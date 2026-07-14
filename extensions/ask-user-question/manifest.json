@@ -1,0 +1,86 @@
+{
+  "id": "ask-user-question",
+  "name": "ask-user-question",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "compat-wrapper",
+  "sourceMode": "omp-compatible-wrapper",
+  "runtimeRequirements": [
+    "Pi interactive UI for select/input/editor/custom prompts",
+    "Custom and fallback selectors are presented as typed SELECT surfaces; free-text follow-ups are typed INPUT surfaces",
+    "Official Pi dialog results use string or undefined; a known legacy object result is normalized by the local adapter",
+    "Interactive cancellation records a cancelled decision, while no-UI modes fail unavailable without recording a fake user decision",
+    "Locus human-control decision journal"
+  ],
+  "stateUsed": [
+    "decision session entries",
+    "Pi custom decision entries"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "ask",
+      "askUserQuestion"
+    ],
+    "commands": [],
+    "hooks": []
+  },
+  "uiLifecycle": {
+    "commands": [],
+    "tools": [
+      {
+        "name": "ask",
+        "taxonomy": [
+          "overlay-selector",
+          "blocking-prompt"
+        ],
+        "persistent": [
+          "decision entries"
+        ]
+      },
+      {
+        "name": "askUserQuestion",
+        "taxonomy": [
+          "overlay-selector",
+          "blocking-prompt"
+        ],
+        "persistent": [
+          "decision entries"
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [],
+      "write": [
+        ".locus/runtime/session-state.jsonl"
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": [
+      "select",
+      "input",
+      "editor",
+      "custom"
+    ]
+  },
+  "risk": "medium",
+  "docsPath": "docs/extensions/active/ask-user-question.md",
+  "sourceAuditPath": "docs/source-audit/ask-user-question.md",
+  "tests": [
+    "tests/integration/core.test.ts",
+    "tests/extensions/ask-user-question/ask-user-question.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "copy-after-audit",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-06-24"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "id": "ast-structural-edit",
+  "name": "AST Structural Edit",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "compat-wrapper",
+  "sourceMode": "omp-compatible-wrapper",
+  "runtimeRequirements": [
+    "filesystem read/write for selected project files",
+    "AST engine dependencies",
+    "Pi tool approval metadata for apply writes"
+  ],
+  "stateUsed": [
+    "in-memory pending AST previews"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "ast_grep",
+      "ast_edit",
+      "resolve",
+      "ast_apply"
+    ],
+    "commands": [],
+    "hooks": []
+  },
+  "uiLifecycle": {
+    "commands": [],
+    "tools": [
+      {
+        "name": "ast_edit",
+        "taxonomy": [
+          "artifact-write"
+        ],
+        "persistent": [
+          "in-memory pending AST preview"
+        ]
+      },
+      {
+        "name": "resolve",
+        "taxonomy": [
+          "artifact-write"
+        ],
+        "persistent": [
+          "filesystem writes after Pi approval and stale-check"
+        ]
+      },
+      {
+        "name": "ast_apply",
+        "taxonomy": [
+          "artifact-write"
+        ],
+        "persistent": [
+          "filesystem writes after Pi approval and stale-check"
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        "."
+      ],
+      "write": [
+        "."
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": []
+  },
+  "risk": "high",
+  "docsPath": "docs/extensions/active/ast-structural-edit.md",
+  "sourceAuditPath": "docs/source-audit/omp-tools.md",
+  "tests": [
+    "tests/extensions/ast-structural-edit/tools.test.ts",
+    "tests/shared/security/security.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "copy-after-audit",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-06-01"
+  }
+}

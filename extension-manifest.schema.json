@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/locus-pi/extension-manifest.schema.json",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "defaultEnabled",
+    "behaviorStatus",
+    "ownershipStatus",
+    "sourceMode",
+    "runtimeRequirements",
+    "stateUsed",
+    "tier",
+    "provides",
+    "permissions",
+    "risk",
+    "docsPath",
+    "sourceAuditPath",
+    "tests",
+    "review"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "defaultEnabled": { "type": "boolean" },
+    "behaviorStatus": {
+      "enum": ["active", "beta-active", "fail-closed", "report-only", "fixture", "disabled-no-runtime"]
+    },
+    "ownershipStatus": {
+      "enum": [
+        "locus-specific",
+        "omp-owned-to-import",
+        "compat-wrapper",
+        "redesign-later",
+        "split-required",
+        "no-current-owner"
+      ]
+    },
+    "tier": { "enum": ["core-owned", "audited-fork", "local-experimental", "blocked"] },
+    "sourceMode": {
+      "enum": [
+        "locus-owned",
+        "omp-compatible-wrapper",
+        "omp-port-pending",
+        "redesign-required",
+        "split-required"
+      ]
+    },
+    "runtimeRequirements": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "stateUsed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "provides": {
+      "type": "object",
+      "required": ["tools", "commands", "hooks"],
+      "properties": {
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "hooks": { "type": "array", "items": { "type": "string" } },
+        "shortcuts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["filesystem", "subprocess", "network", "browser", "models", "ui"],
+      "properties": {
+        "filesystem": {
+          "type": "object",
+          "required": ["read", "write"],
+          "properties": {
+            "read": { "type": "array", "items": { "type": "string" } },
+            "write": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "subprocess": { "type": "array", "items": { "type": "string" } },
+        "network": { "type": "array", "items": { "type": "string" } },
+        "browser": { "type": "boolean" },
+        "models": { "type": "boolean" },
+        "ui": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "risk": { "enum": ["low", "medium", "high", "critical"] },
+    "docsPath": { "type": "string" },
+    "sourceAuditPath": { "type": ["string", "null"] },
+    "tests": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "review": {
+      "type": "object",
+      "required": ["status", "source", "reviewedBy", "reviewedAt"],
+      "properties": {
+        "status": { "enum": ["draft", "in-review", "reviewed", "blocked"] },
+        "source": { "enum": ["write-from-scratch", "rewrite-first", "fork-after-audit", "wrapper-first", "copy-after-audit"] },
+        "reviewedBy": { "type": ["string", "null"] },
+        "reviewedAt": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

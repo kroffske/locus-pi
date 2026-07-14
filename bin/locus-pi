@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const command = process.argv[2] ?? "help";
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const packagePath = join(root, "package.json");
+const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+const extensions = pkg.pi?.extensions ?? [];
+
+function printHelp() {
+  console.log(`${pkg.name} ${pkg.version}`);
+  console.log("");
+  console.log("Pi extension package for Locus agentic development workflows.");
+  console.log("");
+  console.log("Usage:");
+  console.log("  npx @kroffske/locus-pi");
+  console.log("  npx @kroffske/locus-pi doctor");
+  console.log("");
+  console.log("Install into Pi:");
+  console.log("  pi install npm:@kroffske/locus-pi");
+  console.log("");
+  console.log("After install, run Pi in a trusted project and use /devext doctor.");
+}
+
+function printDoctor() {
+  console.log(`${pkg.name} ${pkg.version}`);
+  console.log(`package root: ${root}`);
+  console.log(`pi extensions: ${extensions.length}`);
+  for (const extensionPath of extensions) {
+    const absolutePath = join(root, extensionPath);
+    const status = existsSync(absolutePath) ? "ok" : "missing";
+    console.log(`- ${status}: ${extensionPath}`);
+  }
+}
+
+switch (command) {
+  case "help":
+  case "--help":
+  case "-h":
+    printHelp();
+    break;
+  case "doctor":
+    printDoctor();
+    break;
+  default:
+    console.error(`Unknown command: ${command}`);
+    console.error("Try: npx @kroffske/locus-pi --help");
+    process.exit(2);
+}

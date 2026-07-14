@@ -1,0 +1,91 @@
+{
+  "id": "todo-context",
+  "name": "todo-context",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "compat-wrapper",
+  "sourceMode": "omp-compatible-wrapper",
+  "runtimeRequirements": [
+    "Pi tool and command registration",
+    "session todo state",
+    "Locus session-core backend",
+    "explicit .tasks/index.json task lookup for /todo from-task <task-id>",
+    "read-only .tasks/index.json current-task resolver for /todo current-task",
+    "Pi-delegated /todo completion-note --yes writeback to .tasks/<task>/artifacts/completion-note.md",
+    "completion-note exports current session todos as task-artifact Markdown",
+    "commands never infer a current task from todos or auto-sync task status",
+    "operator commands render typed Session todos views, short change receipts, warnings/errors, and bounded explicit Markdown export",
+    "/todo edit uses the official-signature input adapter; cancel and parse failure do not mutate session state"
+  ],
+  "stateUsed": [
+    "session-core todo_write entries",
+    "Pi custom todo_write entries",
+    "shared todo fallback",
+    ".tasks/index.json task index",
+    ".tasks/<task>/artifacts/completion-note.md"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "todo_write"
+    ],
+    "commands": [
+      "todo"
+    ],
+    "hooks": []
+  },
+  "uiLifecycle": {
+    "commands": [
+      {
+        "name": "todo",
+        "taxonomy": [
+          "transient-widget",
+          "blocking-prompt",
+          "artifact-write"
+        ],
+        "transient": [
+          "widget:todo"
+        ],
+        "persistent": [
+          "session todo entries",
+          ".tasks/**/artifacts/completion-note.md"
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        ".tasks/index.json"
+      ],
+      "write": [
+        ".tasks/**/artifacts/completion-note.md"
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": [
+      "editor",
+      "setWidget",
+      "theme"
+    ]
+  },
+  "risk": "medium",
+  "docsPath": "docs/extensions/active/todo-context.md",
+  "sourceAuditPath": "docs/source-audit/todo-write.md",
+  "tests": [
+    "tests/extensions/todo-context/todo-context.test.ts",
+    "tests/shared/task/tasks-bridge.test.ts",
+    "tests/shared/session/session-core-jsonl.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "copy-after-audit",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-06-24"
+  }
+}

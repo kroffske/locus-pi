@@ -1,0 +1,167 @@
+{
+  "id": "agents",
+  "name": "agents",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "locus-specific",
+  "sourceMode": "locus-owned",
+  "runtimeRequirements": [
+    "Loaded by default through package.json#pi.extensions",
+    "agent definition catalog and validation",
+    "M10 runner contract exists before execution",
+    "createAgentSession SDK host required before /agent run or task executes",
+    "completed agent runs require a real non-empty child answer; tool calls and LOCUS_AGENT_RESULT_V1 are optional evidence, not success requirements",
+    "named-tool evidence is collected only from exact SDK tool_execution lifecycle events and passed through AgentChildOutputStats.recordedToolNames; aggregate toolCalls/toolResults never fabricate a tool name",
+    "agent observe / agent summary render an on-demand bounded snapshot of current and recent live rows from agentLiveStore.rows; done/cancelled/error rows stay terminal, not running, with currentTools/currentToolArgs/currentToolStartMs cleared and elapsedMs frozen at terminal transition",
+    "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
+    "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
+    "no first-class createAgentSession JSON schema/response_format mode is confirmed in Pi SDK 0.78.0; structured mode must be explicit, not the default",
+    "locus_workload_proof records diagnostic persisted child-workload evidence but does not control success by itself",
+    "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
+    "spawn_agent is the model-friendly primary subagent-spawn tool; task is a back-compat alias; both share the same createAgentSession SDK host, honesty-gate, and requestedSurface:task detail shape",
+    "SDK children always receive excludeTools=[spawn_agent, task] after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; the workflow tool remains available when the profile allows it",
+    "task spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
+    "task resolves missing agent and default to task; general resolves to task only when no project/user general agent exists",
+    "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
+    "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs keep the scroll overlay while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
+    "unknown-target and headless settled-run chrome use typed ERROR/RESULT blocks without replacing the domain-owned live fleet, focus, drill, stop, resolver, or runtime store",
+    "unknown or incomplete agent command syntax renders a typed WARN with no-action evidence and exact usage recovery",
+    "task returns isError=true for unknown-agent and child-session failed/blocked/cancelled results",
+    "nested createAgentSession runs do not claim inherited parent yolo/approval policy; Pi native approval happens before the task tool handler",
+    "agent context extras are opt-in via LOCUS_AGENT_CONTEXT_EXTRAS=1 and default off",
+    "optional memory context uses LOCUS_AGENT_MEMORY_FILE or defaults to <projectRoot>/MEMORY.md; missing files are a non-fatal diagnostic",
+    "optional skill context uses explicit LOCUS_AGENT_PRELOAD_SKILLS entries only; no default preload list is configured",
+    "skill names resolve through .agents/skills/<name>/SKILL.md then .pi/skills/<name>/SKILL.md under the project root, preserving Pi progressive-disclosure boundaries",
+    "/ps opens the existing fleet selector, /ps <target> opens the canonical resolved row, and /agent ps plus /agent drill remain stable compatibility paths",
+    "Pi command-context custom UI plus public AssistantMessageComponent and ToolExecutionComponent are required for the native viewer; missing capability is reported explicitly and RPC/headless modes keep passive text fallback",
+    "the native viewer uses a 100% overlay with terminal-height output, no frame, follow-tail pause/resume, compact/expanded tools, and Esc close without child abort",
+    "AgentLiveStore owns live-row lifecycle while _shared/agent-live-transcript.ts owns one bounded typed timeline with stable block ids, complete assistant snapshots, structured tool lifecycle, cwd, redaction, and latestMessage projection; raw AgentLiveRow.eventLines remain diagnostic data",
+    "terminal assistant stopReason=error surfaces errorMessage before the generic empty-result fallback; completed children still require a real non-empty answer and side-effect-only success is not part of the contract",
+    "child turn_end assistant usage updates live tokenCount during execution; final getSessionStats tokens replace it with cumulative truth, and workflow parallel/pipeline summary rows show the sum of token-bearing descendants",
+    "the passive fleet renders below the editor; bare Up/Down always remain owned by Pi editor/history, while /ps opens fleet management and shift+down remains the terminal-compatible entry fallback; aggregate rows stay visible as headings but only leaf rows are selectable or actionable, then configured select keys navigate, Enter drills the exact leaf row, x asks for confirmation before aborting its active SDK child, and Esc returns to the editor without stopping it",
+    "when Pi app.interrupt Escape would abort an active parent turn with live agent rows, a Yes/No confirmation is required first; closing fleet/drill views reports that active agents continue running",
+    "agentLiveStore is process-shared through a versioned global symbol because Pi loads package entrypoints through independent jiti instances with moduleCache disabled"
+  ],
+  "stateUsed": [
+    "in-memory discovered agent definitions",
+    "agent discovery diagnostics",
+    "process-shared agentLiveStore.rows, per-row cancellation handlers, AgentLiveRow.transcript typed blocks and latestMessage projection, and AgentLiveRow.eventLines as diagnostic store data",
+    "process-shared ephemeral fleet selection state",
+    "AgentLiveRow optional metadata for source-backed activity/model/path/tool/result fields",
+    "runtime result artifacts",
+    "optional child prompt memory from <projectRoot>/MEMORY.md",
+    "optional child prompt skills from .agents/skills/<name>/SKILL.md and .pi/skills/<name>/SKILL.md",
+    ".locus/runtime/agent-workload-proof/*.json"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "spawn_agent",
+      "task",
+      "locus_workload_proof"
+    ],
+    "commands": [
+      "agent list",
+      "agent inspect",
+      "agent run",
+      "agent observe",
+      "agent summary",
+      "agent drill",
+      "agent ps",
+      "ps"
+    ],
+    "hooks": [
+      "session_start",
+      "tool_call",
+      "tool_result"
+    ],
+    "shortcuts": [
+      "shift+down"
+    ]
+  },
+  "uiLifecycle": {
+    "commands": [
+    {
+      "name": "agent",
+        "taxonomy": [
+          "transient-widget",
+          "status",
+          "overlay-selector",
+          "artifact-write"
+        ],
+        "transient": [
+          "widget:agents",
+          "status:agents"
+        ],
+      "persistent": []
+    },
+    {
+      "name": "ps",
+      "taxonomy": [
+        "transient-widget",
+        "overlay-selector"
+      ],
+      "transient": [
+        "widget:agents",
+        "status:agents"
+      ],
+      "persistent": []
+    }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        ".agents/agents/*.md",
+        "~/.agents/agents/*.md",
+        "bundled .agents/agents/*.md",
+        ".locus/runtime/agent-workload-proof/*.json",
+        "MEMORY.md",
+        ".agents/skills/*/SKILL.md",
+        ".pi/skills/*/SKILL.md"
+      ],
+      "write": [
+        ".locus/runtime/artifacts/*.json",
+        ".locus/runtime/agent-workload-proof/*.json",
+        ".locus/runtime/reports/*.jsonl"
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": [
+      "setWidget",
+      "setStatus",
+      "notify",
+      "custom",
+      "registerShortcut",
+      "confirm",
+      "onTerminalInput",
+      "getEditorText"
+    ]
+  },
+  "risk": "high",
+  "docsPath": "docs/extensions/active/agents.md",
+  "sourceAuditPath": "docs/source-audit/agents.md",
+  "tests": [
+    "tests/extensions/agents/agents-discovery.test.ts",
+    "tests/shared/agents/agent-runner.test.ts",
+    "tests/shared/agents/agent-executor-host.test.ts",
+    "tests/shared/agents/agent-sdk-host.test.ts",
+    "tests/shared/agents/agent-command-run.test.ts",
+    "tests/extensions/agents/agent-observer.test.ts",
+    "tests/extensions/agents/agent-drill.test.ts",
+    "tests/extensions/agents/agent-fleet-menu.test.ts",
+    "tests/extensions/agents/agent-live-store-entrypoints.test.ts",
+    "tests/integration/core.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "write-from-scratch",
+    "reviewedBy": "pi-dev-extensions",
+    "reviewedAt": "2026-07-10"
+  }
+}

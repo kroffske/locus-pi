@@ -1,0 +1,103 @@
+{
+  "id": "model",
+  "name": "model",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "compat-wrapper",
+  "sourceMode": "omp-compatible-wrapper",
+  "runtimeRequirements": [
+    "Pi setModel/getThinkingLevel/setThinkingLevel APIs",
+    "Pi model registry with reasoning/thinkingLevelMap capability metadata",
+    "Pi custom/select UI",
+    "Project-local model role config",
+    "Locus model-settings role resolver",
+    "/effort reads pi.getThinkingLevel, puts the supported current level first in Pi's host selector, reports an unchanged current selection as VIEW without mutation, and sets pi.setThinkingLevel only for a different capability-validated level"
+  ],
+  "stateUsed": [
+    "Pi defaultProvider/defaultModel",
+    "project .pi/model-roles/config.json",
+    "optional project .locus/runtime/session-state.jsonl runtime event",
+    "optional Pi settings modelRoles compatibility mirror",
+    "optional session custom entry evidence",
+    "read-only user model-role config fallback"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [],
+    "commands": [
+      "model-roles",
+      "effort"
+    ],
+    "hooks": [
+      "session_start"
+    ]
+  },
+  "uiLifecycle": {
+    "commands": [
+      {
+        "name": "model-roles",
+      "taxonomy": [
+        "overlay-selector",
+        "transient-widget",
+        "persistent-state",
+        "status"
+      ],
+      "transient": [
+        "widget:model-roles"
+      ],
+        "persistent": [
+          "status:locus contribution model.roles",
+          ".pi/model-roles/config.json",
+          ".locus/runtime/session-state.jsonl"
+        ]
+      },
+      {
+        "name": "effort",
+        "taxonomy": [
+          "overlay-selector",
+          "transient-widget"
+        ],
+        "transient": [
+          "widget:effort"
+        ],
+        "persistent": []
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        "~/.pi/agent/model-roles/config.json",
+        ".pi/model-roles/config.json"
+      ],
+      "write": [
+        ".pi/model-roles/config.json",
+        ".locus/runtime/session-state.jsonl"
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": true,
+    "ui": [
+      "custom",
+      "select",
+      "setStatus",
+      "setWidget"
+    ]
+  },
+  "risk": "medium",
+  "docsPath": "docs/extensions/active/model.md",
+  "sourceAuditPath": "docs/source-audit/model.md",
+  "tests": [
+    "tests/extensions/model/model.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "copy-after-audit",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-07-10"
+  }
+}

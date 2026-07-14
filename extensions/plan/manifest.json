@@ -1,0 +1,221 @@
+{
+  "id": "plan",
+  "name": "plan",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "locus-specific",
+  "sourceMode": "locus-owned",
+  "runtimeRequirements": [
+    "Loaded by default through package.json#pi.extensions",
+    "Prompt commands write explicit markdown prompts to visible local paths",
+    "Persists active goal state to .locus/runtime/goal/state.json",
+    "Registers model-callable goal tool for create/get/complete/resume/drop",
+    "Registers /goal stateful runtime operations and /goal prompt shelf behavior",
+    "Command prompt artifacts use explicit --task <task-id> only for /goal prompt",
+    "Task-backed prompt artifacts require an explicit --task <task-id> target",
+    "Bare /plan opens a typed input dialog; submit authors exactly one plan and cancellation writes no plan artifact",
+    "Bare /goal-ai opens a typed editor; submit runs one replacement-session draft and cancellation writes no prompt artifact",
+    "/plan list and /plan help render typed VIEW blocks; /plan open renders WARN for invalid targets and a bounded CHANGE preview for success",
+    "/goal runtime commands render typed Goal state views/changes/warnings without changing the goal state machine",
+    "/review, /todos, and /goal prompt are summary-first typed prompt shelves; show/read is required for body display and set preserves literal reserved verbs",
+    "/goal-ai uses replacement-session LLM output and fails closed when the host is unavailable",
+    "Commands do not infer an active task or silently fall back from an explicit task target",
+    "Command-visible prompt and continuation widgets show metadata/path and omit full prompt bodies unless explicitly requested through show/read or read from the artifact",
+    "Plan mode is BEHAVIORAL: a before_agent_start system-prompt injection frames the model to plan, not implement; it does NOT block tools",
+    "Plan mode explicitly allows standard commands and throwaway scripts (no read-only enforcement)",
+    "/mode cycles behavioral modes (default <-> plan) and contributes one bounded route label to the shared locus status bar",
+    "Plan mode is shown by two visual cues: one shared-status PLAN route contribution and a recolored input-editor border (installed via ui.setEditorComponent at session_start)",
+    "Shift+Tab is not claimed at default startup because Pi reserves it for app.thinking.cycle; /mode bind-shift-tab writes app.thinking.cycle: [] to ~/.pi/agent/keybindings.json after confirmation, after which a restart enables the optional mode shortcut",
+    "provides.shortcuts lists default startup shortcuts only; the conditional shift+tab registration is intentionally documented here because the manifest schema has no conditional-shortcut field",
+    "Authored plan artifacts persist to ~/.pi/locus-pi/<project-slug>/plans/<plan-slug>.md",
+    "Active mode reference persists to .locus/runtime/mode/state.json",
+    "Leaving plan mode with a composed plan (via /plan exit, /mode, or the explicitly enabled Shift+Tab shortcut) prompts the user with ctx.ui.select for a plan->execution handoff: execute in-context, execute after a context reset (ctx.newSession), tweak-then-execute through typed input, or keep planning",
+    "Cancelling the exit selector or tweak input keeps plan mode and queues no execution turn",
+    "The plan->execution handoff injects the saved plan into the execution turn via sendUserMessage(deliverAs:followUp); it degrades to a plain exit when headless (hasUI!==true) or no composed plan artifact exists"
+  ],
+  "stateUsed": [
+    ".locus/runtime/prompts/goal.md",
+    ".locus/runtime/prompts/review.md",
+    ".locus/runtime/prompts/todos.md",
+    ".locus/runtime/goal/state.json",
+    ".tasks/<task-dir>/artifacts/goal-prompt.md",
+    ".tasks/<task-dir>/artifacts/review-prompt.md",
+    ".tasks/<task-dir>/artifacts/todos-prompt.md",
+    ".locus/runtime/mode/state.json",
+    "~/.pi/locus-pi/<project-slug>/plans/*.md",
+    "~/.pi/agent/keybindings.json (via /mode bind-shift-tab)",
+    "status:locus (plan.mode contribution)",
+    "typed operator widgets for goal state and prompt shelves",
+    "locus-goal-state custom entry"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "goal"
+    ],
+    "commands": [
+      "plan",
+      "mode",
+      "goal",
+      "goal-ai",
+      "review",
+      "todos"
+    ],
+    "hooks": [
+      "session_start",
+      "before_agent_start"
+    ],
+    "shortcuts": []
+  },
+  "uiLifecycle": {
+    "commands": [
+      {
+        "name": "plan",
+        "taxonomy": [
+          "persistent-state",
+          "status",
+          "transient-widget",
+          "blocking-prompt",
+          "artifact-write"
+        ],
+        "transient": [
+          "widget:plan"
+        ],
+        "persistent": [
+          "status:locus (plan.mode contribution)",
+          ".locus/runtime/mode/state.json"
+        ]
+      },
+      {
+        "name": "mode",
+        "taxonomy": [
+          "persistent-state",
+          "status",
+          "transient-widget",
+          "blocking-prompt"
+        ],
+        "transient": [
+          "widget:plan"
+        ],
+        "persistent": [
+          "status:locus (plan.mode contribution)",
+          ".locus/runtime/mode/state.json"
+        ]
+      },
+      {
+        "name": "review",
+        "taxonomy": [
+          "artifact-write",
+          "transient-widget"
+        ],
+        "transient": [
+          "widget:review"
+        ],
+        "persistent": [
+          ".locus/runtime/prompts/review.md",
+          ".tasks/**/artifacts/review-prompt.md"
+        ]
+      },
+      {
+        "name": "todos",
+        "taxonomy": [
+          "artifact-write",
+          "transient-widget"
+        ],
+        "transient": [
+          "widget:todos"
+        ],
+        "persistent": [
+          ".locus/runtime/prompts/todos.md",
+          ".tasks/**/artifacts/todos-prompt.md"
+        ]
+      },
+      {
+        "name": "goal",
+        "taxonomy": [
+          "persistent-state",
+          "artifact-write",
+          "transient-widget"
+        ],
+        "transient": [
+          "widget:goal"
+        ],
+        "persistent": [
+          ".locus/runtime/goal/state.json",
+          ".locus/runtime/goal/continue.md",
+          ".locus/runtime/prompts/goal.md",
+          ".tasks/**/artifacts/goal-prompt.md"
+        ]
+      },
+      {
+        "name": "goal-ai",
+        "taxonomy": [
+          "artifact-write",
+          "transient-widget",
+          "blocking-prompt"
+        ],
+        "transient": [
+          "widget:goal"
+        ],
+        "persistent": [
+          ".locus/runtime/prompts/goal.md",
+          ".tasks/**/artifacts/goal-prompt.md"
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        ".locus/runtime/prompts/*.md",
+        ".locus/runtime/goal/state.json",
+        ".locus/runtime/mode/state.json",
+        ".tasks/index.json",
+        ".tasks/**/artifacts/*-prompt.md",
+        "~/.pi/locus-pi/**/plans/*.md"
+      ],
+      "write": [
+        ".locus/runtime/prompts/*.md",
+        ".locus/runtime/goal/*",
+        ".locus/runtime/mode/state.json",
+        ".tasks/**/artifacts/*-prompt.md",
+        "~/.pi/locus-pi/**/plans/*.md",
+        "~/.pi/agent/keybindings.json"
+      ]
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": true,
+    "ui": [
+      "setWidget",
+      "setStatus",
+      "setEditorComponent",
+      "theme",
+      "select",
+      "input",
+      "editor",
+      "confirm"
+    ]
+  },
+  "risk": "high",
+  "docsPath": "docs/extensions/active/plan.md",
+  "sourceAuditPath": "docs/source-audit/plan.md",
+  "tests": [
+    "tests/extensions/plan/plan-prompt-commands.test.ts",
+    "tests/shared/operator-ui/goal-operator-ui.test.ts",
+    "tests/shared/operator-ui/prompt-shelf-ui.test.ts",
+    "tests/extensions/plan/plan-behavioral-mode.test.ts",
+    "tests/shared/mode-state/mode-state.test.ts",
+    "tests/shared/agents/agent-executor-host.test.ts",
+    "tests/extensions/plan/plan-goal-decision.test.ts",
+    "tests/integration/registration.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "write-from-scratch",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-06-24"
+  }
+}

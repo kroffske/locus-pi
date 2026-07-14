@@ -1,0 +1,242 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it } from "vitest";
+import agents from "../../extensions/agents/index.js";
+import devextDoctor from "../../extensions/devext-doctor/index.js";
+import loop from "../../extensions/loop/index.js";
+import model from "../../extensions/model/index.js";
+import plan from "../../extensions/plan/index.js";
+import workflows from "../../extensions/workflows/index.js";
+import type { ExtensionCommandContext, ReplacementSessionContext, ReplacementSessionEntryLike } from "../../extensions/_shared/pi-api.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/command-ui.js";
+import { createHarness, emit, type Harness } from "../test-harness.js";
+
+function stubPlanSession(
+  h: Harness,
+  root: string,
+  entries: ReplacementSessionEntryLike[] = [{ type: "message", role: "assistant", content: "## Goal\nShip it." }],
+): ExtensionCommandContext {
+  const commandCtx = h.ctx as ExtensionCommandContext;
+  commandCtx.newSession = async (opts) => {
+    const replacementCtx: ReplacementSessionContext = {
+      ...h.ctx,
+      session: { id: "plan-child", projectRoot: root, workingDirectory: root },
+      async sendUserMessage() {},
+      async waitForIdle() {},
+      sessionManager: { getEntries() { return entries; } },
+    };
+    await opts?.withSession?.(replacementCtx);
+    return { cancelled: false };
+  };
+  return commandCtx;
+}
+
+describe("command UI lifecycle", () => {
+  it("dismisses the latest passive VIEW with Escape and leaves no raw listener behind", async () => {
+    const h = createHarness();
+    workflows(h.pi);
+
+    // `/workflows list` now owns focused custom UI; status remains a passive
+    // VIEW and therefore exercises editor-level transient dismissal.
+    await h.commands.get("workflows")!.handler("status", h.ctx as ExtensionCommandContext);
+    expect(h.widgets.get("workflows")).toContain("[VIEW] Workflow runs");
+    expect(h.terminalInputHandlers.size).toBe(1);
+
+    const result = [...h.terminalInputHandlers][0]?.("\x1b");
+
+    expect(result).toEqual({ consume: true });
+    expect(h.widgetPayloads.get("workflows")).toBeUndefined();
+    expect(h.widgets.get("workflows")).toBe("");
+    expect(h.terminalInputHandlers.size).toBe(0);
+  });
+
+  it("clears transient widgets and statuses when an unrelated slash command is entered", async () => {
+    const h = createHarness();
+    agents(h.pi);
+    loop(h.pi);
+
+    await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
+    h.ctx.ui.setStatus("agents", "stale agent status");
+
+    await emit(h, "input", { text: "/loop status" });
+
+    expect(h.widgetPayloads.get("agents")).toBeUndefined();
+    expect(h.widgets.get("agents")).toBe("");
+    expect(h.statuses.has("agents")).toBe(false);
+  });
+
+  it("keeps related transient UI on input so the command handler can replace it", async () => {
+    const h = createHarness();
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
+    await emit(h, "input", { text: "/agent list" });
+
+    expect(h.widgets.get("agents")).toBe("Agent observer: no live rows");
+    expect(h.widgetPayloads.get("agents")).not.toBeUndefined();
+  });
+
+  it("clears the transient plan receipt but keeps the persistent mode status before a different command renders", async () => {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-plan-project-"));
+    const h = createHarness(projectRoot);
+    plan(h.pi);
+    devextDoctor(h.pi);
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "command-ui-plan-home-"));
+    const savedHome = process.env["LOCUS_PI_HOME"];
+    const commandCtx = stubPlanSession(h, projectRoot);
+
+    try {
+      process.env["LOCUS_PI_HOME"] = tmpHome;
+      await h.commands.get("plan")!.handler("Investigate the command UI lifecycle", commandCtx);
+
+      expect(h.widgets.get("plan")).toContain("[RESULT] Plan draft");
+      expect(h.widgets.get("plan")).toContain("Plan saved; behavioral plan mode is active.");
+      expect(h.statuses.get("locus")).toContain("MODE");
+    } finally {
+      if (savedHome === undefined) delete process.env["LOCUS_PI_HOME"];
+      else process.env["LOCUS_PI_HOME"] = savedHome;
+      rmSync(tmpHome, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+
+    await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+
+    expect(h.widgets.get("plan") ?? "").toBe("");
+    expect(h.statuses.get("locus")).toContain("MODE");
+    expect(h.widgets.get("devext-doctor")).toContain("[VIEW] Extension doctor");
+  });
+
+  it("clears a prompt-shelf summary on an unrelated command without mutating its artifact", async () => {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-shelf-project-"));
+    const h = createHarness(projectRoot);
+    plan(h.pi);
+    devextDoctor(h.pi);
+
+    try {
+      await h.commands.get("review")!.handler("Keep this review prompt durable", h.ctx);
+      const artifactPath = path.join(projectRoot, ".locus", "runtime", "prompts", "review.md");
+      const saved = readFileSync(artifactPath, "utf8");
+      await h.commands.get("review")!.handler("", h.ctx);
+      expect(h.widgets.get("review")).toContain("[VIEW] Review prompt shelf");
+
+      await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+
+      expect(h.widgets.get("review") ?? "").toBe("");
+      expect(readFileSync(artifactPath, "utf8")).toBe(saved);
+      expect(h.widgets.get("devext-doctor")).toContain("[VIEW] Extension doctor");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a pinned live progress widget alive when a chat message is submitted", async () => {
+    const h = createHarness();
+    agents(h.pi);
+
+    // A live task/spawn_agent run installs the "agents" progress widget and pins it.
+    await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
+    expect(h.widgetPayloads.get("agents")).not.toBeUndefined();
+    pinTransientUiKey(h.pi, "agents");
+
+    try {
+      // A plain chat line normally clears transient command UI; a pinned key survives.
+      await emit(h, "input", { text: "just a chat message" });
+      expect(h.widgetPayloads.get("agents")).not.toBeUndefined();
+      expect(h.widgets.get("agents")).toBe("Agent observer: no live rows");
+    } finally {
+      unpinTransientUiKey(h.pi, "agents");
+    }
+
+    // Once unpinned, the next chat message clears it (no regression to lifecycle UX).
+    await emit(h, "input", { text: "another chat message" });
+    expect(h.widgetPayloads.get("agents")).toBeUndefined();
+    expect(h.widgets.get("agents")).toBe("");
+  });
+
+  it("does not clear explicitly persistent command status surfaces", async () => {
+    const h = createHarness();
+    model(h.pi);
+    devextDoctor(h.pi);
+
+    h.ctx.ui.setStatus("model-roles", "Model roles: DEFAULT=test/fast");
+
+    await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+
+    expect(h.statuses.get("model-roles")).toBe("Model roles: DEFAULT=test/fast");
+  });
+
+  it("shares cleanup, pinning, and owner callbacks across fresh entrypoint module caches without leaking UI scopes", async () => {
+    const alphaPath = path.resolve("tests/fixtures/extensions/command-ui-alpha.ts");
+    const betaPath = path.resolve("tests/fixtures/extensions/command-ui-beta.ts");
+    const emptyAgentDir = mkdtempSync(path.join(tmpdir(), "locus-pi-empty-agent-dir-"));
+
+    try {
+      const loaded = await discoverAndLoadExtensions(
+        [alphaPath, betaPath],
+        process.cwd(),
+        emptyAgentDir,
+      );
+      expect(loaded.errors).toEqual([]);
+      const alpha = loaded.extensions.find((extension) => extension.resolvedPath === alphaPath);
+      const beta = loaded.extensions.find((extension) => extension.resolvedPath === betaPath);
+      const showAlpha = alpha?.commands.get("test-alpha-view")?.handler as unknown as
+        ((args: string, ctx: ExtensionCommandContext) => Promise<void> | void) | undefined;
+      const showBeta = beta?.commands.get("test-beta-view")?.handler as unknown as
+        ((args: string, ctx: ExtensionCommandContext) => Promise<void> | void) | undefined;
+      const betaInput = beta?.handlers.get("input")?.[0] as unknown as
+        ((event: { type: "input"; text: string }, ctx: ExtensionCommandContext) => Promise<void> | void) | undefined;
+      const h = createHarness();
+
+      expect(showAlpha).toBeDefined();
+      expect(showBeta).toBeDefined();
+      expect(betaInput).toBeDefined();
+      await showAlpha?.("", h.ctx);
+      expect(h.widgets.get("fixture-alpha")).toBe("alpha view");
+      expect(h.statuses.get("fixture-alpha-route")).toBe("alpha persistent route");
+
+      await betaInput?.({ type: "input", text: "/test-alpha-view" }, h.ctx);
+      expect(h.widgets.get("fixture-alpha")).toBe("alpha view");
+
+      const widgetWrites: Array<{ key: string; cleared: boolean }> = [];
+      const setWidget = h.ctx.ui.setWidget.bind(h.ctx.ui);
+      h.ctx.ui.setWidget = (key, content, options) => {
+        widgetWrites.push({ key, cleared: content === undefined });
+        setWidget(key, content, options);
+      };
+      await showBeta?.("", h.ctx);
+
+      const alphaClear = widgetWrites.findIndex((write) => write.key === "fixture-alpha" && write.cleared);
+      const betaRender = widgetWrites.findIndex((write) => write.key === "fixture-beta" && !write.cleared);
+      expect(alphaClear).toBeGreaterThanOrEqual(0);
+      expect(betaRender).toBeGreaterThan(alphaClear);
+      expect(h.widgetPayloads.get("fixture-alpha")).toBeUndefined();
+      expect(h.statuses.has("fixture-alpha")).toBe(false);
+      expect(h.statuses.get("fixture-alpha-cleanup")).toBe("alpha owner cleanup ran");
+      expect(h.statuses.get("fixture-alpha-route")).toBe("alpha persistent route");
+      expect(h.widgets.get("fixture-beta")).toBe("beta view");
+
+      await showAlpha?.("pin", h.ctx);
+      await showBeta?.("", h.ctx);
+      expect(h.widgets.get("fixture-alpha")).toBe("alpha view");
+      expect(h.statuses.get("fixture-alpha")).toBe("alpha transient status");
+      expect(h.statuses.has("fixture-alpha-cleanup")).toBe(false);
+      expect(h.statuses.get("fixture-alpha-route")).toBe("alpha persistent route");
+
+      await showAlpha?.("unpin", h.ctx);
+      await showBeta?.("", h.ctx);
+      expect(h.widgetPayloads.get("fixture-alpha")).toBeUndefined();
+      expect(h.statuses.get("fixture-alpha-cleanup")).toBe("alpha owner cleanup ran");
+
+      const isolatedAlpha = createHarness();
+      const isolatedBeta = createHarness();
+      await showAlpha?.("", isolatedAlpha.ctx);
+      await showBeta?.("", isolatedBeta.ctx);
+      expect(isolatedAlpha.widgets.get("fixture-alpha")).toBe("alpha view");
+      expect(isolatedBeta.widgets.get("fixture-beta")).toBe("beta view");
+    } finally {
+      rmSync(emptyAgentDir, { recursive: true, force: true });
+    }
+  });
+});

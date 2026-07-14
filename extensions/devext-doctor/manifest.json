@@ -1,0 +1,91 @@
+{
+  "id": "devext-doctor",
+  "name": "devext-doctor",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "locus-specific",
+  "sourceMode": "locus-owned",
+  "runtimeRequirements": [
+    "Pi command UI",
+    "Shared command UI lifecycle clears stale transient widgets/status before /devext renders and on the next unrelated input",
+    "doctor, task-lifecycle dry-run, and reload receipts use typed diagnostic blocks with explicit evidence boundaries and recovery actions",
+    "unknown devext actions render a typed WARN with no-action evidence and full usage recovery",
+    "RPC doctor and task-lifecycle projections stay within the 10-line string-array budget while preserving evidence and recovery",
+    "reload RUN means request delegated to Pi and never claims completion from the old command frame",
+    "Pi command-context ctx.reload() for /devext reload hot reload",
+    "devext_reload requires a direct tool-context ctx.reload() host method and otherwise fails closed without queueing slash commands",
+    "readable .tasks/index.json and task workspace files for /devext task-lifecycle dry-runs"
+  ],
+  "stateUsed": [
+    "extension inventory manifests",
+    ".tasks/index.json task index",
+    ".tasks/<task>/task.md Closure text",
+    ".tasks/<task>/qa.md ACCEPTED evidence"
+  ],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [
+      "devext_reload"
+    ],
+    "commands": [
+      "devext doctor",
+      "devext reload",
+      "devext task-lifecycle <task-id> <target-status>"
+    ],
+    "hooks": [
+      "input"
+    ]
+  },
+  "uiLifecycle": {
+    "commands": [
+      {
+        "name": "devext",
+        "taxonomy": [
+          "transient-widget",
+          "no-ui"
+        ],
+        "transient": [
+          "widget:devext-doctor",
+          "status:devext-doctor"
+        ],
+        "persistent": []
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        ".tasks/index.json",
+        ".tasks/**/qa.md",
+        ".tasks/**/task.md"
+      ],
+      "write": []
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": [
+      "setWidget",
+      "setStatus",
+      "notify"
+    ]
+  },
+  "risk": "low",
+  "docsPath": "docs/extensions/active/devext-doctor.md",
+  "sourceAuditPath": null,
+  "tests": [
+    "tests/integration/core.test.ts",
+    "tests/shared/task/tasks-bridge.test.ts",
+    "tests/shared/session/session-core-jsonl.test.ts",
+    "tests/integration/registration.test.ts",
+    "tests/extensions/agents/agent-observer.test.ts"
+  ],
+  "review": {
+    "status": "reviewed",
+    "source": "write-from-scratch",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-07-10"
+  }
+}
