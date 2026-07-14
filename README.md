@@ -73,6 +73,8 @@ package behavior.
 
 - Node.js `>=22.19.0`.
 - Pi `0.80.x`; the candidate peer floor is `0.80.3`.
+- Ripgrep (`rg`) on `PATH`; the curated `requirements-grill` workflow uses it
+  for its bounded read-only repository search.
 - A trusted project and reviewed local workflow sources.
 
 ## Install

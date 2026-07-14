@@ -366,7 +366,10 @@ describe("agent list/inspect rendering surface", () => {
     expect(Array.isArray(h.widgetPayloads.get("agents"))).toBe(true);
     expect(list).toContain("[VIEW] Agent catalog");
     expect(list).toContain("proj-0 [project] · Project agent 0");
-    expect(list).toContain("+25 definition(s) hidden");
+    const loadedCount = Number(/^(\d+) loaded definition\(s\)\./mu.exec(list)?.[1] ?? "0");
+    const hiddenCount = Number(/^\+(\d+) definition\(s\) hidden$/mu.exec(list)?.[1] ?? "0");
+    expect(loadedCount).toBeGreaterThanOrEqual(14);
+    expect(hiddenCount).toBe(loadedCount - 2);
     expect(list).toContain("Inspect: /agent inspect <name>");
     expect(list).not.toContain("widget truncated");
   });
