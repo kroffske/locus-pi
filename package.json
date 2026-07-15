@@ -177,7 +177,14 @@
   },
   "scripts": {
     "check": "npm run typecheck && npm test && npm run audit:sources",
+    "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
+    "check:push": "npm run check && npm run check:repository && npm run check:release && npm run pack:json > /dev/null",
+    "check:release": "tsx scripts/check-release-metadata.ts",
     "check:repository": "tsx scripts/check-public-repository.ts",
+    "format": "prettier --write --ignore-unknown .",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "lint:staged": "lint-staged",
+    "pack:json": "npm pack --dry-run --json --ignore-scripts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pack:dry": "npm pack --dry-run",
@@ -201,6 +208,8 @@
     "@earendil-works/pi-coding-agent": "0.80.3",
     "@earendil-works/pi-tui": "0.80.3",
     "@types/node": "^24.0.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.9.5",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

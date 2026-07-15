@@ -2,6 +2,17 @@
 
 This file records user-visible changes to the public package.
 
+## Unreleased
+
+### Added
+
+- Added the `dev` integration branch contract, tracked local Git hooks, a pull-request template, and executable CI policy checks for task and release pull requests.
+
+### Changed
+
+- Defined `task branch -> dev -> main` as the repository delivery path, with routine work squash-merged into `dev` and releases merged from `dev` into `main`.
+- Updated contribution guidance to reflect the existing MIT license and private maintainer-review phase.
+
 ## [0.2.0] - 2026-07-14
 
 ### Added

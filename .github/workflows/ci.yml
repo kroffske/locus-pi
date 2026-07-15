@@ -2,7 +2,18 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - dev
+      - main
   push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,6 +28,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Use Node 22.19.0
@@ -31,11 +43,23 @@ jobs:
       - name: Install exact dependencies
         run: npm ci --ignore-scripts
 
+      - name: Enforce pull-request branch and release policy
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npm run check:pull-request
+
       - name: Run source, test, and source-audit gates
         run: npm run check
 
       - name: Verify the clean repository inventory
         run: npm run check:repository
+
+      - name: Verify release metadata consistency
+        run: npm run check:release
 
       - name: Audit production dependencies
         run: npm audit --omit=dev
