@@ -1,5 +1,9 @@
+import { execFile } from "node:child_process";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const root = process.cwd();
 const inventoryPath = path.join(root, "public-repository-files.txt");
@@ -8,7 +12,7 @@ const expected = (await readFile(inventoryPath, "utf8"))
   .map((line) => line.trim())
   .filter(Boolean)
   .sort();
-const actual = (await walk(root)).sort();
+const actual = (await candidateFiles(root)).sort();
 
 const missing = expected.filter((file) => !actual.includes(file));
 const extra = actual.filter((file) => !expected.includes(file));
@@ -33,6 +37,15 @@ if (rejected.length > 0) {
 
 for (const relativePath of actual) {
   const absolutePath = path.join(root, relativePath);
+  const entryStat = await lstat(absolutePath);
+  if (entryStat.isSymbolicLink()) {
+    console.error(`Symlink rejected from public repository: ${relativePath}`);
+    process.exit(1);
+  }
+  if (!entryStat.isFile()) {
+    console.error(`Non-file rejected from public repository: ${relativePath}`);
+    process.exit(1);
+  }
   const bytes = await readFile(absolutePath);
   if (bytes.includes(0)) continue;
   const text = bytes.toString("utf8");
@@ -52,6 +65,24 @@ for (const relativePath of actual) {
 
 console.log(`Public repository inventory verified: ${actual.length} files`);
 
+async function candidateFiles(directory: string): Promise<string[]> {
+  try {
+    const { stdout: topLevel } = await execFileAsync("git", ["-C", directory, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    });
+    if (path.resolve(topLevel.trim()) !== path.resolve(directory)) return walk(directory);
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", directory, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout.split("\0").filter(Boolean);
+  } catch {
+    return walk(directory);
+  }
+}
+
 async function walk(directory: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -63,7 +94,7 @@ async function walk(directory: string): Promise<string[]> {
       console.error(`Symlink rejected from public repository: ${relativePath}`);
       process.exit(1);
     }
-    if (entryStat.isDirectory()) files.push(...await walk(absolutePath));
+    if (entryStat.isDirectory()) files.push(...(await walk(absolutePath)));
     else if (entryStat.isFile()) files.push(relativePath);
   }
   return files;

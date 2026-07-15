@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+blocked_ref=""
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/dev)
+      blocked_ref=${remote_ref#refs/heads/}
+      ;;
+  esac
+done
+
+if [ -n "$blocked_ref" ]; then
+  echo "Direct pushes to $blocked_ref are blocked. Use a pull request." >&2
+  exit 1
+fi
+
+npm run check:push

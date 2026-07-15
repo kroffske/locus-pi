@@ -1,12 +1,26 @@
 # Contributing
 
-`locus-pi` is a release candidate, not an open-source release. No license has
-been selected, so external contributions are not accepted yet. Adding a
-`LICENSE` file and explicitly opening the contribution channel are owner gates.
+`locus-pi` is MIT-licensed and currently maintained in a private release-review
+repository. Maintainers and invited reviewers contribute through the branch and
+pull-request process below. Opening the repository to unsolicited public
+contributions remains an owner decision.
 
-Current maintainers and invited reviewers may use this document to prepare the
-candidate. After the repository is opened, the same checks apply to pull
-requests unless the project publishes a replacement policy.
+After the repository is opened, the same checks apply unless the project
+publishes a replacement policy.
+
+## Branch and pull-request flow
+
+1. Update local `dev` from `origin/dev`.
+2. Create a task or milestone branch from `dev`.
+3. Commit and push only the task branch.
+4. Open a pull request into `dev` and squash-merge it after CI and review.
+5. Release through a pull request from `dev` into `main` and merge it with a
+   merge commit.
+6. Create the matching `vX.Y.Z` tag after the release pull request lands.
+
+Direct commits and pushes to `main` or `dev` are not part of the supported
+workflow. `main` remains the default GitHub branch because it represents the
+stable release surface.
 
 ## Before changing code
 
@@ -25,7 +39,14 @@ Use Node.js `>=22.19.0` and a compatible Pi `0.80.x` host.
 
 ```bash
 npm ci --ignore-scripts
+npm run hooks:install
 pi install -l .
+```
+
+The tracked hooks require `gitleaks` for staged secret scanning. On macOS:
+
+```bash
+brew install gitleaks
 ```
 
 ## Required validation
@@ -40,6 +61,10 @@ npm audit --omit=dev
 npm pack --dry-run --json --ignore-scripts
 ```
 
+`npm run check:push` runs the deterministic local push gate. CI repeats the
+full repository and package checks, so bypassing a local hook does not bypass
+review evidence.
+
 Docs-only changes do not need runtime smoke when they do not change active
 behavior claims. They still require source verification and `git diff --check`.
 
@@ -48,11 +73,14 @@ behavior claims. They still require source verification and `git diff --check`.
 - Keep each change bounded and explain the user-visible outcome.
 - Add or update focused tests for runtime behavior.
 - Keep manual docs, manifests, ownership records, and source-audit notes aligned.
+- Update `CHANGELOG.md` in every pull request with user-visible package,
+  runtime, manual, security, or support changes.
+- Do not bump the package version on routine task branches. The `dev` to `main`
+  release pull request owns the version bump and dated changelog heading.
 - Do not commit secrets, credentials, private runtime state, generated reports,
   or absolute workstation paths.
 - Do not add publish tokens, release automation, repository visibility changes,
   or legal metadata without owner authorization.
 
-Use the repository's normal pull-request route only after contributions are
-formally opened. Report suspected vulnerabilities through the private process
-in `SECURITY.md`, never through a public issue or pull request.
+Report suspected vulnerabilities through the private process in `SECURITY.md`,
+never through a public issue or pull request.
