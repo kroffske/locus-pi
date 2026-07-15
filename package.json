@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kroffske/locus-pi-oss.git"
+    "url": "git+https://github.com/kroffske/locus-pi.git"
   },
-  "homepage": "https://github.com/kroffske/locus-pi-oss#readme",
+  "homepage": "https://github.com/kroffske/locus-pi#readme",
   "bugs": {
-    "url": "https://github.com/kroffske/locus-pi-oss/issues"
+    "url": "https://github.com/kroffske/locus-pi/issues"
   },
   "keywords": [
     "locus-pi",

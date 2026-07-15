@@ -40,6 +40,6 @@ describe("public registration contract", () => {
 
   it("binds the MIT package to the clean repository identity", () => {
     expect(pkg.license).toBe("MIT");
-    expect(pkg.repository.url).toBe("git+https://github.com/kroffske/locus-pi-oss.git");
+    expect(pkg.repository.url).toBe("git+https://github.com/kroffske/locus-pi.git");
   });
 });
