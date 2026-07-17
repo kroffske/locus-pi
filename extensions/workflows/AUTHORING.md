@@ -58,8 +58,9 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   3. personal `~/.pi/workflows/<name>.workflow.mjs`.
   4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES`. Files under
      `extensions/workflows/examples/` are not registered merely because they exist.
-- **Run:** `/workflows run <name|path> [input]` or the `workflow { name | scriptPath,
-  input }` tool. Arbitrary inline JS is **not** supported — trusted-file only.
+- **Run:** `/workflows run <name|path> [input]` or the
+  `workflow { name | scriptPath, input }` tool. Arbitrary inline JS is **not**
+  supported — trusted-file only.
   Project targets are checked lexically and by canonical `realpath`; symlinks may
   point only to files that remain inside the project root when resolved. Do not replace
   a workflow target concurrently during launch: validation and Node import are not atomic.
@@ -86,8 +87,17 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   `error.code === "WORKFLOW_GROUP_FAILURE"`, rethrow every other error, inspect
   `slots` / `partialResults` in memory, and return JSON-safe `partial:true`
   evidence. The runner still projects that deliberate partial as non-success.
-For *which shape to pick* (single-agent, `llm()` gate, loop+judge,
+
+For _which shape to pick_ (single-agent, `llm()` gate, loop+judge,
 plan→build→review, adaptive owner-local, pipeline, fan-out+merge, judge-panel,
 loop-until-dry), use the inline skeletons in the pattern catalog
 [`references/patterns.md`](./references/patterns.md). For the full primitive table,
 schema/trust rules, and edge-cases, read the canonical doc linked above.
+
+For a non-trivial workflow visual map, use `$pi-workflow-diagram`. Every curated
+Package workflow must keep `<name>-pipeline.diagram.mjs`, editable
+`<name>-pipeline.excalidraw`, and `<name>-pipeline.png` beside its source. The
+diagram must distinguish operator input, workflow-owned routing, child agents,
+direct `llm()` calls, and persisted artifacts; every decision and branch names
+its real owner. The canonical diagram contract lives in the authoring section of
+the workflow documentation linked above.

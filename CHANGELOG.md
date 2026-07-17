@@ -14,12 +14,18 @@ This file records user-visible changes to the public package.
   filesystem, network, forge-specific, or `llm()` work.
 - Recorded the strict curated-workflow selection criteria and candidate boundary
   in `docs/adr/curated-workflow-portfolio.md`.
+- Added editable Excalidraw.js pipeline maps and PNG previews for every curated
+  Package workflow, with explicit operator, workflow, agent, direct-LLM, decision,
+  and persisted-artifact ownership.
 
 ### Changed
 
 - Expanded the supported curated Package registry from three workflows to four
   while keeping implementation, release, deploy, and incident workflows
   project-local.
+- Added an executable diagram contract so future curated workflows cannot ship
+  without a reproducible generator, editable source, preview, ownership legend,
+  and actual runtime persistence surfaces.
 
 ## [0.2.1] - 2026-07-17
 

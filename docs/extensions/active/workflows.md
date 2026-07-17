@@ -96,6 +96,21 @@ These four names form the Package registry. They are intentionally small and
 owned as part of the package product surface, not discovered merely because a file
 exists in `extensions/workflows/examples/`.
 
+Editable pipeline maps:
+
+- `live-smoke`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.excalidraw)
+- `llm-smoke`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.excalidraw)
+- `requirements-grill`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
+- `review`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-pipeline.excalidraw)
+
 ## Authoring patterns
 
 The clean release contains no uncurated Package examples. The pattern catalog
@@ -496,6 +511,44 @@ Destructure the primitives you need from the first arg:
 ```js
 const { agent, llm, phase, log, parallel, pipeline, workflow } = dsl;
 ```
+
+### Workflow diagram contract
+
+Use `$pi-workflow-diagram` when a workflow has multiple execution steps, agents,
+direct model calls, branches, parallel groups, or persisted handoffs. Every
+curated Package workflow must keep three sibling artifacts beside
+`<name>.workflow.mjs`:
+
+- `<name>-pipeline.diagram.mjs` — reproducible Excalidraw.js generator.
+- `<name>-pipeline.excalidraw` — editable diagram with embedded assets.
+- `<name>-pipeline.png` — visually reviewed preview.
+
+The diagram is an ownership map, not a decorative code trace:
+
+- Prefix each executable or data node with exactly one real owner/type:
+  `Operator:`, `Workflow:`, `Agent:`, `Direct LLM:`, or `Artifact:`.
+- A branch must say who produced the decision and who routes it. For example,
+  `Agent 1 output.status (TARGET_SCHEMA)` is the decision data;
+  `Workflow: check Agent 1 output.status (TARGET_SCHEMA)` is the deterministic
+  branch. Do not use ownerless labels such as `Target ready?`.
+- Name workflow control explicitly: `Workflow: launch Agents 2 + 3 in parallel`
+  and `Workflow: wait for both lane results`, not `fan-out` or `barrier` alone.
+- Label important edges with the actual handoff or schema. Show where
+  `TARGET_SCHEMA`, `LANE_SCHEMA`, or another structured result moves between
+  nodes.
+- Show the source `<name>.workflow.mjs`, the persisted
+  `.locus/runtime/workflows/<runId>/result.json`, and `journal.ndjson` when it
+  records meaningful execution evidence. A field such as `reportMarkdown` is
+  labeled as a field inside `result.json`, not drawn as a separate file.
+- Include a legend that explains the visual types and any accent colors. A
+  reader must understand the graph without opening the workflow source.
+
+Generate through `@kroffske/excalidraw-diagrams`, keep a fixed `Scene` seed, run
+`assertDiagramHealthy(...)`, validate the serialized Excalidraw document, render
+the PNG, and inspect the image itself. Do not hand-write raw Excalidraw element
+JSON. Repository tests enforce the artifact trio and the minimum ownership /
+persistence vocabulary; visual inspection remains required because structural
+validation cannot prove that a diagram is readable.
 
 ### Minimal working template
 

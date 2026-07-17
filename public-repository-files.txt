@@ -136,8 +136,17 @@ extensions/todo-context/index.ts
 extensions/todo-context/manifest.json
 extensions/workflows/AUTHORING.md
 extensions/workflows/catalog-viewer.ts
+extensions/workflows/examples/live-smoke-pipeline.diagram.mjs
+extensions/workflows/examples/live-smoke-pipeline.excalidraw
+extensions/workflows/examples/live-smoke-pipeline.png
 extensions/workflows/examples/live-smoke.workflow.mjs
+extensions/workflows/examples/llm-smoke-pipeline.diagram.mjs
+extensions/workflows/examples/llm-smoke-pipeline.excalidraw
+extensions/workflows/examples/llm-smoke-pipeline.png
 extensions/workflows/examples/llm-smoke.workflow.mjs
+extensions/workflows/examples/requirements-grill-pipeline.diagram.mjs
+extensions/workflows/examples/requirements-grill-pipeline.excalidraw
+extensions/workflows/examples/requirements-grill-pipeline.png
 extensions/workflows/examples/requirements-grill.workflow.mjs
 extensions/workflows/examples/review-pipeline.diagram.mjs
 extensions/workflows/examples/review-pipeline.excalidraw
@@ -180,6 +189,7 @@ tests/extensions/workflows/requirements-grill-workflow.test.ts
 tests/extensions/workflows/review-workflow.test.ts
 tests/extensions/workflows/workflow-catalog-viewer.test.ts
 tests/extensions/workflows/workflow-catalog.test.ts
+tests/extensions/workflows/workflow-diagram-artifacts.test.ts
 tests/extensions/workflows/workflow-identity-projection.test.ts
 tests/extensions/workflows/workflow-live-row-retention.test.ts
 tests/extensions/workflows/workflow-transcript.test.ts

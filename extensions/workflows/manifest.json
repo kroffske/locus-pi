@@ -103,6 +103,7 @@
     "tests/extensions/workflows/workflow-catalog-viewer.test.ts",
     "tests/extensions/workflows/requirements-grill-workflow.test.ts",
     "tests/extensions/workflows/review-workflow.test.ts",
+    "tests/extensions/workflows/workflow-diagram-artifacts.test.ts",
     "tests/extensions/workflows/workflow-transcript.test.ts",
     "tests/shared/workflows/workflow-llm-bridge.test.ts",
     "tests/extensions/workflows/workflows-launch-gate.test.ts",
