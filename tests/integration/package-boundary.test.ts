@@ -1,13 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,6 +26,7 @@ const forbiddenPackedPaths = [
   /^\.(locus|tasks|planning|pi)\//,
   /^(artifacts|benchmarks|catalog|eval|evaluation|evaluations|output|scripts|tests)\//,
   /^docs\/(archive|extension-gallery|reports|system-design)\//,
+  /^docs\/source-audit\//,
   /^extensions\/beta\//,
   /^bin\/pi-live-terminal$/,
   /^STATUS\.md$/,
@@ -42,11 +35,10 @@ const forbiddenPackedPaths = [
 let dryRun: PackResult;
 
 beforeAll(() => {
-  const output = execFileSync(
-    "npm",
-    ["pack", "--dry-run", "--json", "--ignore-scripts"],
-    { cwd: root, encoding: "utf8" },
-  );
+  const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd: root,
+    encoding: "utf8",
+  });
   const [result] = JSON.parse(output) as PackResult[];
   if (!result) throw new Error("npm pack --dry-run returned no package result");
   dryRun = result;
@@ -111,19 +103,18 @@ describe("npm public package boundary", () => {
 
       const packageRoot = path.join(unpackRoot, "package");
       symlinkSync(path.join(root, "node_modules"), path.join(packageRoot, "node_modules"), "dir");
-      const entrypointUrls = pkg.pi.extensions.map((entrypoint) =>
-        pathToFileURL(path.join(packageRoot, entrypoint)).href,
+      const entrypointUrls = pkg.pi.extensions.map(
+        (entrypoint) => pathToFileURL(path.join(packageRoot, entrypoint)).href,
       );
       const loadScript = `for (const url of ${JSON.stringify(entrypointUrls)}) {
         const loaded = await import(url);
         if (typeof loaded.default !== "function") throw new Error(\`Missing default extension export: \${url}\`);
       }`;
 
-      execFileSync(
-        process.execPath,
-        ["--import", "tsx", "--input-type=module", "--eval", loadScript],
-        { cwd: packageRoot, encoding: "utf8" },
-      );
+      execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", loadScript], {
+        cwd: packageRoot,
+        encoding: "utf8",
+      });
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }

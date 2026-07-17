@@ -4,6 +4,8 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+## [0.2.1] - 2026-07-17
+
 ### Added
 
 - Added the `dev` integration branch contract, tracked local Git hooks, a pull-request template, and executable CI policy checks for task and release pull requests.
@@ -11,7 +13,17 @@ This file records user-visible changes to the public package.
 ### Changed
 
 - Defined `task branch -> dev -> main` as the repository delivery path, with routine work squash-merged into `dev` and releases merged from `dev` into `main`.
-- Updated contribution guidance to reflect the existing MIT license and private maintainer-review phase.
+- Corrected packaged documentation links and extension manifest test evidence,
+  with an executable check that rejects missing documentation or test paths.
+- Kept maintainer source-audit archaeology in the public GitHub repository
+  while removing it from the installed npm documentation surface.
+- Updated contribution, support, security, and install guidance for the public
+  MIT-licensed release.
+
+### Security
+
+- Pinned GitHub Actions to reviewed commit SHAs and ignored local `.npmrc`
+  credential configuration.
 
 ## [0.2.0] - 2026-07-14
 

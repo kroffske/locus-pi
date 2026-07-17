@@ -1,9 +1,9 @@
 # Support
 
-No public support commitment exists while `locus-pi` remains an unpublished and
-unlicensed release candidate.
+`locus-pi` is MIT-licensed. No paid support, response-time guarantee, or
+service-level agreement is provided.
 
-After an authorized public release, use these repository-native routes:
+Use these repository-native routes:
 
 - Read `README.md` and the active manuals under `docs/extensions/active/` first.
 - Use GitHub Discussions for usage and design questions when Discussions is

@@ -1,8 +1,9 @@
 # Third-party notices
 
 `locus-pi` uses the public Pi extension and SDK contracts and adapts selected
-tool behavior from Oh My Pi. The exact local decisions and source paths are
-recorded under `docs/source-audit/`.
+tool behavior from Oh My Pi. Maintainer decisions and source references are
+recorded in the repository's
+[source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit).
 
 ## Pi
 
@@ -46,10 +47,10 @@ Source: <https://github.com/can1357/oh-my-pi>
 
 The npm artifact declares, but does not bundle, these runtime packages:
 
-| Package | Declared license |
-|---|---|
-| `@ast-grep/lang-python` | ISC |
-| `@ast-grep/napi` | MIT |
-| `@sinclair/typebox` | MIT |
+| Package                 | Declared license |
+| ----------------------- | ---------------- |
+| `@ast-grep/lang-python` | ISC              |
+| `@ast-grep/napi`        | MIT              |
+| `@sinclair/typebox`     | MIT              |
 
 Each dependency remains governed by its own distributed license and notices.

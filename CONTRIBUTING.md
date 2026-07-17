@@ -1,12 +1,8 @@
 # Contributing
 
-`locus-pi` is MIT-licensed and currently maintained in a private release-review
-repository. Maintainers and invited reviewers contribute through the branch and
-pull-request process below. Opening the repository to unsolicited public
-contributions remains an owner decision.
-
-After the repository is opened, the same checks apply unless the project
-publishes a replacement policy.
+`locus-pi` is MIT-licensed and maintained through the branch and pull-request
+process below. Public issues and pull requests are welcome when they follow the
+security and contribution boundaries in this repository.
 
 ## Branch and pull-request flow
 

@@ -15,4 +15,10 @@ if [ -n "$blocked_ref" ]; then
   exit 1
 fi
 
+# Git exports repository-local variables to hooks. Clear them before the test
+# suite creates foreign temporary repositories, or nested git commands will
+# keep targeting this checkout despite their explicit `-C` directory.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE \
+  GIT_IMPLICIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 npm run check:push

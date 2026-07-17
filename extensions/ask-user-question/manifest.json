@@ -13,16 +13,10 @@
     "Interactive cancellation records a cancelled decision, while no-UI modes fail unavailable without recording a fake user decision",
     "Locus human-control decision journal"
   ],
-  "stateUsed": [
-    "decision session entries",
-    "Pi custom decision entries"
-  ],
+  "stateUsed": ["decision session entries", "Pi custom decision entries"],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "ask",
-      "askUserQuestion"
-    ],
+    "tools": ["ask", "askUserQuestion"],
     "commands": [],
     "hooks": []
   },
@@ -31,51 +25,33 @@
     "tools": [
       {
         "name": "ask",
-        "taxonomy": [
-          "overlay-selector",
-          "blocking-prompt"
-        ],
-        "persistent": [
-          "decision entries"
-        ]
+        "taxonomy": ["overlay-selector", "blocking-prompt"],
+        "persistent": ["decision entries"]
       },
       {
         "name": "askUserQuestion",
-        "taxonomy": [
-          "overlay-selector",
-          "blocking-prompt"
-        ],
-        "persistent": [
-          "decision entries"
-        ]
+        "taxonomy": ["overlay-selector", "blocking-prompt"],
+        "persistent": ["decision entries"]
       }
     ]
   },
   "permissions": {
     "filesystem": {
       "read": [],
-      "write": [
-        ".locus/runtime/session-state.jsonl"
-      ]
+      "write": [".locus/runtime/session-state.jsonl"]
     },
     "subprocess": [],
     "network": [],
     "browser": false,
     "models": false,
-    "ui": [
-      "select",
-      "input",
-      "editor",
-      "custom"
-    ]
+    "ui": ["select", "input", "editor", "custom"]
   },
   "risk": "medium",
   "docsPath": "docs/extensions/active/ask-user-question.md",
-  "sourceAuditPath": "docs/source-audit/ask-user-question.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/ask-user-question.md",
   "tests": [
-    "tests/integration/core.test.ts",
     "tests/extensions/ask-user-question/ask-user-question.test.ts",
-    "tests/integration/registration.test.ts"
+    "tests/integration/public-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

@@ -27,60 +27,39 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "todo_write"
-    ],
-    "commands": [
-      "todo"
-    ],
+    "tools": ["todo_write"],
+    "commands": ["todo"],
     "hooks": []
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "todo",
-        "taxonomy": [
-          "transient-widget",
-          "blocking-prompt",
-          "artifact-write"
-        ],
-        "transient": [
-          "widget:todo"
-        ],
-        "persistent": [
-          "session todo entries",
-          ".tasks/**/artifacts/completion-note.md"
-        ]
+        "taxonomy": ["transient-widget", "blocking-prompt", "artifact-write"],
+        "transient": ["widget:todo"],
+        "persistent": ["session todo entries", ".tasks/**/artifacts/completion-note.md"]
       }
     ]
   },
   "permissions": {
     "filesystem": {
-      "read": [
-        ".tasks/index.json"
-      ],
-      "write": [
-        ".tasks/**/artifacts/completion-note.md"
-      ]
+      "read": [".tasks/index.json"],
+      "write": [".tasks/**/artifacts/completion-note.md"]
     },
     "subprocess": [],
     "network": [],
     "browser": false,
     "models": false,
-    "ui": [
-      "editor",
-      "setWidget",
-      "theme"
-    ]
+    "ui": ["editor", "setWidget", "theme"]
   },
   "risk": "medium",
   "docsPath": "docs/extensions/active/todo-context.md",
-  "sourceAuditPath": "docs/source-audit/todo-write.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/todo-write.md",
   "tests": [
     "tests/extensions/todo-context/todo-context.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/session/session-core-jsonl.test.ts",
-    "tests/integration/registration.test.ts"
+    "tests/integration/public-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

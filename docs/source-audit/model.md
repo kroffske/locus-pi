@@ -8,12 +8,12 @@ The extension owns `/model-roles` and `/effort` but never registers `/model` or
 
 OMP source evidence:
 
-- `.local/oh-my-pi-can1357/packages/coding-agent/src/slash-commands/builtin-registry.ts`
-- `.local/oh-my-pi-can1357/packages/coding-agent/src/modes/controllers/input-controller.ts`
-- `.local/oh-my-pi-can1357/packages/coding-agent/src/modes/controllers/selector-controller.ts`
-- `.local/oh-my-pi-can1357/packages/coding-agent/src/session/agent-session.ts`
-- `.local/oh-my-pi-can1357/packages/coding-agent/src/extensibility/extensions/types.ts`
-- `.local/oh-my-pi-can1357/LICENSE`
+- `oh-my-pi:packages/coding-agent/src/slash-commands/builtin-registry.ts`
+- `oh-my-pi:packages/coding-agent/src/modes/controllers/input-controller.ts`
+- `oh-my-pi:packages/coding-agent/src/modes/controllers/selector-controller.ts`
+- `oh-my-pi:packages/coding-agent/src/session/agent-session.ts`
+- `oh-my-pi:packages/coding-agent/src/extensibility/extensions/types.ts`
+- `oh-my-pi:LICENSE`
 
 Official Pi evidence:
 
