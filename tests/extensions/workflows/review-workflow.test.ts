@@ -176,7 +176,7 @@ describe("workflow example: review.workflow.mjs", () => {
       label: "resolve review target",
       permissionMode: "agent-defined",
       workspaceMode: "project",
-      maxToolCalls: 40,
+      maxToolCalls: 80,
     });
     expect(calls[0]?.tools).toBeUndefined();
     expect(calls[0]?.prompt).toContain("Use your tools now");
@@ -234,7 +234,7 @@ describe("workflow example: review.workflow.mjs", () => {
         agent: "oracle",
         permissionMode: "agent-defined",
         workspaceMode: "project",
-        maxToolCalls: 40,
+        maxToolCalls: 80,
       });
       expect(call.tools).toBeUndefined();
       expect(call.prompt).toContain("LOCUS_AGENT_RESULT_V1");
@@ -244,8 +244,11 @@ describe("workflow example: review.workflow.mjs", () => {
       expect(call.prompt).toMatch(/The workflow\s+will not/u);
     }
     expect(calls[1]?.prompt).toContain("Obtain the diff yourself");
+    expect(calls[1]?.prompt).toContain("Batch related read-only Git");
+    expect(calls[1]?.prompt).toContain("read the complete file");
     expect(calls[2]?.prompt).toContain("Explicit\nrepository standards are review contracts");
     expect(calls[3]?.prompt).toContain("Use your own tools to reopen the target");
+    expect(calls[3]?.prompt).toContain("reserve the rest for verification");
     expect(calls[3]?.prompt).toContain("# Review Report");
     expect(result).toMatchObject({
       ok: true,

@@ -104,8 +104,18 @@ const AGENT_OPTIONS = {
   agent: "oracle",
   permissionMode: "agent-defined",
   workspaceMode: "project",
-  maxToolCalls: 40,
+  maxToolCalls: 80,
 };
+
+const EVIDENCE_BUDGET = `Treat the 80-call runtime ceiling as a hard budget. Spend at most
+64 calls on evidence acquisition and reserve the rest for verification and the structured
+answer. Batch related read-only Git, search, and file-inspection operations instead of
+using one tool call per file. Start from the changed-path inventory and diff statistics.
+Inspect every changed path at least at inventory/diff level, but read the complete file
+for every finding and every architecture conclusion. Prioritize executable code,
+configuration, public contracts, tests, and their direct consumers. Record any
+lower-risk path that could not be read in full as a limitation; do not exhaust the budget
+trying to prove exhaustive coverage.`;
 
 function resultEnvelope(output) {
   return (
@@ -156,8 +166,8 @@ function reviewPrompt(originalRequest, target, lane) {
   const focus =
     lane === "changes"
       ? `Focus on defects introduced by the target: correctness, security, tests, and
-cross-boundary integration. Obtain the diff yourself, then read every changed file in full
-and trace affected consumers outside the diff. Do not report style-only findings.`
+cross-boundary integration. Obtain the diff yourself, read complete files for candidate
+findings, and trace affected consumers outside the diff. Do not report style-only findings.`
       : `Focus on whole-file and repository-contract review. Obtain the diff yourself, then
 inspect complete changed files plus relevant standards, configuration, utilities, types,
 tests, documentation, and neighboring code. Report evidenced architecture,
@@ -182,6 +192,8 @@ open full files, search related code, and inspect project guidance yourself. The
 will not supply a diff, source files, forge adapter, or repository packet.
 
 ${focus}
+
+${EVIDENCE_BUDGET}
 
 Do not edit files, checkout branches, commit, push, or change remote state. Every finding
 must have a repository-relative file, tight line range, concrete evidence, impact, and a
@@ -243,6 +255,8 @@ repository rules. Do not merely summarize the lane outputs. Reject unsupported f
 deduplicate by root cause, correct scope/severity when evidence requires it, and discover
 critical misses when your verification exposes them. The workflow will not fetch or
 prepare any repository or PR evidence for you.
+
+${EVIDENCE_BUDGET}
 
 Do not edit files, checkout branches, commit, push, or change remote state. Verdict is
 blocked if the target cannot be inspected; otherwise needs_changes when actionable

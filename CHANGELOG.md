@@ -26,6 +26,9 @@ This file records user-visible changes to the public package.
 - Added an executable diagram contract so future curated workflows cannot ship
   without a reproducible generator, editable source, preview, ownership legend,
   and actual runtime persistence surfaces.
+- Hardened the curated review agents for large comparisons by budgeting
+  evidence calls, batching read-only inspection, and preserving explicit
+  limitations instead of exhausting the runtime before producing a report.
 
 ## [0.2.1] - 2026-07-17
 
