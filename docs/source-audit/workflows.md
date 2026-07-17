@@ -248,7 +248,7 @@ surface. The active default package surface remains the `workflows` extension at
   `tests/extensions/workflows/workflow-transcript.test.ts`,
   `tests/extensions/workflows/workflows-launch-gate.test.ts`,
   `tests/extensions/workflows/workflows-progress.test.ts`, and
-  `tests/integration/registration.test.ts` are the local regression checks for
+  `tests/integration/public-registration.test.ts` are the local regression checks for
   the current active behavior claims.
 
 License note: this audit did not identify copied external runtime code for the

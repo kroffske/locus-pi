@@ -15,6 +15,7 @@
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
+    "docs/source-audit",
     "SECURITY.md",
     "SUPPORT.md",
     "package-lock.json",

@@ -16,7 +16,7 @@
     "agent observe / agent summary render an on-demand bounded snapshot of current and recent live rows from agentLiveStore.rows; done/cancelled/error rows stay terminal, not running, with currentTools/currentToolArgs/currentToolStartMs cleared and elapsedMs frozen at terminal transition",
     "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
     "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
-    "no first-class createAgentSession JSON schema/response_format mode is confirmed in Pi SDK 0.78.0; structured mode must be explicit, not the default",
+    "no first-class createAgentSession JSON schema/response_format mode is present in the declared Pi SDK 0.80.3 peer; structured mode must be explicit, not the default",
     "locus_workload_proof records diagnostic persisted child-workload evidence but does not control success by itself",
     "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
     "spawn_agent is the model-friendly primary subagent-spawn tool; task is a back-compat alias; both share the same createAgentSession SDK host, honesty-gate, and requestedSurface:task detail shape",
@@ -56,11 +56,7 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "spawn_agent",
-      "task",
-      "locus_workload_proof"
-    ],
+    "tools": ["spawn_agent", "task", "locus_workload_proof"],
     "commands": [
       "agent list",
       "agent inspect",
@@ -71,43 +67,23 @@
       "agent ps",
       "ps"
     ],
-    "hooks": [
-      "session_start",
-      "tool_call",
-      "tool_result"
-    ],
-    "shortcuts": [
-      "shift+down"
-    ]
+    "hooks": ["session_start", "tool_call", "tool_result"],
+    "shortcuts": ["shift+down"]
   },
   "uiLifecycle": {
     "commands": [
-    {
-      "name": "agent",
-        "taxonomy": [
-          "transient-widget",
-          "status",
-          "overlay-selector",
-          "artifact-write"
-        ],
-        "transient": [
-          "widget:agents",
-          "status:agents"
-        ],
-      "persistent": []
-    },
-    {
-      "name": "ps",
-      "taxonomy": [
-        "transient-widget",
-        "overlay-selector"
-      ],
-      "transient": [
-        "widget:agents",
-        "status:agents"
-      ],
-      "persistent": []
-    }
+      {
+        "name": "agent",
+        "taxonomy": ["transient-widget", "status", "overlay-selector", "artifact-write"],
+        "transient": ["widget:agents", "status:agents"],
+        "persistent": []
+      },
+      {
+        "name": "ps",
+        "taxonomy": ["transient-widget", "overlay-selector"],
+        "transient": ["widget:agents", "status:agents"],
+        "persistent": []
+      }
     ]
   },
   "permissions": {
@@ -144,7 +120,7 @@
   },
   "risk": "high",
   "docsPath": "docs/extensions/active/agents.md",
-  "sourceAuditPath": "docs/source-audit/agents.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/agents.md",
   "tests": [
     "tests/extensions/agents/agents-discovery.test.ts",
     "tests/shared/agents/agent-runner.test.ts",
@@ -155,8 +131,7 @@
     "tests/extensions/agents/agent-drill.test.ts",
     "tests/extensions/agents/agent-fleet-menu.test.ts",
     "tests/extensions/agents/agent-live-store-entrypoints.test.ts",
-    "tests/integration/core.test.ts",
-    "tests/integration/registration.test.ts"
+    "tests/integration/public-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

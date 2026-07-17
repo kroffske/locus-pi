@@ -7,14 +7,14 @@ and optional Shift+Tab), the `/review` and `/todos` prompt shelves, and the loca
 > permission boundary. While the active mode is `plan`, a `before_agent_start`
 > injection frames the model to **compose a plan, not implement** — and **standard
 > commands and throwaway scripts are allowed** (no read-only block). `/plan
-> <request>` additionally authors a plan and saves the **output** to a user-level
+<request>` additionally authors a plan and saves the **output** to a user-level
 > file. Bare `/plan` first opens an `[INPUT]` dialog and only authors after submit.
 > Modes form an ordered, cyclable list (`default ⇄ plan`, extensible);
 > **`/mode` cycles them by default; Shift+Tab is opt-in** and updates the same bounded mode contribution
 > in the shared `locus` status bar. `/review`, `/todos`, and `/goal prompt`
 > are **summary-first prompt shelves** (no mode): bare inspection shows target,
-> kind, path, and size; full body requires explicit `show`/`read`. Decisions + research:
-> [vision/plan-mode-v2-modes.md](../vision/plan-mode-v2-modes.md).
+> kind, path, and size; full body requires explicit `show`/`read`. The
+> machine-readable contract is [extensions/plan/manifest.json](../../../extensions/plan/manifest.json).
 
 ## Who uses it
 
@@ -74,7 +74,7 @@ to do with the plan:
 
 1. **Execute the plan (this context)** — exit plan mode and inject the saved plan
    into the current session as a follow-up (`pi.sendUserMessage`, `deliverAs:
-   followUp`) so the model executes it in place.
+followUp`) so the model executes it in place.
 2. **Execute with a fresh context (reset)** — `ctx.newSession`, then seed the new
    session with the plan and execute from a clean slate (start over).
 3. **Tweak, then execute** — prompt for a small amendment through the typed input
@@ -104,20 +104,20 @@ involved in this flow (the separate `ask`/`askUserQuestion` tools live in the
 
 What you type, the good visible result, and the bad result to watch for.
 
-| Spell | What it does now | Good visible result | Bad result |
-|---|---|---|---|
-| `/plan` | Opens typed input, then arms plan mode and authors one plan after submit. | `[INPUT] Plan request` is visually distinct; Escape returns a cancelled receipt and writes nothing. | Empty or cancelled input creates a plan or triggers a model turn. |
-| `/plan <request>` | Arms plan mode, authors a plan, saves the output to the user-level plans dir. | Shared `locus` status shows the bounded plan-mode route; a typed result reports the saved path; the planning framing is injected but all tools stay allowed. | Saves the raw input verbatim, or a tool call gets blocked (v2 never blocks). |
-| `/plan exit` | Leaves plan mode; with a composed plan, opens the execution-handoff selector. | Selector offers execute / execute-fresh / tweak / keep; on execute the plan is injected as a follow-up and the label clears; on keep the `PLAN` label stays. | Selector appears with no composed plan, or the plan is not injected on execute. |
-| `/plan list` / `/plan help` | Shows the saved-plan library or explicit usage. | Typed `VIEW` block, bounded rows, muted path/controls. | Falls back to an unframed white-text stack. |
-| `/plan open <slug>` | Loads a saved plan and re-arms plan mode. | Typed `CHANGE` preview with `PLAN`, path, bounded body, and an explicit `+N more` affordance. | Unknown slug looks like success, or a long plan overflows/truncates silently. |
-| `/mode` / optional Shift+Tab | `/mode` cycles `default ⇄ plan`; Shift+Tab works only after explicit bind + restart. | A typed change receipt shows `from → to`; the shared `locus` status contribution flips `PLAN` ↔ cleared. | Startup reports a shortcut conflict, or Shift+Tab remains unavailable after bind/restart. |
-| `/goal <objective>` | Creates or replaces the long-lived Goal state. | Typed `CHANGE` names the objective, status, id, usage/budget, and state path. | Confuses runtime state with a prompt shelf. |
-| `/goal prompt [show|read|set <prompt>]` | Inspects or writes the separate Goal prompt shelf. | Bare command is summary-only; explicit body view shows `target`, `kind`, compact path, and bounded content. | Bare inspection dumps the full prompt or silently falls back from an explicit task target. |
-| `/goal-ai [<request>]` | With no argument, opens typed input; then converts rough intent into a Locus Prompt Draft through one replacement-session LLM run and saves it as the goal prompt. | Typed result shows the resolved `target`, `kind`, local `path`, and child session id when available. | Pretends to execute the goal, writes after Escape, or overwrites `goal.md` after invalid/empty LLM output. |
-| `/review [show|read|set <prompt>]` | Inspects or writes the Review prompt shelf. | Bare summary hides body; explicit body view is typed and bounded. | Treats prompt storage as review execution proof. |
-| `/todos [show|read|set <prompt>]` | Inspects or writes the Todos prompt shelf. | Label is exactly `Todos prompt shelf`, distinct from `/todo` Session todos. | Mixes prompt storage with session todo state or hidden `.tasks`. |
-| `/<kind> --task <task-id> <prompt>` | Saves a prompt to an explicit task artifact. | Widget shows `target: task:<task-id>` and `path: ./.tasks/<task-dir>/artifacts/<kind>-prompt.md`. | Falls back to project-local storage after a missing or stale task id. |
+| Spell                               | What it does now                                                                                                                                                   | Good visible result                                                                                                                                          | Bad result                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `/plan`                             | Opens typed input, then arms plan mode and authors one plan after submit.                                                                                          | `[INPUT] Plan request` is visually distinct; Escape returns a cancelled receipt and writes nothing.                                                          | Empty or cancelled input creates a plan or triggers a model turn.                                          |
+| `/plan <request>`                   | Arms plan mode, authors a plan, saves the output to the user-level plans dir.                                                                                      | Shared `locus` status shows the bounded plan-mode route; a typed result reports the saved path; the planning framing is injected but all tools stay allowed. | Saves the raw input verbatim, or a tool call gets blocked (v2 never blocks).                               |
+| `/plan exit`                        | Leaves plan mode; with a composed plan, opens the execution-handoff selector.                                                                                      | Selector offers execute / execute-fresh / tweak / keep; on execute the plan is injected as a follow-up and the label clears; on keep the `PLAN` label stays. | Selector appears with no composed plan, or the plan is not injected on execute.                            |
+| `/plan list` / `/plan help`         | Shows the saved-plan library or explicit usage.                                                                                                                    | Typed `VIEW` block, bounded rows, muted path/controls.                                                                                                       | Falls back to an unframed white-text stack.                                                                |
+| `/plan open <slug>`                 | Loads a saved plan and re-arms plan mode.                                                                                                                          | Typed `CHANGE` preview with `PLAN`, path, bounded body, and an explicit `+N more` affordance.                                                                | Unknown slug looks like success, or a long plan overflows/truncates silently.                              |
+| `/mode` / optional Shift+Tab        | `/mode` cycles `default ⇄ plan`; Shift+Tab works only after explicit bind + restart.                                                                               | A typed change receipt shows `from → to`; the shared `locus` status contribution flips `PLAN` ↔ cleared.                                                     | Startup reports a shortcut conflict, or Shift+Tab remains unavailable after bind/restart.                  |
+| `/goal <objective>`                 | Creates or replaces the long-lived Goal state.                                                                                                                     | Typed `CHANGE` names the objective, status, id, usage/budget, and state path.                                                                                | Confuses runtime state with a prompt shelf.                                                                |
+| `/goal prompt [show                 | read                                                                                                                                                               | set <prompt>]`                                                                                                                                               | Inspects or writes the separate Goal prompt shelf.                                                         | Bare command is summary-only; explicit body view shows `target`, `kind`, compact path, and bounded content. | Bare inspection dumps the full prompt or silently falls back from an explicit task target. |
+| `/goal-ai [<request>]`              | With no argument, opens typed input; then converts rough intent into a Locus Prompt Draft through one replacement-session LLM run and saves it as the goal prompt. | Typed result shows the resolved `target`, `kind`, local `path`, and child session id when available.                                                         | Pretends to execute the goal, writes after Escape, or overwrites `goal.md` after invalid/empty LLM output. |
+| `/review [show                      | read                                                                                                                                                               | set <prompt>]`                                                                                                                                               | Inspects or writes the Review prompt shelf.                                                                | Bare summary hides body; explicit body view is typed and bounded.                                           | Treats prompt storage as review execution proof.                                           |
+| `/todos [show                       | read                                                                                                                                                               | set <prompt>]`                                                                                                                                               | Inspects or writes the Todos prompt shelf.                                                                 | Label is exactly `Todos prompt shelf`, distinct from `/todo` Session todos.                                 | Mixes prompt storage with session todo state or hidden `.tasks`.                           |
+| `/<kind> --task <task-id> <prompt>` | Saves a prompt to an explicit task artifact.                                                                                                                       | Widget shows `target: task:<task-id>` and `path: ./.tasks/<task-dir>/artifacts/<kind>-prompt.md`.                                                            | Falls back to project-local storage after a missing or stale task id.                                      |
 
 ## Task-backed artifact route
 
@@ -171,7 +171,7 @@ task lifecycle, or review outcome. Prompt storage is not execution proof.
   The durable source of truth remains `.locus/runtime/goal/state.json`.
 - Plan mode is **behavioral**: it influences the model via a system-prompt
   injection only. It does **not** restrict tools, writes, or the operator's shell —
-  by design (v2). The model is *asked* to plan, not *forced* to.
+  by design (v2). The model is _asked_ to plan, not _forced_ to.
 - Shift+Tab is not claimed by this extension while `app.thinking.cycle` owns the
   chord (Pi reserves it). `/mode bind-shift-tab` frees it via the user
   `keybindings.json`; restart Pi to enable the optional shortcut. Without that,

@@ -23,18 +23,18 @@ Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast
 
 ## Public Map
 
-| Surface | Public home |
-|---|---|
-| Install, trust, `npx` smoke and quick operator checks | [../README.md](../README.md). |
-| Repository-only release policies | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed. |
-| Default extension list | `package.json#pi.extensions`; mirrored above for docs sanity. |
-| Active extension manuals | [extensions/active/](extensions/active/). |
-| Extension status and risk index | [extension-index.md](extension-index.md). |
-| Ownership and promotion decisions | [extension-ownership-matrix.md](extension-ownership-matrix.md). |
-| Package/runtime boundary | [runtime/locus-workspace.md](runtime/locus-workspace.md). |
-| Agent execution trust model | [adr/agent-execution-trust-model.md](adr/agent-execution-trust-model.md). |
-| Source attribution and borrowed behavior | The retained `docs/source-audit/*.md` files named by active manifests. |
-| Bundled agent catalog used by `agents` and `workflows` | [../.agents/agents/](../.agents/agents/). This is package runtime surface, not private planning material. |
+| Surface                                                | Public home                                                                                                                                        |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install, trust, `npx` smoke and quick operator checks  | [../README.md](../README.md).                                                                                                                      |
+| Repository-only release policies                       | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed. |
+| Default extension list                                 | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                      |
+| Active extension manuals                               | [extensions/active/](extensions/active/).                                                                                                          |
+| Extension status and risk index                        | [extension-index.md](extension-index.md).                                                                                                          |
+| Ownership and promotion decisions                      | [extension-ownership-matrix.md](extension-ownership-matrix.md).                                                                                    |
+| Package/runtime boundary                               | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                          |
+| Agent execution trust model                            | [adr/agent-execution-trust-model.md](adr/agent-execution-trust-model.md).                                                                          |
+| Source attribution and borrowed behavior               | [Repository-only source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit) named by active manifests.                  |
+| Bundled agent catalog used by `agents` and `workflows` | [../.agents/agents/](../.agents/agents/). This is package runtime surface, not private planning material.                                          |
 
 ## Excluded from the clean release
 
@@ -59,6 +59,6 @@ promotion decision says otherwise:
 The npm package intentionally ships only the ten default entrypoints and their
 explicit local import closure, the three curated Package workflows
 (`live-smoke`, `llm-smoke`, `requirements-grill`), active manifests, the
-bundled agent catalog, designated public docs and source-audit notes, and the
+bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.

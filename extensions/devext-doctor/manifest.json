@@ -25,61 +25,39 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "devext_reload"
-    ],
-    "commands": [
-      "devext doctor",
-      "devext reload",
-      "devext task-lifecycle <task-id> <target-status>"
-    ],
-    "hooks": [
-      "input"
-    ]
+    "tools": ["devext_reload"],
+    "commands": ["devext doctor", "devext reload", "devext task-lifecycle <task-id> <target-status>"],
+    "hooks": ["input"]
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "devext",
-        "taxonomy": [
-          "transient-widget",
-          "no-ui"
-        ],
-        "transient": [
-          "widget:devext-doctor",
-          "status:devext-doctor"
-        ],
+        "taxonomy": ["transient-widget", "no-ui"],
+        "transient": ["widget:devext-doctor", "status:devext-doctor"],
         "persistent": []
       }
     ]
   },
   "permissions": {
     "filesystem": {
-      "read": [
-        ".tasks/index.json",
-        ".tasks/**/qa.md",
-        ".tasks/**/task.md"
-      ],
+      "read": [".tasks/index.json", ".tasks/**/qa.md", ".tasks/**/task.md"],
       "write": []
     },
     "subprocess": [],
     "network": [],
     "browser": false,
     "models": false,
-    "ui": [
-      "setWidget",
-      "setStatus",
-      "notify"
-    ]
+    "ui": ["setWidget", "setStatus", "notify"]
   },
   "risk": "low",
   "docsPath": "docs/extensions/active/devext-doctor.md",
   "sourceAuditPath": null,
   "tests": [
-    "tests/integration/core.test.ts",
+    "tests/integration/command-ui-lifecycle.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/session/session-core-jsonl.test.ts",
-    "tests/integration/registration.test.ts",
+    "tests/integration/public-registration.test.ts",
     "tests/extensions/agents/agent-observer.test.ts"
   ],
   "review": {

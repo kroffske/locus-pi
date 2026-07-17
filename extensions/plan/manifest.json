@@ -51,96 +51,41 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "goal"
-    ],
-    "commands": [
-      "plan",
-      "mode",
-      "goal",
-      "goal-ai",
-      "review",
-      "todos"
-    ],
-    "hooks": [
-      "session_start",
-      "before_agent_start"
-    ],
+    "tools": ["goal"],
+    "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],
+    "hooks": ["session_start", "before_agent_start"],
     "shortcuts": []
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "plan",
-        "taxonomy": [
-          "persistent-state",
-          "status",
-          "transient-widget",
-          "blocking-prompt",
-          "artifact-write"
-        ],
-        "transient": [
-          "widget:plan"
-        ],
-        "persistent": [
-          "status:locus (plan.mode contribution)",
-          ".locus/runtime/mode/state.json"
-        ]
+        "taxonomy": ["persistent-state", "status", "transient-widget", "blocking-prompt", "artifact-write"],
+        "transient": ["widget:plan"],
+        "persistent": ["status:locus (plan.mode contribution)", ".locus/runtime/mode/state.json"]
       },
       {
         "name": "mode",
-        "taxonomy": [
-          "persistent-state",
-          "status",
-          "transient-widget",
-          "blocking-prompt"
-        ],
-        "transient": [
-          "widget:plan"
-        ],
-        "persistent": [
-          "status:locus (plan.mode contribution)",
-          ".locus/runtime/mode/state.json"
-        ]
+        "taxonomy": ["persistent-state", "status", "transient-widget", "blocking-prompt"],
+        "transient": ["widget:plan"],
+        "persistent": ["status:locus (plan.mode contribution)", ".locus/runtime/mode/state.json"]
       },
       {
         "name": "review",
-        "taxonomy": [
-          "artifact-write",
-          "transient-widget"
-        ],
-        "transient": [
-          "widget:review"
-        ],
-        "persistent": [
-          ".locus/runtime/prompts/review.md",
-          ".tasks/**/artifacts/review-prompt.md"
-        ]
+        "taxonomy": ["artifact-write", "transient-widget"],
+        "transient": ["widget:review"],
+        "persistent": [".locus/runtime/prompts/review.md", ".tasks/**/artifacts/review-prompt.md"]
       },
       {
         "name": "todos",
-        "taxonomy": [
-          "artifact-write",
-          "transient-widget"
-        ],
-        "transient": [
-          "widget:todos"
-        ],
-        "persistent": [
-          ".locus/runtime/prompts/todos.md",
-          ".tasks/**/artifacts/todos-prompt.md"
-        ]
+        "taxonomy": ["artifact-write", "transient-widget"],
+        "transient": ["widget:todos"],
+        "persistent": [".locus/runtime/prompts/todos.md", ".tasks/**/artifacts/todos-prompt.md"]
       },
       {
         "name": "goal",
-        "taxonomy": [
-          "persistent-state",
-          "artifact-write",
-          "transient-widget"
-        ],
-        "transient": [
-          "widget:goal"
-        ],
+        "taxonomy": ["persistent-state", "artifact-write", "transient-widget"],
+        "transient": ["widget:goal"],
         "persistent": [
           ".locus/runtime/goal/state.json",
           ".locus/runtime/goal/continue.md",
@@ -150,18 +95,9 @@
       },
       {
         "name": "goal-ai",
-        "taxonomy": [
-          "artifact-write",
-          "transient-widget",
-          "blocking-prompt"
-        ],
-        "transient": [
-          "widget:goal"
-        ],
-        "persistent": [
-          ".locus/runtime/prompts/goal.md",
-          ".tasks/**/artifacts/goal-prompt.md"
-        ]
+        "taxonomy": ["artifact-write", "transient-widget", "blocking-prompt"],
+        "transient": ["widget:goal"],
+        "persistent": [".locus/runtime/prompts/goal.md", ".tasks/**/artifacts/goal-prompt.md"]
       }
     ]
   },
@@ -188,20 +124,11 @@
     "network": [],
     "browser": false,
     "models": true,
-    "ui": [
-      "setWidget",
-      "setStatus",
-      "setEditorComponent",
-      "theme",
-      "select",
-      "input",
-      "editor",
-      "confirm"
-    ]
+    "ui": ["setWidget", "setStatus", "setEditorComponent", "theme", "select", "input", "editor", "confirm"]
   },
   "risk": "high",
   "docsPath": "docs/extensions/active/plan.md",
-  "sourceAuditPath": "docs/source-audit/plan.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/plan.md",
   "tests": [
     "tests/extensions/plan/plan-prompt-commands.test.ts",
     "tests/shared/operator-ui/goal-operator-ui.test.ts",
@@ -209,8 +136,7 @@
     "tests/extensions/plan/plan-behavioral-mode.test.ts",
     "tests/shared/mode-state/mode-state.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
-    "tests/extensions/plan/plan-goal-decision.test.ts",
-    "tests/integration/registration.test.ts"
+    "tests/integration/public-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

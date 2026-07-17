@@ -2,8 +2,8 @@
 
 ## Supported releases
 
-Version `0.2.x` becomes the supported line when `0.2.0` is published to npm.
-Pre-release source snapshots and internal history are unsupported.
+Published `0.2.x` versions are the supported line. Unreleased source snapshots
+and historical commits are unsupported.
 
 ## Report a vulnerability
 
@@ -20,11 +20,8 @@ Use GitHub's private vulnerability-reporting form from the repository's
 Do not open a public issue, pull request, discussion, or workflow transcript for
 a suspected vulnerability.
 
-GitHub exposes private vulnerability reporting only for public repositories.
-While this clean repository remains private for owner review, the form is not
-available to public npm users. Therefore npm publication remains blocked until
-the repository is public with the form enabled, or the owner approves another
-non-personal private reporting channel and records it here.
+The repository keeps GitHub private vulnerability reporting enabled so npm
+users have a non-public reporting route.
 
 ## Security boundaries
 
@@ -36,4 +33,4 @@ non-personal private reporting channel and records it here.
 - Secret scanning and dependency auditing reduce risk but do not prove that a
   release is safe.
 
-No response or remediation SLA is promised before the first public release.
+No response or remediation SLA is promised.

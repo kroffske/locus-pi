@@ -3,6 +3,7 @@
 Decision: `plan` is default-loaded and owns behavioral `/plan`/`/mode` runtime plus the active local goal runtime. `/review` and `/todos` are separate prompt shelves; OMP goal-tool parity is partial and documented below.
 
 `plan` owns three distinct groups of surfaces:
+
 - behavioral `/plan` and `/mode` runtime, including an explicitly enabled optional `Shift+Tab` shortcut, mode cues, authored plans, and exit handoff,
 - `/review` and `/todos` for explicit prompt shelves,
 - local goal runtime:
@@ -17,13 +18,14 @@ Decision: `plan` is default-loaded and owns behavioral `/plan`/`/mode` runtime p
 This implementation uses OMP source-backed evidence for shape and parity assessment, but does not declare copied code.
 
 OMP source evidence:
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/goals/runtime.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/goals/state.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/goals/tools/goal-tool.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/modes/interactive-mode.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/session/agent-session.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/tools/index.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/config/settings-schema.ts`
+
+- `oh-my-pi:packages/coding-agent/src/goals/runtime.ts`
+- `oh-my-pi:packages/coding-agent/src/goals/state.ts`
+- `oh-my-pi:packages/coding-agent/src/goals/tools/goal-tool.ts`
+- `oh-my-pi:packages/coding-agent/src/modes/interactive-mode.ts`
+- `oh-my-pi:packages/coding-agent/src/session/agent-session.ts`
+- `oh-my-pi:packages/coding-agent/src/tools/index.ts`
+- `oh-my-pi:packages/coding-agent/src/config/settings-schema.ts`
 
 License note: OMP checkout is MIT-licensed. The listed files were used as source evidence only; this extension is not a copied implementation and remains a Locus-owned adaptation.
 

@@ -34,7 +34,7 @@ Shared lifecycle planner читает `.tasks/index.json` через `loadTaskBr
 - Hooks: `input`
 - Permissions: fs.read=`.tasks/index.json`, `.tasks/**/qa.md`, `.tasks/**/task.md`; fs.write=none, subprocess=none, network=none, browser=false, models=false, ui=`setWidget`, `setStatus`, `notify`
 - State: extension читает shared extension inventory, `.tasks/index.json` task bridge snapshot и task workspace files для dry-run planner, но ничего не сохраняет.
-- Tests: `tests/integration/core.test.ts`, `tests/shared/task/tasks-bridge.test.ts`, `tests/shared/session/session-core-jsonl.test.ts`, `tests/integration/registration.test.ts`, `tests/extensions/agents/agent-observer.test.ts`
+- Tests: `tests/integration/command-ui-lifecycle.test.ts`, `tests/shared/task/tasks-bridge.test.ts`, `tests/shared/session/session-core-jsonl.test.ts`, `tests/integration/public-registration.test.ts`, `tests/extensions/agents/agent-observer.test.ts`
 - Review: status=reviewed, source=write-from-scratch, reviewedBy=locus-pi, reviewedAt=2026-05-31, risk=low
 
 ## Ограничения и риски

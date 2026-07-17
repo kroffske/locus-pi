@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,8 +38,7 @@ const tempRoots: string[] = [];
 let testHome: string;
 
 beforeEach(() => {
-  testHome = path.join(tmpdir(), `mode-state-home-${Math.random().toString(16).slice(2)}`);
-  mkdirSync(testHome, { recursive: true });
+  testHome = mkdtempSync(path.join(tmpdir(), "mode-state-home-"));
   tempRoots.push(testHome);
   // Override home so real ~/.pi is never touched
   process.env["LOCUS_PI_HOME"] = testHome;
@@ -53,8 +52,7 @@ afterEach(() => {
 });
 
 function makeTempRoot(): string {
-  const root = path.join(tmpdir(), `mode-state-project-${Math.random().toString(16).slice(2)}`);
-  mkdirSync(root, { recursive: true });
+  const root = mkdtempSync(path.join(tmpdir(), "mode-state-project-"));
   tempRoots.push(root);
   return root;
 }
@@ -93,7 +91,17 @@ describe("loadModeState", () => {
     const root = makeTempRoot();
     const filePath = modeStatePath(root);
     mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify({ version: 2, mode: "plan", slug: "x", activeArtifactPath: "", enteredAt: new Date().toISOString(), status: "active" }));
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 2,
+        mode: "plan",
+        slug: "x",
+        activeArtifactPath: "",
+        enteredAt: new Date().toISOString(),
+        status: "active",
+      }),
+    );
     expect(loadModeState(root)).toBeNull();
   });
 
@@ -101,7 +109,17 @@ describe("loadModeState", () => {
     const root = makeTempRoot();
     const filePath = modeStatePath(root);
     mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify({ version: 1, mode: "unknown-mode", slug: "x", activeArtifactPath: "", enteredAt: "", status: "active" }));
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        mode: "unknown-mode",
+        slug: "x",
+        activeArtifactPath: "",
+        enteredAt: "",
+        status: "active",
+      }),
+    );
     expect(loadModeState(root)).toBeNull();
   });
 });
@@ -197,7 +215,14 @@ describe("isStaleModeState / loadActiveModeState", () => {
   it("does not consider a null-mode record stale regardless of enteredAt", () => {
     const root = makeTempRoot();
     const ancient = new Date(0).toISOString();
-    const state: ModeState = { version: 1, mode: null, slug: "", activeArtifactPath: "", enteredAt: ancient, status: "draft" };
+    const state: ModeState = {
+      version: 1,
+      mode: null,
+      slug: "",
+      activeArtifactPath: "",
+      enteredAt: ancient,
+      status: "draft",
+    };
     writeModeState(root, state);
     expect(isStaleModeState(state)).toBe(false);
     expect(loadActiveModeState(root)).not.toBeNull();
@@ -255,10 +280,14 @@ describe("projectSlug", () => {
     const rootHttps = makeTempRoot();
 
     execFileSync("git", ["-C", rootSsh, "init", "--quiet"], { stdio: "pipe" });
-    execFileSync("git", ["-C", rootSsh, "remote", "add", "origin", "git@github.com:TestOrg/TestRepo.git"], { stdio: "pipe" });
+    execFileSync("git", ["-C", rootSsh, "remote", "add", "origin", "git@github.com:TestOrg/TestRepo.git"], {
+      stdio: "pipe",
+    });
 
     execFileSync("git", ["-C", rootHttps, "init", "--quiet"], { stdio: "pipe" });
-    execFileSync("git", ["-C", rootHttps, "remote", "add", "origin", "https://github.com/TestOrg/TestRepo.git"], { stdio: "pipe" });
+    execFileSync("git", ["-C", rootHttps, "remote", "add", "origin", "https://github.com/TestOrg/TestRepo.git"], {
+      stdio: "pipe",
+    });
 
     const slugSsh = projectSlug(rootSsh);
     const slugHttps = projectSlug(rootHttps);
@@ -270,10 +299,14 @@ describe("projectSlug", () => {
     const rootB = makeTempRoot();
 
     execFileSync("git", ["-C", rootA, "init", "--quiet"], { stdio: "pipe" });
-    execFileSync("git", ["-C", rootA, "remote", "add", "origin", "https://github.com/TestOrg/RepoA.git"], { stdio: "pipe" });
+    execFileSync("git", ["-C", rootA, "remote", "add", "origin", "https://github.com/TestOrg/RepoA.git"], {
+      stdio: "pipe",
+    });
 
     execFileSync("git", ["-C", rootB, "init", "--quiet"], { stdio: "pipe" });
-    execFileSync("git", ["-C", rootB, "remote", "add", "origin", "https://github.com/TestOrg/RepoB.git"], { stdio: "pipe" });
+    execFileSync("git", ["-C", rootB, "remote", "add", "origin", "https://github.com/TestOrg/RepoB.git"], {
+      stdio: "pipe",
+    });
 
     expect(projectSlug(rootA)).not.toBe(projectSlug(rootB));
   });
@@ -357,7 +390,9 @@ describe("mode cycle", () => {
 
   it("currentCycleMode maps state to a cycle position", () => {
     expect(currentCycleMode(null)).toBe("default");
-    expect(currentCycleMode({ version: 1, mode: null, slug: "", activeArtifactPath: "", enteredAt: "", status: "draft" })).toBe("default");
+    expect(
+      currentCycleMode({ version: 1, mode: null, slug: "", activeArtifactPath: "", enteredAt: "", status: "draft" }),
+    ).toBe("default");
     expect(currentCycleMode(sampleState({ mode: "plan" }))).toBe("plan");
   });
 

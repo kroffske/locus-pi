@@ -13,12 +13,9 @@ interface Manifest {
 
 const root = process.cwd();
 const docs = path.join(root, "docs", "source-audit");
-const packageJson = JSON.parse(
-  await readFile(path.join(root, "package.json"), "utf8"),
-) as PackageJson;
+const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as PackageJson;
 const localOmpRoot = path.join(root, ".local", "oh-my-pi-review");
-const ompRoot = process.env.OMP_REVIEW_ROOT
-  ?? ((await exists(localOmpRoot)) ? localOmpRoot : "/tmp/oh-my-pi-review");
+const ompRoot = process.env.OMP_REVIEW_ROOT ?? ((await exists(localOmpRoot)) ? localOmpRoot : "/tmp/oh-my-pi-review");
 
 const auditByExtension: Record<string, string> = {
   agents: "agents.md",
@@ -43,8 +40,8 @@ for (const file of required) {
 }
 
 for (const manifest of manifests) {
-  const copiedOrAdapted = manifest.ownershipStatus === "compat-wrapper"
-    || manifest.review?.source === "copy-after-audit";
+  const copiedOrAdapted =
+    manifest.ownershipStatus === "compat-wrapper" || manifest.review?.source === "copy-after-audit";
   const auditFile = auditByExtension[manifest.id];
   if (copiedOrAdapted && !auditFile) {
     console.error(`Active adapted extension lacks source-audit mapping: ${manifest.id}`);
@@ -58,9 +55,8 @@ for (const file of required) {
     console.error(`Audit note lacks Decision: ${file}`);
     process.exit(1);
   }
-  const hasOmpEvidence = text.includes("/tmp/oh-my-pi-review")
-    || text.includes("OMP source evidence")
-    || text.includes("Relevant OMP references");
+  const hasOmpEvidence =
+    text.includes("oh-my-pi:") || text.includes("OMP source evidence") || text.includes("Relevant OMP references");
   const hasLicenseNote = /License note:|License \/ attribution|MIT licensed|MIT-licensed/i.test(text);
   if (hasOmpEvidence && !hasLicenseNote) {
     console.error(`Audit note lacks OMP license/attribution note: ${file}`);
@@ -71,8 +67,8 @@ for (const file of required) {
 const refs = new Map<string, string[]>();
 for (const file of required) {
   const text = await readFile(path.join(docs, file), "utf8");
-  for (const match of text.matchAll(/`(\/tmp\/oh-my-pi-review\/[^`]+)`/g)) {
-    const resolved = match[1]!.replace("/tmp/oh-my-pi-review", ompRoot);
+  for (const match of text.matchAll(/`oh-my-pi:([^`]+)`/g)) {
+    const resolved = path.resolve(ompRoot, match[1]!);
     refs.set(resolved, [...(refs.get(resolved) ?? []), file]);
   }
 }
@@ -99,11 +95,12 @@ async function exists(filePath: string): Promise<boolean> {
     return true;
   } catch (error) {
     if (
-      typeof error === "object"
-      && error !== null
-      && "code" in error
-      && (error as { code?: string }).code === "ENOENT"
-    ) return false;
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "ENOENT"
+    )
+      return false;
     throw error;
   }
 }

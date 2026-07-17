@@ -65,7 +65,7 @@ this checkout unless a later task creates them.
 Focused coverage:
 
 ```bash
-bun run vitest run tests/integration/core.test.ts tests/integration/registration.test.ts
+npx vitest run tests/integration/package-boundary.test.ts tests/integration/public-registration.test.ts
 ```
 
 Full configured gate is still `npm run check` when `npm` is available. In this environment, `npm` may be absent from PATH; `bun run` can execute the same local Vitest/TypeScript scripts if the installed dependency tree is present.

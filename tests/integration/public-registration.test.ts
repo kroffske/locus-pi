@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../../extensions/_shared/workflow-runner.js";
@@ -9,6 +9,14 @@ interface PackageJson {
   pi: { extensions: string[] };
   repository: { url: string };
 }
+
+interface ExtensionManifest {
+  docsPath: string;
+  sourceAuditPath: string | null;
+  tests: string[];
+}
+
+const sourceAuditUrlPrefix = "https://github.com/kroffske/locus-pi/blob/main/";
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
@@ -31,11 +39,25 @@ describe("public registration contract", () => {
   });
 
   it("declares exactly the curated Package workflows", () => {
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES]).toEqual([
-      "live-smoke",
-      "llm-smoke",
-      "requirements-grill",
-    ]);
+    expect([...CURATED_PACKAGE_WORKFLOW_NAMES]).toEqual(["live-smoke", "llm-smoke", "requirements-grill"]);
+  });
+
+  it("keeps manifest documentation and test evidence resolvable", () => {
+    for (const entrypoint of pkg.pi.extensions) {
+      const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+
+      expect(existsSync(path.join(root, manifest.docsPath)), `missing docsPath from ${manifestPath}`).toBe(true);
+      for (const testPath of manifest.tests) {
+        expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);
+      }
+
+      if (manifest.sourceAuditPath !== null) {
+        expect(manifest.sourceAuditPath.startsWith(sourceAuditUrlPrefix), manifestPath).toBe(true);
+        const repositoryPath = manifest.sourceAuditPath.slice(sourceAuditUrlPrefix.length);
+        expect(existsSync(path.join(root, repositoryPath)), `missing source audit from ${manifestPath}`).toBe(true);
+      }
+    }
   });
 
   it("binds the MIT package to the clean repository identity", () => {

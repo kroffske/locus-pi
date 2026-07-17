@@ -4,7 +4,7 @@
 
 - `main` is the stable release branch and the default GitHub branch.
 - `dev` is the integration branch for accepted task and milestone work.
-- The private `kroffske/locus-pi-original` repository is historical evidence, not an active development target.
+- Historical private migration sources are evidence only, not active development targets.
 - `.locus/`, `.tasks/`, generated reports, credentials, and workstation-specific state remain local and must not be committed.
 
 ## Branch and pull-request policy

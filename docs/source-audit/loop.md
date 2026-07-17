@@ -4,25 +4,21 @@ Decision: active compat-wrapper. The promoted `extensions/loop` entrypoint expos
 
 ## OMP source evidence
 
-The T-138 brief names canonical upstream references under `/tmp/oh-my-pi-review`. This checkout also contains mirrored review copies under `.local/oh-my-pi-review/...`; those were reviewed here before the active wrapper was implemented.
+The references below are relative to the reviewed Oh My Pi checkout and use the
+portable `oh-my-pi:<path>` notation.
 
-Canonical paths from the brief:
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/modes/loop-limit.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/test/loop-limit.test.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/test/interactive-mode-loop.test.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/prompts/system/auto-continue.md`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/prompts/goals/goal-continuation.md`
+Reviewed source paths:
 
-Mirrored review checkout actually inspected here:
-- `.local/oh-my-pi-review/packages/coding-agent/src/modes/loop-limit.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/test/interactive-mode-loop.test.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/src/prompts/system/auto-continue.md`
-- `.local/oh-my-pi-review/packages/coding-agent/src/prompts/goals/goal-continuation.md`
-- `.local/oh-my-pi-review/packages/coding-agent/src/goals/runtime.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/src/goals/state.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/src/goals/tools/goal-tool.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/src/prompts/goals/goal-mode-active.md`
-- `.local/oh-my-pi-review/LICENSE`
+- `oh-my-pi:packages/coding-agent/src/modes/loop-limit.ts`
+- `oh-my-pi:packages/coding-agent/test/loop-limit.test.ts`
+- `oh-my-pi:packages/coding-agent/test/interactive-mode-loop.test.ts`
+- `oh-my-pi:packages/coding-agent/src/prompts/system/auto-continue.md`
+- `oh-my-pi:packages/coding-agent/src/prompts/goals/goal-continuation.md`
+- `oh-my-pi:packages/coding-agent/src/goals/runtime.ts`
+- `oh-my-pi:packages/coding-agent/src/goals/state.ts`
+- `oh-my-pi:packages/coding-agent/src/goals/tools/goal-tool.ts`
+- `oh-my-pi:packages/coding-agent/src/prompts/goals/goal-mode-active.md`
+- `oh-my-pi:LICENSE`
 
 ## What was adapted
 
@@ -45,7 +41,7 @@ Mirrored review checkout actually inspected here:
 
 ## License / attribution
 
-License note: the reviewed OMP checkout is MIT-licensed; see `/tmp/oh-my-pi-review/LICENSE` and the mirrored `.local/oh-my-pi-review/LICENSE`.
+License note: the reviewed OMP checkout is MIT-licensed; see `oh-my-pi:LICENSE`.
 
 OMP review sources were used as design evidence only. No OMP implementation code was copied into this slice.
 
@@ -55,4 +51,4 @@ OMP review sources were used as design evidence only. No OMP implementation code
 - `extensions/_shared/loop-continuation.ts`
 - `extensions/_shared/goal-mode.ts`
 - `tests/extensions/loop/loop.test.ts`
-- `tests/integration/registration.test.ts`
+- `tests/integration/public-registration.test.ts`
