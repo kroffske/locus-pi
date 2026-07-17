@@ -4,6 +4,23 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Added
+
+- Added the curated `review` Package workflow as an agent-owned pipeline. A
+  target agent interprets the operator's free-form request and proves access;
+  independent change and whole-context agents obtain their own evidence; a
+  final agent reopens the target, verifies findings, and fills the supplied
+  Markdown report template. The workflow script performs no direct Git,
+  filesystem, network, forge-specific, or `llm()` work.
+- Recorded the strict curated-workflow selection criteria and candidate boundary
+  in `docs/adr/curated-workflow-portfolio.md`.
+
+### Changed
+
+- Expanded the supported curated Package registry from three workflows to four
+  while keeping implementation, release, deploy, and incident workflows
+  project-local.
+
 ## [0.2.1] - 2026-07-17
 
 ### Added

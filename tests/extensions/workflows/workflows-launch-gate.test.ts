@@ -37,7 +37,16 @@ describe("/workflows run launch gate", () => {
   it("runs an explicit operator command without a second approval prompt", async () => {
     const h = registerHarness();
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-1", runDir: "/tmp/run-1", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-1/result.json" } });
+    const spy = vi
+      .spyOn(runner, "runWorkflowScript")
+      .mockResolvedValue({
+        runId: "run-1",
+        runDir: "/tmp/run-1",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
+      });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke hello", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -94,7 +103,9 @@ describe("/workflows run launch gate", () => {
       expect(h.ctx.isIdle()).toBe(true);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(h.sentMessages).toHaveLength(1);
-      expect(h.sentMessages.every((entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined)).toBe(true);
+      expect(
+        h.sentMessages.every((entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined),
+      ).toBe(true);
       expect(h.customMessageDeliveries).toEqual(["append"]);
       expect(h.waitForIdleCalls).toBe(1);
     } finally {
@@ -146,7 +157,9 @@ describe("/workflows run launch gate", () => {
 
   it("keeps the programmatic workflow tool on one native toolResult during a streaming-host hazard", async () => {
     const h = registerHarness();
-    const sendMessage = vi.fn(() => { throw new Error("sendMessage is unsafe while tool output is streaming"); });
+    const sendMessage = vi.fn(() => {
+      throw new Error("sendMessage is unsafe while tool output is streaming");
+    });
     h.pi.sendMessage = sendMessage;
     const errorLine = { ts: "t", runId: "run-2", kind: "error" as const, message: "same failure" };
     const spy = vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
@@ -163,7 +176,9 @@ describe("/workflows run launch gate", () => {
       };
     });
     try {
-      const result = await h.tools.get("workflow")!.execute("tool-2", { name: "live-smoke" }, new AbortController().signal, () => void 0, h.ctx);
+      const result = await h.tools
+        .get("workflow")!
+        .execute("tool-2", { name: "live-smoke" }, new AbortController().signal, () => void 0, h.ctx);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(sendMessage).not.toHaveBeenCalled();
       expect(result.content).toHaveLength(1);
@@ -180,7 +195,16 @@ describe("/workflows run launch gate", () => {
   it("passes resume metadata to the workflow run call without a Locus approval request", async () => {
     const h = registerHarness();
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-3", runDir: "/tmp/run-3", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-3/result.json" } });
+    const spy = vi
+      .spyOn(runner, "runWorkflowScript")
+      .mockResolvedValue({
+        runId: "run-3",
+        runDir: "/tmp/run-3",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
+      });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke --resume run-old input", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -195,9 +219,20 @@ describe("/workflows run launch gate", () => {
 
   it("keeps the programmatic workflow tool headless", async () => {
     const h = registerHarness();
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-4", runDir: "/tmp/run-4", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-4/result.json" } });
+    const spy = vi
+      .spyOn(runner, "runWorkflowScript")
+      .mockResolvedValue({
+        runId: "run-4",
+        runDir: "/tmp/run-4",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-4/result.json" },
+      });
     try {
-      await h.tools.get("workflow")!.execute("tool-1", { name: "live-smoke" }, new AbortController().signal, () => void 0, h.ctx);
+      await h.tools
+        .get("workflow")!
+        .execute("tool-1", { name: "live-smoke" }, new AbortController().signal, () => void 0, h.ctx);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke" });
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
@@ -230,7 +265,16 @@ describe("/workflows run launch gate", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wf-launch-deny-"));
     const h = registerCommandHarness(root);
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-deny", runDir: "/tmp/run-deny", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-deny/result.json" } });
+    const spy = vi
+      .spyOn(runner, "runWorkflowScript")
+      .mockResolvedValue({
+        runId: "run-deny",
+        runDir: "/tmp/run-deny",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-deny/result.json" },
+      });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -251,13 +295,30 @@ describe("/workflows run launch gate", () => {
     try {
       mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
       mkdirSync(path.join(root, "nested", ".claude", "workflows"), { recursive: true });
-      writeFileSync(path.join(root, ".claude", "workflows", "same.workflow.mjs"), "export default () => 'root';\n", "utf8");
-      writeFileSync(path.join(root, "nested", ".claude", "workflows", "same.workflow.mjs"), "export default () => 'nested';\n", "utf8");
+      writeFileSync(
+        path.join(root, ".claude", "workflows", "same.workflow.mjs"),
+        "export default () => 'root';\n",
+        "utf8",
+      );
+      writeFileSync(
+        path.join(root, "nested", ".claude", "workflows", "same.workflow.mjs"),
+        "export default () => 'nested';\n",
+        "utf8",
+      );
 
       const h = registerCommandHarness(root);
       h.ctx.session = { ...h.ctx.session!, workingDirectory: path.join(root, "nested") };
       const approval = vi.spyOn(h.ctx.ui, "select");
-      const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-3", runDir: "/tmp/run-3", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-3/result.json" } });
+      const spy = vi
+        .spyOn(runner, "runWorkflowScript")
+        .mockResolvedValue({
+          runId: "run-3",
+          runDir: "/tmp/run-3",
+          ok: true,
+          result: { ok: true },
+          journal: [],
+          resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
+        });
       try {
         await h.commands.get("workflows")!.handler("run same", h.ctx);
         expect(approval).not.toHaveBeenCalled();
@@ -310,6 +371,7 @@ describe("/workflows run launch gate", () => {
       expect(widget).toContain("live-smoke");
       expect(widget).toContain("llm-smoke");
       expect(widget).toContain("requirements-grill");
+      expect(widget).toContain("review");
       expect(widget).not.toContain("plan-build-review");
       expect(widget).toContain("/workflows list");
       expect(widget).not.toContain("Cannot find module");

@@ -5,21 +5,21 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 `~/.pi/workflows/` before running it. Workflow JavaScript executes with full
 Node.js host access and is not sandboxed.
 
-The only curated Package workflows are `live-smoke`, `llm-smoke`, and
-`requirements-grill`.
+The only curated Package workflows are `live-smoke`, `llm-smoke`,
+`requirements-grill`, and `review`.
 
 ## Choose a shape
 
-| Requirement | Minimal shape |
-|---|---|
-| One bounded tool-using task | one `agent()` |
-| Cheap classification or draft | one `llm()` |
-| Cheap gate before tool work | `llm()` then conditional `agent()` |
-| Repeat until an evidenced verdict | bounded loop plus judge |
-| Plan, implement, and verify | planner, writer stages, reviewer loop |
-| Ordered transformation per item | `pipeline()` |
-| Independent work followed by synthesis | `parallel()` then merge |
-| Independent acceptance votes | `parallel()` judge panel |
+| Requirement                            | Minimal shape                         |
+| -------------------------------------- | ------------------------------------- |
+| One bounded tool-using task            | one `agent()`                         |
+| Cheap classification or draft          | one `llm()`                           |
+| Cheap gate before tool work            | `llm()` then conditional `agent()`    |
+| Repeat until an evidenced verdict      | bounded loop plus judge               |
+| Plan, implement, and verify            | planner, writer stages, reviewer loop |
+| Ordered transformation per item        | `pipeline()`                          |
+| Independent work followed by synthesis | `parallel()` then merge               |
+| Independent acceptance votes           | `parallel()` judge panel              |
 
 ## Single agent
 
@@ -98,7 +98,8 @@ return { ok: Boolean(review?.ok), plan: plan.summary, review: review?.summary ??
 ## Ordered pipeline
 
 ```js
-const outputs = await pipeline(items,
+const outputs = await pipeline(
+  items,
   async ({ item }) => ({ item, extracted: await agent(`Inspect ${item}`) }),
   async (state) => ({ ...state, classified: await llm(`Classify ${state.extracted.summary}`) }),
 );
@@ -112,22 +113,24 @@ and return `partial: true`; partial is never projected as success.
 ## Parallel fan-out and merge
 
 ```js
-const findings = await parallel(targets.map((target) => () =>
-  agent(`Inspect ${target}`, { agent: "explore", label: `inspect:${target}` })
-));
-const merge = await agent(
-  findings.map((item, index) => `${index + 1}. ${item.summary}`).join("\n"),
-  { agent: "librarian", label: "merge" },
+const findings = await parallel(
+  targets.map((target) => () => agent(`Inspect ${target}`, { agent: "explore", label: `inspect:${target}` })),
 );
+const merge = await agent(findings.map((item, index) => `${index + 1}. ${item.summary}`).join("\n"), {
+  agent: "librarian",
+  label: "merge",
+});
 return { ok: Boolean(merge?.ok), summary: merge?.summary ?? null };
 ```
 
 ## Judge panel
 
 ```js
-const votes = await parallel(["reviewer", "oracle", "explore"].map((role) => () =>
-  agent(input, { agent: role, label: `vote:${role}`, schema: VERDICT_SCHEMA })
-));
+const votes = await parallel(
+  ["reviewer", "oracle", "explore"].map(
+    (role) => () => agent(input, { agent: role, label: `vote:${role}`, schema: VERDICT_SCHEMA }),
+  ),
+);
 const passed = votes.filter((vote) => vote?.ok && vote.output?.verdict === "pass").length;
 return { ok: passed > votes.length / 2, passed, total: votes.length };
 ```

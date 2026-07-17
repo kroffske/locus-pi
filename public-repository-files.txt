@@ -29,6 +29,7 @@ THIRD_PARTY_NOTICES.md
 bin/locus-pi
 docs/README.md
 docs/adr/agent-execution-trust-model.md
+docs/adr/curated-workflow-portfolio.md
 docs/extension-index.md
 docs/extension-ownership-matrix.md
 docs/extensions/README.md
@@ -138,6 +139,10 @@ extensions/workflows/catalog-viewer.ts
 extensions/workflows/examples/live-smoke.workflow.mjs
 extensions/workflows/examples/llm-smoke.workflow.mjs
 extensions/workflows/examples/requirements-grill.workflow.mjs
+extensions/workflows/examples/review-pipeline.diagram.mjs
+extensions/workflows/examples/review-pipeline.excalidraw
+extensions/workflows/examples/review-pipeline.png
+extensions/workflows/examples/review.workflow.mjs
 extensions/workflows/index.ts
 extensions/workflows/manifest.json
 extensions/workflows/progress-widget.ts
@@ -172,6 +177,7 @@ tests/extensions/plan/plan-prompt-commands.test.ts
 tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
 tests/extensions/workflows/requirements-grill-workflow.test.ts
+tests/extensions/workflows/review-workflow.test.ts
 tests/extensions/workflows/workflow-catalog-viewer.test.ts
 tests/extensions/workflows/workflow-catalog.test.ts
 tests/extensions/workflows/workflow-identity-projection.test.ts

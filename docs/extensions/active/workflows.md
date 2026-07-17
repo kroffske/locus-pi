@@ -57,24 +57,42 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ### PENDING SEAMS
 
-| Seam | Location | Status |
-|---|---|---|
-| Bounded concurrency | `extensions/_shared/workflow-runtime.ts` `runScheduled()` | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task. |
-| Git-worktree isolation | `workflow-agent-bridge.ts`, `workflow-worktree.ts` | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope. |
-| Trusted script execution | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()` | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection. |
+| Seam                                | Location                                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bounded concurrency                 | `extensions/_shared/workflow-runtime.ts` `runScheduled()`                                         | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task.                                                                                                                         |
+| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                      |
+| Trusted script execution            | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                           |
 | Owner-default agent + model routing | `extensions/_shared/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing keeps per-call `opts.model` precedence, keeps agent frontmatter `model` visible in the request capsule through model-role resolution, and otherwise lets the child executor use the current session model fallback. |
 
 ---
 
 ## Curated Package workflows
 
-| Workflow | What it is |
-|---|---|
-| `live-smoke` | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`. |
-| `llm-smoke` | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`. |
+| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                   |
+| `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                                                                  |
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize explicit structured handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; `repositoryContext`, stage evidence, and the final handoff are retained in `result.json`. |
+| `review`             | **Agent-owned code review**: four full `oracle` children resolve, inspect, and adjudicate a free-form local or PR target.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
-These three names form the Package registry. They are intentionally small and
+`review` passes the operator request, structured handoffs, and a Markdown report
+template to agents. The first agent resolves the target and proves access. Two
+independent agents obtain and inspect the diff, complete changed files, related
+consumers, repository standards, tests, and documentation themselves. The final
+agent reopens the target, verifies and deduplicates findings, and fills the
+template.
+
+The workflow script uses only `agent()`, `parallel()`, `phase()`, and `log()`.
+It has no Node imports, direct Git/filesystem/network/forge adapter, prepared
+evidence packet, or `llm()` merge. Every child uses the selected catalog
+agent's full tool surface with `permissionMode: "agent-defined"` in the project
+workspace. Prompts prohibit repository or remote mutations, but prompt text and
+permission metadata are not a sandbox; Pi's tool approval remains the
+enforcement boundary. Agent or schema failure remains fail-closed, inaccessible
+or ambiguous targets return a precise blocked question, and review remains
+separate from remediation.
+
+These four names form the Package registry. They are intentionally small and
 owned as part of the package product surface, not discovered merely because a file
 exists in `extensions/workflows/examples/`.
 
@@ -85,12 +103,12 @@ The clean release contains no uncurated Package examples. The pattern catalog
 operator may save under a reviewed project or user workflow directory. Saving a
 local workflow does not add it to the Package registry.
 
-For *which shape to pick* (single-agent, llm()-gate, loop+judge, plan→build→review,
+For _which shape to pick_ (single-agent, llm()-gate, loop+judge, plan→build→review,
 pipeline, fan-out+merge, judge-panel, loop-until-dry), see the pattern catalog
 `extensions/workflows/references/patterns.md` — it maps each requirement to a minimal
-skeleton to adapt. Only the three workflows in the curated table
+skeleton to adapt. Only the four workflows in the curated table
 above are registered Package workflows. (Single source: that file is the catalog of
-*forms*; this doc remains the DSL *contract*.)
+_forms_; this doc remains the DSL _contract_.)
 
 Saved workflow names such as `live-smoke` use one first-wins resolver for
 execution, `/workflows list`, and `/workflows info <name>`. Starting at the command's
@@ -104,7 +122,7 @@ order:
    inputs that may use a different workflow format.
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
 4. The curated Package registry — human source `Package`; currently `live-smoke`,
-   `llm-smoke`, and `requirements-grill`.
+   `llm-smoke`, `requirements-grill`, and `review`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
@@ -520,6 +538,7 @@ export default async function runWorkflow(dsl, input) {
 ```
 
 Notes:
+
 - Keep `meta.description` as one concise, purpose-first sentence: name the useful
   outcome, not test evidence, implementation detail, or a long execution trace.
   Use a literal static string near the top of the module. The browser scans only
@@ -637,19 +656,19 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `agent` | string | `"default"` | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path |
-| `tools` | string[] | selected agent allow-list | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation. |
-| `maxToolCalls` | integer 0–100 | none | Per-child-attempt call budget. The first over-budget tool start aborts the child and returns a failed result; this is a workflow budget, not a security boundary. |
-| `label` | string | — | Journal / UI label |
-| `phase` | string | current phase | Overrides the active phase tag |
-| `permissionMode` | string | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary. |
-| `workspaceMode` | string | `"project"` | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX. |
-| `sandbox` | string | — | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
-| `model` | string | current session model | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`. |
-| `schema` | object (JSON Schema) | none | JSON Schema the agent output must satisfy; enables schema-validation retry loop (see Schema enforcement below) |
-| `throwOnSchemaMismatch` | boolean | `false` | When `schema` is set, throw `SchemaValidationError` on final mismatch instead of returning `ok:false` |
+| Field                   | Type                 | Default                                                                | Description                                                                                                                                                                          |
+| ----------------------- | -------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`                 | string               | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                   |
+| `tools`                 | string[]             | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                               |
+| `maxToolCalls`          | integer 0–100        | none                                                                   | Per-child-attempt call budget. The first over-budget tool start aborts the child and returns a failed result; this is a workflow budget, not a security boundary.                    |
+| `label`                 | string               | —                                                                      | Journal / UI label                                                                                                                                                                   |
+| `phase`                 | string               | current phase                                                          | Overrides the active phase tag                                                                                                                                                       |
+| `permissionMode`        | string               | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                        |
+| `workspaceMode`         | string               | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                  |
+| `sandbox`               | string               | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
+| `model`                 | string               | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.   |
+| `schema`                | object (JSON Schema) | none                                                                   | JSON Schema the agent output must satisfy; enables schema-validation retry loop (see Schema enforcement below)                                                                       |
+| `throwOnSchemaMismatch` | boolean              | `false`                                                                | When `schema` is set, throw `SchemaValidationError` on final mismatch instead of returning `ok:false`                                                                                |
 
 ### Schema enforcement
 
@@ -684,15 +703,15 @@ Returns a `WorkflowLlmResult`: `{ ok, text, stopReason, model?, usage?, output?,
 
 `opts` for `llm()`:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `system` | string | — | Maps to `Context.systemPrompt` |
-| `model` | string | session model | Per-call selector `"provider/id[:thinking]"`; resolved via the same `getModel` path as `agent()`, else `ctx.model` |
-| `reasoning` | string | — | Provider thinking level (`minimal`/`low`/`medium`/`high`/`xhigh`) |
-| `stream` | boolean | `false` | Use `streamSimple`; emits an `llm_delta` journal line per text chunk (live rows in the progress panel) |
-| `schema` | object (JSON Schema) | none | Parse `result.text` as JSON and validate against this schema (retry up to `SCHEMA_MAX_ATTEMPTS`); a valid value is returned in `result.output` |
-| `throwOnSchemaMismatch` | boolean | `false` | Throw `SchemaValidationError` on final mismatch instead of returning `ok:false` |
-| `label` / `phase` | string | — | Journal / UI label; phase tag |
+| Field                   | Type                 | Default       | Description                                                                                                                                    |
+| ----------------------- | -------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system`                | string               | —             | Maps to `Context.systemPrompt`                                                                                                                 |
+| `model`                 | string               | session model | Per-call selector `"provider/id[:thinking]"`; resolved via the same `getModel` path as `agent()`, else `ctx.model`                             |
+| `reasoning`             | string               | —             | Provider thinking level (`minimal`/`low`/`medium`/`high`/`xhigh`)                                                                              |
+| `stream`                | boolean              | `false`       | Use `streamSimple`; emits an `llm_delta` journal line per text chunk (live rows in the progress panel)                                         |
+| `schema`                | object (JSON Schema) | none          | Parse `result.text` as JSON and validate against this schema (retry up to `SCHEMA_MAX_ATTEMPTS`); a valid value is returned in `result.output` |
+| `throwOnSchemaMismatch` | boolean              | `false`       | Throw `SchemaValidationError` on final mismatch instead of returning `ok:false`                                                                |
+| `label` / `phase`       | string               | —             | Journal / UI label; phase tag                                                                                                                  |
 
 **Model and host permissions.** Because `llm()` calls the model directly in-process,
 the manifest declares `models: true`. Separately, trusted workflow JavaScript can
@@ -722,7 +741,7 @@ failure after the barrier.
 - **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus/runtime/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
-The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
+  The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
 
 ---
 

@@ -20,7 +20,7 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const CURATED_V1_WORKFLOW_NAMES = ["live-smoke", "llm-smoke", "requirements-grill"] as const;
+const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "llm-smoke", "requirements-grill", "review"] as const;
 const forbiddenPackedPaths = [
   /^\.agents\/(skills|workflows)\//,
   /^\.(locus|tasks|planning|pi)\//,
@@ -74,15 +74,15 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships exactly the three curated Package workflows and no forbidden paths", () => {
+  it("ships exactly the four curated Package workflows and no forbidden paths", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))
       .map((file) => path.basename(file, ".workflow.mjs"))
       .sort();
 
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES].sort()).toEqual([...CURATED_V1_WORKFLOW_NAMES].sort());
-    expect(packedWorkflowNames).toEqual([...CURATED_V1_WORKFLOW_NAMES].sort());
+    expect([...CURATED_PACKAGE_WORKFLOW_NAMES].sort()).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
+    expect(packedWorkflowNames).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
     expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
   });

@@ -16,17 +16,18 @@ this clean repository or the first public release.
 | `plan`                | active | high     | planning/mode/goal/review/todo prompt surfaces and the `goal` tool                   | `./extensions/plan/index.ts`                |
 | `security-gate`       | active | critical | `/security-audit` and an audit-only `tool_call` observer                             | `./extensions/security-gate/index.ts`       |
 | `todo-context`        | active | medium   | model-callable `todo_write` plus operator `/todo`                                    | `./extensions/todo-context/index.ts`        |
-| `workflows`           | active | critical | `/workflows`, `workflow`, and the three curated Package workflows                    | `./extensions/workflows/index.ts`           |
+| `workflows`           | active | critical | `/workflows`, `workflow`, and the four curated Package workflows                     | `./extensions/workflows/index.ts`           |
 
 ## Curated Package workflows
 
 Only these names are registered by `CURATED_PACKAGE_WORKFLOW_NAMES`:
 
-| Workflow             | Purpose                                                          |
-| -------------------- | ---------------------------------------------------------------- |
-| `live-smoke`         | Proves two small read-only SDK child sessions on a live Pi host. |
-| `llm-smoke`          | Exercises direct workflow `llm()` calls.                         |
-| `requirements-grill` | Produces a bounded requirements challenge and handoff.           |
+| Workflow             | Purpose                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Proves two small read-only SDK child sessions on a live Pi host.                                         |
+| `llm-smoke`          | Exercises direct workflow `llm()` calls.                                                                 |
+| `requirements-grill` | Produces a bounded requirements challenge and handoff.                                                   |
+| `review`             | Runs agents that resolve, inspect, and adjudicate a free-form code-review target into structured output. |
 
 Project and user workflow directories remain scan-based. A file found there is
 local trusted code, not a Package workflow promise.

@@ -26,7 +26,12 @@ import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import { createWorkflowLlmRunner } from "./workflow-llm-bridge.js";
-import { newWorkflowRunId, workflowRunDir, createWorkflowJournalSink, readWorkflowRunSummary } from "./workflow-journal.js";
+import {
+  newWorkflowRunId,
+  workflowRunDir,
+  createWorkflowJournalSink,
+  readWorkflowRunSummary,
+} from "./workflow-journal.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import {
   prepareWorkflowResult,
@@ -98,7 +103,7 @@ export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
   ok: boolean;
-  result: unknown;                   // detached JSON value or explicit diagnostic sentinel
+  result: unknown; // detached JSON value or explicit diagnostic sentinel
   resultDiagnostic?: WorkflowResultDiagnosticSentinel;
   resultPersistence: WorkflowResultPersistence;
   journal: WorkflowJournalLine[];
@@ -116,11 +121,7 @@ export interface RunWorkflowScriptResult {
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
 /** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "llm-smoke",
-  "requirements-grill",
-] as const;
+export const CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "llm-smoke", "requirements-grill", "review"] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
 
 /** Absolute path to this package's shipped workflow examples directory. */
@@ -134,8 +135,7 @@ function hasPathSeparators(value: string): boolean {
 
 function isPathWithinRoot(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
-  return relative === ""
-    || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function resolveConfinedScriptPath(scriptPath: string, projectRoot: string, displayRef = scriptPath): string {
@@ -177,9 +177,10 @@ function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDire
     if (search.source === "package" && !CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) continue;
     const candidate = path.join(search.directory, `${name}.workflow.mjs`);
     if (existsSync(candidate)) {
-      const targetPath = search.source === "project"
-        ? resolveConfinedScriptPath(candidate, projectRoot, `${name}.workflow.mjs`)
-        : candidate;
+      const targetPath =
+        search.source === "project"
+          ? resolveConfinedScriptPath(candidate, projectRoot, `${name}.workflow.mjs`)
+          : candidate;
       return { kind: "name", ref: name, path: targetPath, source: search.source };
     }
   }
@@ -197,9 +198,10 @@ function workflowSearchDirectories(projectRoot: string, workingDirectory: string
   const currentRoot = path.resolve(projectRoot);
   const requestedWorkingDirectory = path.resolve(workingDirectory);
   const workingRelative = path.relative(currentRoot, requestedWorkingDirectory);
-  let current = workingRelative === "" || (!workingRelative.startsWith("..") && !path.isAbsolute(workingRelative))
-    ? requestedWorkingDirectory
-    : currentRoot;
+  let current =
+    workingRelative === "" || (!workingRelative.startsWith("..") && !path.isAbsolute(workingRelative))
+      ? requestedWorkingDirectory
+      : currentRoot;
 
   while (true) {
     for (const [first, second] of PROJECT_WORKFLOW_DIRS) {
@@ -216,7 +218,11 @@ function workflowSearchDirectories(projectRoot: string, workingDirectory: string
   return directories;
 }
 
-export function resolveWorkflowTarget(target: { name?: string; scriptPath?: string; script?: string }, projectRoot: string, workingDirectory?: string): ResolvedWorkflowTarget {
+export function resolveWorkflowTarget(
+  target: { name?: string; scriptPath?: string; script?: string },
+  projectRoot: string,
+  workingDirectory?: string,
+): ResolvedWorkflowTarget {
   const supplied = [target.name, target.scriptPath, target.script].filter((v) => v !== undefined);
   if (supplied.length !== 1) {
     throw new Error("Exactly one workflow target field is required: name, scriptPath, or script");
@@ -245,7 +251,10 @@ export function resolveWorkflowTarget(target: { name?: string; scriptPath?: stri
  * the same first-wins source precedence. Project and personal names are scanned;
  * Package names are filtered by the curated registry above.
  */
-export function listWorkflowCatalogTargets(projectRoot: string, workingDirectory = projectRoot): ResolvedWorkflowTarget[] {
+export function listWorkflowCatalogTargets(
+  projectRoot: string,
+  workingDirectory = projectRoot,
+): ResolvedWorkflowTarget[] {
   const targets = new Map<string, ResolvedWorkflowTarget>();
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
     addCatalogDirectory(targets, search.directory, search.source);
@@ -309,9 +318,10 @@ export async function loadWorkflowScript(
   if (expectedSha256 !== undefined) {
     const afterImportSha256 = sha256WorkflowBytes(readFileSync(scriptPath));
     if (afterImportSha256 !== expectedSha256) {
-      const reason = executionSource === "snapshot"
-        ? "Workflow script snapshot hash mismatch during module import"
-        : "Workflow script changed during module import";
+      const reason =
+        executionSource === "snapshot"
+          ? "Workflow script snapshot hash mismatch during module import"
+          : "Workflow script changed during module import";
       throw new Error(`${reason}: expected ${expectedSha256}, got ${afterImportSha256}`);
     }
   }
@@ -322,7 +332,7 @@ async function importWorkflowModule(specifier: string): Promise<WorkflowScriptMo
   const importer = new Script("(value) => import(value)", {
     importModuleDynamically: vmConstants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
   }).runInThisContext() as (value: string) => Promise<unknown>;
-  return await importer(specifier) as WorkflowScriptModule;
+  return (await importer(specifier)) as WorkflowScriptModule;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +360,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal.write(line);
     opts.onEvent?.(line);
   };
-  const resultMetadata = (): Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
+  const resultMetadata = ():
+    Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
     if (!hasResume) return {};
     return {
       resumeFromRunId: resumeFromRunId!,
@@ -487,19 +498,36 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
 
-  const entry = typeof mod.default === "function"
-    ? mod.default
-    : typeof mod.runWorkflow === "function"
-      ? mod.runWorkflow
-      : undefined;
+  const entry =
+    typeof mod.default === "function"
+      ? mod.default
+      : typeof mod.runWorkflow === "function"
+        ? mod.runWorkflow
+        : undefined;
 
   if (entry === undefined) {
     const error = "Workflow script has no default or runWorkflow export";
     const journalLines = currentJournal(runtime);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
 
   let result: unknown;
@@ -535,7 +563,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     verifyWorkflowScriptSnapshot(scriptIdentity);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
   return finishRun({
     ok: semanticOk,
@@ -596,7 +632,8 @@ function routeOutOfBandFailure(error: unknown): void {
 async function runGuardedAgainstHostCrash<T>(run: () => Promise<T>): Promise<T> {
   let sink!: (error: unknown) => void;
   const fatal = new Promise<never>((_resolve, reject) => {
-    sink = (error: unknown) => reject(error instanceof Error ? error : new Error(`workflow run failed out-of-band: ${String(error)}`));
+    sink = (error: unknown) =>
+      reject(error instanceof Error ? error : new Error(`workflow run failed out-of-band: ${String(error)}`));
   });
 
   activeRuns.add(sink);

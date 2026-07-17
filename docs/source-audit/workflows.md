@@ -171,6 +171,25 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `workflow-runtime.ts` retains the first bounded failure diagnostic on `llm_end`;
   status/detail and the final transcript fallback expose it instead of collapsing
   a zero-token provider failure to a generic workflow error.
+- `extensions/workflows/examples/review.workflow.mjs` is a curated
+  non-mutating-intent review composition, not a new runtime primitive. It accepts
+  an opaque free-form request. A full `oracle` child owns target resolution and
+  access proof; parallel `oracle` children independently obtain and inspect
+  change-focused and whole-context evidence; a final `oracle` child reopens the
+  target, adjudicates findings, and fills a supplied Markdown template. The
+  script has no Node imports and performs no direct Git, filesystem, network,
+  forge-specific, packet-building, or `llm()` work.
+  Every stage uses schema-bearing `agent()` output and records child-session
+  evidence in `result.json`. The selected catalog agent keeps its full tool
+  surface under `permissionMode: "agent-defined"` and
+  `workspaceMode: "project"`, so private forge access comes from the child
+  session's existing tools and authentication rather than package-owned API
+  code. Prompts prohibit
+  file, branch, commit, push, and remote mutations, but prompt text and
+  permission metadata are not a sandbox; Pi's tool approval remains the
+  enforcement boundary. A failed parallel lane remains a typed group failure,
+  while ambiguous or inaccessible targets and an adjudicator's blocked verdict
+  remain explicit non-success.
 - Workflow rows and the `agents` entrypoint share the versioned process-local
   live store required by Pi's per-entrypoint `jiti` loading. This makes active
   workflow children drillable and individually cancellable from the fleet.
@@ -245,6 +264,7 @@ surface. The active default package surface remains the `workflows` extension at
   `tests/shared/workflows/workflow-group-failure.test.ts`,
   `tests/extensions/workflows/workflow-catalog.test.ts`,
   `tests/extensions/workflows/workflow-catalog-viewer.test.ts`,
+  `tests/extensions/workflows/review-workflow.test.ts`,
   `tests/extensions/workflows/workflow-transcript.test.ts`,
   `tests/extensions/workflows/workflows-launch-gate.test.ts`,
   `tests/extensions/workflows/workflows-progress.test.ts`, and
