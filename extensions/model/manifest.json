@@ -25,27 +25,15 @@
   "tier": "core-owned",
   "provides": {
     "tools": [],
-    "commands": [
-      "model-roles",
-      "effort"
-    ],
-    "hooks": [
-      "session_start"
-    ]
+    "commands": ["model-roles", "effort"],
+    "hooks": ["session_start"]
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "model-roles",
-      "taxonomy": [
-        "overlay-selector",
-        "transient-widget",
-        "persistent-state",
-        "status"
-      ],
-      "transient": [
-        "widget:model-roles"
-      ],
+        "taxonomy": ["overlay-selector", "transient-widget", "persistent-state", "status"],
+        "transient": ["widget:model-roles"],
         "persistent": [
           "status:locus contribution model.roles",
           ".pi/model-roles/config.json",
@@ -54,46 +42,27 @@
       },
       {
         "name": "effort",
-        "taxonomy": [
-          "overlay-selector",
-          "transient-widget"
-        ],
-        "transient": [
-          "widget:effort"
-        ],
+        "taxonomy": ["overlay-selector", "transient-widget"],
+        "transient": ["widget:effort"],
         "persistent": []
       }
     ]
   },
   "permissions": {
     "filesystem": {
-      "read": [
-        "~/.pi/agent/model-roles/config.json",
-        ".pi/model-roles/config.json"
-      ],
-      "write": [
-        ".pi/model-roles/config.json",
-        ".locus/runtime/session-state.jsonl"
-      ]
+      "read": ["~/.pi/agent/model-roles/config.json", ".pi/model-roles/config.json"],
+      "write": [".pi/model-roles/config.json", ".locus/runtime/session-state.jsonl"]
     },
     "subprocess": [],
     "network": [],
     "browser": false,
     "models": true,
-    "ui": [
-      "custom",
-      "select",
-      "setStatus",
-      "setWidget"
-    ]
+    "ui": ["custom", "select", "setStatus", "setWidget"]
   },
   "risk": "medium",
   "docsPath": "docs/extensions/active/model.md",
-  "sourceAuditPath": "docs/source-audit/model.md",
-  "tests": [
-    "tests/extensions/model/model.test.ts",
-    "tests/integration/registration.test.ts"
-  ],
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/model.md",
+  "tests": ["tests/extensions/model/model.test.ts", "tests/integration/public-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "copy-after-audit",

@@ -74,20 +74,9 @@
     "commands": [
       {
         "name": "workflows",
-        "taxonomy": [
-          "transient-widget",
-          "status",
-          "overlay-selector",
-          "artifact-write",
-          "no-ui"
-        ],
-        "transient": [
-          "widget:workflows",
-          "status:locus contribution workflow.run"
-        ],
-        "persistent": [
-          ".locus/runtime/workflows/**"
-        ]
+        "taxonomy": ["transient-widget", "status", "overlay-selector", "artifact-write", "no-ui"],
+        "transient": ["widget:workflows", "status:locus contribution workflow.run"],
+        "persistent": [".locus/runtime/workflows/**"]
       }
     ]
   },
@@ -104,21 +93,20 @@
   },
   "risk": "critical",
   "docsPath": "docs/extensions/active/workflows.md",
-  "sourceAuditPath": "docs/source-audit/workflows.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/workflows.md",
   "tests": [
     "tests/shared/workflows/workflow-script-identity.test.ts",
     "tests/shared/workflows/workflow-run-snapshot.test.ts",
-    "tests/shared/workflows/workflow-runtime.test.ts",
     "tests/shared/workflows/workflow-group-failure.test.ts",
     "tests/extensions/workflows/workflow-identity-projection.test.ts",
     "tests/extensions/workflows/workflow-catalog.test.ts",
     "tests/extensions/workflows/workflow-catalog-viewer.test.ts",
-    "tests/extensions/workflows/pipeline-demo-workflow.test.ts",
+    "tests/extensions/workflows/requirements-grill-workflow.test.ts",
     "tests/extensions/workflows/workflow-transcript.test.ts",
     "tests/shared/workflows/workflow-llm-bridge.test.ts",
     "tests/extensions/workflows/workflows-launch-gate.test.ts",
     "tests/extensions/workflows/workflows-progress.test.ts",
-    "tests/integration/registration.test.ts"
+    "tests/integration/public-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

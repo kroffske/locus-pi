@@ -42,12 +42,12 @@ Safe apply protocol:
 
 ## OMP Source Evidence
 
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/tools/ast-grep.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/tools/ast-edit.ts`
-- `/tmp/oh-my-pi-review/packages/coding-agent/src/tools/resolve.ts`
-- `/tmp/oh-my-pi-review/docs/tools/ast-grep.md`
-- `/tmp/oh-my-pi-review/docs/tools/ast-edit.md`
-- `/tmp/oh-my-pi-review/docs/tools/resolve.md`
+- `oh-my-pi:packages/coding-agent/src/tools/ast-grep.ts`
+- `oh-my-pi:packages/coding-agent/src/tools/ast-edit.ts`
+- `oh-my-pi:packages/coding-agent/src/tools/resolve.ts`
+- `oh-my-pi:docs/tools/ast-grep.md`
+- `oh-my-pi:docs/tools/ast-edit.md`
+- `oh-my-pi:docs/tools/resolve.md`
 
 ## Current Gaps
 

@@ -14,29 +14,19 @@
     "Audits classified dangerous tool calls and delegates approval/block decisions to Pi",
     "security-audit shows newest bounded audit-only observations (default TUI selection 20, RPC projection 3) with literal decision facts, derived INFO/WARN severity, redacted width-bounded targets, and hidden count without claiming Locus enforcement"
   ],
-  "stateUsed": [
-    "security audit events"
-  ],
+  "stateUsed": ["security audit events"],
   "tier": "core-owned",
   "provides": {
     "tools": [],
-    "commands": [
-      "security-audit"
-    ],
-    "hooks": [
-      "tool_call"
-    ]
+    "commands": ["security-audit"],
+    "hooks": ["tool_call"]
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "security-audit",
-        "taxonomy": [
-          "transient-widget"
-        ],
-        "transient": [
-          "widget:security-audit"
-        ],
+        "taxonomy": ["transient-widget"],
+        "transient": ["widget:security-audit"],
         "persistent": []
       }
     ]
@@ -50,17 +40,12 @@
     "network": [],
     "browser": false,
     "models": false,
-    "ui": [
-      "setWidget"
-    ]
+    "ui": ["setWidget"]
   },
   "risk": "critical",
   "docsPath": "docs/extensions/active/security-gate.md",
-  "sourceAuditPath": "docs/source-audit/security-gate.md",
-  "tests": [
-    "tests/shared/security/security.test.ts",
-    "tests/integration/registration.test.ts"
-  ],
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/security-gate.md",
+  "tests": ["tests/shared/security/security.test.ts", "tests/integration/public-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "write-from-scratch",

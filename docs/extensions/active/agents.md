@@ -10,7 +10,7 @@ child, live row, progress panel and run boundary described below.
 
 `agents` — default-loaded operator/catalog extension. Он регистрирует команду `/agent` через `package.json#pi.extensions`, импортирует agent definitions из `.agents/agents/*.md` и показывает diagnostics для invalid files.
 
-`/agent run <name> <task>` запускает один command-side SDK child через `createAgentSession` и тот же `executeAgentRunBoundary`, что используется tool path. Флаги `/agent run --yes <name> <task>` и `/agent run --approve <name> <task>` сохранены как legacy trusted-operator syntax, но локальный Locus approval prompt больше не выполняется. Команда создаёт shared live row, показывает progress, собирает structured result и записывает result artifact без parent-session switch. Tool `task` спавнит реального child-агента из programmatic tool-call контекста через тот же host SDK и возвращает его structured result вызывающему; этот путь покрыт retained SDK-host tests и повторным release-candidate Pi smoke. Оба пути fail-closed, когда host не экспортирует `createAgentSession` или child run реально завершился ошибкой. `task` также принимает старую форму `{ agent, tasks }`, optional `agent`, aliases `default -> task` и `general -> task`, и top-level `parentContext`. `general` является built-in alias только когда project/user catalog не содержит реального `.agents/agents/general.md`.
+`/agent run <name> <task>` запускает один command-side SDK child через `createAgentSession` и тот же `executeAgentRunBoundary`, что используется tool path. Флаги `/agent run --yes <name> <task>` и `/agent run --approve <name> <task>` сохранены как legacy trusted-operator syntax, но локальный Locus approval prompt больше не выполняется. Команда создаёт shared live row, показывает progress, собирает structured result и записывает result artifact без parent-session switch. Tool `task` спавнит реального child-агента из programmatic tool-call контекста через тот же host SDK и возвращает его structured result вызывающему; этот путь покрыт retained SDK-host tests и повторным installed-package Pi smoke. Оба пути fail-closed, когда host не экспортирует `createAgentSession` или child run реально завершился ошибкой. `task` также принимает старую форму `{ agent, tasks }`, optional `agent`, aliases `default -> task` и `general -> task`, и top-level `parentContext`. `general` является built-in alias только когда project/user catalog не содержит реального `.agents/agents/general.md`.
 
 ## Почему он есть в проекте
 
@@ -77,7 +77,7 @@ Terminal assistant `stopReason: "error"` surfaces its `errorMessage` before the 
 
 ## Решение
 
-Решение: `default-command-gated-single-agent` + tool-safe `task` через host-SDK `createAgentSession`. `agents` находится в `package.json#pi.extensions`; `task` проверяется retained SDK-host tests и release-candidate Pi smoke, новый entrypoint при этом не добавлялся.
+Решение: `default-command-gated-single-agent` + tool-safe `task` через host-SDK `createAgentSession`. `agents` находится в `package.json#pi.extensions`; `task` проверяется retained SDK-host tests и installed-package Pi smoke, новый entrypoint при этом не добавлялся.
 
 ## Agent profiles — when to use default vs scout
 

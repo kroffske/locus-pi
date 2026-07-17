@@ -26,64 +26,35 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": [
-      "loopControl"
-    ],
-    "commands": [
-      "loop"
-    ],
+    "tools": ["loopControl"],
+    "commands": ["loop"],
     "hooks": []
   },
   "uiLifecycle": {
     "commands": [
       {
         "name": "loop",
-        "taxonomy": [
-          "transient-widget",
-          "status",
-          "blocking-prompt",
-          "artifact-write"
-        ],
-        "transient": [
-          "widget:loop",
-          "status:locus (loop.manual contribution)"
-        ],
-        "persistent": [
-          ".locus/runtime/goal/continue.md",
-          ".locus/runtime/loop/**"
-        ]
+        "taxonomy": ["transient-widget", "status", "blocking-prompt", "artifact-write"],
+        "transient": ["widget:loop", "status:locus (loop.manual contribution)"],
+        "persistent": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/**"]
       }
     ]
   },
   "permissions": {
     "filesystem": {
-      "read": [
-        ".locus/runtime/goal/state.json",
-        ".locus/runtime/workflows/**"
-      ],
-      "write": [
-        ".locus/runtime/goal/continue.md",
-        ".locus/runtime/loop/**"
-      ]
+      "read": [".locus/runtime/goal/state.json", ".locus/runtime/workflows/**"],
+      "write": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/**"]
     },
     "subprocess": [],
     "network": [],
     "browser": false,
     "models": false,
-    "ui": [
-      "editor",
-      "setWidget",
-      "setStatus"
-    ]
+    "ui": ["editor", "setWidget", "setStatus"]
   },
   "risk": "medium",
   "docsPath": "docs/extensions/active/loop.md",
-  "sourceAuditPath": "docs/source-audit/loop.md",
-  "tests": [
-    "tests/extensions/loop/loop.test.ts",
-    "tests/integration/core.test.ts",
-    "tests/integration/registration.test.ts"
-  ],
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/loop.md",
+  "tests": ["tests/extensions/loop/loop.test.ts", "tests/integration/public-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "copy-after-audit",

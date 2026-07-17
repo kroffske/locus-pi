@@ -36,7 +36,9 @@ general agent run.
 ## Evidence
 
 Evidence expectations are set by the agent profile and by the specific execution
-path. The canonical proof ledger is [docs/evidence.md](../evidence.md).
+path. Extension ownership and review status are indexed in the
+[ownership matrix](../extension-ownership-matrix.md); executable evidence is
+named by each extension manifest's `tests` field.
 
 For example, a profile can require visible tool activity, a structured marker,
 or a particular artifact. A different profile can accept a plain answer when the
@@ -80,9 +82,9 @@ block.
 
 ## Status table
 
-| by design | not supported | planned later |
-|---|---|---|
-| Default child agents inherit parent session rights. | Per-child reduced permission sandboxes. | Revisit scoped child permissions if Pi exposes a supported host contract. |
-| General agents may complete without tool calls. | Treating tool calls as a universal success requirement. | Profile-specific evidence policies can become more explicit. |
-| Workflow `.mjs` files run as trusted local orchestration code. | Treating workflow scripts as sandboxed code. | More workflow audit and launch metadata can be added. |
-| Security enforcement delegates to Pi original. | Local beta `security-gate` blocking global execution. | Promote local security work only after a real blocking contract exists. |
+| by design                                                      | not supported                                           | planned later                                                             |
+| -------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Default child agents inherit parent session rights.            | Per-child reduced permission sandboxes.                 | Revisit scoped child permissions if Pi exposes a supported host contract. |
+| General agents may complete without tool calls.                | Treating tool calls as a universal success requirement. | Profile-specific evidence policies can become more explicit.              |
+| Workflow `.mjs` files run as trusted local orchestration code. | Treating workflow scripts as sandboxed code.            | More workflow audit and launch metadata can be added.                     |
+| Security enforcement delegates to Pi original.                 | Local beta `security-gate` blocking global execution.   | Promote local security work only after a real blocking contract exists.   |

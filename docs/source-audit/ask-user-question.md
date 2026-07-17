@@ -3,16 +3,19 @@
 Decision: copy-after-audit. The current extension ports the OMP `ask` tool contract into `locus-pi` and uses Pi custom UI when available; `askUserQuestion` remains a compatibility alias.
 
 OMP source evidence:
-- `.local/oh-my-pi-review/packages/coding-agent/src/tools/ask.ts`
-- `.local/oh-my-pi-review/packages/coding-agent/src/prompts/tools/ask.md`
-- `.local/oh-my-pi-review/packages/coding-agent/test/tools/ask.test.ts`
-- `.local/oh-my-pi-review/docs/tools/ask.md`
-- `.local/oh-my-pi-review/LICENSE`
+
+- `oh-my-pi:packages/coding-agent/src/tools/ask.ts`
+- `oh-my-pi:packages/coding-agent/src/prompts/tools/ask.md`
+- `oh-my-pi:packages/coding-agent/test/tools/ask.test.ts`
+- `oh-my-pi:docs/tools/ask.md`
+- `oh-my-pi:LICENSE`
 
 License/attribution:
-- OMP reference is MIT licensed; `.local/oh-my-pi-review/LICENSE` lists copyright for Mario Zechner and Can Bölük.
+
+- OMP reference is MIT licensed; `oh-my-pi:LICENSE` lists copyright for Mario Zechner and Can Bölük.
 
 Ported contract:
+
 - Primary tool name is `ask`.
 - Input shape is `questions[]` with `id`, `question`, `options`, optional `multi`, and optional `recommended`.
 - UI automatically adds `Other (type your own)`.
@@ -28,6 +31,7 @@ Ported contract:
 - No-UI modes return `unavailable` without recording a cancelled decision, because no human cancellation occurred.
 
 Known gaps:
+
 - The local adapter is a bounded plain-text Pi custom UI, not the exact OMP renderer/styling.
 - The fallback path is still the older `select` / `editor` surface for hosts without custom UI.
 - Decision journaling is Locus-owned runtime behavior, not copied OMP UI code.
