@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
@@ -215,6 +215,35 @@ describe("agent SDK evidence surfacing", () => {
     const body = JSON.parse(withArtifact.resultArtifact.content) as Record<string, unknown>;
     assert.equal(body.version, "locus.agent.run-result.v1");
     assert.equal(Object.hasOwn(body, "evidence"), false);
+  });
+
+  it("keeps run-result artifacts distinct across fresh stores by child session id", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-agent-artifact-collision-"));
+    const req = { ...request(), projectRoot: root };
+    const first = writeAgentRunResultArtifact(root, req, {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "first",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      text: "first",
+      childSession: { id: "child-one", createdAt: "fixed", metadata: {} },
+    });
+    const second = writeAgentRunResultArtifact(root, req, {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "second",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      text: "second",
+      childSession: { id: "child-two", createdAt: "fixed", metadata: {} },
+    });
+
+    assert.ok(first.resultArtifact !== undefined);
+    assert.ok(second.resultArtifact !== undefined);
+    assert.notEqual(first.resultArtifact.path, second.resultArtifact.path);
+    assert.equal(JSON.parse(readFileSync(first.resultArtifact.path, "utf8")).content.includes("first"), true);
+    assert.equal(JSON.parse(readFileSync(second.resultArtifact.path, "utf8")).content.includes("second"), true);
   });
 
   it("exposes a reports-confined, session-bound child trace and serializes it separately from the run result", async () => {

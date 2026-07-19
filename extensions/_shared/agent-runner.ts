@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getSessionId, getWorkingDirectory } from "./pi-api.js";
 import type { AgentDefinition, EvidenceEvaluation } from "./types.js";
@@ -252,6 +253,7 @@ export function writeAgentRunResultArtifact(
   };
   try {
     const artifact = store.writeArtifact({
+      id: `agent-run-${result.childSession?.id ?? randomUUID()}`,
       kind: "json",
       content: `${JSON.stringify(body, null, 2)}\n`,
       sessionId: request.parentSessionId,
