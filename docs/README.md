@@ -18,6 +18,8 @@
   появиться там.
 - [extensions/active/](extensions/active/) — ручные страницы для десяти default
   extensions.
+- [prd/todo-session-auto-continuation.md](prd/todo-session-auto-continuation.md)
+  — repository product contract for bounded session queue execution.
 
 Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast-structural-edit`, `devext-doctor`, `loop`, `model`, `plan`, `security-gate`, `todo-context`, `workflows`.
 
@@ -29,6 +31,7 @@ Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast
 | Repository-only release policies                       | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed. |
 | Default extension list                                 | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                      |
 | Active extension manuals                               | [extensions/active/](extensions/active/).                                                                                                          |
+| Todo queue execution product contract                  | [prd/todo-session-auto-continuation.md](prd/todo-session-auto-continuation.md).                                                                    |
 | Extension status and risk index                        | [extension-index.md](extension-index.md).                                                                                                          |
 | Ownership and promotion decisions                      | [extension-ownership-matrix.md](extension-ownership-matrix.md).                                                                                    |
 | Package/runtime boundary                               | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                          |

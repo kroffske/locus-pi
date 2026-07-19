@@ -23,7 +23,7 @@ contains exactly these ten entrypoints:
 | `model`               | Provides `/model-roles` and `/effort` for role routing. Pi's operator-owned `/model` and `/models` selection surfaces are not model-callable tools from this package.                                                                                  |
 | `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
-| `todo-context`        | Provides the model-callable `todo_write` task-list update tool. The `/todo` command is a separate human/operator view.                                                                                                                                 |
+| `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
 | `workflows`           | Provides `/workflows` and the `workflow` tool for reviewed trusted JavaScript workflows, agent orchestration, and direct model-call nodes.                                                                                                             |
 
 Each retained extension also has a manifest and a manual under

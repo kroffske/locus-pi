@@ -1,8 +1,19 @@
 import type { TSchema } from "@sinclair/typebox";
 
-export interface ToolResultText { type: "text"; text: string }
-export interface ToolResultImage { type: "image"; data: string; mimeType: string }
-export interface ToolResultResource { type: "resource"; uri: string; title?: string }
+export interface ToolResultText {
+  type: "text";
+  text: string;
+}
+export interface ToolResultImage {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+export interface ToolResultResource {
+  type: "resource";
+  uri: string;
+  title?: string;
+}
 export type ToolResultContent = ToolResultText | ToolResultImage | ToolResultResource;
 
 export interface ToolResult {
@@ -40,7 +51,13 @@ export interface ToolDefinition {
   parameters: TSchema;
   approval?: ToolApproval;
   formatApprovalDetails?: (args: unknown) => string | string[] | undefined;
-  execute: (toolCallId: string, params: unknown, signal: AbortSignal, update: ToolUpdate, ctx: ExtensionContext) => Promise<ToolResult> | ToolResult;
+  execute: (
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal,
+    update: ToolUpdate,
+    ctx: ExtensionContext,
+  ) => Promise<ToolResult> | ToolResult;
   /**
    * Optional/additive: a tool result renderer so the finished tool can redraw a
    * persistent transcript card from `result.details` instead of collapsing to a
@@ -59,10 +76,12 @@ export interface CommandOptions {
   handler: (args: CommandArgs, ctx: ExtensionCommandContext) => Promise<void> | void;
 }
 
-export type CommandArgs = string | {
-  text?: string;
-  args: Record<string, string>;
-};
+export type CommandArgs =
+  | string
+  | {
+      text?: string;
+      args: Record<string, string>;
+    };
 
 export type LifecycleEvent =
   | "session_start"
@@ -79,6 +98,7 @@ export type LifecycleEvent =
   | "turn_end"
   | "agent_start"
   | "agent_end"
+  | "agent_settled"
   | "stop";
 
 export interface EventPayload {
@@ -123,14 +143,30 @@ export interface EventResult {
   injectContext?: Array<{ role: string; content: string; hidden?: boolean }>;
 }
 
-export type EventHandler = (event: EventPayload, ctx: ExtensionContext) => Promise<EventResult | void> | EventResult | void;
+export type EventHandler = (
+  event: EventPayload,
+  ctx: ExtensionContext,
+) => Promise<EventResult | void> | EventResult | void;
 
-export interface SelectOption { label: string; value: string }
+export interface SelectOption {
+  label: string;
+  value: string;
+}
 export type SelectChoice = SelectOption | string;
-export interface SelectResult { value: string; label?: string; cancelled?: boolean }
+export interface SelectResult {
+  value: string;
+  label?: string;
+  cancelled?: boolean;
+}
 export type SelectReturn = SelectResult | string | undefined;
-export interface InputResult { value: string; cancelled?: boolean }
-export interface EditorResult { value: string; cancelled?: boolean }
+export interface InputResult {
+  value: string;
+  cancelled?: boolean;
+}
+export interface EditorResult {
+  value: string;
+  cancelled?: boolean;
+}
 
 export interface CustomUiComponent {
   render(width: number): string[];
@@ -148,7 +184,12 @@ export interface WidgetFactoryTui extends CustomUiTui {
   terminal?: { rows: number; columns: number };
 }
 
-export type CustomUiFactory<T> = (tui: CustomUiTui, theme: unknown, keybindings: unknown, done: (result: T) => void) => CustomUiComponent | Promise<CustomUiComponent>;
+export type CustomUiFactory<T> = (
+  tui: CustomUiTui,
+  theme: unknown,
+  keybindings: unknown,
+  done: (result: T) => void,
+) => CustomUiComponent | Promise<CustomUiComponent>;
 
 export interface CustomUiOverlayOptions {
   width?: number | `${number}%`;
@@ -236,7 +277,10 @@ export interface ReplacementSessionEntryLike {
 }
 
 export interface ReplacementSessionManagerLike {
-  getEntries(opts?: { type?: string; limit?: number }): Promise<ReplacementSessionEntryLike[]> | ReplacementSessionEntryLike[];
+  getEntries(opts?: {
+    type?: string;
+    limit?: number;
+  }): Promise<ReplacementSessionEntryLike[]> | ReplacementSessionEntryLike[];
   getBranch?(): Promise<ReplacementSessionEntryLike[]> | ReplacementSessionEntryLike[];
   getSessionId?(): string;
   getSessionFile?(): string | undefined;
@@ -285,7 +329,11 @@ export interface ExtensionContext {
   setModel?(model: ModelLike): boolean | Promise<boolean>;
   setThinkingLevel?(level: ThinkingLevel): void;
   ui: {
-    select(title: string, options: SelectChoice[], opts?: { timeout?: number; signal?: AbortSignal }): Promise<SelectReturn>;
+    select(
+      title: string,
+      options: SelectChoice[],
+      opts?: { timeout?: number; signal?: AbortSignal },
+    ): Promise<SelectReturn>;
     input(title: string, opts?: { default?: string; placeholder?: string }): Promise<InputResult>;
     editor(title: string, content: string, opts?: { language?: string }): Promise<EditorResult>;
     confirm(title: string, message: string): Promise<boolean>;
@@ -296,10 +344,17 @@ export interface ExtensionContext {
     setEditorText?(text: string): void;
     getEditorText?(): string;
     setStatus(key: string, text: string | undefined): void;
-    setWidget(key: string, content: string[] | WidgetFactory | undefined, options?: { placement?: "aboveEditor" | "belowEditor" }): void;
+    setWidget(
+      key: string,
+      content: string[] | WidgetFactory | undefined,
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ): void;
     setTitle(title: string): void;
     setWorkingIndicator(active: boolean): void;
-    custom?<T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean; overlayOptions?: CustomUiOverlayOptions }): Promise<T>;
+    custom?<T>(
+      factory: CustomUiFactory<T>,
+      options?: { overlay?: boolean; overlayOptions?: CustomUiOverlayOptions },
+    ): Promise<T>;
     /** Live interactive theme for styling status/badges. Undefined outside interactive mode. */
     readonly theme?: ThemeLike;
     /** Install a custom input-editor component, or undefined to restore the default. */
@@ -351,7 +406,11 @@ export interface ExtensionCommandContext extends ExtensionContext {
 
 export type WidgetFactory = (...args: unknown[]) => unknown;
 
-export interface CustomEntry { type: string; data: unknown; timestamp?: string }
+export interface CustomEntry {
+  type: string;
+  data: unknown;
+  timestamp?: string;
+}
 
 export interface ShortcutOptions {
   description?: string;
@@ -391,10 +450,17 @@ export function textResult(text: string, details?: Record<string, unknown>): Too
 }
 
 export function errorResult(text: string, details?: Record<string, unknown>): ToolResult {
-  return details === undefined ? { isError: true, content: [{ type: "text", text }] } : { isError: true, content: [{ type: "text", text }], details };
+  return details === undefined
+    ? { isError: true, content: [{ type: "text", text }] }
+    : { isError: true, content: [{ type: "text", text }], details };
 }
 
-export function setTextWidget(ctx: ExtensionContext, key: string, content: string, options?: { placement?: "aboveEditor" | "belowEditor" }): void {
+export function setTextWidget(
+  ctx: ExtensionContext,
+  key: string,
+  content: string,
+  options?: { placement?: "aboveEditor" | "belowEditor" },
+): void {
   ctx.ui.setWidget(key, content.split(/\r?\n/), options);
 }
 
@@ -411,5 +477,5 @@ export function getSessionId(ctx: ExtensionContext): string {
 }
 
 export function getCommandText(args: CommandArgs): string {
-  return typeof args === "string" ? args : args.text ?? "";
+  return typeof args === "string" ? args : (args.text ?? "");
 }

@@ -29,6 +29,10 @@ This file records user-visible changes to the public package.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
   Package workflow, with explicit operator, workflow, agent, direct-LLM, decision,
   and persisted-artifact ownership.
+- Added opt-in session todo auto-continuation: a persisted queue context,
+  `/todo run` and `/todo pause`, and one hidden Pi continuation turn after each
+  successful queue transition.
+- Added atomic `/todo append` batches with `;;` separators and a 20-item limit.
 
 ### Changed
 
@@ -61,6 +65,9 @@ This file records user-visible changes to the public package.
   evidence calls, batching read-only inspection, excluding local `.tasks/`,
   `.locus/`, and prior reports from review evidence, and preserving explicit
   limitations instead of exhausting the runtime before producing a report.
+- Session todo autonomy now fails closed on missing progress, transport
+  failure, empty queues, or the 20-continuation safety limit while preserving
+  remaining queue state.
 
 ## [0.2.1] - 2026-07-17
 

@@ -37,6 +37,7 @@ import {
   commitTodoState,
   loadTodoState,
   type TodoPhase,
+  type TodoQueueMetadata,
   type TodoStateCommit,
   type TodoStateSnapshot,
   type TodoStatus,
@@ -45,26 +46,39 @@ import {
 import { validateParams } from "../_shared/validation.js";
 
 const TodoWriteParams = Type.Object({
-  ops: Type.Array(Type.Object({
-    op: Type.Union([
-      Type.Literal("init"),
-      Type.Literal("start"),
-      Type.Literal("done"),
-      Type.Literal("drop"),
-      Type.Literal("rm"),
-      Type.Literal("append"),
-      Type.Literal("note"),
-    ]),
-    phase: Type.Optional(Type.String()),
-    task: Type.Optional(Type.String()),
-    items: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 20 })),
-    text: Type.Optional(Type.String({ maxLength: 500 })),
-    list: Type.Optional(Type.Array(Type.Object({
-      phase: Type.String(),
-      items: Type.Array(Type.String(), { minItems: 1 }),
-    }))),
-  }), { minItems: 1, maxItems: 30 }),
+  context: Type.Optional(Type.String({ maxLength: 2000 })),
+  autoContinue: Type.Optional(Type.Boolean()),
+  ops: Type.Array(
+    Type.Object({
+      op: Type.Union([
+        Type.Literal("init"),
+        Type.Literal("start"),
+        Type.Literal("done"),
+        Type.Literal("drop"),
+        Type.Literal("rm"),
+        Type.Literal("append"),
+        Type.Literal("note"),
+      ]),
+      phase: Type.Optional(Type.String()),
+      task: Type.Optional(Type.String()),
+      items: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 20 })),
+      text: Type.Optional(Type.String({ maxLength: 500 })),
+      list: Type.Optional(
+        Type.Array(
+          Type.Object({
+            phase: Type.String(),
+            items: Type.Array(Type.String(), { minItems: 1 }),
+          }),
+        ),
+      ),
+    }),
+    { minItems: 1, maxItems: 30 },
+  ),
 });
+
+const MAX_AUTO_CONTINUATIONS = 20;
+const BATCH_DELIMITER = ";;";
+const PROGRESS_OPS = new Set(["init", "start", "done", "drop", "rm", "append"]);
 
 interface TodoOp {
   op: string;
@@ -88,7 +102,11 @@ function compactTodoBlock(block: OperatorBlock): OperatorBlock {
   const body = [...(block.body ?? [])];
   const visibleBody = body.slice(0, 2);
   const hidden = body.length - visibleBody.length;
-  const metadata = prioritizeCompactLines(block.metadata ?? [], /^(?:artifact|path|target|storageBackend|activeTask):/u, 3);
+  const metadata = prioritizeCompactLines(
+    block.metadata ?? [],
+    /^(?:artifact|path|target|storageBackend|activeTask):/u,
+    3,
+  );
   const controls = prioritizeCompactLines(block.controls ?? [], /(?:export|body|retry|recovery|usage)/iu, 1);
   return {
     ...block,
@@ -179,7 +197,11 @@ function todoChangeBlock(
   };
 }
 
-function todoWarningBlock(primary: string, body: string[] = [], controls: string[] = ["Help: /todo help"]): OperatorBlock {
+function todoWarningBlock(
+  primary: string,
+  body: string[] = [],
+  controls: string[] = ["Help: /todo help"],
+): OperatorBlock {
   return {
     type: "WARN",
     subject: "Session todos",
@@ -219,21 +241,33 @@ function todoErrorBlock(error: unknown): OperatorBlock {
  * local helpers below.
  */
 export default function todoContext(pi: ExtensionAPI): void {
-  registerCommandWithUiLifecycle(pi, {
-    command: "todo",
-    group: "todo",
-    surfaces: ["transient-widget", "blocking-prompt", "artifact-write"],
-    transientWidgets: ["todo"],
-  }, {
-    description: "Show, edit, and explicitly bridge OMP-style todos from the session todo state.",
-    handler: async (args, ctx) => {
-      try {
-        await handleTodoCommand(pi, getCommandText(args), ctx);
-      } catch (error) {
-        setTodoBlock(ctx, todoErrorBlock(error));
-      }
+  let continuationArmed = false;
+  let automaticDispatches = 0;
+  const dispatchNext = async (ctx: ExtensionContext): Promise<void> => {
+    if (await dispatchActiveTodo(pi, ctx, automaticDispatches)) {
+      automaticDispatches += 1;
+    }
+  };
+
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "todo",
+      group: "todo",
+      surfaces: ["transient-widget", "blocking-prompt", "artifact-write"],
+      transientWidgets: ["todo"],
     },
-  });
+    {
+      description: "Show, edit, and explicitly bridge OMP-style todos from the session todo state.",
+      handler: async (args, ctx) => {
+        try {
+          await handleCommand(args, ctx);
+        } catch (error) {
+          setTodoBlock(ctx, todoErrorBlock(error));
+        }
+      },
+    },
+  );
 
   pi.registerTool({
     name: "todo_write",
@@ -247,13 +281,35 @@ export default function todoContext(pi: ExtensionAPI): void {
       const previousPhases = previous.phases;
       const { phases, errors } = applyTodoOps(previousPhases, valid.value.ops as TodoOp[]);
       const completedTasks = getCompletionTransitions(previousPhases, phases);
-      const commit = await commitTodoPhases(pi, ctx, phases);
+      const context = normalizeQueueContext(valid.value.context) ?? previous.context;
+      const requestedAutoContinue = valid.value.autoContinue ?? previous.autoContinue;
+      const autoContinue = findActiveTask(phases) === undefined ? false : requestedAutoContinue;
+      if (
+        (previous.autoContinue === false && autoContinue) ||
+        (autoContinue && valid.value.ops.some((op) => op.op === "init"))
+      ) {
+        automaticDispatches = 0;
+      }
+      const commit = await commitTodoPhases(pi, ctx, phases, {
+        ...(context === undefined ? {} : { context }),
+        autoContinue,
+      });
+      if (errors.length > 0 || !autoContinue || findActiveTask(phases) === undefined) {
+        continuationArmed = false;
+      } else if (valid.value.ops.some((op) => PROGRESS_OPS.has(op.op))) {
+        continuationArmed = true;
+      }
       const details = {
         phases: sharedState.todos,
         storage: "session",
         storageBackend: commit.backend,
         todoStateSource: previous.backend,
-        ...(commit.diagnostics.length > 0 || previous.diagnostics.length > 0 ? { storageDiagnostics: [...previous.diagnostics, ...commit.diagnostics] } : {}),
+        queueContext: context,
+        autoContinue,
+        continuationArmed,
+        ...(commit.diagnostics.length > 0 || previous.diagnostics.length > 0
+          ? { storageDiagnostics: [...previous.diagnostics, ...commit.diagnostics] }
+          : {}),
         activeTask: findActiveTask(sharedState.todos),
         ...(completedTasks.length > 0 ? { completedTasks } : {}),
       };
@@ -261,6 +317,164 @@ export default function todoContext(pi: ExtensionAPI): void {
       return errors.length > 0 ? errorResult(summary, details) : textResult(summary, details);
     },
   });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    if (!continuationArmed) return;
+    continuationArmed = false;
+    await dispatchNext(ctx);
+  });
+
+  async function runQueue(ctx: ExtensionContext, contextInput: string): Promise<void> {
+    continuationArmed = false;
+    automaticDispatches = 0;
+    const current = await loadTodoPhases(pi, ctx);
+    const context = normalizeQueueContext(contextInput) ?? current.context;
+    if (findActiveTask(current.phases) === undefined) {
+      setTodoBlock(ctx, todoWarningBlock("No active todo to run.", [], ["Add: /todo append <task>"]));
+      return;
+    }
+    const commit = await commitTodoPhases(pi, ctx, current.phases, {
+      ...(context === undefined ? {} : { context }),
+      autoContinue: true,
+    });
+    setTodoBlock(
+      ctx,
+      todoChangeBlock("Autonomous todo execution started.", current.phases, commit.backend, [
+        ...(context === undefined ? [] : [`context: ${context}`]),
+        "autoContinue: true",
+      ]),
+    );
+    await dispatchNext(ctx);
+  }
+
+  async function pauseQueue(ctx: ExtensionContext): Promise<void> {
+    continuationArmed = false;
+    const current = await loadTodoPhases(pi, ctx);
+    const commit = await commitTodoPhases(pi, ctx, current.phases, {
+      ...(current.context === undefined ? {} : { context: current.context }),
+      autoContinue: false,
+    });
+    setTodoBlock(
+      ctx,
+      todoChangeBlock("Autonomous todo execution paused.", current.phases, commit.backend, ["autoContinue: false"]),
+    );
+  }
+
+  async function handleCommand(
+    args: string | { text?: string; args: Record<string, string> },
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    const input = getCommandText(args).trim();
+    const [verb = "", rest = ""] = splitCommand(input);
+    if (verb === "run") {
+      await runQueue(ctx, rest);
+      return;
+    }
+    if (verb === "pause") {
+      await pauseQueue(ctx);
+      return;
+    }
+    await handleTodoCommand(pi, input, ctx);
+  }
+}
+
+async function dispatchActiveTodo(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  automaticDispatches: number,
+): Promise<boolean> {
+  const current = await loadTodoPhases(pi, ctx);
+  const active = findActiveTaskDetails(current.phases);
+  if (!current.autoContinue || active === undefined) return false;
+
+  if (automaticDispatches >= MAX_AUTO_CONTINUATIONS) {
+    await pauseAutonomousState(pi, ctx, current);
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        `Autonomous execution paused after ${MAX_AUTO_CONTINUATIONS} continuations.`,
+        ["The active item remains visible and can be resumed explicitly."],
+        ["Resume: /todo run", "Inspect: /todo"],
+      ),
+    );
+    return false;
+  }
+
+  if (pi.sendMessage === undefined) {
+    await pauseAutonomousState(pi, ctx, current);
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Autonomous execution is unavailable because this Pi host cannot trigger a continuation turn.",
+        ["The active item remains visible."],
+        ["Inspect: /todo"],
+      ),
+    );
+    return false;
+  }
+
+  try {
+    await pi.sendMessage(
+      {
+        customType: "locus-todo-continuation",
+        content: buildContinuationPrompt(current.context, active.phase, active.task.content),
+        display: false,
+        details: {
+          phase: active.phase,
+          activeTask: active.task.content,
+          continuation: automaticDispatches + 1,
+        },
+      },
+      {
+        triggerTurn: true,
+        deliverAs: "followUp",
+      },
+    );
+    return true;
+  } catch (error) {
+    await pauseAutonomousState(pi, ctx, current);
+    const message = error instanceof Error ? error.message : String(error);
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Autonomous execution paused because the continuation turn could not be dispatched.",
+        [`error: ${message}`, "The active item remains visible."],
+        ["Resume: /todo run", "Inspect: /todo"],
+      ),
+    );
+    return false;
+  }
+}
+
+async function pauseAutonomousState(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  current: TodoStateSnapshot,
+): Promise<void> {
+  await commitTodoPhases(pi, ctx, current.phases, {
+    ...(current.context === undefined ? {} : { context: current.context }),
+    autoContinue: false,
+  });
+}
+
+function buildContinuationPrompt(context: string | undefined, phase: string, task: string): string {
+  return [
+    "Continue the explicit session todo queue.",
+    ...(context === undefined ? [] : ["Queue context:", context]),
+    `Active phase: ${phase}`,
+    `Active todo: ${task}`,
+    "",
+    "Complete only this active todo. Work directly or delegate through available agent tools.",
+    "Before ending your response, call todo_write with a terminal transition for the active todo.",
+    "If blocked or user input is required, call todo_write with autoContinue: false and explain the blocker.",
+    "Do not execute later todos in this response; the queue controller will schedule the next one.",
+  ].join("\n");
+}
+
+function normalizeQueueContext(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized === "" ? undefined : normalized.slice(0, 2000);
 }
 
 /**
@@ -335,7 +549,14 @@ async function handleTodoCommand(pi: ExtensionAPI, text: string, ctx: ExtensionC
  * enabled, then Pi custom entries, then shared memory as the final fallback.
  */
 async function loadTodoPhases(pi: ExtensionAPI, ctx: ExtensionContext): Promise<TodoStateSnapshot> {
-  return loadTodoState(pi, ctx, sharedState.todos);
+  const snapshot = await loadTodoState(pi, ctx, sharedState.todos, {
+    ...(sharedState.todoContext === null ? {} : { context: sharedState.todoContext }),
+    autoContinue: sharedState.todoAutoContinue,
+  });
+  sharedState.todos = cloneTodoPhases(snapshot.phases);
+  sharedState.todoContext = snapshot.context ?? null;
+  sharedState.todoAutoContinue = snapshot.autoContinue;
+  return snapshot;
 }
 
 /**
@@ -345,9 +566,19 @@ async function loadTodoPhases(pi: ExtensionAPI, ctx: ExtensionContext): Promise<
  * are delegated to `_shared/todo-state` so command and tool paths share one
  * storage contract.
  */
-async function commitTodoPhases(pi: ExtensionAPI, ctx: ExtensionContext, phases: TodoPhase[]): Promise<TodoStateCommit> {
+async function commitTodoPhases(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  phases: TodoPhase[],
+  metadata: TodoQueueMetadata = {
+    ...(sharedState.todoContext === null ? {} : { context: sharedState.todoContext }),
+    autoContinue: sharedState.todoAutoContinue,
+  },
+): Promise<TodoStateCommit> {
   sharedState.todos = cloneTodoPhases(phases);
-  const commit = await commitTodoState(pi, ctx, sharedState.todos);
+  sharedState.todoContext = metadata.context ?? null;
+  sharedState.todoAutoContinue = metadata.autoContinue;
+  const commit = await commitTodoState(pi, ctx, sharedState.todos, metadata);
   emitDevEvent("todo:update", { phases: sharedState.todos.length });
   return commit;
 }
@@ -372,11 +603,14 @@ async function editTodos(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void>
     prefill: initial,
   });
   if (result.status === "unavailable") {
-    setTodoBlock(ctx, todoWarningBlock(
-      "Interactive todo editing is unavailable in this host mode.",
-      [],
-      ["Use /todo append, /todo start, /todo done, or todo_write."],
-    ));
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Interactive todo editing is unavailable in this host mode.",
+        [],
+        ["Use /todo append, /todo start, /todo done, or todo_write."],
+      ),
+    );
     return;
   }
   if (result.status === "cancelled") {
@@ -385,54 +619,120 @@ async function editTodos(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void>
   }
   const parsed = markdownToPhases(result.value);
   if (parsed.errors.length > 0) {
-    setTodoBlock(ctx, todoWarningBlock(
-      "Could not parse session todos; state was not changed.",
-      parsed.errors.map((error) => `- ${error}`),
-      ["Reopen: /todo edit", "Syntax: /todo help"],
-    ));
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Could not parse session todos; state was not changed.",
+        parsed.errors.map((error) => `- ${error}`),
+        ["Reopen: /todo edit", "Syntax: /todo help"],
+      ),
+    );
     return;
   }
   const commit = await commitTodoPhases(pi, ctx, parsed.phases);
-  setTodoBlock(ctx, todoChangeBlock(
-    `Todos updated from editor: ${parsed.phases.length} phase(s), ${parsed.phases.reduce((sum, phase) => sum + phase.tasks.length, 0)} task(s).`,
-    parsed.phases,
-    commit.backend,
-  ));
+  setTodoBlock(
+    ctx,
+    todoChangeBlock(
+      `Todos updated from editor: ${parsed.phases.length} phase(s), ${parsed.phases.reduce((sum, phase) => sum + phase.tasks.length, 0)} task(s).`,
+      parsed.phases,
+      commit.backend,
+    ),
+  );
 }
 
 /**
- * Append one task from the operator command path.
+ * Append one or more tasks from the operator command path.
  *
  * The command accepts fuzzy phase input for operator ergonomics. The structured
  * tool path remains stricter and addresses phases/tasks by exact values.
  */
 async function appendTodo(pi: ExtensionAPI, ctx: ExtensionContext, rest: string): Promise<void> {
-  const tokens = tokenize(rest);
-  if (tokens.length === 0) {
-    setTodoBlock(ctx, todoWarningBlock(
-      "Append requires a task.",
-      [],
-      ["Usage: /todo append [<phase>] <task...>"],
-    ));
+  const segments = rest.split(BATCH_DELIMITER).map((segment) => segment.trim());
+  if (segments.length > 20) {
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Append accepts at most 20 tasks at once; state was not changed.",
+        [],
+        ["Usage: /todo append [<phase>] <task> [;; <task> ...]"],
+      ),
+    );
     return;
   }
+  if (segments.length === 0 || segments.some((segment) => segment === "")) {
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Append requires a task in every batch segment; state was not changed.",
+        [],
+        ["Usage: /todo append [<phase>] <task> [;; <task> ...]"],
+      ),
+    );
+    return;
+  }
+  const firstTokens = tokenize(segments[0]!);
+  if (firstTokens.length === 0) {
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Append requires a task; state was not changed.",
+        [],
+        ["Usage: /todo append [<phase>] <task> [;; <task> ...]"],
+      ),
+    );
+    return;
+  }
+  const phaseName = firstTokens.length === 1 ? undefined : firstTokens[0];
+  const rawItems = [
+    firstTokens.length === 1 ? firstTokens[0]! : firstTokens.slice(1).join(" "),
+    ...segments.slice(1).map((segment) => tokenize(segment).join(" ")),
+  ];
+  if (rawItems.some((item) => item === "")) {
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Append requires a task in every batch segment; state was not changed.",
+        [],
+        ["Usage: /todo append [<phase>] <task> [;; <task> ...]"],
+      ),
+    );
+    return;
+  }
+  const items = rawItems.map(titleCaseSentence);
+  const duplicateBatchItem = items.find((item, index) => items.indexOf(item) !== index);
   const { phases: current } = await loadTodoPhases(pi, ctx);
-  const phaseName = tokens.length === 1 ? undefined : tokens[0];
-  const content = tokens.length === 1 ? tokens[0]! : tokens.slice(1).join(" ");
+  const duplicateExistingItem = items.find((item) => findTask(current, item) !== undefined);
+  const duplicate = duplicateBatchItem ?? duplicateExistingItem;
+  if (duplicate !== undefined) {
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        `Task "${duplicate}" already exists; batch state was not changed.`,
+        [],
+        ["Inspect: /todo", "Retry with unique task text."],
+      ),
+    );
+    return;
+  }
   const next = cloneTodoPhases(current);
   let target = phaseName ? findPhaseFuzzy(next, phaseName) : next[next.length - 1];
   if (!target) {
     target = { name: phaseName ? titleCaseWords(phaseName) : "Todos", tasks: [] };
     next.push(target);
   }
-  target.tasks.push({ content: titleCaseSentence(content), status: "pending" });
+  target.tasks.push(...items.map((content) => ({ content, status: "pending" as const })));
   normalizeInProgressTask(next);
   const commit = await commitTodoPhases(pi, ctx, next);
-  setTodoBlock(ctx, todoChangeBlock(
-    `Appended to ${target.name}: ${titleCaseSentence(content)}`,
-    next,
-    commit.backend,
-  ));
+  setTodoBlock(
+    ctx,
+    todoChangeBlock(
+      items.length === 1
+        ? `Appended to ${target.name}: ${items[0]}`
+        : `Appended ${items.length} tasks to ${target.name}.`,
+      next,
+      commit.backend,
+    ),
+  );
 }
 
 /**
@@ -442,11 +742,7 @@ async function startTodo(pi: ExtensionAPI, ctx: ExtensionContext, rest: string):
   const { phases: current } = await loadTodoPhases(pi, ctx);
   const hit = findTaskFuzzy(current, rest);
   if (!hit) {
-    setTodoBlock(ctx, todoWarningBlock(
-      `No task matched "${rest}".`,
-      [],
-      ["Inspect current state: /todo"],
-    ));
+    setTodoBlock(ctx, todoWarningBlock(`No task matched "${rest}".`, [], ["Inspect current state: /todo"]));
     return;
   }
   const { phases } = applyTodoOps(current, [{ op: "start", task: hit.task.content }]);
@@ -457,7 +753,12 @@ async function startTodo(pi: ExtensionAPI, ctx: ExtensionContext, rest: string):
 /**
  * Apply an operator mutation to one task, one phase, or all tasks.
  */
-async function mutateTodo(pi: ExtensionAPI, ctx: ExtensionContext, verb: "done" | "drop" | "rm", rest: string): Promise<void> {
+async function mutateTodo(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  verb: "done" | "drop" | "rm",
+  rest: string,
+): Promise<void> {
   const { phases: current } = await loadTodoPhases(pi, ctx);
   const trimmed = rest.trim();
   if (!trimmed) {
@@ -468,26 +769,27 @@ async function mutateTodo(pi: ExtensionAPI, ctx: ExtensionContext, verb: "done" 
     }
     const { phases } = applyTodoOps(current, [{ op: verb }]);
     const commit = await commitTodoPhases(pi, ctx, phases);
-    setTodoBlock(ctx, todoChangeBlock(
-      verb === "done" ? "Marked all tasks completed." : "Marked all tasks abandoned.",
-      phases,
-      commit.backend,
-    ));
+    setTodoBlock(
+      ctx,
+      todoChangeBlock(
+        verb === "done" ? "Marked all tasks completed." : "Marked all tasks abandoned.",
+        phases,
+        commit.backend,
+      ),
+    );
     return;
   }
 
   const taskHit = findTaskFuzzy(current, trimmed);
   const phaseHit = taskHit ? undefined : findPhaseFuzzy(current, trimmed);
   if (!taskHit && !phaseHit) {
-    setTodoBlock(ctx, todoWarningBlock(
-      `No task or phase matched "${trimmed}".`,
-      [],
-      ["Inspect current state: /todo"],
-    ));
+    setTodoBlock(ctx, todoWarningBlock(`No task or phase matched "${trimmed}".`, [], ["Inspect current state: /todo"]));
     return;
   }
 
-  const { phases } = applyTodoOps(current, [taskHit ? { op: verb, task: taskHit.task.content } : { op: verb, phase: phaseHit!.name }]);
+  const { phases } = applyTodoOps(current, [
+    taskHit ? { op: verb, task: taskHit.task.content } : { op: verb, phase: phaseHit!.name },
+  ]);
   const commit = await commitTodoPhases(pi, ctx, phases);
   const target = taskHit?.task.content ?? phaseHit!.name;
   const label = verb === "done" ? "Marked completed" : verb === "drop" ? "Marked abandoned" : "Removed";
@@ -528,11 +830,14 @@ interface ExplicitTaskTarget {
 async function seedTodoFromTask(pi: ExtensionAPI, ctx: ExtensionContext, rest: string): Promise<void> {
   const taskId = rest.trim();
   if (taskId === "") {
-    setTodoBlock(ctx, todoWarningBlock(
-      "Task import requires an exact task id.",
-      ["Reads .tasks/index.json and seeds session todos only.", "No current task is inferred."],
-      ["Usage: /todo from-task <task-id>"],
-    ));
+    setTodoBlock(
+      ctx,
+      todoWarningBlock(
+        "Task import requires an exact task id.",
+        ["Reads .tasks/index.json and seeds session todos only.", "No current task is inferred."],
+        ["Usage: /todo from-task <task-id>"],
+      ),
+    );
     return;
   }
 
@@ -540,12 +845,13 @@ async function seedTodoFromTask(pi: ExtensionAPI, ctx: ExtensionContext, rest: s
     const { task, workspace } = resolveExplicitTaskTarget(getProjectRoot(ctx), taskId);
     const phases = importTodosFromProjectTasks([task]);
     const commit = await commitTodoPhases(pi, ctx, phases);
-    setTodoBlock(ctx, todoChangeBlock(
-      `Seeded session todos from task ${task.id}: ${task.title}`,
-      phases,
-      commit.backend,
-      [`taskPath: ${displayProjectPath(getProjectRoot(ctx), workspace.taskPath)}`, "taskSelection: explicit"],
-    ));
+    setTodoBlock(
+      ctx,
+      todoChangeBlock(`Seeded session todos from task ${task.id}: ${task.title}`, phases, commit.backend, [
+        `taskPath: ${displayProjectPath(getProjectRoot(ctx), workspace.taskPath)}`,
+        "taskSelection: explicit",
+      ]),
+    );
   } catch (error) {
     renderExplicitTaskFailure(ctx, "from-task", taskId, error);
   }
@@ -563,7 +869,9 @@ function showCurrentProjectTask(ctx: ExtensionContext): void {
     primary: resolution.ok ? `${heading}: ${resolution.taskId}` : resolution.message,
     body: details,
     hint: ["This resolver never reads or mutates Session todos."],
-    controls: resolution.ok ? ["Seed explicitly: /todo from-task <task-id>"] : ["Inspect .tasks/index.json; no current task was inferred."],
+    controls: resolution.ok
+      ? ["Seed explicitly: /todo from-task <task-id>"]
+      : ["Inspect .tasks/index.json; no current task was inferred."],
   });
 }
 
@@ -588,11 +896,14 @@ async function writeTodoCompletionNote(pi: ExtensionAPI, ctx: ExtensionContext, 
       approvalTier: parsed.approvalTier,
     });
     if (!approval.approved || approval.artifactPath === undefined) {
-      setTodoBlock(ctx, todoResultBlock(
-        `Completion note not written for task ${task.id}; session todos were not changed.`,
-        ["permission: delegated-to-pi", `reason: ${approval.reason}`, `target: task:${task.id}`],
-        "Todo completion note",
-      ));
+      setTodoBlock(
+        ctx,
+        todoResultBlock(
+          `Completion note not written for task ${task.id}; session todos were not changed.`,
+          ["permission: delegated-to-pi", `reason: ${approval.reason}`, `target: task:${task.id}`],
+          "Todo completion note",
+        ),
+      );
       return;
     }
 
@@ -617,12 +928,15 @@ async function writeTodoCompletionNote(pi: ExtensionAPI, ctx: ExtensionContext, 
 
 function parseCompletionNoteInput(rest: string): { taskId: string; approvalTier: "allow" | "prompt"; usage?: string } {
   const tokens = tokenize(rest);
-  if (tokens.length === 0) return { taskId: "", approvalTier: "prompt", usage: "Usage: /todo completion-note [--yes] <task-id>" };
+  if (tokens.length === 0)
+    return { taskId: "", approvalTier: "prompt", usage: "Usage: /todo completion-note [--yes] <task-id>" };
   if (tokens[0] === "--yes") {
-    if (tokens.length !== 2) return { taskId: "", approvalTier: "allow", usage: "Usage: /todo completion-note --yes <task-id>" };
+    if (tokens.length !== 2)
+      return { taskId: "", approvalTier: "allow", usage: "Usage: /todo completion-note --yes <task-id>" };
     return { taskId: tokens[1]!, approvalTier: "allow" };
   }
-  if (tokens.length !== 1) return { taskId: "", approvalTier: "prompt", usage: "Usage: /todo completion-note [--yes] <task-id>" };
+  if (tokens.length !== 1)
+    return { taskId: "", approvalTier: "prompt", usage: "Usage: /todo completion-note [--yes] <task-id>" };
   return { taskId: tokens[0]!, approvalTier: "prompt" };
 }
 
@@ -661,11 +975,14 @@ function resolveTaskWorkspace(projectRoot: string, task: TaskBridgeTask): Explic
 
 function renderExplicitTaskFailure(ctx: ExtensionContext, action: string, taskId: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  setTodoBlock(ctx, todoWarningBlock(
-    `/todo ${action} failed.`,
-    [`target: task:${taskId}`, `error: ${message}`, "No session todos were changed."],
-    [action === "from-task" ? "Retry: /todo from-task <task-id>" : "Retry: /todo completion-note [--yes] <task-id>"],
-  ));
+  setTodoBlock(
+    ctx,
+    todoWarningBlock(
+      `/todo ${action} failed.`,
+      [`target: task:${taskId}`, `error: ${message}`, "No session todos were changed."],
+      [action === "from-task" ? "Retry: /todo from-task <task-id>" : "Retry: /todo completion-note [--yes] <task-id>"],
+    ),
+  );
 }
 
 function displayProjectPath(projectRoot: string, filePath: string): string {
@@ -679,7 +996,9 @@ const TODO_HELP = [
   "  /todo edit                         Edit todos as Markdown",
   "  /todo copy                         Print todos as Markdown",
   "  /todo export                       Print deterministic Markdown only",
-  "  /todo append [<phase>] <task...>   Append a task",
+  "  /todo append [<phase>] <task> [;; <task> ...]  Append one or more tasks atomically",
+  "  /todo run [<context...>]            Start autonomous execution of the active todo",
+  "  /todo pause                         Pause autonomous execution",
   "  /todo start  <task>                Mark task in_progress",
   "  /todo from-task <task-id>          Seed session todos from an exact .tasks/index.json task",
   "  /todo current-task                 Show the unambiguous project task from .tasks/index.json",
@@ -691,7 +1010,9 @@ const TODO_HELP = [
 
 function splitCommand(input: string): [verb: string, rest: string] {
   const space = input.search(/\s/u);
-  return space === -1 ? [input.toLowerCase(), ""] : [input.slice(0, space).toLowerCase(), input.slice(space + 1).trim()];
+  return space === -1
+    ? [input.toLowerCase(), ""]
+    : [input.slice(0, space).toLowerCase(), input.slice(space + 1).trim()];
 }
 
 function tokenize(input: string): string[] {
@@ -704,7 +1025,7 @@ function tokenize(input: string): string[] {
       current += input[++index];
       continue;
     }
-    if (ch === "\"") {
+    if (ch === '"') {
       inQuote = !inQuote;
       continue;
     }
@@ -763,9 +1084,9 @@ function findTaskFuzzy(phases: TodoPhase[], query: string): { task: TodoTask; ph
     const exact = phase.tasks.find((task) => task.content.toLowerCase() === normalized);
     if (exact) return { task: exact, phase };
   }
-  const matches = phases.flatMap((phase) => phase.tasks
-    .filter((task) => task.content.toLowerCase().includes(normalized))
-    .map((task) => ({ task, phase })));
+  const matches = phases.flatMap((phase) =>
+    phase.tasks.filter((task) => task.content.toLowerCase().includes(normalized)).map((task) => ({ task, phase })),
+  );
   if (matches.length === 1) return matches[0];
   const active = matches.filter(({ task }) => task.status === "pending" || task.status === "in_progress");
   return active.length === 1 ? active[0] : undefined;
@@ -939,7 +1260,11 @@ function findTask(phases: TodoPhase[], content: string): { task: TodoTask; phase
   return undefined;
 }
 
-function resolveTaskOrError(phases: TodoPhase[], content: string | undefined, errors: string[]): { task: TodoTask; phase: TodoPhase } | undefined {
+function resolveTaskOrError(
+  phases: TodoPhase[],
+  content: string | undefined,
+  errors: string[],
+): { task: TodoTask; phase: TodoPhase } | undefined {
   if (!content) {
     errors.push("Missing task content");
     return undefined;
@@ -947,7 +1272,9 @@ function resolveTaskOrError(phases: TodoPhase[], content: string | undefined, er
   const hit = findTask(phases, content);
   if (!hit) {
     if (/^task-\d+$/u.test(content)) {
-      errors.push(`Task "${content}" not found. Tasks are referenced by content, not by IDs - pass the task's full text from the previous result.`);
+      errors.push(
+        `Task "${content}" not found. Tasks are referenced by content, not by IDs - pass the task's full text from the previous result.`,
+      );
       return undefined;
     }
     const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
@@ -1038,6 +1365,14 @@ function normalizeInProgressTask(phases: TodoPhase[]): void {
  */
 function findActiveTask(phases: readonly TodoPhase[]): string | undefined {
   return phases.flatMap((phase) => phase.tasks).find((task) => task.status === "in_progress")?.content;
+}
+
+function findActiveTaskDetails(phases: readonly TodoPhase[]): { phase: string; task: TodoTask } | undefined {
+  for (const phase of phases) {
+    const task = phase.tasks.find((candidate) => candidate.status === "in_progress");
+    if (task !== undefined) return { phase: phase.name, task };
+  }
+  return undefined;
 }
 
 /**

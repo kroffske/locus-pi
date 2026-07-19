@@ -15,7 +15,7 @@ this clean repository or the first public release.
 | `model`               | active | medium   | `/model-roles` and `/effort`; Pi retains operator-owned `/model` and `/models`       | `./extensions/model/index.ts`               |
 | `plan`                | active | high     | planning/mode/goal/review/todo prompt surfaces and the `goal` tool                   | `./extensions/plan/index.ts`                |
 | `security-gate`       | active | critical | `/security-audit` and an audit-only `tool_call` observer                             | `./extensions/security-gate/index.ts`       |
-| `todo-context`        | active | medium   | model-callable `todo_write` plus operator `/todo`                                    | `./extensions/todo-context/index.ts`        |
+| `todo-context`        | active | high     | `todo_write`, bounded settled continuation, and operator `/todo`                     | `./extensions/todo-context/index.ts`        |
 | `workflows`           | active | critical | `/workflows`, `workflow`, and the five curated Package workflows                     | `./extensions/workflows/index.ts`           |
 
 ## Curated Package workflows
