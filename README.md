@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and four curated
+It provides ten default extensions, a bundled agent catalog, and five curated
 Package workflows through a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private
@@ -34,12 +34,13 @@ evidence remains in the public GitHub repository rather than the npm artifact.
 
 Only these names are registered as Package workflows:
 
-| Workflow             | Intended use                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.      |
-| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                             |
-| `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.          |
-| `review`             | Runs full agents that resolve a free-form target, inspect changes and whole-file context, and adjudicate findings. |
+| Workflow             | Intended use                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.   |
+| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                          |
+| `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.       |
+| `review`             | Reviews a free-form target and publishes immutable `review.md` plus a pending human approval plan.              |
+| `review-fix`         | Applies only explicitly accepted findings in a retained linked worktree and publishes independent verification. |
 
 Use the operator catalog to inspect and run them:
 

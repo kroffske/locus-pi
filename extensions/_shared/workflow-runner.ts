@@ -121,12 +121,34 @@ export interface RunWorkflowScriptResult {
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
 /** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "llm-smoke", "requirements-grill", "review"] as const;
+export const CURATED_PACKAGE_WORKFLOW_NAMES = [
+  "live-smoke",
+  "llm-smoke",
+  "requirements-grill",
+  "review",
+  "review-fix",
+] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
+const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
+  "live-smoke": "live-smoke.workflow.mjs",
+  "llm-smoke": "llm-smoke.workflow.mjs",
+  "requirements-grill": "requirements-grill.workflow.mjs",
+  review: path.join("review", "review.workflow.mjs"),
+  "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),
+};
 
 /** Absolute path to this package's shipped workflow examples directory. */
 export function packagedExamplesDir(): string {
   return PACKAGED_EXAMPLES_DIR;
+}
+
+/** Absolute path to one explicitly curated Package workflow entry module. */
+export function packagedWorkflowPath(name: string): string {
+  if (!CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) {
+    throw new WorkflowNameNotFoundError(name);
+  }
+  const relativePath = CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS[name as (typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number]];
+  return path.join(PACKAGED_EXAMPLES_DIR, relativePath);
 }
 
 function hasPathSeparators(value: string): boolean {
@@ -175,7 +197,8 @@ const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
 function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDirectory: string): ResolvedWorkflowTarget {
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
     if (search.source === "package" && !CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) continue;
-    const candidate = path.join(search.directory, `${name}.workflow.mjs`);
+    const candidate =
+      search.source === "package" ? packagedWorkflowPath(name) : path.join(search.directory, `${name}.workflow.mjs`);
     if (existsSync(candidate)) {
       const targetPath =
         search.source === "project"
@@ -257,9 +280,24 @@ export function listWorkflowCatalogTargets(
 ): ResolvedWorkflowTarget[] {
   const targets = new Map<string, ResolvedWorkflowTarget>();
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
-    addCatalogDirectory(targets, search.directory, search.source);
+    if (search.source === "package") addCuratedPackageCatalogTargets(targets);
+    else addCatalogDirectory(targets, search.directory, search.source);
   }
   return [...targets.values()];
+}
+
+function addCuratedPackageCatalogTargets(targets: Map<string, ResolvedWorkflowTarget>): void {
+  const namesByEntryFilename = [...CURATED_PACKAGE_WORKFLOW_NAMES].sort((left, right) => {
+    const leftEntry = `${left}.workflow.mjs`;
+    const rightEntry = `${right}.workflow.mjs`;
+    return leftEntry < rightEntry ? -1 : leftEntry > rightEntry ? 1 : 0;
+  });
+  for (const name of namesByEntryFilename) {
+    if (targets.has(name)) continue;
+    const candidate = packagedWorkflowPath(name);
+    if (!existsSync(candidate)) continue;
+    targets.set(name, { kind: "name", ref: name, path: candidate, source: "package" });
+  }
 }
 
 function addCatalogDirectory(

@@ -73,26 +73,70 @@ with real session ids. See "Run a real workflow (live)" below.
 | `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                   |
 | `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                                                                  |
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize explicit structured handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; `repositoryContext`, stage evidence, and the final handoff are retained in `result.json`. |
-| `review`             | **Agent-owned code review**: four full `oracle` children resolve, inspect, and adjudicate a free-form local or PR target.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `review`             | **Agent-owned code review**: five full `oracle` children resolve, inspect, adjudicate, and publish immutable `review.md` plus an all-pending human approval manifest as `fix-plan.md`.                                                                                                                                                                                                                                                                                                                                                          |
+| `review-fix`         | **Human-gated remediation**: three full `oracle` children accept only findings marked `accepted`, create and edit a separate linked Git worktree, independently verify the diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, deploy, or modify the original checkout.                                                                                                                                                                                                                                                |
 
 `review` passes the operator request, structured handoffs, and a Markdown report
-template to agents. The first agent resolves the target and proves access. Two
-independent agents obtain and inspect the diff, complete changed files, related
-consumers, repository standards, tests, and documentation themselves. The final
-agent reopens the target, verifies and deduplicates findings, and fills the
-template.
+template to agents. The first agent resolves the target and immutable snapshot.
+Two independent agents obtain and inspect the diff, complete changed files,
+related consumers, repository standards, tests, and documentation themselves.
+The adjudicator reopens the target, verifies and deduplicates findings. A final
+publisher agent creates a real local review task in the Pi launch project,
+writes the complete reader-facing report to
+`.tasks/<task>/artifacts/review.md`, and mechanically copies every verified
+finding into `fix-plan.md` with `Disposition: pending`. It first proves that
+`.tasks/` is ignored and never writes into a different reviewed repository.
+The report has explicit sections for confirmed target identity, verdict, new
+findings, reconciliation of earlier claims, independently executed checks, and
+residual risks.
 
-The workflow script uses only `agent()`, `parallel()`, `phase()`, and `log()`.
-It has no Node imports, direct Git/filesystem/network/forge adapter, prepared
-evidence packet, or `llm()` merge. Every child uses the selected catalog
-agent's full tool surface with `permissionMode: "agent-defined"` in the project
-workspace. Prompts prohibit repository or remote mutations, but prompt text and
+The two review workflows have independent package directories:
+`extensions/workflows/examples/review/` and
+`extensions/workflows/examples/review-fix/`. Shared family documentation,
+configuration, and the ownership diagram live under
+`extensions/workflows/examples/review-family/`. Its `README.md` explains the
+complete algorithm. `agents.yaml` is the reader-facing and runtime source for
+all eight named agent definitions: ids `R1`–`R5` and `F1`–`F3`,
+numbers, names, child-session labels, `oracle` profile, schema names,
+permission/workspace options, tool-call caps, and full prompt templates.
+`review-config.mjs` parses and validates that package-owned YAML before either
+workflow runs; missing roles, wrong order, duplicate ids/labels, invalid fixed
+options, schema mismatches, or unresolved template variables fail closed.
+
+The separate files preserve the human gate without a separate planning
+workflow: `review.md` remains immutable evidence, while the operator edits only
+`fix-plan.md` to mark findings `accepted`, `waived`, `deferred`, or leave them
+`pending`. `review-fix` accepts that edited Markdown as write authority: only
+explicit `accepted` dispositions authorize source changes; every other state is
+ignored. It checks out the exact reviewed snapshot into a new retained linked
+worktree, applies accepted items sequentially, and keeps the result uncommitted
+for inspection.
+
+Both review-family entry scripts use `agent()`, `parallel()` where needed,
+`phase()`, and `log()` for orchestration and import the neutral family YAML
+loader.
+The loader reads only `agents.yaml`; it is not a Git/filesystem evidence adapter.
+Repository and private-forge evidence acquisition remains owned by full child
+agents. There is no prepared evidence packet or `llm()` merge. Every child uses
+the selected catalog agent's full tool surface with
+`permissionMode: "agent-defined"` in the project workspace. Prompts constrain
+writes to the documented task/worktree boundaries, but prompt text and
 permission metadata are not a sandbox; Pi's tool approval remains the
-enforcement boundary. Agent or schema failure remains fail-closed, inaccessible
-or ambiguous targets return a precise blocked question, and review remains
-separate from remediation.
+enforcement boundary. Agent, manifest, template, or output-schema failure
+remains fail-closed.
 
-These four names form the Package registry. They are intentionally small and
+Because the executable entry modules import
+`../review-family/review-config.mjs`, and that loader reads `agents.yaml`, both
+declare `meta.identityCoverage: "entry-only"`.
+Persisted entry SHA-256 evidence therefore does not bind the loader or YAML
+bytes. The Package folder is the reviewed unit; runtime evidence reports the
+dependency downgrade instead of pretending the entry hash covers prompts.
+
+The Markdown files are the human-facing artifacts. Mandatory `result.json`
+remains the machine-readable run envelope, structured handoff, and provenance
+surface; it is not the report a reader is expected to consume.
+
+These five names form the Package registry. They are intentionally small and
 owned as part of the package product surface, not discovered merely because a file
 exists in `extensions/workflows/examples/`.
 
@@ -108,8 +152,11 @@ Editable pipeline maps:
   [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
   [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
 - `review`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-pipeline.excalidraw)
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.excalidraw)
+- `review-fix`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.excalidraw)
 
 ## Authoring patterns
 
@@ -121,7 +168,7 @@ local workflow does not add it to the Package registry.
 For _which shape to pick_ (single-agent, llm()-gate, loop+judge, plan→build→review,
 pipeline, fan-out+merge, judge-panel, loop-until-dry), see the pattern catalog
 `extensions/workflows/references/patterns.md` — it maps each requirement to a minimal
-skeleton to adapt. Only the four workflows in the curated table
+skeleton to adapt. Only the five workflows in the curated table
 above are registered Package workflows. (Single source: that file is the catalog of
 _forms_; this doc remains the DSL _contract_.)
 
@@ -137,7 +184,7 @@ order:
    inputs that may use a different workflow format.
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
 4. The curated Package registry — human source `Package`; currently `live-smoke`,
-   `llm-smoke`, `requirements-grill`, and `review`.
+   `llm-smoke`, `requirements-grill`, `review`, and `review-fix`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
@@ -538,8 +585,10 @@ The diagram is an ownership map, not a decorative code trace:
   nodes.
 - Show the source `<name>.workflow.mjs`, the persisted
   `.locus/runtime/workflows/<runId>/result.json`, and `journal.ndjson` when it
-  records meaningful execution evidence. A field such as `reportMarkdown` is
-  labeled as a field inside `result.json`, not drawn as a separate file.
+  records meaningful execution evidence. Draw a Markdown report as a separate
+  artifact only when an agent really persists that file; the review family
+  therefore shows `.tasks/<task>/artifacts/review.md`, `fix-plan.md`, or
+  `fix-report.md` alongside the mandatory runtime JSON.
 - Include a legend that explains the visual types and any accent colors. A
   reader must understand the graph without opening the workflow source.
 

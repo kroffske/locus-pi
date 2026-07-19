@@ -11,6 +11,7 @@ import {
 interface TargetResolution {
   status: "ready" | "blocked";
   target: string;
+  snapshot: string;
   summary: string;
   question: string;
   constraints: string[];
@@ -34,9 +35,32 @@ interface ReviewReport {
   verdict: "pass" | "needs_changes" | "blocked";
   summary: string;
   findings: ReviewFinding[];
+  previousFindings: {
+    claim: string;
+    classification: "current" | "fixed" | "stale" | "other_branch" | "not_reproduced";
+    evidence: string;
+  }[];
+  checks: {
+    check: string;
+    status: "passed" | "failed" | "not_run";
+    evidence: string;
+  }[];
   reviewedFiles: string[];
   limitations: string[];
-  reportMarkdown?: string;
+}
+
+interface ReviewPublication {
+  status: "completed" | "blocked";
+  summary: string;
+  question: string;
+  taskId: string;
+  taskPath: string;
+  reportPath: string;
+  reportSha256: string;
+  fixPlanPath: string;
+  fixPlanSha256: string;
+  findingIds: string[];
+  pendingCount: number;
 }
 
 interface ReviewWorkflowResult {
@@ -48,10 +72,11 @@ interface ReviewWorkflowResult {
   target?: TargetResolution;
   verdict?: string;
   review: ReviewReport | null;
+  publication?: ReviewPublication;
   stages?: Record<string, { childSessionId: string | null }>;
 }
 
-const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review.workflow.mjs");
+const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review/review.workflow.mjs");
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
   const module = (await import(workflowPath)) as {
@@ -108,6 +133,7 @@ function failedAgent(request: WorkflowAgentRequest, status: "failed" | "blocked"
 const readyTarget: TargetResolution = {
   status: "ready",
   target: "current branch against dev",
+  snapshot: "base=abc123 head=def456",
   summary: "Resolved the local branch comparison and verified both refs.",
   question: "",
   constraints: ["Review is read-only."],
@@ -117,6 +143,8 @@ const changesLane: ReviewReport = {
   verdict: "needs_changes",
   summary: "One introduced defect.",
   findings: [finding("introduced", "C1")],
+  previousFindings: [],
+  checks: [],
   reviewedFiles: ["dags/customer_snapshot_dag.py"],
   limitations: [],
 };
@@ -125,6 +153,8 @@ const contextLane: ReviewReport = {
   verdict: "needs_changes",
   summary: "One related pre-existing defect.",
   findings: [finding("pre-existing", "X1")],
+  previousFindings: [],
+  checks: [],
   reviewedFiles: ["dags/customer_snapshot_dag.py", "DAG_STANDARDS.md"],
   limitations: [],
 };
@@ -133,16 +163,45 @@ const finalReport: ReviewReport = {
   verdict: "needs_changes",
   summary: "The pagination defect must be fixed before merge.",
   findings: [finding("introduced", "F1")],
+  previousFindings: [
+    {
+      claim: "Pagination was already fixed.",
+      classification: "not_reproduced",
+      evidence: "The current target still reuses offset=0.",
+    },
+  ],
+  checks: [
+    {
+      check: "Focused pagination test",
+      status: "failed",
+      evidence: "The second page requested offset=0.",
+    },
+  ],
   reviewedFiles: ["dags/customer_snapshot_dag.py", "DAG_STANDARDS.md"],
   limitations: [],
-  reportMarkdown: "# Review Report\n\n## Verdict\nneeds_changes",
+};
+
+const finalPublication: ReviewPublication = {
+  status: "completed",
+  summary: "Published the review task and verified review.md.",
+  question: "",
+  taskId: "T-201",
+  taskPath: ".tasks/T-201-code-review/task.md",
+  reportPath: ".tasks/T-201-code-review/artifacts/review.md",
+  reportSha256: "a".repeat(64),
+  fixPlanPath: ".tasks/T-201-code-review/artifacts/fix-plan.md",
+  fixPlanSha256: "b".repeat(64),
+  findingIds: ["F1"],
+  pendingCount: 1,
 };
 
 describe("workflow example: review.workflow.mjs", () => {
-  it("contains only workflow orchestration and no host-owned evidence adapter", () => {
+  it("keeps evidence acquisition agent-owned while loading prompts from the review manifest", () => {
     const source = readFileSync(workflowPath, "utf8");
 
-    expect(source).not.toContain('from "node:');
+    expect(source).toContain('from "../review-family/review-config.mjs"');
+    expect(source).toContain('identityCoverage: "entry-only"');
+    expect(source).not.toContain("You own review-target resolution");
     expect(source).not.toContain("execFile");
     expect(source).not.toContain("fetch(");
     expect(source).not.toContain("api.bitbucket.org");
@@ -156,6 +215,7 @@ describe("workflow example: review.workflow.mjs", () => {
     const blockedTarget: TargetResolution = {
       status: "blocked",
       target: "",
+      snapshot: "",
       summary: "No unambiguous comparison target was available.",
       question: "Which branch or pull request should be reviewed?",
       constraints: [],
@@ -181,7 +241,7 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(calls[0]?.tools).toBeUndefined();
     expect(calls[0]?.prompt).toContain("Use your tools now");
     expect(calls[0]?.prompt).toContain("private forge");
-    expect(calls[0]?.prompt).toContain("No diff or file contents will be supplied");
+    expect(calls[0]?.prompt).toMatch(/No\s+diff or file contents will be supplied/u);
     expect(result).toMatchObject({
       ok: false,
       status: "blocked",
@@ -191,7 +251,7 @@ describe("workflow example: review.workflow.mjs", () => {
     });
   });
 
-  it("runs target, independent review, and adjudication as four agent sessions", async () => {
+  it("runs target, independent review, adjudication, and report publication as five agent sessions", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
     const agentRunner: WorkflowAgentRunner = async (request) => {
@@ -205,6 +265,8 @@ describe("workflow example: review.workflow.mjs", () => {
           return completedAgent(request, contextLane, "context-child");
         case "adjudicate review findings":
           return completedAgent(request, finalReport, "adjudicator-child");
+        case "publish review report":
+          return completedAgent(request, finalPublication, "publisher-child");
         default:
           throw new Error(`Unexpected agent label: ${request.label}`);
       }
@@ -227,42 +289,56 @@ describe("workflow example: review.workflow.mjs", () => {
       "review introduced changes",
       "review whole-file context",
       "adjudicate review findings",
+      "publish review report",
     ]);
     expect(llmCalls).toBe(0);
+    expect(calls.map(({ maxToolCalls }) => maxToolCalls)).toEqual([80, 100, 100, 100, 80]);
     for (const call of calls) {
       expect(call).toMatchObject({
         agent: "oracle",
         permissionMode: "agent-defined",
         workspaceMode: "project",
-        maxToolCalls: 80,
       });
       expect(call.tools).toBeUndefined();
       expect(call.prompt).toContain("LOCUS_AGENT_RESULT_V1");
       expect(call.prompt).toContain(request);
     }
-    for (const call of calls.slice(1)) {
+    for (const call of calls.slice(1, 4)) {
       expect(call.prompt).toMatch(/The workflow\s+will not/u);
     }
     expect(calls[1]?.prompt).toContain("Obtain the diff yourself");
     expect(calls[1]?.prompt).toContain("Batch related read-only Git");
-    expect(calls[1]?.prompt).toContain("read the complete file");
-    expect(calls[2]?.prompt).toContain("Explicit\nrepository standards are review contracts");
+    expect(calls[1]?.prompt).toContain("Read the\ncomplete tracked file");
+    expect(calls[1]?.prompt).toContain("fail-closed runaway safeguard");
+    expect(calls[1]?.prompt).toContain("Do not inspect ignored or local workflow state");
+    expect(calls[1]?.prompt).toContain("`.tasks/`, `.locus/`");
+    expect(calls[1]?.prompt).toContain("group mechanical deletions");
+    expect(calls[2]?.prompt).toMatch(/Explicit\s+repository standards are review contracts/u);
     expect(calls[3]?.prompt).toContain("Use your own tools to reopen the target");
-    expect(calls[3]?.prompt).toContain("reserve the rest for verification");
-    expect(calls[3]?.prompt).toContain("# Review Report");
+    expect(calls[3]?.prompt).toMatch(/Reconcile every\s+distinct previous claim/u);
+    expect(calls[3]?.prompt).toContain("status=not_run");
+    expect(calls[4]?.prompt).toContain("# Code Review");
+    expect(calls[4]?.prompt).toContain("Previous Findings Reconciliation");
+    expect(calls[4]?.prompt).toContain("Independent Checks");
+    expect(calls[4]?.prompt).toContain("Residual Risks");
+    expect(calls[4]?.prompt).toContain("git check-ignore");
+    expect(calls[4]?.prompt).toContain("artifacts/review.md");
+    expect(calls[4]?.prompt).toContain("artifacts/fix-plan.md");
+    expect(calls[4]?.prompt).toContain("Disposition to pending");
+    expect(calls[4]?.prompt).toContain("Do not invent implementation steps");
     expect(result).toMatchObject({
       ok: true,
       status: "completed",
       verdict: "needs_changes",
       target: readyTarget,
-      review: {
-        reportMarkdown: expect.stringContaining("# Review Report"),
-      },
+      review: finalReport,
+      publication: finalPublication,
       stages: {
         target: { childSessionId: "target-child" },
         changes: { childSessionId: "changes-child" },
         context: { childSessionId: "context-child" },
         adjudication: { childSessionId: "adjudicator-child" },
+        publish: { childSessionId: "publisher-child" },
       },
     });
   });
@@ -287,14 +363,17 @@ describe("workflow example: review.workflow.mjs", () => {
         if (request.label === "review whole-file context") {
           return completedAgent(request, contextLane, "context");
         }
-        return completedAgent(request, finalReport, "final");
+        if (request.label === "adjudicate review findings") {
+          return completedAgent(request, finalReport, "final");
+        }
+        return completedAgent(request, finalPublication, "publisher");
       },
     });
     const opaqueRequest = "Review PR ACME/private-repo#918 using my existing login";
 
     const result = (await runWorkflow(dsl, opaqueRequest)) as ReviewWorkflowResult;
 
-    expect(prompts).toHaveLength(4);
+    expect(prompts).toHaveLength(5);
     expect(prompts.every((prompt) => prompt.includes(opaqueRequest))).toBe(true);
     expect(result.target).toEqual(privateTarget);
   });
@@ -361,9 +440,10 @@ describe("workflow example: review.workflow.mjs", () => {
       verdict: "blocked",
       summary: "The private PR could not be opened with available authentication.",
       findings: [],
+      previousFindings: [],
+      checks: [],
       reviewedFiles: [],
       limitations: ["PR contents unavailable."],
-      reportMarkdown: "# Review Report\n\n## Verdict\nblocked",
     };
     const { dsl } = createWorkflowRuntime({
       runId: "review-final-blocked",
@@ -377,7 +457,10 @@ describe("workflow example: review.workflow.mjs", () => {
         if (request.label === "review whole-file context") {
           return completedAgent(request, contextLane, "context");
         }
-        return completedAgent(request, blockedReport, "final");
+        if (request.label === "adjudicate review findings") {
+          return completedAgent(request, blockedReport, "final");
+        }
+        return completedAgent(request, finalPublication, "publisher");
       },
     });
 
@@ -388,6 +471,53 @@ describe("workflow example: review.workflow.mjs", () => {
       status: "blocked",
       verdict: "blocked",
       review: blockedReport,
+      publication: finalPublication,
+    });
+  });
+
+  it("keeps adjudicated findings when report publication is blocked", async () => {
+    const runWorkflow = await loadWorkflow();
+    const blockedPublication: ReviewPublication = {
+      status: "blocked",
+      summary: ".tasks is not ignored in the storage project.",
+      question: "Where should the local review task be stored?",
+      taskId: "",
+      taskPath: "",
+      reportPath: "",
+      reportSha256: "",
+      fixPlanPath: "",
+      fixPlanSha256: "",
+      findingIds: [],
+      pendingCount: 0,
+    };
+    const { dsl } = createWorkflowRuntime({
+      runId: "review-publication-blocked",
+      agentRunner: async (request) => {
+        if (request.label === "resolve review target") {
+          return completedAgent(request, readyTarget, "target");
+        }
+        if (request.label === "review introduced changes") {
+          return completedAgent(request, changesLane, "changes");
+        }
+        if (request.label === "review whole-file context") {
+          return completedAgent(request, contextLane, "context");
+        }
+        if (request.label === "adjudicate review findings") {
+          return completedAgent(request, finalReport, "final");
+        }
+        return completedAgent(request, blockedPublication, "publisher");
+      },
+    });
+
+    const result = (await runWorkflow(dsl, "Review current branch")) as ReviewWorkflowResult;
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: "blocked",
+      verdict: "needs_changes",
+      review: finalReport,
+      publication: blockedPublication,
+      question: "Where should the local review task be stored?",
     });
   });
 });

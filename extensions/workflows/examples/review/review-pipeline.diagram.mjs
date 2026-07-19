@@ -122,7 +122,7 @@ const workflowCheck = (id, x, y, width, height) => {
     { color: COLORS.workflow, strokeWidth: 2 },
   );
   setFrameFill(frame, COLORS.workflowFill);
-  const title = scene.text(x + 15, y + 91, "Workflow: check Agent 1 output.status (TARGET_SCHEMA)", {
+  const title = scene.text(x + 15, y + 91, "Workflow: check Agent R1 output.status (TARGET_SCHEMA)", {
     size: 10,
     color: COLORS.workflow,
     width: width - 30,
@@ -131,7 +131,7 @@ const workflowCheck = (id, x, y, width, height) => {
   const body = scene.text(
     x + 50,
     y + 118,
-    "Producer: Agent 1\nSchema: TARGET_SCHEMA\nField: output.status = ready / blocked",
+    "Producer: Agent R1\nSchema: TARGET_SCHEMA\nField: output.status = ready / blocked",
     {
       size: 10,
       color: COLORS.workflow,
@@ -174,7 +174,7 @@ const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
 };
 
 const lane = (title, subtitle, y, height, color, fill) => {
-  const frame = scene.rect(40, y, 3920, height, {
+  const frame = scene.rect(40, y, 4820, height, {
     color,
     strokeWidth: 1,
     dashed: true,
@@ -193,17 +193,22 @@ const lane = (title, subtitle, y, height, color, fill) => {
   });
 };
 
-scene.text(40, 20, "Curated review workflow — ownership, decisions, and evidence", {
+scene.text(40, 20, "Curated review workflow — findings, immutable report, and human approval plan", {
   size: 29,
-  width: 3920,
+  width: 4820,
   align: "center",
 });
-scene.text(40, 61, "Agents inspect and decide. The workflow launches, waits, schema-checks, routes, and serializes.", {
-  size: 15,
-  color: COLORS.muted,
-  width: 3920,
-  align: "center",
-});
+scene.text(
+  40,
+  61,
+  "Agents inspect, decide, and publish. The workflow launches, waits, schema-checks, routes, and returns.",
+  {
+    size: 15,
+    color: COLORS.muted,
+    width: 4820,
+    align: "center",
+  },
+);
 
 scene.text(80, 99, "Legend", {
   size: 16,
@@ -306,7 +311,7 @@ lane(
 );
 lane(
   "ARTIFACTS",
-  "Source definition plus runtime-persisted result and journal files.",
+  "Source definition, immutable report, editable approval plan, and runtime evidence.",
   1100,
   250,
   COLORS.artifact,
@@ -317,7 +322,7 @@ const request = operatorNode("operator-request", 85, 222, 300, 105);
 
 const launchTarget = workflowNode(
   "launch-agent-1",
-  "Workflow: launch Agent 1",
+  "Workflow: launch Agent R1",
   ["Pass operator request", "Attach TARGET_SCHEMA"],
   "multi_agent_orchestrator",
   455,
@@ -328,8 +333,8 @@ const launchTarget = workflowNode(
 
 const targetAgent = agentNode(
   "agent-1",
-  "Agent: 1 — resolve target",
-  ["Full tool-using child session", "Inspects Git, remotes, guidance, and auth", "Decides status: ready or blocked"],
+  "Agent: R1 — target-resolver",
+  ["label: resolve review target", "Inspects Git, remotes, guidance, and auth", "Decides ready or blocked"],
   "signal_quality_magnifier",
   800,
   790,
@@ -341,7 +346,7 @@ const targetStatusCheck = workflowCheck("agent-1-status", 1080, 430, 380, 210);
 
 const launchReviewLanes = workflowNode(
   "launch-agents-2-3",
-  "Workflow: launch Agents 2+3 in parallel",
+  "Workflow: launch Agents R2+R3 in parallel",
   ["Same request + target handoff", "Independent child sessions"],
   "multi_agent_orchestrator",
   1530,
@@ -353,7 +358,7 @@ const launchReviewLanes = workflowNode(
 const mapBlockedTarget = workflowNode(
   "map-blocked-target",
   "Workflow: map blocked target",
-  ["No review lanes start", "Return Agent 1 question", "Runtime writes result.json"],
+  ["No review lanes start", "Return Agent R1 question", "Runtime writes result.json"],
   "function_router",
   1530,
   570,
@@ -363,8 +368,8 @@ const mapBlockedTarget = workflowNode(
 
 const changesAgent = agentNode(
   "agent-2",
-  "Agent: 2 — introduced changes",
-  ["Obtains diff; reads changed files", "Traces affected consumers", "Reports introduced defects"],
+  "Agent: R2 — change-reviewer",
+  ["label: review introduced changes", "Reads diff + full candidate files", "Reports introduced defects"],
   "robot_agent",
   1900,
   752,
@@ -374,9 +379,9 @@ const changesAgent = agentNode(
 
 const contextAgent = agentNode(
   "agent-3",
-  "Agent: 3 — whole context",
+  "Agent: R3 — context-reviewer",
   [
-    "Obtains diff; reads full files",
+    "label: review whole-file context",
     "Checks standards, config, tests, and docs",
     "Reports evidenced contract problems",
   ],
@@ -400,7 +405,7 @@ const waitForLanes = workflowNode(
 
 const launchAdjudicator = workflowNode(
   "launch-agent-4",
-  "Workflow: launch Agent 4",
+  "Workflow: launch Agent R4",
   ["Pass target + both lane outputs", "Attach REPORT_SCHEMA"],
   "multi_agent_orchestrator",
   2620,
@@ -411,12 +416,12 @@ const launchAdjudicator = workflowNode(
 
 const adjudicator = agentNode(
   "agent-4",
-  "Agent: 4 — adjudicate",
+  "Agent: R4 — adjudicator",
   [
-    "Full tool-using child session",
+    "label: adjudicate review findings",
     "Reopens target; verifies findings",
     "Decides verdict: pass / needs_changes / blocked",
-    "Fills reportMarkdown",
+    "Returns structured REPORT_SCHEMA",
   ],
   "model_validation",
   2960,
@@ -425,21 +430,54 @@ const adjudicator = agentNode(
   190,
 );
 
+const launchPublisher = workflowNode(
+  "launch-agent-5",
+  "Workflow: launch Agent R5",
+  ["Pass target + REPORT_SCHEMA", "Attach PUBLISH_SCHEMA"],
+  "multi_agent_orchestrator",
+  3325,
+  462,
+  285,
+  120,
+);
+
+const publisher = agentNode(
+  "agent-5",
+  "Agent: R5 — publisher",
+  [
+    "label: publish review report",
+    "Proves .tasks/ is ignored",
+    "Creates review task in launch project",
+    "Writes review.md + pending fix-plan.md",
+  ],
+  "prompt_template",
+  3330,
+  790,
+  315,
+  175,
+);
+
 const mapFinalResult = workflowNode(
   "map-final-result",
-  "Workflow: map Agent 4 result",
-  ["No review judgment", "blocked → ok=false; otherwise ok=true", "Missing output → failed stage"],
+  "Workflow: check Agent R5 output.status (PUBLISH_SCHEMA)",
+  ["completed → return artifact paths", "blocked → ok=false + question", "No review judgment"],
   "function_router",
-  3340,
+  3710,
   442,
-  310,
+  330,
   165,
 );
 
+const humanGate = operatorNode("operator-fix-plan", 4140, 222, 360, 105);
+humanGate.texts[0].text = "Operator: edit fix-plan dispositions";
+humanGate.texts[0].originalText = "Operator: edit fix-plan dispositions";
+humanGate.texts[1].text = "accepted / waived / deferred / pending\nHuman decision before review-fix";
+humanGate.texts[1].originalText = "accepted / waived / deferred / pending\nHuman decision before review-fix";
+
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs",
-  ["Trusted workflow definition", "agent / parallel / phase / log"],
+  "Artifact: review.workflow.mjs + agents.yaml",
+  ["Routing + result schemas", "R1–R5 names, options, and prompts"],
   "prompt_template",
   455,
   1160,
@@ -452,24 +490,46 @@ const journalFile = artifactNode(
   "Artifact: journal.ndjson",
   ["Runtime execution journal", "phase, log, and child-session evidence"],
   "audit_log",
-  2580,
+  2700,
   1160,
   315,
   125,
+);
+
+const reportFile = artifactNode(
+  "report-file",
+  "Artifact: .tasks/<task>/artifacts/review.md",
+  ["Primary reader-facing report", "Full evidence, impact, and recommended fix", "Immutable evidence for review-fix"],
+  "prompt_template",
+  3330,
+  1142,
+  340,
+  165,
+);
+
+const fixPlanFile = artifactNode(
+  "fix-plan-file",
+  "Artifact: .tasks/<task>/artifacts/fix-plan.md",
+  ["Human-editable approval manifest", "Every finding starts pending", "Only accepted ids authorize review-fix"],
+  "guardrails",
+  3710,
+  1142,
+  350,
+  165,
 );
 
 const resultFile = artifactNode(
   "result-file",
   "Artifact: result.json",
   [
-    "Target-blocked or final-review return",
-    "review.reportMarkdown is a JSON field",
-    "No separate Markdown report file",
+    "Mandatory machine-readable run envelope",
+    "Structured findings + task/artifact paths",
+    "Technical provenance, not primary report",
   ],
   "data_catalog",
-  3620,
+  4460,
   1138,
-  315,
+  320,
   170,
 );
 
@@ -485,9 +545,14 @@ const nodes = [
   waitForLanes,
   launchAdjudicator,
   adjudicator,
+  launchPublisher,
+  publisher,
   mapFinalResult,
+  humanGate,
   sourceFile,
   journalFile,
+  reportFile,
+  fixPlanFile,
   resultFile,
 ];
 
@@ -599,13 +664,55 @@ connect("launch-to-agent-4", launchAdjudicator, adjudicator, {
   from: { side: "bottom", slot: 0.62 },
   to: { side: "top", slot: 0.35 },
 });
-connect("agent-4-to-map", adjudicator, mapFinalResult, {
+connect("agent-4-to-launch-agent-5", adjudicator, launchPublisher, {
   direction: "bottom-up",
-  label: "REPORT_SCHEMA / reportMarkdown",
-  labelWidth: 220,
+  label: "REPORT_SCHEMA",
+  labelWidth: 130,
   labelSize: 10,
   from: { side: "top", slot: 0.65 },
   to: { side: "bottom", slot: 0.35 },
+});
+connect("launch-to-agent-5", launchPublisher, publisher, {
+  direction: "top-down",
+  label: "target + REPORT_SCHEMA",
+  labelWidth: 165,
+  from: { side: "bottom", slot: 0.62 },
+  to: { side: "top", slot: 0.35 },
+});
+connect("agent-5-to-map", publisher, mapFinalResult, {
+  direction: "bottom-up",
+  label: "PUBLISH_SCHEMA\nstatus + reportPath + fixPlanPath",
+  labelWidth: 190,
+  labelSize: 10,
+  from: { side: "top", slot: 0.7 },
+  to: { side: "bottom", slot: 0.35 },
+});
+connect("agent-5-to-report", publisher, reportFile, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "writes + re-reads",
+  labelWidth: 130,
+  from: { side: "bottom", slot: 0.65 },
+  to: { side: "top", slot: 0.4 },
+});
+connect("agent-5-to-fix-plan", publisher, fixPlanFile, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "copies findings + pending",
+  labelWidth: 150,
+  from: { side: "bottom", slot: 0.82 },
+  to: { side: "top", slot: 0.4 },
+});
+connect("fix-plan-to-operator", fixPlanFile, humanGate, {
+  direction: "bottom-up",
+  dashed: true,
+  color: COLORS.operator,
+  label: "human disposition gate",
+  labelWidth: 150,
+  from: { side: "top", slot: 0.96 },
+  to: { side: "bottom", slot: 0.04 },
 });
 connect("map-to-result", mapFinalResult, resultFile, {
   direction: "top-down",
@@ -631,7 +738,7 @@ const health = assertDiagramHealthy({
   })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 4000, 1460),
+  renderBounds: new Bounds(0, 0, 4900, 1460),
   sceneBounds: scene.bounds(),
 });
 

@@ -13,16 +13,22 @@ import {
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
-import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedExamplesDir } from "../../../extensions/_shared/workflow-runner.js";
+import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
 
 describe("workflow operator catalog", () => {
   it("keeps every curated Package workflow description concise and purpose-first", () => {
     const descriptions = CURATED_PACKAGE_WORKFLOW_NAMES.map((name) => ({
       name,
-      description: readWorkflowMetaDescription(path.join(packagedExamplesDir(), `${name}.workflow.mjs`)),
+      description: readWorkflowMetaDescription(packagedWorkflowPath(name)),
     }));
 
-    expect(descriptions.map(({ name }) => name)).toEqual(["live-smoke", "llm-smoke", "requirements-grill", "review"]);
+    expect(descriptions.map(({ name }) => name)).toEqual([
+      "live-smoke",
+      "llm-smoke",
+      "requirements-grill",
+      "review",
+      "review-fix",
+    ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
       expect(description.length, name).toBeLessThanOrEqual(96);
@@ -38,7 +44,7 @@ describe("workflow operator catalog", () => {
         .current.filter((row) => row.source === "package")
         .map((row) => row.name);
 
-      expect(packageNames).toEqual(["live-smoke", "llm-smoke", "requirements-grill", "review"]);
+      expect(packageNames).toEqual(["live-smoke", "llm-smoke", "requirements-grill", "review-fix", "review"]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -332,7 +338,9 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("opts.model selects the child-session model");
       expect(namedText).toContain("otherwise the active Pi session model is passed to the child executor");
       expect(namedText).toContain("llm() is a direct one-shot model call with no child session or tools");
-      expect(namedText).toContain("curated Package names live-smoke, llm-smoke, requirements-grill, review");
+      expect(namedText).toContain(
+        "curated Package names live-smoke, llm-smoke, requirements-grill, review, review-fix",
+      );
       expect(namedText).toContain("Package files are not registered by existence");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 

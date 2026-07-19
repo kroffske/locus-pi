@@ -9,9 +9,16 @@ This file records user-visible changes to the public package.
 - Added the curated `review` Package workflow as an agent-owned pipeline. A
   target agent interprets the operator's free-form request and proves access;
   independent change and whole-context agents obtain their own evidence; a
-  final agent reopens the target, verifies findings, and fills the supplied
-  Markdown report template. The workflow script performs no direct Git,
-  filesystem, network, forge-specific, or `llm()` work.
+  final adjudicator reopens the target and verifies findings; then a publisher
+  agent creates a local review task and writes both the complete reader-facing
+  `.tasks/<task>/artifacts/review.md` and a mechanically copied, all-pending
+  `fix-plan.md` for human disposition editing. The workflow script performs no
+  direct Git, network, forge-specific, or `llm()` work; its local loader reads
+  only the package-owned agent manifest.
+- Added the curated `review-fix` workflow. It applies only explicit `accepted`
+  findings from the review-created approval plan in a retained linked worktree,
+  independently verifies the diff, and writes `fix-report.md` without commit,
+  push, merge, deployment, or original-checkout edits.
 - Recorded the strict curated-workflow selection criteria and candidate boundary
   in `docs/adr/curated-workflow-portfolio.md`.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
@@ -20,14 +27,35 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
-- Expanded the supported curated Package registry from three workflows to four
-  while keeping implementation, release, deploy, and incident workflows
-  project-local.
+- Separated `review` and `review-fix` into independent workflow directories,
+  with each entrypoint and pipeline diagram beside its owning workflow. Shared
+  family documentation, C4 artifacts, and the temporary validated
+  `agents.yaml` loader live under
+  `extensions/workflows/examples/review-family/`, so remediation no longer
+  appears owned by the review entrypoint. The modular entry scripts declare
+  `identityCoverage: "entry-only"` because the entry SHA-256 does not bind the
+  shared YAML or loader bytes.
+- Added `yaml` as an explicit runtime dependency for the shipped review-agent
+  manifest instead of relying on a transitive package.
+- Hardened curated review completion for large cumulative diffs. Evidence-heavy
+  review and adjudication agents now receive the runtime's full 100-call budget,
+  while `review.md` records the confirmed target, verdict, new findings, prior
+  finding reconciliation, independent checks, and residual risks as explicit
+  reader sections.
+- Expanded the supported curated Package registry from three workflows to five.
+  Generic implementation, release, deploy, and incident workflows remain
+  project-local; the narrow review remediation family is human-gated and
+  worktree-isolated.
+- Kept review and fixing as two workflows instead of adding a separate
+  `review-plan` run. The review publisher can copy verified findings into a
+  pending approval manifest without three more agent sessions, while immutable
+  evidence and the human write gate remain separate files.
 - Added an executable diagram contract so future curated workflows cannot ship
   without a reproducible generator, editable source, preview, ownership legend,
   and actual runtime persistence surfaces.
 - Hardened the curated review agents for large comparisons by budgeting
-  evidence calls, batching read-only inspection, and preserving explicit
+  evidence calls, batching read-only inspection, excluding local `.tasks/`,
+  `.locus/`, and prior reports from review evidence, and preserving explicit
   limitations instead of exhausting the runtime before producing a report.
 
 ## [0.2.1] - 2026-07-17

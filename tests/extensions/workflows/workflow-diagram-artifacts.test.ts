@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../../../extensions/_shared/workflow-runner.js";
+import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
 
 interface ExcalidrawElement {
   type?: string;
@@ -14,12 +14,10 @@ interface ExcalidrawDocument {
   files?: Record<string, unknown>;
 }
 
-const root = process.cwd();
-const examples = path.join(root, "extensions", "workflows", "examples");
-
 function diagramText(name: string): string {
+  const workflowPath = packagedWorkflowPath(name);
   const document = JSON.parse(
-    readFileSync(path.join(examples, `${name}-pipeline.excalidraw`), "utf8"),
+    readFileSync(path.join(path.dirname(workflowPath), `${name}-pipeline.excalidraw`), "utf8"),
   ) as ExcalidrawDocument;
   return (document.elements ?? [])
     .filter((element) => element.type === "text" && typeof element.text === "string")
@@ -30,9 +28,11 @@ function diagramText(name: string): string {
 describe("curated workflow diagram contract", () => {
   it("keeps an editable generator, Excalidraw source, and PNG preview beside every curated workflow", () => {
     for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
-      const generatorPath = path.join(examples, `${name}-pipeline.diagram.mjs`);
-      const excalidrawPath = path.join(examples, `${name}-pipeline.excalidraw`);
-      const pngPath = path.join(examples, `${name}-pipeline.png`);
+      const workflowPath = packagedWorkflowPath(name);
+      const directory = path.dirname(workflowPath);
+      const generatorPath = path.join(directory, `${name}-pipeline.diagram.mjs`);
+      const excalidrawPath = path.join(directory, `${name}-pipeline.excalidraw`);
+      const pngPath = path.join(directory, `${name}-pipeline.png`);
 
       const generator = readFileSync(generatorPath, "utf8");
       expect(generator, generatorPath).toContain("@kroffske/excalidraw-diagrams");
@@ -66,15 +66,35 @@ describe("curated workflow diagram contract", () => {
   it("labels review decisions and parallel control with their real owners", () => {
     const text = diagramText("review");
 
-    expect(text).toMatch(/Agent: 1.*resolve target/su);
-    expect(text).toMatch(/Workflow:.*Agent 1.*output\.status.*TARGET_SCHEMA/su);
-    expect(text).toMatch(/Workflow:.*launch Agents 2\+3 in parallel/su);
+    expect(text).toMatch(/Agent: R1.*target-resolver.*resolve review target/su);
+    expect(text).toMatch(/Workflow:.*Agent R1.*output\.status.*TARGET_SCHEMA/su);
+    expect(text).toMatch(/Workflow:.*launch Agents R2\+R3 in parallel/su);
     expect(text).toMatch(/Workflow:.*wait for both lane results/su);
-    expect(text).toMatch(/Agent: 4.*adjudicate.*Decides verdict/su);
+    expect(text).toMatch(/Agent: R2.*change-reviewer.*review introduced changes/su);
+    expect(text).toMatch(/Agent: R3.*context-reviewer.*review whole-file context/su);
+    expect(text).toMatch(/Agent: R4.*adjudicator.*adjudicate review findings.*Decides verdict/su);
+    expect(text).toMatch(/Agent: R5.*publisher.*publish review report.*artifacts\/review\.md/su);
     expect(text).toContain("TARGET_SCHEMA");
     expect(text).toContain("LANE_SCHEMA");
     expect(text).toContain("REPORT_SCHEMA");
-    expect(text).toMatch(/reportMarkdown.*result\.json/su);
+    expect(text).toContain("PUBLISH_SCHEMA");
+    expect(text).toContain(".tasks/<task>/artifacts/review.md");
+    expect(text).toContain(".tasks/<task>/artifacts/fix-plan.md");
+    expect(text).toMatch(/review\.md.*Primary reader-facing report/su);
+    expect(text).toMatch(/Operator: edit fix-plan dispositions.*accepted.*waived.*deferred.*pending/su);
+  });
+
+  it("shows the isolated fix boundary in the review family", () => {
+    const reviewFix = diagramText("review-fix");
+    expect(reviewFix).toMatch(/Agent: F1.*plan-resolver.*resolve approved review plan/su);
+    expect(reviewFix).toMatch(/Agent: F2.*implementer.*apply accepted review fixes/su);
+    expect(reviewFix).toMatch(/Agent: F3.*verifier.*verify review fixes and publish report/su);
+    expect(reviewFix).toContain("APPROVED_PLAN_SCHEMA");
+    expect(reviewFix).toContain("IMPLEMENTATION_SCHEMA");
+    expect(reviewFix).toContain("FIX_REPORT_SCHEMA");
+    expect(reviewFix).toMatch(/Only accepted ids cross to Agent F2/su);
+    expect(reviewFix).toMatch(/Artifact: retained linked Git worktree.*Original checkout remains untouched/su);
+    expect(reviewFix).toContain(".tasks/<task>/artifacts/fix-report.md");
   });
 
   it("does not disguise direct model calls or workflow-owned repository search as agents", () => {

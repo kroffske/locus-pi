@@ -6,7 +6,7 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 Node.js host access and is not sandboxed.
 
 The only curated Package workflows are `live-smoke`, `llm-smoke`,
-`requirements-grill`, and `review`.
+`requirements-grill`, `review`, and `review-fix`.
 
 ## Choose a shape
 

@@ -13,8 +13,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CURATED_PACKAGE_WORKFLOW_NAMES,
   loadWorkflowScript,
-  packagedExamplesDir,
+  packagedWorkflowPath,
   runWorkflowScript,
   type RunWorkflowScriptResult,
 } from "../../../extensions/_shared/workflow-runner.js";
@@ -23,10 +24,7 @@ import {
   createWorkflowScriptSnapshot,
   workflowScriptExecutionPath,
 } from "../../../extensions/_shared/workflow-script-identity.js";
-import {
-  readWorkflowRunResult,
-  workflowRunDir,
-} from "../../../extensions/_shared/workflow-journal.js";
+import { readWorkflowRunResult, workflowRunDir } from "../../../extensions/_shared/workflow-journal.js";
 import { createHarness } from "../../test-harness.js";
 
 async function runScript(root: string, scriptPath: string, sessionId: string): Promise<RunWorkflowScriptResult> {
@@ -46,11 +44,15 @@ describe("workflow script identity coverage", () => {
       builtinImports: [],
       unboundDependencies: [],
     });
-    expect(assessWorkflowSourceIdentity([
-      'import path from "node:path";',
-      'export { readFileSync } from "node:fs";',
-      "export default () => path.sep;",
-    ].join("\n"))).toEqual({
+    expect(
+      assessWorkflowSourceIdentity(
+        [
+          'import path from "node:path";',
+          'export { readFileSync } from "node:fs";',
+          "export default () => path.sep;",
+        ].join("\n"),
+      ),
+    ).toEqual({
       identityCoverage: "self-contained-static",
       builtinImports: ["node:fs", "node:path"],
       unboundDependencies: [],
@@ -75,26 +77,37 @@ describe("workflow script identity coverage", () => {
     // The policy accounts for declared/direct source edges, not arbitrary code
     // loading by trusted host code. Authors must explicitly downgrade these
     // indirect forms even though static analysis cannot prove their behavior.
-    expect(assessWorkflowSourceIdentity([
-      'import { createRequire as makeRequire } from "node:module";',
-      'const load = makeRequire("/tmp/entry.mjs");',
-      'eval("import(\\"./helper.mjs\\")");',
-      'export default () => typeof load;',
-    ].join("\n"))).toEqual({
+    expect(
+      assessWorkflowSourceIdentity(
+        [
+          'import { createRequire as makeRequire } from "node:module";',
+          'const load = makeRequire("/tmp/entry.mjs");',
+          'eval("import(\\"./helper.mjs\\")");',
+          "export default () => typeof load;",
+        ].join("\n"),
+      ),
+    ).toEqual({
       identityCoverage: "self-contained-static",
       builtinImports: ["node:module"],
       unboundDependencies: [],
     });
   });
 
-  it("keeps every packaged example on strict source identity", () => {
-    const examples = readdirSync(packagedExamplesDir())
-      .filter((name) => name.endsWith(".workflow.mjs"))
-      .sort();
-    expect(examples.length).toBeGreaterThan(0);
-    for (const name of examples) {
-      expect(assessWorkflowSourceIdentity(readFileSync(path.join(packagedExamplesDir(), name), "utf8")), name)
-        .toMatchObject({ identityCoverage: "self-contained-static", unboundDependencies: [] });
+  it("keeps curated identity coverage explicit for static and YAML-backed workflows", () => {
+    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+      const assessment = assessWorkflowSourceIdentity(readFileSync(packagedWorkflowPath(name), "utf8"));
+      if (name === "review" || name === "review-fix") {
+        expect(assessment, name).toEqual({
+          identityCoverage: "entry-only",
+          builtinImports: [],
+          unboundDependencies: ["import:../review-family/review-config.mjs"],
+        });
+      } else {
+        expect(assessment, name).toMatchObject({
+          identityCoverage: "self-contained-static",
+          unboundDependencies: [],
+        });
+      }
     }
   });
 
@@ -219,29 +232,38 @@ describe("workflow script identity coverage", () => {
   });
 
   it("requires a literal opt-out and downgrades old persisted identity", () => {
-    expect(() => assessWorkflowSourceIdentity([
-      'const coverage = "entry-only";',
-      "export const meta = { identityCoverage: coverage };",
-      'import "./helper.mjs";',
-    ].join("\n"))).toThrow(/must be the literal/u);
-    expect(() => assessWorkflowSourceIdentity([
-      'export const meta = { identityCoverage: "unknown" };',
-      "export default () => true;",
-    ].join("\n"))).toThrow(/must be the literal/u);
+    expect(() =>
+      assessWorkflowSourceIdentity(
+        [
+          'const coverage = "entry-only";',
+          "export const meta = { identityCoverage: coverage };",
+          'import "./helper.mjs";',
+        ].join("\n"),
+      ),
+    ).toThrow(/must be the literal/u);
+    expect(() =>
+      assessWorkflowSourceIdentity(
+        ['export const meta = { identityCoverage: "unknown" };', "export default () => true;"].join("\n"),
+      ),
+    ).toThrow(/must be the literal/u);
 
     const root = mkdtempSync(path.join(tmpdir(), "wf-identity-legacy-"));
     const runId = "legacy-run";
     try {
       const runDir = workflowRunDir(root, runId);
       mkdirSync(runDir, { recursive: true });
-      writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-        ok: true,
-        scriptIdentity: {
-          sourcePath: "/private/legacy.workflow.mjs",
-          snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
-          scriptSha256: "a".repeat(64),
-        },
-      }), "utf8");
+      writeFileSync(
+        path.join(runDir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          scriptIdentity: {
+            sourcePath: "/private/legacy.workflow.mjs",
+            snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
+            scriptSha256: "a".repeat(64),
+          },
+        }),
+        "utf8",
+      );
       expect(readWorkflowRunResult(root, runId)?.scriptIdentity).toMatchObject({
         schemaVersion: 1,
         identityPolicy: "legacy-unversioned",
@@ -255,27 +277,35 @@ describe("workflow script identity coverage", () => {
         snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
         scriptSha256: "a".repeat(64),
       };
-      writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-        ok: true,
-        scriptIdentity: { ...legacyFields, schemaVersion: 3 },
-      }), "utf8");
+      writeFileSync(
+        path.join(runDir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          scriptIdentity: { ...legacyFields, schemaVersion: 3 },
+        }),
+        "utf8",
+      );
       expect(readWorkflowRunResult(root, runId)?.scriptIdentity).toBeUndefined();
 
-      writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-        ok: true,
-        scriptIdentity: {
-          ...legacyFields,
-          schemaVersion: 2,
-          identityPolicy: "static-node-only-v1",
-          identityCoverage: "self-contained-static",
-          executionSource: "source",
-          nodeVersion: process.version,
-          platform: process.platform,
-          arch: process.arch,
-          builtinImports: ["node:fs"],
-          unboundDependencies: ["import:./helper.mjs"],
-        },
-      }), "utf8");
+      writeFileSync(
+        path.join(runDir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          scriptIdentity: {
+            ...legacyFields,
+            schemaVersion: 2,
+            identityPolicy: "static-node-only-v1",
+            identityCoverage: "self-contained-static",
+            executionSource: "source",
+            nodeVersion: process.version,
+            platform: process.platform,
+            arch: process.arch,
+            builtinImports: ["node:fs"],
+            unboundDependencies: ["import:./helper.mjs"],
+          },
+        }),
+        "utf8",
+      );
       expect(readWorkflowRunResult(root, runId)?.scriptIdentity).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -322,13 +352,17 @@ describe("workflow script identity coverage", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-identity-cache-scope-"));
     const globalKey = `__wf_identity_${path.basename(root).replace(/\W/gu, "_")}`;
     try {
-      writeFileSync(path.join(root, "entry.workflow.mjs"), [
-        'export const meta = { identityCoverage: "entry-only" };',
-        `globalThis[${JSON.stringify(globalKey)}] = (globalThis[${JSON.stringify(globalKey)}] ?? 0) + 1;`,
-        `const moduleInstance = globalThis[${JSON.stringify(globalKey)}];`,
-        "export default () => ({ moduleInstance });",
-        "",
-      ].join("\n"), "utf8");
+      writeFileSync(
+        path.join(root, "entry.workflow.mjs"),
+        [
+          'export const meta = { identityCoverage: "entry-only" };',
+          `globalThis[${JSON.stringify(globalKey)}] = (globalThis[${JSON.stringify(globalKey)}] ?? 0) + 1;`,
+          `const moduleInstance = globalThis[${JSON.stringify(globalKey)}];`,
+          "export default () => ({ moduleInstance });",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
       const first = await runScript(root, "entry.workflow.mjs", "wf-identity-cache-scope-a");
       const second = await runScript(root, "entry.workflow.mjs", "wf-identity-cache-scope-b");
@@ -366,7 +400,9 @@ describe("workflow script identity coverage", () => {
         ctx: harness.ctx,
         signal: new AbortController().signal,
         scriptPath: "entry.workflow.mjs",
-        onRunStart: (run) => { runDir = run.runDir; },
+        onRunStart: (run) => {
+          runDir = run.runDir;
+        },
       });
       expect(tampered).toBe(true);
       expect(result.ok).toBe(false);
@@ -381,23 +417,27 @@ describe("workflow script identity coverage", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-identity-tojson-tamper-"));
     const workflowsRoot = path.join(root, ".locus", "runtime", "workflows");
     try {
-      writeFileSync(path.join(root, "entry.workflow.mjs"), [
-        'import { appendFileSync, chmodSync, readdirSync } from "node:fs";',
-        'import path from "node:path";',
-        `const workflowsRoot = ${JSON.stringify(workflowsRoot)};`,
-        "export default () => ({",
-        "  toJSON() {",
-        "    const runId = readdirSync(workflowsRoot)[0];",
-        "    const runDir = path.join(workflowsRoot, runId);",
-        "    const snapshot = readdirSync(runDir).find((name) => name.startsWith('script-'));",
-        "    const snapshotPath = path.join(runDir, snapshot);",
-        "    chmodSync(snapshotPath, 0o644);",
-        "    appendFileSync(snapshotPath, '\\n// toJSON tamper\\n');",
-        "    return { escaped: true };",
-        "  },",
-        "});",
-        "",
-      ].join("\n"), "utf8");
+      writeFileSync(
+        path.join(root, "entry.workflow.mjs"),
+        [
+          'import { appendFileSync, chmodSync, readdirSync } from "node:fs";',
+          'import path from "node:path";',
+          `const workflowsRoot = ${JSON.stringify(workflowsRoot)};`,
+          "export default () => ({",
+          "  toJSON() {",
+          "    const runId = readdirSync(workflowsRoot)[0];",
+          "    const runDir = path.join(workflowsRoot, runId);",
+          "    const snapshot = readdirSync(runDir).find((name) => name.startsWith('script-'));",
+          "    const snapshotPath = path.join(runDir, snapshot);",
+          "    chmodSync(snapshotPath, 0o644);",
+          "    appendFileSync(snapshotPath, '\\n// toJSON tamper\\n');",
+          "    return { escaped: true };",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
       const result = await runScript(root, "entry.workflow.mjs", "wf-identity-tojson-tamper");
       expect(result.ok).toBe(false);

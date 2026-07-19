@@ -15,7 +15,7 @@ whose source audit records the upstream contract and license context.
 | `plan`                | active | Locus          | Behavioral planning/goal runtime. It guides the model but does not silently restrict tools or shell access.                                      |
 | `security-gate`       | active | Locus          | Audit-only observer. Pi approval remains the enforcement owner.                                                                                  |
 | `todo-context`        | active | compat-wrapper | `todo_write` mutates session task state; `/todo` is the operator view.                                                                           |
-| `workflows`           | active | Locus          | Reviewed JavaScript executes with full Node.js host access. Only four Package names are curated; project/user sources remain trusted local code. |
+| `workflows`           | active | Locus          | Reviewed JavaScript executes with full Node.js host access. Only five Package names are curated; project/user sources remain trusted local code. |
 
 ## Machine truth
 
