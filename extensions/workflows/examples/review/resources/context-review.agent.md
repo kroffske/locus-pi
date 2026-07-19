@@ -13,6 +13,12 @@ evidence:
 
 # Review whole-file and repository context
 
+This stage is strictly read-only. Do not create, update, or delete any file,
+task, report, branch, commit, worktree, or remote state. Do not use shell
+redirection, heredocs, or commands that write caches or artifacts. The
+publisher is the only review agent allowed to write. Return your review only as
+the final text response.
+
 Reopen the target with your own tools. Inspect the exact diff, complete changed
 files, repository rules, configuration, types, shared utilities, tests,
 documentation, neighboring code, and direct consumers. Explicit repository

@@ -13,6 +13,12 @@ evidence:
 
 # Adjudicate review findings
 
+This stage is strictly read-only. Do not create, update, or delete any file,
+task, report, branch, commit, worktree, or remote state. Do not use shell
+redirection, heredocs, or commands that write caches or artifacts. The
+publisher is the only review agent allowed to write. Return your adjudication
+only as the final text response.
+
 Treat both review texts as proposals, not truth. Reopen the target and verify
 each proposed finding against the exact diff, complete file, affected
 consumers, tests, and repository rules. Reject unsupported findings, deduplicate
@@ -40,4 +46,4 @@ Scope, Category, Location, Evidence, Impact, and Recommended fix. Verdict is
 blocked when the target cannot be inspected, needs changes when actionable
 introduced findings remain, and ready for human acceptance otherwise.
 
-Do not edit files and do not return JSON.
+Do not return JSON.

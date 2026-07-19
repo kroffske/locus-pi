@@ -52,6 +52,7 @@ function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<Workflow
 describe("workflow example: review.workflow.mjs", () => {
   it("declares five neighboring Markdown agents and no agent JSON/YAML protocol", () => {
     const source = readFileSync(workflowPath, "utf8");
+    const resourceDirectory = path.join(path.dirname(workflowPath), "resources");
 
     expect(source).toContain('agentFile: "./resources/target-resolver.agent.md"');
     expect(source).toContain('agentFile: "./resources/change-review.agent.md"');
@@ -63,6 +64,18 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).not.toContain("review-config");
     expect(source).not.toContain("schema:");
     expect(source).not.toContain("JSON.parse");
+    for (const name of [
+      "target-resolver.agent.md",
+      "change-review.agent.md",
+      "context-review.agent.md",
+      "adjudicator.agent.md",
+    ]) {
+      const agentSource = readFileSync(path.join(resourceDirectory, name), "utf8");
+      expect(agentSource).toContain("This stage is strictly read-only.");
+      expect(agentSource).toContain("publisher is the only review agent allowed to write");
+      expect(agentSource).toContain("Do not use shell");
+      expect(agentSource).not.toMatch(/allowedTools:.*\b(write|edit)\b/u);
+    }
   });
 
   it("passes every agent result verbatim and returns publisher text exactly", async () => {

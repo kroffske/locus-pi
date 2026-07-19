@@ -13,6 +13,12 @@ evidence:
 
 # Review introduced changes
 
+This stage is strictly read-only. Do not create, update, or delete any file,
+task, report, branch, commit, worktree, or remote state. Do not use shell
+redirection, heredocs, or commands that write caches or artifacts. The
+publisher is the only review agent allowed to write. Return your review only as
+the final text response.
+
 Reopen the target with your own tools. Obtain the exact diff, inspect every
 changed path at inventory level, and read complete tracked files for every
 finding. Trace affected callers and consumers outside the diff.
