@@ -11,7 +11,9 @@
 // ---------------------------------------------------------------------------
 
 import type { WorkflowRunSummary } from "./workflow-journal.js";
-import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
+import type { WorkflowResourceEvidence, WorkflowResourceLoader } from "./workflow-resources.js";
+import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type { AgentDefinition, EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
 
 /** The single agent-execution callback the runtime depends on. The bridge supplies
@@ -23,7 +25,10 @@ export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 
 export interface WorkflowAgentRequest {
   prompt: string;
-  agent: string;            // catalog name; defaults to DEFAULT_WORKFLOW_AGENT
+  agent: string; // catalog name; defaults to DEFAULT_WORKFLOW_AGENT
+  agentFile?: string;
+  agentDefinition?: AgentDefinition;
+  agentResource?: WorkflowResourceEvidence;
   /** Optional per-call subset of the selected catalog agent's allowed tools. */
   tools?: string[];
   /** Fail-closed per-child tool-call budget. The first over-budget start aborts the child. */
@@ -32,21 +37,22 @@ export interface WorkflowAgentRequest {
   model?: string;
   label?: string;
   phase?: string;
-  schema?: unknown;         // enforced by the runtime: validated post-run, retried up to SCHEMA_MAX_ATTEMPTS (then ok:false, or a thrown SchemaValidationError when the caller opts into throwOnSchemaMismatch)
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
   /** Permission intent for the child run. This is trace metadata, not a security boundary. */
   permissionMode?: PermissionMode;
   /** Workspace isolation intent for the child run. Worktrees isolate file changes for review, not security. */
   workspaceMode?: WorkspaceMode;
+  /** Opaque runtime-owned workspace identity. The bridge resolves it to cwd. */
+  workspaceHandle?: string;
 }
 
 export interface WorkflowAgentResult {
-  ok: boolean;              // true when status === "completed"
+  ok: boolean; // true when status === "completed"
   status: "completed" | "failed" | "cancelled" | "blocked";
   summary: string;
-  output?: unknown;         // structuredResult.output when present
-  structured?: unknown;     // the full AgentStructuredResult
+  /** Exact final child text when status is completed. */
+  text?: string;
   diagnostics: string[];
   evidence?: EvidenceEvaluation;
   agent: string;
@@ -65,9 +71,6 @@ export interface WorkflowAgentResult {
   usage?: WorkflowLlmUsage;
   permissionMode?: PermissionMode;
   workspaceMode?: WorkspaceMode;
-  /** Present only when the call requested schema validation. This is protocol
-   *  accounting, not a domain-quality verdict. */
-  schemaValidation?: WorkflowSchemaValidation;
 }
 
 export interface WorkflowAgentChildTrace {
@@ -115,13 +118,13 @@ export interface WorkflowLlmUsage {
 }
 
 export interface WorkflowLlmResult {
-  ok: boolean;              // true when the model returned normally (stopReason stop/length)
-  text: string;            // concatenated assistant text content
-  stopReason: string;      // raw provider stop reason ("stop" | "length" | "error" | ...)
-  model?: string;          // resolved model selector actually used
+  ok: boolean; // true when the model returned normally (stopReason stop/length)
+  text: string; // concatenated assistant text content
+  stopReason: string; // raw provider stop reason ("stop" | "length" | "error" | ...)
+  model?: string; // resolved model selector actually used
   thinking?: string;
   usage?: WorkflowLlmUsage;
-  output?: unknown;         // parsed JSON value when a schema was provided and validation passed
+  output?: unknown; // parsed JSON value when a schema was provided and validation passed
   diagnostics: string[];
   label?: string;
   /** Present only when the call requested schema validation. This is protocol
@@ -130,7 +133,14 @@ export interface WorkflowLlmResult {
 }
 
 export interface WorkflowDsl {
-  agent(prompt: string, opts?: WorkflowAgentOptions): Promise<WorkflowAgentResult>;
+  /** Run one child agent. Success resolves to its exact non-empty final text. */
+  agent(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
+  /** Render one neighboring .prompt.md resource from the original workflow source. */
+  promptFile(path: string, variables?: Record<string, string>): Promise<string>;
+  /** Allocate one retained runtime-owned linked worktree at an exact Git ref. */
+  workspace(label: string, ref: string): Promise<string>;
+  /** Absolute project root captured by the workflow runner. */
+  projectRoot(): string;
   /** Direct one-shot model completion node — a thin sibling of agent(). No child session,
    *  no tools. Returns ok:false (never throws) when no llmRunner is configured or the model
    *  errors; a group classifies that explicit result as a typed branch failure. */
@@ -143,7 +153,9 @@ export interface WorkflowDsl {
 }
 
 export interface WorkflowAgentOptions {
-  agent?: string;           // catalog name; default DEFAULT_WORKFLOW_AGENT
+  agent?: string; // catalog name; default DEFAULT_WORKFLOW_AGENT
+  /** Workflow-local neighboring Markdown definition, relative to the workflow source. */
+  agentFile?: string;
   /** Narrow this child to a subset of its catalog allow-list; [] creates a no-tool child. */
   tools?: string[];
   /** Maximum tool calls per child attempt; 0 requires a no-tool completion. */
@@ -152,20 +164,14 @@ export interface WorkflowAgentOptions {
   model?: string;
   label?: string;
   phase?: string;
-  /** When provided, the runtime validates result.output after each attempt and retries up to
-   *  SCHEMA_MAX_ATTEMPTS times. On final mismatch it returns ok:false/status:"failed" by
-   *  default, or throws SchemaValidationError when throwOnSchemaMismatch is set. Optional. */
-  schema?: unknown;
-  /** When true AND schema is set, a final schema mismatch (after SCHEMA_MAX_ATTEMPTS) THROWS
-   *  a SchemaValidationError instead of returning ok:false. In a group either form becomes
-   *  fail-closed WorkflowGroupFailureError evidence after siblings finish. */
-  throwOnSchemaMismatch?: boolean;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
   /** Permission intent for the child run. This is trace metadata, not a security boundary. */
   permissionMode?: PermissionMode;
   /** Workspace isolation intent for the child run. Worktrees isolate file changes for review, not security. */
   workspaceMode?: WorkspaceMode;
+  /** Reuse a runtime-owned workspace allocated by workspace(). */
+  workspaceHandle?: string;
 }
 
 export interface WorkflowLlmOptions {
@@ -205,8 +211,7 @@ export type WorkflowGroupSlot<T> =
   | { index: number; status: "failed"; failure: WorkflowBranchFailure; value?: T };
 
 export type WorkflowGroupEnvelopeSlot =
-  | { index: number; status: "completed" }
-  | { index: number; status: "failed"; failure: WorkflowBranchFailure };
+  { index: number; status: "completed" } | { index: number; status: "failed"; failure: WorkflowBranchFailure };
 
 /** JSON-safe run/result projection for an unhandled group failure. */
 export interface WorkflowGroupFailureEnvelope {
@@ -241,30 +246,30 @@ export class WorkflowGroupFailureError<T = unknown> extends Error {
   readonly completed: number;
   readonly failed: number;
 
-  constructor(
-    groupKind: WorkflowGroupKind,
-    groupId: string,
-    slots: Array<WorkflowGroupSlot<T>>,
-  ) {
+  constructor(groupKind: WorkflowGroupKind, groupId: string, slots: Array<WorkflowGroupSlot<T>>) {
     const failures = slots
       .filter((slot): slot is Extract<WorkflowGroupSlot<T>, { status: "failed" }> => slot.status === "failed")
       .map((slot) => slot.failure);
     const total = slots.length;
     const failed = failures.length;
-    const preview = failures.slice(0, 3).map((failure) =>
-      `branch ${failure.index}${failure.stageIndex === undefined ? "" : ` stage ${failure.stageIndex}`}: ${failure.message}`
-    ).join("; ");
+    const preview = failures
+      .slice(0, 3)
+      .map(
+        (failure) =>
+          `branch ${failure.index}${failure.stageIndex === undefined ? "" : ` stage ${failure.stageIndex}`}: ${failure.message}`,
+      )
+      .join("; ");
     const suffix = failures.length > 3 ? `; +${failures.length - 3} more` : "";
     super(`${groupKind} failed in ${failed}/${total} branch(es): ${preview}${suffix}`);
     this.name = "WorkflowGroupFailureError";
     this.groupKind = groupKind;
     this.groupId = groupId;
-    this.slots = slots.map((slot) => slot.status === "completed"
-      ? { ...slot }
-      : { ...slot, failure: { ...slot.failure } });
+    this.slots = slots.map((slot) =>
+      slot.status === "completed" ? { ...slot } : { ...slot, failure: { ...slot.failure } },
+    );
     this.partialResults = this.slots.map((slot) => {
       if (slot.status === "completed") return slot.value;
-      return Object.prototype.hasOwnProperty.call(slot, "value") ? slot.value ?? null : null;
+      return Object.prototype.hasOwnProperty.call(slot, "value") ? (slot.value ?? null) : null;
     });
     this.failures = failures.map((failure) => ({ ...failure }));
     this.total = total;
@@ -282,9 +287,11 @@ export class WorkflowGroupFailureError<T = unknown> extends Error {
       total: this.total,
       completed: this.completed,
       failed: this.failed,
-      slots: this.slots.map((slot) => slot.status === "completed"
-        ? { index: slot.index, status: "completed" }
-        : { index: slot.index, status: "failed", failure: { ...slot.failure } }),
+      slots: this.slots.map((slot) =>
+        slot.status === "completed"
+          ? { index: slot.index, status: "completed" }
+          : { index: slot.index, status: "failed", failure: { ...slot.failure } },
+      ),
       failures: this.failures.map((failure) => ({ ...failure })),
     };
   }
@@ -295,20 +302,33 @@ export function workflowGroupFailureEnvelope(value: unknown): WorkflowGroupFailu
 }
 
 class CapturedWorkflowBranchFailure<T = unknown> extends Error {
-  constructor(readonly value: T, readonly failure: WorkflowBranchFailure) {
+  constructor(
+    readonly value: T,
+    readonly failure: WorkflowBranchFailure,
+  ) {
     super(failure.message);
     this.name = "CapturedWorkflowBranchFailure";
   }
 }
 
 export interface WorkflowJournalSink {
-  write(line: WorkflowJournalLine): void;   // sync append; never throws into the DSL
+  write(line: WorkflowJournalLine): void; // sync append; never throws into the DSL
 }
 
 export interface WorkflowJournalLine {
   ts: string;
   runId: string;
-  kind: "phase" | "log" | "group_start" | "group_end" | "agent_start" | "agent_end" | "llm_start" | "llm_end" | "llm_delta" | "error";
+  kind:
+    | "phase"
+    | "log"
+    | "group_start"
+    | "group_end"
+    | "agent_start"
+    | "agent_end"
+    | "llm_start"
+    | "llm_end"
+    | "llm_delta"
+    | "error";
   /** Provenance for log lines. Absent means legacy/unknown and must not be inferred. */
   source?: "script" | "runtime";
   phase?: string;
@@ -320,6 +340,8 @@ export interface WorkflowJournalLine {
   groupCompleted?: number;
   groupFailed?: number;
   agent?: string;
+  agentFile?: string;
+  resourceSha256?: string;
   label?: string;
   /** Workflow loop slot descriptor (phase,label) on agent lines (REQ-009); absent = no-rounds journal. */
   slotKey?: string;
@@ -328,9 +350,16 @@ export interface WorkflowJournalLine {
   status?: string;
   evidence?: EvidenceEvaluation;
   evidenceWarnings?: string[];
+  /** Runtime-owned child session identity; never parsed from agent text. */
+  childSessionId?: string;
+  /** Persisted child transcript evidence; never exposed as the DSL return value. */
+  childTrace?: WorkflowAgentChildTrace;
+  /** Persisted child result artifact path; never exposed as the DSL return value. */
+  resultArtifact?: string;
   schemaValidation?: WorkflowSchemaValidation;
   durationMs?: number;
   worktreePath?: string;
+  workspaceHandle?: string;
   /** Resolved permission intent for agent_start/agent_end lines. Not a security boundary. */
   permissionMode?: PermissionMode;
   /** Resolved workspace intent for agent_start/agent_end lines. Not a security boundary. */
@@ -354,18 +383,21 @@ export interface WorkflowRuntimeOptions {
    *  fail-closed ok:false result (never throws, never fabricates text). */
   llmRunner?: WorkflowLlmRunner;
   args?: unknown;
-  maxConcurrentAgents?: number;              // default: unlimited global leaf-agent concurrency
+  projectRoot?: string;
+  resourceLoader?: WorkflowResourceLoader;
+  workspaceManager?: WorkflowWorkspaceManager;
+  maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
   // default DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS (1000); global per-run cap across agent() calls;
   // cyclic workflows allowed up to the cap, exceeding it throws WorkflowInvocationCapError and exits the run.
   maxTotalAgentInvocations?: number;
-  journal?: WorkflowJournalSink;            // default: no-op sink
-  now?: () => string;                        // default () => new Date().toISOString()
+  journal?: WorkflowJournalSink; // default: no-op sink
+  now?: () => string; // default () => new Date().toISOString()
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
 }
 
 export interface WorkflowRuntime {
   dsl: WorkflowDsl;
-  getJournal(): WorkflowJournalLine[];       // in-memory mirror (for tests / final render)
+  getJournal(): WorkflowJournalLine[]; // in-memory mirror (for tests / final render)
   getArgs(): unknown;
   currentPhase(): string | undefined;
 }
@@ -490,7 +522,7 @@ function defaultWorkflowWorkspaceMode(opts: WorkflowAgentOptions | undefined): W
 // Schema enforcement (S2)
 // ---------------------------------------------------------------------------
 
-/** Maximum agent invocation attempts when a schema is provided. */
+/** Maximum direct-model invocation attempts when a schema is provided. */
 const SCHEMA_MAX_ATTEMPTS = 2;
 
 /** Default global per-run cap on total dsl.agent() invocations. Cyclic workflows are
@@ -509,7 +541,19 @@ export class WorkflowInvocationCapError extends Error {
   }
 }
 
-/** Thrown by agent({ schema, throwOnSchemaMismatch: true }) when the agent output still
+/** Typed failure for one child execution. Public agent() callers receive text only;
+ * runtime status and diagnostics remain available on this internal error and journal. */
+export class WorkflowAgentExecutionError extends Error {
+  readonly result: WorkflowAgentResult;
+
+  constructor(result: WorkflowAgentResult) {
+    super(result.summary);
+    this.name = "WorkflowAgentExecutionError";
+    this.result = result;
+  }
+}
+
+/** Thrown by llm({ schema, throwOnSchemaMismatch: true }) when the model output still
  *  violates the schema after SCHEMA_MAX_ATTEMPTS. Carries the validator errors + attempt count. */
 export class SchemaValidationError extends Error {
   readonly errors: string[];
@@ -548,7 +592,9 @@ function validateAgainstSchema(
     const loc = path || "root";
     if (type === "object") {
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        errors.push(`${loc}: expected object, got ${value === null ? "null" : Array.isArray(value) ? "array" : typeof value}`);
+        errors.push(
+          `${loc}: expected object, got ${value === null ? "null" : Array.isArray(value) ? "array" : typeof value}`,
+        );
       } else {
         const obj = value as Record<string, unknown>;
         const required = schema["required"];
@@ -567,7 +613,11 @@ function validateAgainstSchema(
         if (propsObj) {
           for (const [key, propSchema] of Object.entries(propsObj)) {
             if (key in obj && propSchema !== null && typeof propSchema === "object") {
-              const sub = validateAgainstSchema(obj[key], propSchema as Record<string, unknown>, path ? `${path}.${key}` : key);
+              const sub = validateAgainstSchema(
+                obj[key],
+                propSchema as Record<string, unknown>,
+                path ? `${path}.${key}` : key,
+              );
               if (!sub.ok) errors.push(...sub.errors);
             }
           }
@@ -679,7 +729,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
   }
 
-  async function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<WorkflowAgentResult> {
+  async function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string> {
     // Global per-run cap across all agent() calls (including those nested in
     // parallel()/pipeline()). Count BEFORE doing any work so the call that breaches
     // the cap is itself counted, and throw a typed error that bubbles past grouped
@@ -688,22 +738,44 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (totalAgentInvocations > maxTotalAgentInvocations) {
       throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
     }
+    if (prompt.trim() === "") throw new Error("agent prompt must be non-empty");
+    if (opts?.agent !== undefined && opts.agentFile !== undefined) {
+      throw new Error("agent and agentFile are mutually exclusive");
+    }
+    if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
+      throw new Error("workflow workspace manager is not configured");
+    }
     const effectivePhase = opts?.phase ?? _currentPhase;
     const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls);
-    const permissionMode = defaultWorkflowPermissionMode(opts?.agent ?? DEFAULT_WORKFLOW_AGENT, opts?.permissionMode);
-    const workspaceMode = defaultWorkflowWorkspaceMode(opts);
+    const loadedAgent = opts?.agentFile === undefined ? undefined : options.resourceLoader?.loadAgent(opts.agentFile);
+    if (opts?.agentFile !== undefined && loadedAgent === undefined) {
+      throw new Error("workflow resource loader is not configured");
+    }
+    const agentName = loadedAgent?.definition.name ?? opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
+    const permissionMode = defaultWorkflowPermissionMode(
+      loadedAgent === undefined ? agentName : loadedAgent.definition.name,
+      opts?.permissionMode ?? loadedAgent?.definition.permissionMode,
+    );
+    const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
     const req: WorkflowAgentRequest = {
       prompt,
-      agent: opts?.agent ?? DEFAULT_WORKFLOW_AGENT,
+      agent: agentName,
+      ...(opts?.agentFile !== undefined ? { agentFile: opts.agentFile } : {}),
+      ...(loadedAgent !== undefined
+        ? {
+            agentDefinition: loadedAgent.definition,
+            agentResource: loadedAgent.evidence,
+          }
+        : {}),
       permissionMode,
       workspaceMode,
+      ...(opts?.workspaceHandle !== undefined ? { workspaceHandle: opts.workspaceHandle } : {}),
       ...(opts?.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
-      ...(opts?.schema !== undefined ? { schema: opts.schema } : {}),
     };
     const requestedLiveModel = liveModelFromSelector(req.model);
     emit({
@@ -711,8 +783,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "agent_start",
       agent: req.agent,
+      ...(req.agentFile !== undefined ? { agentFile: req.agentFile } : {}),
+      ...(req.agentResource !== undefined ? { resourceSha256: req.agentResource.sha256 } : {}),
       permissionMode,
       workspaceMode,
+      ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...activeGroupFields(),
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
@@ -722,79 +797,24 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
     });
     const start = Date.now();
-    // Route through the single scheduler seam even for a single agent call.
-    // With schema: retry up to SCHEMA_MAX_ATTEMPTS; return ok:false on final mismatch (no throw).
-    let result: WorkflowAgentResult | undefined;
-    let lastSchemaErrors: string[] | undefined;
-    let schemaAttempts = 0;
-
-    const throwOnMismatch = opts?.throwOnSchemaMismatch === true;
-    // Each schema retry is intentionally a FRESH agent run: a complete-but-wrong structured
-    // result cannot be "continued", so attempts are independent cold runs, not a resumed
-    // session. Deliberate decision, not an accidental restart.
-    const maxAttempts = req.schema !== undefined ? SCHEMA_MAX_ATTEMPTS : 1;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      schemaAttempts += 1;
-      const attemptRequest = attempt === 0 || lastSchemaErrors === undefined
-        ? req
-        : {
-            ...req,
-            prompt:
-              `${req.prompt}\n\nSCHEMA RETRY: The previous completed result failed validation: ` +
-              `${lastSchemaErrors.join("; ")}. Return the required structured result again. ` +
-              `The result envelope must contain a non-empty output value matching the requested shape.`,
-          };
-      try {
-        const [r] = await runScheduled<WorkflowAgentResult>([async () => {
+    let finalResult: WorkflowAgentResult;
+    try {
+      const [result] = await runScheduled<WorkflowAgentResult>([
+        async () => {
           await agentConcurrencyGate.acquire();
           try {
-            return await agentRunner(attemptRequest);
+            return await agentRunner(req);
           } finally {
             agentConcurrencyGate.release();
           }
-        }]);
-        if (r === undefined) {
-          throw new Error("scheduler returned empty array for single-agent call");
-        }
-        result = r;
-      } catch (err) {
-        const durationMs = Date.now() - start;
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "error",
-          agent: req.agent,
-          ...(req.label !== undefined ? { label: req.label } : {}),
-          ...(req.phase !== undefined ? { phase: req.phase } : {}),
-          message: err instanceof Error ? err.message : String(err),
-          durationMs,
-        });
-        throw err; // bare agent() rejects; groups retain it in typed failure evidence
+        },
+      ]);
+      if (result === undefined) {
+        throw new Error("scheduler returned empty array for single-agent call");
       }
-
-      // No schema or agent-level failure: stop here.
-      if (req.schema === undefined || !result.ok) break;
-
-      // Validate output against schema.
-      const validation = validateAgainstSchema(
-        result.output,
-        req.schema as Record<string, unknown>,
-      );
-      if (validation.ok) break; // valid — exit retry loop
-
-      lastSchemaErrors = validation.errors;
-      result = undefined; // mark as not yet valid; will retry or fail below
-    }
-
-    // Schema enforcement produced a final mismatch after all attempts.
-    if (result === undefined && lastSchemaErrors !== undefined) {
-      const mismatchMsg = `schema mismatch after ${maxAttempts} attempt(s): ${lastSchemaErrors.join("; ")}`;
+      finalResult = result;
+    } catch (err) {
       const durationMs = Date.now() - start;
-      const schemaValidation: WorkflowSchemaValidation = {
-        status: "mismatch",
-        attempts: schemaAttempts,
-        errors: [...lastSchemaErrors],
-      };
       emit({
         ts: nowFn(),
         runId,
@@ -802,52 +822,29 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         agent: req.agent,
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        message: mismatchMsg,
+        message: err instanceof Error ? err.message : String(err),
         durationMs,
       });
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "agent_end",
-        agent: req.agent,
-        status: "failed",
-        permissionMode,
-        workspaceMode,
-        schemaValidation,
-        ...activeGroupFields(),
-        ...(req.label !== undefined ? { label: req.label } : {}),
-        ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        durationMs,
-      });
-      // Opt-in fail-fast: bare callers can request the narrower schema error. A group
-      // classifies either the throw or default ok:false result as a failed branch.
-      if (throwOnMismatch) {
-        throw new SchemaValidationError(lastSchemaErrors, maxAttempts);
-      }
-      return {
-        ok: false,
-        status: "failed",
-        summary: mismatchMsg,
-        diagnostics: [`schema mismatch: ${lastSchemaErrors.join("; ")}`],
-        agent: req.agent,
-        schemaValidation,
-        ...(req.label !== undefined ? { label: req.label } : {}),
-      };
+      throw err;
     }
-
-    // Normal path: result is valid (or schema was not requested).
-    const baseResult = result!;
-    const finalResult: WorkflowAgentResult = req.schema !== undefined && baseResult.ok
-      ? {
-          ...baseResult,
-          schemaValidation: { status: "valid", attempts: schemaAttempts, errors: [] },
-        }
-      : baseResult;
     if (opts?.sandbox !== undefined) {
       finalResult.diagnostics = finalResult.diagnostics ?? [];
       finalResult.diagnostics.push(
         "`sandbox` is deprecated; it remains a compatible alias — file isolation only, not a security boundary",
       );
+    }
+    if (
+      finalResult.ok &&
+      finalResult.status === "completed" &&
+      (finalResult.text === undefined || finalResult.text.trim() === "")
+    ) {
+      finalResult = {
+        ...finalResult,
+        ok: false,
+        status: "failed",
+        summary: "Agent result text is empty.",
+        diagnostics: [...finalResult.diagnostics, "Agent result text is empty."],
+      };
     }
     const durationMs = Date.now() - start;
     emit({
@@ -855,6 +852,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "agent_end",
       agent: req.agent,
+      ...(req.agentFile !== undefined ? { agentFile: req.agentFile } : {}),
+      ...(req.agentResource !== undefined ? { resourceSha256: req.agentResource.sha256 } : {}),
       status: finalResult.status,
       permissionMode: finalResult.permissionMode ?? permissionMode,
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,
@@ -865,7 +864,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.evidence?.warnings !== undefined && finalResult.evidence.warnings.length > 0
         ? { evidenceWarnings: finalResult.evidence.warnings }
         : {}),
-      ...(finalResult.schemaValidation !== undefined ? { schemaValidation: finalResult.schemaValidation } : {}),
+      ...(finalResult.childSessionId !== undefined ? { childSessionId: finalResult.childSessionId } : {}),
+      ...(finalResult.childTrace !== undefined ? { childTrace: finalResult.childTrace } : {}),
+      ...(finalResult.resultArtifact !== undefined ? { resultArtifact: finalResult.resultArtifact } : {}),
+      ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Round record for the drill submenu (REQ-009): (slotKey,round,usage) from the bridge.
@@ -876,7 +878,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.worktreePath !== undefined ? { worktreePath: finalResult.worktreePath } : {}),
       durationMs,
     });
-    return finalResult;
+    if (!finalResult.ok || finalResult.status !== "completed") {
+      throw new WorkflowAgentExecutionError(finalResult);
+    }
+    return finalResult.text!;
   }
 
   async function llmDsl(prompt: string, opts?: WorkflowLlmOptions): Promise<WorkflowLlmResult> {
@@ -913,7 +918,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "llm_start",
       ...activeGroupFields(),
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
-      ...(req.reasoning !== undefined ? { thinking: req.reasoning } : requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
+      ...(req.reasoning !== undefined
+        ? { thinking: req.reasoning }
+        : requestedLiveModel?.thinking !== undefined
+          ? { thinking: requestedLiveModel.thinking }
+          : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
     });
@@ -930,7 +939,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
         ...(r?.model !== undefined ? { model: r.model } : {}),
-        ...(r?.thinking !== undefined ? { thinking: r.thinking } : req.reasoning !== undefined ? { thinking: req.reasoning } : {}),
+        ...(r?.thinking !== undefined
+          ? { thinking: r.thinking }
+          : req.reasoning !== undefined
+            ? { thinking: req.reasoning }
+            : {}),
         ...(r?.usage !== undefined ? { usage: r.usage } : {}),
         ...(r?.schemaValidation !== undefined ? { schemaValidation: r.schemaValidation } : {}),
         ...(status !== "completed" && diagnostic !== undefined ? { message: diagnostic } : {}),
@@ -964,14 +977,16 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       schemaAttempts += 1;
       let r: WorkflowLlmResult;
       try {
-        const [scheduled] = await runScheduled<WorkflowLlmResult>([async () => {
-          await agentConcurrencyGate.acquire();
-          try {
-            return await llmRunner(req);
-          } finally {
-            agentConcurrencyGate.release();
-          }
-        }]);
+        const [scheduled] = await runScheduled<WorkflowLlmResult>([
+          async () => {
+            await agentConcurrencyGate.acquire();
+            try {
+              return await llmRunner(req);
+            } finally {
+              agentConcurrencyGate.release();
+            }
+          },
+        ]);
         if (scheduled === undefined) {
           throw new Error("scheduler returned empty array for single-llm call");
         }
@@ -1036,12 +1051,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
 
     const baseResult = result!;
-    const finalResult: WorkflowLlmResult = schema !== undefined && baseResult.ok
-      ? {
-          ...baseResult,
-          schemaValidation: { status: "valid", attempts: schemaAttempts, errors: [] },
-        }
-      : baseResult;
+    const finalResult: WorkflowLlmResult =
+      schema !== undefined && baseResult.ok
+        ? {
+            ...baseResult,
+            schemaValidation: { status: "valid", attempts: schemaAttempts, errors: [] },
+          }
+        : baseResult;
     emitLlmEnd(finalResult.ok ? "completed" : "failed", finalResult);
     return finalResult;
   }
@@ -1080,10 +1096,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return runGrouped("pipeline", itemThunks.length, () => runGroupBranches("pipeline", itemThunks));
   }
 
-  async function runGroupBranches<T>(
-    kind: WorkflowGroupKind,
-    thunks: Array<() => Promise<T>>,
-  ): Promise<T[]> {
+  async function runGroupBranches<T>(kind: WorkflowGroupKind, thunks: Array<() => Promise<T>>): Promise<T[]> {
     const groupId = activeGroupFields().groupId ?? `${kind}-unknown`;
     const wrapped: Array<() => Promise<WorkflowGroupSlot<T>>> = thunks.map((thunk, index) => async () => {
       try {
@@ -1096,9 +1109,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         // The invocation cap is a hard run-level failure and remains its own
         // public error type instead of being converted into a partial group.
         if (err instanceof WorkflowInvocationCapError) throw err;
-        const failure = err instanceof CapturedWorkflowBranchFailure
-          ? err.failure
-          : { index, kind: "thrown" as const, message: workflowErrorMessage(err) };
+        const failure =
+          err instanceof CapturedWorkflowBranchFailure
+            ? err.failure
+            : { index, kind: "thrown" as const, message: workflowErrorMessage(err) };
         emitGroupBranchFailure(failure);
         return {
           index,
@@ -1148,9 +1162,23 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>,
     input?: unknown,
   ): Promise<T> {
-    emit({ ts: nowFn(), runId, kind: "log", source: "runtime", message: "[workflow:enter]", ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}) });
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: "[workflow:enter]",
+      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+    });
     const result = await subFn(dsl, input);
-    emit({ ts: nowFn(), runId, kind: "log", source: "runtime", message: "[workflow:exit]", ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}) });
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: "[workflow:exit]",
+      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+    });
     return result;
   }
 
@@ -1224,8 +1252,32 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return { groupId: group.id, groupKind: group.kind, groupLabel: group.label };
   }
 
+  async function promptFile(path: string, variables?: Record<string, string>): Promise<string> {
+    if (options.resourceLoader === undefined) {
+      throw new Error("workflow resource loader is not configured");
+    }
+    return options.resourceLoader.renderPrompt(path, variables);
+  }
+
+  async function workspace(label: string, ref: string): Promise<string> {
+    if (options.workspaceManager === undefined) {
+      throw new Error("workflow workspace manager is not configured");
+    }
+    return options.workspaceManager.allocate(label, ref);
+  }
+
+  function projectRoot(): string {
+    if (options.projectRoot === undefined || options.projectRoot.trim() === "") {
+      throw new Error("workflow project root is not configured");
+    }
+    return options.projectRoot;
+  }
+
   const dsl: WorkflowDsl = {
     agent: agentDsl,
+    promptFile,
+    workspace,
+    projectRoot,
     llm: llmDsl,
     parallel,
     pipeline,
@@ -1266,7 +1318,15 @@ function liveModelFromSelector(selector: string | undefined): { model: string; t
 }
 
 function isThinkingSuffix(value: string): boolean {
-  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "thinking";
+  return (
+    value === "off" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh" ||
+    value === "thinking"
+  );
 }
 
 function classifyReturnedGroupFailure(
@@ -1278,14 +1338,14 @@ function classifyReturnedGroupFailure(
   const status = typeof value.status === "string" ? value.status : undefined;
   const failedStatus = status === "failed" || status === "blocked" || status === "cancelled";
   if (value.ok !== false && !failedStatus) return undefined;
-  const summary = typeof value.summary === "string" && value.summary.trim() !== ""
-    ? value.summary
-    : undefined;
+  const summary = typeof value.summary === "string" && value.summary.trim() !== "" ? value.summary : undefined;
   const firstDiagnostic = Array.isArray(value.diagnostics)
     ? value.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
     : undefined;
   const message = workflowErrorMessage(
-    summary ?? firstDiagnostic ?? (status === undefined ? "branch returned ok:false" : `branch returned status=${status}`),
+    summary ??
+      firstDiagnostic ??
+      (status === undefined ? "branch returned ok:false" : `branch returned status=${status}`),
   );
   return {
     index,

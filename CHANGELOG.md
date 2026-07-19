@@ -12,13 +12,18 @@ This file records user-visible changes to the public package.
   final adjudicator reopens the target and verifies findings; then a publisher
   agent creates a local review task and writes both the complete reader-facing
   `.tasks/<task>/artifacts/review.md` and a mechanically copied, all-pending
-  `fix-plan.md` for human disposition editing. The workflow script performs no
-  direct Git, network, forge-specific, or `llm()` work; its local loader reads
-  only the package-owned agent manifest.
+  `fix-plan.md` for human disposition editing. Workflow-local agents and prompts
+  are ordinary neighboring Markdown files; exact child text is passed between
+  stages without a model-written JSON protocol.
 - Added the curated `review-fix` workflow. It applies only explicit `accepted`
-  findings from the review-created approval plan in a retained linked worktree,
-  independently verifies the diff, and writes `fix-report.md` without commit,
-  push, merge, deployment, or original-checkout edits.
+  findings from a deterministically validated review plan in one runtime-owned
+  retained linked worktree, independently verifies the diff with the same
+  opaque workspace handle, and writes `fix-report.md` without commit, push,
+  merge, deployment, or original-checkout edits.
+- Added workflow-local `agentFile` and `promptFile()` resources with
+  source-relative confinement, immutable run copies, and SHA-256 evidence.
+- Added runtime-owned `workspace()` handles for sharing one exact linked
+  worktree safely across workflow agents.
 - Recorded the strict curated-workflow selection criteria and candidate boundary
   in `docs/adr/curated-workflow-portfolio.md`.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
@@ -27,16 +32,15 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- Agent execution now has one output contract: the exact final non-empty child
+  text. `spawn_agent` and `task` accept one required `task` string and create one
+  child. Model-written result markers, JSON envelopes, agent schemas, parser
+  retries, and batch `tasks:[]` were removed; runtime metadata remains in
+  details, journals, and result artifacts.
 - Separated `review` and `review-fix` into independent workflow directories,
-  with each entrypoint and pipeline diagram beside its owning workflow. Shared
-  family documentation, C4 artifacts, and the temporary validated
-  `agents.yaml` loader live under
-  `extensions/workflows/examples/review-family/`, so remediation no longer
-  appears owned by the review entrypoint. The modular entry scripts declare
-  `identityCoverage: "entry-only"` because the entry SHA-256 does not bind the
-  shared YAML or loader bytes.
-- Added `yaml` as an explicit runtime dependency for the shipped review-agent
-  manifest instead of relying on a transitive package.
+  with each entrypoint, local Markdown agents/prompts, and pipeline diagram
+  beside its owner. The former shared YAML/config loader and stale review-family
+  diagrams were removed.
 - Hardened curated review completion for large cumulative diffs. Evidence-heavy
   review and adjudication agents now receive the runtime's full 100-call budget,
   while `review.md` records the confirmed target, verdict, new findings, prior

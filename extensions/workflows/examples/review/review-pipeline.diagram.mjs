@@ -122,7 +122,7 @@ const workflowCheck = (id, x, y, width, height) => {
     { color: COLORS.workflow, strokeWidth: 2 },
   );
   setFrameFill(frame, COLORS.workflowFill);
-  const title = scene.text(x + 15, y + 91, "Workflow: check Agent R1 output.status (TARGET_SCHEMA)", {
+  const title = scene.text(x + 15, y + 91, "Workflow: forward Agent R1 exact text", {
     size: 10,
     color: COLORS.workflow,
     width: width - 30,
@@ -131,7 +131,7 @@ const workflowCheck = (id, x, y, width, height) => {
   const body = scene.text(
     x + 50,
     y + 118,
-    "Producer: Agent R1\nSchema: TARGET_SCHEMA\nField: output.status = ready / blocked",
+    "No JSON parse\nNo verdict/status branch\nText becomes targetText prompt input",
     {
       size: 10,
       color: COLORS.workflow,
@@ -201,7 +201,7 @@ scene.text(40, 20, "Curated review workflow — findings, immutable report, and 
 scene.text(
   40,
   61,
-  "Agents inspect, decide, and publish. The workflow launches, waits, schema-checks, routes, and returns.",
+  "Agents exchange exact readable text. The workflow launches, waits, forwards handoffs verbatim, and returns.",
   {
     size: 15,
     color: COLORS.muted,
@@ -323,7 +323,7 @@ const request = operatorNode("operator-request", 85, 222, 300, 105);
 const launchTarget = workflowNode(
   "launch-agent-1",
   "Workflow: launch Agent R1",
-  ["Pass operator request", "Attach TARGET_SCHEMA"],
+  ["Load target-resolver.agent.md", "Render target-resolver.prompt.md"],
   "multi_agent_orchestrator",
   455,
   462,
@@ -333,8 +333,8 @@ const launchTarget = workflowNode(
 
 const targetAgent = agentNode(
   "agent-1",
-  "Agent: R1 — target-resolver",
-  ["label: resolve review target", "Inspects Git, remotes, guidance, and auth", "Decides ready or blocked"],
+  "Agent: R1 — review-01-target-resolver",
+  ["label: resolve review target", "Inspects Git, remotes, guidance, and auth", "Returns exact readable target text"],
   "signal_quality_magnifier",
   800,
   790,
@@ -347,7 +347,7 @@ const targetStatusCheck = workflowCheck("agent-1-status", 1080, 430, 380, 210);
 const launchReviewLanes = workflowNode(
   "launch-agents-2-3",
   "Workflow: launch Agents R2+R3 in parallel",
-  ["Same request + target handoff", "Independent child sessions"],
+  ["Same request + targetText", "Independent local agent files"],
   "multi_agent_orchestrator",
   1530,
   418,
@@ -357,8 +357,8 @@ const launchReviewLanes = workflowNode(
 
 const mapBlockedTarget = workflowNode(
   "map-blocked-target",
-  "Workflow: map blocked target",
-  ["No review lanes start", "Return Agent R1 question", "Runtime writes result.json"],
+  "Workflow: child failure boundary",
+  ["Empty/failed child throws", "No model text is parsed", "Runtime records diagnostics"],
   "function_router",
   1530,
   570,
@@ -368,8 +368,8 @@ const mapBlockedTarget = workflowNode(
 
 const changesAgent = agentNode(
   "agent-2",
-  "Agent: R2 — change-reviewer",
-  ["label: review introduced changes", "Reads diff + full candidate files", "Reports introduced defects"],
+  "Agent: R2 — review-02-change-review",
+  ["label: review introduced changes", "Reads diff + full candidate files", "Returns exact review text"],
   "robot_agent",
   1900,
   752,
@@ -379,11 +379,11 @@ const changesAgent = agentNode(
 
 const contextAgent = agentNode(
   "agent-3",
-  "Agent: R3 — context-reviewer",
+  "Agent: R3 — review-03-context-review",
   [
     "label: review whole-file context",
     "Checks standards, config, tests, and docs",
-    "Reports evidenced contract problems",
+    "Returns exact context-review text",
   ],
   "context_window",
   1900,
@@ -395,7 +395,7 @@ const contextAgent = agentNode(
 const waitForLanes = workflowNode(
   "wait-for-lanes",
   "Workflow: wait for both lane results",
-  ["Collect 2 × LANE_SCHEMA", "Record stage evidence"],
+  ["Collect two exact strings", "Fail closed after sibling settles"],
   "guardrails",
   2260,
   462,
@@ -406,7 +406,7 @@ const waitForLanes = workflowNode(
 const launchAdjudicator = workflowNode(
   "launch-agent-4",
   "Workflow: launch Agent R4",
-  ["Pass target + both lane outputs", "Attach REPORT_SCHEMA"],
+  ["Pass targetText + both lane texts", "No parsing or normalization"],
   "multi_agent_orchestrator",
   2620,
   462,
@@ -416,12 +416,12 @@ const launchAdjudicator = workflowNode(
 
 const adjudicator = agentNode(
   "agent-4",
-  "Agent: R4 — adjudicator",
+  "Agent: R4 — review-04-adjudicator",
   [
     "label: adjudicate review findings",
     "Reopens target; verifies findings",
-    "Decides verdict: pass / needs_changes / blocked",
-    "Returns structured REPORT_SCHEMA",
+    "Writes reader-facing Markdown verdict",
+    "Returns exact adjudicated text",
   ],
   "model_validation",
   2960,
@@ -433,7 +433,7 @@ const adjudicator = agentNode(
 const launchPublisher = workflowNode(
   "launch-agent-5",
   "Workflow: launch Agent R5",
-  ["Pass target + REPORT_SCHEMA", "Attach PUBLISH_SCHEMA"],
+  ["Pass targetText + reviewText", "No parsed ids, paths, or status"],
   "multi_agent_orchestrator",
   3325,
   462,
@@ -443,7 +443,7 @@ const launchPublisher = workflowNode(
 
 const publisher = agentNode(
   "agent-5",
-  "Agent: R5 — publisher",
+  "Agent: R5 — review-05-publisher",
   [
     "label: publish review report",
     "Proves .tasks/ is ignored",
@@ -459,8 +459,8 @@ const publisher = agentNode(
 
 const mapFinalResult = workflowNode(
   "map-final-result",
-  "Workflow: check Agent R5 output.status (PUBLISH_SCHEMA)",
-  ["completed → return artifact paths", "blocked → ok=false + question", "No review judgment"],
+  "Workflow: return Agent R5 exact text",
+  ["No JSON parse", "Metadata stays in runtime journal", "Text is workflow result"],
   "function_router",
   3710,
   442,
@@ -476,8 +476,8 @@ humanGate.texts[1].originalText = "accepted / waived / deferred / pending\nHuman
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs + agents.yaml",
-  ["Routing + result schemas", "R1–R5 names, options, and prompts"],
+  "Artifact: review.workflow.mjs + resources/*.md",
+  ["Routing in entry file", "R1–R5 agent and prompt Markdown", "Copied bytes + SHA-256 in run evidence"],
   "prompt_template",
   455,
   1160,
@@ -523,8 +523,8 @@ const resultFile = artifactNode(
   "Artifact: result.json",
   [
     "Mandatory machine-readable run envelope",
-    "Structured findings + task/artifact paths",
-    "Technical provenance, not primary report",
+    "result is Agent R5 exact text",
+    "Resource hashes and child metadata stay separate",
   ],
   "data_catalog",
   4460,
@@ -604,32 +604,38 @@ connect("launch-to-agent-1", launchTarget, targetAgent, {
 });
 connect("agent-1-to-status", targetAgent, targetStatusCheck, {
   direction: "bottom-up",
-  label: "TARGET_SCHEMA",
+  label: "exact target text",
   from: { side: "top", slot: 0.7 },
   to: { side: "bottom", slot: 0.35 },
 });
 connect("status-ready", targetStatusCheck, launchReviewLanes, {
-  label: "ready",
-  labelWidth: 46,
+  label: "targetText verbatim",
+  labelWidth: 115,
+  labelOffset: { dx: 0, dy: -105 },
   from: { side: "right", slot: 0.36 },
   to: { side: "left", slot: 0.5 },
 });
-connect("status-blocked", targetStatusCheck, mapBlockedTarget, {
-  label: "blocked",
-  labelWidth: 50,
-  from: { side: "right", slot: 0.72 },
+connect("status-blocked", targetAgent, mapBlockedTarget, {
+  label: "runtime failure",
+  labelWidth: 90,
+  dashed: true,
+  path: "outer",
+  outerSide: "bottom",
+  outerGap: 46,
+  labelOffset: { dx: 0, dy: 145 },
+  from: { side: "top", slot: 0.72 },
   to: { side: "left", slot: 0.5 },
 });
 connect("launch-to-agent-2", launchReviewLanes, changesAgent, {
   direction: "top-down",
-  label: "TARGET_SCHEMA",
+  label: "request + targetText",
   from: { side: "right", slot: 0.36 },
   to: { side: "top", slot: 0.35 },
   labelOffset: { dx: 250, dy: -58 },
 });
 connect("launch-to-agent-3", launchReviewLanes, contextAgent, {
   direction: "top-down",
-  label: "TARGET_SCHEMA",
+  label: "request + targetText",
   from: { side: "right", slot: 0.72 },
   to: { side: "left", slot: 0.35 },
   path: "outer",
@@ -638,13 +644,13 @@ connect("launch-to-agent-3", launchReviewLanes, contextAgent, {
 });
 connect("agent-2-to-wait", changesAgent, waitForLanes, {
   direction: "bottom-up",
-  label: "LANE_SCHEMA",
+  label: "exact changesText",
   from: { side: "top", slot: 0.65 },
   to: { side: "bottom", slot: 0.35 },
 });
 connect("agent-3-to-wait", contextAgent, waitForLanes, {
   direction: "bottom-up",
-  label: "LANE_SCHEMA",
+  label: "exact contextText",
   from: { side: "right", slot: 0.55 },
   to: { side: "bottom", slot: 0.72 },
   path: "outer",
@@ -659,14 +665,14 @@ connect("wait-to-launch-agent-4", waitForLanes, launchAdjudicator, {
 });
 connect("launch-to-agent-4", launchAdjudicator, adjudicator, {
   direction: "top-down",
-  label: "TARGET_SCHEMA +\n2 × LANE_SCHEMA",
+  label: "targetText +\nchangesText + contextText",
   labelWidth: 170,
   from: { side: "bottom", slot: 0.62 },
   to: { side: "top", slot: 0.35 },
 });
 connect("agent-4-to-launch-agent-5", adjudicator, launchPublisher, {
   direction: "bottom-up",
-  label: "REPORT_SCHEMA",
+  label: "exact adjudicatedText",
   labelWidth: 130,
   labelSize: 10,
   from: { side: "top", slot: 0.65 },
@@ -674,14 +680,14 @@ connect("agent-4-to-launch-agent-5", adjudicator, launchPublisher, {
 });
 connect("launch-to-agent-5", launchPublisher, publisher, {
   direction: "top-down",
-  label: "target + REPORT_SCHEMA",
+  label: "targetText + reviewText",
   labelWidth: 165,
   from: { side: "bottom", slot: 0.62 },
   to: { side: "top", slot: 0.35 },
 });
 connect("agent-5-to-map", publisher, mapFinalResult, {
   direction: "bottom-up",
-  label: "PUBLISH_SCHEMA\nstatus + reportPath + fixPlanPath",
+  label: "exact publisher text",
   labelWidth: 190,
   labelSize: 10,
   from: { side: "top", slot: 0.7 },

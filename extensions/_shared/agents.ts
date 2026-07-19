@@ -26,7 +26,10 @@ export interface AgentParseResult {
 const SHARED_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const BUNDLED_AGENTS_DIR = path.resolve(SHARED_DIR, "..", "..", ".agents", "agents");
 
-export function discoverAgentDefinitions(projectRoot: string, options: AgentDiscoveryOptions = {}): AgentDiscoveryResult {
+export function discoverAgentDefinitions(
+  projectRoot: string,
+  options: AgentDiscoveryOptions = {},
+): AgentDiscoveryResult {
   const agentMap = new Map<string, AgentDefinition>();
   const diagnostics: AgentDiagnostic[] = [];
   for (const { dir, source } of agentDiscoveryDirs(projectRoot, options)) {
@@ -42,7 +45,10 @@ export function discoverAgentDefinitions(projectRoot: string, options: AgentDisc
   };
 }
 
-export function agentDiscoveryDirs(projectRoot: string, options: AgentDiscoveryOptions = {}): Array<{ dir: string; source: AgentSource }> {
+export function agentDiscoveryDirs(
+  projectRoot: string,
+  options: AgentDiscoveryOptions = {},
+): Array<{ dir: string; source: AgentSource }> {
   const dirs: Array<{ dir: string; source: AgentSource }> = [];
   const projectDir = nearestProjectAgentDir(projectRoot, [".agents", "agents"]);
   const bundledDir = options.bundledDir ?? BUNDLED_AGENTS_DIR;
@@ -131,7 +137,10 @@ export function formatAgentCatalogSummary(
   const hasDiagnostics = diagnostics.length > 0;
   const diagnosticsLineCount = hasDiagnostics ? 1 : 0;
   let previewCount = Math.min(requestedPreview, definitions.length);
-  while (2 + previewCount + (definitions.length > previewCount ? 1 : 0) + diagnosticsLineCount > maxLines && previewCount > 0) {
+  while (
+    2 + previewCount + (definitions.length > previewCount ? 1 : 0) + diagnosticsLineCount > maxLines &&
+    previewCount > 0
+  ) {
     previewCount -= 1;
   }
   const previewDefinitions = selectAgentCatalogPreview(definitions, previewCount);
@@ -157,7 +166,9 @@ export function formatAgentListItem(agent: AgentDefinition): string {
     `tools=${agent.allowedTools.join(", ")}`,
     agent.model?.length ? `model=${agent.model.join(", ")}` : undefined,
     agent.thinkingLevel ? `thinking=${agent.thinkingLevel}` : undefined,
-    agent.spawns ? `spawns=requested:${agent.spawns === "*" ? "*" : agent.spawns.join(", ")} (blocked by host)` : undefined,
+    agent.spawns
+      ? `spawns=requested:${agent.spawns === "*" ? "*" : agent.spawns.join(", ")} (blocked by host)`
+      : undefined,
     agent.blocking ? "blocking=true" : undefined,
     agent.output === undefined ? undefined : "output=true",
     agent.source ? `source=${agent.source}` : undefined,
@@ -174,7 +185,9 @@ export function formatAgentInspect(agent: AgentDefinition): string {
     `readOnly: ${String(agent.readOnly)}`,
     ...(agent.permissionMode === undefined ? [] : [`permissionMode: ${agent.permissionMode}`]),
     `risk: ${agent.risk}`,
-    ...(agent.spawns === undefined ? [] : [`spawns metadata: ${agent.spawns === "*" ? "*" : agent.spawns.join(", ")} (direct nesting blocked by host)`]),
+    ...(agent.spawns === undefined
+      ? []
+      : [`spawns metadata: ${agent.spawns === "*" ? "*" : agent.spawns.join(", ")} (direct nesting blocked by host)`]),
     ...(agent.model?.length ? [`model: ${agent.model.join(", ")}`] : []),
     ...(agent.thinkingLevel ? [`thinking: ${agent.thinkingLevel}`] : []),
     ...(agent.blocking === undefined ? [] : [`blocking: ${String(agent.blocking)}`]),
@@ -196,7 +209,8 @@ type FrontmatterContainer = Record<string, unknown> | unknown[];
 
 function parseFrontmatter(text: string): Record<string, unknown> {
   const root: Record<string, unknown> = {};
-  const stack: Array<{ indent: number; value: FrontmatterContainer; parent?: Record<string, unknown>; key?: string }> = [{ indent: -1, value: root }];
+  const stack: Array<{ indent: number; value: FrontmatterContainer; parent?: Record<string, unknown>; key?: string }> =
+    [{ indent: -1, value: root }];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
     const indent = line.length - line.trimStart().length;
@@ -230,7 +244,7 @@ function parseFrontmatter(text: string): Record<string, unknown> {
 }
 
 function parseScalar(value: string): unknown {
-  if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
     return value.slice(1, -1);
   }
   if (value === "true") return true;
@@ -254,7 +268,10 @@ function asStringList(value: unknown): string[] {
   const scalar = asScalar(value);
   if (!scalar) return [];
   const withoutBrackets = scalar.replace(/^\[/, "").replace(/\]$/, "");
-  return withoutBrackets.split(",").map((item) => item.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  return withoutBrackets
+    .split(",")
+    .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
 }
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
@@ -270,12 +287,18 @@ function asOptionalBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function asEvidencePolicy(value: Record<string, unknown> | undefined, filePath: string, diagnostics: AgentDiagnostic[]): AgentEvidencePolicy {
-  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) return { mode: "none" };
+function asEvidencePolicy(
+  value: Record<string, unknown> | undefined,
+  filePath: string,
+  diagnostics: AgentDiagnostic[],
+): AgentEvidencePolicy {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value))
+    return { mode: "none" };
 
   const allowedKeys = new Set(["mode", "requireAnyToolCall", "requireAnyOf", "claimsWithoutEvidence"]);
   for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) diagnostics.push({ filePath, message: `frontmatter.evidence has unknown field: ${key}` });
+    if (!allowedKeys.has(key))
+      diagnostics.push({ filePath, message: `frontmatter.evidence has unknown field: ${key}` });
   }
 
   const policy: AgentEvidencePolicy = { mode: "none" };
@@ -307,11 +330,18 @@ function asRisk(value: string | undefined): AgentDefinition["risk"] {
   return value === "medium" || value === "high" ? value : "low";
 }
 
-function asPermissionMode(value: unknown, filePath: string, diagnostics: AgentDiagnostic[]): PermissionMode | undefined {
+function asPermissionMode(
+  value: unknown,
+  filePath: string,
+  diagnostics: AgentDiagnostic[],
+): PermissionMode | undefined {
   const scalar = asScalar(value);
   if (scalar === "inherit-parent" || scalar === "agent-defined" || scalar === "restricted") return scalar;
   if (scalar !== undefined) {
-    diagnostics.push({ filePath, message: "frontmatter.permissionMode must be one of: inherit-parent, agent-defined, restricted" });
+    diagnostics.push({
+      filePath,
+      message: "frontmatter.permissionMode must be one of: inherit-parent, agent-defined, restricted",
+    });
   }
   return undefined;
 }
@@ -329,7 +359,7 @@ function asSpawns(value: unknown): AgentDefinition["spawns"] {
 }
 
 function countAgentSources(definitions: AgentDefinition[]): Record<AgentSource, number> {
-  const counts: Record<AgentSource, number> = { bundled: 0, project: 0, user: 0 };
+  const counts: Record<AgentSource, number> = { bundled: 0, project: 0, user: 0, workflow: 0 };
   for (const definition of definitions) {
     if (definition.source !== undefined) counts[definition.source] += 1;
   }
@@ -347,10 +377,7 @@ function selectAgentCatalogPreview(definitions: AgentDefinition[], previewCount:
   if (previewCount <= 0) return [];
   const headCount = Math.ceil(previewCount / 2);
   const tailCount = previewCount - headCount;
-  return [
-    ...definitions.slice(0, headCount),
-    ...definitions.slice(definitions.length - tailCount),
-  ];
+  return [...definitions.slice(0, headCount), ...definitions.slice(definitions.length - tailCount)];
 }
 
 function compactAgentMeta(agent: AgentDefinition): string {
@@ -358,7 +385,9 @@ function compactAgentMeta(agent: AgentDefinition): string {
     `tools=${compactList(agent.allowedTools, 2)}`,
     agent.model?.length ? `model=${compactList(agent.model, 1)}` : undefined,
     agent.thinkingLevel ? `thinking=${agent.thinkingLevel}` : undefined,
-    agent.spawns ? `spawns=requested:${agent.spawns === "*" ? "*" : compactList(agent.spawns, 1)} (blocked)` : undefined,
+    agent.spawns
+      ? `spawns=requested:${agent.spawns === "*" ? "*" : compactList(agent.spawns, 1)} (blocked)`
+      : undefined,
     agent.blocking ? "blocking" : undefined,
     agent.output === undefined ? undefined : "output",
   ].filter((part): part is string => part !== undefined);

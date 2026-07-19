@@ -242,7 +242,7 @@ const exploreAgent = agentNode(
     "label: list cwd entries",
     "permissionMode: agent-defined",
     "read/bash lists cwd",
-    "one-sentence summary + childSessionId",
+    "returns exact one-sentence text",
   ],
   1660,
   605,
@@ -253,7 +253,7 @@ const sequentialAwait = workflowNode(
   "sequential-await",
   "Workflow: sequential await",
   "function_router",
-  ["retain explore result", "only then invoke quick_task", "owner: workflow"],
+  ["retain exact explore text", "only then invoke quick_task", "owner: workflow"],
   2070,
   365,
   320,
@@ -266,17 +266,18 @@ const quickAgent = agentNode(
     "label: list cwd entries",
     "permissionMode: agent-defined",
     "read/bash lists cwd",
-    "one-sentence summary + childSessionId",
+    "returns exact one-sentence text",
   ],
   2440,
   605,
   360,
   205,
 );
-const resultCheck = checkNode(
+const resultCheck = workflowNode(
   "result-check",
-  "Workflow: result check",
-  "Boolean(explore.ok && quick_task.ok)",
+  "Workflow: assemble result",
+  "function_router",
+  ["topic + ok: true", "notes contain both exact texts", "no agent-result parsing"],
   2830,
   365,
   310,
@@ -308,7 +309,7 @@ const resultFile = artifactNode(
   "result-file",
   "Artifact: .locus/runtime/workflows/<runId>/result.json",
   "historical_database",
-  ["normalized run envelope", "result: topic, ok, notes, childSessions", "includes journal + persistence status"],
+  ["normalized run envelope", "result: topic, ok, exact notes", "status/session stay in runtime evidence"],
   3230,
   1015,
   530,
@@ -404,7 +405,7 @@ connect("phase-explore", phaseAndLog, exploreAgent, "prompt + agent=explore", {
   to: { side: "left", slot: 0.35 },
   labelOffset: { dx: -12, dy: -8 },
 });
-connect("explore-await", exploreAgent, sequentialAwait, "explore WorkflowAgentResult", {
+connect("explore-await", exploreAgent, sequentialAwait, "exact explore text", {
   direction: "bottom-up",
   from: { side: "right", slot: 0.35 },
   to: { side: "left", slot: 0.75 },
@@ -416,7 +417,7 @@ connect("await-quick", sequentialAwait, quickAgent, "prompt + agent=quick_task",
   to: { side: "left", slot: 0.35 },
   labelOffset: { dx: -4, dy: -8 },
 });
-connect("quick-check", quickAgent, resultCheck, "quick_task WorkflowAgentResult", {
+connect("quick-check", quickAgent, resultCheck, "exact quick_task text", {
   direction: "bottom-up",
   from: { side: "right", slot: 0.35 },
   to: { side: "left", slot: 0.75 },
@@ -457,7 +458,7 @@ connect("quick-journal", quickAgent, journalFile, "quick_task agent_start / agen
   dashed: true,
   labelOffset: { dx: 36, dy: 0 },
 });
-connect("check-result", resultCheck, resultFile, "topic + ok + notes + childSessions", {
+connect("check-result", resultCheck, resultFile, "topic + ok + exact notes", {
   direction: "top-down",
   from: { side: "bottom", slot: 0.7 },
   to: { side: "top", slot: 0.5 },

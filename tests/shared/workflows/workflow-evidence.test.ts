@@ -5,14 +5,20 @@ import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
-import { createWorkflowRuntime, type WorkflowAgentResult, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowAgentResult,
+  type WorkflowJournalLine,
+} from "../../../extensions/_shared/workflow-runtime.js";
 import type { EvidenceEvaluation } from "../../../extensions/_shared/types.js";
 import { WorkflowProgressComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createHarness } from "../../test-harness.js";
 
 const evidence: EvidenceEvaluation = {
   evidence: "missing_expected_evidence",
-  warnings: ["reviewer is missing expected runtime evidence (read, grep); mode=warn allows the run status to remain completed."],
+  warnings: [
+    "reviewer is missing expected runtime evidence (read, grep); mode=warn allows the run status to remain completed.",
+  ],
   missingRequiredTools: ["read", "grep"],
   observedTools: [],
 };
@@ -39,6 +45,7 @@ describe("workflow evidence threading", () => {
           status: "completed",
           agentName: request.agent.name,
           reason: "reviewed",
+          text: "reviewed",
           diagnostics: [],
           lifecycleEntryIds: [],
           evidence,
@@ -63,9 +70,17 @@ describe("workflow evidence threading", () => {
       ok: true,
       status: "completed",
       summary: "done",
+      text: "done",
       diagnostics: [],
       agent: "reviewer",
       evidence,
+      childSessionId: "child-session-1",
+      childTrace: {
+        path: "/tmp/run/child-session-1.jsonl",
+        format: "pi-session-jsonl",
+        childSessionId: "child-session-1",
+      },
+      resultArtifact: "/tmp/run/agent-result.json",
     };
     const runtime = createWorkflowRuntime({
       runId: "wf-evidence",
@@ -79,6 +94,13 @@ describe("workflow evidence threading", () => {
     assert.ok(endLine !== undefined);
     assert.deepEqual(endLine.evidence, evidence);
     assert.deepEqual(endLine.evidenceWarnings, evidence.warnings);
+    assert.equal(endLine.childSessionId, "child-session-1");
+    assert.deepEqual(endLine.childTrace, {
+      path: "/tmp/run/child-session-1.jsonl",
+      format: "pi-session-jsonl",
+      childSessionId: "child-session-1",
+    });
+    assert.equal(endLine.resultArtifact, "/tmp/run/agent-result.json");
   });
 
   it("renders agent_end evidence warnings in the progress widget tail", () => {

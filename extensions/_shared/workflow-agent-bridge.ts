@@ -11,6 +11,7 @@ import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot } from "./pi-api.js";
 import { createAgentRunRequest, executeAgentRunBoundary } from "./agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
+import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import {
   agentLiveStore,
@@ -23,10 +24,14 @@ import {
 import { discoverAgentDefinitions } from "./agents.js";
 import { loadModelRolesState, resolveAgentModelPreference } from "./model-settings.js";
 import { resolveLiveModelDisplay } from "./live-model-display.js";
-import type { AgentStructuredResult } from "./agent-executor-host.js";
 import { DEFAULT_WORKFLOW_AGENT, workflowSlotKey } from "./workflow-runtime.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
-import type { WorkflowAgentRunner, WorkflowAgentRequest, WorkflowAgentResult, WorkflowLlmUsage } from "./workflow-runtime.js";
+import type {
+  WorkflowAgentRunner,
+  WorkflowAgentRequest,
+  WorkflowAgentResult,
+  WorkflowLlmUsage,
+} from "./workflow-runtime.js";
 import { defaultResolveModel } from "./workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode, WorkspaceMode } from "./types.js";
 
@@ -46,7 +51,7 @@ export class WorkflowAgentUnavailableError extends Error {
 
 export interface WorkflowAgentBridgeOptions {
   pi: ExtensionAPI;
-  ctx: ExtensionContext;          // captured at tool/command execute time
+  ctx: ExtensionContext; // captured at tool/command execute time
   signal: AbortSignal;
   workflowRunId?: string;
   args?: unknown;
@@ -61,7 +66,8 @@ export interface WorkflowAgentBridgeOptions {
     maxToolCalls?: number;
   }) => AgentExecutor;
   resolveModel?: (selector: string) => unknown;
-  defaultAgent?: string;          // default DEFAULT_WORKFLOW_AGENT
+  defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
+  workspaceManager?: WorkflowWorkspaceManager;
 }
 
 export function resolvePermissionMode(input: {
@@ -110,19 +116,21 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
   return async function runWorkflowAgent(req: WorkflowAgentRequest): Promise<WorkflowAgentResult> {
     const projectRoot = getProjectRoot(ctx);
 
-    // 1. Resolve the catalog agent by name (populate a local Map, do NOT mutate sharedState)
-    const discovered = discoverAgentDefinitions(projectRoot);
-    const agentMap = new Map(discovered.definitions.map((a) => [a.name, a]));
+    // 1. Resolve either the explicit workflow-local definition or one catalog agent.
     const agentName = req.agent !== "" ? req.agent : defaultAgentName;
-    const agent = agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
+    const discovered = req.agentDefinition === undefined ? discoverAgentDefinitions(projectRoot) : undefined;
+    const agentMap = new Map((discovered?.definitions ?? []).map((a) => [a.name, a]));
+    const agent = req.agentDefinition ?? agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
 
-    if (agent === undefined || !agentMap.has(agentName)) {
+    if (agent === undefined || (req.agentDefinition === undefined && !agentMap.has(agentName))) {
       // Unknown catalog name -> return a result (not throw); script error, not host-unavailable.
       return {
         ok: false,
         status: "failed",
         summary: `Unknown agent: ${agentName}`,
-        diagnostics: [`Workflow agent bridge: agent "${agentName}" not found in catalog. Available: ${[...agentMap.keys()].join(", ")}`],
+        diagnostics: [
+          `Workflow agent bridge: agent "${agentName}" not found in catalog. Available: ${[...agentMap.keys()].join(", ")}`,
+        ],
         agent: agentName,
         workspaceMode: resolveWorkspaceMode({ reqMode: req.workspaceMode, sandbox: req.sandbox }),
         ...(req.label !== undefined ? { label: req.label } : {}),
@@ -142,11 +150,45 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // 3. Model role resolution (mirror runTaskTool)
     const modelRoles = await loadModelRolesState(ctx);
     const modelRoleResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
-    const liveModel = resolveLiveModelDisplay({ pi, ctx, requestedModel: req.model, assignment: modelRoleResolution.assignment });
+    const liveModel = resolveLiveModelDisplay({
+      pi,
+      ctx,
+      requestedModel: req.model,
+      assignment: modelRoleResolution.assignment,
+    });
 
     let worktreePath: string | undefined;
     let worktreeId: string | undefined;
-    if (workspaceMode === "worktree" || workspaceMode === "temporary-worktree") {
+    if (req.workspaceHandle !== undefined) {
+      if (options.workspaceManager === undefined) {
+        const message = "Workflow workspace handle was supplied without a workspace manager.";
+        return {
+          ok: false,
+          status: "failed",
+          summary: message,
+          diagnostics: [message],
+          agent: agent.name,
+          workspaceMode,
+          ...(req.label !== undefined ? { label: req.label } : {}),
+        };
+      }
+      try {
+        const workspace = options.workspaceManager.resolve(req.workspaceHandle);
+        worktreePath = workspace.path;
+        worktreeId = workspace.id;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          status: "failed",
+          summary: message,
+          diagnostics: [message],
+          agent: agent.name,
+          workspaceMode,
+          ...(req.label !== undefined ? { label: req.label } : {}),
+        };
+      }
+    } else if (workspaceMode === "worktree" || workspaceMode === "temporary-worktree") {
       if (options.workflowRunId === undefined || options.workflowRunId.trim() === "") {
         const message = "Workflow write agent requires workflowRunId for isolated git worktree allocation.";
         return {
@@ -194,7 +236,14 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             metadata: {
               ...(options.args !== undefined ? { workflowArgs: options.args } : {}),
               ...(worktreePath !== undefined
-                ? { workflowWorktree: { id: worktreeId, path: worktreePath, runId: options.workflowRunId } }
+                ? {
+                    workflowWorktree: {
+                      id: worktreeId,
+                      path: worktreePath,
+                      runId: options.workflowRunId,
+                      ...(req.workspaceHandle !== undefined ? { handle: req.workspaceHandle } : {}),
+                    },
+                  }
                 : {}),
               permissionMode,
               workspaceMode,
@@ -207,40 +256,36 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // 5. Build the executor via the injectable factory
     const createExecutorFn =
       options.createExecutor ??
-      ((o: {
-        model?: unknown;
-        live?: AgentSdkSessionExecutorOptions["live"];
-        maxToolCalls?: number;
-      }) =>
+      ((o: { model?: unknown; live?: AgentSdkSessionExecutorOptions["live"]; maxToolCalls?: number }) =>
         createAgentSdkSessionExecutor({
           ...(o.model !== undefined ? { model: o.model } : {}),
           ...(o.live !== undefined ? { live: o.live } : {}),
           ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
         }));
     const perCallModel = req.model !== undefined ? await Promise.resolve(resolveModelFn(req.model)) : undefined;
-    const workflowParentRowId = options.workflowRunId !== undefined
-      ? workflowAgentLiveRowId({
-          runId: options.workflowRunId,
-          agent: agent.name,
-          ...(req.label !== undefined ? { label: req.label } : {}),
-          ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        })
-      : undefined;
+    const workflowParentRowId =
+      options.workflowRunId !== undefined
+        ? workflowAgentLiveRowId({
+            runId: options.workflowRunId,
+            agent: agent.name,
+            ...(req.label !== undefined ? { label: req.label } : {}),
+            ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          })
+        : undefined;
     // Slot anchoring (REQ-009, D-006): a workflow agent with a `label` is a repeatable slot.
     // Give its live row a STABLE id derived from (runId, agent, label, phase) so a loop re-invoke
     // REUSES the one row (round++) instead of spawning a fresh `agent-live-*` row each iteration.
     // No label ⇒ not a slot: leave rowId unset (fresh-row-per-call legacy behaviour, no rounds).
-    const slotRowId = options.workflowRunId !== undefined && req.label !== undefined
-      ? workflowAgentLiveChildRowId({
-          runId: options.workflowRunId,
-          agent: agent.name,
-          label: req.label,
-          ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        })
-      : undefined;
-    const slotKey = slotRowId !== undefined
-      ? workflowSlotKey({ phase: req.phase, label: req.label })
-      : undefined;
+    const slotRowId =
+      options.workflowRunId !== undefined && req.label !== undefined
+        ? workflowAgentLiveChildRowId({
+            runId: options.workflowRunId,
+            agent: agent.name,
+            label: req.label,
+            ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          })
+        : undefined;
+    const slotKey = slotRowId !== undefined ? workflowSlotKey({ phase: req.phase, label: req.label }) : undefined;
     const round = slotRowId !== undefined ? nextRound(roundByRowId, slotRowId) : undefined;
     const live: AgentSdkSessionExecutorOptions["live"] = {
       ...(req.label !== undefined ? { label: req.label } : {}),
@@ -261,13 +306,14 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
 
     // 6. Execute through the boundary (same as task tool)
     const boundary = await executeAgentRunBoundary({ pi, ctx, request, executor, signal });
+    if (req.workspaceHandle !== undefined) {
+      options.workspaceManager?.resolve(req.workspaceHandle);
+    }
 
     // 7. Fail-closed mapping: SDK host unavailable -> throw WorkflowAgentUnavailableError
     if (
       boundary.status === "blocked" &&
-      boundary.diagnostics.some(
-        (d) => typeof d === "string" && d.includes(AGENT_SDK_UNAVAILABLE_DIAGNOSTIC),
-      )
+      boundary.diagnostics.some((d) => typeof d === "string" && d.includes(AGENT_SDK_UNAVAILABLE_DIAGNOSTIC))
     ) {
       throw new WorkflowAgentUnavailableError(
         `${AGENT_SDK_UNAVAILABLE_HINT}: ${boundary.reason}`,
@@ -276,7 +322,6 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
 
     // 8. Success / other outcomes -> map to WorkflowAgentResult
-    const structured = boundary.structuredResult as AgentStructuredResult | undefined;
     // Round journal payload (REQ-009): the accumulated child-session tokens land on the live
     // row (applySessionStats); project them into the agent_end usage so the drill shows a
     // per-round token count. No usage on the row ⇒ omit (never a fabricated 0).
@@ -285,11 +330,10 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ok: boundary.status === "completed",
       status: boundary.status as WorkflowAgentResult["status"],
       summary: boundary.reason,
+      ...(boundary.text !== undefined ? { text: boundary.text } : {}),
       diagnostics: boundary.diagnostics,
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       agent: agent.name,
-      ...(structured !== undefined ? { structured } : {}),
-      ...(structured?.output !== undefined ? { output: structured.output } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),

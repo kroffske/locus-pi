@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENT_RESULT_MARKER } from "../../../extensions/_shared/agent-executor-host.js";
 import { AgentLivePanel } from "../../../extensions/_shared/agent-live-panel.js";
 import type { AgentLiveRow, SdkAgentSessionEventLike } from "../../../extensions/_shared/agent-sdk-host.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
@@ -35,7 +34,7 @@ function projectWithReviewer(): string {
 /** Mock the SDK host so a headless child session completes deterministically. */
 function mockSdkSession(
   sessionId: string,
-  opts: { summary?: string; status?: string; toolCalls?: number; toolResults?: number } = {},
+  opts: { summary?: string; toolCalls?: number; toolResults?: number } = {},
 ): void {
   vi.doMock("@earendil-works/pi-coding-agent", () => ({
     DefaultResourceLoader: class {
@@ -66,11 +65,7 @@ function mockSdkSession(
             return { sessionId, toolCalls: opts.toolCalls ?? 1, toolResults: opts.toolResults ?? 1 };
           },
           getLastAssistantText() {
-            return `${AGENT_RESULT_MARKER} ${JSON.stringify({
-              version: "locus.agent.result.v1",
-              status: opts.status ?? "completed",
-              summary: opts.summary ?? "Reviewed",
-            })}`;
+            return opts.summary ?? "Reviewed";
           },
           exportToJsonl(outputPath: string) {
             return outputPath;
@@ -139,7 +134,7 @@ describe("agent command run (unified live surface)", () => {
     agents(h.pi);
 
     // LLM tool trigger (the primary user scenario).
-    await runTool(h, "task", { agent: "reviewer", tasks: [{ id: "Review", description: "Review this", assignment: "Review this" }] });
+    await runTool(h, "task", { agent: "reviewer", task: "Review this" });
     const toolRow = reviewerRow(agentLiveStore)!;
     const toolLine = renderRow(toolRow);
     agentLiveStore.reset();
@@ -165,26 +160,22 @@ describe("agent command run (unified live surface)", () => {
     expect(slashRow.childSessionId).toBe(toolRow.childSessionId);
   });
 
-  it("preserves structured cancelled status and lifecycle marker for both tool and slash triggers", async () => {
-    mockSdkSession("sdk-cancelled-parity", { status: "cancelled", summary: "Operator cancelled child" });
+  it("does not interpret JSON-looking text as a lifecycle status", async () => {
+    const text = '{"status":"cancelled","summary":"Operator cancelled child"}';
+    mockSdkSession("sdk-json-text", { summary: text });
     const { agents, agentLiveStore } = await loadAgents();
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    await runTool(h, "task", { agent: "reviewer", tasks: [{ id: "Cancel", description: "Cancel", assignment: "Return cancelled" }] });
+    const toolResult = await runTool(h, "task", { agent: "reviewer", task: "Return JSON-looking text" });
     const toolRow = reviewerRow(agentLiveStore)!;
-    expect(toolRow).toMatchObject({ status: "cancelled", finalAnswer: "Operator cancelled child" });
-    expect(renderRow(toolRow)).toContain("⊘");
+    expect(toolResult.isError).not.toBe(true);
+    expect(toolRow).toMatchObject({ status: "done", finalAnswer: text });
 
     agentLiveStore.reset();
-    await h.commands.get("agent")!.handler("run reviewer Return cancelled", h.ctx as ExtensionCommandContext);
+    await h.commands.get("agent")!.handler("run reviewer Return JSON-looking text", h.ctx as ExtensionCommandContext);
     const slashRow = reviewerRow(agentLiveStore)!;
-    expect(slashRow).toMatchObject({ status: "cancelled", finalAnswer: "Operator cancelled child" });
-    expect(renderRow(slashRow)).toContain("⊘");
-    expect(h.notificationEvents).toContainEqual({
-      message: expect.stringContaining("⊘ agent"),
-      level: "warning",
-    });
+    expect(slashRow).toMatchObject({ status: "done", finalAnswer: text });
   });
 
   it("shows an honest above-editor settled summary with units on a headless host", async () => {
@@ -279,7 +270,7 @@ describe("agent command run (unified live surface)", () => {
     const h: Harness = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    const taskResult = await runTool(h, "task", { agent: "reviewer", tasks: [{ id: "Review", description: "Review", assignment: "Review this" }] });
+    const taskResult = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
 
     // Legacy alias remains gone.
     expect(h.tools.has("runAgent")).toBe(false);
@@ -302,7 +293,8 @@ describe("agent command run (unified live surface)", () => {
 
     await runTool(h, "task", {
       agent: "reviewer",
-      tasks: [{ id: "Review", title: "review auth middleware", description: "Review this", assignment: "Review this" }],
+      task: "Review this",
+      title: "review auth middleware",
     });
 
     const row = reviewerRow(agentLiveStore)!;
@@ -316,7 +308,9 @@ describe("agent command run (unified live surface)", () => {
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    await h.commands.get("agent")!.handler('run --title "review auth middleware" reviewer Review the middleware', h.ctx as ExtensionCommandContext);
+    await h.commands
+      .get("agent")!
+      .handler('run --title "review auth middleware" reviewer Review the middleware', h.ctx as ExtensionCommandContext);
 
     const row = reviewerRow(agentLiveStore)!;
     expect(row.title).toBe("review auth middleware");

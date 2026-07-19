@@ -1,16 +1,23 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../extensions/_shared/workflow-runtime.js";
+import type {
+  WorkflowWorkspaceEvidence,
+  WorkflowWorkspaceManager,
+} from "../../../extensions/_shared/workflow-worktree.js";
 
-const examples = path.join(process.cwd(), "extensions/workflows/examples/review-fix");
-const reviewFixPath = path.join(examples, "review-fix.workflow.mjs");
+const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review-fix/review-fix.workflow.mjs");
 
-async function loadWorkflow(workflowPath: string): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
+async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
   const module = (await import(workflowPath)) as {
     default?: (dsl: unknown, input?: unknown) => Promise<unknown>;
   };
@@ -18,208 +25,262 @@ async function loadWorkflow(workflowPath: string): Promise<(dsl: unknown, input?
   return module.default!;
 }
 
-function completedAgent<T>(request: WorkflowAgentRequest, output: T, childSessionId: string): WorkflowAgentResult {
+function sha256(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+function createReviewFixture(disposition: "accepted" | "pending" = "accepted") {
+  const root = mkdtempSync(path.join(tmpdir(), "locus-review-fix-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+  writeFileSync(path.join(root, "tracked.txt"), "reviewed\n", "utf8");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: root });
+  execFileSync("git", ["commit", "-qm", "fixture"], { cwd: root });
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const taskId = "T-201";
+  const taskDirectory = path.join(root, ".tasks", `${taskId}-code-review`);
+  const artifactsDirectory = path.join(taskDirectory, "artifacts");
+  mkdirSync(artifactsDirectory, { recursive: true });
+  const reviewRelative = `.tasks/${taskId}-code-review/artifacts/review.md`;
+  const planRelative = `.tasks/${taskId}-code-review/artifacts/fix-plan.md`;
+  const snapshot = `base=${head} head=${head}`;
+  const target = "current branch against dev";
+  const reviewText = [
+    "# Code Review",
+    "",
+    "## Confirmed Target",
+    "",
+    `- Target: ${target}`,
+    `- Snapshot: ${snapshot}`,
+    "",
+    "## Verdict",
+    "",
+    "Needs changes.",
+    "",
+    "## New Findings",
+    "",
+    "### F1 — [P1] Advance the pagination offset",
+    "",
+    "- Scope: introduced",
+    "- Category: correctness",
+    "- Location: `src/page.ts:41`",
+    "- Evidence: Offset remains zero.",
+    "- Impact: Loop repeats.",
+    "- Recommended fix: Advance the offset.",
+    "",
+    "## Previous Findings Reconciliation",
+    "",
+    "None.",
+  ].join("\n");
+  const reviewSha = sha256(reviewText);
+  const pendingPlanText = [
+    "# Review Fix Plan",
+    "",
+    "## Source Review",
+    "",
+    `- Task: ${taskId}`,
+    `- Review: ${reviewRelative}`,
+    `- Review SHA-256: ${reviewSha}`,
+    `- Target: ${target}`,
+    `- Snapshot: ${snapshot}`,
+    "",
+    "## Human Approval Gate",
+    "",
+    "Edit dispositions explicitly.",
+    "",
+    "## Findings",
+    "",
+    "### F1 — Advance the pagination offset",
+    "",
+    "- Disposition: pending",
+    "- Severity: P1",
+    "- Scope: introduced",
+    "- Category: correctness",
+    "- Location: `src/page.ts:41`",
+  ].join("\n");
+  const planText = pendingPlanText.replace("- Disposition: pending", `- Disposition: ${disposition}`);
+  const taskText = [
+    "---",
+    `id: ${taskId}`,
+    "status: review",
+    "---",
+    "",
+    "# Code review",
+    "",
+    "## Review Evidence",
+    "",
+    `- Review: ${reviewRelative}`,
+    `- Review SHA-256: ${reviewSha}`,
+    `- Fix Plan: ${planRelative}`,
+    `- Published Fix Plan SHA-256: ${sha256(pendingPlanText)}`,
+    `- Target: ${target}`,
+    `- Snapshot: ${snapshot}`,
+    "- Finding IDs: F1",
+  ].join("\n");
+  const reviewPath = path.join(root, reviewRelative);
+  const fixPlanPath = path.join(root, planRelative);
+  writeFileSync(reviewPath, reviewText, "utf8");
+  writeFileSync(fixPlanPath, planText, "utf8");
+  writeFileSync(path.join(taskDirectory, "task.md"), taskText, "utf8");
+  return { root, head, planRelative, fixPlanPath, reviewText, planText };
+}
+
+function completed(request: WorkflowAgentRequest, text: string): WorkflowAgentResult {
   return {
     ok: true,
     status: "completed",
-    summary:
-      typeof output === "object" && output !== null && "summary" in output && typeof output.summary === "string"
-        ? output.summary
-        : "completed",
-    output,
+    summary: text,
+    text,
     diagnostics: [],
     agent: request.agent,
-    ...(request.label !== undefined ? { label: request.label } : {}),
-    childSessionId,
+    ...(request.label === undefined ? {} : { label: request.label }),
   };
 }
 
-const reviewTask = {
-  status: "ready",
-  summary: "Resolved one immutable review task.",
-  question: "",
-  taskId: "T-201",
-  taskPath: ".tasks/T-201-code-review/task.md",
-  reviewPath: ".tasks/T-201-code-review/artifacts/review.md",
-  reviewSha256: "a".repeat(64),
-  target: "dev...feature",
-  snapshot: "base=abc123 head=def456",
-  findingIds: ["F1", "F2"],
-  constraints: ["Keep source read-only while planning."],
-};
-
-const approvedPlan = {
-  status: "ready",
-  summary: "One finding was explicitly accepted.",
-  question: "",
-  taskId: "T-201",
-  taskPath: reviewTask.taskPath,
-  reviewPath: reviewTask.reviewPath,
-  reviewSha256: reviewTask.reviewSha256,
-  fixPlanPath: ".tasks/T-201-code-review/artifacts/fix-plan.md",
-  approvedPlanSha256: "c".repeat(64),
-  target: reviewTask.target,
-  snapshot: reviewTask.snapshot,
-  acceptedFindings: [
-    {
-      id: "F1",
-      title: "Advance the pagination offset",
-      scope: "introduced",
-      file: "dags/customer_snapshot_dag.py",
+function workspaceManager(root: string, head: string) {
+  const calls: Array<{ label: string; ref: string }> = [];
+  const evidence: WorkflowWorkspaceEvidence = {
+    handle: "workflow-workspace:1",
+    id: "review-fix-worktree",
+    path: root,
+    head,
+    sourceRef: head,
+    originalRepoRoot: root,
+    originalHead: head,
+  };
+  const manager: WorkflowWorkspaceManager = {
+    allocate(label, ref) {
+      calls.push({ label, ref });
+      return evidence.handle;
     },
-  ],
-  ignoredFindingIds: ["F2"],
-  constraints: ["Do not modify the original checkout."],
-};
-
-const implementation = {
-  status: "completed",
-  summary: "Applied F1 in a retained linked worktree.",
-  question: "",
-  taskId: "T-201",
-  worktreePath: "/tmp/locus-review-fix-T-201",
-  targetHeadBefore: "def456",
-  targetHeadAfter: "def456",
-  changedFiles: ["dags/customer_snapshot_dag.py"],
-  fixedIds: ["F1"],
-  unresolvedIds: [],
-  checks: ["pytest dags/tests/test_customer_snapshot.py passed"],
-};
-
-const fixReport = {
-  status: "completed",
-  summary: "F1 is fixed and independently verified.",
-  question: "",
-  taskId: "T-201",
-  worktreePath: implementation.worktreePath,
-  fixReportPath: ".tasks/T-201-code-review/artifacts/fix-report.md",
-  fixReportSha256: "d".repeat(64),
-  fixedIds: ["F1"],
-  unresolvedIds: [],
-  checks: ["pytest dags/tests/test_customer_snapshot.py passed"],
-};
+    resolve(handle) {
+      if (handle !== evidence.handle) throw new Error(`Unknown handle: ${handle}`);
+      return { ...evidence };
+    },
+    evidence() {
+      return calls.length === 0 ? [] : [{ ...evidence }];
+    },
+  };
+  return { manager, calls };
+}
 
 describe("curated review remediation workflow", () => {
-  it("keeps remediation agent-owned while loading prompts from the review manifest", () => {
-    const source = readFileSync(reviewFixPath, "utf8");
-    expect(source).toContain('from "../review-family/review-config.mjs"');
-    expect(source).toContain('identityCoverage: "entry-only"');
-    expect(source).not.toContain("You resolve one human-approved review fix plan");
-    expect(source).not.toContain("execFile");
-    expect(source).not.toContain("fetch(");
-    expect(source).not.toMatch(/\bllm\s*\(/u);
-    expect(source).toContain('renderAgentPrompt("reviewFix"');
+  it("uses deterministic plan validation, local Markdown agents, and one workspace handle", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain('from "./review-fix-plan.mjs"');
+    expect(source).toContain('agentFile: "./resources/implementer.agent.md"');
+    expect(source).toContain('agentFile: "./resources/verifier.agent.md"');
+    expect(source).toContain("workspaceHandle");
+    expect(source).not.toContain("agents.yaml");
+    expect(source).not.toContain("schema:");
+    expect(source).not.toContain("JSON.parse");
   });
 
-  it("applies only accepted findings in a linked worktree and publishes verification", async () => {
-    const runWorkflow = await loadWorkflow(reviewFixPath);
+  it("validates approval before writes, reuses one handle, and hands implementation text verbatim", async () => {
+    const fixture = createReviewFixture("accepted");
+    const workspaces = workspaceManager(fixture.root, fixture.head);
+    const resources = createWorkflowResourceLoader({
+      workflowSourcePath: workflowPath,
+      runDir: mkdtempSync(path.join(tmpdir(), "locus-review-fix-run-")),
+    });
     const calls: WorkflowAgentRequest[] = [];
+    const implementationText = '  Changed src/page.ts.\n{"fixed":["F1"]}\n';
+    const verificationText = "Published .tasks/T-201-code-review/artifacts/fix-report.md";
     const { dsl } = createWorkflowRuntime({
-      runId: "review-fix-pipeline",
+      runId: "review-fix-test",
+      projectRoot: fixture.root,
+      resourceLoader: resources,
+      workspaceManager: workspaces.manager,
       agentRunner: async (request) => {
         calls.push(request);
-        if (request.label === "resolve approved review plan") {
-          return completedAgent(request, approvedPlan, "resolve-child");
-        }
-        if (request.label === "apply accepted review fixes") {
-          return completedAgent(request, implementation, "implementation-child");
-        }
-        return completedAgent(request, fixReport, "verification-child");
+        return completed(
+          request,
+          request.label === "apply accepted review fixes" ? implementationText : verificationText,
+        );
       },
     });
 
-    const result = (await runWorkflow(dsl, "Fix accepted findings from T-201")) as Record<string, unknown>;
+    const result = await (await loadWorkflow())(dsl, fixture.planRelative);
 
-    expect(calls.map(({ label }) => label)).toEqual([
-      "resolve approved review plan",
-      "apply accepted review fixes",
-      "verify review fixes and publish report",
-    ]);
-    expect(calls[0]?.prompt).toMatch(/Only explicit accepted values authorize source\s+changes/u);
-    expect(calls[1]?.prompt).toContain("Never edit the original checkout");
-    expect(calls[1]?.prompt).toContain("new linked Git worktree");
-    expect(calls[1]?.prompt).toMatch(/Do not commit, push,\s+create a pull request/u);
-    expect(calls[2]?.prompt).toContain("artifacts/fix-report.md");
-    expect(calls[2]?.prompt).toContain("Original checkout was not modified");
-    expect(result).toMatchObject({
-      ok: true,
-      status: "completed",
-      implementation,
-      verification: fixReport,
-      stages: {
-        resolve: { childSessionId: "resolve-child" },
-        implementation: { childSessionId: "implementation-child" },
-        verification: { childSessionId: "verification-child" },
-      },
-    });
+    expect(result).toBe(verificationText);
+    expect(workspaces.calls).toEqual([{ label: "review-fix-T-201", ref: fixture.head }]);
+    expect(calls.map((call) => call.agent)).toEqual(["review-fix-01-implementer", "review-fix-02-verifier"]);
+    expect(calls.map((call) => call.workspaceHandle)).toEqual(["workflow-workspace:1", "workflow-workspace:1"]);
+    expect(calls[1]?.prompt).toContain(implementationText);
+    expect(calls[0]?.prompt).toContain("F1");
+    expect(calls[0]?.prompt).not.toContain("pending");
   });
 
-  it("refuses review-fix when no finding is explicitly accepted", async () => {
-    const runWorkflow = await loadWorkflow(reviewFixPath);
-    const noApproval = {
-      ...approvedPlan,
-      status: "blocked",
-      summary: "No finding is accepted.",
-      question: "Mark at least one finding accepted in fix-plan.md.",
-      acceptedFindings: [],
-      ignoredFindingIds: ["F1", "F2"],
-    };
-    let calls = 0;
+  it("refuses an all-pending plan before allocating a workspace or spawning a write agent", async () => {
+    const fixture = createReviewFixture("pending");
+    const workspaces = workspaceManager(fixture.root, fixture.head);
+    let agentCalls = 0;
+    const resources = createWorkflowResourceLoader({
+      workflowSourcePath: workflowPath,
+      runDir: mkdtempSync(path.join(tmpdir(), "locus-review-fix-pending-")),
+    });
     const { dsl } = createWorkflowRuntime({
-      runId: "review-fix-no-approval",
+      runId: "review-fix-pending",
+      projectRoot: fixture.root,
+      resourceLoader: resources,
+      workspaceManager: workspaces.manager,
       agentRunner: async (request) => {
-        calls += 1;
-        return completedAgent(request, noApproval, "resolve-child");
+        agentCalls += 1;
+        return completed(request, "should not run");
       },
     });
 
-    const result = (await runWorkflow(dsl, "Fix T-201")) as Record<string, unknown>;
-
-    expect(calls).toBe(1);
-    expect(result).toMatchObject({
-      ok: false,
-      status: "blocked",
-      stoppedStage: "resolve-approved-plan",
-      question: "Mark at least one finding accepted in fix-plan.md.",
-    });
+    await expect((await loadWorkflow())(dsl, fixture.planRelative)).rejects.toThrow("at least one accepted finding");
+    expect(workspaces.calls).toEqual([]);
+    expect(agentCalls).toBe(0);
   });
 
-  it("projects independently verified partial remediation as semantic non-success", async () => {
-    const runWorkflow = await loadWorkflow(reviewFixPath);
-    const partialImplementation = {
-      ...implementation,
-      status: "partial",
-      summary: "F1 changed but its integration test is unavailable.",
-      fixedIds: [],
-      unresolvedIds: ["F1"],
-    };
-    const partialReport = {
-      ...fixReport,
-      status: "partial",
-      summary: "F1 remains unverified.",
-      fixedIds: [],
-      unresolvedIds: ["F1"],
-    };
+  it("detects approval-artifact mutation before verifier execution", async () => {
+    const fixture = createReviewFixture("accepted");
+    const workspaces = workspaceManager(fixture.root, fixture.head);
+    const resources = createWorkflowResourceLoader({
+      workflowSourcePath: workflowPath,
+      runDir: mkdtempSync(path.join(tmpdir(), "locus-review-fix-mutation-")),
+    });
+    let agentCalls = 0;
     const { dsl } = createWorkflowRuntime({
-      runId: "review-fix-partial",
+      runId: "review-fix-mutation",
+      projectRoot: fixture.root,
+      resourceLoader: resources,
+      workspaceManager: workspaces.manager,
       agentRunner: async (request) => {
-        if (request.label === "resolve approved review plan") {
-          return completedAgent(request, approvedPlan, "resolve-child");
-        }
-        if (request.label === "apply accepted review fixes") {
-          return completedAgent(request, partialImplementation, "implementation-child");
-        }
-        return completedAgent(request, partialReport, "verification-child");
+        agentCalls += 1;
+        writeFileSync(fixture.fixPlanPath, `${fixture.planText}\nmutated\n`, "utf8");
+        return completed(request, "implementation complete");
       },
     });
 
-    const result = (await runWorkflow(dsl, "Fix T-201")) as Record<string, unknown>;
+    await expect((await loadWorkflow())(dsl, fixture.planRelative)).rejects.toThrow(
+      "fix-plan.md changed after approval validation",
+    );
+    expect(agentCalls).toBe(1);
+  });
 
-    expect(result).toMatchObject({
-      ok: false,
-      partial: true,
-      status: "partial",
-      verification: partialReport,
+  it("rejects absolute and escaping fix-plan paths", async () => {
+    const fixture = createReviewFixture("accepted");
+    const workspaces = workspaceManager(fixture.root, fixture.head);
+    const resources = createWorkflowResourceLoader({
+      workflowSourcePath: workflowPath,
+      runDir: mkdtempSync(path.join(tmpdir(), "locus-review-fix-path-")),
     });
+    const { dsl } = createWorkflowRuntime({
+      runId: "review-fix-path",
+      projectRoot: fixture.root,
+      resourceLoader: resources,
+      workspaceManager: workspaces.manager,
+      agentRunner: async (request) => completed(request, "unused"),
+    });
+    const workflow = await loadWorkflow();
+
+    await expect(workflow(dsl, fixture.fixPlanPath)).rejects.toThrow("must be project-relative");
+    await expect(workflow(dsl, "../fix-plan.md")).rejects.toThrow("escapes project root");
+    expect(workspaces.calls).toEqual([]);
   });
 });

@@ -3,10 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import {
-  discoverAgentDefinitions,
-  parseAgentMarkdown,
-} from "../../../extensions/_shared/agents.js";
+import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agents.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
@@ -35,18 +32,22 @@ function writeAgent(root: string, relativeDir: string, fileName: string, body: s
 
 describe("agents discovery", () => {
   it("parses valid markdown agent definitions", () => {
-    const parsed = parseAgentMarkdown([
-      "---",
-      "name: reviewer",
-      "description: Review code",
-      "tools: read, search",
-      "spawns: explore",
-      "model: pi/slow",
-      "thinking-level: high",
-      "blocking: true",
-      "---",
-      "Review carefully.",
-    ].join("\n"), "project", "/repo/.agents/agents/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      [
+        "---",
+        "name: reviewer",
+        "description: Review code",
+        "tools: read, search",
+        "spawns: explore",
+        "model: pi/slow",
+        "thinking-level: high",
+        "blocking: true",
+        "---",
+        "Review carefully.",
+      ].join("\n"),
+      "project",
+      "/repo/.agents/agents/reviewer.md",
+    );
 
     expect(parsed.diagnostics).toEqual([]);
     expect(parsed.definition).toMatchObject({
@@ -63,15 +64,19 @@ describe("agents discovery", () => {
   });
 
   it("parses permissionMode metadata", () => {
-    const parsed = parseAgentMarkdown([
-      "---",
-      "name: restricted-reviewer",
-      "description: Review code with restricted permissions",
-      "tools: read, search",
-      "permissionMode: restricted",
-      "---",
-      "Review carefully.",
-    ].join("\n"), "project", "/repo/.agents/agents/restricted-reviewer.md");
+    const parsed = parseAgentMarkdown(
+      [
+        "---",
+        "name: restricted-reviewer",
+        "description: Review code with restricted permissions",
+        "tools: read, search",
+        "permissionMode: restricted",
+        "---",
+        "Review carefully.",
+      ].join("\n"),
+      "project",
+      "/repo/.agents/agents/restricted-reviewer.md",
+    );
 
     expect(parsed.diagnostics).toEqual([]);
     expect(parsed.definition).toMatchObject({
@@ -82,12 +87,19 @@ describe("agents discovery", () => {
   });
 
   it("reports invalid permissionMode metadata", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\npermissionMode: sandboxed\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\npermissionMode: sandboxed\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition).toBeDefined();
     expect(parsed.definition?.permissionMode).toBeUndefined();
     expect(parsed.diagnostics).toEqual([
-      { filePath: "/repo/reviewer.md", message: "frontmatter.permissionMode must be one of: inherit-parent, agent-defined, restricted" },
+      {
+        filePath: "/repo/reviewer.md",
+        message: "frontmatter.permissionMode must be one of: inherit-parent, agent-defined, restricted",
+      },
     ]);
   });
 
@@ -96,7 +108,9 @@ describe("agents discovery", () => {
     const missingName = parseAgentMarkdown("---\ndescription: Missing name\n---\nBody", "project", "/repo/missing.md");
 
     expect(missingFrontmatter.diagnostics).toEqual([{ filePath: "/repo/bad.md", message: "missing frontmatter" }]);
-    expect(missingName.diagnostics).toEqual([{ filePath: "/repo/missing.md", message: "frontmatter.name is required" }]);
+    expect(missingName.diagnostics).toEqual([
+      { filePath: "/repo/missing.md", message: "frontmatter.name is required" },
+    ]);
     expect(missingName.definition).toBeUndefined();
   });
 
@@ -104,8 +118,18 @@ describe("agents discovery", () => {
     const project = tempRoot("locus-pi-agents-project");
     const userHome = tempRoot("locus-pi-agents-user");
     const bundled = tempRoot("locus-pi-agents-bundled");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.");
-    writeAgent(userHome, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: User reviewer\ntools: bash\n---\nUser.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.",
+    );
+    writeAgent(
+      userHome,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: User reviewer\ntools: bash\n---\nUser.",
+    );
     writeAgent(bundled, "", "worker.md", "---\nname: worker\ndescription: Bundled worker\n---\nBundled.");
 
     const discovered = discoverAgentDefinitions(project, { userHome, bundledDir: bundled });
@@ -118,7 +142,12 @@ describe("agents discovery", () => {
 
   it("lists and inspects definitions while task execution falls back closed when the SDK host is absent", async () => {
     const project = tempRoot("locus-pi-agents-command");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.",
+    );
     const h = createHarness(project);
     agents(h.pi);
 
@@ -128,7 +157,7 @@ describe("agents discovery", () => {
     await h.commands.get("agent")!.handler("inspect reviewer", h.ctx);
     const inspect = h.widgets.get("agents") ?? "";
     const inspectOptions = h.widgetOptions.get("agents");
-    const runResult = await runTool(h, "task", { agent: "reviewer", tasks: [{ id: "Review", description: "Review", assignment: "Review this" }] });
+    const runResult = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
 
     expect(list).toContain("[VIEW]");
     expect(list).toContain("Agent catalog");
@@ -164,9 +193,9 @@ describe("agents discovery", () => {
     const h = createHarness(project);
     agents(h.pi);
 
-    const omitted = await runTool(h, "task", { tasks: [{ id: "Omitted", description: "Omitted", assignment: "Run default" }] });
-    const defaultAlias = await runTool(h, "task", { agent: "default", tasks: [{ id: "Default", description: "Default", assignment: "Run default" }] });
-    const generalAlias = await runTool(h, "task", { agent: "general", tasks: [{ id: "General", description: "General", assignment: "Run general" }] });
+    const omitted = await runTool(h, "task", { task: "Run default" });
+    const defaultAlias = await runTool(h, "task", { agent: "default", task: "Run default" });
+    const generalAlias = await runTool(h, "task", { agent: "general", task: "Run general" });
 
     expect(omitted.details).toMatchObject({ requestedAgent: "task", agent: "task" });
     expect(defaultAlias.details).toMatchObject({ requestedAgent: "default", agent: "task", aliasApplied: "default" });
@@ -175,11 +204,16 @@ describe("agents discovery", () => {
 
   it("does not apply the general alias when a project/user general agent exists", async () => {
     const project = tempRoot("locus-pi-agents-general-override");
-    writeAgent(project, ".agents/agents", "general.md", "---\nname: general\ndescription: Project general agent\ntools: read\n---\nProject general.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "general.md",
+      "---\nname: general\ndescription: Project general agent\ntools: read\n---\nProject general.",
+    );
     const h = createHarness(project);
     agents(h.pi);
 
-    const result = await runTool(h, "task", { agent: "general", tasks: [{ id: "General", description: "General", assignment: "Run general" }] });
+    const result = await runTool(h, "task", { agent: "general", task: "Run general" });
 
     expect(result.details).toMatchObject({ requestedAgent: "general", agent: "general" });
     expect(result.details).not.toMatchObject({ aliasApplied: "general" });
@@ -187,11 +221,16 @@ describe("agents discovery", () => {
 
   it("returns human unknown-agent ToolResult details and writes a durable artifact", async () => {
     const project = tempRoot("locus-pi-agents-unknown");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.",
+    );
     const h = createHarness(project);
     agents(h.pi);
 
-    const result = await runTool(h, "task", { agent: "missing", tasks: [{ id: "Missing", description: "Missing", assignment: "Run missing" }] });
+    const result = await runTool(h, "task", { agent: "missing", task: "Run missing" });
 
     const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
     expect(result.isError).toBe(true);
@@ -213,15 +252,33 @@ describe("agents discovery", () => {
     const artifactPath = String(result.details?.artifactPath);
     expect(artifactPath).toBeTruthy();
     expect(existsSync(artifactPath)).toBe(true);
-    const artifact = JSON.parse(readFileSync(artifactPath, "utf8")) as { content: string; metadata: Record<string, unknown> };
+    const artifact = JSON.parse(readFileSync(artifactPath, "utf8")) as {
+      content: string;
+      metadata: Record<string, unknown>;
+    };
     const content = JSON.parse(artifact.content) as Record<string, unknown>;
-    expect(artifact.metadata).toMatchObject({ source: "agents-catalog", requestedSurface: "task", errorCode: "unknown-agent", requestedAgent: "missing" });
-    expect(content).toMatchObject({ version: "locus.agent.unknown-agent.v1", status: "blocked", requestedSurface: "task", requestedAgent: "missing" });
+    expect(artifact.metadata).toMatchObject({
+      source: "agents-catalog",
+      requestedSurface: "task",
+      errorCode: "unknown-agent",
+      requestedAgent: "missing",
+    });
+    expect(content).toMatchObject({
+      version: "locus.agent.unknown-agent.v1",
+      status: "blocked",
+      requestedSurface: "task",
+      requestedAgent: "missing",
+    });
   });
 
   it("registers spawn_agent as a model-friendly alias that routes through the same task surface", async () => {
     const project = tempRoot("locus-pi-agents-spawn-alias");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\n---\nProject.",
+    );
     const h = createHarness(project);
     agents(h.pi);
 
@@ -232,8 +289,8 @@ describe("agents discovery", () => {
 
     // spawn_agent reports the same requestedSurface/requestedAgent shape as task, so
     // existing detail-shape consumers keep working regardless of which name was called.
-    const viaSpawn = await runTool(h, "spawn_agent", { agent: "missing", tasks: [{ id: "Missing", description: "Missing", assignment: "Run missing" }] });
-    const viaTask = await runTool(h, "task", { agent: "missing", tasks: [{ id: "Missing", description: "Missing", assignment: "Run missing" }] });
+    const viaSpawn = await runTool(h, "spawn_agent", { agent: "missing", task: "Run missing" });
+    const viaTask = await runTool(h, "task", { agent: "missing", task: "Run missing" });
 
     expect(viaSpawn.isError).toBe(true);
     expect(viaSpawn.details).toMatchObject({
@@ -249,32 +306,52 @@ describe("agents discovery", () => {
 
 describe("evidence policy", () => {
   it("agent without evidence block defaults to mode none", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition!.evidence!.mode).toBe("none");
     expect(parsed.diagnostics.filter((diagnostic) => diagnostic.message.includes("evidence"))).toEqual([]);
   });
 
   it("parses mode: none", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: none\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: none\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition!.evidence!.mode).toBe("none");
   });
 
   it("parses mode: warn", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: warn\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: warn\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition!.evidence!.mode).toBe("warn");
   });
 
   it("parses mode: require", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: require\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\nevidence:\n  mode: require\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition!.evidence!.mode).toBe("require");
   });
 
   it("invalid evidence field warns but agent still loads", () => {
-    const parsed = parseAgentMarkdown("---\nname: reviewer\ndescription: Review code\nevidence:\n  bogus: 1\n---\nReview.", "project", "/repo/reviewer.md");
+    const parsed = parseAgentMarkdown(
+      "---\nname: reviewer\ndescription: Review code\nevidence:\n  bogus: 1\n---\nReview.",
+      "project",
+      "/repo/reviewer.md",
+    );
 
     expect(parsed.definition).toBeDefined();
     expect(parsed.diagnostics.some((diagnostic) => /bogus|unknown field/.test(diagnostic.message))).toBe(true);
@@ -284,7 +361,12 @@ describe("evidence policy", () => {
 describe("agent list/inspect rendering surface", () => {
   function writeManyAgents(project: string): void {
     for (let index = 0; index < 14; index += 1) {
-      writeAgent(project, ".agents/agents", `proj-${index}.md`, `---\nname: proj-${index}\ndescription: Project agent ${index}\ntools: read\nrisk: medium\n---\nBody.`);
+      writeAgent(
+        project,
+        ".agents/agents",
+        `proj-${index}.md`,
+        `---\nname: proj-${index}\ndescription: Project agent ${index}\ntools: read\nrisk: medium\n---\nBody.`,
+      );
     }
   }
 
@@ -324,7 +406,12 @@ describe("agent list/inspect rendering surface", () => {
 
   it("routes /agent inspect through the scroll overlay when custom UI is available", async () => {
     const project = tempRoot("locus-pi-agents-inspect-overlay");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.",
+    );
     const h = createHarness(project);
     h.ctx.hasUI = true;
     h.customInputQueue.push("q");
@@ -402,7 +489,12 @@ describe("agent list/inspect rendering surface", () => {
 
   it("falls back to the bounded text widget for inspect when custom UI is unavailable", async () => {
     const project = tempRoot("locus-pi-agents-inspect-headless");
-    writeAgent(project, ".agents/agents", "reviewer.md", "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.");
+    writeAgent(
+      project,
+      ".agents/agents",
+      "reviewer.md",
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read\nrisk: medium\n---\nProject.",
+    );
     const h = createHarness(project);
     h.ctx.hasUI = true;
     delete h.ctx.ui.custom;

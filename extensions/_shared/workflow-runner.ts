@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
-import type { WorkflowDsl, WorkflowJournalLine } from "./workflow-runtime.js";
+import type { WorkflowDsl, WorkflowJournalLine, WorkflowRuntime } from "./workflow-runtime.js";
 import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
@@ -48,6 +48,16 @@ import {
   workflowScriptExecutionPath,
   type WorkflowScriptIdentity,
 } from "./workflow-script-identity.js";
+import {
+  createWorkflowResourceLoader,
+  type WorkflowResourceEvidence,
+  type WorkflowResourceLoader,
+} from "./workflow-resources.js";
+import {
+  createWorkflowWorkspaceManager,
+  type WorkflowWorkspaceEvidence,
+  type WorkflowWorkspaceManager,
+} from "./workflow-worktree.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 
@@ -110,6 +120,8 @@ export interface RunWorkflowScriptResult {
   error?: string;
   target?: ResolvedWorkflowTarget;
   scriptIdentity?: WorkflowScriptIdentity;
+  resourceEvidence?: WorkflowResourceEvidence[];
+  workspaceEvidence?: WorkflowWorkspaceEvidence[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
 }
@@ -391,6 +403,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const resumeFromRunId = opts.resumeFromRunId?.trim();
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
+  let resourceLoader: WorkflowResourceLoader | undefined;
+  let workspaceManager: WorkflowWorkspaceManager | undefined;
+  let runtime: WorkflowRuntime | undefined;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
   const preludeLines: WorkflowJournalLine[] = [];
   const emitPrelude = (line: WorkflowJournalLine): void => {
@@ -412,13 +427,29 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   ];
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
+    let enrichedFields: RunResultFields = {
+      ...fields,
+      ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
+    };
+    if (workspaceManager !== undefined) {
+      try {
+        enrichedFields = { ...enrichedFields, workspaceEvidence: workspaceManager.evidence() };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? message,
+        };
+      }
+    }
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
-      ...fields,
+      ...enrichedFields,
       resultPersistence: intendedPersistence,
     });
-    if (resultPersistence.ok) return { runId, runDir, ...fields, resultPersistence };
+    if (resultPersistence.ok) return { runId, runDir, ...enrichedFields, resultPersistence };
 
     const persistenceError: WorkflowJournalLine = {
       ts: new Date().toISOString(),
@@ -435,10 +466,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       // the typed persistence failure returned below.
     }
     const failedFields: RunResultFields = {
-      ...fields,
+      ...enrichedFields,
       ok: false,
-      error: fields.error ?? resultPersistence.message,
-      journal: [...fields.journal, persistenceError],
+      error: enrichedFields.error ?? resultPersistence.message,
+      journal: [...enrichedFields.journal, persistenceError],
     };
     return { runId, runDir, ...failedFields, resultPersistence };
   };
@@ -472,34 +503,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     });
   }
 
-  const agentRunner = createWorkflowAgentRunner({
-    pi: opts.pi,
-    ctx: opts.ctx,
-    signal: opts.signal,
-    workflowRunId: runId,
-    ...(opts.input !== undefined ? { args: opts.input } : {}),
-    ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
-
-  // dsl.llm() shares the agent bridge's model-routing (resolveModel) but reaches the
-  // model directly via pi-ai completeSimple instead of spawning a child session.
-  const llmRunner = createWorkflowLlmRunner({
-    ctx: opts.ctx,
-    signal: opts.signal,
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
-
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner,
-    llmRunner,
-    journal,
-    ...(opts.input !== undefined ? { args: opts.input } : {}),
-    ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
-    ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
-  });
-
   let target: ResolvedWorkflowTarget;
   try {
     const targetInput: { name?: string; scriptPath?: string; script?: string } = {};
@@ -521,6 +524,42 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const journalLines = currentJournal(runtime);
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
+
+  resourceLoader = createWorkflowResourceLoader({
+    workflowSourcePath: target.path,
+    runDir,
+  });
+  workspaceManager = createWorkflowWorkspaceManager({
+    projectRoot,
+    runId,
+  });
+  const agentRunner = createWorkflowAgentRunner({
+    pi: opts.pi,
+    ctx: opts.ctx,
+    signal: opts.signal,
+    workflowRunId: runId,
+    workspaceManager,
+    ...(opts.input !== undefined ? { args: opts.input } : {}),
+    ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
+    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
+  });
+  const llmRunner = createWorkflowLlmRunner({
+    ctx: opts.ctx,
+    signal: opts.signal,
+    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
+  });
+  runtime = createWorkflowRuntime({
+    runId,
+    agentRunner,
+    llmRunner,
+    journal,
+    projectRoot,
+    resourceLoader,
+    workspaceManager,
+    ...(opts.input !== undefined ? { args: opts.input } : {}),
+    ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
+    ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
+  });
 
   let mod: WorkflowScriptModule;
   try {
@@ -575,7 +614,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // SDK/host machinery we never get a handle to (e.g. a dead-model auth error
     // firing on a detached emit path). Without this run-scoped net those would hit
     // Node's default handler and KILL the whole pi process — the Iskhod-1 defect.
-    result = await runGuardedAgainstHostCrash(() => Promise.resolve(entry(runtime.dsl, opts.input)));
+    result = await runGuardedAgainstHostCrash(() => Promise.resolve(entry(runtime!.dsl, opts.input)));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);

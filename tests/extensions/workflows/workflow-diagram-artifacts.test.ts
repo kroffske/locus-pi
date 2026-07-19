@@ -63,21 +63,26 @@ describe("curated workflow diagram contract", () => {
     }
   });
 
-  it("labels review decisions and parallel control with their real owners", () => {
+  it("labels review agents, exact-text handoffs, and parallel control with their real owners", () => {
     const text = diagramText("review");
 
-    expect(text).toMatch(/Agent: R1.*target-resolver.*resolve review target/su);
-    expect(text).toMatch(/Workflow:.*Agent R1.*output\.status.*TARGET_SCHEMA/su);
+    expect(text).toMatch(/Agent: R1.*review-01-target-resolver.*resolve review target/su);
+    expect(text).toMatch(/Workflow: forward Agent R1 exact text.*No JSON parse/su);
     expect(text).toMatch(/Workflow:.*launch Agents R2\+R3 in parallel/su);
     expect(text).toMatch(/Workflow:.*wait for both lane results/su);
-    expect(text).toMatch(/Agent: R2.*change-reviewer.*review introduced changes/su);
-    expect(text).toMatch(/Agent: R3.*context-reviewer.*review whole-file context/su);
-    expect(text).toMatch(/Agent: R4.*adjudicator.*adjudicate review findings.*Decides verdict/su);
-    expect(text).toMatch(/Agent: R5.*publisher.*publish review report.*artifacts\/review\.md/su);
-    expect(text).toContain("TARGET_SCHEMA");
-    expect(text).toContain("LANE_SCHEMA");
-    expect(text).toContain("REPORT_SCHEMA");
-    expect(text).toContain("PUBLISH_SCHEMA");
+    expect(text).toMatch(/Agent: R2.*review-02-change-review.*review introduced changes/su);
+    expect(text).toMatch(/Agent: R3.*review-03-context-review.*review whole-file context/su);
+    expect(text).toMatch(/Agent: R4.*review-04-adjudicator.*adjudicate review findings.*Markdown verdict/su);
+    expect(text).toMatch(/Agent: R5.*review-05-publisher.*publish review report.*review\.md/su);
+    expect(text).toContain("targetText verbatim");
+    expect(text).toContain("exact changesText");
+    expect(text).toContain("exact contextText");
+    expect(text).toContain("exact adjudicatedText");
+    expect(text).toContain("exact publisher text");
+    expect(text).not.toContain("TARGET_SCHEMA");
+    expect(text).not.toContain("LANE_SCHEMA");
+    expect(text).not.toContain("REPORT_SCHEMA");
+    expect(text).not.toContain("PUBLISH_SCHEMA");
     expect(text).toContain(".tasks/<task>/artifacts/review.md");
     expect(text).toContain(".tasks/<task>/artifacts/fix-plan.md");
     expect(text).toMatch(/review\.md.*Primary reader-facing report/su);
@@ -86,13 +91,16 @@ describe("curated workflow diagram contract", () => {
 
   it("shows the isolated fix boundary in the review family", () => {
     const reviewFix = diagramText("review-fix");
-    expect(reviewFix).toMatch(/Agent: F1.*plan-resolver.*resolve approved review plan/su);
-    expect(reviewFix).toMatch(/Agent: F2.*implementer.*apply accepted review fixes/su);
-    expect(reviewFix).toMatch(/Agent: F3.*verifier.*verify review fixes and publish report/su);
-    expect(reviewFix).toContain("APPROVED_PLAN_SCHEMA");
-    expect(reviewFix).toContain("IMPLEMENTATION_SCHEMA");
-    expect(reviewFix).toContain("FIX_REPORT_SCHEMA");
-    expect(reviewFix).toMatch(/Only accepted ids cross to Agent F2/su);
+    expect(reviewFix).toMatch(/Workflow: deterministic approval validator.*at least one accepted finding/su);
+    expect(reviewFix).toMatch(/Agent: F1.*review-fix-01-implementer.*apply accepted review fixes/su);
+    expect(reviewFix).toMatch(/Agent: F2.*review-fix-02-verifier.*verify review fixes and publish report/su);
+    expect(reviewFix).toContain("workspaceHandle");
+    expect(reviewFix).toContain("exact implementationText");
+    expect(reviewFix).toContain("exact verificationText");
+    expect(reviewFix).not.toContain("APPROVED_PLAN_SCHEMA");
+    expect(reviewFix).not.toContain("IMPLEMENTATION_SCHEMA");
+    expect(reviewFix).not.toContain("FIX_REPORT_SCHEMA");
+    expect(reviewFix).toMatch(/Only accepted ids cross to Agent F1/su);
     expect(reviewFix).toMatch(/Artifact: retained linked Git worktree.*Original checkout remains untouched/su);
     expect(reviewFix).toContain(".tasks/<task>/artifacts/fix-report.md");
   });

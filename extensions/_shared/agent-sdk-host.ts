@@ -1,12 +1,14 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { mkdirSync, readFileSync, realpathSync } from "node:fs";
-import type { AgentChildOutputStats, AgentChildTrace, AgentExecutor, AgentRunRequest, AgentRunResult } from "./agent-runner.js";
-import {
-  createAgentExecutionPromptCapsule,
-  formatAgentKickoffPrompt,
-  parseAgentStructuredResult,
-} from "./agent-executor-host.js";
+import type {
+  AgentChildOutputStats,
+  AgentChildTrace,
+  AgentExecutor,
+  AgentRunRequest,
+  AgentRunResult,
+} from "./agent-runner.js";
+import { createAgentExecutionPromptCapsule, formatAgentKickoffPrompt, parseAgentText } from "./agent-executor-host.js";
 import type { SessionRecord } from "./session-core.js";
 import { runtimeStateDir } from "./files.js";
 import { evaluateEvidence } from "./agent-evidence-evaluator.js";
@@ -21,9 +23,8 @@ import { AgentLiveTranscript, type AgentLiveTranscriptSnapshot } from "./agent-l
  * `ctx.newSession`, which is structurally unreachable from a tool `execute()`
  * context. This executor instead spawns a real HEADLESS child agent session via
  * the top-level public SDK `createAgentSession`, so the programmatic `task` tool
- * can run a genuine sub-agent. It reuses the same capsule + parse layer and the
- * same optional structured-result parser as the command path, and it does NOT
- * touch the boundary/runner.
+ * can run a genuine sub-agent. It reuses the same capsule + text-result layer as
+ * the command path, and it does NOT touch the boundary/runner.
  */
 
 /** Diagnostic token stamped on blocked results when the SDK host is unavailable. */
@@ -270,14 +271,20 @@ class AgentLiveStore {
       ...(existing?.lastActivityAt !== undefined || options.now !== undefined
         ? { lastActivityAt: existing?.lastActivityAt ?? options.now }
         : {}),
-      ...(existing?.model !== undefined || options.model !== undefined ? { model: existing?.model ?? options.model } : {}),
-      ...(existing?.thinking !== undefined || options.thinking !== undefined ? { thinking: existing?.thinking ?? options.thinking } : {}),
+      ...(existing?.model !== undefined || options.model !== undefined
+        ? { model: existing?.model ?? options.model }
+        : {}),
+      ...(existing?.thinking !== undefined || options.thinking !== undefined
+        ? { thinking: existing?.thinking ?? options.thinking }
+        : {}),
       ...(existing?.currentPath !== undefined || options.currentPath !== undefined
         ? { currentPath: existing?.currentPath ?? options.currentPath }
         : {}),
       currentTools: isNewRound ? [] : (existing?.currentTools ?? []),
       ...(!isNewRound && existing?.currentToolArgs !== undefined ? { currentToolArgs: existing.currentToolArgs } : {}),
-      ...(!isNewRound && existing?.currentToolStartMs !== undefined ? { currentToolStartMs: existing.currentToolStartMs } : {}),
+      ...(!isNewRound && existing?.currentToolStartMs !== undefined
+        ? { currentToolStartMs: existing.currentToolStartMs }
+        : {}),
       stepCount: existing?.stepCount ?? 0,
       ...(existing?.turnCount !== undefined ? { turnCount: existing.turnCount } : {}),
       ...(!isNewRound && existing?.tokenCount !== undefined ? { tokenCount: existing.tokenCount } : {}),
@@ -308,7 +315,9 @@ class AgentLiveStore {
   patch(id: string, patch: Partial<Omit<AgentLiveRow, "id">>, now = Date.now()): AgentLiveRow | undefined {
     const current = this.rows.get(id);
     if (current === undefined) return undefined;
-    const activityState = patch.activityState ?? (patch.status !== undefined ? activityStateForStatus(patch.status) : current.activityState);
+    const activityState =
+      patch.activityState ??
+      (patch.status !== undefined ? activityStateForStatus(patch.status) : current.activityState);
     const row: AgentLiveRow = {
       ...current,
       ...patch,
@@ -479,7 +488,11 @@ function sharedAgentLiveStore(): AgentLiveStore {
 
 function isSharedAgentLiveStoreSlot(value: unknown): value is SharedAgentLiveStoreSlot {
   if (!isRecord(value) || value.version !== 3 || !isRecord(value.store)) return false;
-  return value.store.rows instanceof Map && typeof value.store.begin === "function" && typeof value.store.cancel === "function";
+  return (
+    value.store.rows instanceof Map &&
+    typeof value.store.begin === "function" &&
+    typeof value.store.cancel === "function"
+  );
 }
 
 export const agentLiveStore = sharedAgentLiveStore();
@@ -608,9 +621,10 @@ async function runWithSdkSession(
   if (model !== undefined && model !== null) sessionOptions.model = model;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
   if (appendSystemPrompt !== undefined) sessionOptions.appendSystemPrompt = appendSystemPrompt;
-  const liveRow = live !== undefined
-    ? agentLiveStore.begin(liveBeginOptions(live.rowId, request.agent.name, live, cwd))
-    : agentLiveStore.claimQueuedRow(request.agent.name, request.agent.name);
+  const liveRow =
+    live !== undefined
+      ? agentLiveStore.begin(liveBeginOptions(live.rowId, request.agent.name, live, cwd))
+      : agentLiveStore.claimQueuedRow(request.agent.name, request.agent.name);
   onLiveRow?.(liveRow.id);
 
   let created: SdkCreateSessionResultLike;
@@ -651,20 +665,9 @@ async function runWithSdkSession(
   // killed prematurely, while a stuck child still has a hard ceiling.
   const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
   try {
-    const turn = await driveChildTurn(
-      session,
-      kickoff,
-      signal,
-      turnBudgetMs,
-      maxToolCalls,
-      liveRow.id,
-    );
+    const turn = await driveChildTurn(session, kickoff, signal, turnBudgetMs, maxToolCalls, liveRow.id);
 
-    if (
-      turn.settlement === "aborted" ||
-      turn.settlement === "timed_out" ||
-      turn.settlement === "tool_limit"
-    ) {
+    if (turn.settlement === "aborted" || turn.settlement === "timed_out" || turn.settlement === "tool_limit") {
       // Stop the child, then still export evidence and dispose (finally below).
       await abortChild(session);
       const childTrace = exportEvidence(session, request, now, reportsDirOverride, diagnostics);
@@ -672,12 +675,18 @@ async function runWithSdkSession(
       if (turn.settlement === "timed_out") {
         const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
         agentLiveStore.patch(liveRow.id, { status: "error", errors: [reason], finalAnswer: reason });
-        return withChildTrace(failedResult(request, reason, [...diagnostics, reason], undefined, childSession), childTrace);
+        return withChildTrace(
+          failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
+          childTrace,
+        );
       }
       if (turn.settlement === "tool_limit") {
         const reason = `Child agent exceeded the ${maxToolCalls ?? 0} tool-call budget and was aborted.`;
         agentLiveStore.patch(liveRow.id, { status: "error", errors: [reason], finalAnswer: reason });
-        return withChildTrace(failedResult(request, reason, [...diagnostics, reason], undefined, childSession), childTrace);
+        return withChildTrace(
+          failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
+          childTrace,
+        );
       }
       const reason = "Agent run was cancelled.";
       agentLiveStore.patch(liveRow.id, { status: "cancelled", finalAnswer: reason });
@@ -710,16 +719,22 @@ async function runWithSdkSession(
         errors: unique([...agentLiveStore.rows.get(liveRow.id)!.errors, providerFailure]),
         finalAnswer: providerFailure,
       });
-      return withChildTrace(failedResult(request, providerFailure, [...diagnostics, providerFailure], childOutputStats, childSession), childTrace);
+      return withChildTrace(
+        failedResult(request, providerFailure, [...diagnostics, providerFailure], childOutputStats, childSession),
+        childTrace,
+      );
     }
-    const parsed = parseAgentStructuredResult(text ?? "");
+    const parsed = parseAgentText(text ?? "");
     if (!parsed.ok) {
       agentLiveStore.patch(liveRow.id, {
         status: "error",
         childSessionId: childSession.id,
         finalAnswer: parsed.reason,
       });
-      return withChildTrace(failedResult(request, parsed.reason, [...diagnostics, parsed.reason], childOutputStats, childSession), childTrace);
+      return withChildTrace(
+        failedResult(request, parsed.reason, [...diagnostics, parsed.reason], childOutputStats, childSession),
+        childTrace,
+      );
     }
     const evidenceInput: EvidenceEvaluationInput = {
       agentName: request.agent.name,
@@ -728,21 +743,21 @@ async function runWithSdkSession(
       toolResultCount: stats.toolResults,
       observedToolNames: childOutputStats.recordedToolNames ?? [],
       outputText: text ?? "",
-      status: parsed.result.status,
+      status: "completed",
     };
     const evidence = evaluateEvidence(evidenceInput);
     agentLiveStore.patch(liveRow.id, {
-      status: parsed.result.status === "completed" ? "done" : parsed.result.status === "cancelled" ? "cancelled" : "error",
+      status: "done",
       childSessionId: childSession.id,
-      finalAnswer: parsed.result.summary,
+      finalAnswer: parsed.text,
     });
     return {
-      status: parsed.result.status,
+      status: "completed",
       agentName: request.agent.name,
-      reason: parsed.result.summary,
+      reason: parsed.text,
+      text: parsed.text,
       evidence,
-      structuredResult: parsed.result,
-      diagnostics: [...diagnostics, ...(parsed.result.diagnostics ?? [])],
+      diagnostics,
       lifecycleEntryIds: [],
       childOutputStats,
       childSession,
@@ -756,11 +771,7 @@ async function runWithSdkSession(
 }
 
 type ChildTurnSettlement = "completed" | "aborted" | "timed_out" | "tool_limit";
-const SDK_TOOL_EVIDENCE_EVENT_TYPES = new Set([
-  "tool_execution_start",
-  "tool_execution_update",
-  "tool_execution_end",
-]);
+const SDK_TOOL_EVIDENCE_EVENT_TYPES = new Set(["tool_execution_start", "tool_execution_update", "tool_execution_end"]);
 
 interface ChildTurnObservation {
   settlement: ChildTurnSettlement;
@@ -889,13 +900,20 @@ async function defaultCreateAgentSession(opts: SdkCreateSessionOptionsLike): Pro
   return result as unknown as SdkCreateSessionResultLike;
 }
 
-async function materializeSdkSessionOptions(mod: unknown, opts: SdkCreateSessionOptionsLike): Promise<Record<string, unknown>> {
+async function materializeSdkSessionOptions(
+  mod: unknown,
+  opts: SdkCreateSessionOptionsLike,
+): Promise<Record<string, unknown>> {
   const { appendSystemPrompt, ...sessionOptions } = opts;
   if (appendSystemPrompt === undefined) return sessionOptions;
   if (!isRecord(mod) || typeof mod.DefaultResourceLoader !== "function") {
-    throw new AgentSdkUnavailableError("Installed Pi host does not expose DefaultResourceLoader for appendSystemPrompt.");
+    throw new AgentSdkUnavailableError(
+      "Installed Pi host does not expose DefaultResourceLoader for appendSystemPrompt.",
+    );
   }
-  const DefaultResourceLoader = mod.DefaultResourceLoader as new (options: Record<string, unknown>) => { reload?: () => Promise<void> | void };
+  const DefaultResourceLoader = mod.DefaultResourceLoader as new (options: Record<string, unknown>) => {
+    reload?: () => Promise<void> | void;
+  };
   const loaderOptions: Record<string, unknown> = {
     cwd: opts.cwd,
     appendSystemPromptOverride: (base: string[]) => [...base, appendSystemPrompt],
@@ -985,7 +1003,6 @@ function failedResult(
   diagnostics: string[] = [reason],
   childOutputStats?: AgentChildOutputStats,
   childSession?: SessionRecord,
-  structuredResult?: unknown,
 ): AgentRunResult {
   const result: AgentRunResult = {
     status: "failed",
@@ -996,7 +1013,6 @@ function failedResult(
   };
   if (childOutputStats !== undefined) result.childOutputStats = childOutputStats;
   if (childSession !== undefined) result.childSession = childSession;
-  if (structuredResult !== undefined) result.structuredResult = structuredResult;
   return result;
 }
 
@@ -1151,7 +1167,9 @@ function formatAgentLiveEventLine(event: unknown): string {
 }
 
 function formatAgentLiveStatsLine(stats: SdkSessionStatsLike): string {
-  return boundedAgentLiveLine(`stats sessionId=${stats.sessionId} toolCalls=${stats.toolCalls} toolResults=${stats.toolResults}`);
+  return boundedAgentLiveLine(
+    `stats sessionId=${stats.sessionId} toolCalls=${stats.toolCalls} toolResults=${stats.toolResults}`,
+  );
 }
 
 function appendAgentLiveEventLine(lines: string[], line: string): string[] {

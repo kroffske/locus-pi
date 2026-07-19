@@ -40,7 +40,8 @@ export interface AgentRunResult {
   childSession?: SessionRecord;
   diagnostics: string[];
   lifecycleEntryIds: string[];
-  structuredResult?: unknown;
+  /** Exact non-empty final child message on successful completion. */
+  text?: string;
   childOutputStats?: AgentChildOutputStats;
   childTrace?: AgentChildTrace;
   resultArtifact?: RuntimeArtifact;
@@ -73,7 +74,8 @@ export interface AgentExecutor {
 export interface AgentRunBoundaryOptions {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
-  request: Omit<AgentRunRequest, "parentSessionId" | "projectRoot" | "workingDirectory"> & Partial<Pick<AgentRunRequest, "workingDirectory">>;
+  request: Omit<AgentRunRequest, "parentSessionId" | "projectRoot" | "workingDirectory"> &
+    Partial<Pick<AgentRunRequest, "workingDirectory">>;
   sessionStore?: SessionStore;
   executor?: AgentExecutor;
   signal?: AbortSignal;
@@ -132,7 +134,11 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
       },
     });
     lifecycleEntryIds.push(failed.id);
-    return writeAgentRunResultArtifact(projectRoot, request, blockedResult(request, "No agent executor is configured.", lifecycleEntryIds, childSession));
+    return writeAgentRunResultArtifact(
+      projectRoot,
+      request,
+      blockedResult(request, "No agent executor is configured.", lifecycleEntryIds, childSession),
+    );
   }
 
   const result = await options.executor.run(request, options.signal ?? new AbortController().signal);
@@ -143,11 +149,16 @@ export function validateRunPolicy(request: AgentRunRequest): string | undefined 
   if (request.maxTurns < 1 || request.maxTurns > 20) return "maxTurns must be between 1 and 20.";
   if (request.depth < 0) return "depth must be non-negative.";
   if (request.depth >= request.maxDepth) return "Agent run depth limit reached.";
-  if (!isAllowedToolSubset(request.agent.allowedTools, request.allowedTools)) return "Requested tools exceed the agent definition allow-list.";
+  if (!isAllowedToolSubset(request.agent.allowedTools, request.allowedTools))
+    return "Requested tools exceed the agent definition allow-list.";
   return undefined;
 }
 
-export function createAgentRunRequest(agent: AgentDefinition, task: string, input: Partial<AgentRunRequest> = {}): Omit<AgentRunRequest, "parentSessionId" | "projectRoot"> {
+export function createAgentRunRequest(
+  agent: AgentDefinition,
+  task: string,
+  input: Partial<AgentRunRequest> = {},
+): Omit<AgentRunRequest, "parentSessionId" | "projectRoot"> {
   const request: Omit<AgentRunRequest, "parentSessionId" | "projectRoot"> = {
     agent,
     task,
@@ -181,7 +192,9 @@ function createAgentChildSession(store: MemorySessionStore, request: AgentRunReq
       maxTurns: request.maxTurns,
       depth: request.depth,
       maxDepth: request.maxDepth,
-      ...(request.modelRoleResolution === undefined ? {} : { modelRole: modelRoleResolutionRecord(request.modelRoleResolution) }),
+      ...(request.modelRoleResolution === undefined
+        ? {}
+        : { modelRole: modelRoleResolutionRecord(request.modelRoleResolution) }),
     },
   };
   if (request.projectRoot !== undefined) childInput.projectRoot = request.projectRoot;
@@ -206,7 +219,11 @@ function blockedResult(
   return result;
 }
 
-export function writeAgentRunResultArtifact(projectRoot: string, request: AgentRunRequest, result: AgentRunResult): AgentRunResult {
+export function writeAgentRunResultArtifact(
+  projectRoot: string,
+  request: AgentRunRequest,
+  result: AgentRunResult,
+): AgentRunResult {
   if (result.resultArtifact !== undefined) return result;
   const store = createRuntimeArtifactStore(projectRoot);
   const body = {
@@ -222,11 +239,12 @@ export function writeAgentRunResultArtifact(projectRoot: string, request: AgentR
     depth: request.depth,
     maxDepth: request.maxDepth,
     allowedTools: request.allowedTools,
-    modelRole: request.modelRoleResolution === undefined ? undefined : modelRoleResolutionRecord(request.modelRoleResolution),
+    modelRole:
+      request.modelRoleResolution === undefined ? undefined : modelRoleResolutionRecord(request.modelRoleResolution),
     diagnostics: result.diagnostics,
     lifecycleEntryIds: result.lifecycleEntryIds,
     evidence: result.evidence,
-    structuredResult: result.structuredResult,
+    text: result.text,
     childOutputStats: result.childOutputStats,
     childTrace: result.childTrace,
     metadata: request.metadata,
@@ -243,7 +261,10 @@ export function writeAgentRunResultArtifact(projectRoot: string, request: AgentR
         agentName: result.agentName,
         status: result.status,
         childSessionId: result.childSession?.id,
-        modelRole: request.modelRoleResolution === undefined ? undefined : modelRoleResolutionRecord(request.modelRoleResolution),
+        modelRole:
+          request.modelRoleResolution === undefined
+            ? undefined
+            : modelRoleResolutionRecord(request.modelRoleResolution),
       },
     });
     return { ...result, resultArtifact: artifact };

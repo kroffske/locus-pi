@@ -61,7 +61,7 @@ const lane = (title, y) => {
 lane("Operator", 150);
 lane("Workflow-owned execution and checks", 370);
 lane("Full agent sessions, absent direct LLM type, and fail-closed exits", 680);
-lane("Artifacts and structured handoffs", 1010);
+lane("Artifacts and exact text handoffs", 1010);
 lane("Legend", 1340);
 
 const cards = [];
@@ -157,7 +157,7 @@ const recon = card({
     "Full agent() child session",
     "Receives originalRequest + repositoryContext",
     "tools: []; maxToolCalls: 0; project workspace",
-    "Must match RECON_SCHEMA",
+    "Returns exact non-empty readable text",
   ],
   x: 1630,
   y: 730,
@@ -167,12 +167,12 @@ const recon = card({
 
 const reconCheck = card({
   id: "recon-check",
-  title: "Workflow: check 3 — recon valid",
+  title: "Workflow: receive recon text",
   iconId: "model_validation",
   bullets: [
-    "Owner: requirements-grill.workflow.mjs",
-    "validStage = result.ok + object output",
-    "Failure stops at recon",
+    "Runtime rejects failed or empty child result",
+    "No JSON or schema validation",
+    "Exact reconText enters Agent 2 prompt",
   ],
   x: 2050,
   y: 430,
@@ -185,9 +185,9 @@ const challenge = card({
   iconId: "robot_agent",
   bullets: [
     "Full agent() child session",
-    "Receives originalRequest + recon.output",
+    "Receives originalRequest + reconText",
     "tools: []; maxToolCalls: 0; project workspace",
-    "Must match CHALLENGE_SCHEMA",
+    "Returns exact non-empty readable text",
   ],
   x: 2450,
   y: 730,
@@ -197,12 +197,12 @@ const challenge = card({
 
 const challengeCheck = card({
   id: "challenge-check",
-  title: "Workflow: check 4 — challenge valid",
+  title: "Workflow: receive challenge text",
   iconId: "model_validation",
   bullets: [
-    "Owner: requirements-grill.workflow.mjs",
-    "validStage = result.ok + object output",
-    "Failure stops at challenge",
+    "Runtime rejects failed or empty child result",
+    "No JSON or schema validation",
+    "Exact challengeText enters Agent 3 prompt",
   ],
   x: 2870,
   y: 430,
@@ -215,9 +215,9 @@ const synthesis = card({
   iconId: "robot_agent",
   bullets: [
     "Full agent() child session",
-    "Receives originalRequest + both prior outputs",
+    "Receives originalRequest + both prior texts",
     "tools: []; maxToolCalls: 0; project workspace",
-    "Must match HANDOFF_SCHEMA",
+    "Returns exact non-empty readable text",
   ],
   x: 3270,
   y: 730,
@@ -227,12 +227,12 @@ const synthesis = card({
 
 const synthesisCheck = card({
   id: "synthesis-check",
-  title: "Workflow: check 5 — synthesis valid",
+  title: "Workflow: receive synthesis text",
   iconId: "model_validation",
   bullets: [
-    "Owner: requirements-grill.workflow.mjs",
-    "validStage = result.ok + object output",
-    "Failure stops at synthesis",
+    "Runtime rejects failed or empty child result",
+    "No JSON or schema validation",
+    "Exact synthesisText becomes workflow result",
   ],
   x: 3690,
   y: 430,
@@ -243,7 +243,7 @@ const success = card({
   id: "success-result",
   title: "Workflow: result — success",
   iconId: "confidence_meter",
-  bullets: ["ok: true", "repositoryContext retained", "handoff = synthesis.output", "Stage evidence retained"],
+  bullets: ["Exact synthesisText", "No agent result envelope", "Runtime evidence retained"],
   x: 4090,
   y: 430,
   width: 340,
@@ -305,7 +305,7 @@ const reconFailure = card({
   id: "recon-failure",
   title: "Workflow: fail closed — recon",
   iconId: "kill_switch",
-  bullets: ["Owner: workflow script", "Invalid or failed structured agent result", "Later agents do not start"],
+  bullets: ["Owner: agent runtime", "Child failed or returned empty text", "Later agents do not start"],
   x: 2050,
   y: 730,
   width: 340,
@@ -316,7 +316,7 @@ const challengeFailure = card({
   id: "challenge-failure",
   title: "Workflow: fail closed — challenge",
   iconId: "kill_switch",
-  bullets: ["Owner: workflow script", "Invalid or failed structured agent result", "Synthesis does not start"],
+  bullets: ["Owner: agent runtime", "Child failed or returned empty text", "Synthesis does not start"],
   x: 2870,
   y: 730,
   width: 340,
@@ -327,7 +327,7 @@ const synthesisFailure = card({
   id: "synthesis-failure",
   title: "Workflow: fail closed — synthesis",
   iconId: "kill_switch",
-  bullets: ["Owner: workflow script", "Invalid or failed structured agent result", "No handoff is returned"],
+  bullets: ["Owner: agent runtime", "Child failed or returned empty text", "No handoff is returned"],
   x: 3690,
   y: 730,
   width: 340,
@@ -366,9 +366,9 @@ const repositoryContext = card({
 
 const reconArtifact = card({
   id: "recon-artifact",
-  title: "Artifact: recon output — RECON_SCHEMA",
+  title: "Artifact: in-memory reconText",
   iconId: "data_catalog",
-  bullets: ["LOCUS_AGENT_RESULT_V1 envelope", "summary, relevantFiles, facts", "uncertainties"],
+  bullets: ["Exact Agent 1 text", "Passed verbatim to Agent 2", "No JSON parsing"],
   x: 1630,
   y: 1060,
   width: 360,
@@ -377,9 +377,9 @@ const reconArtifact = card({
 
 const challengeArtifact = card({
   id: "challenge-artifact",
-  title: "Artifact: challenge output — CHALLENGE_SCHEMA",
+  title: "Artifact: in-memory challengeText",
   iconId: "data_catalog",
-  bullets: ["LOCUS_AGENT_RESULT_V1 envelope", "revisedGoal, risks, ambiguities", "assumptions, questions"],
+  bullets: ["Exact Agent 2 text", "Passed verbatim to Agent 3", "No JSON parsing"],
   x: 2450,
   y: 1060,
   width: 360,
@@ -388,13 +388,9 @@ const challengeArtifact = card({
 
 const handoffArtifact = card({
   id: "handoff-artifact",
-  title: "Artifact: handoff output — HANDOFF_SCHEMA",
+  title: "Artifact: in-memory synthesisText",
   iconId: "data_catalog",
-  bullets: [
-    "refined requirements + acceptance criteria",
-    "non-goals + ordered implementation plan",
-    "questions + contextDigest",
-  ],
+  bullets: ["Exact Agent 3 text", "Returned as workflow result", "Readable Markdown requested"],
   x: 3270,
   y: 1060,
   width: 360,
@@ -405,11 +401,7 @@ const resultJson = card({
   id: "result-json",
   title: "Artifact: result.json",
   iconId: "historical_database",
-  bullets: [
-    ".locus/runtime/workflows/<runId>/",
-    "Success or fail-closed result",
-    "Stages, repositoryContext, and handoff",
-  ],
+  bullets: [".locus/runtime/workflows/<runId>/", "Technical workflow result", "Exact synthesisText in result value"],
   x: 4090,
   y: 1060,
   width: 360,
@@ -494,7 +486,7 @@ connect("recon-to-check", recon, reconCheck, {
   from: "top",
   to: "bottom",
   path: "straight",
-  label: "RECON result",
+  label: "exact reconText",
   labelOffset: { dx: -80, dy: 20 },
 });
 connect("recon-pass", reconCheck, challenge, {
@@ -502,7 +494,7 @@ connect("recon-pass", reconCheck, challenge, {
   from: "bottom",
   to: "top",
   path: "straight",
-  label: "pass: request + recon",
+  label: "request + reconText",
   labelOffset: { dx: 100, dy: 20 },
 });
 connect("recon-fail", reconCheck, reconFailure, {
@@ -510,7 +502,7 @@ connect("recon-fail", reconCheck, reconFailure, {
   from: "bottom",
   to: "top",
   path: "straight",
-  label: "fail: recon invalid",
+  label: "child failure",
   labelOffset: { dx: 80, dy: 22 },
   color: RED,
 });
@@ -519,7 +511,7 @@ connect("challenge-to-check", challenge, challengeCheck, {
   from: "top",
   to: "bottom",
   path: "straight",
-  label: "CHALLENGE result",
+  label: "exact challengeText",
   labelOffset: { dx: -80, dy: 20 },
 });
 connect("challenge-pass", challengeCheck, synthesis, {
@@ -527,7 +519,7 @@ connect("challenge-pass", challengeCheck, synthesis, {
   from: "bottom",
   to: "top",
   path: "straight",
-  label: "pass: request + both outputs",
+  label: "request + both texts",
   labelOffset: { dx: 100, dy: 20 },
 });
 connect("challenge-fail", challengeCheck, challengeFailure, {
@@ -535,7 +527,7 @@ connect("challenge-fail", challengeCheck, challengeFailure, {
   from: "bottom",
   to: "top",
   path: "straight",
-  label: "fail: challenge invalid",
+  label: "child failure",
   labelOffset: { dx: 80, dy: 22 },
   color: RED,
 });
@@ -544,12 +536,12 @@ connect("synthesis-to-check", synthesis, synthesisCheck, {
   from: "top",
   to: "bottom",
   path: "straight",
-  label: "HANDOFF result",
+  label: "exact synthesisText",
   labelOffset: { dx: -80, dy: 20 },
 });
 connect("synthesis-pass", synthesisCheck, success, {
   direction: "left-to-right",
-  label: "pass: final handoff",
+  label: "exact text result",
   labelOffset: { dy: -64 },
 });
 connect("synthesis-fail", synthesisCheck, synthesisFailure, {
@@ -557,7 +549,7 @@ connect("synthesis-fail", synthesisCheck, synthesisFailure, {
   from: "bottom",
   to: "top",
   path: "straight",
-  label: "fail: synthesis invalid",
+  label: "child failure",
   labelOffset: { dx: 80, dy: 22 },
   color: RED,
 });
@@ -579,7 +571,7 @@ connect("recon-to-artifact", recon, reconArtifact, {
   direction: "top-down",
   from: "bottom",
   to: "top",
-  label: "structured output",
+  label: "exact text",
   color: GRAY,
   dashed: true,
 });
@@ -587,7 +579,7 @@ connect("challenge-to-artifact", challenge, challengeArtifact, {
   direction: "top-down",
   from: "bottom",
   to: "top",
-  label: "structured output",
+  label: "exact text",
   color: GRAY,
   dashed: true,
 });
@@ -595,7 +587,7 @@ connect("synthesis-to-artifact", synthesis, handoffArtifact, {
   direction: "top-down",
   from: "bottom",
   to: "top",
-  label: "structured handoff",
+  label: "exact text",
   color: GRAY,
   dashed: true,
 });
@@ -603,7 +595,7 @@ connect("runtime-to-result", runtime, resultJson, {
   direction: "top-down",
   from: { side: "bottom", slot: 0.35 },
   to: "top",
-  label: "persist final envelope",
+  label: "persist runtime result",
   labelOffset: { dx: -96 },
   color: GRAY,
   dashed: true,
@@ -647,7 +639,7 @@ scene.rect(2900, 1405, 64, 42, {
   strokeWidth: 2,
   roundness: { type: 3 },
 });
-scene.text(2980, 1408, "Artifact, file, or structured handoff", { size: 15, width: 660 });
+scene.text(2980, 1408, "Artifact, file, or exact text handoff", { size: 15, width: 660 });
 
 scene.rect(3790, 1405, 64, 42, {
   color: RED,

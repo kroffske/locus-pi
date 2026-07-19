@@ -28,12 +28,12 @@ export const meta = { name: "one-agent", description: "Run one bounded tool-usin
 
 export default async function run({ agent, phase }, input) {
   phase("work");
-  const result = await agent(input, {
+  const text = await agent(input, {
     agent: "quick_task",
     label: "work",
     permissionMode: "agent-defined",
   });
-  return { ok: Boolean(result?.ok), summary: result?.summary ?? null };
+  return text;
 }
 ```
 
@@ -52,7 +52,7 @@ if (!gate?.ok) return { ok: false, error: gate?.error ?? "Gate failed" };
 if (!gate.output.needsTools) return { ok: true, skipped: true };
 
 const work = await agent(input, { agent: "quick_task", label: "work" });
-return { ok: Boolean(work?.ok), summary: work?.summary ?? null };
+return work;
 ```
 
 ## Bounded loop plus judge
@@ -61,9 +61,8 @@ return { ok: Boolean(work?.ok), summary: work?.summary ?? null };
 const maxRounds = 3;
 for (let round = 1; round <= maxRounds; round += 1) {
   const work = await agent(`Round ${round}: ${input}`, { label: `work:${round}` });
-  if (!work?.ok) return { ok: false, error: work?.error ?? "Work failed" };
 
-  const judge = await llm(`Is this complete? Reply with done boolean.\n${work.summary}`, {
+  const judge = await llm(`Is this complete? Reply with done boolean.\n${work}`, {
     schema: {
       type: "object",
       required: ["done"],
@@ -79,20 +78,18 @@ return { ok: false, stoppedBy: "round-cap", error: "Completion was not proven" }
 
 ```js
 const plan = await agent(`Plan: ${input}`, { agent: "plan", label: "plan" });
-if (!plan?.ok) return { ok: false, error: "Planning failed" };
 
-const build = await agent(`Implement this plan:\n${plan.summary}`, {
+const build = await agent(`Implement this plan:\n${plan}`, {
   agent: "task",
   label: "build",
   workspaceMode: "worktree",
 });
-if (!build?.ok) return { ok: false, error: "Build failed" };
 
-const review = await agent(`Review the implementation:\n${build.summary}`, {
+const review = await agent(`Review the implementation:\n${build}`, {
   agent: "reviewer",
   label: "review",
 });
-return { ok: Boolean(review?.ok), plan: plan.summary, review: review?.summary ?? null };
+return review;
 ```
 
 ## Ordered pipeline
@@ -101,7 +98,7 @@ return { ok: Boolean(review?.ok), plan: plan.summary, review: review?.summary ??
 const outputs = await pipeline(
   items,
   async ({ item }) => ({ item, extracted: await agent(`Inspect ${item}`) }),
-  async (state) => ({ ...state, classified: await llm(`Classify ${state.extracted.summary}`) }),
+  async (state) => ({ ...state, classified: await llm(`Classify ${state.extracted}`) }),
 );
 return { ok: true, outputs };
 ```
@@ -116,22 +113,22 @@ and return `partial: true`; partial is never projected as success.
 const findings = await parallel(
   targets.map((target) => () => agent(`Inspect ${target}`, { agent: "explore", label: `inspect:${target}` })),
 );
-const merge = await agent(findings.map((item, index) => `${index + 1}. ${item.summary}`).join("\n"), {
+const merge = await agent(findings.map((item, index) => `${index + 1}. ${item}`).join("\n"), {
   agent: "librarian",
   label: "merge",
 });
-return { ok: Boolean(merge?.ok), summary: merge?.summary ?? null };
+return merge;
 ```
 
 ## Judge panel
 
 ```js
 const votes = await parallel(
-  ["reviewer", "oracle", "explore"].map(
-    (role) => () => agent(input, { agent: role, label: `vote:${role}`, schema: VERDICT_SCHEMA }),
+  ["strict", "balanced", "skeptical"].map(
+    (perspective) => () => llm(`${perspective} judge: ${input}`, { schema: VERDICT_SCHEMA }),
   ),
 );
-const passed = votes.filter((vote) => vote?.ok && vote.output?.verdict === "pass").length;
+const passed = votes.filter((vote) => vote.ok && vote.output.verdict === "pass").length;
 return { ok: passed > votes.length / 2, passed, total: votes.length };
 ```
 
@@ -144,7 +141,15 @@ panels are not accepted by requirements, let the group fail closed.
 let emptyStreak = 0;
 for (let round = 1; round <= 5; round += 1) {
   const sweep = await agent(`Find remaining work, round ${round}`, { label: `sweep:${round}` });
-  const remaining = Number(sweep?.output?.remaining ?? 0);
+  const measured = await llm(`Count evidenced remaining items in this report:\n${sweep}`, {
+    schema: {
+      type: "object",
+      required: ["remaining"],
+      properties: { remaining: { type: "number" } },
+    },
+  });
+  if (!measured.ok) return { ok: false, error: "Remaining-work measurement failed" };
+  const remaining = measured.output.remaining;
   emptyStreak = remaining === 0 ? emptyStreak + 1 : 0;
   if (emptyStreak >= 2) return { ok: true, stoppedBy: "dry", round };
 }

@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
-import type { AgentChildOutputStats, AgentExecutor, AgentParentContext, AgentRunRequest, AgentRunResult } from "./agent-runner.js";
+import type {
+  AgentChildOutputStats,
+  AgentExecutor,
+  AgentParentContext,
+  AgentRunRequest,
+  AgentRunResult,
+} from "./agent-runner.js";
 import type { ModelRoleResolutionRecord } from "./model-settings.js";
 import { modelRoleResolutionRecord } from "./model-settings.js";
 import type {
@@ -13,8 +19,6 @@ import { getAgentWorkloadProof } from "./agent-workload-proof.js";
 import { buildAgentSystemPrompt } from "./agent-system-prompt.js";
 import { OUTPUT_DEFAULTS } from "./types.js";
 
-export const AGENT_RESULT_MARKER = "LOCUS_AGENT_RESULT_V1";
-
 export interface AgentExecutionPromptCapsule {
   version: "locus.agent.prompt.v1";
   agentName: string;
@@ -27,20 +31,9 @@ export interface AgentExecutionPromptCapsule {
   depth: number;
   maxDepth: number;
   modelRole?: ModelRoleResolutionRecord;
-  expectedResultMarker: typeof AGENT_RESULT_MARKER;
   agentSystemPrompt?: string;
   contextDiagnostics?: string[];
   parentContext?: string;
-}
-
-export interface AgentStructuredResult {
-  version: "locus.agent.result.v1";
-  status: "completed" | "failed" | "cancelled";
-  summary: string;
-  result?: unknown;
-  output?: unknown;
-  diagnostics?: string[];
-  artifacts?: Array<{ path: string; kind?: string; title?: string }>;
 }
 
 export interface AgentReplacementSessionRunInput {
@@ -48,14 +41,17 @@ export interface AgentReplacementSessionRunInput {
   promptCapsule?: AgentExecutionPromptCapsule;
   kickoffPrompt?: string;
   onSessionReplaced?: () => void;
-  onChildOutput?: (output: AgentReplacementSessionRunOutput, replacementCtx: ReplacementSessionContext) => Promise<void> | void;
+  onChildOutput?: (
+    output: AgentReplacementSessionRunOutput,
+    replacementCtx: ReplacementSessionContext,
+  ) => Promise<void> | void;
 }
 
 export interface AgentReplacementSessionRunOutput {
   status: "blocked" | "completed" | "failed" | "cancelled";
   reason: string;
   promptCapsule: AgentExecutionPromptCapsule;
-  result?: AgentStructuredResult;
+  text?: string;
   childSessionId?: string;
   diagnostics: string[];
   entries: ReplacementSessionEntryLike[];
@@ -64,7 +60,10 @@ export interface AgentReplacementSessionRunOutput {
 export interface AgentReplacementSessionHost {
   kind: "replacement-session";
   available(ctx: unknown): boolean;
-  runInChildSession(input: AgentReplacementSessionRunInput, signal: AbortSignal): Promise<AgentReplacementSessionRunOutput>;
+  runInChildSession(
+    input: AgentReplacementSessionRunInput,
+    signal: AbortSignal,
+  ): Promise<AgentReplacementSessionRunOutput>;
 }
 
 export interface AgentReplacementSessionExecutorOptions {
@@ -73,13 +72,15 @@ export interface AgentReplacementSessionExecutorOptions {
   promptEnv?: NodeJS.ProcessEnv;
 }
 
-export function createAgentReplacementSessionExecutor(ctx: ExtensionCommandContext, options: AgentReplacementSessionExecutorOptions = {}): AgentExecutor {
+export function createAgentReplacementSessionExecutor(
+  ctx: ExtensionCommandContext,
+  options: AgentReplacementSessionExecutorOptions = {},
+): AgentExecutor {
   const host = createAgentReplacementSessionHost(ctx);
   return {
     async run(request, signal) {
-      const promptCapsule = options.promptEnv === undefined
-        ? undefined
-        : createAgentExecutionPromptCapsule(request, [], options.promptEnv);
+      const promptCapsule =
+        options.promptEnv === undefined ? undefined : createAgentExecutionPromptCapsule(request, [], options.promptEnv);
       const input: AgentReplacementSessionRunInput = {
         request,
         ...(promptCapsule === undefined ? {} : { promptCapsule }),
@@ -94,7 +95,11 @@ export function createAgentReplacementSessionExecutor(ctx: ExtensionCommandConte
   };
 }
 
-export function createAgentExecutionPromptCapsule(request: AgentRunRequest, diagnostics: string[] = [], promptEnv: NodeJS.ProcessEnv | undefined = process.env): AgentExecutionPromptCapsule {
+export function createAgentExecutionPromptCapsule(
+  request: AgentRunRequest,
+  diagnostics: string[] = [],
+  promptEnv: NodeJS.ProcessEnv | undefined = process.env,
+): AgentExecutionPromptCapsule {
   const effectivePromptEnv = promptEnv ?? process.env;
   const capsule: AgentExecutionPromptCapsule = {
     version: "locus.agent.prompt.v1",
@@ -106,10 +111,10 @@ export function createAgentExecutionPromptCapsule(request: AgentRunRequest, diag
     maxTurns: request.maxTurns,
     depth: request.depth,
     maxDepth: request.maxDepth,
-    expectedResultMarker: AGENT_RESULT_MARKER,
   };
   if (request.agent.filePath !== undefined) capsule.agentDefinitionPath = request.agent.filePath;
-  if (request.modelRoleResolution !== undefined) capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
+  if (request.modelRoleResolution !== undefined)
+    capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
   const agentSystemPrompt = buildAgentSystemPrompt(request, { diagnostics, env: effectivePromptEnv });
   if (agentSystemPrompt !== undefined) capsule.agentSystemPrompt = agentSystemPrompt;
   if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
@@ -160,9 +165,9 @@ export function formatAgentKickoffPrompt(capsule: AgentExecutionPromptCapsule): 
   }
   lines.push(
     "",
-    "Do the work, then reply to the parent runtime in plain text. Plain prose IS the result: the runtime returns your final message to the caller as-is and treats it as completed. Do not wrap it in JSON.",
+    "Do the work, then reply to the parent runtime in plain text. Your exact final non-empty message is the result.",
+    "Do not wrap the result in JSON and do not add a machine-readable result envelope.",
     "If the prompt capsule includes agentSystemPrompt, treat it as this child agent's operating instructions.",
-    `Structured output is OPT-IN — only if you must report a non-success outcome or return machine-readable fields, end your message with ${AGENT_RESULT_MARKER} followed by JSON { version: "locus.agent.result.v1", status, summary, result?, output?, diagnostics?, artifacts? }, where status is exactly one of "completed", "failed", or "cancelled". If you emit that envelope, make it valid JSON; otherwise just answer in plain text.`,
   );
   return lines.join("\n");
 }
@@ -250,16 +255,30 @@ async function runReplacementSession(
   kickoffPrompt: string,
   signal: AbortSignal,
 ): Promise<AgentReplacementSessionRunOutput> {
-  if (signal.aborted) return finishReplacementSessionRun(input, replacementCtx, hostCancelled(promptCapsule, "Agent run was cancelled before child session kickoff."));
+  if (signal.aborted)
+    return finishReplacementSessionRun(
+      input,
+      replacementCtx,
+      hostCancelled(promptCapsule, "Agent run was cancelled before child session kickoff."),
+    );
   if (typeof replacementCtx.sendUserMessage !== "function") {
-    return finishReplacementSessionRun(input, replacementCtx, hostBlocked(promptCapsule, "Replacement session cannot receive user messages."));
+    return finishReplacementSessionRun(
+      input,
+      replacementCtx,
+      hostBlocked(promptCapsule, "Replacement session cannot receive user messages."),
+    );
   }
   await replacementCtx.sendUserMessage(kickoffPrompt, { source: "locus-pi-agent-executor" });
   if (typeof replacementCtx.waitForIdle === "function") await replacementCtx.waitForIdle({ signal });
   const entries = await readReplacementEntries(replacementCtx);
-  const parsed = parseAgentStructuredResultFromEntries(entries);
+  const parsed = parseAgentTextFromEntries(entries);
   const childSessionId = childSessionIdOutput(replacementCtx).childSessionId;
-  const outputStats = summarizeReplacementSessionEntries(entries, childSessionId, promptCapsule.allowedTools, promptCapsule.projectRoot);
+  const outputStats = summarizeReplacementSessionEntries(
+    entries,
+    childSessionId,
+    promptCapsule.allowedTools,
+    promptCapsule.projectRoot,
+  );
   if (!parsed.ok) {
     return finishReplacementSessionRun(input, replacementCtx, {
       status: "failed",
@@ -271,11 +290,11 @@ async function runReplacementSession(
     });
   }
   return finishReplacementSessionRun(input, replacementCtx, {
-    status: parsed.result.status,
-    reason: parsed.result.summary,
+    status: "completed",
+    reason: parsed.text,
     promptCapsule,
-    result: parsed.result,
-    diagnostics: parsed.result.diagnostics ?? [],
+    text: parsed.text,
+    diagnostics: [],
     entries,
     ...(childSessionId === undefined ? {} : { childSessionId }),
   });
@@ -290,97 +309,68 @@ async function finishReplacementSessionRun(
   return output;
 }
 
-export function parseAgentStructuredResultFromEntries(entries: ReplacementSessionEntryLike[]): { ok: true; result: AgentStructuredResult } | { ok: false; reason: string } {
+export function parseAgentTextFromEntries(
+  entries: ReplacementSessionEntryLike[],
+): { ok: true; text: string } | { ok: false; reason: string } {
   for (const entry of entries.slice().reverse()) {
+    if (!isAssistantEntry(entry)) continue;
     const text = extractEntryText(entry);
     if (text === undefined) continue;
-    const parsed = parseAgentStructuredResult(text);
+    const parsed = parseAgentText(text);
     if (parsed.ok) return parsed;
     if (parsed.reason !== "Agent result text is empty.") return parsed;
   }
   return { ok: false, reason: "Agent result text is empty." };
 }
 
-export function parseAgentStructuredResult(text: string): { ok: true; result: AgentStructuredResult } | { ok: false; reason: string } {
-  const markerIndex = findResultMarkerIndex(text);
-  const normalized = text.trim();
-  if (normalized.length === 0) return { ok: false, reason: "Agent result text is empty." };
-  if (markerIndex < 0) {
-    const rawJson = parseRawStructuredJson(normalized);
-    if (rawJson.ok) return rawJson;
-    return wrapPlainTextResult(normalized);
-  }
-  const payload = normalized.slice(markerIndex + AGENT_RESULT_MARKER.length).trim();
-  // The structured envelope is OPT-IN, not required: an agent does its work and
-  // returns text. We honor a VALID envelope when the model emits one (so a child
-  // can still self-report failed/diagnostics/output), but a botched envelope must
-  // never hard-fail the run — we fall back to wrapping what the child actually
-  // said as a completed plain-text result. Honesty is enforced by workload proof
-  // (tool activity), not by the envelope's JSON being well-formed.
-  const preMarker = normalized.slice(0, markerIndex).trim();
-  const fallback = () => wrapPlainTextResult(preMarker.length > 0 ? preMarker : payload.length > 0 ? payload : normalized);
-  if (payload.length === 0) return fallback();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload);
-  } catch {
-    return fallback();
-  }
-  const validated = validateAgentStructuredResult(parsed);
-  return validated.ok ? validated : fallback();
-}
-
-function parseRawStructuredJson(text: string): { ok: true; result: AgentStructuredResult } | { ok: false; reason: string } {
-  if (!text.startsWith("{")) return { ok: false, reason: "Agent result is not structured JSON." };
-  try {
-    return validateAgentStructuredResult(JSON.parse(text) as unknown);
-  } catch {
-    return { ok: false, reason: "Agent result is not structured JSON." };
-  }
-}
-
-function wrapPlainTextResult(text: string): { ok: true; result: AgentStructuredResult } {
-  return {
-    ok: true,
-    result: {
-      version: "locus.agent.result.v1",
-      status: "completed",
-      summary: summarizePlainTextResult(text),
-      result: text,
-    },
-  };
-}
-
-function summarizePlainTextResult(text: string): string {
-  const firstLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== "") ?? text.trim();
-  return firstLine.length <= 160 ? firstLine : `${firstLine.slice(0, 157)}...`;
+export function parseAgentText(text: string): { ok: true; text: string } | { ok: false; reason: string } {
+  if (text.trim() === "") return { ok: false, reason: "Agent result text is empty." };
+  return { ok: true, text };
 }
 
 function mergePromptDiagnostics(promptCapsule: AgentExecutionPromptCapsule, diagnostics: string[]): string[] {
-  if (promptCapsule.contextDiagnostics === undefined || promptCapsule.contextDiagnostics.length === 0) return diagnostics;
+  if (promptCapsule.contextDiagnostics === undefined || promptCapsule.contextDiagnostics.length === 0)
+    return diagnostics;
   return [...promptCapsule.contextDiagnostics, ...diagnostics];
 }
 
-export function mapReplacementSessionOutputToRunResult(request: AgentRunRequest, output: AgentReplacementSessionRunOutput): AgentRunResult {
+export function mapReplacementSessionOutputToRunResult(
+  request: AgentRunRequest,
+  output: AgentReplacementSessionRunOutput,
+): AgentRunResult {
   const result: AgentRunResult = {
     status: output.status,
     agentName: request.agent.name,
     reason: output.reason,
     diagnostics: mergePromptDiagnostics(output.promptCapsule, output.diagnostics),
     lifecycleEntryIds: [],
-    childOutputStats: summarizeReplacementSessionEntries(output.entries, output.childSessionId, output.promptCapsule.allowedTools, request.projectRoot),
+    childOutputStats: summarizeReplacementSessionEntries(
+      output.entries,
+      output.childSessionId,
+      output.promptCapsule.allowedTools,
+      request.projectRoot,
+    ),
   };
-  if (output.result !== undefined) result.structuredResult = output.result;
-  if (output.childSessionId !== undefined) result.childSession = createReplacementSessionRecord(request, output.childSessionId);
+  if (output.text !== undefined) result.text = output.text;
+  if (output.childSessionId !== undefined)
+    result.childSession = createReplacementSessionRecord(request, output.childSessionId);
   return result;
 }
 
-function summarizeReplacementSessionEntries(entries: ReplacementSessionEntryLike[], sessionId?: string, allowedTools: string[] = [], projectRoot?: string): AgentChildOutputStats {
+function summarizeReplacementSessionEntries(
+  entries: ReplacementSessionEntryLike[],
+  sessionId?: string,
+  allowedTools: string[] = [],
+  projectRoot?: string,
+): AgentChildOutputStats {
   let assistantMessageCount = 0;
   let assistantToolCallCount = 0;
   let toolResultCount = 0;
   for (const entry of entries) {
-    const role = entry.role ?? (isRecord(entry.message) ? entry.message.role : undefined) ?? (isRecord(entry.payload) ? entry.payload.role : undefined);
+    const role =
+      entry.role ??
+      (isRecord(entry.message) ? entry.message.role : undefined) ??
+      (isRecord(entry.payload) ? entry.payload.role : undefined);
     if (role === "assistant") assistantMessageCount += 1;
     assistantToolCallCount += countToolCalls(entry);
     toolResultCount += countToolResults(entry);
@@ -394,15 +384,19 @@ function summarizeReplacementSessionEntries(entries: ReplacementSessionEntryLike
     assistantMessageCount,
     assistantToolCallCount,
     toolResultCount,
-    ...(recorded === undefined ? {} : {
-      recordedToolCallCount,
-      recordedToolResultCount,
-      recordedToolNames: recorded.toolNames,
-    }),
-    ...(transcriptProof.count === 0 ? {} : {
-      transcriptToolBlockCount: transcriptProof.count,
-      transcriptToolNames: transcriptProof.toolNames,
-    }),
+    ...(recorded === undefined
+      ? {}
+      : {
+          recordedToolCallCount,
+          recordedToolResultCount,
+          recordedToolNames: recorded.toolNames,
+        }),
+    ...(transcriptProof.count === 0
+      ? {}
+      : {
+          transcriptToolBlockCount: transcriptProof.count,
+          transcriptToolNames: transcriptProof.toolNames,
+        }),
     hasWorkloadProof: assistantToolCallCount > 0 || toolResultCount > 0 || transcriptProof.count > 0,
   };
 }
@@ -413,45 +407,10 @@ async function readReplacementEntries(ctx: ReplacementSessionContext): Promise<R
   return entries.slice(-500);
 }
 
-function findResultMarkerIndex(text: string): number {
-  const trimmed = text.trim();
-  if (trimmed.startsWith(AGENT_RESULT_MARKER)) return text.indexOf(AGENT_RESULT_MARKER);
-  const lineMatch = new RegExp(`(?:^|\\n)\\s*${AGENT_RESULT_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).exec(text);
-  return lineMatch?.index === undefined ? -1 : lineMatch.index + lineMatch[0].lastIndexOf(AGENT_RESULT_MARKER);
-}
-
-function isCommandContextWithNewSession(ctx: unknown): ctx is ExtensionCommandContext & Required<Pick<ExtensionCommandContext, "newSession">> {
+function isCommandContextWithNewSession(
+  ctx: unknown,
+): ctx is ExtensionCommandContext & Required<Pick<ExtensionCommandContext, "newSession">> {
   return isRecord(ctx) && typeof ctx.newSession === "function";
-}
-
-function validateAgentStructuredResult(value: unknown): { ok: true; result: AgentStructuredResult } | { ok: false; reason: string } {
-  if (!isRecord(value)) return { ok: false, reason: "Structured agent result must be an object." };
-  if (value.version !== "locus.agent.result.v1") return { ok: false, reason: "Structured agent result has unsupported version." };
-  if (value.status !== "completed" && value.status !== "failed" && value.status !== "cancelled") {
-    return { ok: false, reason: "Structured agent result has unsupported status." };
-  }
-  if (typeof value.summary !== "string" || value.summary.trim() === "") {
-    return { ok: false, reason: "Structured agent result summary is required." };
-  }
-
-  const result: AgentStructuredResult = {
-    version: "locus.agent.result.v1",
-    status: value.status,
-    summary: value.summary,
-  };
-  if ("result" in value) result.result = value.result;
-  if ("output" in value) result.output = value.output;
-  if ("diagnostics" in value) {
-    const diagnostics = normalizeDiagnostics(value.diagnostics);
-    if (diagnostics === undefined) return { ok: false, reason: "Structured agent result diagnostics are invalid." };
-    result.diagnostics = diagnostics;
-  }
-  if ("artifacts" in value) {
-    const artifacts = normalizeArtifacts(value.artifacts);
-    if (artifacts === undefined) return { ok: false, reason: "Structured agent result artifacts are invalid." };
-    result.artifacts = artifacts;
-  }
-  return { ok: true, result };
 }
 
 function extractEntryText(entry: ReplacementSessionEntryLike): string | undefined {
@@ -466,6 +425,15 @@ function extractEntryText(entry: ReplacementSessionEntryLike): string | undefine
   const dataText = extractTextFromContent(isRecord(entry.data) ? entry.data.content : undefined);
   if (dataText !== undefined) return dataText;
   return undefined;
+}
+
+function isAssistantEntry(entry: ReplacementSessionEntryLike): boolean {
+  const role =
+    entry.role ??
+    (isRecord(entry.message) ? entry.message.role : undefined) ??
+    (isRecord(entry.payload) ? entry.payload.role : undefined) ??
+    (isRecord(entry.data) ? entry.data.role : undefined);
+  return role === "assistant";
 }
 
 function extractTextFromContent(content: unknown): string | undefined {
@@ -548,7 +516,8 @@ function countToolResults(value: unknown): number {
   if (Array.isArray(value)) return value.reduce((count, item) => count + countToolResults(item), 0);
   if (!isRecord(value)) return 0;
   const role = typeof value.role === "string" ? value.role : undefined;
-  const type = typeof value.type === "string" ? value.type : typeof value.customType === "string" ? value.customType : undefined;
+  const type =
+    typeof value.type === "string" ? value.type : typeof value.customType === "string" ? value.customType : undefined;
   if (role === "tool" || type === "tool_result" || type === "toolResult") return 1;
   let count = 0;
   for (const [key, item] of Object.entries(value)) {
@@ -561,7 +530,10 @@ function countToolResults(value: unknown): number {
   return count;
 }
 
-function countTranscriptToolBlocks(entries: ReplacementSessionEntryLike[], allowedTools: string[]): { count: number; toolNames: string[] } {
+function countTranscriptToolBlocks(
+  entries: ReplacementSessionEntryLike[],
+  allowedTools: string[],
+): { count: number; toolNames: string[] } {
   const names = allowedTools.filter((name) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(name));
   if (names.length === 0) return { count: 0, toolNames: [] };
   let count = 0;
@@ -590,71 +562,19 @@ function nextNonEmptyLine(lines: string[], start: number): string | undefined {
   return undefined;
 }
 
-function normalizeDiagnostics(value: unknown): string[] | undefined {
-  if (Array.isArray(value)) return value.map(formatDiagnosticItem);
-  if (typeof value === "string") return [value];
-  if (!isRecord(value)) return undefined;
-  return Object.entries(value).map(([key, item]) => `${key}: ${formatDiagnosticItem(item)}`);
-}
-
-function formatDiagnosticItem(item: unknown): string {
-  if (typeof item === "string") return item;
-  try {
-    return JSON.stringify(item);
-  } catch {
-    return String(item);
-  }
-}
-
-function normalizeArtifacts(value: unknown): Array<{ path: string; kind?: string; title?: string }> | undefined {
-  if (Array.isArray(value)) return normalizeArtifactArray(value);
-  if (!isRecord(value)) return undefined;
-  const artifacts: Array<{ path: string; kind?: string; title?: string }> = [];
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === "string" && looksLikePath(item)) artifacts.push({ path: item, title: key });
-    if (Array.isArray(item)) {
-      for (const nested of item) {
-        if (typeof nested === "string" && looksLikePath(nested)) artifacts.push({ path: nested, title: key });
-      }
-    }
-  }
-  return artifacts;
-}
-
-function normalizeArtifactArray(value: unknown[]): Array<{ path: string; kind?: string; title?: string }> | undefined {
-  const artifacts: Array<{ path: string; kind?: string; title?: string }> = [];
-  for (const item of value) {
-    if (isArtifact(item)) {
-      artifacts.push(item);
-      continue;
-    }
-    if (typeof item === "string" && looksLikePath(item)) {
-      artifacts.push({ path: item });
-      continue;
-    }
-    return undefined;
-  }
-  return artifacts;
-}
-
-function looksLikePath(value: string): boolean {
-  return value.includes("/") || value.startsWith(".");
-}
-
-function isArtifact(value: unknown): value is { path: string; kind?: string; title?: string } {
-  if (!isRecord(value) || typeof value.path !== "string") return false;
-  if ("kind" in value && typeof value.kind !== "string") return false;
-  if ("title" in value && typeof value.title !== "string") return false;
-  return true;
-}
-
 function isNewSessionCancelledResult(value: unknown): value is NewSessionResultLike & { cancelled: true } {
   return isRecord(value) && value.cancelled === true;
 }
 
 function isAgentReplacementSessionRunOutput(value: unknown): value is AgentReplacementSessionRunOutput {
   if (!isRecord(value)) return false;
-  if (value.status !== "blocked" && value.status !== "completed" && value.status !== "failed" && value.status !== "cancelled") return false;
+  if (
+    value.status !== "blocked" &&
+    value.status !== "completed" &&
+    value.status !== "failed" &&
+    value.status !== "cancelled"
+  )
+    return false;
   return typeof value.reason === "string" && Array.isArray(value.diagnostics) && Array.isArray(value.entries);
 }
 

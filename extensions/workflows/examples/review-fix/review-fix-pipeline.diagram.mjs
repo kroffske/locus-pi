@@ -122,7 +122,7 @@ scene.text(40, 18, "Curated review-fix workflow — accepted findings, isolated 
 scene.text(
   40,
   58,
-  "Only explicit accepted dispositions authorize writes. Source changes stay uncommitted in a distinct linked worktree.",
+  "Deterministic code validates approval before one runtime-owned worktree and two text-returning agents.",
   { size: 14, color: COLORS.muted, width: 3920, align: "center" },
 );
 scene.text(70, 96, "Legend", { size: 15, color: COLORS.artifact, width: 80 });
@@ -143,7 +143,7 @@ lane(
 );
 lane(
   "WORKFLOW-OWNED",
-  "Launches agents, checks schema fields, and returns semantic success/partial/blocked.",
+  "Validates files and hashes, allocates one opaque handle, forwards exact text, and returns.",
   345,
   250,
   COLORS.workflow,
@@ -151,7 +151,7 @@ lane(
 );
 lane(
   "FULL AGENT SESSIONS",
-  "Resolver reads; implementer writes only the linked worktree; verifier reads source and writes the task report.",
+  "Implementer and verifier receive the same runtime-owned workspace handle.",
   615,
   235,
   COLORS.agent,
@@ -177,8 +177,8 @@ const request = operator(
 );
 const launchResolver = panel(
   "launch-resolver",
-  "Workflow: launch Agent F1",
-  ["Pass free-form request", "Attach APPROVED_PLAN_SCHEMA"],
+  "Workflow: load explicit fix-plan.md",
+  ["Require one project-relative path", "Resolve files inside project root"],
   "multi_agent_orchestrator",
   430,
   405,
@@ -188,19 +188,23 @@ const launchResolver = panel(
 );
 const resolver = panel(
   "agent-1",
-  "Agent: F1 — plan-resolver",
-  ["label: resolve approved review plan", "Recomputes review + plan hashes", "Decides ready or blocked"],
+  "Workflow: deterministic approval validator",
+  [
+    "Recompute review + plan SHA-256",
+    "Match target, snapshot, and finding ids",
+    "Require at least one accepted finding",
+  ],
   "signal_quality_magnifier",
   770,
   665,
   305,
   145,
-  "agent",
+  "workflow",
 );
 const checkApproval = panel(
   "check-approval",
-  "Workflow: check Agent F1 output.status (APPROVED_PLAN_SCHEMA)",
-  ["ready + acceptedFindings → implement", "blocked → return question"],
+  "Workflow: allocate one workspace handle",
+  ["Exact reviewed head", "Opaque runtime-owned identity", "Original checkout invariant"],
   "function_router",
   1125,
   390,
@@ -210,8 +214,8 @@ const checkApproval = panel(
 );
 const blocked = panel(
   "blocked",
-  "Workflow: map missing approval",
-  ["No worktree creation", "Return Agent F1 question"],
+  "Workflow: stop on validation error",
+  ["No worktree creation", "No write-capable agent starts"],
   "guardrails",
   3560,
   500,
@@ -221,8 +225,8 @@ const blocked = panel(
 );
 const launchImplementer = panel(
   "launch-implementer",
-  "Workflow: launch Agent F2",
-  ["Pass accepted findings only", "Attach IMPLEMENTATION_SCHEMA"],
+  "Workflow: launch Agent F1",
+  ["Pass accepted findings only", "Pass opaque workspace handle"],
   "multi_agent_orchestrator",
   1550,
   385,
@@ -232,8 +236,8 @@ const launchImplementer = panel(
 );
 const implementer = panel(
   "agent-2",
-  "Agent: F2 — implementer",
-  ["label: apply accepted review fixes", "Creates distinct linked worktree", "Applies accepted ids + runs checks"],
+  "Agent: F1 — review-fix-01-implementer",
+  ["label: apply accepted review fixes", "Edits runtime-owned worktree", "Returns exact implementation text"],
   "sandbox_executor",
   1880,
   655,
@@ -243,8 +247,8 @@ const implementer = panel(
 );
 const launchVerifier = panel(
   "launch-verifier",
-  "Workflow: launch Agent F3",
-  ["Pass plan + implementation", "Attach FIX_REPORT_SCHEMA"],
+  "Workflow: launch Agent F2",
+  ["Pass exact implementation text", "Reuse same opaque workspace handle"],
   "multi_agent_orchestrator",
   2250,
   405,
@@ -254,7 +258,7 @@ const launchVerifier = panel(
 );
 const verifier = panel(
   "agent-3",
-  "Agent: F3 — verifier",
+  "Agent: F2 — review-fix-02-verifier",
   ["label: verify review fixes and publish report", "Inspects diff + re-runs checks", "Writes fix-report.md"],
   "model_validation",
   2590,
@@ -265,8 +269,8 @@ const verifier = panel(
 );
 const mapResult = panel(
   "map-result",
-  "Workflow: check Agent F3 output.status (FIX_REPORT_SCHEMA)",
-  ["completed → ok=true", "partial/blocked → ok=false"],
+  "Workflow: return Agent F2 exact text",
+  ["No JSON parse", "Recheck plan hashes", "Runtime keeps workspace evidence"],
   "function_router",
   2950,
   390,
@@ -286,8 +290,8 @@ const operatorDecision = operator(
 
 const source = artifact(
   "source",
-  "Artifact: review-fix.workflow.mjs + agents.yaml",
-  ["Routing + schemas; F1–F3 prompts"],
+  "Artifact: review-fix.workflow.mjs + resources/*.md",
+  ["Deterministic validator + F1/F2 Markdown"],
   "prompt_template",
   430,
   935,
@@ -300,7 +304,7 @@ const fixPlan = artifact(
   [
     "Review publishes every finding pending",
     "Human disposition is the write gate",
-    "Only accepted ids cross to Agent F2",
+    "Only accepted ids cross to Agent F1",
   ],
   "prompt_template",
   1125,
@@ -346,7 +350,7 @@ const journal = artifact(
 const result = artifact(
   "result",
   "Artifact: result.json",
-  ["Mandatory run envelope", "Approval, worktree, and report handoffs"],
+  ["Mandatory run envelope", "Exact verifier text + runtime workspace evidence"],
   "data_catalog",
   3480,
   920,
@@ -404,7 +408,7 @@ connect("source-launch", source, launchResolver, {
 });
 connect("launch-resolver", launchResolver, resolver, {
   direction: "top-down",
-  label: "agent(...)",
+  label: "path + file bytes",
   from: { side: "bottom", slot: 0.65 },
   to: { side: "top", slot: 0.35 },
 });
@@ -418,16 +422,16 @@ connect("plan-resolver", fixPlan, resolver, {
 });
 connect("resolver-check", resolver, checkApproval, {
   direction: "bottom-up",
-  label: "APPROVED_PLAN_SCHEMA",
+  label: "validated plan + reviewed head",
   from: { side: "top", slot: 0.65 },
   to: { side: "bottom", slot: 0.35 },
 });
 connect("approval-ready", checkApproval, launchImplementer, {
-  label: "status=ready",
+  label: "workspaceHandle",
   labelOffset: { dx: 0, dy: -100 },
 });
 connect("approval-blocked", checkApproval, blocked, {
-  label: "status=blocked",
+  label: "validation/allocation error",
   path: "outer",
   outerSide: "top",
   outerGap: 38,
@@ -437,26 +441,29 @@ connect("approval-blocked", checkApproval, blocked, {
 });
 connect("launch-implementer", launchImplementer, implementer, {
   direction: "top-down",
-  label: "acceptedFindings[] only",
+  label: "accepted ids + plan text + handle",
   from: { side: "bottom", slot: 0.65 },
   to: { side: "top", slot: 0.35 },
 });
-connect("implementer-worktree", implementer, worktree, {
+connect("implementer-worktree", checkApproval, worktree, {
   direction: "top-down",
   color: COLORS.risk,
-  label: "creates + edits isolated path",
+  label: "allocates exact reviewed head",
+  path: "outer",
+  outerSide: "right",
+  outerGap: 42,
   from: { side: "bottom", slot: 0.65 },
   to: { side: "top", slot: 0.35 },
 });
 connect("implementer-launch-verifier", implementer, launchVerifier, {
   direction: "bottom-up",
-  label: "IMPLEMENTATION_SCHEMA",
+  label: "exact implementationText",
   from: { side: "top", slot: 0.65 },
   to: { side: "bottom", slot: 0.35 },
 });
 connect("launch-verifier", launchVerifier, verifier, {
   direction: "top-down",
-  label: "plan + implementation",
+  label: "plan + text + same handle",
   from: { side: "bottom", slot: 0.65 },
   to: { side: "top", slot: 0.35 },
 });
@@ -478,7 +485,7 @@ connect("verifier-report", verifier, fixReport, {
 });
 connect("verifier-map", verifier, mapResult, {
   direction: "bottom-up",
-  label: "FIX_REPORT_SCHEMA\noutput.status",
+  label: "exact verificationText",
   from: { side: "top", slot: 0.65 },
   to: { side: "bottom", slot: 0.35 },
 });

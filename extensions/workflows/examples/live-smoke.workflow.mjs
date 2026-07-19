@@ -2,9 +2,8 @@
 // Minimal LIVE proof that the runtime really spawns child agent sessions.
 // Two read-only agents each perform a small tool action (so they pass the
 // honesty gate, which rejects "completed" with zero tool activity) and return a
-// one-line note. The workflow returns both notes + per-agent status, so the
-// run is VERIFIABLE: check .locus/runtime/workflows/<runId>/result.json for
-// agent_end events with status "completed" and a real childSessionId.
+// one-line note. The workflow returns both exact notes; per-agent status and
+// session evidence remain runtime-owned in journal events and child artifacts.
 
 export const meta = {
   name: "live-smoke",
@@ -32,14 +31,10 @@ export default async function runWorkflow(dsl, input) {
 
   return {
     topic,
-    ok: Boolean(explore?.ok && quick?.ok),
+    ok: true,
     notes: {
-      explore: explore?.summary ?? null,
-      quick_task: quick?.summary ?? null,
-    },
-    childSessions: {
-      explore: explore?.childSessionId ?? null,
-      quick_task: quick?.childSessionId ?? null,
+      explore,
+      quick_task: quick,
     },
   };
 }

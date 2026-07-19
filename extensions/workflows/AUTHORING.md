@@ -45,7 +45,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
 
 - **Author from requirements:** delegate to the `workflow-author` catalog agent
   (`.agents/agents/workflow-author.md`) — `/agent run workflow-author` or
-  `task { agent: "workflow-author", tasks: ["<requirement>"] }`.
+  `task { agent: "workflow-author", task: "<requirement>" }`.
   The helper writes saved workflows; the package surface remains the `workflows`
   extension.
 - **Save** so it resolves by name. Resolution order (first match wins, walking up

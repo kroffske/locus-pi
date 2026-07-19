@@ -173,39 +173,31 @@ or borrowed runtime implementation was identified for this source-audit slice.
   a zero-token provider failure to a generic workflow error.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
   review composition, not a new runtime primitive. It accepts an opaque
-  free-form request. A full `oracle` child owns target resolution and access
-  proof; parallel `oracle` children independently obtain and inspect
-  change-focused and whole-context evidence; an adjudicator reopens the target
-  and verifies findings; a publisher creates a local review task and writes
-  immutable `.tasks/<task>/artifacts/review.md` plus an all-pending
-  `fix-plan.md` approval manifest only after proving `.tasks/` is ignored. The
-  publisher copies adjudicated findings exactly and does not perform a second
-  planning pass or write into a different reviewed repository. Agent ids,
-  numbers, names, labels, options, and full prompt templates live in the
-  package-owned `extensions/workflows/examples/review-family/agents.yaml`; the
-  entry script imports the validating neutral family loader and therefore
-  declares `identityCoverage: "entry-only"`. The loader reads only that YAML,
-  while repository/forge evidence remains agent-owned. The workflow performs no
-  direct Git, network, forge-specific, packet-building, or `llm()` work.
-  Every stage uses schema-bearing `agent()` output and records child-session
-  evidence in `result.json`. The selected catalog agent keeps its full tool
-  surface under `permissionMode: "agent-defined"` and
-  `workspaceMode: "project"`, so private forge access comes from the child
-  session's existing tools and authentication rather than package-owned API
-  code. Prompts prohibit
-  source, branch, commit, push, and remote mutations during review, but prompt
-  text and permission metadata are not a sandbox; Pi's tool approval remains
-  the enforcement boundary. A failed parallel lane remains a typed group
-  failure, while ambiguous targets, inaccessible evidence, a blocked verdict,
-  or missing Markdown publication remain explicit non-success.
+  free-form request. Five workflow-local Markdown agents own target resolution,
+  two independent review lanes, adjudication, and publication. Agent and prompt
+  resources live beside the entry under `resources/`; runtime resolves them
+  from the original workflow source, rejects path escapes, snapshots each
+  loaded file once, and records SHA-256 evidence. Every `agent()` call returns
+  exact non-empty text. The coordinator forwards `targetText`, `changesText`,
+  `contextText`, and `adjudicatedText` verbatim and never parses verdicts,
+  statuses, ids, paths, or JSON. A publisher creates a local review task and
+  writes immutable `.tasks/<task>/artifacts/review.md` plus an all-pending
+  `fix-plan.md` only after proving `.tasks/` is ignored. Repository/forge
+  evidence remains agent-owned; the workflow performs no direct Git, network,
+  forge-specific, packet-building, or `llm()` work. Prompts prohibit source,
+  branch, commit, push, and remote mutations during review, but prompt text and
+  permission metadata are not a sandbox. A failed parallel child remains a
+  typed group failure.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the curated,
-  human-gated remediation exception. Its resolver accepts only findings whose
-  current Markdown disposition is exactly `accepted`. Its implementer creates a
-  distinct linked Git worktree at the reviewed snapshot and changes only those
-  items. Its verifier rechecks the diff and writes `fix-report.md`. Prompts
-  prohibit original-checkout edits, commit, push, pull-request creation, merge,
-  deployment, and remote mutation. These are agent instructions plus Pi
-  approvals, not a new sandbox.
+  human-gated remediation exception. Deterministic `review-fix-plan.mjs`
+  validates path confinement, hashes, target, snapshot, finding identity,
+  explicit plan edit, accepted findings, and reviewed commit before writes.
+  Runtime creates one retained linked worktree and exposes only an opaque
+  workspace handle. Workflow-local implementer and verifier agents share that
+  handle; the verifier receives implementation text verbatim but reopens the
+  diff as evidence. Prompts prohibit original-checkout edits, commit, push,
+  pull-request creation, merge, deployment, and remote mutation. These are
+  agent instructions plus Pi approvals, not a new sandbox.
 - Workflow rows and the `agents` entrypoint share the versioned process-local
   live store required by Pi's per-entrypoint `jiti` loading. This makes active
   workflow children drillable and individually cancellable from the fleet.

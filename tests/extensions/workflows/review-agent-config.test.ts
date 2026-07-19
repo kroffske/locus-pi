@@ -1,78 +1,148 @@
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
 
-interface AgentDefinition {
-  id: string;
-  number: number;
-  name: string;
-  label: string;
-  profile: string;
-  schema: string;
-  maxToolCalls: number;
-  prompt: string;
+function fixture() {
+  const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-resources-"));
+  const workflowDirectory = path.join(root, "nested", "review");
+  const resourceDirectory = path.join(workflowDirectory, "resources");
+  const runDir = path.join(root, "run");
+  mkdirSync(resourceDirectory, { recursive: true });
+  const workflowPath = path.join(workflowDirectory, "review.workflow.mjs");
+  writeFileSync(workflowPath, "export default async () => {};\n", "utf8");
+  writeFileSync(
+    path.join(resourceDirectory, "reviewer.agent.md"),
+    [
+      "---",
+      "name: review-01-reader",
+      "description: Workflow-local reader",
+      "readOnly: true",
+      "allowedTools: [read, grep]",
+      "---",
+      "",
+      "# Review",
+      "",
+      "Return text only.",
+    ].join("\n"),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(resourceDirectory, "review.prompt.md"),
+    "Target:\n{{TARGET}}\n\nPrior text:\n{{PRIOR_TEXT}}\n",
+    "utf8",
+  );
+  return { root, workflowDirectory, workflowPath, resourceDirectory, runDir };
 }
 
-interface ReviewAgentManifest {
-  version: string;
-  workflows: {
-    review: { agents: Record<string, AgentDefinition> };
-    reviewFix: { agents: Record<string, AgentDefinition> };
-  };
-}
+describe("workflow-local Markdown resources", () => {
+  it("loads an ordinary agent definition and renders a neighboring prompt source-relatively", () => {
+    const item = fixture();
+    const loader = createWorkflowResourceLoader({
+      workflowSourcePath: item.workflowPath,
+      runDir: item.runDir,
+    });
 
-const reviewFamilyDirectory = path.join(process.cwd(), "extensions/workflows/examples/review-family");
-const manifestPath = path.join(reviewFamilyDirectory, "agents.yaml");
-const configPath = path.join(reviewFamilyDirectory, "review-config.mjs");
+    const loaded = loader.loadAgent("./resources/reviewer.agent.md");
+    const prompt = loader.renderPrompt("./resources/review.prompt.md", {
+      TARGET: "base=abc head=def",
+      PRIOR_TEXT: '{"status":"failed-looking"}',
+    });
 
-describe("review agent YAML manifest", () => {
-  it("names and numbers every review and remediation agent explicitly", () => {
-    const manifest = parse(readFileSync(manifestPath, "utf8")) as ReviewAgentManifest;
-    const reviewAgents = Object.entries(manifest.workflows.review.agents);
-    const fixAgents = Object.entries(manifest.workflows.reviewFix.agents);
-
-    expect(manifest.version).toBe("locus.review-agents.v1");
-    expect(reviewAgents.map(([key, agent]) => [key, agent.id, agent.number, agent.name, agent.label])).toEqual([
-      ["targetResolver", "R1", 1, "target-resolver", "resolve review target"],
-      ["changeReviewer", "R2", 2, "change-reviewer", "review introduced changes"],
-      ["contextReviewer", "R3", 3, "context-reviewer", "review whole-file context"],
-      ["adjudicator", "R4", 4, "adjudicator", "adjudicate review findings"],
-      ["publisher", "R5", 5, "publisher", "publish review report"],
-    ]);
-    expect(fixAgents.map(([key, agent]) => [key, agent.id, agent.number, agent.name, agent.label])).toEqual([
-      ["planResolver", "F1", 1, "plan-resolver", "resolve approved review plan"],
-      ["implementer", "F2", 2, "implementer", "apply accepted review fixes"],
-      ["verifier", "F3", 3, "verifier", "verify review fixes and publish report"],
-    ]);
-
-    const allAgents = [...reviewAgents, ...fixAgents].map(([, agent]) => agent);
-    expect(new Set(allAgents.map(({ id }) => id)).size).toBe(8);
-    expect(new Set(allAgents.map(({ label }) => label)).size).toBe(8);
-    expect(allAgents.every(({ profile }) => profile === "oracle")).toBe(true);
-    expect(allAgents.every(({ prompt }) => prompt.includes("{{RESULT_ENVELOPE}}"))).toBe(true);
+    expect(loaded.definition).toMatchObject({
+      name: "review-01-reader",
+      description: "Workflow-local reader",
+      source: "workflow",
+      readOnly: true,
+      allowedTools: ["read", "grep", "yield"],
+    });
+    expect(loaded.definition.systemPrompt).toContain("Return text only.");
+    expect(prompt).toBe('Target:\nbase=abc head=def\n\nPrior text:\n{"status":"failed-looking"}\n');
+    expect(loader.evidence()).toHaveLength(2);
+    expect(
+      loader.evidence().every((evidence) => evidence.sourcePath.startsWith(realpathSync(item.workflowDirectory))),
+    ).toBe(true);
   });
 
-  it("loads, freezes, and fail-closed renders the package-owned manifest", async () => {
-    const loaded = (await import(configPath)) as {
-      reviewAgentManifest: ReviewAgentManifest;
-      agentOptions: (workflow: string, agent: string, schemaName: string, schema: unknown) => unknown;
-      renderAgentPrompt: (workflow: string, agent: string, variables: Record<string, string>) => string;
-    };
+  it("copies immutable bytes once and records hash-backed run evidence", () => {
+    const item = fixture();
+    const loader = createWorkflowResourceLoader({
+      workflowSourcePath: item.workflowPath,
+      runDir: item.runDir,
+    });
+    const first = loader.renderPrompt("./resources/review.prompt.md", {
+      TARGET: "one",
+      PRIOR_TEXT: "two",
+    });
+    writeFileSync(path.join(item.resourceDirectory, "review.prompt.md"), "changed {{TARGET}} {{PRIOR_TEXT}}", "utf8");
+    const second = loader.renderPrompt("./resources/review.prompt.md", {
+      TARGET: "one",
+      PRIOR_TEXT: "two",
+    });
+    const evidence = loader.evidence()[0]!;
 
-    expect(Object.isFrozen(loaded.reviewAgentManifest)).toBe(true);
-    expect(Object.isFrozen(loaded.reviewAgentManifest.workflows.review.agents.targetResolver)).toBe(true);
-    expect(() => loaded.agentOptions("review", "targetResolver", "WRONG_SCHEMA", {})).toThrow(
-      /declares schema TARGET_SCHEMA, expected WRONG_SCHEMA/u,
+    expect(second).toBe(first);
+    expect(readFileSync(evidence.snapshotPath, "utf8")).toBe("Target:\n{{TARGET}}\n\nPrior text:\n{{PRIOR_TEXT}}\n");
+    expect(evidence.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(statSync(evidence.snapshotPath).mode & 0o222).toBe(0);
+  });
+
+  it("rejects absolute paths, lexical escapes, symlink escapes, and wrong suffixes", () => {
+    const item = fixture();
+    const outside = path.join(item.root, "outside.prompt.md");
+    writeFileSync(outside, "outside", "utf8");
+    symlinkSync(outside, path.join(item.resourceDirectory, "escape.prompt.md"));
+    const loader = createWorkflowResourceLoader({
+      workflowSourcePath: item.workflowPath,
+      runDir: item.runDir,
+    });
+
+    expect(() => loader.renderPrompt(outside)).toThrow("must be relative");
+    expect(() => loader.renderPrompt("../../outside.prompt.md")).toThrow("escapes");
+    expect(() => loader.renderPrompt("./resources/escape.prompt.md")).toThrow("through a symlink");
+    expect(() => loader.renderPrompt("./resources/reviewer.agent.md")).toThrow("must use .prompt.md");
+  });
+
+  it("rejects missing and unused prompt variables", () => {
+    const item = fixture();
+    const loader = createWorkflowResourceLoader({
+      workflowSourcePath: item.workflowPath,
+      runDir: item.runDir,
+    });
+
+    expect(() => loader.renderPrompt("./resources/review.prompt.md", { TARGET: "target" })).toThrow(
+      "PRIOR_TEXT is missing",
     );
-    expect(() => loaded.renderAgentPrompt("review", "targetResolver", {})).toThrow(
-      /Missing template variable ORIGINAL_REQUEST/u,
-    );
-    expect(
-      loaded.renderAgentPrompt("review", "targetResolver", {
-        ORIGINAL_REQUEST: "Review dev...feature",
-        RESULT_ENVELOPE: "structured-result",
+    expect(() =>
+      loader.renderPrompt("./resources/review.prompt.md", {
+        TARGET: "target",
+        PRIOR_TEXT: "prior",
+        EXTRA: "unused",
       }),
-    ).toContain("Review dev...feature");
+    ).toThrow("variables are unused (EXTRA)");
+  });
+
+  it("fails malformed agent front matter with source and snapshot evidence", () => {
+    const item = fixture();
+    const badPath = path.join(item.resourceDirectory, "bad.agent.md");
+    writeFileSync(badPath, "---\nname: bad\n---\nMissing description.\n", "utf8");
+    chmodSync(badPath, 0o644);
+    const loader = createWorkflowResourceLoader({
+      workflowSourcePath: item.workflowPath,
+      runDir: item.runDir,
+    });
+
+    expect(() => loader.loadAgent("./resources/bad.agent.md")).toThrow("Invalid workflow agent resource");
+    expect(loader.evidence()).toHaveLength(1);
   });
 });
