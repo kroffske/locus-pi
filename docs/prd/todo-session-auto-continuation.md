@@ -81,7 +81,17 @@ compatible.
 - Focused tests cover opt-in/default behavior, run, pause, single-item progression, batch append, atomic rejection, context persistence, no-progress stop, empty completion, continuation cap, and unavailable transport.
 - Session-core tests prove that old phase-only todo entries still load and new metadata round-trips through memory and JSONL backends.
 - A real interactive Pi test is required because unit tests cannot prove that `agent_settled` plus a hidden triggered message creates separate visible assistant responses.
-- Runtime acceptance requires three ordered arithmetic todos to produce three assistant answers without operator input between them, followed by `/todo` showing all three completed.
+- Runtime acceptance requires three ordered checkpoint todos that each explicitly
+  finish with a user-facing answer and end the current response. The persisted
+  session trace must prove, for every non-final checkpoint, this causal chain:
+  assistant message with `stop` -> `agent_end` -> settled-hook dispatch -> a
+  hidden `locus-todo-continuation` message naming only the next active todo ->
+  another `agent_start`. The final checkpoint must settle idle with no fourth
+  continuation.
+- The runtime session must contain one initiating user message, three hidden
+  continuation messages with `display: false`, four distinct visible assistant
+  stops (queue initialization plus checkpoints A, B, and C), and a final queue
+  state with all three tasks completed and autonomous mode disabled.
 - The full repository check remains required because the extension manifest, public docs, package boundary, and shared Pi API shim are release surfaces.
 
 ## Out of Scope
