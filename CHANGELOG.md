@@ -49,11 +49,11 @@ This file records user-visible changes to the public package.
   with each entrypoint, local Markdown agents/prompts, and pipeline diagram
   beside its owner. The former shared YAML/config loader and stale review-family
   diagrams were removed.
-- Hardened curated review completion for large cumulative diffs. Evidence-heavy
-  review and adjudication agents now receive the runtime's full 100-call budget,
-  while `review.md` records the confirmed target, verdict, new findings, prior
-  finding reconciliation, independent checks, and residual risks as explicit
-  reader sections.
+- Hardened curated review completion for large cumulative diffs. Review agents
+  now share one visible 1,000-call runaway fuse and workspace configuration
+  instead of repeating small per-stage budgets. Workflow entrypoints also carry
+  IDE-only `WorkflowDsl` type links so JavaScript-aware editors can navigate
+  `agent()`, `promptFile()`, `phase()`, and `log()` to their definitions.
 - Expanded the supported curated Package registry from three workflows to five.
   Generic implementation, release, deploy, and incident workflows remain
   project-local; the narrow review remediation family is human-gated and

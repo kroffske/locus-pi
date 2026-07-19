@@ -7,6 +7,8 @@ import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared
 import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
+  DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
+  type WorkflowAgentRequest,
   type WorkflowAgentResult,
   type WorkflowJournalLine,
 } from "../../../extensions/_shared/workflow-runtime.js";
@@ -36,6 +38,73 @@ function tempProject(): string {
 }
 
 describe("workflow evidence threading", () => {
+  it("uses a high configurable tool-call fuse instead of the former 100-call ceiling", async () => {
+    const requests: WorkflowAgentRequest[] = [];
+    const resultFor = (request: WorkflowAgentRequest): WorkflowAgentResult => ({
+      ok: true,
+      status: "completed",
+      summary: "done",
+      text: "done",
+      diagnostics: [],
+      agent: request.agent,
+    });
+    const defaultRuntime = createWorkflowRuntime({
+      runId: "wf-default-tool-fuse",
+      agentRunner: async (request) => {
+        requests.push(request);
+        return resultFor(request);
+      },
+    });
+
+    await defaultRuntime.dsl.agent("default fuse");
+    await defaultRuntime.dsl.agent("large explicit fuse", { maxToolCalls: 5_000 });
+
+    assert.deepEqual(
+      requests.map((request) => request.maxToolCalls),
+      [DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS, 5_000],
+    );
+
+    const configuredRequests: WorkflowAgentRequest[] = [];
+    const configuredRuntime = createWorkflowRuntime({
+      runId: "wf-configured-tool-fuse",
+      defaultMaxToolCalls: 2_000,
+      agentRunner: async (request) => {
+        configuredRequests.push(request);
+        return resultFor(request);
+      },
+    });
+    await configuredRuntime.dsl.agent("configured fuse");
+    assert.equal(configuredRequests[0]?.maxToolCalls, 2_000);
+  });
+
+  it("rejects invalid tool-call fuse values before child execution", async () => {
+    assert.throws(
+      () =>
+        createWorkflowRuntime({
+          runId: "wf-invalid-default-tool-fuse",
+          defaultMaxToolCalls: -1,
+          agentRunner: async () => {
+            throw new Error("must not run");
+          },
+        }),
+      /defaultMaxToolCalls must be a non-negative safe integer/u,
+    );
+
+    let calls = 0;
+    const runtime = createWorkflowRuntime({
+      runId: "wf-invalid-call-tool-fuse",
+      agentRunner: async () => {
+        calls += 1;
+        throw new Error("must not run");
+      },
+    });
+    await assert.rejects(
+      runtime.dsl.agent("invalid explicit fuse", { maxToolCalls: 1.5 }),
+      /agent maxToolCalls must be a non-negative safe integer/u,
+    );
+    assert.equal(calls, 0);
+  });
+
   it("carries evidence from the agent boundary into WorkflowAgentResult", async () => {
     const root = tempProject();
     const h = createHarness(root, { sessionId: "wf-parent" });

@@ -21,6 +21,8 @@ export type { PermissionMode, WorkspaceMode } from "./types.js";
 export type WorkflowAgentRunner = (req: WorkflowAgentRequest) => Promise<WorkflowAgentResult>;
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
+/** High per-child safety fuse. Ordinary agent work should finish far below this value. */
+export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = 1_000;
 export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 
 export interface WorkflowAgentRequest {
@@ -31,7 +33,7 @@ export interface WorkflowAgentRequest {
   agentResource?: WorkflowResourceEvidence;
   /** Optional per-call subset of the selected catalog agent's allowed tools. */
   tools?: string[];
-  /** Fail-closed per-child tool-call budget. The first over-budget start aborts the child. */
+  /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
@@ -145,10 +147,15 @@ export interface WorkflowDsl {
    *  no tools. Returns ok:false (never throws) when no llmRunner is configured or the model
    *  errors; a group classifies that explicit result as a typed branch failure. */
   llm(prompt: string, opts?: WorkflowLlmOptions): Promise<WorkflowLlmResult>;
+  /** Run independent branches behind one fail-closed barrier and preserve input order. */
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
+  /** Run ordered stages for every item; a failed item stops before its later stages. */
   pipeline<T>(items: T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]>;
+  /** Change the current reader-visible stage and append a phase line to the run journal. */
   phase(name: string): void;
+  /** Append a script-owned journal message tagged with the current phase. */
   log(msg: string): void;
+  /** Run a nested workflow function with the same typed DSL handle. */
   workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>, input?: unknown): Promise<T>;
 }
 
@@ -158,7 +165,7 @@ export interface WorkflowAgentOptions {
   agentFile?: string;
   /** Narrow this child to a subset of its catalog allow-list; [] creates a no-tool child. */
   tools?: string[];
-  /** Maximum tool calls per child attempt; 0 requires a no-tool completion. */
+  /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. 0 requires no tools. */
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
@@ -387,6 +394,8 @@ export interface WorkflowRuntimeOptions {
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
   maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
+  /** Default per-child tool-call safety fuse; defaults to DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS. */
+  defaultMaxToolCalls?: number;
   // default DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS (1000); global per-run cap across agent() calls;
   // cyclic workflows allowed up to the cap, exceeding it throws WorkflowInvocationCapError and exits the run.
   maxTotalAgentInvocations?: number;
@@ -494,10 +503,9 @@ function resolveMaxTotalAgentInvocations(maxTotalAgentInvocations: number | unde
   return maxTotalAgentInvocations;
 }
 
-function normalizeMaxToolCalls(maxToolCalls: number | undefined): number | undefined {
-  if (maxToolCalls === undefined) return undefined;
-  if (!Number.isInteger(maxToolCalls) || maxToolCalls < 0 || maxToolCalls > 100) {
-    throw new Error("agent maxToolCalls must be an integer between 0 and 100");
+function normalizeMaxToolCalls(maxToolCalls: number, field: string): number {
+  if (!Number.isSafeInteger(maxToolCalls) || maxToolCalls < 0) {
+    throw new Error(`${field} must be a non-negative safe integer`);
   }
   return maxToolCalls;
 }
@@ -704,6 +712,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   const llmRunner = options.llmRunner;
   const args = options.args;
   const agentConcurrencyGate = createAgentConcurrencyGate(options.maxConcurrentAgents);
+  const defaultMaxToolCalls = normalizeMaxToolCalls(
+    options.defaultMaxToolCalls ?? DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
+    "defaultMaxToolCalls",
+  );
   const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(options.maxTotalAgentInvocations);
   let totalAgentInvocations = 0;
   const journal = options.journal;
@@ -746,7 +758,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       throw new Error("workflow workspace manager is not configured");
     }
     const effectivePhase = opts?.phase ?? _currentPhase;
-    const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls);
+    const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls ?? defaultMaxToolCalls, "agent maxToolCalls");
     const loadedAgent = opts?.agentFile === undefined ? undefined : options.resourceLoader?.loadAgent(opts.agentFile);
     if (opts?.agentFile !== undefined && loadedAgent === undefined) {
       throw new Error("workflow resource loader is not configured");
@@ -774,7 +786,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
-      ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
+      maxToolCalls,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
     const requestedLiveModel = liveModelFromSelector(req.model);

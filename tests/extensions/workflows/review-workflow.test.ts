@@ -60,6 +60,10 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain('agentFile: "./resources/adjudicator.agent.md"');
     expect(source).toContain('agentFile: "./resources/publisher.agent.md"');
     expect(source).toContain('promptFile("./resources/');
+    expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
+    expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
+    expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
+    expect(source).toContain('@param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl');
     expect(source).not.toContain("agents.yaml");
     expect(source).not.toContain("review-config");
     expect(source).not.toContain("schema:");
@@ -111,6 +115,15 @@ describe("workflow example: review.workflow.mjs", () => {
       "review-03-context-review",
       "review-04-adjudicator",
       "review-05-publisher",
+    ]);
+    expect(calls.map((call) => call.maxToolCalls)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
+    expect(calls.map((call) => call.workspaceMode)).toEqual(["project", "project", "project", "project", "project"]);
+    expect(calls.map((call) => call.phase)).toEqual([
+      "resolve-target",
+      "independent-review",
+      "independent-review",
+      "adjudicate",
+      "publish-report",
     ]);
     expect(calls[1]?.prompt).toContain(outputs["resolve review target"]);
     expect(calls[2]?.prompt).toContain(outputs["resolve review target"]);

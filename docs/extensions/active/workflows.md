@@ -553,6 +553,23 @@ Destructure the primitives you need from the first arg:
 const { agent, llm, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;
 ```
 
+The DSL is injected by Pi, so a workflow does not import runtime functions at
+execution time. Repository-owned `.mjs` files can still give JavaScript IDEs a
+declaration target with an import type in JSDoc:
+
+```js
+/**
+ * @param {import("../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {unknown} input
+ */
+export default async function runWorkflow(dsl, input) {
+  // PyCharm/WebStorm can now navigate agent(), phase(), log(), and other DSL methods.
+}
+```
+
+Adjust the relative type path for a nested workflow. This comment performs no
+runtime import and does not change source-identity coverage.
+
 ### Workflow diagram contract
 
 Use `$pi-workflow-diagram` when a workflow has multiple execution steps, agents,
@@ -632,8 +649,10 @@ Notes:
   accept `schema`, parse JSON-looking text, or expose child status fields as a
   model-controlled result. Technical metadata is written to the workflow journal.
 - Use `agentFile: "./resources/name.agent.md"` for a neighboring workflow-local
-  agent. Use `promptFile("./resources/name.prompt.md", variables)` for its
-  concrete prompt. Both paths are source-relative and hash-backed.
+  agent definition: stable role, instructions, model preference, and tool
+  policy. Use `promptFile("./resources/name.prompt.md", variables)` for that
+  agent's concrete per-run task and dynamic handoffs. A custom step normally
+  uses both. Both paths are source-relative and hash-backed.
 - Choose `agent()` when the step must **do tool work** or be an authoritative judge
   whose verdict is a real child session; choose `llm()` for a **cheap one-shot
   decision / text** (a gate, a classification, a draft) with no tools and no session.
@@ -745,23 +764,27 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field             | Type          | Default                                                                | Description                                                                                                                                                                          |
-| ----------------- | ------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`           | string        | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                   |
-| `agentFile`       | string        | —                                                                      | Neighboring workflow-local `*.agent.md`, resolved from the original workflow source. Mutually exclusive with `agent`.                                                                |
-| `tools`           | string[]      | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                               |
-| `maxToolCalls`    | integer 0–100 | none                                                                   | Per-child-attempt call budget. The first over-budget tool start aborts the child and returns a failed result; this is a workflow budget, not a security boundary.                    |
-| `label`           | string        | —                                                                      | Journal / UI label                                                                                                                                                                   |
-| `phase`           | string        | current phase                                                          | Overrides the active phase tag                                                                                                                                                       |
-| `permissionMode`  | string        | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                        |
-| `workspaceMode`   | string        | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                  |
-| `workspaceHandle` | string        | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                      |
-| `sandbox`         | string        | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
-| `model`           | string        | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.   |
+| Field             | Type                      | Default                                                                | Description                                                                                                                                                                          |
+| ----------------- | ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                   |
+| `agentFile`       | string                    | —                                                                      | Neighboring workflow-local `*.agent.md`, resolved from the original workflow source. Mutually exclusive with `agent`.                                                                |
+| `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                               |
+| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.  |
+| `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                   |
+| `phase`           | string                    | current phase                                                          | Overrides the active phase tag                                                                                                                                                       |
+| `permissionMode`  | string                    | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                        |
+| `workspaceMode`   | string                    | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                  |
+| `workspaceHandle` | string                    | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                      |
+| `sandbox`         | string                    | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
+| `model`           | string                    | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.   |
 
 `agent()` resolves to exact non-empty text. Child metadata and diagnostics stay
 in journal/result evidence; model text is never parsed as status or JSON. Schema
 validation belongs only to `llm()` below.
+
+The host may replace the default agent fuse through
+`WorkflowRuntimeOptions.defaultMaxToolCalls`; an explicit per-call value wins.
+There is no small authoring ceiling such as the former 100-call cap.
 
 ---
 

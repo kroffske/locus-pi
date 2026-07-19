@@ -173,6 +173,9 @@ describe("curated review remediation workflow", () => {
     expect(source).toContain('agentFile: "./resources/implementer.agent.md"');
     expect(source).toContain('agentFile: "./resources/verifier.agent.md"');
     expect(source).toContain("workspaceHandle");
+    expect(source).toContain("const REVIEW_FIX_AGENT_DEFAULTS");
+    expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
+    expect(source).toContain('@param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl');
     expect(source).not.toContain("agents.yaml");
     expect(source).not.toContain("schema:");
     expect(source).not.toContain("JSON.parse");
@@ -208,6 +211,8 @@ describe("curated review remediation workflow", () => {
     expect(workspaces.calls).toEqual([{ label: "review-fix-T-201", ref: fixture.head }]);
     expect(calls.map((call) => call.agent)).toEqual(["review-fix-01-implementer", "review-fix-02-verifier"]);
     expect(calls.map((call) => call.workspaceHandle)).toEqual(["workflow-workspace:1", "workflow-workspace:1"]);
+    expect(calls.map((call) => call.workspaceMode)).toEqual(["worktree", "worktree"]);
+    expect(calls.map((call) => call.maxToolCalls)).toEqual([1_000, 1_000]);
     expect(calls[1]?.prompt).toContain(implementationText);
     expect(calls[0]?.prompt).toContain("F1");
     expect(calls[0]?.prompt).not.toContain("pending");
