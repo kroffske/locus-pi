@@ -12,16 +12,20 @@ This file records user-visible changes to the public package.
   final adjudicator reopens the target and verifies findings; then a publisher
   agent creates a local review task and writes both the complete reader-facing
   `.tasks/<task>/artifacts/review.md` and a mechanically copied, all-pending
-  `fix-plan.md` for human disposition editing. Workflow-local agents and prompts
-  are ordinary neighboring Markdown files; exact child text is passed between
-  stages without a model-written JSON protocol.
+  `fix-plan.md` for human disposition editing. Workflow-local prompts are
+  ordinary neighboring Markdown files containing both stable role instructions
+  and dynamic handoffs; exact child text is passed between stages without a
+  model-written JSON protocol.
 - Added the curated `review-fix` workflow. It applies only explicit `accepted`
   findings from a deterministically validated review plan in one runtime-owned
   retained linked worktree, independently verifies the diff with the same
   opaque workspace handle, and writes `fix-report.md` without commit, push,
   merge, deployment, or original-checkout edits.
-- Added workflow-local `agentFile` and `promptFile()` resources with
+- Added workflow-local `promptFile()` resources with strict variable rendering,
   source-relative confinement, immutable run copies, and SHA-256 evidence.
+- Added per-call `readOnly: true` policy for workflow agents so prompt-only
+  stages can retain host-enforced capability narrowing without local agent
+  definitions or the ability to broaden a catalog read-only role.
 - Enforced `readOnly: true` for child-agent sessions with a strict capability
   allowlist. Curated review readers now use a dedicated non-shell `git_read`
   query tool; shell, write/edit, nested workflow, unknown tools, and mutating
@@ -46,9 +50,9 @@ This file records user-visible changes to the public package.
   retries, and batch `tasks:[]` were removed; runtime metadata remains in
   details, journals, and result artifacts.
 - Separated `review` and `review-fix` into independent workflow directories,
-  with each entrypoint, local Markdown agents/prompts, and pipeline diagram
-  beside its owner. The former shared YAML/config loader and stale review-family
-  diagrams were removed.
+  with each entrypoint, local Markdown prompts, and pipeline diagram beside its
+  owner. The former shared YAML/config loader, paired local agent files, and
+  stale review-family diagrams were removed.
 - Hardened curated review completion for large cumulative diffs. Review agents
   now share one visible 1,000-call runaway fuse and workspace configuration
   instead of repeating small per-stage budgets. Workflow entrypoints also carry

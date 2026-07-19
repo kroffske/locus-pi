@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { parseAgentMarkdown } from "./agents.js";
-import type { AgentDefinition } from "./types.js";
 
-export type WorkflowResourceKind = "agent" | "prompt";
+export type WorkflowResourceKind = "prompt";
 
 export interface WorkflowResourceEvidence {
   kind: WorkflowResourceKind;
@@ -15,13 +13,7 @@ export interface WorkflowResourceEvidence {
   sizeBytes: number;
 }
 
-export interface WorkflowLoadedAgent {
-  definition: AgentDefinition;
-  evidence: WorkflowResourceEvidence;
-}
-
 export interface WorkflowResourceLoader {
-  loadAgent(requestedPath: string): WorkflowLoadedAgent;
   renderPrompt(requestedPath: string, variables?: Record<string, string>): string;
   evidence(): WorkflowResourceEvidence[];
 }
@@ -43,40 +35,38 @@ export function createWorkflowResourceLoader(options: WorkflowResourceLoaderOpti
   const snapshotDirectory = path.join(options.runDir, "resources");
   const loadedBySourcePath = new Map<string, LoadedResource>();
 
-  function load(requestedPath: string, kind: WorkflowResourceKind): LoadedResource {
-    const suffix = kind === "agent" ? ".agent.md" : ".prompt.md";
+  function load(requestedPath: string): LoadedResource {
+    const kind: WorkflowResourceKind = "prompt";
+    const suffix = ".prompt.md";
     if (requestedPath.trim() === "") {
-      throw new Error(`Workflow ${kind} resource path is empty.`);
+      throw new Error("Workflow prompt resource path is empty.");
     }
     if (path.isAbsolute(requestedPath)) {
-      throw new Error(`Workflow ${kind} resource path must be relative to ${workflowDirectory}: ${requestedPath}`);
+      throw new Error(`Workflow prompt resource path must be relative to ${workflowDirectory}: ${requestedPath}`);
     }
     if (!requestedPath.endsWith(suffix)) {
-      throw new Error(`Workflow ${kind} resource must use ${suffix}: ${requestedPath}`);
+      throw new Error(`Workflow prompt resource must use ${suffix}: ${requestedPath}`);
     }
 
     const lexicalPath = path.resolve(workflowDirectory, requestedPath);
     if (!isPathWithinRoot(workflowDirectory, lexicalPath)) {
-      throw new Error(`Workflow ${kind} resource escapes ${workflowDirectory}: ${requestedPath} -> ${lexicalPath}`);
+      throw new Error(`Workflow prompt resource escapes ${workflowDirectory}: ${requestedPath} -> ${lexicalPath}`);
     }
     if (!existsSync(lexicalPath)) {
-      throw new Error(`Workflow ${kind} resource does not exist: ${requestedPath} -> ${lexicalPath}`);
+      throw new Error(`Workflow prompt resource does not exist: ${requestedPath} -> ${lexicalPath}`);
     }
     const physicalPath = realpathSync(lexicalPath);
     if (!isPathWithinRoot(physicalWorkflowDirectory, physicalPath)) {
       throw new Error(
-        `Workflow ${kind} resource escapes ${workflowDirectory} through a symlink: ${requestedPath} -> ${physicalPath}`,
+        `Workflow prompt resource escapes ${workflowDirectory} through a symlink: ${requestedPath} -> ${physicalPath}`,
       );
     }
     if (!statSync(physicalPath).isFile()) {
-      throw new Error(`Workflow ${kind} resource is not a file: ${requestedPath} -> ${physicalPath}`);
+      throw new Error(`Workflow prompt resource is not a file: ${requestedPath} -> ${physicalPath}`);
     }
 
     const cached = loadedBySourcePath.get(physicalPath);
     if (cached !== undefined) {
-      if (cached.evidence.kind !== kind) {
-        throw new Error(`Workflow resource was already loaded as ${cached.evidence.kind}: ${requestedPath}`);
-      }
       return cached;
     }
 
@@ -110,19 +100,8 @@ export function createWorkflowResourceLoader(options: WorkflowResourceLoaderOpti
   }
 
   return {
-    loadAgent(requestedPath) {
-      const loaded = load(requestedPath, "agent");
-      const parsed = parseAgentMarkdown(loaded.text, "workflow", loaded.evidence.snapshotPath);
-      if (parsed.definition === undefined || parsed.diagnostics.length > 0) {
-        const diagnostics = parsed.diagnostics.map((item) => item.message).join("; ");
-        throw new Error(
-          `Invalid workflow agent resource ${requestedPath} -> ${loaded.evidence.sourcePath}: ${diagnostics || "definition missing"}`,
-        );
-      }
-      return { definition: parsed.definition, evidence: { ...loaded.evidence } };
-    },
     renderPrompt(requestedPath, variables = {}) {
-      const loaded = load(requestedPath, "prompt");
+      const loaded = load(requestedPath);
       if (loaded.text.trim() === "") {
         throw new Error(`Workflow prompt resource is empty: ${requestedPath} -> ${loaded.evidence.sourcePath}`);
       }

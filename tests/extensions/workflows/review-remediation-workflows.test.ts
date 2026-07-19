@@ -166,16 +166,18 @@ function workspaceManager(root: string, head: string) {
 }
 
 describe("curated review remediation workflow", () => {
-  it("uses deterministic plan validation, local Markdown agents, and one workspace handle", () => {
+  it("uses deterministic plan validation, prompt-only stages, and one workspace handle", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain('from "./review-fix-plan.mjs"');
-    expect(source).toContain('agentFile: "./resources/implementer.agent.md"');
-    expect(source).toContain('agentFile: "./resources/verifier.agent.md"');
+    expect(source).toContain('promptFile("./resources/implementer.prompt.md"');
+    expect(source).toContain('promptFile("./resources/verifier.prompt.md"');
     expect(source).toContain("workspaceHandle");
     expect(source).toContain("const REVIEW_FIX_AGENT_DEFAULTS");
     expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
     expect(source).toContain('@param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl');
+    expect(source).not.toContain("agentFile");
+    expect(source).not.toContain(".agent.md");
     expect(source).not.toContain("agents.yaml");
     expect(source).not.toContain("schema:");
     expect(source).not.toContain("JSON.parse");
@@ -209,13 +211,16 @@ describe("curated review remediation workflow", () => {
 
     expect(result).toBe(verificationText);
     expect(workspaces.calls).toEqual([{ label: "review-fix-T-201", ref: fixture.head }]);
-    expect(calls.map((call) => call.agent)).toEqual(["review-fix-01-implementer", "review-fix-02-verifier"]);
+    expect(calls.map((call) => call.agent)).toEqual(["default", "default"]);
+    expect(calls.map((call) => call.readOnly)).toEqual([undefined, undefined]);
+    expect(calls[0]?.tools).toEqual(["read", "write", "edit", "bash", "grep", "find"]);
+    expect(calls[1]?.tools).toEqual(["read", "write", "bash", "grep", "find"]);
     expect(calls.map((call) => call.workspaceHandle)).toEqual(["workflow-workspace:1", "workflow-workspace:1"]);
     expect(calls.map((call) => call.workspaceMode)).toEqual(["worktree", "worktree"]);
     expect(calls.map((call) => call.maxToolCalls)).toEqual([1_000, 1_000]);
     expect(calls[1]?.prompt).toContain(implementationText);
     expect(calls[0]?.prompt).toContain("F1");
-    expect(calls[0]?.prompt).not.toContain("pending");
+    expect(calls[0]?.prompt).not.toContain("- Disposition: pending");
   });
 
   it("refuses an all-pending plan before allocating a workspace or spawning a write agent", async () => {

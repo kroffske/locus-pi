@@ -66,14 +66,16 @@ describe("curated workflow diagram contract", () => {
   it("labels review agents, exact-text handoffs, and parallel control with their real owners", () => {
     const text = diagramText("review");
 
-    expect(text).toMatch(/Agent: R1.*review-01-target-resolver.*resolve review target/su);
+    expect(text).toMatch(/Agent: R1.*target prompt.*catalog default.*resolve target/su);
     expect(text).toMatch(/Workflow: forward Agent R1 exact text.*No JSON parse/su);
     expect(text).toMatch(/Workflow:.*launch Agents R2\+R3 in parallel/su);
     expect(text).toMatch(/Workflow:.*wait for both lane results/su);
-    expect(text).toMatch(/Agent: R2.*review-02-change-review.*review introduced changes/su);
-    expect(text).toMatch(/Agent: R3.*review-03-context-review.*review whole-file context/su);
-    expect(text).toMatch(/Agent: R4.*review-04-adjudicator.*adjudicate review findings.*Markdown verdict/su);
-    expect(text).toMatch(/Agent: R5.*review-05-publisher.*publish review report.*review\.md/su);
+    expect(text).toMatch(/Agent: R2.*change-review prompt.*catalog default.*review changes/su);
+    expect(text).toMatch(/Agent: R3.*context-review prompt.*catalog default.*review context/su);
+    expect(text).toMatch(/Agent: R4.*adjudicator prompt.*catalog default.*adjudicate findings.*Markdown verdict/su);
+    expect(text).toMatch(/Agent: R5.*publisher prompt.*catalog default.*publish report.*review\.md/su);
+    expect(text).toContain("resources/*.prompt.md");
+    expect(text).not.toContain(".agent.md");
     expect(text).toContain("targetText verbatim");
     expect(text).toContain("exact changesText");
     expect(text).toContain("exact contextText");
@@ -92,8 +94,10 @@ describe("curated workflow diagram contract", () => {
   it("shows the isolated fix boundary in the review family", () => {
     const reviewFix = diagramText("review-fix");
     expect(reviewFix).toMatch(/Workflow: deterministic approval validator.*at least one accepted finding/su);
-    expect(reviewFix).toMatch(/Agent: F1.*review-fix-01-implementer.*apply accepted review fixes/su);
-    expect(reviewFix).toMatch(/Agent: F2.*review-fix-02-verifier.*verify review fixes and publish report/su);
+    expect(reviewFix).toMatch(/Agent: F1.*implementer prompt.*catalog default.*apply accepted fixes/su);
+    expect(reviewFix).toMatch(/Agent: F2.*verifier prompt.*catalog default.*verify and report/su);
+    expect(reviewFix).toContain("resources/*.prompt.md");
+    expect(reviewFix).not.toContain(".agent.md");
     expect(reviewFix).toContain("workspaceHandle");
     expect(reviewFix).toContain("exact implementationText");
     expect(reviewFix).toContain("exact verificationText");

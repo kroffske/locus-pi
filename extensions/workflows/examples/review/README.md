@@ -1,16 +1,24 @@
-# Как работает review workflow
+# Curated review workflow
 
-В пакете есть два связанных workflow:
+The package contains two related workflows:
 
-- `review` проверяет код и публикует замечания;
-- `review-fix` применяет только те замечания, которые человек явно отметил
-  как `accepted`.
+- `review` inspects a target and publishes review evidence;
+- `review-fix` applies only findings that a human explicitly marks
+  `accepted`.
 
-Главное правило: дочерний агент возвращает обычный текст. Workflow передаёт
-этот текст следующему агенту без `JSON.parse`, схемы результата и скрытой
-обёртки.
+The core contract is deliberately small:
 
-## Где лежат файлы
+1. A workflow-specific stage is one neighboring `*.prompt.md` file.
+2. The prompt contains both stable role instructions and dynamic
+   `{{VARIABLE}}` handoffs.
+3. `agent(renderedPrompt, options)` launches a catalog agent. Omitted `agent`
+   uses the catalog `default` role.
+4. Capability policy remains in workflow code. `readOnly`, `tools`,
+   `workspaceMode`, and `maxToolCalls` are not prompt claims.
+5. A successful child returns exact non-empty text. The workflow forwards that
+   text without `JSON.parse`, result schemas, or model-written envelopes.
+
+## Files
 
 ```text
 extensions/workflows/examples/
@@ -21,15 +29,10 @@ extensions/workflows/examples/
 │   ├── review-pipeline.excalidraw
 │   ├── review-pipeline.png
 │   └── resources/
-│       ├── target-resolver.agent.md
 │       ├── target-resolver.prompt.md
-│       ├── change-review.agent.md
 │       ├── change-review.prompt.md
-│       ├── context-review.agent.md
 │       ├── context-review.prompt.md
-│       ├── adjudicator.agent.md
 │       ├── adjudicator.prompt.md
-│       ├── publisher.agent.md
 │       └── publisher.prompt.md
 └── review-fix/
     ├── review-fix.workflow.mjs
@@ -38,248 +41,187 @@ extensions/workflows/examples/
     ├── review-fix-pipeline.excalidraw
     ├── review-fix-pipeline.png
     └── resources/
-        ├── implementer.agent.md
         ├── implementer.prompt.md
-        ├── verifier.agent.md
         └── verifier.prompt.md
 ```
 
-Файл `*.agent.md` — настоящий агент: обычный Markdown с front matter и
-инструкцией. Файл `*.prompt.md` — конкретное задание для одного шага workflow.
-Это не шаблоны для будущих workflow, а реальные ресурсы текущего запуска.
+There are no workflow-local `*.agent.md` files. Catalog agents provide the
+stable execution mechanism; neighboring prompts provide workflow-specific
+behavior.
 
-Workflow использует оба файла одновременно:
+## How one stage is launched
 
 ```js
-const prompt = await promptFile("./resources/change-review.prompt.md", variables);
+const prompt = await promptFile("./resources/change-review.prompt.md", {
+  ORIGINAL_REQUEST: originalRequest,
+  TARGET_TEXT: targetText,
+});
+
 const text = await agent(prompt, {
-  ...REVIEW_AGENT_DEFAULTS,
-  agentFile: "./resources/change-review.agent.md",
+  ...REVIEW_READ_OPTIONS,
+  label: "review introduced changes",
 });
 ```
 
-- `agentFile` отвечает на вопрос «кто выполняет шаг»: имя, постоянная роль,
-  системная инструкция, модель и разрешённые инструменты.
-- `promptFile()` отвечает на вопрос «что этот агент делает в текущем запуске»:
-  исходный запрос, выбранный target и точный текст предыдущих агентов.
+`promptFile()` resolves the path from the original workflow entry, not from the
+process working directory. Runtime rejects absolute paths, lexical and symlink
+escapes, missing files, wrong suffixes, missing variables, and unused
+variables. It reads each prompt once, stores an immutable run copy, and records
+SHA-256 evidence.
 
-Одного `agent.md` недостаточно: он описывает постоянное поведение агента, но не
-содержит динамические данные конкретного запуска. Если поместить туда и роль, и
-текущий target, и ответы предыдущих этапов, определение агента пришлось бы
-изменять на каждом запуске.
+`REVIEW_READ_OPTIONS` is declared once near the top of
+`review.workflow.mjs`. The 1,000-call limit is a runaway fuse, not a normal
+budget. `workspaceMode: "project"` keeps inspection in the launch checkout.
+`readOnly: true` causes the SDK host to remove shell, write/edit, nested
+workflow, and unknown tools. Git inspection uses the allowlisted `git_read`
+argv tool.
 
-Пути вида `./resources/...` считаются от исходного файла workflow. Текущий
-каталог запуска на них не влияет. Runtime проверяет, что путь не выходит из
-каталога workflow, один раз читает байты и сохраняет в каталоге запуска
-неизменяемую копию с SHA-256.
+## Where `phase()` and `log()` come from
 
-Общие параметры review-агентов объявлены один раз в начале
-`review.workflow.mjs` как `REVIEW_AGENT_DEFAULTS`. `workspaceMode: "project"`
-оставляет review в исходном checkout, а `maxToolCalls: 1_000` служит только
-аварийным предохранителем от зацикливания. Это не целевой бюджет обычного шага.
+Workflow entry files do not import DSL methods at runtime. Pi passes one `dsl`
+object as the first argument to `runWorkflow`.
 
-R1–R4 объявлены `readOnly: true`. Для них runtime технически убирает shell,
-write/edit, запуск вложенного workflow и неизвестные tools. Git они читают через
-`git_read`: это отдельный argv-инструмент с allowlist только для query-команд.
-R5 остаётся единственным агентом с правом записи review-артефактов.
+- `WorkflowDsl` is defined in
+  `extensions/_shared/workflow-runtime.ts`.
+- `phase(name)` changes the visible stage and appends a `phase` journal line.
+- `log(message)` appends a script-owned message under the current stage.
+- The JSDoc type link above `runWorkflow` lets JavaScript-aware IDEs navigate
+  from destructured DSL methods to `WorkflowDsl` without executing an import.
 
-## Где определены `phase()` и `log()`
-
-Они не импортируются в runtime-код workflow: Pi передаёт готовый объект `dsl`
-первым аргументом `runWorkflow`.
-
-- интерфейс и подсказки IDE: `extensions/_shared/workflow-runtime.ts`,
-  `WorkflowDsl`;
-- реализация `phase()` меняет текущую стадию и пишет строку `phase` в journal;
-- реализация `log()` пишет пользовательское пояснение с текущей стадией.
-
-Над `runWorkflow` добавлена JSDoc-ссылка на `WorkflowDsl`. Это type-only ссылка:
-она не выполняет import при запуске, но позволяет PyCharm перейти из `phase`,
-`log`, `agent` или `promptFile` к определению через Go to Declaration.
-
-## Общая схема
+## Agent map
 
 ```mermaid
 flowchart LR
-    U["Оператор: что проверить"]
+    U["Operator: review request"]
 
     subgraph R["Workflow: review"]
-        R1["Агент R1<br/>review-01-target-resolver<br/>read-only · определяет target"]
-        P["Workflow<br/>Запускает R2 и R3 параллельно"]
-        R2["Агент R2<br/>review-02-change-review<br/>read-only · проверяет diff"]
-        R3["Агент R3<br/>review-03-context-review<br/>read-only · проверяет контекст"]
-        R4["Агент R4<br/>review-04-adjudicator<br/>read-only · перепроверяет замечания"]
-        R5["Агент R5<br/>review-05-publisher<br/>Публикует review.md"]
+        R1["Agent R1: resolve target<br/>read-only"]
+        P["Workflow: launch R2 and R3 in parallel"]
+        R2["Agent R2: inspect introduced changes<br/>read-only"]
+        R3["Agent R3: inspect full repository context<br/>read-only"]
+        R4["Agent R4: verify and adjudicate findings<br/>read-only"]
+        R5["Agent R5: publish review artifacts<br/>write-capable"]
 
-        R1 -->|"точный текст targetText"| P
+        R1 -->|"exact targetText"| P
         P --> R2
         P --> R3
-        R2 -->|"точный текст changesText"| R4
-        R3 -->|"точный текст contextText"| R4
-        R4 -->|"точный текст adjudicatedText"| R5
+        R2 -->|"exact changesText"| R4
+        R3 -->|"exact contextText"| R4
+        R4 -->|"exact adjudicatedText"| R5
     end
 
     U --> R1
-    R5 -->|"review.md"| H["Человек: редактирует fix-plan.md"]
+    R5 -->|"review.md + optional fix-plan.md"| H["Human: edit dispositions"]
 
     subgraph F["Workflow: review-fix"]
-        V["Workflow<br/>Детерминированно проверяет план и SHA-256"]
-        W["Workflow<br/>Создаёт один workspaceHandle"]
-        F1["Агент F1<br/>review-fix-01-implementer<br/>Исправляет accepted"]
-        F2["Агент F2<br/>review-fix-02-verifier<br/>Проверяет и пишет fix-report.md"]
+        V["Workflow: validate plan and hashes"]
+        W["Workflow: allocate one workspaceHandle"]
+        F1["Agent F1: apply accepted findings"]
+        F2["Agent F2: verify diff and publish fix-report.md"]
 
         V --> W --> F1
-        F1 -->|"точный текст implementationText"| F2
+        F1 -->|"exact implementationText"| F2
     end
 
-    H -->|"явный путь к fix-plan.md"| V
+    H -->|"explicit fix-plan.md path"| V
 ```
 
-## Алгоритм `review`
+## `review` algorithm
 
-Запуск:
+### 1. R1 resolves the target
 
-```text
-/workflows run review "Проверь текущую ветку относительно dev"
-```
-
-### 1. R1 определяет объект проверки
-
-Workflow загружает:
-
-- `target-resolver.agent.md`;
-- `target-resolver.prompt.md`.
-
-Агент проверяет Git, правила проекта, доступные remotes и указанный объект. Он
-возвращает читаемый текст с точным сравнением и неизменяемым снимком, обычно
+The workflow renders `target-resolver.prompt.md`. R1 inspects Git state,
+repository rules, remotes, and the requested object. It returns readable text
+containing the exact comparison and an immutable snapshot, normally
 `base=<commit> head=<commit>`.
 
-Workflow не разбирает слова `ready`, `blocked`, ветки или хэши из ответа. Весь
-ответ становится строкой `targetText`.
+The workflow does not parse `ready`, `blocked`, branch names, or hashes from
+the answer. The complete answer becomes `targetText`.
 
-### 2. R2 и R3 проверяют код независимо
+### 2. R2 and R3 inspect independently
 
-Workflow параллельно создаёт два дочерних агента.
+The workflow starts two child sessions behind one fail-closed parallel barrier.
 
-- R2 ищет дефекты, внесённые проверяемым изменением.
-- R3 читает полные файлы, правила, тесты, конфигурацию и прямых потребителей.
+- R2 focuses on defects introduced by the exact change.
+- R3 reads complete files, repository rules, tests, configuration, and direct
+  consumers.
 
-Оба получают исходный запрос и `targetText`. Каждый повторно открывает target
-своими инструментами. Ответы сохраняются как `changesText` и `contextText`
-без преобразования.
+Each session receives the original request and exact `targetText`, then reopens
+the target with its own tools. Their final texts become `changesText` and
+`contextText`.
 
-Если один дочерний запуск технически завершился ошибкой, пустым ответом,
-отменой или блокировкой runtime, общий параллельный этап завершается ошибкой
-после остановки второго запуска. Свободный текст агента не используется как
-технический статус.
+If either child technically fails, is blocked, is cancelled, or returns empty
+text, the parallel stage fails after its sibling settles. Text that merely
+looks like a failure envelope is still ordinary text.
 
-### 3. R4 перепроверяет обе линии
+### 3. R4 adjudicates
 
-R4 получает:
+R4 receives the original request plus exact `targetText`, `changesText`, and
+`contextText`. It reopens the target, verifies proposed findings, removes
+duplicates, corrects severity and scope, reconciles prior claims, and returns
+one complete Markdown review as `adjudicatedText`.
 
-- исходный запрос;
-- `targetText`;
-- точный `changesText`;
-- точный `contextText`.
+### 4. R5 publishes
 
-Он заново открывает код, проверяет каждое предложенное замечание, удаляет
-дубли и формирует один полный Markdown-отчёт. Workflow считает весь ответ
-строкой `adjudicatedText`.
+R5 is the only write-capable review session. It first proves `.tasks/` is
+ignored, then creates one local review task and writes:
 
-### 4. R5 публикует результат
+- `artifacts/review.md` with the exact adjudicated review;
+- `artifacts/fix-plan.md` when actionable findings exist;
+- review paths, hashes, target, snapshot, and finding ids in `task.md`.
 
-R5 получает `targetText` и `adjudicatedText`. Он:
+Every new plan disposition is `pending`. R5 copies findings mechanically and
+does not edit reviewed source code.
 
-1. Проверяет, что `.tasks/` игнорируется Git.
-2. Создаёт локальную review-задачу.
-3. Пишет `artifacts/review.md`.
-4. При наличии замечаний пишет `artifacts/fix-plan.md`.
-5. Для каждого замечания ставит начальное решение `pending`.
-6. Записывает пути и SHA-256 в раздел `## Review Evidence` файла `task.md`.
-7. Повторно читает созданные файлы и проверяет хэши.
+## Human approval
 
-Точный финальный текст R5 становится результатом workflow. Пути дочерней
-сессии, хэши ресурсов и технические статусы runtime хранятся отдельно в
-`journal.ndjson` и `result.json`.
+The operator reads immutable `review.md` and edits only the disposition in
+`fix-plan.md`:
 
-## Решение человека
+- `accepted` authorizes a source change;
+- `waived` records a conscious non-fix;
+- `deferred` postpones the finding;
+- `pending` grants no write authority.
 
-`fix-plan.md` поддерживает четыре значения:
+No remediation starts until at least one finding is `accepted`.
 
-- `accepted` — исправить;
-- `waived` — осознанно не исправлять;
-- `deferred` — перенести;
-- `pending` — решение ещё не принято.
+## `review-fix` algorithm
 
-`review-fix` не запускает write-агента, пока хотя бы одно замечание не имеет
-значение `accepted`.
+### 1. Deterministic validation
 
-## Алгоритм `review-fix`
+`review-fix-plan.mjs` validates path confinement, review and plan hashes,
+target, snapshot, finding identity, proof that the plan changed after
+publication, at least one accepted finding, and an addressable reviewed commit.
+No child or worktree exists before this check passes.
 
-Запуск принимает один явный путь:
+### 2. One runtime-owned worktree
 
-```text
-/workflows run review-fix ".tasks/T-201-code-review/artifacts/fix-plan.md"
-```
+The workflow allocates one retained linked worktree at the reviewed head and
+keeps only its opaque `workspaceHandle`. Model-returned paths never select the
+workspace.
 
-### 1. Workflow проверяет план без агента
+### 3. F1 applies accepted findings
 
-`review-fix-plan.mjs` до создания рабочего дерева:
+The implementer receives immutable review text, the approved plan, accepted
+ids, ignored ids, and exact hashes. It applies only accepted findings, runs
+focused checks, and returns ordinary text as `implementationText`. It does not
+commit, push, merge, deploy, or edit the original checkout.
 
-1. Требует project-relative путь именно к `fix-plan.md`.
-2. Запрещает выход за корень проекта, в том числе через symlink.
-3. Повторно вычисляет SHA-256 `review.md`.
-4. Сверяет target и snapshot между `review.md`, `fix-plan.md` и `task.md`.
-5. Требует одинаковый набор и описание finding id.
-6. Требует доказательство изменения первоначального all-pending плана.
-7. Требует хотя бы один `accepted`.
-8. Разрешает `head=<commit>` в настоящий Git commit.
+### 4. F2 verifies and reports
 
-Любая ошибка останавливает workflow до создания рабочего дерева и до запуска
-write-агента.
+The verifier reuses the same `workspaceHandle`. It treats
+`implementationText` as a claim, reopens the actual diff, verifies each
+accepted finding, and writes `artifacts/fix-report.md` plus matching task
+evidence. Source changes remain uncommitted in the retained worktree.
 
-### 2. Runtime создаёт одно рабочее дерево
+## Output and safety boundaries
 
-Runtime создаёт linked Git worktree на точном reviewed head и возвращает
-workflow непрозрачный идентификатор вида `workflow-workspace:1`.
-
-Путь к рабочему дереву не берётся из ответа модели. Перед каждым агентом и
-после завершения runtime проверяет:
-
-- исходный checkout не изменился;
-- HEAD рабочего дерева не изменился;
-- идентификатор всё ещё указывает на созданное runtime рабочее дерево.
-
-### 3. F1 применяет только `accepted`
-
-Implementer получает одобренный план и workspace handle. Он меняет только
-выделенное рабочее дерево, запускает проверки и возвращает обычный текст.
-Коммиты, push, pull request, merge и deploy запрещены.
-
-### 4. F2 независимо проверяет результат
-
-Verifier получает тот же workspace handle и точный текст implementer. Он не
-считает этот текст доказательством: повторно читает diff, полные файлы и
-запускает необходимые проверки. Затем пишет `fix-report.md` и возвращает
-обычный текст.
-
-Точный текст verifier становится результатом `review-fix`. Рабочее дерево
-сохраняется для решения оператора.
-
-## Что агент возвращает
-
-Успешный агент возвращает ровно одно значение: свой последний непустой текст.
-
-```text
-Проверил изменение. Найдено одно замечание в src/page.ts:41.
-```
-
-Даже JSON-похожий ответ остаётся обычным текстом:
-
-```json
-{ "status": "failed", "summary": "это всё ещё текст агента" }
-```
-
-Workflow не извлекает из него `status`, `summary`, пути или идентификаторы.
-JSON-схема остаётся доступна только отдельному `llm()` API, когда вызывающий код
-явно запросил schema validation. Она не является контрактом `agent()`.
+- Model output is always text. Runtime status, diagnostics, session ids, model
+  data, and artifacts remain runtime-owned evidence.
+- `llm({ schema })` is the separate direct-model JSON contract; `agent()` does
+  not parse JSON.
+- `readOnly: true` is host-enforced capability narrowing.
+- `permissionMode` is trace intent, and Pi still owns operator approval.
+- A worktree isolates file changes for review. It is not a security sandbox.
+- Prompt restrictions guide write-capable sessions but do not replace host
+  approval or deterministic validation.

@@ -134,6 +134,51 @@ describe("workflow evidence threading", () => {
     assert.deepEqual(result.evidence, evidence);
   });
 
+  it("applies per-call read-only narrowing without broadening catalog policy", async () => {
+    const root = tempProject();
+    const h = createHarness(root, { sessionId: "wf-parent-read-only" });
+    let observed: AgentRunRequest | undefined;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: () => ({
+        async run(request: AgentRunRequest) {
+          observed = request;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "read",
+            text: "read",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = await runner({
+      prompt: "inspect",
+      agent: "default",
+      readOnly: true,
+      tools: ["read", "git_read", "grep", "find"],
+    });
+
+    assert.equal(observed?.agent.readOnly, true);
+    assert.deepEqual(observed?.allowedTools, ["read", "git_read", "grep", "find"]);
+    assert.equal(result.readOnly, true);
+
+    const attemptedBroadening = await runner({
+      prompt: "inspect",
+      agent: "reviewer",
+      readOnly: false,
+      tools: ["read"],
+    } as unknown as WorkflowAgentRequest);
+
+    assert.equal(observed?.agent.readOnly, true);
+    assert.equal(attemptedBroadening.readOnly, true);
+  });
+
   it("writes evidence onto agent_end journal lines from WorkflowAgentResult", async () => {
     const result: WorkflowAgentResult = {
       ok: true,

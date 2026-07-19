@@ -173,18 +173,18 @@ or borrowed runtime implementation was identified for this source-audit slice.
   a zero-token provider failure to a generic workflow error.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
   review composition, not a new runtime primitive. It accepts an opaque
-  free-form request. Five workflow-local Markdown agents own target resolution,
-  two independent review lanes, adjudication, and publication. Agent and prompt
-  resources live beside the entry under `resources/`; runtime resolves them
-  from the original workflow source, rejects path escapes, snapshots each
-  loaded file once, and records SHA-256 evidence. Every `agent()` call returns
+  free-form request. Five catalog-agent sessions own target resolution, two
+  independent review lanes, adjudication, and publication. Complete stage
+  prompts live beside the entry under `resources/`; runtime resolves them from
+  the original workflow source, rejects path escapes, snapshots each loaded
+  file once, and records SHA-256 evidence. Every `agent()` call returns
   exact non-empty text. The coordinator forwards `targetText`, `changesText`,
   `contextText`, and `adjudicatedText` verbatim and never parses verdicts,
   statuses, ids, paths, or JSON. A publisher creates a local review task and
   writes immutable `.tasks/<task>/artifacts/review.md` plus an all-pending
   `fix-plan.md` only after proving `.tasks/` is ignored. Repository/forge
-  evidence remains agent-owned; the workflow performs no direct Git, network,
-  forge-specific, packet-building, or `llm()` work. R1-R4 declare
+  evidence remains child-session-owned; the workflow performs no direct Git,
+  network, forge-specific, packet-building, or `llm()` work. R1-R4 pass
   `readOnly: true`; the shared SDK host narrows their sessions to known read
   tools and removes shell, write/edit, nested workflow, and unknown tools.
   Their local Git evidence comes through `git_read`, which invokes only
@@ -196,8 +196,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   validates path confinement, hashes, target, snapshot, finding identity,
   explicit plan edit, accepted findings, and reviewed commit before writes.
   Runtime creates one retained linked worktree and exposes only an opaque
-  workspace handle. Workflow-local implementer and verifier agents share that
-  handle; the verifier receives implementation text verbatim but reopens the
+  workspace handle. Prompt-configured implementer and verifier sessions share
+  that handle; the verifier receives implementation text verbatim but reopens the
   diff as evidence. Prompts prohibit original-checkout edits, commit, push,
   pull-request creation, merge, deployment, and remote mutation. These are
   agent instructions plus Pi approvals, not a new sandbox.

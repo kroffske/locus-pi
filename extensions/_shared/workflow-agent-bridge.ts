@@ -116,13 +116,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
   return async function runWorkflowAgent(req: WorkflowAgentRequest): Promise<WorkflowAgentResult> {
     const projectRoot = getProjectRoot(ctx);
 
-    // 1. Resolve either the explicit workflow-local definition or one catalog agent.
+    // 1. Resolve one catalog agent. Workflow-local behavior belongs in the rendered prompt.
     const agentName = req.agent !== "" ? req.agent : defaultAgentName;
-    const discovered = req.agentDefinition === undefined ? discoverAgentDefinitions(projectRoot) : undefined;
-    const agentMap = new Map((discovered?.definitions ?? []).map((a) => [a.name, a]));
-    const agent = req.agentDefinition ?? agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
+    const discovered = discoverAgentDefinitions(projectRoot);
+    const agentMap = new Map(discovered.definitions.map((a) => [a.name, a]));
+    const selectedAgent = agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
 
-    if (agent === undefined || (req.agentDefinition === undefined && !agentMap.has(agentName))) {
+    if (selectedAgent === undefined || !agentMap.has(agentName)) {
       // Unknown catalog name -> return a result (not throw); script error, not host-unavailable.
       return {
         ok: false,
@@ -136,6 +136,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
     }
+    const agent =
+      req.readOnly === true && !selectedAgent.readOnly ? { ...selectedAgent, readOnly: true } : selectedAgent;
 
     // 2. Pi still owns operator approval. The SDK host separately enforces
     //    `agent.readOnly` as a capability allowlist: no shell, write/edit,
@@ -347,6 +349,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(usage !== undefined ? { usage } : {}),
       permissionMode,
       workspaceMode,
+      readOnly: agent.readOnly,
     };
     return result;
   };

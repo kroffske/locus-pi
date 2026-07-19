@@ -1,14 +1,26 @@
 // review.workflow.mjs
-// Five workflow-local agents exchange readable text. The coordinator owns only
-// stage order; it never parses model text for verdicts, ids, paths, or status.
+// Five catalog-agent sessions exchange readable text. Each neighboring prompt
+// owns both the stable role and the dynamic handoff for one stage.
 //
-// `agentFile` selects the agent definition (role, instructions, and tools).
-// `promptFile()` renders that agent's task for this run, including prior-stage text.
+// `promptFile()` renders the complete task for this run.
+// Agent options enforce capabilities; prompt text never acts as a sandbox.
 // `phase()` changes the visible/journal stage; `log()` explains the work inside it.
 
 const REVIEW_AGENT_DEFAULTS = Object.freeze({
   maxToolCalls: 1_000,
+  permissionMode: "agent-defined",
   workspaceMode: "project",
+});
+
+const REVIEW_READ_OPTIONS = Object.freeze({
+  ...REVIEW_AGENT_DEFAULTS,
+  readOnly: true,
+  tools: ["read", "git_read", "grep", "find"],
+});
+
+const REVIEW_PUBLISH_OPTIONS = Object.freeze({
+  ...REVIEW_AGENT_DEFAULTS,
+  tools: ["read", "write", "bash", "grep", "find"],
 });
 
 export const meta = {
@@ -33,8 +45,7 @@ export default async function runWorkflow(dsl, input) {
     ORIGINAL_REQUEST: originalRequest || "(no explicit target supplied)",
   });
   const targetText = await agent(targetPrompt, {
-    ...REVIEW_AGENT_DEFAULTS,
-    agentFile: "./resources/target-resolver.agent.md",
+    ...REVIEW_READ_OPTIONS,
     label: "resolve review target",
   });
 
@@ -48,8 +59,7 @@ export default async function runWorkflow(dsl, input) {
         TARGET_TEXT: targetText,
       });
       return agent(changesPrompt, {
-        ...REVIEW_AGENT_DEFAULTS,
-        agentFile: "./resources/change-review.agent.md",
+        ...REVIEW_READ_OPTIONS,
         label: "review introduced changes",
       });
     },
@@ -59,8 +69,7 @@ export default async function runWorkflow(dsl, input) {
         TARGET_TEXT: targetText,
       });
       return agent(contextPrompt, {
-        ...REVIEW_AGENT_DEFAULTS,
-        agentFile: "./resources/context-review.agent.md",
+        ...REVIEW_READ_OPTIONS,
         label: "review whole-file context",
       });
     },
@@ -76,8 +85,7 @@ export default async function runWorkflow(dsl, input) {
     CONTEXT_TEXT: contextText,
   });
   const adjudicatedText = await agent(adjudicatorPrompt, {
-    ...REVIEW_AGENT_DEFAULTS,
-    agentFile: "./resources/adjudicator.agent.md",
+    ...REVIEW_READ_OPTIONS,
     label: "adjudicate review findings",
   });
 
@@ -90,8 +98,7 @@ export default async function runWorkflow(dsl, input) {
     REVIEW_TEXT: adjudicatedText,
   });
   return agent(publisherPrompt, {
-    ...REVIEW_AGENT_DEFAULTS,
-    agentFile: "./resources/publisher.agent.md",
+    ...REVIEW_PUBLISH_OPTIONS,
     label: "publish review report",
   });
 }

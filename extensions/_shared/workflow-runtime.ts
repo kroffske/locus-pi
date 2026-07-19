@@ -11,9 +11,9 @@
 // ---------------------------------------------------------------------------
 
 import type { WorkflowRunSummary } from "./workflow-journal.js";
-import type { WorkflowResourceEvidence, WorkflowResourceLoader } from "./workflow-resources.js";
+import type { WorkflowResourceLoader } from "./workflow-resources.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
-import type { AgentDefinition, EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
+import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
 
 /** The single agent-execution callback the runtime depends on. The bridge supplies
@@ -28,9 +28,8 @@ export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 export interface WorkflowAgentRequest {
   prompt: string;
   agent: string; // catalog name; defaults to DEFAULT_WORKFLOW_AGENT
-  agentFile?: string;
-  agentDefinition?: AgentDefinition;
-  agentResource?: WorkflowResourceEvidence;
+  /** Per-call host-enforced read-only capability boundary. */
+  readOnly?: true;
   /** Optional per-call subset of the selected catalog agent's allowed tools. */
   tools?: string[];
   /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
@@ -73,6 +72,8 @@ export interface WorkflowAgentResult {
   usage?: WorkflowLlmUsage;
   permissionMode?: PermissionMode;
   workspaceMode?: WorkspaceMode;
+  /** Resolved host-enforced read-only capability boundary. */
+  readOnly?: boolean;
 }
 
 export interface WorkflowAgentChildTrace {
@@ -161,8 +162,8 @@ export interface WorkflowDsl {
 
 export interface WorkflowAgentOptions {
   agent?: string; // catalog name; default DEFAULT_WORKFLOW_AGENT
-  /** Workflow-local neighboring Markdown definition, relative to the workflow source. */
-  agentFile?: string;
+  /** Narrow the selected catalog agent with a host-enforced read-only capability boundary. */
+  readOnly?: true;
   /** Narrow this child to a subset of its catalog allow-list; [] creates a no-tool child. */
   tools?: string[];
   /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. 0 requires no tools. */
@@ -347,8 +348,8 @@ export interface WorkflowJournalLine {
   groupCompleted?: number;
   groupFailed?: number;
   agent?: string;
-  agentFile?: string;
-  resourceSha256?: string;
+  /** Host-enforced read-only capability boundary for this child. */
+  readOnly?: boolean;
   label?: string;
   /** Workflow loop slot descriptor (phase,label) on agent lines (REQ-009); absent = no-rounds journal. */
   slotKey?: string;
@@ -751,34 +752,18 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
     }
     if (prompt.trim() === "") throw new Error("agent prompt must be non-empty");
-    if (opts?.agent !== undefined && opts.agentFile !== undefined) {
-      throw new Error("agent and agentFile are mutually exclusive");
-    }
     if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
       throw new Error("workflow workspace manager is not configured");
     }
     const effectivePhase = opts?.phase ?? _currentPhase;
     const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls ?? defaultMaxToolCalls, "agent maxToolCalls");
-    const loadedAgent = opts?.agentFile === undefined ? undefined : options.resourceLoader?.loadAgent(opts.agentFile);
-    if (opts?.agentFile !== undefined && loadedAgent === undefined) {
-      throw new Error("workflow resource loader is not configured");
-    }
-    const agentName = loadedAgent?.definition.name ?? opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
-    const permissionMode = defaultWorkflowPermissionMode(
-      loadedAgent === undefined ? agentName : loadedAgent.definition.name,
-      opts?.permissionMode ?? loadedAgent?.definition.permissionMode,
-    );
+    const agentName = opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
+    const permissionMode = defaultWorkflowPermissionMode(agentName, opts?.permissionMode);
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
     const req: WorkflowAgentRequest = {
       prompt,
       agent: agentName,
-      ...(opts?.agentFile !== undefined ? { agentFile: opts.agentFile } : {}),
-      ...(loadedAgent !== undefined
-        ? {
-            agentDefinition: loadedAgent.definition,
-            agentResource: loadedAgent.evidence,
-          }
-        : {}),
+      ...(opts?.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),
       permissionMode,
       workspaceMode,
       ...(opts?.workspaceHandle !== undefined ? { workspaceHandle: opts.workspaceHandle } : {}),
@@ -795,8 +780,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "agent_start",
       agent: req.agent,
-      ...(req.agentFile !== undefined ? { agentFile: req.agentFile } : {}),
-      ...(req.agentResource !== undefined ? { resourceSha256: req.agentResource.sha256 } : {}),
+      ...(req.readOnly !== undefined ? { readOnly: req.readOnly } : {}),
       permissionMode,
       workspaceMode,
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
@@ -864,8 +848,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "agent_end",
       agent: req.agent,
-      ...(req.agentFile !== undefined ? { agentFile: req.agentFile } : {}),
-      ...(req.agentResource !== undefined ? { resourceSha256: req.agentResource.sha256 } : {}),
+      ...((finalResult.readOnly ?? req.readOnly) !== undefined
+        ? { readOnly: finalResult.readOnly ?? req.readOnly }
+        : {}),
       status: finalResult.status,
       permissionMode: finalResult.permissionMode ?? permissionMode,
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,

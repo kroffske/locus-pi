@@ -50,37 +50,34 @@ function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<Workflow
 }
 
 describe("workflow example: review.workflow.mjs", () => {
-  it("declares five neighboring Markdown agents and no agent JSON/YAML protocol", () => {
+  it("uses five neighboring prompts and no workflow-local agent or JSON/YAML protocol", () => {
     const source = readFileSync(workflowPath, "utf8");
     const resourceDirectory = path.join(path.dirname(workflowPath), "resources");
 
-    expect(source).toContain('agentFile: "./resources/target-resolver.agent.md"');
-    expect(source).toContain('agentFile: "./resources/change-review.agent.md"');
-    expect(source).toContain('agentFile: "./resources/context-review.agent.md"');
-    expect(source).toContain('agentFile: "./resources/adjudicator.agent.md"');
-    expect(source).toContain('agentFile: "./resources/publisher.agent.md"');
     expect(source).toContain('promptFile("./resources/');
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
     expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
+    expect(source).toContain("readOnly: true");
+    expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
     expect(source).toContain('@param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl');
+    expect(source).not.toContain("agentFile");
+    expect(source).not.toContain(".agent.md");
     expect(source).not.toContain("agents.yaml");
     expect(source).not.toContain("review-config");
     expect(source).not.toContain("schema:");
     expect(source).not.toContain("JSON.parse");
     for (const name of [
-      "target-resolver.agent.md",
-      "change-review.agent.md",
-      "context-review.agent.md",
-      "adjudicator.agent.md",
+      "target-resolver.prompt.md",
+      "change-review.prompt.md",
+      "context-review.prompt.md",
+      "adjudicator.prompt.md",
     ]) {
-      const agentSource = readFileSync(path.join(resourceDirectory, name), "utf8");
-      expect(agentSource).toContain("This stage is host-enforced read-only.");
-      expect(agentSource).toMatch(/publisher is the only review agent allowed\s+to write/iu);
-      expect(agentSource).toContain("You have no shell");
-      expect(agentSource).toMatch(/allowedTools:.*\bgit_read\b/u);
-      expect(agentSource).not.toMatch(/allowedTools:.*\b(bash|write|edit|workflow)\b/u);
-      expect(agentSource).toContain("requireAnyOf: [git_read]");
+      const promptSource = readFileSync(path.join(resourceDirectory, name), "utf8");
+      expect(promptSource).toContain("This stage is host-enforced read-only.");
+      expect(promptSource).toMatch(/publisher is the only review\s+stage allowed to write/iu);
+      expect(promptSource).toContain("You have no shell");
+      expect(promptSource).toContain("git_read");
     }
   });
 
@@ -109,13 +106,10 @@ describe("workflow example: review.workflow.mjs", () => {
       "adjudicate review findings",
       "publish review report",
     ]);
-    expect(calls.map((call) => call.agent)).toEqual([
-      "review-01-target-resolver",
-      "review-02-change-review",
-      "review-03-context-review",
-      "review-04-adjudicator",
-      "review-05-publisher",
-    ]);
+    expect(calls.map((call) => call.agent)).toEqual(["default", "default", "default", "default", "default"]);
+    expect(calls.map((call) => call.readOnly)).toEqual([true, true, true, true, undefined]);
+    expect(calls.slice(0, 4).every((call) => call.tools?.join(",") === "read,git_read,grep,find")).toBe(true);
+    expect(calls[4]?.tools).toEqual(["read", "write", "bash", "grep", "find"]);
     expect(calls.map((call) => call.maxToolCalls)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
     expect(calls.map((call) => call.workspaceMode)).toEqual(["project", "project", "project", "project", "project"]);
     expect(calls.map((call) => call.phase)).toEqual([
@@ -130,7 +124,8 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(calls[3]?.prompt).toContain(outputs["review introduced changes"]);
     expect(calls[3]?.prompt).toContain(outputs["review whole-file context"]);
     expect(calls[4]?.prompt).toContain(outputs["adjudicate review findings"]);
-    expect(resourceLoader.evidence()).toHaveLength(10);
+    expect(resourceLoader.evidence()).toHaveLength(5);
+    expect(resourceLoader.evidence().every((item) => item.kind === "prompt")).toBe(true);
     expect(resourceLoader.evidence().every((item) => /^[0-9a-f]{64}$/.test(item.sha256))).toBe(true);
   });
 

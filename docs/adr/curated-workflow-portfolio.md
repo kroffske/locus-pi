@@ -22,18 +22,18 @@ The accepted Package portfolio is:
 | `review-fix`         | Isolated accepted fixes     | It applies only explicit human approvals in a retained linked worktree and publishes independent verification without committing. |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
-evidence adapter. Each workflow owns ordinary `resources/*.agent.md`
-definitions and `resources/*.prompt.md` step prompts beside its entry file.
-The first full local agent resolves
+evidence adapter. Each workflow owns ordinary `resources/*.prompt.md` step
+prompts beside its entry file. Each prompt contains the stable stage role plus
+the dynamic per-run handoffs. The first full child session resolves
 the target and proves access, two independent agents obtain their own change and
 whole-context evidence, and the final agent reopens the target before
 adjudicating findings. This design keeps private-forge authentication and
 repository operations inside the existing agent/tool environment instead of
 creating a second provider-specific integration in the package.
 
-The four inspection agents declare `readOnly: true`. The SDK host turns that
-declaration into a capability allowlist: shell, write/edit, nested workflow, and
-unknown tools are unavailable. Git inspection uses the package-owned
+The four inspection calls set `readOnly: true` in workflow code. The SDK host
+turns that per-call policy into a capability allowlist: shell, write/edit,
+nested workflow, and unknown tools are unavailable. Git inspection uses the package-owned
 `git_read` tool, which executes only allowlisted query subcommands without a
 shell, pager, external diff, textconv, hooks, fsmonitor, or optional locks.
 `permissionMode: "agent-defined"` remains trace intent and Pi still owns
@@ -46,10 +46,11 @@ every disposition initially `pending`; it does not add findings or invent a
 second implementation plan. Mandatory `result.json` remains technical runtime
 evidence rather than the primary report.
 
-Externalizing prompts is an explicit readability trade-off. Both entry modules
-declare `identityCoverage: "entry-only"` because their SHA-256 does not bind
-neighboring resources; `review-fix` also imports a deterministic local plan
-validator. Runtime snapshots each loaded Markdown resource once and records its
+Externalizing prompts is an explicit readability trade-off. The workflow uses
+catalog agents and does not define neighboring workflow-local agents. Both
+entry modules declare `identityCoverage: "entry-only"` because their SHA-256
+does not bind neighboring resources; `review-fix` also imports a deterministic
+local plan validator. Runtime snapshots each loaded prompt once and records its
 SHA-256 instead of pretending the entry hash covers it.
 
 Keeping `review.md` and `fix-plan.md` as separate files preserves the human gate

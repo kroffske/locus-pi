@@ -1,4 +1,4 @@
-# ADR: Text-only agent results and workflow-local Markdown agents
+# ADR: Text-only agent results and workflow-local prompt resources
 
 - Status: accepted
 - Date: 2026-07-19
@@ -15,7 +15,9 @@ That design mixed two responsibilities:
 - orchestration code parsed model text as a transport protocol.
 
 It also made the review workflow hard to read and edit because unrelated agent
-definitions and prompts lived in one long YAML document.
+definitions and prompts lived in one long YAML document. Splitting that file
+into paired `*.agent.md` and `*.prompt.md` resources still left two concepts
+for every workflow stage even though only the prompt needed per-run rendering.
 
 ## Decision
 
@@ -32,28 +34,30 @@ Every successful agent call returns its exact final non-empty text.
   data stay in runtime-owned details, journals, and result envelopes.
 - `llm({ schema })` keeps its separate explicit JSON validation contract.
 
-A workflow may select either:
+A workflow selects a normal project, user, or bundled catalog agent. Omitted
+`agent` uses the catalog `default` role. Workflow-specific behavior lives in
+one neighboring `*.prompt.md` per stage and is rendered through
+`promptFile(path, variables)`. The prompt contains both the stable role
+instructions and the concrete per-run handoff.
 
-- `agent: "name"` for a normal project/user/bundled catalog agent; or
-- `agentFile: "./resources/name.agent.md"` for a workflow-local agent.
-
-The two options are mutually exclusive. A workflow-local agent is an ordinary
-Markdown agent definition with front matter and body instructions. Concrete
-step prompts live in neighboring `*.prompt.md` files and are rendered through
-`promptFile(path, variables)`.
+Runtime policy remains code, not prompt prose. Per-call `readOnly`, `tools`,
+`permissionMode`, `workspaceMode`, and `maxToolCalls` options define the child
+execution boundary. `readOnly: true` narrows the selected catalog definition
+for that call before the SDK host constructs its capability allowlist. It
+cannot broaden a catalog read-only agent.
 
 Resource paths are resolved from the original workflow entry directory, not
 the process working directory or retained script snapshot. Runtime rejects
 absolute paths, lexical escapes, symlink escapes, missing files, wrong suffixes,
-malformed agents, missing prompt variables, and unused prompt variables. It
-reads each source once, writes a read-only run copy, and records source path,
-snapshot path, size, and SHA-256.
+missing prompt variables, and unused prompt variables. It reads each prompt
+once, writes a read-only run copy, and records source path, snapshot path, size,
+and SHA-256.
 
-For a workflow-local definition with `readOnly: true`, the SDK host narrows the
-child to known read capabilities. It removes shell, write/edit, nested workflow,
-and unknown custom tools. Read-only Git inspection is available through the
-package-owned `git_read` argv tool; mutating subcommands and process-spawning
-options are rejected before Git starts.
+For a call with `readOnly: true`, the SDK host narrows the selected catalog
+agent to known read capabilities. It removes shell, write/edit, nested
+workflow, and unknown custom tools. Read-only Git inspection is available
+through the package-owned `git_read` argv tool; mutating subcommands and
+process-spawning options are rejected before Git starts.
 
 ## Review remediation boundary
 
@@ -64,13 +68,15 @@ that same handle; model-returned paths are never workspace authority.
 
 ## Consequences
 
-Workflow source becomes shorter and handoffs are visible as ordinary text.
+Workflow source and resources become shorter: every stage has one prompt, while
+runtime policy stays visible in the workflow entry. Handoffs remain ordinary
+text.
 Runtime status can no longer be forged by writing `{"status":"completed"}` in a
 model answer. Workflows that need structured model output must use an explicit
 direct-LLM schema step or implement a separate protocol in a future scoped
 change.
 
-The old agent result envelope, `agents.yaml` review loader, agent-side schema
-option, batch `tasks:[]` tool shape, and backward-compatibility parser are
-removed. This is an intentional breaking change because the current package has
-one coordinated consumer.
+The old agent result envelope, `agents.yaml` review loader, workflow-local
+`agentFile` loader, agent-side schema option, batch `tasks:[]` tool shape, and
+backward-compatibility parser are removed. This is an intentional breaking
+change because the current package has one coordinated consumer.

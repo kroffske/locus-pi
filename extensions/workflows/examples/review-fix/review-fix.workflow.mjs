@@ -2,7 +2,8 @@
 // Deterministic code validates the explicit approval artifact before any
 // write-capable child or linked worktree exists.
 //
-// `agentFile` selects the agent definition; `promptFile()` renders its task.
+// Each `promptFile()` call renders the complete stable role and dynamic task.
+// Agent options enforce capabilities; prompt text never acts as a sandbox.
 // The shared `workspaceHandle` selects one worktree, so these calls do not set
 // a separate static workspaceMode.
 
@@ -10,6 +11,7 @@ import { loadApprovedReviewPlan, verifyApprovedReviewPlan } from "./review-fix-p
 
 const REVIEW_FIX_AGENT_DEFAULTS = Object.freeze({
   maxToolCalls: 1_000,
+  permissionMode: "agent-defined",
 });
 
 export const meta = {
@@ -54,8 +56,8 @@ export default async function runWorkflow(dsl, input) {
   });
   const implementationText = await agent(implementerPrompt, {
     ...REVIEW_FIX_AGENT_DEFAULTS,
-    agentFile: "./resources/implementer.agent.md",
     label: "apply accepted review fixes",
+    tools: ["read", "write", "edit", "bash", "grep", "find"],
     workspaceHandle,
   });
   verifyApprovedReviewPlan(plan);
@@ -81,8 +83,8 @@ export default async function runWorkflow(dsl, input) {
   });
   const verificationText = await agent(verifierPrompt, {
     ...REVIEW_FIX_AGENT_DEFAULTS,
-    agentFile: "./resources/verifier.agent.md",
     label: "verify review fixes and publish report",
+    tools: ["read", "write", "bash", "grep", "find"],
     workspaceHandle,
   });
   verifyApprovedReviewPlan(plan);

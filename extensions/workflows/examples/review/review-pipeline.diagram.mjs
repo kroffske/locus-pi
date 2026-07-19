@@ -101,7 +101,7 @@ const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
         iconId,
         bullets,
         iconSize: 48,
-        titleSize: 17,
+        titleSize: 15,
         bulletSize: 12,
         bulletGap: 7,
       }),
@@ -311,7 +311,7 @@ lane(
 );
 lane(
   "ARTIFACTS",
-  "Source definition, immutable report, editable approval plan, and runtime evidence.",
+  "Workflow source, complete stage prompts, reports, approval plan, and runtime evidence.",
   1100,
   250,
   COLORS.artifact,
@@ -323,7 +323,7 @@ const request = operatorNode("operator-request", 85, 222, 300, 105);
 const launchTarget = workflowNode(
   "launch-agent-1",
   "Workflow: launch Agent R1",
-  ["Load target-resolver.agent.md", "Render target-resolver.prompt.md"],
+  ["Render complete target-resolver.prompt.md", "Apply readOnly + tool policy in code"],
   "multi_agent_orchestrator",
   455,
   462,
@@ -333,8 +333,12 @@ const launchTarget = workflowNode(
 
 const targetAgent = agentNode(
   "agent-1",
-  "Agent: R1 — review-01-target-resolver",
-  ["label: resolve review target", "Inspects Git, remotes, guidance, and auth", "Returns exact readable target text"],
+  "Agent: R1 — target prompt",
+  [
+    "catalog default · label: resolve target",
+    "Inspects Git, remotes, guidance, and auth",
+    "Returns exact readable target text",
+  ],
   "signal_quality_magnifier",
   800,
   790,
@@ -347,7 +351,7 @@ const targetStatusCheck = workflowCheck("agent-1-status", 1080, 430, 380, 210);
 const launchReviewLanes = workflowNode(
   "launch-agents-2-3",
   "Workflow: launch Agents R2+R3 in parallel",
-  ["Same request + targetText", "Independent local agent files"],
+  ["Same request + targetText", "Independent complete prompt files"],
   "multi_agent_orchestrator",
   1530,
   418,
@@ -368,8 +372,8 @@ const mapBlockedTarget = workflowNode(
 
 const changesAgent = agentNode(
   "agent-2",
-  "Agent: R2 — review-02-change-review",
-  ["label: review introduced changes", "Reads diff + full candidate files", "Returns exact review text"],
+  "Agent: R2 — change-review prompt",
+  ["catalog default · label: review changes", "Reads diff + full candidate files", "Returns exact review text"],
   "robot_agent",
   1900,
   752,
@@ -379,9 +383,9 @@ const changesAgent = agentNode(
 
 const contextAgent = agentNode(
   "agent-3",
-  "Agent: R3 — review-03-context-review",
+  "Agent: R3 — context-review prompt",
   [
-    "label: review whole-file context",
+    "catalog default · label: review context",
     "Checks standards, config, tests, and docs",
     "Returns exact context-review text",
   ],
@@ -416,9 +420,9 @@ const launchAdjudicator = workflowNode(
 
 const adjudicator = agentNode(
   "agent-4",
-  "Agent: R4 — review-04-adjudicator",
+  "Agent: R4 — adjudicator prompt",
   [
-    "label: adjudicate review findings",
+    "catalog default · label: adjudicate findings",
     "Reopens target; verifies findings",
     "Writes reader-facing Markdown verdict",
     "Returns exact adjudicated text",
@@ -443,9 +447,9 @@ const launchPublisher = workflowNode(
 
 const publisher = agentNode(
   "agent-5",
-  "Agent: R5 — review-05-publisher",
+  "Agent: R5 — publisher prompt",
   [
-    "label: publish review report",
+    "catalog default · label: publish report",
     "Proves .tasks/ is ignored",
     "Creates review task in launch project",
     "Writes review.md + pending fix-plan.md",
@@ -476,8 +480,8 @@ humanGate.texts[1].originalText = "accepted / waived / deferred / pending\nHuman
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs + resources/*.md",
-  ["Routing in entry file", "R1–R5 agent and prompt Markdown", "Copied bytes + SHA-256 in run evidence"],
+  "Artifact: review.workflow.mjs + resources/*.prompt.md",
+  ["Routing + capability policy in entry", "R1–R5 complete stage prompts", "Copied bytes + SHA-256 evidence"],
   "prompt_template",
   455,
   1160,

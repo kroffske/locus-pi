@@ -19,7 +19,7 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / llm / parallel / pipeline / phase / log / promptFile / workspace`) for orchestrating catalog or workflow-local agents through the existing `task / createAgentSession` path, plus a direct model-call node.
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / llm / parallel / pipeline / phase / log / promptFile / workspace`) for orchestrating catalog-agent sessions through the existing `task / createAgentSession` path, plus a direct model-call node.
 
 Two ways a workflow reaches a model:
 
@@ -75,8 +75,8 @@ with real session ids. See "Run a real workflow (live)" below.
 | `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                   |
 | `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                  |
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`. |
-| `review`             | **Agent-owned code review**: five workflow-local Markdown agents resolve, inspect, adjudicate, and publish immutable `review.md` plus an all-pending human approval manifest as `fix-plan.md`.                                                                                                                                                                                                                                                                                                  |
-| `review-fix`         | **Human-gated remediation**: deterministic code validates the approval plan, then two workflow-local Markdown agents share one runtime-owned linked worktree, verify the diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, deploy, or modify the original checkout.                                                                                                                                                                                                  |
+| `review`             | **Agent-owned code review**: five prompt-configured catalog-agent sessions resolve, inspect, adjudicate, and publish immutable `review.md` plus an all-pending human approval manifest as `fix-plan.md`.                                                                                                                                                                                                                                                                                        |
+| `review-fix`         | **Human-gated remediation**: deterministic code validates the approval plan, then two prompt-configured catalog-agent sessions share one runtime-owned linked worktree, verify the diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, deploy, or modify the original checkout.                                                                                                                                                                                        |
 
 `review` passes the operator request and exact text handoffs between agents. The
 first agent resolves the target and immutable snapshot.
@@ -95,11 +95,11 @@ residual risks.
 The two review workflows have independent package directories:
 `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`. The reader algorithm lives in
-`review/README.md`. Each `resources/*.agent.md` file is an ordinary agent
-definition with front matter and instructions; each `resources/*.prompt.md`
-file is one concrete step prompt. `agentFile` and `promptFile()` resolve paths
-relative to the original workflow source, reject lexical or symlink escapes,
-copy bytes once into the run directory, and record SHA-256 evidence.
+`review/README.md`. Each `resources/*.prompt.md` file contains both the stable
+role instructions and the dynamic handoffs for one concrete stage.
+`promptFile()` resolves paths relative to the original workflow source, rejects
+lexical or symlink escapes, copies bytes once into the run directory, and
+records SHA-256 evidence.
 
 The separate review artifacts preserve the human gate without a separate planning
 workflow: `review.md` remains immutable evidence, while the operator edits only
@@ -648,11 +648,11 @@ Notes:
 - `agent()` always returns the child's exact non-empty final text. It does not
   accept `schema`, parse JSON-looking text, or expose child status fields as a
   model-controlled result. Technical metadata is written to the workflow journal.
-- Use `agentFile: "./resources/name.agent.md"` for a neighboring workflow-local
-  agent definition: stable role, instructions, model preference, and tool
-  policy. Use `promptFile("./resources/name.prompt.md", variables)` for that
-  agent's concrete per-run task and dynamic handoffs. A custom step normally
-  uses both. Both paths are source-relative and hash-backed.
+- Use `promptFile("./resources/name.prompt.md", variables)` when a stage needs
+  substantial workflow-specific instructions or dynamic handoffs. Keep the
+  stable role and the per-run task in that one prompt. The path is
+  source-relative and hash-backed. Runtime policy such as `readOnly`, `tools`,
+  and `workspaceMode` remains visible in the `agent()` options.
 - Choose `agent()` when the step must **do tool work** or be an authoritative judge
   whose verdict is a real child session; choose `llm()` for a **cheap one-shot
   decision / text** (a gate, a classification, a draft) with no tools and no session.
@@ -767,7 +767,7 @@ contract, not an enforcement or security boundary.
 | Field             | Type                      | Default                                                                | Description                                                                                                                                                                          |
 | ----------------- | ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                   |
-| `agentFile`       | string                    | —                                                                      | Neighboring workflow-local `*.agent.md`, resolved from the original workflow source. Mutually exclusive with `agent`.                                                                |
+| `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                            |
 | `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                               |
 | `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.  |
 | `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                   |
@@ -840,12 +840,13 @@ failure after the barrier.
 
 - **Permissions:** `permissionMode` describes the child run's tool-policy intent (`"inherit-parent"`, `"agent-defined"`, or `"restricted"`). It does not allocate a worktree.
 - **Tools:** `tools` can only narrow the selected catalog agent's allow-list. It cannot grant a tool that the agent definition excludes.
-- **Read-only agents:** `readOnly: true` on the selected Markdown definition is
-  enforced by the SDK host. The child receives only `read`, `grep`, `find`,
-  `ls`, `yield`, and the package-owned `git_read` when requested. `bash`,
-  `write`, `edit`, nested `workflow`, and unknown tools are removed. `git_read`
-  accepts argv for allowlisted Git queries and rejects mutation, output-file,
-  external-diff, textconv, pager, signature, and config options before launch.
+- **Read-only agents:** `readOnly: true` in `agent()` options, or on the selected
+  catalog definition when no per-call override is present, is enforced by the
+  SDK host. The child receives only `read`, `grep`, `find`, `ls`, `yield`, and
+  the package-owned `git_read` when requested. `bash`, `write`, `edit`, nested
+  `workflow`, and unknown tools are removed. `git_read` accepts argv for
+  allowlisted Git queries and rejects mutation, output-file, external-diff,
+  textconv, pager, signature, and config options before launch.
 - **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus/runtime/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.

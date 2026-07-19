@@ -1,13 +1,4 @@
-import {
-  chmodSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,22 +13,6 @@ function fixture() {
   const workflowPath = path.join(workflowDirectory, "review.workflow.mjs");
   writeFileSync(workflowPath, "export default async () => {};\n", "utf8");
   writeFileSync(
-    path.join(resourceDirectory, "reviewer.agent.md"),
-    [
-      "---",
-      "name: review-01-reader",
-      "description: Workflow-local reader",
-      "readOnly: true",
-      "allowedTools: [read, grep]",
-      "---",
-      "",
-      "# Review",
-      "",
-      "Return text only.",
-    ].join("\n"),
-    "utf8",
-  );
-  writeFileSync(
     path.join(resourceDirectory, "review.prompt.md"),
     "Target:\n{{TARGET}}\n\nPrior text:\n{{PRIOR_TEXT}}\n",
     "utf8",
@@ -45,30 +20,22 @@ function fixture() {
   return { root, workflowDirectory, workflowPath, resourceDirectory, runDir };
 }
 
-describe("workflow-local Markdown resources", () => {
-  it("loads an ordinary agent definition and renders a neighboring prompt source-relatively", () => {
+describe("workflow-local prompt resources", () => {
+  it("renders a neighboring prompt source-relatively and records only prompt evidence", () => {
     const item = fixture();
     const loader = createWorkflowResourceLoader({
       workflowSourcePath: item.workflowPath,
       runDir: item.runDir,
     });
 
-    const loaded = loader.loadAgent("./resources/reviewer.agent.md");
     const prompt = loader.renderPrompt("./resources/review.prompt.md", {
       TARGET: "base=abc head=def",
       PRIOR_TEXT: '{"status":"failed-looking"}',
     });
 
-    expect(loaded.definition).toMatchObject({
-      name: "review-01-reader",
-      description: "Workflow-local reader",
-      source: "workflow",
-      readOnly: true,
-      allowedTools: ["read", "grep", "yield"],
-    });
-    expect(loaded.definition.systemPrompt).toContain("Return text only.");
     expect(prompt).toBe('Target:\nbase=abc head=def\n\nPrior text:\n{"status":"failed-looking"}\n');
-    expect(loader.evidence()).toHaveLength(2);
+    expect(loader.evidence()).toHaveLength(1);
+    expect(loader.evidence()[0]?.kind).toBe("prompt");
     expect(
       loader.evidence().every((evidence) => evidence.sourcePath.startsWith(realpathSync(item.workflowDirectory))),
     ).toBe(true);
@@ -132,17 +99,16 @@ describe("workflow-local Markdown resources", () => {
     ).toThrow("variables are unused (EXTRA)");
   });
 
-  it("fails malformed agent front matter with source and snapshot evidence", () => {
+  it("fails empty prompts after recording their immutable source evidence", () => {
     const item = fixture();
-    const badPath = path.join(item.resourceDirectory, "bad.agent.md");
-    writeFileSync(badPath, "---\nname: bad\n---\nMissing description.\n", "utf8");
-    chmodSync(badPath, 0o644);
+    const badPath = path.join(item.resourceDirectory, "empty.prompt.md");
+    writeFileSync(badPath, "\n", "utf8");
     const loader = createWorkflowResourceLoader({
       workflowSourcePath: item.workflowPath,
       runDir: item.runDir,
     });
 
-    expect(() => loader.loadAgent("./resources/bad.agent.md")).toThrow("Invalid workflow agent resource");
+    expect(() => loader.renderPrompt("./resources/empty.prompt.md")).toThrow("Workflow prompt resource is empty");
     expect(loader.evidence()).toHaveLength(1);
   });
 });

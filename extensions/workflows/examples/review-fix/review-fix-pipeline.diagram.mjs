@@ -236,8 +236,12 @@ const launchImplementer = panel(
 );
 const implementer = panel(
   "agent-2",
-  "Agent: F1 — review-fix-01-implementer",
-  ["label: apply accepted review fixes", "Edits runtime-owned worktree", "Returns exact implementation text"],
+  "Agent: F1 — implementer prompt",
+  [
+    "catalog default · label: apply accepted fixes",
+    "Edits runtime-owned worktree",
+    "Returns exact implementation text",
+  ],
   "sandbox_executor",
   1880,
   655,
@@ -258,8 +262,8 @@ const launchVerifier = panel(
 );
 const verifier = panel(
   "agent-3",
-  "Agent: F2 — review-fix-02-verifier",
-  ["label: verify review fixes and publish report", "Inspects diff + re-runs checks", "Writes fix-report.md"],
+  "Agent: F2 — verifier prompt",
+  ["catalog default · label: verify and report", "Inspects diff + re-runs checks", "Writes fix-report.md"],
   "model_validation",
   2590,
   655,
@@ -290,8 +294,8 @@ const operatorDecision = operator(
 
 const source = artifact(
   "source",
-  "Artifact: review-fix.workflow.mjs + resources/*.md",
-  ["Deterministic validator + F1/F2 Markdown"],
+  "Artifact: review-fix.workflow.mjs + resources/*.prompt.md",
+  ["Deterministic validator + F1/F2 complete prompts"],
   "prompt_template",
   430,
   935,
