@@ -14,7 +14,7 @@ whose source audit records the upstream contract and license context.
 | `model`               | active | compat-wrapper | Local role-routing state and UI. Pi owns active model selection through `/model` and `/models`.                                                   |
 | `plan`                | active | Locus          | Behavioral planning/goal runtime. It guides the model but does not silently restrict tools or shell access.                                       |
 | `security-gate`       | active | Locus          | Audit-only observer. Pi approval remains the enforcement owner.                                                                                   |
-| `todo-context`        | active | compat-wrapper | `todo_write` mutates session task state; `/todo` is the operator view.                                                                            |
+| `todo-context`        | active | compat-wrapper | `todo_write` mutates session task state; explicit autonomous mode may trigger one bounded settled follow-up per recorded progress transition.     |
 | `workflows`           | active | Locus          | Reviewed JavaScript executes with full Node.js host access. Only three Package names are curated; project/user sources remain trusted local code. |
 
 ## Machine truth

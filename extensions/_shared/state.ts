@@ -12,13 +12,20 @@ export interface GoalState {
 export const sharedState: {
   goal: GoalState | null;
   plan: { active: boolean; executionApproved: boolean; tasks: PlanTask[]; raw: string | null };
-  todos: Array<{ name: string; tasks: Array<{ content: string; status: "pending" | "in_progress" | "completed" | "abandoned"; notes?: string[] }> }>;
+  todos: Array<{
+    name: string;
+    tasks: Array<{ content: string; status: "pending" | "in_progress" | "completed" | "abandoned"; notes?: string[] }>;
+  }>;
+  todoContext: string | null;
+  todoAutoContinue: boolean;
   agents: Map<string, AgentDefinition>;
   toolPreset: string;
 } = {
   goal: null,
   plan: { active: false, executionApproved: false, tasks: [], raw: null },
   todos: [],
+  todoContext: null,
+  todoAutoContinue: false,
   agents: new Map(),
   toolPreset: "minimal",
 };
