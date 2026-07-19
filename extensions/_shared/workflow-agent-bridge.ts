@@ -137,8 +137,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       };
     }
 
-    // 2. Sandbox discipline stays local; approval/prompt/deny decisions belong
-    //    to the Pi tool wrapper and user settings.
+    // 2. Pi still owns operator approval. The SDK host separately enforces
+    //    `agent.readOnly` as a capability allowlist: no shell, write/edit,
+    //    nested workflow, or unknown custom tool reaches a read-only child.
     const approvalTier: "allow" = "allow";
     const permissionMode = resolvePermissionMode({
       agent,

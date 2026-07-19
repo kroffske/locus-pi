@@ -15,6 +15,7 @@ import { evaluateEvidence } from "./agent-evidence-evaluator.js";
 import type { EvidenceEvaluationInput } from "./types.js";
 import { PetnameRegistry } from "./agent-names.js";
 import { AgentLiveTranscript, type AgentLiveTranscriptSnapshot } from "./agent-live-transcript.js";
+import { createReadOnlyAgentSessionCapabilities, type ReadOnlyAgentCustomTool } from "./agent-read-only-policy.js";
 
 /**
  * Tool-context sibling of `createAgentReplacementSessionExecutor`.
@@ -81,6 +82,8 @@ export interface SdkCreateSessionOptionsLike {
   tools?: string[];
   /** Tool names disabled after any allowlist is applied. */
   excludeTools?: string[];
+  /** Custom tools registered for this child session. */
+  customTools?: ReadOnlyAgentCustomTool[];
   /** A resolved Pi `Model` object (kept structurally opaque here). When set, the
    *  child session uses it instead of the host default — so the child inherits the
    *  caller's model rather than relying on settings (which may default to a weak or
@@ -92,6 +95,7 @@ export interface SdkCreateSessionOptionsLike {
   appendSystemPrompt?: string;
   resourceLoader?: unknown;
 }
+
 export type CreateAgentSessionFactory = (options: SdkCreateSessionOptionsLike) => Promise<SdkCreateSessionResultLike>;
 
 /** Per-turn wall-clock budget for the child agent before the run is force-stopped. */
@@ -609,15 +613,21 @@ async function runWithSdkSession(
   const kickoff = formatAgentKickoffPrompt(capsule);
 
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
-  const allowsAll = request.allowedTools.includes("*");
+  const readOnlyCapabilities = request.agent.readOnly
+    ? createReadOnlyAgentSessionCapabilities(cwd, request.allowedTools)
+    : undefined;
+  const effectiveTools =
+    readOnlyCapabilities?.tools ?? (request.allowedTools.includes("*") ? undefined : [...request.allowedTools]);
+  const excludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent", "task"];
   const sessionOptions: SdkCreateSessionOptionsLike = {
     cwd,
-    // Children may run the `workflow` tool, but cannot recursively call the two
-    // direct child-session entrypoints. Pi applies excludeTools after `tools`, so
-    // this boundary also holds for wildcard catalog profiles.
-    excludeTools: ["spawn_agent", "task"],
+    // Write-capable children may run `workflow`, but no child can recursively
+    // call the two direct child-session entrypoints. Read-only children receive
+    // the stricter allowlist above. Pi applies excludes after `tools`.
+    excludeTools: excludedTools,
   };
-  if (!allowsAll) sessionOptions.tools = [...request.allowedTools];
+  if (effectiveTools !== undefined) sessionOptions.tools = effectiveTools;
+  if (readOnlyCapabilities?.customTools !== undefined) sessionOptions.customTools = readOnlyCapabilities.customTools;
   if (model !== undefined && model !== null) sessionOptions.model = model;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
   if (appendSystemPrompt !== undefined) sessionOptions.appendSystemPrompt = appendSystemPrompt;

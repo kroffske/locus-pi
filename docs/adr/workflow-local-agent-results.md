@@ -49,6 +49,12 @@ malformed agents, missing prompt variables, and unused prompt variables. It
 reads each source once, writes a read-only run copy, and records source path,
 snapshot path, size, and SHA-256.
 
+For a workflow-local definition with `readOnly: true`, the SDK host narrows the
+child to known read capabilities. It removes shell, write/edit, nested workflow,
+and unknown custom tools. Read-only Git inspection is available through the
+package-owned `git_read` argv tool; mutating subcommands and process-spawning
+options are rejected before Git starts.
+
 ## Review remediation boundary
 
 `review-fix` validates the human-edited plan with deterministic code before any

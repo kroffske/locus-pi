@@ -31,12 +31,14 @@ adjudicating findings. This design keeps private-forge authentication and
 repository operations inside the existing agent/tool environment instead of
 creating a second provider-specific integration in the package.
 
-The agents retain their declared tool surface because evidence acquisition and
-task-artifact publication are their responsibility.
-`permissionMode: "agent-defined"` records that intent; it does not enforce
-read-only behavior. Prompts prohibit repository and remote mutation during
-review and planning, while Pi tool approval remains the real enforcement
-boundary. The adjudicator returns reader-facing Markdown; a separate
+The four inspection agents declare `readOnly: true`. The SDK host turns that
+declaration into a capability allowlist: shell, write/edit, nested workflow, and
+unknown tools are unavailable. Git inspection uses the package-owned
+`git_read` tool, which executes only allowlisted query subcommands without a
+shell, pager, external diff, textconv, hooks, fsmonitor, or optional locks.
+`permissionMode: "agent-defined"` remains trace intent and Pi still owns
+operator approval, but the publisher-only write rule no longer depends on
+prompt compliance. The adjudicator returns reader-facing Markdown; a separate
 publisher agent writes the complete reader-facing report to
 `.tasks/<task>/artifacts/review.md` after proving `.tasks/` is ignored. The same
 publisher mechanically copies every verified finding into `fix-plan.md` with

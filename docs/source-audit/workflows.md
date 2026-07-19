@@ -184,10 +184,13 @@ or borrowed runtime implementation was identified for this source-audit slice.
   writes immutable `.tasks/<task>/artifacts/review.md` plus an all-pending
   `fix-plan.md` only after proving `.tasks/` is ignored. Repository/forge
   evidence remains agent-owned; the workflow performs no direct Git, network,
-  forge-specific, packet-building, or `llm()` work. Prompts prohibit source,
-  branch, commit, push, and remote mutations during review, but prompt text and
-  permission metadata are not a sandbox. A failed parallel child remains a
-  typed group failure.
+  forge-specific, packet-building, or `llm()` work. R1-R4 declare
+  `readOnly: true`; the shared SDK host narrows their sessions to known read
+  tools and removes shell, write/edit, nested workflow, and unknown tools.
+  Their local Git evidence comes through `git_read`, which invokes only
+  allowlisted query subcommands without a shell and rejects mutating or
+  process-spawning options. The publisher remains the only write-capable
+  review agent. A failed parallel child remains a typed group failure.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the curated,
   human-gated remediation exception. Deterministic `review-fix-plan.mjs`
   validates path confinement, hashes, target, snapshot, finding identity,

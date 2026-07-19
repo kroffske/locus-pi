@@ -53,6 +53,11 @@ extensions/workflows/examples/
 каталога workflow, один раз читает байты и сохраняет в каталоге запуска
 неизменяемую копию с SHA-256.
 
+R1–R4 объявлены `readOnly: true`. Для них runtime технически убирает shell,
+write/edit, запуск вложенного workflow и неизвестные tools. Git они читают через
+`git_read`: это отдельный argv-инструмент с allowlist только для query-команд.
+R5 остаётся единственным агентом с правом записи review-артефактов.
+
 ## Общая схема
 
 ```mermaid
@@ -60,11 +65,11 @@ flowchart LR
     U["Оператор: что проверить"]
 
     subgraph R["Workflow: review"]
-        R1["Агент R1<br/>review-01-target-resolver<br/>Определяет точный target"]
+        R1["Агент R1<br/>review-01-target-resolver<br/>read-only · определяет target"]
         P["Workflow<br/>Запускает R2 и R3 параллельно"]
-        R2["Агент R2<br/>review-02-change-review<br/>Проверяет внесённые изменения"]
-        R3["Агент R3<br/>review-03-context-review<br/>Проверяет полный контекст"]
-        R4["Агент R4<br/>review-04-adjudicator<br/>Перепроверяет замечания"]
+        R2["Агент R2<br/>review-02-change-review<br/>read-only · проверяет diff"]
+        R3["Агент R3<br/>review-03-context-review<br/>read-only · проверяет контекст"]
+        R4["Агент R4<br/>review-04-adjudicator<br/>read-only · перепроверяет замечания"]
         R5["Агент R5<br/>review-05-publisher<br/>Публикует review.md"]
 
         R1 -->|"точный текст targetText"| P

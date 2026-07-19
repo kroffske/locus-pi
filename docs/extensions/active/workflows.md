@@ -817,6 +817,12 @@ failure after the barrier.
 
 - **Permissions:** `permissionMode` describes the child run's tool-policy intent (`"inherit-parent"`, `"agent-defined"`, or `"restricted"`). It does not allocate a worktree.
 - **Tools:** `tools` can only narrow the selected catalog agent's allow-list. It cannot grant a tool that the agent definition excludes.
+- **Read-only agents:** `readOnly: true` on the selected Markdown definition is
+  enforced by the SDK host. The child receives only `read`, `grep`, `find`,
+  `ls`, `yield`, and the package-owned `git_read` when requested. `bash`,
+  `write`, `edit`, nested `workflow`, and unknown tools are removed. `git_read`
+  accepts argv for allowlisted Git queries and rejects mutation, output-file,
+  external-diff, textconv, pager, signature, and config options before launch.
 - **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus/runtime/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.

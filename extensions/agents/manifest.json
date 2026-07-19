@@ -20,7 +20,8 @@
     "locus_workload_proof records diagnostic persisted child-workload evidence but does not control success by itself",
     "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
     "spawn_agent is the model-friendly primary subagent-spawn tool; task is a back-compat alias; both accept one required task string, create one child, return exact text in content, and keep runtime metadata in details",
-    "SDK children always receive excludeTools=[spawn_agent, task] after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; the workflow tool remains available when the profile allows it",
+    "SDK children always receive excludeTools=[spawn_agent, task] after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow when the profile allows it",
+    "readOnly=true is host-enforced: the child allowlist is narrowed to read, grep, find, ls, yield, and explicitly requested git_read; bash, write, edit, workflow, and unknown tools are removed; git_read invokes only allowlisted local Git query subcommands without a shell and rejects mutating or process-spawning options",
     "task spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
     "task resolves missing agent and default to task; general resolves to task only when no project/user general agent exists",
     "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
@@ -103,7 +104,7 @@
         ".locus/runtime/reports/*.jsonl"
       ]
     },
-    "subprocess": [],
+    "subprocess": ["git (allowlisted local read-only queries through git_read)"],
     "network": [],
     "browser": false,
     "models": false,

@@ -63,6 +63,7 @@ extensions/_shared/agent-executor-host.ts
 extensions/_shared/agent-live-panel.ts
 extensions/_shared/agent-live-transcript.ts
 extensions/_shared/agent-names.ts
+extensions/_shared/agent-read-only-policy.ts
 extensions/_shared/agent-runner.ts
 extensions/_shared/agent-sdk-host.ts
 extensions/_shared/agent-system-prompt.ts

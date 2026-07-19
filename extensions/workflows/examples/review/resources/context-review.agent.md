@@ -5,19 +5,18 @@ model: pi/slow
 thinking-level: xhigh
 readOnly: true
 permissionMode: agent-defined
-allowedTools: [read, bash, grep, find]
+allowedTools: [read, git_read, grep, find]
 evidence:
   mode: warn
-  requireAnyOf: [bash]
+  requireAnyOf: [git_read]
 ---
 
 # Review whole-file and repository context
 
-This stage is strictly read-only. Do not create, update, or delete any file,
-task, report, branch, commit, worktree, or remote state. Do not use shell
-redirection, heredocs, or commands that write caches or artifacts. The
-publisher is the only review agent allowed to write. Return your review only as
-the final text response.
+This stage is host-enforced read-only. You have no shell, write, edit, workflow,
+or unknown custom tool. Use `git_read` for Git inspection; it accepts an `args`
+array without the leading `git`. The publisher is the only review agent allowed
+to write. Return your review only as the final text response.
 
 Reopen the target with your own tools. Inspect the exact diff, complete changed
 files, repository rules, configuration, types, shared utilities, tests,

@@ -13,7 +13,7 @@ caller runs it.
 
 Canonical detail reference (read it for edge-cases, the full primitive table, schema and
 trust rules): `extensions/workflows/AUTHORING.md` (which links to the full DSL doc
-`docs/extensions/active/workflows.md`). For *which shape to pick*, consult the pattern
+`docs/extensions/active/workflows.md`). For _which shape to pick_, consult the pattern
 catalog `extensions/workflows/references/patterns.md` — it maps requirements to a minimal
 skeleton plus the runnable example to adapt. You carry the operational contract below
 inline, so you can author competently without reading it for a simple workflow.
@@ -29,28 +29,26 @@ A workflow is one ESM module with exactly two exports:
   `[input]` from the run command (a string, possibly empty). Whatever the function
   returns is written to `result.json` as `result`.
 
-Destructure only what you use: `const { agent, llm, phase, log, parallel, pipeline, workflow } = dsl;`
+Destructure only what you use: `const { agent, llm, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;`
 
 Primitives:
 
-| Primitive | Signature | Use |
-|---|---|---|
-| `agent` | `agent(prompt, { agent?, model?, label?, schema?, permissionMode?, workspaceMode?, throwOnSchemaMismatch? })` | Spawns a REAL child session with tools. `agent` = catalog name (default `"default"`; `"quick_task"` for mechanical work; `"reviewer"` for a judge). `permissionMode`: `"inherit-parent"` \| `"agent-defined"` \| `"restricted"` (tool-policy intent, not a security boundary). `workspaceMode`: `"project"` (default) \| `"worktree"` \| `"temporary-worktree"` (worktree modes allocate an isolated git worktree for diff review). The two axes are independent. (Legacy `sandbox: "read-only" \| "workspace-write"` still works as a deprecated alias.) `schema` → validated+retried; final mismatch → `ok:false`. Returns `{ ok, status, summary, output, childSessionId, diagnostics }`. |
-| `llm` | `llm(prompt, { system?, model?, reasoning?, stream?, schema? })` | ONE direct model call, no session/tools. Fail-closed `ok:false` (never throws) on no-runner/model error. Returns `{ ok, text, stopReason, model, usage, output }`. Use for a cheap gate/classify/draft. |
-| `phase` | `phase(name)` | Journal phase boundary. |
-| `log` | `log(msg)` | Journal log line. |
-| `parallel` | `parallel(thunks)` | Bounded full barrier. All-success returns ordered `T[]`; an explicitly fulfilled `null` is a value. An ordinary thrown thunk or directly returned `ok:false` / `status:failed|blocked|cancelled` rejects one typed `WorkflowGroupFailureError` after scheduled siblings settle. |
-| `pipeline` | `pipeline(items, ...stages)` | Run items through ordered `(item, i) => Promise` stages. A failed direct stage result stops later stages for that item; siblings settle, then the group rejects the same typed error with item `index` and `stageIndex`. |
-| `workflow` | `workflow(subFn, input?)` | Run a nested workflow function for composition. |
+| Primitive  | Signature                                                                                                                         | Use                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`    | `agent(prompt, { agent?, agentFile?, model?, label?, tools?, maxToolCalls?, permissionMode?, workspaceMode?, workspaceHandle? })` | Spawns one REAL child session with tools and resolves to its exact non-empty final text. `agent` selects a catalog agent; `agentFile` selects one neighboring `*.agent.md`; they are mutually exclusive. Runtime status, session ids, diagnostics, usage, and artifacts stay in journal evidence instead of the model text. An agent with `readOnly: true` receives only host-approved read capabilities; Git inspection uses `git_read`, never shell. |
+| `llm`      | `llm(prompt, { system?, model?, reasoning?, stream?, schema? })`                                                                  | ONE direct model call, no session/tools. Fail-closed `ok:false` (never throws) on no-runner/model error. Returns `{ ok, text, stopReason, model, usage, output }`. Use for a cheap gate/classify/draft.                                                                                                                                                                                                                                                |
+| `phase`    | `phase(name)`                                                                                                                     | Journal phase boundary.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `log`      | `log(msg)`                                                                                                                        | Journal log line.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `parallel` | `parallel(thunks)`                                                                                                                | Bounded full barrier. All-success returns ordered `T[]`; an explicitly fulfilled `null` is a value. An ordinary thrown thunk or directly returned `ok:false`, `status:failed`, `status:blocked`, or `status:cancelled` rejects one typed `WorkflowGroupFailureError` after scheduled siblings settle.                                                                                                                                                  |
+| `pipeline` | `pipeline(items, ...stages)`                                                                                                      | Run items through ordered `(item, i) => Promise` stages. A failed direct stage result stops later stages for that item; siblings settle, then the group rejects the same typed error with item `index` and `stageIndex`.                                                                                                                                                                                                                               |
+| `workflow` | `workflow(subFn, input?)`                                                                                                         | Run a nested workflow function for composition.                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Per-call `model` selector form: `"provider/id"` or `"provider/id:thinking"`. Prefer
 catalog model defaults unless the requirement asks otherwise.
 
-When a step opts into `schema`, instruct the agent to end its message with the structured
-envelope: `LOCUS_AGENT_RESULT_V1` followed by JSON
-`{ "version": "locus.agent.result.v1", "status": "completed", "summary": "<one line>", "output": { ... } }`.
-The schema's validated value lands in `result.output`. Plain-text completion works when no
-`schema` is set.
+Agent output is always text. Do not ask an agent for a runtime envelope or parse
+JSON-looking agent text as status. When a workflow genuinely needs validated
+JSON, use a separate direct `llm({ schema })` step.
 
 Group failure is fail-closed by default. Do not filter failed positions from a normal return
 array: a failed group does not return one. The rejected error has stable
@@ -94,31 +92,19 @@ export const meta = {
   description: "<one line>",
 };
 
-const SCHEMA = {
-  type: "object",
-  required: ["ok"],
-  properties: { ok: { type: "boolean" } },
-};
-
 export default async function runWorkflow(dsl, input) {
   const { agent, phase, log } = dsl;
   const task = (typeof input === "string" && input.trim()) || "<default task>";
 
   phase("work");
-  const worker = await agent(
-    `Task: ${task}. Use a read tool once (a real tool action). Then return ONLY ` +
-      `the structured result envelope: end with LOCUS_AGENT_RESULT_V1 followed by JSON ` +
-      `{ "version": "locus.agent.result.v1", "status": "completed", ` +
-      `"summary": "<one line>", "output": { "ok": true } }.`,
-    { agent: "quick_task", label: "work", permissionMode: "agent-defined", schema: SCHEMA },
-  );
-  log(`worker ok=${Boolean(worker?.ok)} session=${worker?.childSessionId ?? "none"}`);
+  const workerText = await agent(`Task: ${task}. Use a read tool once, then return one concise text summary.`, {
+    agent: "quick_task",
+    label: "work",
+    permissionMode: "agent-defined",
+  });
+  log("Worker returned a non-empty text result.");
 
-  return {
-    ok: Boolean(worker?.ok && worker?.output?.ok === true),
-    childSessionId: worker?.childSessionId ?? null,
-    output: worker?.output ?? null,
-  };
+  return workerText;
 }
 ```
 
@@ -150,7 +136,9 @@ export default async function runWorkflow(dsl, input) {
    fan-out+merge, judge-panel, loop-until-dry) and adapt its skeleton or its runnable example. Pick the shape: a single
    `agent()` (tool work / authoritative judge), a single `llm()` (cheap decision/text), or
    a loop/judge/`parallel`/`pipeline` only if the requirement needs it. Default to the
-   simplest shape that satisfies it. For every group, default to uncaught fail-closed
+   simplest shape that satisfies it. Use workflow-local `*.agent.md` plus
+   `*.prompt.md` resources beside the entry when a step needs a custom persona;
+   use a catalog agent when it does not. For every group, default to uncaught fail-closed
    behavior; choose deliberate typed partial continuation only when the requirement says
    the surviving results are still useful.
    Use the adaptive owner-local variant only when the request explicitly needs
@@ -159,12 +147,14 @@ export default async function runWorkflow(dsl, input) {
    task-specific; do not invent a generic loop primitive.
 2. Derive a short kebab-case `<name>` from the requirement (e.g. `list-cwd-count`).
 3. Write `.pi/workflows/<name>.workflow.mjs` (create the directory if missing) from
-   the template, adapting prompts, schema, and the returned `result`. `.pi/workflows/`
+   the template, adapting prompts and the returned `result`. `.pi/workflows/`
    is the canonical pi-native save target — it resolves first by bare name. Keep prompts
-   explicit about the tool action and the structured envelope when a schema is set.
+   explicit about the tool action and required text. When custom step instructions are
+   substantial, place `*.agent.md` and `*.prompt.md` in a neighboring `resources/`
+   directory and load them with `agentFile` and `promptFile()`.
    Keep the source self-contained unless the requirement itself needs modular or
    source-anchored code; only then add literal `meta.identityCoverage: "entry-only"`.
-   Default agents to `permissionMode: "agent-defined"` and `workspaceMode: "project"`; set `workspaceMode: "worktree"` only when the requirement requires isolated file writes.
+   Default agents to `permissionMode: "agent-defined"` and `workspaceMode: "project"`; set `workspaceMode: "worktree"` only when the requirement requires isolated file writes. A workflow-local reader must declare `readOnly: true` and only read tools such as `[read, git_read, grep, find]`; never give it `bash`.
 4. Confirm source identity policy before executing the module:
    `node -e "import('./extensions/_shared/workflow-script-identity.ts').then(m=>console.log(m.assessWorkflowSourceIdentity(require('node:fs').readFileSync('./.pi/workflows/<name>.workflow.mjs','utf8')))).catch(e=>{console.error('IDENTITY_FAIL',e.message);process.exit(1)})"`.
    Then confirm the module loads and exports the contract. Prefer a Node check:

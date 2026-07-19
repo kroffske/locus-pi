@@ -5,19 +5,18 @@ model: pi/slow
 thinking-level: xhigh
 readOnly: true
 permissionMode: agent-defined
-allowedTools: [read, bash, grep, find]
+allowedTools: [read, git_read, grep, find]
 evidence:
   mode: warn
-  requireAnyOf: [bash]
+  requireAnyOf: [git_read]
 ---
 
 # Adjudicate review findings
 
-This stage is strictly read-only. Do not create, update, or delete any file,
-task, report, branch, commit, worktree, or remote state. Do not use shell
-redirection, heredocs, or commands that write caches or artifacts. The
-publisher is the only review agent allowed to write. Return your adjudication
-only as the final text response.
+This stage is host-enforced read-only. You have no shell, write, edit, workflow,
+or unknown custom tool. Use `git_read` for Git inspection; it accepts an `args`
+array without the leading `git`. The publisher is the only review agent allowed
+to write. Return your adjudication only as the final text response.
 
 Treat both review texts as proposals, not truth. Reopen the target and verify
 each proposed finding against the exact diff, complete file, affected

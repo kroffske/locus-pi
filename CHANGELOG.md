@@ -22,6 +22,10 @@ This file records user-visible changes to the public package.
   merge, deployment, or original-checkout edits.
 - Added workflow-local `agentFile` and `promptFile()` resources with
   source-relative confinement, immutable run copies, and SHA-256 evidence.
+- Enforced `readOnly: true` for child-agent sessions with a strict capability
+  allowlist. Curated review readers now use a dedicated non-shell `git_read`
+  query tool; shell, write/edit, nested workflow, unknown tools, and mutating
+  Git commands are blocked before execution.
 - Added runtime-owned `workspace()` handles for sharing one exact linked
   worktree safely across workflow agents.
 - Recorded the strict curated-workflow selection criteria and candidate boundary

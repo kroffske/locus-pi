@@ -1,4 +1,5 @@
 import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
@@ -937,7 +938,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const result = await executor.run(
       {
         ...request(),
-        agent: { ...reviewer, systemPrompt: "Review for correctness first." },
+        agent: { ...reviewer, readOnly: false, systemPrompt: "Review for correctness first." },
       },
       new AbortController().signal,
     );
@@ -972,7 +973,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const result = await executor.run(
       {
         ...requestWithSystemPrompt(),
-        agent: { ...reviewer, allowedTools: ["*"], tools: ["*"] },
+        agent: { ...reviewer, readOnly: false, allowedTools: ["*"], tools: ["*"] },
         allowedTools: ["*"],
       },
       new AbortController().signal,
@@ -982,6 +983,67 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(capturedOptions?.tools).toBeUndefined();
     expect(capturedOptions?.excludeTools).toEqual(["spawn_agent", "task"]);
     expect(capturedOptions?.excludeTools).not.toContain("workflow");
+  });
+
+  it("enforces read-only child capabilities and rejects Git mutations without a shell", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-read-only-agent-"));
+    execFileSync("git", ["init", "--quiet", root]);
+    writeFileSync(path.join(root, "tracked.txt"), "candidate\n", "utf8");
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "Read-only answer." });
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(
+      {
+        ...request(),
+        projectRoot: root,
+        workingDirectory: root,
+        allowedTools: ["read", "git_read", "grep", "find", "bash", "write", "edit", "workflow", "unknown"],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(capturedOptions?.tools).toEqual(["read", "git_read", "grep", "find"]);
+    expect(capturedOptions?.excludeTools).toEqual(
+      expect.arrayContaining(["spawn_agent", "task", "workflow", "bash", "edit", "write", "unknown"]),
+    );
+    expect(capturedOptions?.tools).not.toEqual(expect.arrayContaining(["bash", "write", "edit", "workflow"]));
+
+    const gitRead = capturedOptions?.customTools?.find((tool) => tool.name === "git_read");
+    expect(gitRead).toBeDefined();
+    const readResult = await gitRead!.execute(
+      "read-status",
+      { args: ["status", "--short"] },
+      new AbortController().signal,
+    );
+    expect(readResult.isError).not.toBe(true);
+    expect(readResult.content[0]?.text).toContain("tracked.txt");
+
+    const mutationResult = await gitRead!.execute(
+      "blocked-checkout",
+      { args: ["checkout", "-b", "forbidden"] },
+      new AbortController().signal,
+    );
+    expect(mutationResult).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(mutationResult.content[0]?.text).toContain("blocks mutating or unsupported subcommand: checkout");
+    const externalProcessResult = await gitRead!.execute(
+      "blocked-pager",
+      { args: ["grep", "--open-files-in-pager", "candidate"] },
+      new AbortController().signal,
+    );
+    expect(externalProcessResult).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(externalProcessResult.content[0]?.text).toContain("external-process options");
+    expect(execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim()).not.toBe(
+      "forbidden",
+    );
   });
 
   it("returns a blocked result with the unavailable diagnostic when the host is too old", async () => {

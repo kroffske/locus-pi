@@ -71,10 +71,12 @@ describe("workflow example: review.workflow.mjs", () => {
       "adjudicator.agent.md",
     ]) {
       const agentSource = readFileSync(path.join(resourceDirectory, name), "utf8");
-      expect(agentSource).toContain("This stage is strictly read-only.");
-      expect(agentSource).toContain("publisher is the only review agent allowed to write");
-      expect(agentSource).toContain("Do not use shell");
-      expect(agentSource).not.toMatch(/allowedTools:.*\b(write|edit)\b/u);
+      expect(agentSource).toContain("This stage is host-enforced read-only.");
+      expect(agentSource).toMatch(/publisher is the only review agent allowed\s+to write/iu);
+      expect(agentSource).toContain("You have no shell");
+      expect(agentSource).toMatch(/allowedTools:.*\bgit_read\b/u);
+      expect(agentSource).not.toMatch(/allowedTools:.*\b(bash|write|edit|workflow)\b/u);
+      expect(agentSource).toContain("requireAnyOf: [git_read]");
     }
   });
 
