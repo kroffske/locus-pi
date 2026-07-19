@@ -43,6 +43,7 @@ docs/extensions/active/plan.md
 docs/extensions/active/security-gate.md
 docs/extensions/active/todo-context.md
 docs/extensions/active/workflows.md
+docs/prd/todo-session-auto-continuation.md
 docs/runtime/locus-workspace.md
 docs/source-audit/agents.md
 docs/source-audit/ask-user-question.md

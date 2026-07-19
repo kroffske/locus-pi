@@ -17,8 +17,15 @@ export interface TodoPhase {
 
 export interface TodoStateSnapshot {
   phases: TodoPhase[];
+  context?: string;
+  autoContinue: boolean;
   backend: "jsonl" | "pi-entry" | "memory";
   diagnostics: string[];
+}
+
+export interface TodoQueueMetadata {
+  context?: string;
+  autoContinue: boolean;
 }
 
 export interface TodoStateCommit {
@@ -26,7 +33,12 @@ export interface TodoStateCommit {
   diagnostics: string[];
 }
 
-export async function loadTodoState(_pi: ExtensionAPI, ctx: ExtensionContext, fallbackPhases: TodoPhase[]): Promise<TodoStateSnapshot> {
+export async function loadTodoState(
+  _pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  fallbackPhases: TodoPhase[],
+  fallbackMetadata: TodoQueueMetadata = { autoContinue: false },
+): Promise<TodoStateSnapshot> {
   const backend = selectSessionStoreBackend();
   if (backend === "jsonl") {
     const store = createSessionStore({ projectRoot: getProjectRoot(ctx), backend: "jsonl" });
@@ -35,6 +47,7 @@ export async function loadTodoState(_pi: ExtensionAPI, ctx: ExtensionContext, fa
     if (latest !== undefined) {
       return {
         phases: cloneTodoPhases(latest.payload.phases as TodoPhase[]),
+        ...readTodoMetadata(latest.payload.metadata),
         backend: "jsonl",
         diagnostics: "diagnostics" in store ? store.diagnostics : [],
       };
@@ -42,11 +55,21 @@ export async function loadTodoState(_pi: ExtensionAPI, ctx: ExtensionContext, fa
   }
 
   const latest = await getLatestPiTodoEntry(ctx);
-  const data = latest?.data as { phases?: unknown } | undefined;
+  const data = latest?.data as { phases?: unknown; metadata?: unknown } | undefined;
   if (data && Array.isArray(data.phases)) {
-    return { phases: cloneTodoPhases(data.phases as TodoPhase[]), backend: "pi-entry", diagnostics: [] };
+    return {
+      phases: cloneTodoPhases(data.phases as TodoPhase[]),
+      ...readTodoMetadata(data.metadata),
+      backend: "pi-entry",
+      diagnostics: [],
+    };
   }
-  return { phases: cloneTodoPhases(fallbackPhases), backend: "memory", diagnostics: [] };
+  return {
+    phases: cloneTodoPhases(fallbackPhases),
+    ...cloneTodoMetadata(fallbackMetadata),
+    backend: "memory",
+    diagnostics: [],
+  };
 }
 
 async function getLatestPiTodoEntry(ctx: ExtensionContext): Promise<{ data?: unknown } | undefined> {
@@ -64,18 +87,44 @@ function getTodoWriteEntryData(entry: ReplacementSessionEntryLike): unknown {
   return undefined;
 }
 
-export async function commitTodoState(pi: ExtensionAPI, ctx: ExtensionContext, phases: TodoPhase[]): Promise<TodoStateCommit> {
+export async function commitTodoState(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  phases: TodoPhase[],
+  metadata: TodoQueueMetadata = { autoContinue: false },
+): Promise<TodoStateCommit> {
   const backend = selectSessionStoreBackend();
   const cloned = cloneTodoPhases(phases);
+  const clonedMetadata = cloneTodoMetadata(metadata);
+  const persistedMetadata: Record<string, unknown> = { ...clonedMetadata };
   const diagnostics: string[] = [];
   if (backend === "jsonl") {
     const store = createSessionStore({ projectRoot: getProjectRoot(ctx), backend: "jsonl" });
     const sessionId = ensureRuntimeSession(store, ctx);
-    store.appendEntry(sessionId, { type: "todo_write", payload: { phases: cloned } });
+    store.appendEntry(sessionId, { type: "todo_write", payload: { phases: cloned, metadata: persistedMetadata } });
     if ("diagnostics" in store) diagnostics.push(...store.diagnostics);
   }
-  await pi.appendEntry("todo_write", { phases: cloned });
+  await pi.appendEntry("todo_write", { phases: cloned, metadata: persistedMetadata });
   return { backend, diagnostics };
+}
+
+function readTodoMetadata(value: unknown): TodoQueueMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { autoContinue: false };
+  }
+  const metadata = value as Record<string, unknown>;
+  const context = typeof metadata.context === "string" && metadata.context.trim() !== "" ? metadata.context : undefined;
+  return {
+    ...(context === undefined ? {} : { context }),
+    autoContinue: metadata.autoContinue === true,
+  };
+}
+
+function cloneTodoMetadata(metadata: TodoQueueMetadata): TodoQueueMetadata {
+  return {
+    ...(metadata.context === undefined ? {} : { context: metadata.context }),
+    autoContinue: metadata.autoContinue === true,
+  };
 }
 
 export function cloneTodoPhases(phases: TodoPhase[]): TodoPhase[] {

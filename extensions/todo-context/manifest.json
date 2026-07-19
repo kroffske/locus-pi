@@ -16,12 +16,16 @@
     "completion-note exports current session todos as task-artifact Markdown",
     "commands never infer a current task from todos or auto-sync task status",
     "operator commands render typed Session todos views, short change receipts, warnings/errors, and bounded explicit Markdown export",
-    "/todo edit uses the official-signature input adapter; cancel and parse failure do not mutate session state"
+    "/todo edit uses the official-signature input adapter; cancel and parse failure do not mutate session state",
+    "autoContinue is explicit through todo_write or /todo run and is disabled by /todo pause",
+    "agent_settled dispatches at most one hidden follow-up after recorded progress",
+    "missing progress, empty queues, transport failure, and a 20-continuation limit stop execution",
+    "/todo append accepts up to 20 atomic tasks separated by ;;"
   ],
   "stateUsed": [
     "session-core todo_write entries",
     "Pi custom todo_write entries",
-    "shared todo fallback",
+    "shared todo phases/context/autoContinue fallback",
     ".tasks/index.json task index",
     ".tasks/<task>/artifacts/completion-note.md"
   ],
@@ -29,7 +33,7 @@
   "provides": {
     "tools": ["todo_write"],
     "commands": ["todo"],
-    "hooks": []
+    "hooks": ["agent_settled"]
   },
   "uiLifecycle": {
     "commands": [
@@ -49,10 +53,10 @@
     "subprocess": [],
     "network": [],
     "browser": false,
-    "models": false,
+    "models": true,
     "ui": ["editor", "setWidget", "theme"]
   },
-  "risk": "medium",
+  "risk": "high",
   "docsPath": "docs/extensions/active/todo-context.md",
   "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/todo-write.md",
   "tests": [
@@ -65,6 +69,6 @@
     "status": "reviewed",
     "source": "copy-after-audit",
     "reviewedBy": "locus-pi",
-    "reviewedAt": "2026-06-24"
+    "reviewedAt": "2026-07-19"
   }
 }

@@ -28,9 +28,16 @@ Ported contract:
 - Latest phases are written to Locus session-core entries when JSONL storage is enabled. Pi custom entries written through `pi.appendEntry("todo_write", ...)` remain the compatibility path and are restored through `ctx.sessionManager.getEntries()`. Process memory is only the final fallback.
 - `/todo from-task` and `/todo completion-note` are local task-bridge additions: the first seeds session todos from an exact `.tasks/index.json` task id, and the second writes current session todo markdown to `.tasks/<task>/artifacts/completion-note.md` with Pi-delegated write permission.
 - T-205 changes only local presentation: slash-command paths use typed `Session todos` cards, short mutation receipts, bounded explicit export, and the official-signature input adapter. `todo_write` schema/result details and OMP-derived mutation semantics are unchanged.
+- T-100 adds locally owned queue execution policy: backward-compatible
+  `context`/`autoContinue` metadata, atomic `;;` operator batches, and a bounded
+  Pi `agent_settled` hidden follow-up. This is a Locus extension of the audited
+  OMP mutation contract, not behavior claimed from OMP.
 
 Known gaps:
 
 - Local storage is session-core backed when JSONL is enabled, but it is still not a full OMP session transcript integration.
-- Local UI does not include OMP sticky todo panel, tree renderer, completion animation, reminder hooks, clipboard copy, or file import/export. `/todo export` is an explicit bounded screen view, not a file-export feature.
-- Full OMP sticky todo panel, reminder hooks, clipboard copy, file import/export, and richer renderer remain unported enhancements.
+- Local UI does not include the OMP sticky todo panel, tree renderer,
+  completion animation, clipboard copy, or file import/export. `/todo export`
+  is an explicit bounded screen view, not a file-export feature.
+- Automatic transcript compaction, background scheduling, parallel queue
+  execution, and automatic agent/model routing remain out of scope.
