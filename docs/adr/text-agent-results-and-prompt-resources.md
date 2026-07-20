@@ -1,0 +1,82 @@
+# ADR: Text-only agent results and workflow-local prompt resources
+
+- Status: accepted
+- Date: 2026-07-19
+
+## Context
+
+Agent calls previously supported a model-written JSON result envelope with
+status, summary, diagnostics, artifacts, and optional schema validation.
+Curated review prompts were also stored in one large `agents.yaml` file.
+
+That design mixed two responsibilities:
+
+- the model described its own runtime status;
+- orchestration code parsed model text as a transport protocol.
+
+It also made the review workflow hard to read and edit because unrelated agent
+definitions and prompts lived in one long YAML document. Splitting that file
+into paired `*.agent.md` and `*.prompt.md` resources still left two concepts
+for every workflow stage even though only the prompt needed per-run rendering.
+
+## Decision
+
+Every successful agent call returns its exact final non-empty text.
+
+- `spawn_agent` and `task` accept one required `task` string and create one
+  child agent.
+- Successful `ToolResult.content` is the exact child text.
+- `dsl.agent()` resolves to the exact child text.
+- JSON-looking text remains text. Agent calls do not parse a marker, envelope,
+  status, summary, paths, ids, diagnostics, artifacts, or schema.
+- Empty text and runtime child failures remain technical failures.
+- Child session ids, evidence, diagnostics, artifacts, model data, and workspace
+  data stay in runtime-owned details, journals, and result envelopes.
+- `llm({ schema })` keeps its separate explicit JSON validation contract.
+
+A workflow selects a normal project, user, or bundled catalog agent. Omitted
+`agent` uses the catalog `default` role. Workflow-specific behavior lives in
+one neighboring `*.prompt.md` per stage and is rendered through
+`promptFile(path, variables)`. The prompt contains both the stable role
+instructions and the concrete per-run handoff.
+
+Runtime policy remains code, not prompt prose. Per-call `readOnly`, `tools`,
+`permissionMode`, `workspaceMode`, and `maxToolCalls` options define the child
+execution boundary. `readOnly: true` narrows the selected catalog definition
+for that call before the SDK host constructs its capability allowlist. It
+cannot broaden a catalog read-only agent.
+
+Resource paths are resolved from the original workflow entry directory, not
+the process working directory or retained script snapshot. Runtime rejects
+absolute paths, lexical escapes, symlink escapes, missing files, wrong suffixes,
+missing prompt variables, and unused prompt variables. It reads each prompt
+once, writes a read-only run copy, and records source path, snapshot path, size,
+and SHA-256.
+
+For a call with `readOnly: true`, the SDK host narrows the selected catalog
+agent to known read capabilities. It removes shell, write/edit, nested
+workflow, and unknown custom tools. Read-only Git inspection is available
+through the package-owned `git_read` argv tool; mutating subcommands and
+process-spawning options are rejected before Git starts.
+
+## Review remediation boundary
+
+`review-fix` validates the human-edited plan with deterministic code before any
+write-capable child or worktree exists. Runtime creates one linked worktree at
+the reviewed commit and returns an opaque handle. Implementer and verifier use
+that same handle; model-returned paths are never workspace authority.
+
+## Consequences
+
+Workflow source and resources become shorter: every stage has one prompt, while
+runtime policy stays visible in the workflow entry. Handoffs remain ordinary
+text.
+Runtime status can no longer be forged by writing `{"status":"completed"}` in a
+model answer. Workflows that need structured model output must use an explicit
+direct-LLM schema step or implement a separate protocol in a future scoped
+change.
+
+The old agent result envelope, `agents.yaml` review loader, workflow-local
+`agentFile` loader, agent-side schema option, batch `tasks:[]` tool shape, and
+backward-compatibility parser are removed. This is an intentional breaking
+change because the current package has one coordinated consumer.

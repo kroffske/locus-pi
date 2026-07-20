@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and three curated
+It provides ten default extensions, a bundled agent catalog, and five curated
 Package workflows through a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private
@@ -39,6 +39,8 @@ Only these names are registered as Package workflows:
 | `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
 | `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                        |
 | `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
 
 Use the operator catalog to inspect and run them:
 

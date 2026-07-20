@@ -2,19 +2,32 @@ import { relative } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { sliceByColumn, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { errorResult, getCommandText, getProjectRoot, getSessionId, setTextWidget, textResult } from "../_shared/pi-api.js";
+import {
+  errorResult,
+  getCommandText,
+  getProjectRoot,
+  getSessionId,
+  setTextWidget,
+  textResult,
+} from "../_shared/pi-api.js";
 import { validateParams } from "../_shared/validation.js";
 import { pinTransientUiKey, registerCommandWithUiLifecycle, unpinTransientUiKey } from "../_shared/command-ui.js";
 import { sharedState } from "../_shared/state.js";
-import {
-  discoverAgentDefinitions,
-  formatAgentListItem,
-  type AgentDiagnostic,
-} from "../_shared/agents.js";
+import { discoverAgentDefinitions, formatAgentListItem, type AgentDiagnostic } from "../_shared/agents.js";
 import { createAgentRunRequest, executeAgentRunBoundary, type ApprovalTier } from "../_shared/agent-runner.js";
 import { createRuntimeArtifactStore } from "../_shared/artifacts.js";
-import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC, agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-sdk-host.js";
-import { agentLiveShortId, agentShortIdFromSource, formatAgentDrillTitle, formatAgentFinishedEventLine, formatAgentStartedEventLine } from "../_shared/agent-live-panel.js";
+import {
+  AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
+  agentLiveStore,
+  createAgentSdkSessionExecutor,
+} from "../_shared/agent-sdk-host.js";
+import {
+  agentLiveShortId,
+  agentShortIdFromSource,
+  formatAgentDrillTitle,
+  formatAgentFinishedEventLine,
+  formatAgentStartedEventLine,
+} from "../_shared/agent-live-panel.js";
 import {
   FLEET_FOCUS_FALLBACK_SHORTCUT,
   FleetFocusComponent,
@@ -22,12 +35,20 @@ import {
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
 } from "../_shared/fleet-menu.js";
-import { loadModelRolesState, resolveAgentModelPreference, type ModelRoleResolution } from "../_shared/model-settings.js";
+import {
+  loadModelRolesState,
+  resolveAgentModelPreference,
+  type ModelRoleResolution,
+} from "../_shared/model-settings.js";
 import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
 import type { ExtensionCommandContext } from "../_shared/pi-api.js";
 import { registerAgentWorkloadProofHooks, writeAgentWorkloadProof } from "../_shared/agent-workload-proof.js";
-import { installWorkflowProgress, renderAgentLiveRowsText, renderAgentObserverText } from "../workflows/progress-widget.js";
-import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../_shared/workflow-journal.js";
+import { installWorkflowProgress, renderAgentObserverText } from "../workflows/progress-widget.js";
+import {
+  listWorkflowRoundsForSlot,
+  readWorkflowRoundBody,
+  workflowRunIdFromRowId,
+} from "../_shared/workflow-journal.js";
 import { ScrollableTextOverlay, type DrillRoundsConfig } from "./drill-overlay.js";
 import {
   AGENT_VIEWER_OVERLAY_OPTIONS,
@@ -42,27 +63,40 @@ import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operato
 import { setOperatorWidget } from "../_shared/widget-render.js";
 
 const TaskParams = Type.Object({
-  agent: Type.Optional(Type.String({ description: "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists." })),
-  tasks: Type.Array(Type.Object({
-    id: Type.String({ description: "CamelCase task identifier", maxLength: 48 }),
-    title: Type.Optional(Type.String({ description: "Short work title shown in the live agent row, e.g. \"review auth middleware\" (≤48 chars); falls back to the first words of the assignment", maxLength: 48 })),
-    description: Type.String({ description: "UI label, not sent to the subagent" }),
-    assignment: Type.String({ description: "Self-contained subagent instructions", maxLength: 16000 }),
-  }), { description: "Tasks to run sequentially; each spawns a headless child agent session", minItems: 1 }),
-  parentContext: Type.Optional(Type.Object({
-    inline: Type.Optional(Type.String({ description: "Explicit parent-provided context text", maxLength: 32000 })),
-    artifactPath: Type.Optional(Type.String({ description: "Path to an explicit parent context artifact" })),
-  })),
+  agent: Type.Optional(
+    Type.String({
+      description:
+        "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.",
+    }),
+  ),
+  task: Type.String({ description: "Self-contained subagent instructions", minLength: 1, maxLength: 16000 }),
+  title: Type.Optional(
+    Type.String({
+      description: "Short work title shown in the live agent row; falls back to the first words of task",
+      maxLength: 48,
+    }),
+  ),
+  parentContext: Type.Optional(
+    Type.Object({
+      inline: Type.Optional(Type.String({ description: "Explicit parent-provided context text", maxLength: 32000 })),
+      artifactPath: Type.Optional(Type.String({ description: "Path to an explicit parent context artifact" })),
+    }),
+  ),
 });
 
 const WorkloadProofParams = Type.Object({
-  summary: Type.String({ description: "Short description of the bounded child workload already performed", maxLength: 500 }),
+  summary: Type.String({
+    description: "Short description of the bounded child workload already performed",
+    maxLength: 500,
+  }),
 });
 
-const AGENT_RUN_USAGE = "Usage: /agent list | /agent inspect <name> | /agent run [--yes|--approve] [--title <title>] <name> <task>";
+const AGENT_RUN_USAGE =
+  "Usage: /agent list | /agent inspect <name> | /agent run [--yes|--approve] [--title <title>] <name> <task>";
 const AGENT_DRILL_USAGE = "Usage: /agent drill <row-id|agent|last>";
 const AGENT_OBSERVER_USAGE = "Usage: /agent observe | /agent summary";
-const AGENT_COMMAND_USAGE = "Usage: /agent list | /agent inspect <name> | /agent run [--yes|--approve] <name> <task> | /agent drill <row-id|agent|last> | /agent observe | /agent summary";
+const AGENT_COMMAND_USAGE =
+  "Usage: /agent list | /agent inspect <name> | /agent run [--yes|--approve] <name> <task> | /agent drill <row-id|agent|last> | /agent observe | /agent summary";
 const PS_USAGE = "Usage: /ps [row-id|agent|last]";
 const AGENTS_WIDGET_KEY = "agents";
 const AGENTS_WIDGET_MAX_LINES = 10;
@@ -119,7 +153,8 @@ export default function agents(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: "locus_workload_proof",
-    description: "Record diagnostic evidence that an SDK child agent claims bounded workload. This does not make a parser-clean result successful by itself.",
+    description:
+      "Record diagnostic evidence that an SDK child agent claims bounded workload. This does not make a parser-clean result successful by itself.",
     parameters: WorkloadProofParams,
     approval: "write",
     async execute(_toolCallId, params, _signal, _update, ctx) {
@@ -137,15 +172,30 @@ export default function agents(pi: ExtensionAPI): void {
   // Both route through the same createAgentSession host + honesty-gate and
   // report requestedSurface:"task" internally so existing detail-shape tests
   // are unaffected. Only the registered tool name differs.
-  const spawnAgentExecute: Parameters<ExtensionAPI["registerTool"]>[0]["execute"] = async (_toolCallId, params, signal, _update, ctx) => {
+  const spawnAgentExecute: Parameters<ExtensionAPI["registerTool"]>[0]["execute"] = async (
+    _toolCallId,
+    params,
+    signal,
+    _update,
+    ctx,
+  ) => {
     const valid = validateParams(TaskParams, params);
     if (!valid.ok) return valid.result;
     refreshAgents(getProjectRoot(ctx));
-    return runTaskTool(pi, ctx, signal, valid.value.agent, valid.value.tasks, valid.value.parentContext);
+    return runTaskTool(
+      pi,
+      ctx,
+      signal,
+      valid.value.agent,
+      valid.value.task,
+      valid.value.title,
+      valid.value.parentContext,
+    );
   };
   pi.registerTool({
     name: "spawn_agent",
-    description: "Spawn a subagent to run a self-contained task in a headless child agent session (one or more tasks, sequential). The primary way to delegate work to a sub-agent. Pick a .agents catalog agent or omit for the default. Fails closed with an honest reason if this host cannot spawn a child session.",
+    description:
+      "Spawn one subagent to run one self-contained task in a headless child agent session. Pick a .agents catalog agent or omit for the default. Successful content is the child's exact final text.",
     parameters: TaskParams,
     approval: "exec",
     formatApprovalDetails: taskApprovalDetails,
@@ -153,115 +203,127 @@ export default function agents(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: "task",
-    description: "Run a local .agents catalog agent on one or more tasks, each in a headless child agent session. Fails closed with an honest reason if this host cannot spawn a child session.",
+    description:
+      "Run one local .agents catalog agent on one task in a headless child agent session. Successful content is the child's exact final text.",
     parameters: TaskParams,
     approval: "exec",
     formatApprovalDetails: taskApprovalDetails,
     execute: spawnAgentExecute,
   });
-  registerCommandWithUiLifecycle(pi, {
-    command: "ps",
-    group: "agents",
-    surfaces: ["transient-widget", "overlay-selector"],
-    transientWidgets: [AGENTS_WIDGET_KEY],
-    transientStatuses: [AGENTS_WIDGET_KEY],
-  }, {
-    description: "Open the agent fleet or view one live/recent agent.",
-    handler: async (args, ctx) => {
-      clearAgentsTransient(ctx);
-      const target = parsePsTarget(getCommandText(args));
-      if (target === undefined) {
-        setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
-          type: "WARN",
-          subject: "Agent processes",
-          primary: "A single row id, agent, or last target is required.",
-          controls: [PS_USAGE],
-        });
-        return;
-      }
-      if (target === "") await openFleetMenu(ctx);
-      else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target });
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "ps",
+      group: "agents",
+      surfaces: ["transient-widget", "overlay-selector"],
+      transientWidgets: [AGENTS_WIDGET_KEY],
+      transientStatuses: [AGENTS_WIDGET_KEY],
     },
-  });
-  registerCommandWithUiLifecycle(pi, {
-    command: "agent",
-    group: "agents",
-    surfaces: ["transient-widget", "status", "overlay-selector", "artifact-write"],
-    transientWidgets: [AGENTS_WIDGET_KEY],
-    transientStatuses: [AGENTS_WIDGET_KEY],
-  }, {
-    description: "List, inspect, run, observe, summary, or drill into agent definitions and live rows.",
-    handler: async (args, ctx) => {
-      const discovery = refreshAgents(getProjectRoot(ctx));
-      clearAgentsStatus(ctx);
-      const text = getCommandText(args).trim();
-      if (text === "list" || text === "") {
-        const catalog = [...sharedState.agents.values()];
-        const fullBlock = agentCatalogBlock(catalog, discovery.diagnostics);
-        if (await renderAgentBlockOverlay(ctx as ExtensionCommandContext, fullBlock)) return;
-        setOperatorWidget(
-          ctx,
-          AGENTS_WIDGET_KEY,
-          agentCatalogBlock(catalog, discovery.diagnostics, AGENT_CATALOG_FALLBACK_ROWS),
-        );
-        return;
-      }
-      const inspectMatch = /^inspect\s+(\S+)/.exec(text);
-      if (inspectMatch) {
-        const agent = sharedState.agents.get(inspectMatch[1]!);
-        if (agent !== undefined) {
-          const fullBlock = agentInspectBlock(agent);
+    {
+      description: "Open the agent fleet or view one live/recent agent.",
+      handler: async (args, ctx) => {
+        clearAgentsTransient(ctx);
+        const target = parsePsTarget(getCommandText(args));
+        if (target === undefined) {
+          setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
+            type: "WARN",
+            subject: "Agent processes",
+            primary: "A single row id, agent, or last target is required.",
+            controls: [PS_USAGE],
+          });
+          return;
+        }
+        if (target === "") await openFleetMenu(ctx);
+        else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target });
+      },
+    },
+  );
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "agent",
+      group: "agents",
+      surfaces: ["transient-widget", "status", "overlay-selector", "artifact-write"],
+      transientWidgets: [AGENTS_WIDGET_KEY],
+      transientStatuses: [AGENTS_WIDGET_KEY],
+    },
+    {
+      description: "List, inspect, run, observe, summary, or drill into agent definitions and live rows.",
+      handler: async (args, ctx) => {
+        const discovery = refreshAgents(getProjectRoot(ctx));
+        clearAgentsStatus(ctx);
+        const text = getCommandText(args).trim();
+        if (text === "list" || text === "") {
+          const catalog = [...sharedState.agents.values()];
+          const fullBlock = agentCatalogBlock(catalog, discovery.diagnostics);
           if (await renderAgentBlockOverlay(ctx as ExtensionCommandContext, fullBlock)) return;
           setOperatorWidget(
             ctx,
             AGENTS_WIDGET_KEY,
-            ctx.mode === "tui" ? fullBlock : agentInspectBlock(agent, true),
+            agentCatalogBlock(catalog, discovery.diagnostics, AGENT_CATALOG_FALLBACK_ROWS),
           );
-        } else {
-          const report = createUnknownAgentReport(ctx, "agent-inspect", inspectMatch[1]!);
-          setOperatorWidget(ctx, AGENTS_WIDGET_KEY, report.block);
+          return;
         }
-        return;
-      }
-      const drillCommand = parseAgentDrillCommand(text);
-      if (drillCommand !== undefined) {
-        clearAgentsTransient(ctx);
-        await executeAgentDrillCommand(ctx as ExtensionCommandContext, drillCommand);
-        return;
-      }
-      const psTarget = parseAgentPsCommand(text);
-      if (psTarget !== undefined) {
-        clearAgentsTransient(ctx);
-        if (psTarget === "") await openFleetMenu(ctx);
-        else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: psTarget });
-        return;
-      }
-      const observerCommand = parseAgentObserverCommand(text);
-      if (observerCommand !== undefined) {
-        const observerText = renderAgentObserverText();
-        clearAgentsStatus(ctx);
-        setAgentsWidget(ctx, observerText);
-        return;
-      }
-      const runCommand = parseAgentRunCommand(text);
-      if (runCommand === undefined) {
-        const usage = text.startsWith("run")
-          ? AGENT_RUN_USAGE
-          : text.startsWith("observe") || text.startsWith("summary")
-            ? AGENT_OBSERVER_USAGE
-            : AGENT_COMMAND_USAGE;
-        setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
-          type: "WARN",
-          subject: "Agent command",
-          primary: text === "" ? "An agent action is required." : `Unknown or incomplete /agent action: ${text}`,
-          metadata: ["No agent run, catalog mutation, or live control action was attempted."],
-          controls: [usage],
-        });
-        return;
-      }
-      await executeAgentRunCommand(pi, ctx as ExtensionCommandContext, runCommand.name, runCommand.task, runCommand.approvalTier, runCommand.title);
+        const inspectMatch = /^inspect\s+(\S+)/.exec(text);
+        if (inspectMatch) {
+          const agent = sharedState.agents.get(inspectMatch[1]!);
+          if (agent !== undefined) {
+            const fullBlock = agentInspectBlock(agent);
+            if (await renderAgentBlockOverlay(ctx as ExtensionCommandContext, fullBlock)) return;
+            setOperatorWidget(ctx, AGENTS_WIDGET_KEY, ctx.mode === "tui" ? fullBlock : agentInspectBlock(agent, true));
+          } else {
+            const report = createUnknownAgentReport(ctx, "agent-inspect", inspectMatch[1]!);
+            setOperatorWidget(ctx, AGENTS_WIDGET_KEY, report.block);
+          }
+          return;
+        }
+        const drillCommand = parseAgentDrillCommand(text);
+        if (drillCommand !== undefined) {
+          clearAgentsTransient(ctx);
+          await executeAgentDrillCommand(ctx as ExtensionCommandContext, drillCommand);
+          return;
+        }
+        const psTarget = parseAgentPsCommand(text);
+        if (psTarget !== undefined) {
+          clearAgentsTransient(ctx);
+          if (psTarget === "") await openFleetMenu(ctx);
+          else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: psTarget });
+          return;
+        }
+        const observerCommand = parseAgentObserverCommand(text);
+        if (observerCommand !== undefined) {
+          const observerText = renderAgentObserverText();
+          clearAgentsStatus(ctx);
+          setAgentsWidget(ctx, observerText);
+          return;
+        }
+        const runCommand = parseAgentRunCommand(text);
+        if (runCommand === undefined) {
+          const usage = text.startsWith("run")
+            ? AGENT_RUN_USAGE
+            : text.startsWith("observe") || text.startsWith("summary")
+              ? AGENT_OBSERVER_USAGE
+              : AGENT_COMMAND_USAGE;
+          setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
+            type: "WARN",
+            subject: "Agent command",
+            primary: text === "" ? "An agent action is required." : `Unknown or incomplete /agent action: ${text}`,
+            metadata: ["No agent run, catalog mutation, or live control action was attempted."],
+            controls: [usage],
+          });
+          return;
+        }
+        await executeAgentRunCommand(
+          pi,
+          ctx as ExtensionCommandContext,
+          runCommand.name,
+          runCommand.task,
+          runCommand.approvalTier,
+          runCommand.title,
+        );
+      },
     },
-  });
+  );
 }
 
 function warnOnPsCollision(pi: ExtensionAPI, ctx: ExtensionContext): void {
@@ -336,12 +398,9 @@ async function openFleetMenu(ctx: ExtensionContext): Promise<void> {
   fleetMenuState.setFocused(true);
   let action: { kind: "close" } | { kind: "drill"; rowId: string } | { kind: "stop"; rowId: string };
   try {
-    action = await ctx.ui.custom((tui, _theme, keybindings, done) => new FleetFocusComponent(
-      rows,
-      keybindings,
-      tui,
-      done,
-    ));
+    action = await ctx.ui.custom(
+      (tui, _theme, keybindings, done) => new FleetFocusComponent(rows, keybindings, tui, done),
+    );
     if (action.kind === "stop") {
       const row = agentLiveStore.rows.get(action.rowId);
       if (row?.status !== "working") {
@@ -373,13 +432,9 @@ async function openFleetMenu(ctx: ExtensionContext): Promise<void> {
 }
 
 function taskApprovalDetails(args: unknown): string[] {
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const agent = String(record.agent ?? DEFAULT_TASK_AGENT_NAME);
-  const tasks = Array.isArray(record.tasks) ? record.tasks.length : 0;
-  return [
-    `Agent: ${agent}`,
-    `Tasks: ${tasks}`,
-  ];
+  return [`Agent: ${agent}`, "Tasks: 1"];
 }
 
 /**
@@ -396,7 +451,10 @@ async function renderAgentBlockOverlay(ctx: ExtensionCommandContext, block: Oper
     AGENTS_WIDGET_FALLBACK_WIDTH,
   );
   clearAgentsTransient(ctx);
-  await ctx.ui.custom<void>((tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done), { overlay: true });
+  await ctx.ui.custom<void>(
+    (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
+    { overlay: true },
+  );
   return true;
 }
 
@@ -407,7 +465,7 @@ function agentCatalogBlock(
   diagnostics: readonly AgentDiagnostic[],
   previewLimit?: number,
 ): OperatorBlock {
-  const sourceCounts = { project: 0, user: 0, bundled: 0 };
+  const sourceCounts = { project: 0, user: 0, bundled: 0, workflow: 0 };
   for (const agent of catalog) sourceCounts[agent.source ?? "bundled"] += 1;
   const shown = previewLimit === undefined ? catalog : catalog.slice(0, previewLimit);
   const hidden = catalog.length - shown.length;
@@ -415,19 +473,26 @@ function agentCatalogBlock(
     type: "VIEW",
     subject: "Agent catalog",
     primary: `${catalog.length} loaded definition(s).`,
-    body: catalog.length === 0
-      ? ["No loaded agent definitions."]
-      : [
-          ...shown.map((agent) => previewLimit === undefined
-            ? formatAgentListItem(agent)
-            : compactAgentCatalogLine(`${agent.name} [${agent.source ?? "bundled"}] · ${agent.description}`)),
-          ...(hidden > 0 ? [`+${hidden} definition(s) hidden`] : []),
-        ],
+    body:
+      catalog.length === 0
+        ? ["No loaded agent definitions."]
+        : [
+            ...shown.map((agent) =>
+              previewLimit === undefined
+                ? formatAgentListItem(agent)
+                : compactAgentCatalogLine(`${agent.name} [${agent.source ?? "bundled"}] · ${agent.description}`),
+            ),
+            ...(hidden > 0 ? [`+${hidden} definition(s) hidden`] : []),
+          ],
     metadata: [
       `Sources: project=${sourceCounts.project} user=${sourceCounts.user} bundled=${sourceCounts.bundled}`,
       ...(diagnostics.length === 0
         ? []
-        : [compactAgentCatalogLine(`Diagnostics: ${diagnostics.length} issue(s); first: ${diagnostics[0]?.message ?? "unknown"}`)]),
+        : [
+            compactAgentCatalogLine(
+              `Diagnostics: ${diagnostics.length} issue(s); first: ${diagnostics[0]?.message ?? "unknown"}`,
+            ),
+          ]),
     ],
     controls: ["Inspect: /agent inspect <name> · Run: /agent run <name> <task>"],
   };
@@ -446,7 +511,9 @@ function agentInspectBlock(agent: AgentDefinition, compact = false): OperatorBlo
       body: [
         compactAgentCatalogLine(`tools: ${agent.allowedTools.join(", ")}`),
         `readOnly: ${String(agent.readOnly)} · risk: ${agent.risk}`,
-        compactAgentCatalogLine(`model: ${agent.model?.join(", ") || "host default"} · thinking: ${agent.thinkingLevel ?? "host default"}`),
+        compactAgentCatalogLine(
+          `model: ${agent.model?.join(", ") || "host default"} · thinking: ${agent.thinkingLevel ?? "host default"}`,
+        ),
       ],
       metadata: [
         `source: ${agent.source ?? "unknown"}`,
@@ -473,10 +540,7 @@ function agentInspectBlock(agent: AgentDefinition, compact = false): OperatorBlo
       ...(agent.thinkingLevel ? [`thinking: ${agent.thinkingLevel}`] : []),
       ...(agent.blocking === undefined ? [] : [`blocking: ${String(agent.blocking)}`]),
     ],
-    metadata: [
-      `source: ${agent.source ?? "unknown"}`,
-      `file: ${agent.filePath ?? "unknown"}`,
-    ],
+    metadata: [`source: ${agent.source ?? "unknown"}`, `file: ${agent.filePath ?? "unknown"}`],
     controls: [`Run: /agent run ${agent.name} <task> · Catalog: /agent list`],
   };
 }
@@ -488,17 +552,26 @@ function compactAgentCatalogLine(value: string): string {
   return `${sliceByColumn(plain, 0, width - 1)}…`;
 }
 
-function setAgentsWidget(ctx: ExtensionContext, content: string, maxLines: number = AGENTS_WIDGET_MAX_LINES, wrap = false): void {
+function setAgentsWidget(
+  ctx: ExtensionContext,
+  content: string,
+  maxLines: number = AGENTS_WIDGET_MAX_LINES,
+  wrap = false,
+): void {
   const lines = content.split(/\r?\n/).map((line) => line.trimEnd());
   const component = new BoundedTextWidget(lines, maxLines, wrap);
   if (ctx.mode !== "tui") {
-    setTextWidget(ctx, AGENTS_WIDGET_KEY, component.render(AGENTS_WIDGET_FALLBACK_WIDTH).join("\n"), { placement: "belowEditor" });
+    setTextWidget(ctx, AGENTS_WIDGET_KEY, component.render(AGENTS_WIDGET_FALLBACK_WIDTH).join("\n"), {
+      placement: "belowEditor",
+    });
     return;
   }
   try {
     ctx.ui.setWidget(AGENTS_WIDGET_KEY, () => component, { placement: "belowEditor" });
   } catch {
-    setTextWidget(ctx, AGENTS_WIDGET_KEY, component.render(AGENTS_WIDGET_FALLBACK_WIDTH).join("\n"), { placement: "belowEditor" });
+    setTextWidget(ctx, AGENTS_WIDGET_KEY, component.render(AGENTS_WIDGET_FALLBACK_WIDTH).join("\n"), {
+      placement: "belowEditor",
+    });
   }
 }
 
@@ -540,10 +613,7 @@ class BoundedTextWidget implements CustomUiComponent {
     if (rendered.length <= this.maxLines) return rendered;
     const visibleCount = Math.max(0, this.maxLines - 1);
     const hiddenCount = rendered.length - visibleCount;
-    return [
-      ...rendered.slice(0, visibleCount),
-      truncatePlain(`more: ${hiddenCount} line(s) not shown`, safeWidth),
-    ];
+    return [...rendered.slice(0, visibleCount), truncatePlain(`more: ${hiddenCount} line(s) not shown`, safeWidth)];
   }
 
   invalidate(): void {
@@ -639,9 +709,8 @@ async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: P
   }
   if (!resolution.ok && resolution.reason === "aggregate") {
     const children = resolution.children.map((row) => {
-      const anchor = row.parentRowId !== undefined && row.parentRowId !== resolution.row.id
-        ? ` · via ${row.parentRowId}`
-        : "";
+      const anchor =
+        row.parentRowId !== undefined && row.parentRowId !== resolution.row.id ? ` · via ${row.parentRowId}` : "";
       return `- ${formatAgentDrillTitle(row)} · ${row.id}${anchor}`;
     });
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
@@ -649,9 +718,11 @@ async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: P
       subject: "Agent drill",
       primary: `${formatAgentDrillTitle(resolution.row)} is a group summary; choose one child agent.`,
       ...(children.length > 0 ? { body: ["Children:", ...children] } : {}),
-      controls: [children.length > 0
-        ? `Open /ps and select a child, or run /ps ${resolution.children[0]!.id}.`
-        : "Open /ps after the group creates a child row."],
+      controls: [
+        children.length > 0
+          ? `Open /ps and select a child, or run /ps ${resolution.children[0]!.id}.`
+          : "Open /ps after the group creates a child row.",
+      ],
     });
     return;
   }
@@ -693,12 +764,17 @@ async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: P
   }
   const current = agentLiveStore.rows.get(row.id);
   if (current?.status === "working" || current?.status === "queued") {
-    ctx.ui.notify(`Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`, "info");
+    ctx.ui.notify(
+      `Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`,
+      "info",
+    );
   }
 }
 
 function notifyActiveAgentsContinue(ctx: ExtensionContext, prefix: string): void {
-  const count = [...agentLiveStore.rows.values()].filter((row) => row.status === "working" || row.status === "queued").length;
+  const count = [...agentLiveStore.rows.values()].filter(
+    (row) => row.status === "working" || row.status === "queued",
+  ).length;
   if (count > 0) ctx.ui.notify(`${prefix} ${count} agent${count === 1 ? "" : "s"} continue running.`, "info");
 }
 
@@ -709,11 +785,15 @@ function notifyActiveAgentsContinue(ctx: ExtensionContext, prefix: string): void
  */
 function buildDrillRounds(ctx: ExtensionCommandContext, row: AgentLiveRow): DrillRoundsConfig | undefined {
   if (row.slotKey === undefined || row.round === undefined) return undefined;
-  const runId = workflowRunIdFromRowId(row.id) ?? (row.parentRowId !== undefined ? workflowRunIdFromRowId(row.parentRowId) : undefined);
+  const runId =
+    workflowRunIdFromRowId(row.id) ??
+    (row.parentRowId !== undefined ? workflowRunIdFromRowId(row.parentRowId) : undefined);
   if (runId === undefined) return undefined;
   const projectRoot = getProjectRoot(ctx);
   const slotKey = row.slotKey;
-  const list = [...new Set([...listWorkflowRoundsForSlot(projectRoot, runId, slotKey), row.round])].sort((a, b) => a - b);
+  const list = [...new Set([...listWorkflowRoundsForSlot(projectRoot, runId, slotKey), row.round])].sort(
+    (a, b) => a - b,
+  );
   if (list.length <= 1) return undefined; // one round → no switcher
   return {
     active: row.round,
@@ -751,23 +831,25 @@ function resolveAgentDrillTarget(target: string): AgentDrillResolution {
   // normalized, but multiplicity is not hidden: duplicate agent names/labels or
   // colliding short ids require an explicit row id/petname/uuid from the user.
   const targetLower = target.toLocaleLowerCase();
-  const exact = uniqueRows(rows.filter((row) => [
-    row.displayName,
-    row.agentName,
-    row.childSessionId,
-    agentLiveShortId(row),
-    row.label,
-  ].some((value) => value?.toLocaleLowerCase() === targetLower)));
+  const exact = uniqueRows(
+    rows.filter((row) =>
+      [row.displayName, row.agentName, row.childSessionId, agentLiveShortId(row), row.label].some(
+        (value) => value?.toLocaleLowerCase() === targetLower,
+      ),
+    ),
+  );
   const exactResult = resolutionFromCandidates(exact);
   if (exactResult !== undefined) return exactResult;
 
   const needle = normalizeDrillToken(target);
   if (needle.length === 0) return { ok: false, reason: "not-found" };
-  const fragments = uniqueRows(rows.filter((row) => {
-    const sources = [row.displayName, row.childSessionId, row.id];
-    if (target.length >= 3) sources.push(row.label);
-    return sources.some((value) => value !== undefined && normalizeDrillToken(value).includes(needle));
-  }));
+  const fragments = uniqueRows(
+    rows.filter((row) => {
+      const sources = [row.displayName, row.childSessionId, row.id];
+      if (target.length >= 3) sources.push(row.label);
+      return sources.some((value) => value !== undefined && normalizeDrillToken(value).includes(needle));
+    }),
+  );
   return resolutionFromCandidates(fragments) ?? { ok: false, reason: "not-found" };
 }
 
@@ -875,7 +957,11 @@ function clampTitle(value: string): string {
 
 function headOfPrompt(prompt: string): string {
   const firstLine = (prompt.split(/\r?\n/, 1)[0] ?? "").trim();
-  return firstLine.split(/\s+/).filter((word) => word !== "").slice(0, 8).join(" ");
+  return firstLine
+    .split(/\s+/)
+    .filter((word) => word !== "")
+    .slice(0, 8)
+    .join(" ");
 }
 
 function refreshAgents(projectRoot: string) {
@@ -891,7 +977,8 @@ function resolveAgentSelection(agentName: string | undefined): AgentResolution |
   const requestedAgent = normalizeRequestedAgentName(agentName);
   if (requestedAgent === "default") {
     const aliased = sharedState.agents.get(DEFAULT_TASK_AGENT_NAME);
-    if (aliased !== undefined) return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
+    if (aliased !== undefined)
+      return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
     return undefined;
   }
   const exact = sharedState.agents.get(requestedAgent);
@@ -901,7 +988,8 @@ function resolveAgentSelection(agentName: string | undefined): AgentResolution |
   const aliasTarget = builtInAliasTarget(requestedAgent);
   if (aliasTarget !== undefined) {
     const aliased = sharedState.agents.get(aliasTarget);
-    if (aliased !== undefined) return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
+    if (aliased !== undefined)
+      return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
   }
   if (exact !== undefined) return { requestedAgent, resolvedAgent: exact.name, agent: exact };
   return undefined;
@@ -924,7 +1012,11 @@ function builtInAliasTarget(name: string): string | undefined {
   return isBuiltInAgentAlias(name) ? BUILT_IN_AGENT_ALIASES[name] : undefined;
 }
 
-function createUnknownAgentReport(ctx: ExtensionContext, requestedSurface: string, agentName: string | undefined): UnknownAgentReport {
+function createUnknownAgentReport(
+  ctx: ExtensionContext,
+  requestedSurface: string,
+  agentName: string | undefined,
+): UnknownAgentReport {
   const requestedAgent = normalizeRequestedAgentName(agentName);
   const availableAgents = listAvailableAgents();
   const builtInAliases = listBuiltInAliases();
@@ -964,7 +1056,7 @@ function unknownAgentBlock(
   projectRoot: string,
   previewLimit: number,
 ): OperatorBlock {
-  const sourceRank = (source: string): number => source === "project" ? 0 : source === "user" ? 1 : 2;
+  const sourceRank = (source: string): number => (source === "project" ? 0 : source === "user" ? 1 : 2);
   const preview = [...availableAgents]
     .sort((left, right) => sourceRank(left.source) - sourceRank(right.source) || left.name.localeCompare(right.name))
     .slice(0, previewLimit);
@@ -981,10 +1073,14 @@ function unknownAgentBlock(
       ...(hidden > 0 ? [`+${hidden} agent(s) not shown`] : []),
     ],
     metadata: [
-      compactAgentCatalogLine(`Built-in aliases: ${builtInAliases.map((alias) => `${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : " (conditional)"}`).join("; ")}`),
+      compactAgentCatalogLine(
+        `Built-in aliases: ${builtInAliases.map((alias) => `${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : " (conditional)"}`).join("; ")}`,
+      ),
     ],
     hint: [
-      compactAgentCatalogLine(artifact.ok ? `Artifact: ${relative(projectRoot, artifact.path)}` : `Artifact write failed: ${artifact.reason}`),
+      compactAgentCatalogLine(
+        artifact.ok ? `Artifact: ${relative(projectRoot, artifact.path)}` : `Artifact write failed: ${artifact.reason}`,
+      ),
       compactAgentCatalogLine("Evidence boundary: catalog failure only; not child-execution proof."),
     ],
     controls: ["Recovery: /agent list"],
@@ -1011,10 +1107,13 @@ function formatUnknownAgentMessage(
   artifact: { ok: true; path: string } | { ok: false; reason: string },
   projectRoot: string,
 ): string {
-  const availableLines = availableAgents.length === 0
-    ? ["- (none)"]
-    : availableAgents.map((agent) => `- ${agent.name} [${agent.source}] - ${agent.description}`);
-  const aliasLines = builtInAliases.map((alias) => `- ${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : ` (${alias.condition})`}`);
+  const availableLines =
+    availableAgents.length === 0
+      ? ["- (none)"]
+      : availableAgents.map((agent) => `- ${agent.name} [${agent.source}] - ${agent.description}`);
+  const aliasLines = builtInAliases.map(
+    (alias) => `- ${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : ` (${alias.condition})`}`,
+  );
   return [
     `Unknown agent: "${requestedAgent}".`,
     "",
@@ -1066,14 +1165,9 @@ function writeUnknownAgentArtifact(
   }
 }
 
-type TaskToolCtx = Parameters<ExtensionAPI["registerTool"]>[0]["execute"] extends (...args: infer Args) => unknown ? Args[4] : never;
-
-interface TaskRequestItem {
-  id: string;
-  title?: string;
-  description: string;
-  assignment: string;
-}
+type TaskToolCtx = Parameters<ExtensionAPI["registerTool"]>[0]["execute"] extends (...args: infer Args) => unknown
+  ? Args[4]
+  : never;
 
 /** Monotonic suffix so repeated `/agent run` of the same agent get distinct rows. */
 let agentRunSeq = 0;
@@ -1103,7 +1197,9 @@ interface AgentLiveTaskInput {
  * drives the SDK headless child through the shared boundary, and patches the
  * terminal state. It does NOT own the widget/panel or the aggregation — callers do.
  */
-async function runAgentLiveTask(input: AgentLiveTaskInput): Promise<Awaited<ReturnType<typeof executeAgentRunBoundary>>> {
+async function runAgentLiveTask(
+  input: AgentLiveTaskInput,
+): Promise<Awaited<ReturnType<typeof executeAgentRunBoundary>>> {
   const { ctx, resolvedAgent, rowId, label, title, liveModel } = input;
   const startedRow = agentLiveStore.begin({
     id: rowId,
@@ -1165,22 +1261,19 @@ function emitAgentEventLine(ctx: ExtensionContext, line: string, level: "info" |
 }
 
 /**
- * Real per-task execution path for the `task` tool. Each task spawns a genuine
- * headless child agent session through the SDK host (the tool-context executor),
+ * Real single-task execution path for the `task` tool. One invocation spawns one
+ * genuine headless child agent session through the SDK host (the tool-context executor),
  * routed through the same `executeAgentRunBoundary` as the /agent command. Falls
  * back to the honest fail-closed `sdkUnavailableResult` surface only when the SDK
  * host is genuinely unavailable on this machine.
- *
- * Sequential, NOT true parallel: each child is a full headless agent session, so
- * they run one at a time. The "in parallel" schema label is surfaced as
- * `parallel: false` in the tool details so callers are not misled.
  */
 async function runTaskTool(
   pi: ExtensionAPI,
   ctx: TaskToolCtx,
   signal: AbortSignal,
   agentName: string | undefined,
-  tasks: TaskRequestItem[],
+  task: string,
+  title: string | undefined,
   parentContext?: { inline?: string; artifactPath?: string },
 ) {
   const resolution = resolveAgentSelection(agentName);
@@ -1195,28 +1288,25 @@ async function runTaskTool(
   const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution.assignment });
   const hasUI = ctx.hasUI === true;
   const panel = hasUI ? installWorkflowProgress(ctx, "agents", `task ${resolvedAgent}`, "task") : undefined;
-  const results: Array<Record<string, unknown>> = [];
+  let boundary: Awaited<ReturnType<typeof runAgentLiveTask>>;
   // Pin the "agents" progress key for the duration of the live run so a chat
   // message (which clears transient command UI) cannot dispose the progress
   // widget mid-flight. Unpinned in the finally below, even on throw.
   if (hasUI) pinTransientUiKey(pi, AGENTS_WIDGET_KEY);
   try {
-  for (let i = 0; i < tasks.length; i += 1) {
-    const t = tasks[i]; // noUncheckedIndexedAccess => t: TaskRequestItem | undefined
-    if (t === undefined) continue; // satisfies the strict index type; cannot actually be undefined
     // Pi native tool approval happens before this handler runs, so the child runs
     // under the already-approved bounds (approvalTier "allow").
     const parentContextBroker = summarizeParentContextBroker(parentContext, agentDefault);
-    const boundary = await runAgentLiveTask({
+    boundary = await runAgentLiveTask({
       pi,
       ctx,
       signal,
       agent,
       resolvedAgent,
-      rowId: `task:${resolvedAgent}:${t.id}`,
-      label: t.description !== "" ? t.description : t.id,
-      title: resolveAgentTitle(t.title, t.description, t.assignment),
-      task: t.assignment,
+      rowId: `task:${resolvedAgent}:${++agentRunSeq}`,
+      label: resolveAgentTitle(title, "", task),
+      title: resolveAgentTitle(title, "", task),
+      task,
       approvalTier: "allow",
       liveModel,
       modelRoleResolution,
@@ -1224,20 +1314,7 @@ async function runTaskTool(
       ...(parentContextBroker.forwarded && parentContext !== undefined ? { parentContext } : {}),
     });
     if (hasUI) panel?.render(80);
-    results.push({
-      id: t.id,
-      status: boundary.status,
-      reason: boundary.reason,
-      diagnostics: boundary.diagnostics,
-      evidence: boundary.evidence,
-      structuredResult: boundary.structuredResult,
-      childSessionId: boundary.childSession?.id,
-      childOutputStats: boundary.childOutputStats,
-      resultArtifact: boundary.resultArtifact?.path,
-      parentContextBroker,
-    });
-  }
-  panel?.finish({ ok: results.length > 0 && results.every((r) => r.status === "completed"), result: results });
+    panel?.finish({ ok: boundary.status === "completed", result: boundary });
   } catch (err) {
     // Agent/host crash mid-run: stop the spinner AND surface a visible error
     // instead of leaving the panel spinning forever (no silent vanish). finish()
@@ -1247,23 +1324,16 @@ async function runTaskTool(
   } finally {
     if (hasUI) unpinTransientUiKey(pi, AGENTS_WIDGET_KEY);
   }
-  // GRACEFUL FALLBACK: only when EVERY task came back substrate-unavailable (a
-  // blocked result carrying the SDK-host-unavailable diagnostic token) do we
-  // fail closed. The reason is HONEST about the real cause (this host cannot
-  // spawn a child agent session) — never the stale M11/replacement-session text.
-  const allUnavailable =
-    results.length > 0 &&
-    results.every((r) => r.status === "blocked" && diagnosticsInclude(r.diagnostics, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC));
-  if (allUnavailable) {
-    return sdkUnavailableResult({
-      requestedAgent,
-      resolvedAgent,
-      ...(aliasApplied === undefined ? {} : { aliasApplied }),
-    }, tasks.length, results);
+  if (boundary.status === "blocked" && diagnosticsInclude(boundary.diagnostics, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC)) {
+    return sdkUnavailableResult(
+      {
+        requestedAgent,
+        resolvedAgent,
+        ...(aliasApplied === undefined ? {} : { aliasApplied }),
+      },
+      boundary,
+    );
   }
-  const completedCount = results.filter((r) => r.status === "completed").length;
-  const summaryLine = `task ${resolvedAgent}: ${completedCount}/${results.length} completed`;
-  const liveLines = renderAgentLiveRowsText();
   const parentContextBroker = summarizeParentContextBroker(parentContext, agentDefault);
   const details = {
     owner: "agents-catalog",
@@ -1271,42 +1341,26 @@ async function runTaskTool(
     requestedAgent,
     agent: resolvedAgent,
     ...(aliasApplied === undefined ? {} : { aliasApplied }),
-    taskCount: tasks.length,
-    parallel: false,
+    taskCount: 1,
     executor: "agent-sdk-session-host",
     parentContextBroker,
-    results,
-    structuredResults: results.map((r) => r.structuredResult).filter((v) => v !== undefined),
+    status: boundary.status,
+    diagnostics: boundary.diagnostics,
+    evidence: boundary.evidence,
+    childSessionId: boundary.childSession?.id,
+    childOutputStats: boundary.childOutputStats,
+    resultArtifact: boundary.resultArtifact?.path,
   };
-  const text = [summaryLine, liveLines, ...results.map(formatTaskRunResultLine)].join("\n");
-  if (completedCount !== results.length) {
-    return errorResult(text, { ...details, status: "failed" });
+  if (boundary.status !== "completed" || boundary.text === undefined) {
+    return errorResult(boundary.reason, details);
   }
-  return textResult(
-    text,
-    { ...details, status: "completed" },
-  );
+  return textResult(boundary.text, details);
 }
 
-function formatTaskRunResultLine(result: Record<string, unknown>): string {
-  const parts = [`- ${String(result.id)}: ${String(result.status)} — ${String(result.reason)}`];
-  const evidence = result.evidence;
-  if (isEvidenceEvaluationRecord(evidence)) {
-    parts.push(`evidence=${evidence.evidence}`);
-    const warnings = evidence.warnings.filter((warning): warning is string => typeof warning === "string" && warning.trim() !== "");
-    if (warnings.length > 0) parts.push(`warnings=${warnings.join("; ")}`);
-  }
-  return parts.join(" | ");
-}
-
-function isEvidenceEvaluationRecord(value: unknown): value is { evidence: string; warnings: unknown[] } {
-  return typeof value === "object" &&
-    value !== null &&
-    typeof (value as { evidence?: unknown }).evidence === "string" &&
-    Array.isArray((value as { warnings?: unknown }).warnings);
-}
-
-function summarizeParentContextBroker(parentContext: { inline?: string; artifactPath?: string } | undefined, agentDefault: boolean) {
+function summarizeParentContextBroker(
+  parentContext: { inline?: string; artifactPath?: string } | undefined,
+  agentDefault: boolean,
+) {
   const sources: string[] = [];
   if (parentContext?.inline !== undefined && parentContext.inline.length > 0) sources.push("inline");
   if (parentContext?.artifactPath !== undefined && parentContext.artifactPath.length > 0) sources.push("artifactPath");
@@ -1327,11 +1381,9 @@ function diagnosticsInclude(diagnostics: unknown, token: string): boolean {
  */
 function sdkUnavailableResult(
   resolution: Pick<AgentResolution, "requestedAgent" | "resolvedAgent" | "aliasApplied">,
-  taskCount: number,
-  results: Array<Record<string, unknown>>,
+  result: Awaited<ReturnType<typeof runAgentLiveTask>>,
 ) {
-  const firstReason = results.find((r) => typeof r.reason === "string")?.reason;
-  const reason = typeof firstReason === "string" ? firstReason : "createAgentSession is unavailable on this host.";
+  const reason = result.reason || "createAgentSession is unavailable on this host.";
   return errorResult(
     [
       `Agent task execution is unavailable: this Pi host cannot spawn a child agent session for "${resolution.resolvedAgent}".`,
@@ -1343,12 +1395,17 @@ function sdkUnavailableResult(
       requestedAgent: resolution.requestedAgent,
       agent: resolution.resolvedAgent,
       ...(resolution.aliasApplied === undefined ? {} : { aliasApplied: resolution.aliasApplied }),
-      taskCount,
+      taskCount: 1,
       executor: "agent-sdk-session-host",
       status: "blocked",
       hostCapability: "agent-sdk-session-unavailable",
       toolExecutorAvailable: false,
-      results,
+      result: {
+        status: result.status,
+        reason: result.reason,
+        diagnostics: result.diagnostics,
+        resultArtifact: result.resultArtifact?.path,
+      },
       sources: [".agents/agents"],
     },
   );
@@ -1403,7 +1460,10 @@ async function executeAgentRunCommand(
     });
     if (hasUI) {
       panel?.render(80);
-      panel?.finish({ ok: boundary.status === "completed", result: { status: boundary.status, summary: boundary.reason } });
+      panel?.finish({
+        ok: boundary.status === "completed",
+        result: { status: boundary.status, summary: boundary.reason },
+      });
     } else {
       // Headless host: no live panel, so surface the honest settled result.
       setOperatorWidget(ctx, AGENTS_WIDGET_KEY, agentRunBoundaryBlock(boundary));
@@ -1411,13 +1471,14 @@ async function executeAgentRunCommand(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (hasUI) panel?.finish({ ok: false, error: message });
-    else setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
-      type: "ERROR",
-      subject: "Agent run",
-      primary: `Agent ${resolvedAgent}: error`,
-      body: [`Reason: ${message}`],
-      controls: ["Recovery: inspect the live row with /agent drill last, then retry."],
-    });
+    else
+      setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
+        type: "ERROR",
+        subject: "Agent run",
+        primary: `Agent ${resolvedAgent}: error`,
+        body: [`Reason: ${message}`],
+        controls: ["Recovery: inspect the live row with /agent drill last, then retry."],
+      });
     throw err;
   } finally {
     if (hasUI) unpinTransientUiKey(pi, AGENTS_WIDGET_KEY);
@@ -1425,13 +1486,15 @@ async function executeAgentRunCommand(
 }
 
 function agentRunBoundaryBlock(boundary: Awaited<ReturnType<typeof executeAgentRunBoundary>>): OperatorBlock {
-  const identity = boundary.childSession?.id !== undefined
-    ? `${boundary.agentName}#${agentShortIdFromSource(boundary.childSession.id)}`
-    : boundary.agentName;
+  const identity =
+    boundary.childSession?.id !== undefined
+      ? `${boundary.agentName}#${agentShortIdFromSource(boundary.childSession.id)}`
+      : boundary.agentName;
   const metadata: string[] = [];
   if (boundary.childSession !== undefined) {
     metadata.push(`childSessionId: ${boundary.childSession.id}`);
-    if (boundary.childSession.parentSessionId !== undefined) metadata.push(`parentSessionId: ${boundary.childSession.parentSessionId}`);
+    if (boundary.childSession.parentSessionId !== undefined)
+      metadata.push(`parentSessionId: ${boundary.childSession.parentSessionId}`);
   }
   if (boundary.resultArtifact !== undefined) metadata.push(`resultArtifact: ${boundary.resultArtifact.path}`);
   if (boundary.childOutputStats !== undefined) {
@@ -1447,14 +1510,14 @@ function agentRunBoundaryBlock(boundary: Awaited<ReturnType<typeof executeAgentR
     subject: "Agent run",
     primary: `Agent ${identity}: ${boundary.status}`,
     body: [boundary.reason],
-    badges: [{
-      text: `status:${boundary.status}`,
-      tone: isCompleted ? "success" : isCancelled ? "muted" : "error",
-    }],
+    badges: [
+      {
+        text: `status:${boundary.status}`,
+        tone: isCompleted ? "success" : isCancelled ? "muted" : "error",
+      },
+    ],
     metadata,
-    hint: boundary.diagnostics.length === 0
-      ? []
-      : ["Diagnostics:", ...boundary.diagnostics.map((item) => `- ${item}`)],
+    hint: boundary.diagnostics.length === 0 ? [] : ["Diagnostics:", ...boundary.diagnostics.map((item) => `- ${item}`)],
     controls: [`Drill: /agent drill ${boundary.childSession?.id ?? "last"}`],
   };
 }

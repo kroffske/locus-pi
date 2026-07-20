@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
-import { AGENT_RESULT_MARKER } from "../../../extensions/_shared/agent-executor-host.js";
 import {
   createAgentSdkSessionExecutor,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
 } from "../../../extensions/_shared/agent-sdk-host.js";
-import { writeAgentRunResultArtifact, type AgentRunRequest, type AgentRunResult } from "../../../extensions/_shared/agent-runner.js";
+import {
+  writeAgentRunResultArtifact,
+  type AgentRunRequest,
+  type AgentRunResult,
+} from "../../../extensions/_shared/agent-runner.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 
 const baseAgent: AgentDefinition = {
@@ -73,8 +76,10 @@ function fakeSession(config: {
       if (config.exportError !== undefined) throw new Error(config.exportError);
       const target = config.exportOutsideReports
         ? path.join(exportDir, "escaped.jsonl")
-        : outputPath ?? path.join(exportDir, "session.jsonl");
-      const header = config.exportRawHeader ?? JSON.stringify({ type: "session", version: 3, id: config.exportHeaderId ?? "sdk-child" });
+        : (outputPath ?? path.join(exportDir, "session.jsonl"));
+      const header =
+        config.exportRawHeader ??
+        JSON.stringify({ type: "session", version: 3, id: config.exportHeaderId ?? "sdk-child" });
       writeFileSync(target, `${header}\n`, "utf8");
       return target;
     },
@@ -84,13 +89,15 @@ function fakeSession(config: {
 }
 
 function completedText(summary: string): string {
-  return `${AGENT_RESULT_MARKER} ${JSON.stringify({ version: "locus.agent.result.v1", status: "completed", summary })}`;
+  return summary;
 }
 
 describe("agent SDK evidence surfacing", () => {
   it("attaches reasoning_only evidence for policy mode none with no tools", async () => {
     const executor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "fixed",
     });
@@ -112,7 +119,9 @@ describe("agent SDK evidence surfacing", () => {
       evidence: { mode: "warn", requireAnyOf: ["read", "grep"] },
     };
     const executor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "fixed",
     });
@@ -132,16 +141,18 @@ describe("agent SDK evidence surfacing", () => {
       evidence: { mode: "warn", requireAnyOf: ["bash"] },
     };
     const executor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({
-        toolCalls: 1,
-        toolResults: 1,
-        text: completedText("Checked."),
-        events: [
-          { type: "tool_execution_start", toolName: " bash ", toolCallId: "call-1", args: { command: "pwd" } },
-          { type: "tool_execution_update", toolName: "bash", toolCallId: "call-1", args: { command: "pwd" } },
-          { type: "tool_execution_end", toolName: "bash", toolCallId: "call-1", isError: false },
-        ],
-      }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({
+          toolCalls: 1,
+          toolResults: 1,
+          text: completedText("Checked."),
+          events: [
+            { type: "tool_execution_start", toolName: " bash ", toolCallId: "call-1", args: { command: "pwd" } },
+            { type: "tool_execution_update", toolName: "bash", toolCallId: "call-1", args: { command: "pwd" } },
+            { type: "tool_execution_end", toolName: "bash", toolCallId: "call-1", isError: false },
+          ],
+        }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "fixed",
     });
@@ -165,15 +176,17 @@ describe("agent SDK evidence surfacing", () => {
       evidence: { mode: "warn", requireAnyOf: ["bash"] },
     };
     const executor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({
-        toolCalls: 1,
-        toolResults: 1,
-        text: completedText("Checked."),
-        events: [
-          { type: "step_start", name: "bash" },
-          { type: "tool_hint", toolName: "bash" },
-        ],
-      }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({
+          toolCalls: 1,
+          toolResults: 1,
+          text: completedText("Checked."),
+          events: [
+            { type: "step_start", name: "bash" },
+            { type: "tool_hint", toolName: "bash" },
+          ],
+        }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "fixed",
     });
@@ -204,11 +217,42 @@ describe("agent SDK evidence surfacing", () => {
     assert.equal(Object.hasOwn(body, "evidence"), false);
   });
 
+  it("keeps run-result artifacts distinct across fresh stores by child session id", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-agent-artifact-collision-"));
+    const req = { ...request(), projectRoot: root };
+    const first = writeAgentRunResultArtifact(root, req, {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "first",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      text: "first",
+      childSession: { id: "child-one", createdAt: "fixed", metadata: {} },
+    });
+    const second = writeAgentRunResultArtifact(root, req, {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "second",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      text: "second",
+      childSession: { id: "child-two", createdAt: "fixed", metadata: {} },
+    });
+
+    assert.ok(first.resultArtifact !== undefined);
+    assert.ok(second.resultArtifact !== undefined);
+    assert.notEqual(first.resultArtifact.path, second.resultArtifact.path);
+    assert.equal(JSON.parse(readFileSync(first.resultArtifact.path, "utf8")).content.includes("first"), true);
+    assert.equal(JSON.parse(readFileSync(second.resultArtifact.path, "utf8")).content.includes("second"), true);
+  });
+
   it("exposes a reports-confined, session-bound child trace and serializes it separately from the run result", async () => {
     const req = request();
     const reportsDir = path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports");
     const executor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }),
+      })) as CreateAgentSessionFactory,
       reportsDir,
       now: () => "fixed",
     });
@@ -248,7 +292,9 @@ describe("agent SDK evidence surfacing", () => {
 
   it("preserves an exported child trace on parse failure, timeout and cancellation", async () => {
     const parseExecutor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: "" }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: "" }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "parse",
     });
@@ -257,7 +303,9 @@ describe("agent SDK evidence surfacing", () => {
     assert.equal(parsed.childTrace?.childSessionId, "sdk-child");
 
     const timeoutExecutor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: "", neverEnds: true }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: "", neverEnds: true }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "timeout",
       turnTimeoutMs: 1,
@@ -267,7 +315,9 @@ describe("agent SDK evidence surfacing", () => {
     assert.equal(timedOut.childTrace?.childSessionId, "sdk-child");
 
     const cancelExecutor = createAgentSdkSessionExecutor({
-      createSession: (async () => ({ session: fakeSession({ toolCalls: 0, toolResults: 0, text: "", neverEnds: true }) })) as CreateAgentSessionFactory,
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: "", neverEnds: true }),
+      })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "cancelled",
       turnTimeoutMs: 10_000,

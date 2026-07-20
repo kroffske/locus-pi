@@ -19,11 +19,13 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / llm / parallel / pipeline / phase / log`) for orchestrating `.agents` catalog sub-agents through the existing `task / createAgentSession` path, plus a direct model-call node.
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / llm / parallel / pipeline / phase / log / promptFile / workspace`) for orchestrating catalog-agent sessions through the existing `task / createAgentSession` path, plus a direct model-call node.
 
 Two ways a workflow reaches a model:
 
-- **`agent()`** — spawns a full `.agents` catalog child session (tools, structured-result protocol), routed through the same code path as the `task` tool.
+- **`agent()`** — spawns a full catalog or workflow-local child session and returns
+  its exact non-empty final text, routed through the same code path as the `task`
+  tool.
 - **`llm()`** — makes ONE direct model completion via the pi-ai host (`completeSimple` / `streamSimple`), with no child session and no tools. Use it for cheap classify/summarize/synthesis nodes where a full agent is overkill. See "Direct model calls" below.
 
 Every `agent()` call in a workflow script routes through exactly the same code path as the `task` tool:
@@ -57,26 +59,139 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ### PENDING SEAMS
 
-| Seam | Location | Status |
-|---|---|---|
-| Bounded concurrency | `extensions/_shared/workflow-runtime.ts` `runScheduled()` | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task. |
-| Git-worktree isolation | `workflow-agent-bridge.ts`, `workflow-worktree.ts` | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope. |
-| Trusted script execution | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()` | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection. |
+| Seam                                | Location                                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bounded concurrency                 | `extensions/_shared/workflow-runtime.ts` `runScheduled()`                                         | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task.                                                                                                                         |
+| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                      |
+| Trusted script execution            | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                           |
 | Owner-default agent + model routing | `extensions/_shared/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing keeps per-call `opts.model` precedence, keeps agent frontmatter `model` visible in the request capsule through model-role resolution, and otherwise lets the child executor use the current session model fallback. |
 
 ---
 
 ## Curated Package workflows
 
-| Workflow | What it is |
-|---|---|
-| `live-smoke` | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`. |
-| `llm-smoke` | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`. |
-| `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize explicit structured handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; `repositoryContext`, stage evidence, and the final handoff are retained in `result.json`. |
+| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                   |
+| `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                  |
+| `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`. |
+| `review`             | **Question-led code review**: six prompt-configured catalog-agent sessions resolve the scope, inventory the change, plan review units, ask falsifiable questions, verify them independently, and publish a readable review package whose primary report is `review.md`.                                                                                                                                                                                                                         |
+| `review-fix`         | **Human-gated remediation**: deterministic code confines the operator-supplied `review.md` path and refuses an empty finding list, then five prompt-configured catalog-agent sessions resolve the fix scope, revalidate each finding and plan atomic fix units, apply them, verify the working-tree diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, or deploy.                                                                                                     |
 
-These three names form the Package registry. They are intentionally small and
+`review` passes exact text handoffs between six sequential agents. The scope
+resolver turns the free-form operator request into one explicit review scope;
+later stages receive that scope instead of the original conversation. The
+inventory agent proves coverage of every changed surface, including staged,
+unstaged, and untracked work. The unit planner groups the inventory into
+material decisions rather than one unit per file. The interrogator asks
+falsifiable questions about those units. The verifier treats units and
+questions as a work map and hypotheses, reopens the code, callers, tests, and
+existing documentation itself, answers every question, and writes the complete
+reader-facing review; only confirmed problems become findings. A final
+publisher agent creates a real local review task in the Pi launch project,
+publishes the handoffs as task-local Markdown with
+`.tasks/<task>/artifacts/review.md` as the mandatory primary report, and
+returns an executive summary as the workflow result. It first proves that
+`.tasks/` is ignored and never writes into a different reviewed repository.
+The review records reviewed scope, verdict, findings, one resolution per
+question id, and explicit coverage limits. It contains no commit hashes,
+snapshots, fix plan, or dispositions: a human edits `review.md` directly, and
+deleting a finding rejects it.
+
+The unit planner, interrogator, and verifier may also use `ast_index`, an
+allowlisted argv tool over the installed `ast-index` binary, for code-symbol
+relationships. Its database lives in the user cache directory, so index
+refreshes never touch reviewed source. A missing binary or index degrades to
+`grep`/`find` and is recorded as a coverage limit instead of blocking the
+review.
+
+The two review workflows have independent package directories:
+`extensions/workflows/examples/review/` and
+`extensions/workflows/examples/review-fix/`. The reader algorithm lives in
+`review/README.md`. Each `resources/*.prompt.md` file contains both the stable
+role instructions and the dynamic handoffs for one concrete stage.
+`promptFile()` resolves paths relative to the original workflow source, rejects
+lexical or symlink escapes, copies bytes once into the run directory, and
+records SHA-256 evidence.
+
+The human gate is the review document itself. The operator edits `review.md`
+directly: deleting a finding rejects it, rewording one changes the request, and
+a free-form note under a finding is an instruction to the fix agents. Nothing is
+carried over as a hash, snapshot, disposition field, or reviewed commit, so a
+review of uncommitted work stays actionable.
+
+`review-fix` mirrors the `review` shape — interpret intent, plan, act, verify,
+present — as one deterministic gate plus five sequential agents. Deterministic
+`review-fix-input.mjs` extracts the single `review.md` token from the operator
+request, so `apply only the P1 items in .tasks/T-1/artifacts/review.md` is a
+valid input, and proves what a prompt cannot: the path is project-relative,
+inside a task `artifacts` directory, reachable without a symlink escape, and its
+`## Findings` section still lists at least one `### <id>` block. An empty or
+missing findings section throws before any agent exists.
+
+Everything after that is agent judgement. The scope resolver decides which
+remaining findings this run addresses and under which constraints. The unit
+planner reopens each in-scope finding against live source, lists the ones that
+no longer hold as stale, and groups the survivors into atomic, dependency-ordered
+fix units. The implementer applies those units. The verifier reopens the
+working-tree diff, reruns the checks, and writes the report. The publisher writes
+`fix-scope.md`, `fix-units.md`, and the mandatory `fix-report.md` beside the
+review and returns an executive summary.
+
+All `review-fix` agents run in the operator's launch checkout with
+`workspaceMode: "project"` rather than in a linked worktree. That is a
+deliberate trade: the review may cover staged, unstaged, or untracked work that
+exists in no commit, and a worktree at some commit would hand the fix agent
+different code than the one that was reviewed. The compensating boundaries are
+that the operator starts the workflow explicitly, every finding is revalidated
+before a change, the prompts forbid commit, push, merge, deploy, and discarding
+uncommitted work the agent did not create, and every change stays uncommitted
+for an ordinary diff review. The scope resolver and unit planner are
+host-enforced `readOnly`; the verifier is not, because running repository checks
+requires a shell.
+
+Both entry scripts use `agent()`, `promptFile()`, `phase()`, and `log()` and run
+strictly sequentially. Repository and private-forge evidence acquisition remains
+owned by full child agents. There is no prepared evidence packet or `llm()`
+merge. Prompts constrain writes to documented task boundaries, but prompt text
+and permission metadata are not a sandbox; Pi's tool approval remains the
+enforcement boundary. Resource validation or child execution failure remains
+fail-closed.
+
+`review` imports nothing, so it keeps the default `self-contained-static`
+identity and the runner executes its retained snapshot. `review-fix` imports
+`review-fix-input.mjs` and therefore declares
+`meta.identityCoverage: "entry-only"`: it executes from the hash-qualified
+source and its entry hash does not bind that deterministic helper. Neither
+coverage says anything about prompts — every loaded agent/prompt resource has
+its own immutable run copy and SHA-256 regardless.
+
+The Markdown files are the human-facing artifacts. Mandatory `result.json`
+remains the machine-readable runtime envelope and provenance surface. Its
+workflow `result` is the final agent's exact text; it is not a parsed findings,
+status, or path object.
+
+These five names form the Package registry. They are intentionally small and
 owned as part of the package product surface, not discovered merely because a file
 exists in `extensions/workflows/examples/`.
+
+Editable pipeline maps:
+
+- `live-smoke`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.excalidraw)
+- `llm-smoke`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.excalidraw)
+- `requirements-grill`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
+- `review`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.excalidraw)
+- `review-fix`:
+  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.png) ·
+  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.excalidraw)
 
 ## Authoring patterns
 
@@ -85,12 +200,12 @@ The clean release contains no uncurated Package examples. The pattern catalog
 operator may save under a reviewed project or user workflow directory. Saving a
 local workflow does not add it to the Package registry.
 
-For *which shape to pick* (single-agent, llm()-gate, loop+judge, plan→build→review,
+For _which shape to pick_ (single-agent, llm()-gate, loop+judge, plan→build→review,
 pipeline, fan-out+merge, judge-panel, loop-until-dry), see the pattern catalog
 `extensions/workflows/references/patterns.md` — it maps each requirement to a minimal
-skeleton to adapt. Only the three workflows in the curated table
+skeleton to adapt. Only the five workflows in the curated table
 above are registered Package workflows. (Single source: that file is the catalog of
-*forms*; this doc remains the DSL *contract*.)
+_forms_; this doc remains the DSL _contract_.)
 
 Saved workflow names such as `live-smoke` use one first-wins resolver for
 execution, `/workflows list`, and `/workflows info <name>`. Starting at the command's
@@ -104,7 +219,7 @@ order:
    inputs that may use a different workflow format.
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
 4. The curated Package registry — human source `Package`; currently `live-smoke`,
-   `llm-smoke`, and `requirements-grill`.
+   `llm-smoke`, `requirements-grill`, `review`, and `review-fix`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
@@ -476,24 +591,76 @@ A workflow is a single ESM module `<name>.workflow.mjs` with two exports:
 Destructure the primitives you need from the first arg:
 
 ```js
-const { agent, llm, phase, log, parallel, pipeline, workflow } = dsl;
+const { agent, llm, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;
 ```
 
-### Minimal working template
+The DSL is injected by Pi, so a workflow does not import runtime functions at
+execution time. Repository-owned `.mjs` files can still give JavaScript IDEs a
+declaration target with an import type in JSDoc:
 
-One real agent that does a tool action and returns a schema-checked result:
+```js
+/**
+ * @param {import("../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {unknown} input
+ */
+export default async function runWorkflow(dsl, input) {
+  // PyCharm/WebStorm can now navigate agent(), phase(), log(), and other DSL methods.
+}
+```
+
+Adjust the relative type path for a nested workflow. This comment performs no
+runtime import and does not change source-identity coverage.
+
+### Workflow diagram contract
+
+Use `$pi-workflow-diagram` when a workflow has multiple execution steps, agents,
+direct model calls, branches, parallel groups, or persisted handoffs. Every
+curated Package workflow must keep three sibling artifacts beside
+`<name>.workflow.mjs`:
+
+- `<name>-pipeline.diagram.mjs` — reproducible Excalidraw.js generator.
+- `<name>-pipeline.excalidraw` — editable diagram with embedded assets.
+- `<name>-pipeline.png` — visually reviewed preview.
+
+The diagram is an ownership map, not a decorative code trace:
+
+- Prefix each executable or data node with exactly one real owner/type:
+  `Operator:`, `Workflow:`, `Agent:`, `Direct LLM:`, or `Artifact:`.
+- A branch must say who produced the decision and who routes it. A text-only
+  `agent()` result is not implicit decision data: show the exact text handoff,
+  and show a deterministic workflow check only when trusted workflow code
+  actually validates something. Do not use ownerless labels such as
+  `Target ready?`.
+- Name workflow control explicitly: `Workflow: launch Agents 2 + 3 in parallel`
+  and `Workflow: wait for both lane results`, not `fan-out` or `barrier` alone.
+- Label important edges with the actual handoff. For text-only agents, name the
+  exact string such as `targetText` or `implementationText`; for `llm({ schema })`,
+  name the schema and inspected field.
+- Show the source `<name>.workflow.mjs`, the persisted
+  `.locus/runtime/workflows/<runId>/result.json`, and `journal.ndjson` when it
+  records meaningful execution evidence. Draw a Markdown report as a separate
+  artifact only when an agent really persists that file; the review family
+  therefore shows `.tasks/<task>/artifacts/review.md`, its supporting stage
+  artifacts, or `fix-report.md` alongside the mandatory runtime JSON.
+- Include a legend that explains the visual types and any accent colors. A
+  reader must understand the graph without opening the workflow source.
+
+Generate through `@kroffske/excalidraw-diagrams`, keep a fixed `Scene` seed, run
+`assertDiagramHealthy(...)`, validate the serialized Excalidraw document, render
+the PNG, and inspect the image itself. Do not hand-write raw Excalidraw element
+JSON. Repository tests enforce the artifact trio and the minimum ownership /
+persistence vocabulary; visual inspection remains required because structural
+validation cannot prove that a diagram is readable.
+
+### Minimal working example
+
+One real agent that does a tool action and returns text:
 
 ```js
 // hello.workflow.mjs
 export const meta = {
   name: "hello",
-  description: "One agent lists the cwd and returns a schema-checked verdict.",
-};
-
-const SCHEMA = {
-  type: "object",
-  required: ["ok"],
-  properties: { ok: { type: "boolean" } },
+  description: "One agent lists the cwd and returns readable text.",
 };
 
 export default async function runWorkflow(dsl, input) {
@@ -501,34 +668,32 @@ export default async function runWorkflow(dsl, input) {
   const task = (typeof input === "string" && input.trim()) || "list the cwd";
 
   phase("work");
-  const worker = await agent(
-    `Task: ${task}. Use a read tool once to list the current directory ` +
-      `(a real tool action). Then return ONLY the structured result envelope: ` +
-      `end with LOCUS_AGENT_RESULT_V1 followed by JSON ` +
-      `{ "version": "locus.agent.result.v1", "status": "completed", ` +
-      `"summary": "<one line>", "output": { "ok": true } }.`,
-    { agent: "quick_task", label: "work", permissionMode: "agent-defined", schema: SCHEMA },
-  );
-  log(`worker ok=${Boolean(worker?.ok)} session=${worker?.childSessionId ?? "none"}`);
-
-  return {
-    ok: Boolean(worker?.ok && worker?.output?.ok === true),
-    childSessionId: worker?.childSessionId ?? null, // proves a real spawn
-    output: worker?.output ?? null,
-  };
+  const workerText = await agent(`Task: ${task}. Use a read tool once, then return a concise Markdown answer.`, {
+    agent: "quick_task",
+    label: "work",
+    permissionMode: "agent-defined",
+  });
+  log("worker returned non-empty text");
+  return workerText;
 }
 ```
 
 Notes:
+
 - Keep `meta.description` as one concise, purpose-first sentence: name the useful
   outcome, not test evidence, implementation detail, or a long execution trace.
   Use a literal static string near the top of the module. The browser scans only
   the first 64 KiB, accepts no interpolation/computed value, and shortens catalog
   display after 96 characters. Project and user workflows are never rewritten by
   the browser.
-- An `agent()` step that opts into a `schema` should end its message with the
-  structured envelope (`LOCUS_AGENT_RESULT_V1` + JSON, `output` carries the schema'd
-  value). Plain-text completion still works when no `schema` is set.
+- `agent()` always returns the child's exact non-empty final text. It does not
+  accept `schema`, parse JSON-looking text, or expose child status fields as a
+  model-controlled result. Technical metadata is written to the workflow journal.
+- Use `promptFile("./resources/name.prompt.md", variables)` when a stage needs
+  substantial workflow-specific instructions or dynamic handoffs. Keep the
+  stable role and the per-run task in that one prompt. The path is
+  source-relative and hash-backed. Runtime policy such as `readOnly`, `tools`,
+  and `workspaceMode` remains visible in the `agent()` options.
 - Choose `agent()` when the step must **do tool work** or be an authoritative judge
   whose verdict is a real child session; choose `llm()` for a **cheap one-shot
   decision / text** (a gate, a classification, a draft) with no tools and no session.
@@ -558,7 +723,7 @@ Notes:
 
 To turn a plain-text requirement into a valid `<name>.workflow.mjs`, delegate to the
 `workflow-author` catalog agent rather than hand-authoring: `/agent run workflow-author`
-or `task { agent: "workflow-author", tasks: ["<requirement>"] }`. It writes the file to
+or `task { agent: "workflow-author", task: "<requirement>" }`. It writes the file to
 the canonical `.pi/workflows/`, confirms the module loads (`meta` + default export), and
 returns the path. This page is its detail reference. The helper is a catalog agent only;
 the package surface remains `./extensions/workflows/index.ts`.
@@ -568,7 +733,10 @@ the package surface remains `./extensions/workflows/index.ts`.
 ## DSL surface (v0)
 
 ```ts
-agent(prompt, opts?)          // Run a catalog agent (child session); returns WorkflowAgentResult
+agent(prompt, opts?)          // Run a catalog/local agent; returns exact child text
+promptFile(path, variables?)  // Render a neighboring .prompt.md resource
+workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
+projectRoot()                 // Absolute launch project root
 llm(prompt, opts?)            // ONE direct model completion (no session/tools); returns WorkflowLlmResult
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
@@ -637,33 +805,27 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `agent` | string | `"default"` | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path |
-| `tools` | string[] | selected agent allow-list | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation. |
-| `maxToolCalls` | integer 0–100 | none | Per-child-attempt call budget. The first over-budget tool start aborts the child and returns a failed result; this is a workflow budget, not a security boundary. |
-| `label` | string | — | Journal / UI label |
-| `phase` | string | current phase | Overrides the active phase tag |
-| `permissionMode` | string | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary. |
-| `workspaceMode` | string | `"project"` | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX. |
-| `sandbox` | string | — | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
-| `model` | string | current session model | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`. |
-| `schema` | object (JSON Schema) | none | JSON Schema the agent output must satisfy; enables schema-validation retry loop (see Schema enforcement below) |
-| `throwOnSchemaMismatch` | boolean | `false` | When `schema` is set, throw `SchemaValidationError` on final mismatch instead of returning `ok:false` |
+| Field             | Type                      | Default                                                                | Description                                                                                                                                                                          |
+| ----------------- | ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                   |
+| `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                            |
+| `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                               |
+| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.  |
+| `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                   |
+| `phase`           | string                    | current phase                                                          | Overrides the active phase tag                                                                                                                                                       |
+| `permissionMode`  | string                    | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                        |
+| `workspaceMode`   | string                    | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                  |
+| `workspaceHandle` | string                    | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                      |
+| `sandbox`         | string                    | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
+| `model`           | string                    | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.   |
 
-### Schema enforcement
+`agent()` resolves to exact non-empty text. Child metadata and diagnostics stay
+in journal/result evidence; model text is never parsed as status or JSON. Schema
+validation belongs only to `llm()` below.
 
-When `opts.schema` is provided, the runtime validates `result.output` after each attempt. It retries up to `SCHEMA_MAX_ATTEMPTS` times, currently `2`.
-
-On final mismatch, behavior depends on `opts.throwOnSchemaMismatch`:
-
-- **default (`false`)** — a bare `agent()` returns a result object with `ok:false`, `status:'failed'`, a `schema mismatch` diagnostic and `schemaValidation: { status:'mismatch', attempts, errors }`. It does not throw. Callers MUST guard on `r.ok` before using `r.output`. When that result is returned directly from a `parallel()` branch or `pipeline()` stage, the group rejects `WorkflowGroupFailureError` after siblings settle; the failed value remains inspectable in `slots` and `partialResults`.
-- **`throwOnSchemaMismatch: true`** — `agent()` throws `SchemaValidationError` (carrying `.errors` and `.attempts`). A bare `agent()` call rejects. Inside `parallel()` / `pipeline()`, the group records it as a `kind: "thrown"` branch failure and rejects `WorkflowGroupFailureError` after siblings settle. Use it for fail-fast bare callers.
-
-Each retry is a fresh agent run (a complete-but-wrong structured result cannot be resumed), not a continued session.
-Successful schema calls carry `schemaValidation: { status:'valid', attempts, errors:[] }`, so a workflow can audit recovery after more than one infrastructure attempt without counting it as more than one domain-quality verdict. Raw child/model failure is not relabelled as schema-valid or schema-mismatch, and no-schema calls omit the field. Terminal `agent_end`/`llm_end` journal lines carry the same value.
-
-The supported JSON-schema subset is `type` (`object`, `array`, `string`, `number`, `boolean`), `required`, `properties`, `additionalProperties: false`, `items` (array element schema), and `enum`.
+The host may replace the default agent fuse through
+`WorkflowRuntimeOptions.defaultMaxToolCalls`; an explicit per-call value wins.
+There is no small authoring ceiling such as the former 100-call cap.
 
 ---
 
@@ -684,15 +846,15 @@ Returns a `WorkflowLlmResult`: `{ ok, text, stopReason, model?, usage?, output?,
 
 `opts` for `llm()`:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `system` | string | — | Maps to `Context.systemPrompt` |
-| `model` | string | session model | Per-call selector `"provider/id[:thinking]"`; resolved via the same `getModel` path as `agent()`, else `ctx.model` |
-| `reasoning` | string | — | Provider thinking level (`minimal`/`low`/`medium`/`high`/`xhigh`) |
-| `stream` | boolean | `false` | Use `streamSimple`; emits an `llm_delta` journal line per text chunk (live rows in the progress panel) |
-| `schema` | object (JSON Schema) | none | Parse `result.text` as JSON and validate against this schema (retry up to `SCHEMA_MAX_ATTEMPTS`); a valid value is returned in `result.output` |
-| `throwOnSchemaMismatch` | boolean | `false` | Throw `SchemaValidationError` on final mismatch instead of returning `ok:false` |
-| `label` / `phase` | string | — | Journal / UI label; phase tag |
+| Field                   | Type                 | Default       | Description                                                                                                                                    |
+| ----------------------- | -------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system`                | string               | —             | Maps to `Context.systemPrompt`                                                                                                                 |
+| `model`                 | string               | session model | Per-call selector `"provider/id[:thinking]"`; resolved via the same `getModel` path as `agent()`, else `ctx.model`                             |
+| `reasoning`             | string               | —             | Provider thinking level (`minimal`/`low`/`medium`/`high`/`xhigh`)                                                                              |
+| `stream`                | boolean              | `false`       | Use `streamSimple`; emits an `llm_delta` journal line per text chunk (live rows in the progress panel)                                         |
+| `schema`                | object (JSON Schema) | none          | Parse `result.text` as JSON and validate against this schema (retry up to `SCHEMA_MAX_ATTEMPTS`); a valid value is returned in `result.output` |
+| `throwOnSchemaMismatch` | boolean              | `false`       | Throw `SchemaValidationError` on final mismatch instead of returning `ok:false`                                                                |
+| `label` / `phase`       | string               | —             | Journal / UI label; phase tag                                                                                                                  |
 
 **Model and host permissions.** Because `llm()` calls the model directly in-process,
 the manifest declares `models: true`. Separately, trusted workflow JavaScript can
@@ -719,10 +881,17 @@ failure after the barrier.
 
 - **Permissions:** `permissionMode` describes the child run's tool-policy intent (`"inherit-parent"`, `"agent-defined"`, or `"restricted"`). It does not allocate a worktree.
 - **Tools:** `tools` can only narrow the selected catalog agent's allow-list. It cannot grant a tool that the agent definition excludes.
+- **Read-only agents:** `readOnly: true` in `agent()` options, or on the selected
+  catalog definition when no per-call override is present, is enforced by the
+  SDK host. The child receives only `read`, `grep`, `find`, `ls`, `yield`, and
+  the package-owned `git_read` when requested. `bash`, `write`, `edit`, nested
+  `workflow`, and unknown tools are removed. `git_read` accepts argv for
+  allowlisted Git queries and rejects mutation, output-file, external-diff,
+  textconv, pager, signature, and config options before launch.
 - **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus/runtime/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
-The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
+  The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
 
 ---
 

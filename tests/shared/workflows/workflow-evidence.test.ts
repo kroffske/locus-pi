@@ -5,14 +5,22 @@ import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
-import { createWorkflowRuntime, type WorkflowAgentResult, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
+  type WorkflowAgentRequest,
+  type WorkflowAgentResult,
+  type WorkflowJournalLine,
+} from "../../../extensions/_shared/workflow-runtime.js";
 import type { EvidenceEvaluation } from "../../../extensions/_shared/types.js";
 import { WorkflowProgressComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createHarness } from "../../test-harness.js";
 
 const evidence: EvidenceEvaluation = {
   evidence: "missing_expected_evidence",
-  warnings: ["reviewer is missing expected runtime evidence (read, grep); mode=warn allows the run status to remain completed."],
+  warnings: [
+    "reviewer is missing expected runtime evidence (read, grep); mode=warn allows the run status to remain completed.",
+  ],
   missingRequiredTools: ["read", "grep"],
   observedTools: [],
 };
@@ -30,6 +38,73 @@ function tempProject(): string {
 }
 
 describe("workflow evidence threading", () => {
+  it("uses a high configurable tool-call fuse instead of the former 100-call ceiling", async () => {
+    const requests: WorkflowAgentRequest[] = [];
+    const resultFor = (request: WorkflowAgentRequest): WorkflowAgentResult => ({
+      ok: true,
+      status: "completed",
+      summary: "done",
+      text: "done",
+      diagnostics: [],
+      agent: request.agent,
+    });
+    const defaultRuntime = createWorkflowRuntime({
+      runId: "wf-default-tool-fuse",
+      agentRunner: async (request) => {
+        requests.push(request);
+        return resultFor(request);
+      },
+    });
+
+    await defaultRuntime.dsl.agent("default fuse");
+    await defaultRuntime.dsl.agent("large explicit fuse", { maxToolCalls: 5_000 });
+
+    assert.deepEqual(
+      requests.map((request) => request.maxToolCalls),
+      [DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS, 5_000],
+    );
+
+    const configuredRequests: WorkflowAgentRequest[] = [];
+    const configuredRuntime = createWorkflowRuntime({
+      runId: "wf-configured-tool-fuse",
+      defaultMaxToolCalls: 2_000,
+      agentRunner: async (request) => {
+        configuredRequests.push(request);
+        return resultFor(request);
+      },
+    });
+    await configuredRuntime.dsl.agent("configured fuse");
+    assert.equal(configuredRequests[0]?.maxToolCalls, 2_000);
+  });
+
+  it("rejects invalid tool-call fuse values before child execution", async () => {
+    assert.throws(
+      () =>
+        createWorkflowRuntime({
+          runId: "wf-invalid-default-tool-fuse",
+          defaultMaxToolCalls: -1,
+          agentRunner: async () => {
+            throw new Error("must not run");
+          },
+        }),
+      /defaultMaxToolCalls must be a non-negative safe integer/u,
+    );
+
+    let calls = 0;
+    const runtime = createWorkflowRuntime({
+      runId: "wf-invalid-call-tool-fuse",
+      agentRunner: async () => {
+        calls += 1;
+        throw new Error("must not run");
+      },
+    });
+    await assert.rejects(
+      runtime.dsl.agent("invalid explicit fuse", { maxToolCalls: 1.5 }),
+      /agent maxToolCalls must be a non-negative safe integer/u,
+    );
+    assert.equal(calls, 0);
+  });
+
   it("carries evidence from the agent boundary into WorkflowAgentResult", async () => {
     const root = tempProject();
     const h = createHarness(root, { sessionId: "wf-parent" });
@@ -39,6 +114,7 @@ describe("workflow evidence threading", () => {
           status: "completed",
           agentName: request.agent.name,
           reason: "reviewed",
+          text: "reviewed",
           diagnostics: [],
           lifecycleEntryIds: [],
           evidence,
@@ -58,14 +134,67 @@ describe("workflow evidence threading", () => {
     assert.deepEqual(result.evidence, evidence);
   });
 
+  it("applies per-call read-only narrowing without broadening catalog policy", async () => {
+    const root = tempProject();
+    const h = createHarness(root, { sessionId: "wf-parent-read-only" });
+    let observed: AgentRunRequest | undefined;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: () => ({
+        async run(request: AgentRunRequest) {
+          observed = request;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "read",
+            text: "read",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = await runner({
+      prompt: "inspect",
+      agent: "default",
+      readOnly: true,
+      tools: ["read", "git_read", "grep", "find"],
+    });
+
+    assert.equal(observed?.agent.readOnly, true);
+    assert.deepEqual(observed?.allowedTools, ["read", "git_read", "grep", "find"]);
+    assert.equal(result.readOnly, true);
+
+    const attemptedBroadening = await runner({
+      prompt: "inspect",
+      agent: "reviewer",
+      readOnly: false,
+      tools: ["read"],
+    } as unknown as WorkflowAgentRequest);
+
+    assert.equal(observed?.agent.readOnly, true);
+    assert.equal(attemptedBroadening.readOnly, true);
+  });
+
   it("writes evidence onto agent_end journal lines from WorkflowAgentResult", async () => {
     const result: WorkflowAgentResult = {
       ok: true,
       status: "completed",
       summary: "done",
+      text: "done",
       diagnostics: [],
       agent: "reviewer",
       evidence,
+      childSessionId: "child-session-1",
+      childTrace: {
+        path: "/tmp/run/child-session-1.jsonl",
+        format: "pi-session-jsonl",
+        childSessionId: "child-session-1",
+      },
+      resultArtifact: "/tmp/run/agent-result.json",
     };
     const runtime = createWorkflowRuntime({
       runId: "wf-evidence",
@@ -79,6 +208,13 @@ describe("workflow evidence threading", () => {
     assert.ok(endLine !== undefined);
     assert.deepEqual(endLine.evidence, evidence);
     assert.deepEqual(endLine.evidenceWarnings, evidence.warnings);
+    assert.equal(endLine.childSessionId, "child-session-1");
+    assert.deepEqual(endLine.childTrace, {
+      path: "/tmp/run/child-session-1.jsonl",
+      format: "pi-session-jsonl",
+      childSessionId: "child-session-1",
+    });
+    assert.equal(endLine.resultArtifact, "/tmp/run/agent-result.json");
   });
 
   it("renders agent_end evidence warnings in the progress widget tail", () => {

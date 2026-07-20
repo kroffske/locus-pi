@@ -1,4 +1,5 @@
 import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
@@ -12,7 +13,6 @@ import {
   type SdkAgentSessionLike,
   type SdkCreateSessionOptionsLike,
 } from "../../../extensions/_shared/agent-sdk-host.js";
-import { AGENT_RESULT_MARKER } from "../../../extensions/_shared/agent-executor-host.js";
 import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/agent-live-panel.js";
 import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-system-prompt.js";
 import type { AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
@@ -22,7 +22,7 @@ import type { AgentDefinition } from "../../../extensions/_shared/types.js";
  * INSURANCE, NOT PROOF.
  *
  * These tests inject a FAKE createAgentSession factory and only prove the wiring:
- * boundary contract -> SDK executor -> capsule/parse -> structuredResult + graceful
+ * boundary contract -> SDK executor -> exact text result + graceful
  * degradation. They deliberately do NOT spawn a real child agent.
  * Real proof must come from a live `task`-tool run on a working host, captured via
  * the exported .locus/runtime/reports JSONL — that is out of scope here.
@@ -120,7 +120,11 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
       if (config.neverEnds !== true) listener?.({ type: "agent_end", willRetry: false });
     },
     getSessionStats() {
-      return { sessionId: config.sessionId ?? "sdk-child", toolCalls: config.toolCalls, toolResults: config.toolResults };
+      return {
+        sessionId: config.sessionId ?? "sdk-child",
+        toolCalls: config.toolCalls,
+        toolResults: config.toolResults,
+      };
     },
     getLastAssistantText() {
       return config.lastAssistantText;
@@ -139,7 +143,6 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
 function tmpReportsDir(): string {
   return mkdtempSync(path.join(tmpdir(), "locus-sdk-host-reports-"));
 }
-
 
 describe("agent SDK session executor (insurance, not proof)", () => {
   it("omits context extras when the opt-in flag is unset", () => {
@@ -164,17 +167,20 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const memoryPath = path.join(root, "MEMORY.md");
     const filesystem = inMemoryFileSystem(new Map([[memoryPath, "DEFAULT_MEMORY\nline-2"]]));
 
-    const prompt = buildAgentSystemPrompt({
-      ...requestWithSystemPrompt(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...requestWithSystemPrompt(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    });
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+        },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
 
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain(`Requested: ${memoryPath}`);
@@ -184,7 +190,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
   it("preserves live parentRowId through session events, stats, and terminal status", async () => {
     agentLiveStore.reset();
     try {
-      const session = fakeSession({ toolCalls: 1, toolResults: 1, lastAssistantText: `${AGENT_RESULT_MARKER} {"version":"locus.agent.result.v1","status":"completed","summary":"done"}` });
+      const session = fakeSession({ toolCalls: 1, toolResults: 1, lastAssistantText: "done" });
       const createSession: CreateAgentSessionFactory = async () => ({ session: session.session });
       const executor = createAgentSdkSessionExecutor({
         createSession,
@@ -201,8 +207,8 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       });
 
       await executor.run(request(), new AbortController().signal);
-      const row = [...agentLiveStore.rows.values()].find((candidate) =>
-        candidate.parentRowId === "workflow:run:reviewer:review-step:smoke",
+      const row = [...agentLiveStore.rows.values()].find(
+        (candidate) => candidate.parentRowId === "workflow:run:reviewer:review-step:smoke",
       );
 
       expect(row).toBeDefined();
@@ -228,14 +234,24 @@ describe("agent SDK session executor (insurance, not proof)", () => {
   it("records source-backed live metadata without fabricating unsupported fields", () => {
     agentLiveStore.reset();
     try {
-      const row = agentLiveStore.begin({ id: "metadata-row", agentName: "reviewer", label: "Review", isolated: false, noMcp: false });
+      const row = agentLiveStore.begin({
+        id: "metadata-row",
+        agentName: "reviewer",
+        label: "Review",
+        isolated: false,
+        noMcp: false,
+      });
 
       agentLiveStore.feedSessionEvent(row.id, { type: "turn_start", cwd: "/repo/worktree" }, 1000);
-      agentLiveStore.feedSessionEvent(row.id, {
-        type: "tool_call",
-        toolName: "read",
-        toolCall: { args: { file: "README.md", range: [1, 4] } },
-      }, 1100);
+      agentLiveStore.feedSessionEvent(
+        row.id,
+        {
+          type: "tool_call",
+          toolName: "read",
+          toolCall: { args: { file: "README.md", range: [1, 4] } },
+        },
+        1100,
+      );
 
       const updated = agentLiveStore.rows.get(row.id);
       expect(updated).toMatchObject({
@@ -268,10 +284,14 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       expect(agentLiveStore.rows.get(row.id)?.tokenCount).toBeUndefined();
 
       agentLiveStore.feedSessionEvent(row.id, { type: "turn_end", message }, 1_100);
-      agentLiveStore.feedSessionEvent(row.id, {
-        type: "turn_end",
-        message: { role: "assistant", usage: { input: 80, output: 20 } },
-      }, 1_200);
+      agentLiveStore.feedSessionEvent(
+        row.id,
+        {
+          type: "turn_end",
+          message: { role: "assistant", usage: { input: 80, output: 20 } },
+        },
+        1_200,
+      );
 
       expect(agentLiveStore.rows.get(row.id)?.tokenCount).toEqual({ input: 200, output: 50 });
     } finally {
@@ -282,15 +302,29 @@ describe("agent SDK session executor (insurance, not proof)", () => {
   it("stamps currentToolStartMs when a tool starts and clears it on tool end / change (T-196 W2)", () => {
     agentLiveStore.reset();
     try {
-      const row = agentLiveStore.begin({ id: "tool-clock", agentName: "reviewer", label: "Review", isolated: false, noMcp: false });
+      const row = agentLiveStore.begin({
+        id: "tool-clock",
+        agentName: "reviewer",
+        label: "Review",
+        isolated: false,
+        noMcp: false,
+      });
 
       // Tool starts → anchor stamped at the event's `now`.
-      const started = agentLiveStore.feedSessionEvent(row.id, { type: "tool_call", toolName: "bash", args: { command: "npm test -- sums.spec" } }, 10_000);
+      const started = agentLiveStore.feedSessionEvent(
+        row.id,
+        { type: "tool_call", toolName: "bash", args: { command: "npm test -- sums.spec" } },
+        10_000,
+      );
       expect(started?.currentTools).toEqual(["bash"]);
       expect(started?.currentToolStartMs).toBe(10_000);
 
       // A *different* tool starts → anchor re-stamped (tool change resets the clock).
-      const changed = agentLiveStore.feedSessionEvent(row.id, { type: "tool_call", toolName: "read", args: { path: "src/app.ts" } }, 12_000);
+      const changed = agentLiveStore.feedSessionEvent(
+        row.id,
+        { type: "tool_call", toolName: "read", args: { path: "src/app.ts" } },
+        12_000,
+      );
       expect(changed?.currentToolStartMs).toBe(12_000);
 
       // Tool ends → anchor cleared.
@@ -314,17 +348,20 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const memoryPath = path.join(root, "MEMORY.md");
     const filesystem = inMemoryFileSystem(new Map([[memoryPath, memoryLines.join("\n")]]));
 
-    const prompt = buildAgentSystemPrompt({
-      ...requestWithSystemPrompt(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...requestWithSystemPrompt(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    });
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+        },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
 
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("MEMORY_SENTINEL");
@@ -337,18 +374,21 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const skillPath = path.join(root, ".agents", "skills", "reviewer", "SKILL.md");
     const filesystem = inMemoryFileSystem(new Map([[skillPath, "SKILL_SENTINEL\n"]]));
 
-    const prompt = buildAgentSystemPrompt({
-      ...requestWithSystemPrompt(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
-        LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...requestWithSystemPrompt(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    });
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+          LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+        },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
 
     expect(prompt).toContain("## Skill: reviewer");
     expect(prompt).toContain(`Source: ${skillPath}`);
@@ -360,23 +400,28 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-context-extras-skill-pi-"));
     const skillPath = path.join(root, ".pi", "skills", "reviewer", "SKILL.md");
     const memoryPath = path.join(root, "MEMORY.md");
-    const filesystem = inMemoryFileSystem(new Map([
-      [memoryPath, "DEFAULT_MEMORY\n"],
-      [skillPath, "PI_SKILL_SENTINEL\n"],
-    ]));
+    const filesystem = inMemoryFileSystem(
+      new Map([
+        [memoryPath, "DEFAULT_MEMORY\n"],
+        [skillPath, "PI_SKILL_SENTINEL\n"],
+      ]),
+    );
 
-    const prompt = buildAgentSystemPrompt({
-      ...requestWithSystemPrompt(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
-        LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...requestWithSystemPrompt(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    });
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+          LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+        },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
 
     expect(prompt).toContain(`Source: ${skillPath}`);
     expect(prompt).toContain("PI_SKILL_SENTINEL");
@@ -387,21 +432,24 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const missingSkillPath = path.join(root, ".agents", "skills", "missing", "SKILL.md");
     const missingMemoryPath = path.join(root, "missing-memory.md");
 
-    const prompt = buildAgentSystemPrompt({
-      ...requestWithSystemPrompt(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
-        LOCUS_AGENT_MEMORY_FILE: missingMemoryPath,
-        LOCUS_AGENT_PRELOAD_SKILLS: "missing",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...requestWithSystemPrompt(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile() {
-        throw new Error("must not read missing files");
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+          LOCUS_AGENT_MEMORY_FILE: missingMemoryPath,
+          LOCUS_AGENT_PRELOAD_SKILLS: "missing",
+        },
+        readFile() {
+          throw new Error("must not read missing files");
+        },
+        exists: () => false,
       },
-      exists: () => false,
-    });
+    );
 
     expect(prompt).toContain("- Missing memory file: ");
     expect(prompt).toContain(missingMemoryPath);
@@ -415,10 +463,12 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-context-extras-stable-"));
     const memoryPath = path.join(root, "MEMORY.md");
     const skillPath = path.join(root, ".agents", "skills", "reviewer", "SKILL.md");
-    const filesystem = inMemoryFileSystem(new Map([
-      [memoryPath, "MEMORY_SENTINEL\nline-2"],
-      [skillPath, "SKILL_SENTINEL\n"],
-    ]));
+    const filesystem = inMemoryFileSystem(
+      new Map([
+        [memoryPath, "MEMORY_SENTINEL\nline-2"],
+        [skillPath, "SKILL_SENTINEL\n"],
+      ]),
+    );
 
     const requestWithExtras = {
       ...requestWithSystemPrompt(),
@@ -429,16 +479,18 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       LOCUS_AGENT_CONTEXT_EXTRAS: "1",
       LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
     };
-    const promptA = buildAgentSystemPrompt(requestWithExtras, {
-      env,
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    }) ?? "";
-    const promptB = buildAgentSystemPrompt(requestWithExtras, {
-      env,
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    }) ?? "";
+    const promptA =
+      buildAgentSystemPrompt(requestWithExtras, {
+        env,
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      }) ?? "";
+    const promptB =
+      buildAgentSystemPrompt(requestWithExtras, {
+        env,
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      }) ?? "";
 
     expect(Buffer.byteLength(promptA, "utf8")).toBe(Buffer.byteLength(promptB, "utf8"));
     expect(promptA).toBe(promptB);
@@ -475,7 +527,10 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       promptEnv: env,
     });
 
-    const result = await executor.run({ ...requestWithSystemPrompt(), projectRoot: root, workingDirectory: root }, new AbortController().signal);
+    const result = await executor.run(
+      { ...requestWithSystemPrompt(), projectRoot: root, workingDirectory: root },
+      new AbortController().signal,
+    );
 
     expect(result.status).toBe("completed");
     const prompt = String(capturedOptions?.appendSystemPrompt ?? "");
@@ -495,28 +550,33 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-context-extras-no-system-prompt-"));
     const memoryPath = path.join(root, "MEMORY.md");
     const skillPath = path.join(root, ".pi", "skills", "reviewer", "SKILL.md");
-    const filesystem = inMemoryFileSystem(new Map([
-      [memoryPath, "MEMORY_SENTINEL\n"],
-      [skillPath, "PI_SKILL_SENTINEL\n"],
-    ]));
+    const filesystem = inMemoryFileSystem(
+      new Map([
+        [memoryPath, "MEMORY_SENTINEL\n"],
+        [skillPath, "PI_SKILL_SENTINEL\n"],
+      ]),
+    );
 
-    const prompt = buildAgentSystemPrompt({
-      ...request(),
-      projectRoot: root,
-      workingDirectory: root,
-    }, {
-      env: {
-        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
-        LOCUS_AGENT_MEMORY_FILE: memoryPath,
-        LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+    const prompt = buildAgentSystemPrompt(
+      {
+        ...request(),
+        projectRoot: root,
+        workingDirectory: root,
       },
-      readFile: filesystem.readFile,
-      exists: filesystem.exists,
-    });
+      {
+        env: {
+          LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+          LOCUS_AGENT_MEMORY_FILE: memoryPath,
+          LOCUS_AGENT_PRELOAD_SKILLS: "reviewer",
+        },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
 
     expect(prompt).toBeDefined();
     const promptText = prompt ?? "";
-    expect(promptText).toContain("<active_agent name=\"reviewer\"/>");
+    expect(promptText).toContain('<active_agent name="reviewer"/>');
     expect(promptText).toContain("You are a pi coding agent sub-agent.");
     expect(promptText).toContain("# Context extras");
     expect(promptText).toContain("## Memory");
@@ -525,7 +585,9 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(promptText).toContain(`Source: ${skillPath}`);
     expect(promptText).toContain("PI_SKILL_SENTINEL");
     expect(promptText).not.toContain("<agent_instructions>");
-    expect(promptText.indexOf("# Context extras")).toBeGreaterThan(promptText.indexOf("You have been invoked to handle a specific task autonomously."));
+    expect(promptText.indexOf("# Context extras")).toBeGreaterThan(
+      promptText.indexOf("You have been invoked to handle a specific task autonomously."),
+    );
   });
 
   it("surfaces missing context-extra diagnostics without failing the SDK run", async () => {
@@ -550,17 +612,22 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       promptEnv: env,
     });
 
-    const result = await executor.run({ ...requestWithSystemPrompt(), projectRoot: root, workingDirectory: root }, new AbortController().signal);
+    const result = await executor.run(
+      { ...requestWithSystemPrompt(), projectRoot: root, workingDirectory: root },
+      new AbortController().signal,
+    );
 
     expect(result.status).toBe("completed");
-    expect(result.diagnostics).toEqual(expect.arrayContaining([
-      expect.stringContaining("Missing memory file"),
-      expect.stringContaining(missingMemoryPath),
-      expect.stringContaining("Requested: missing"),
-      expect.stringContaining("Skill source missing. Tried"),
-      expect.stringContaining(missingSkillPath),
-      expect.stringContaining("(skill content unavailable)"),
-    ]));
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Missing memory file"),
+        expect.stringContaining(missingMemoryPath),
+        expect.stringContaining("Requested: missing"),
+        expect.stringContaining("Skill source missing. Tried"),
+        expect.stringContaining(missingSkillPath),
+        expect.stringContaining("(skill content unavailable)"),
+      ]),
+    );
   });
 
   it("updates AgentLiveStore rows from mocked session events and stats", () => {
@@ -616,21 +683,51 @@ describe("agent SDK session executor (insurance, not proof)", () => {
   it("projects streaming and completed Pi messages into one readable chronological transcript", () => {
     agentLiveStore.reset();
     const row = agentLiveStore.begin({ id: "transcript-live", agentName: "reviewer", label: "reviewer" });
-    const partial = { role: "assistant", content: [{ type: "thinking", thinking: "Inspecting" }, { type: "text", text: "I will read" }] };
+    const partial = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Inspecting" },
+        { type: "text", text: "I will read" },
+      ],
+    };
 
     agentLiveStore.feedSessionEvent(row.id, { type: "message_update", message: partial });
     expect(agentLiveStore.rows.get(row.id)?.transcript?.blocks).toHaveLength(1);
     expect(agentLiveStore.rows.get(row.id)?.latestMessage).toBe("I will read");
 
     agentLiveStore.feedSessionEvent(row.id, { type: "message_end", message: partial });
-    agentLiveStore.feedSessionEvent(row.id, { type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: { path: "README.md" } });
-    agentLiveStore.feedSessionEvent(row.id, { type: "tool_execution_end", toolCallId: "read-1", toolName: "read", result: { content: [{ type: "text", text: "file body" }] }, isError: false });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "tool_execution_start",
+      toolCallId: "read-1",
+      toolName: "read",
+      args: { path: "README.md" },
+    });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "tool_execution_end",
+      toolCallId: "read-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "file body" }] },
+      isError: false,
+    });
     agentLiveStore.feedSessionEvent(row.id, {
       type: "agent_end",
       willRetry: false,
       messages: [
-        { role: "assistant", content: [...partial.content, { type: "toolCall", id: "read-1", name: "read", arguments: { path: "README.md" } }], stopReason: "toolUse" },
-        { role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "file body" }], isError: false },
+        {
+          role: "assistant",
+          content: [
+            ...partial.content,
+            { type: "toolCall", id: "read-1", name: "read", arguments: { path: "README.md" } },
+          ],
+          stopReason: "toolUse",
+        },
+        {
+          role: "toolResult",
+          toolCallId: "read-1",
+          toolName: "read",
+          content: [{ type: "text", text: "file body" }],
+          isError: false,
+        },
         { role: "assistant", content: [{ type: "text", text: "Final answer" }], stopReason: "stop" },
       ],
     });
@@ -693,11 +790,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     }
   });
 
-  it("runs a child session through the SDK host and returns the structured result", async () => {
+  it("runs a child session through the SDK host and returns exact text", async () => {
     const { session, disposeSpy } = fakeSession({
       toolCalls: 2,
       toolResults: 1,
-      lastAssistantText: `${AGENT_RESULT_MARKER} {"version":"locus.agent.result.v1","status":"completed","summary":"Reviewed via SDK"}`,
+      lastAssistantText: "  Reviewed via SDK\n",
     });
     const reportsDir = tmpReportsDir();
     const createSession: CreateAgentSessionFactory = async () => ({ session });
@@ -707,7 +804,8 @@ describe("agent SDK session executor (insurance, not proof)", () => {
 
     expect(result).toMatchObject({
       status: "completed",
-      structuredResult: { summary: "Reviewed via SDK" },
+      reason: "  Reviewed via SDK\n",
+      text: "  Reviewed via SDK\n",
       childSession: { id: "sdk-child" },
       childOutputStats: {
         assistantToolCallCount: 2,
@@ -719,11 +817,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(existsSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl"))).toBe(true);
   });
 
-  it("accepts a parser-clean completion with no child workload proof", async () => {
+  it("accepts a non-empty text completion with no child workload proof", async () => {
     const { session, disposeSpy } = fakeSession({
       toolCalls: 0,
       toolResults: 0,
-      lastAssistantText: `${AGENT_RESULT_MARKER} {"version":"locus.agent.result.v1","status":"completed","summary":"Reviewed via SDK"}`,
+      lastAssistantText: "Reviewed via SDK",
     });
     const createSession: CreateAgentSessionFactory = async () => ({ session });
     const executor = createAgentSdkSessionExecutor({ createSession, reportsDir: tmpReportsDir(), now: () => "fixed" });
@@ -736,11 +834,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("wraps free-text SDK child output as a completed structured result", async () => {
+  it("treats JSON-looking SDK output as ordinary text", async () => {
     const { session, disposeSpy } = fakeSession({
       toolCalls: 0,
       toolResults: 0,
-      lastAssistantText: "Reasoning-only final answer.",
+      lastAssistantText: '{"status":"failed","summary":"Reasoning-only final answer."}',
     });
     const createSession: CreateAgentSessionFactory = async () => ({ session });
     const executor = createAgentSdkSessionExecutor({ createSession, reportsDir: tmpReportsDir(), now: () => "fixed" });
@@ -748,12 +846,8 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const result = await executor.run(request(), new AbortController().signal);
 
     expect(result.status).toBe("completed");
-    expect(result.structuredResult).toEqual({
-      version: "locus.agent.result.v1",
-      status: "completed",
-      summary: "Reasoning-only final answer.",
-      result: "Reasoning-only final answer.",
-    });
+    expect(result.text).toBe('{"status":"failed","summary":"Reasoning-only final answer."}');
+    expect(result).not.toHaveProperty("structuredResult");
     expect(result.childOutputStats).toMatchObject({ hasWorkloadProof: false });
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
@@ -766,7 +860,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       lastAssistantText: undefined,
       messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: providerError }],
     });
-    const executor = createAgentSdkSessionExecutor({ createSession: async () => ({ session }), reportsDir: tmpReportsDir(), now: () => "fixed" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
 
     const result = await executor.run(request(), new AbortController().signal);
 
@@ -789,7 +887,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       lastAssistantText: undefined,
       messages: [{ role: "assistant", content: [], stopReason: "stop" }],
     });
-    const executor = createAgentSdkSessionExecutor({ createSession: async () => ({ session }), reportsDir: tmpReportsDir(), now: () => "fixed" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
 
     const result = await executor.run(request(), new AbortController().signal);
 
@@ -808,7 +910,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
         { role: "assistant", content: [{ type: "text", text: answer }], stopReason: "stop" },
       ],
     });
-    const executor = createAgentSdkSessionExecutor({ createSession: async () => ({ session }), reportsDir: tmpReportsDir(), now: () => "fixed" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
 
     const result = await executor.run(request(), new AbortController().signal);
 
@@ -829,10 +935,13 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     };
     const executor = createAgentSdkSessionExecutor({ createSession, reportsDir: tmpReportsDir(), now: () => "fixed" });
 
-    const result = await executor.run({
-      ...request(),
-      agent: { ...reviewer, systemPrompt: "Review for correctness first." },
-    }, new AbortController().signal);
+    const result = await executor.run(
+      {
+        ...request(),
+        agent: { ...reviewer, readOnly: false, systemPrompt: "Review for correctness first." },
+      },
+      new AbortController().signal,
+    );
 
     expect(result.status).toBe("completed");
     expect(capturedOptions).toMatchObject({
@@ -840,8 +949,12 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       excludeTools: ["spawn_agent", "task"],
       appendSystemPrompt: expect.stringContaining("Review for correctness first."),
     });
-    expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain('<active_agent name="reviewer"/>');
-    expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain("Do not call `spawn_agent` or `task` directly");
+    expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
+      '<active_agent name="reviewer"/>',
+    );
+    expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
+      "Do not call `spawn_agent` or `task` directly",
+    );
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain("`workflow`");
   });
 
@@ -857,16 +970,130 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       now: () => "fixed",
     });
 
-    const result = await executor.run({
-      ...requestWithSystemPrompt(),
-      agent: { ...reviewer, allowedTools: ["*"], tools: ["*"] },
-      allowedTools: ["*"],
-    }, new AbortController().signal);
+    const result = await executor.run(
+      {
+        ...requestWithSystemPrompt(),
+        agent: { ...reviewer, readOnly: false, allowedTools: ["*"], tools: ["*"] },
+        allowedTools: ["*"],
+      },
+      new AbortController().signal,
+    );
 
     expect(result.status).toBe("completed");
     expect(capturedOptions?.tools).toBeUndefined();
     expect(capturedOptions?.excludeTools).toEqual(["spawn_agent", "task"]);
     expect(capturedOptions?.excludeTools).not.toContain("workflow");
+  });
+
+  it("enforces read-only child capabilities and rejects Git mutations without a shell", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-read-only-agent-"));
+    execFileSync("git", ["init", "--quiet", root]);
+    writeFileSync(path.join(root, "tracked.txt"), "candidate\n", "utf8");
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "Read-only answer." });
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(
+      {
+        ...request(),
+        projectRoot: root,
+        workingDirectory: root,
+        allowedTools: ["read", "git_read", "grep", "find", "bash", "write", "edit", "workflow", "unknown"],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(capturedOptions?.tools).toEqual(["read", "git_read", "grep", "find"]);
+    expect(capturedOptions?.excludeTools).toEqual(
+      expect.arrayContaining(["spawn_agent", "task", "workflow", "bash", "edit", "write", "unknown"]),
+    );
+    expect(capturedOptions?.tools).not.toEqual(expect.arrayContaining(["bash", "write", "edit", "workflow"]));
+
+    const gitRead = capturedOptions?.customTools?.find((tool) => tool.name === "git_read");
+    expect(gitRead).toBeDefined();
+    const readResult = await gitRead!.execute(
+      "read-status",
+      { args: ["status", "--short"] },
+      new AbortController().signal,
+    );
+    expect(readResult.isError).not.toBe(true);
+    expect(readResult.content[0]?.text).toContain("tracked.txt");
+
+    const mutationResult = await gitRead!.execute(
+      "blocked-checkout",
+      { args: ["checkout", "-b", "forbidden"] },
+      new AbortController().signal,
+    );
+    expect(mutationResult).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(mutationResult.content[0]?.text).toContain("blocks mutating or unsupported subcommand: checkout");
+    const externalProcessResult = await gitRead!.execute(
+      "blocked-pager",
+      { args: ["grep", "--open-files-in-pager", "candidate"] },
+      new AbortController().signal,
+    );
+    expect(externalProcessResult).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(externalProcessResult.content[0]?.text).toContain("external-process options");
+    expect(execFileSync("git", ["-C", root, "branch", "--show-current"], { encoding: "utf8" }).trim()).not.toBe(
+      "forbidden",
+    );
+  });
+
+  it("offers ast_index only when requested and blocks its destructive commands", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-ast-index-agent-"));
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "Read-only answer." });
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    await executor.run(
+      { ...request(), projectRoot: root, workingDirectory: root, allowedTools: ["read", "grep", "find"] },
+      new AbortController().signal,
+    );
+    expect(capturedOptions?.customTools?.some((tool) => tool.name === "ast_index")).not.toBe(true);
+
+    await executor.run(
+      {
+        ...request(),
+        projectRoot: root,
+        workingDirectory: root,
+        allowedTools: ["read", "ast_index", "grep", "find", "bash"],
+      },
+      new AbortController().signal,
+    );
+
+    expect(capturedOptions?.tools).toEqual(["read", "ast_index", "grep", "find"]);
+    expect(capturedOptions?.excludeTools).toEqual(expect.arrayContaining(["bash", "write", "edit"]));
+    const astIndex = capturedOptions?.customTools?.find((tool) => tool.name === "ast_index");
+    expect(astIndex).toBeDefined();
+
+    for (const [args, expected] of [
+      [["clear"], "blocks destructive or unsupported command: clear"],
+      [["watch"], "blocks destructive or unsupported command: watch"],
+      [["symbol; rm -rf /"], "blocks destructive or unsupported command"],
+      [["search", "--output=/tmp/out.txt", "run"], "blocks output-file options"],
+    ] as Array<[string[], string]>) {
+      const blockedResult = await astIndex!.execute("blocked", { args }, new AbortController().signal);
+      expect(blockedResult, args.join(" ")).toMatchObject({ isError: true, details: { blocked: true } });
+      expect(blockedResult.content[0]?.text, args.join(" ")).toContain(expected);
+    }
+
+    const missingArgs = await astIndex!.execute("bad-input", { command: "symbol" }, new AbortController().signal);
+    expect(missingArgs).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(missingArgs.content[0]?.text).toContain("ast_index requires one `args` string array.");
   });
 
   it("returns a blocked result with the unavailable diagnostic when the host is too old", async () => {

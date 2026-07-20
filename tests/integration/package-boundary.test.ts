@@ -20,7 +20,20 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const CURATED_V1_WORKFLOW_NAMES = ["live-smoke", "llm-smoke", "requirements-grill"] as const;
+const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = [
+  "live-smoke",
+  "llm-smoke",
+  "requirements-grill",
+  "review",
+  "review-fix",
+] as const;
+const CURATED_PACKAGE_WORKFLOW_PATHS = {
+  "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
+  "llm-smoke": "extensions/workflows/examples/llm-smoke.workflow.mjs",
+  "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
+  review: "extensions/workflows/examples/review/review.workflow.mjs",
+  "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
+} as const;
 const forbiddenPackedPaths = [
   /^\.agents\/(skills|workflows)\//,
   /^\.(locus|tasks|planning|pi)\//,
@@ -58,6 +71,20 @@ describe("npm public package boundary", () => {
     expect(actual).toEqual(expected);
   });
 
+  it("ships every prompt resource a curated workflow renders", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+
+    for (const [name, workflowPath] of Object.entries(CURATED_PACKAGE_WORKFLOW_PATHS)) {
+      const source = readFileSync(path.join(root, workflowPath), "utf8");
+      const directory = path.posix.dirname(workflowPath);
+      for (const match of source.matchAll(/promptFile\(\s*"(\.\/[^"]+\.prompt\.md)"/gu)) {
+        const resource = path.posix.normalize(path.posix.join(directory, match[1]!));
+        expect(existsSync(path.join(root, resource)), `${name} renders a missing prompt: ${resource}`).toBe(true);
+        expect(packedPaths.has(resource), `${name} renders an unpacked prompt: ${resource}`).toBe(true);
+      }
+    }
+  });
+
   it("ships ten active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
     expect(pkg.pi.extensions).toHaveLength(10);
@@ -74,15 +101,15 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships exactly the three curated Package workflows and no forbidden paths", () => {
+  it("ships exactly the five curated Package workflows and no forbidden paths", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))
       .map((file) => path.basename(file, ".workflow.mjs"))
       .sort();
 
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES].sort()).toEqual([...CURATED_V1_WORKFLOW_NAMES].sort());
-    expect(packedWorkflowNames).toEqual([...CURATED_V1_WORKFLOW_NAMES].sort());
+    expect([...CURATED_PACKAGE_WORKFLOW_NAMES].sort()).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
+    expect(packedWorkflowNames).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
     expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
   });
@@ -106,9 +133,18 @@ describe("npm public package boundary", () => {
       const entrypointUrls = pkg.pi.extensions.map(
         (entrypoint) => pathToFileURL(path.join(packageRoot, entrypoint)).href,
       );
+      const workflowUrls = EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES.map((name) => ({
+        name,
+        url: pathToFileURL(path.join(packageRoot, CURATED_PACKAGE_WORKFLOW_PATHS[name])).href,
+      }));
       const loadScript = `for (const url of ${JSON.stringify(entrypointUrls)}) {
         const loaded = await import(url);
         if (typeof loaded.default !== "function") throw new Error(\`Missing default extension export: \${url}\`);
+      }
+      for (const workflow of ${JSON.stringify(workflowUrls)}) {
+        const loaded = await import(workflow.url);
+        if (typeof loaded.default !== "function") throw new Error(\`Missing workflow export: \${workflow.url}\`);
+        if (loaded.meta?.name !== workflow.name) throw new Error(\`Wrong workflow name: \${workflow.url}\`);
       }`;
 
       execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", loadScript], {

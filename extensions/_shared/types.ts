@@ -44,15 +44,23 @@ export const OUTPUT_DEFAULTS = {
   subagentSummaryBytes: 16 * 1024,
 } as const;
 
-export interface PlanTask { index: number; text: string; status: "pending" | "in_progress" | "done" | "blocked" }
-export interface ExtractedPlan { tasks: PlanTask[]; raw: string }
+export interface PlanTask {
+  index: number;
+  text: string;
+  status: "pending" | "in_progress" | "done" | "blocked";
+}
+export interface ExtractedPlan {
+  tasks: PlanTask[];
+  raw: string;
+}
 
-export type AgentSource = "bundled" | "project" | "user";
+export type AgentSource = "bundled" | "project" | "user" | "workflow";
 export type PermissionMode = "inherit-parent" | "agent-defined" | "restricted";
 export type WorkspaceMode = "project" | "worktree" | "temporary-worktree";
 export type AgentEvidenceMode = "none" | "warn" | "require";
 export type AgentClaimsWithoutEvidence = "off" | "warn";
-export type CompletionEvidence = "reasoning_only" | "evidence_backed" | "missing_expected_evidence" | "claims_without_evidence";
+export type CompletionEvidence =
+  "reasoning_only" | "evidence_backed" | "missing_expected_evidence" | "claims_without_evidence";
 export interface AgentEvidencePolicy {
   mode: AgentEvidenceMode;
   requireAnyToolCall?: boolean;
@@ -99,7 +107,13 @@ export interface AgentDefinition {
 }
 
 export type CatalogKind = "skill" | "prompt" | "extension" | "mcp";
-export interface CatalogEntry { kind: CatalogKind; id: string; manifest: CatalogManifest; sourcePath: string; hash: string }
+export interface CatalogEntry {
+  kind: CatalogKind;
+  id: string;
+  manifest: CatalogManifest;
+  sourcePath: string;
+  hash: string;
+}
 export interface CatalogManifest {
   name: string;
   version: string;

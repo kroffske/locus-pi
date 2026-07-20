@@ -49,14 +49,14 @@ Non-default role assignment не меняет session model или session effor
 
 ## Runtime capability ролей
 
-| Role | Capability | Реальный consumer |
-|---|---|---|
-| `DEFAULT` | `active · session + route fallback` | Current session action и последний fallback всех resolver chains. |
-| `AGENT` | `active · agents/workflows primary` | Default-loaded `agents` и workflow agent bridge. |
-| `TASK` | `fallback · agents/workflows` | Fallback после `AGENT` для тех же active consumers. |
-| `PLAN` | `dormant · beta prompt planning` | Только disabled beta `prompt-planning`; default-loaded consumer отсутствует. |
-| `SUMMARY` | `dormant · resolver only` | Resolver contract и tests; default-loaded consumer отсутствует. |
-| `SMOL` | `fallback-only · summary resolver` | Fallback в `SUMMARY → SMOL → DEFAULT`; active summary caller пока отсутствует. |
+| Role      | Capability                          | Реальный consumer                                                              |
+| --------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| `DEFAULT` | `active · session + route fallback` | Current session action и последний fallback всех resolver chains.              |
+| `AGENT`   | `active · agents/workflows primary` | Default-loaded `agents` и workflow agent bridge.                               |
+| `TASK`    | `fallback · agents/workflows`       | Fallback после `AGENT` для тех же active consumers.                            |
+| `PLAN`    | `dormant · beta prompt planning`    | Только disabled beta `prompt-planning`; default-loaded consumer отсутствует.   |
+| `SUMMARY` | `dormant · resolver only`           | Resolver contract и tests; default-loaded consumer отсутствует.                |
+| `SMOL`    | `fallback-only · summary resolver`  | Fallback в `SUMMARY → SMOL → DEFAULT`; active summary caller пока отсутствует. |
 
 Selector намеренно не выдаёт dormant/resolver-only role за полностью активную
 возможность. Полный source map записан в task-local consumer audit T-203.

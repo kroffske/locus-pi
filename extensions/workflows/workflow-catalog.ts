@@ -51,7 +51,11 @@ export interface WorkflowCatalogModel {
 
 export type WorkflowSourceReadState =
   | { kind: "ready"; row: WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow; path: string; source: string }
-  | { kind: "missing" | "shadowed" | "unreadable" | "legacy" | "invalid" | "tampered" | "stale"; row: WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow; message: string };
+  | {
+      kind: "missing" | "shadowed" | "unreadable" | "legacy" | "invalid" | "tampered" | "stale";
+      row: WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow;
+      message: string;
+    };
 
 export type WorkflowBrowserAction = "start" | "edit" | "review";
 
@@ -87,15 +91,17 @@ export function buildWorkflowCatalogModel(
   workingDirectory: string,
   query?: string,
 ): WorkflowCatalogModel {
-  const catalogRows: WorkflowCatalogCurrentRow[] = listWorkflowCatalogTargets(projectRoot, workingDirectory).map((target) => ({
-    kind: "current",
-    target,
-    name: target.ref,
-    source: target.source,
-    sourceLabel: workflowSourceLabel(target.source),
-    originPath: target.path,
-    description: readWorkflowMetaDescription(target.path),
-  }));
+  const catalogRows: WorkflowCatalogCurrentRow[] = listWorkflowCatalogTargets(projectRoot, workingDirectory).map(
+    (target) => ({
+      kind: "current",
+      target,
+      name: target.ref,
+      source: target.source,
+      sourceLabel: workflowSourceLabel(target.source),
+      originPath: target.path,
+      description: readWorkflowMetaDescription(target.path),
+    }),
+  );
   const recentRows = recentWorkflowRows(projectRoot);
   const matches = (row: WorkflowCatalogRow): boolean => workflowCatalogRowMatches(row, query);
   return {
@@ -129,9 +135,7 @@ export function buildWorkflowCatalogBlockFromModel(
     return {
       type: "VIEW",
       subject: "Workflow catalog",
-      primary: query === undefined
-        ? `${totalCurrent} runnable workflow(s).`
-        : `Matches for ${JSON.stringify(query)}.`,
+      primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
       body: compactBody.lines,
       metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] History"],
       controls: ["Run: /workflows run <name|path> · Filter: /workflows list <query>"],
@@ -139,17 +143,36 @@ export function buildWorkflowCatalogBlockFromModel(
   }
 
   const body: string[] = [];
-  appendWorkflowCatalogGroup(body, "[R] Run history", filteredRecent, query === undefined ? "none yet" : "no recent matches", true);
-  appendWorkflowCatalogGroup(body, "[P] Project", rowsForSource(filteredCatalog, "project"), query === undefined ? "none found" : "no matches");
-  appendWorkflowCatalogGroup(body, "[U] User", rowsForSource(filteredCatalog, "personal"), query === undefined ? "none found" : "no matches");
-  appendWorkflowCatalogGroup(body, "[PKG] Package", rowsForSource(filteredCatalog, "package"), query === undefined ? "none installed" : "no matches");
+  appendWorkflowCatalogGroup(
+    body,
+    "[R] Run history",
+    filteredRecent,
+    query === undefined ? "none yet" : "no recent matches",
+    true,
+  );
+  appendWorkflowCatalogGroup(
+    body,
+    "[P] Project",
+    rowsForSource(filteredCatalog, "project"),
+    query === undefined ? "none found" : "no matches",
+  );
+  appendWorkflowCatalogGroup(
+    body,
+    "[U] User",
+    rowsForSource(filteredCatalog, "personal"),
+    query === undefined ? "none found" : "no matches",
+  );
+  appendWorkflowCatalogGroup(
+    body,
+    "[PKG] Package",
+    rowsForSource(filteredCatalog, "package"),
+    query === undefined ? "none installed" : "no matches",
+  );
 
   return {
     type: "VIEW",
     subject: "Workflow catalog",
-    primary: query === undefined
-      ? `${totalCurrent} runnable workflow(s).`
-      : `Matches for ${JSON.stringify(query)}.`,
+    primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
     body,
     metadata: [WORKFLOW_SOURCE_LEGEND],
     controls: [
@@ -166,8 +189,9 @@ export function readSelectedWorkflowSource(
   projectRoot: string,
   workingDirectory: string,
 ): WorkflowSourceReadState {
-  const current = listWorkflowCatalogTargets(projectRoot, workingDirectory)
-    .find((target) => target.ref === selected.target.ref);
+  const current = listWorkflowCatalogTargets(projectRoot, workingDirectory).find(
+    (target) => target.ref === selected.target.ref,
+  );
   if (current === undefined) {
     return {
       kind: "missing",
@@ -219,21 +243,11 @@ export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string
       request = `Review the recorded workflow identity for ${identity.join(", ")}; diagnose why the immutable snapshot is unavailable.`;
     }
   }
-  return [
-    `Request: ${request}`,
-    "Skill: $pi-workflow-authoring",
-    "",
-    "Additional instructions:",
-    "",
-  ].join("\n");
+  return [`Request: ${request}`, "Skill: $pi-workflow-authoring", "", "Additional instructions:", ""].join("\n");
 }
 
 /** Passive source-backed explanation. It reads static metadata but never imports workflow code. */
-export function buildWorkflowInfoBlock(
-  projectRoot: string,
-  workingDirectory: string,
-  name?: string,
-): OperatorBlock {
+export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: string, name?: string): OperatorBlock {
   const model = buildWorkflowCatalogModel(projectRoot, workingDirectory);
   const requested = name?.trim();
   if (requested !== undefined && requested !== "") {
@@ -268,7 +282,12 @@ export function buildWorkflowInfoBlock(
     primary: "Passive workflow resolver, DSL, agent, and model contract.",
     body: workflowContractLines(projectRoot, workingDirectory),
     metadata: [WORKFLOW_SOURCE_LEGEND, "No workflow JavaScript was imported or evaluated."],
-    controls: ["Browse: /workflows list [query]", "Inspect one: /workflows info <exact-name>", "Run: /workflows run <name|path> [input]", "History: /workflows status [runId]"],
+    controls: [
+      "Browse: /workflows list [query]",
+      "Inspect one: /workflows info <exact-name>",
+      "Run: /workflows run <name|path> [input]",
+      "History: /workflows status [runId]",
+    ],
   };
 }
 
@@ -279,8 +298,10 @@ function workflowContractLines(projectRoot: string, workingDirectory: string): s
     "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
     "agent models: opts.model selects the child-session model for that agent() call; otherwise the active Pi session model is passed to the child executor; agent frontmatter and saved model-role assignments remain routing/display metadata, not executor selection",
     "llm models: llm() is a direct one-shot model call with no child session or tools; opts.model overrides the active session model for that call",
-    "agents: agent() selects a discovered .agents catalog role; omitted agent uses role \"default\"; unknown roles fail explicitly",
-    "DSL: agent(), llm(), parallel(), pipeline(), phase(), log(), workflow()",
+    'agents: agent() returns exact non-empty child text; opts.agent selects a discovered catalog role, omitted agent uses role "default", and opts.readOnly can impose a host-enforced per-call read boundary',
+    "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
+    "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
+    "DSL: agent(), llm(), parallel(), pipeline(), phase(), log(), workflow(), promptFile(), workspace()",
     `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then curated Package names ${CURATED_PACKAGE_WORKFLOW_NAMES.join(", ")}`,
     "registration: project and user directories are scanned on every call; Package files are not registered by existence and require an explicit curated-list change",
   ];
@@ -319,9 +340,21 @@ function compactWorkflowCatalogBody(
     history?: boolean;
   }> = [
     { label: "[R]", rows: recentRows, empty: query === undefined ? "none yet" : "no recent matches", history: true },
-    { label: "[P]", rows: rowsForSource([...catalogRows], "project"), empty: query === undefined ? "none found" : "no matches" },
-    { label: "[U]", rows: rowsForSource([...catalogRows], "personal"), empty: query === undefined ? "none found" : "no matches" },
-    { label: "[PKG]", rows: rowsForSource([...catalogRows], "package"), empty: query === undefined ? "none installed" : "no matches" },
+    {
+      label: "[P]",
+      rows: rowsForSource([...catalogRows], "project"),
+      empty: query === undefined ? "none found" : "no matches",
+    },
+    {
+      label: "[U]",
+      rows: rowsForSource([...catalogRows], "personal"),
+      empty: query === undefined ? "none found" : "no matches",
+    },
+    {
+      label: "[PKG]",
+      rows: rowsForSource([...catalogRows], "package"),
+      empty: query === undefined ? "none installed" : "no matches",
+    },
   ];
   let hidden = 0;
   const populated = groups.filter((group) => group.rows.length > 0);
@@ -384,9 +417,10 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
       source: target.source,
       sourceLabel: workflowSourceLabel(target.source),
       originPath: snapshot.path ?? `(snapshot unavailable for run ${runId})`,
-      description: snapshot.kind === "ready"
-        ? staticWorkflowMetaDescription(snapshot.source) ?? HISTORICAL_WORKFLOW_DESCRIPTION
-        : HISTORICAL_WORKFLOW_DESCRIPTION,
+      description:
+        snapshot.kind === "ready"
+          ? (staticWorkflowMetaDescription(snapshot.source) ?? HISTORICAL_WORKFLOW_DESCRIPTION)
+          : HISTORICAL_WORKFLOW_DESCRIPTION,
     });
     if (recent.length >= RECENT_WORKFLOW_LIMIT) break;
   }
@@ -399,9 +433,9 @@ function staticWorkflowMetaDescription(source: string): string | undefined {
     for (const statement of root.findAll("export const meta = $META")) {
       const value = exportedMetaObject(statement);
       if (value === undefined) continue;
-      const descriptionPair = value.children().find((child) =>
-        child.kind() === "pair" && staticObjectKey(child.field("key")) === "description"
-      );
+      const descriptionPair = value
+        .children()
+        .find((child) => child.kind() === "pair" && staticObjectKey(child.field("key")) === "description");
       const description = staticStringValue(descriptionPair?.field("value"));
       if (description !== undefined && description.trim() !== "") {
         return compactCatalogText(description.replace(/\s+/gu, " ").trim());
@@ -414,11 +448,13 @@ function staticWorkflowMetaDescription(source: string): string | undefined {
 }
 
 function sameRunSnapshotIdentity(left: WorkflowRunScriptSnapshot, right: WorkflowRunScriptSnapshot): boolean {
-  return left.runId === right.runId
-    && samePersistedTarget(left.target, right.target)
-    && left.path === right.path
-    && left.sha256 === right.sha256
-    && left.identityCoverage === right.identityCoverage;
+  return (
+    left.runId === right.runId &&
+    samePersistedTarget(left.target, right.target) &&
+    left.path === right.path &&
+    left.sha256 === right.sha256 &&
+    left.identityCoverage === right.identityCoverage
+  );
 }
 
 function samePersistedTarget(
@@ -442,9 +478,9 @@ function readBoundedSource(file: string): string {
 
 function exportedMetaObject(statement: SgNode): SgNode | undefined {
   const declaration = statement.children().find((child) => child.kind() === "lexical_declaration");
-  const variable = declaration?.children().find((child) =>
-    child.kind() === "variable_declarator" && child.field("name")?.text() === "meta"
-  );
+  const variable = declaration
+    ?.children()
+    .find((child) => child.kind() === "variable_declarator" && child.field("name")?.text() === "meta");
   const value = variable?.field("value");
   return value?.kind() === "object" ? value : undefined;
 }
@@ -504,7 +540,9 @@ function appendWorkflowCatalogGroup(
   }
   for (const row of rows) {
     const historyBadge = history ? "[R] " : "";
-    out.push(`  ${historyBadge}${workflowSourceBadge(row.source)} ${row.name} · ${row.description} · ${row.originPath}`);
+    out.push(
+      `  ${historyBadge}${workflowSourceBadge(row.source)} ${row.name} · ${row.description} · ${row.originPath}`,
+    );
   }
 }
 
@@ -533,10 +571,12 @@ function compactWorkflowCatalogLine(value: string): string {
 }
 
 function sameResolvedTarget(left: ResolvedWorkflowTarget, right: ResolvedWorkflowTarget): boolean {
-  return left.kind === right.kind
-    && left.ref === right.ref
-    && left.source === right.source
-    && path.resolve(left.path) === path.resolve(right.path);
+  return (
+    left.kind === right.kind &&
+    left.ref === right.ref &&
+    left.source === right.source &&
+    path.resolve(left.path) === path.resolve(right.path)
+  );
 }
 
 function errorMessage(error: unknown): string {

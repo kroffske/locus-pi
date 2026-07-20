@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/_shared/workflow-runner.js";
-import { WORKFLOW_LIVE_WIDGET_KEY, WorkflowProgressComponent, WorkflowTextComponent, installWorkflowProgress, installWorkflowTextWidget, renderAgentLiveRowsText } from "../../../extensions/workflows/progress-widget.js";
+import {
+  WORKFLOW_LIVE_WIDGET_KEY,
+  WorkflowProgressComponent,
+  WorkflowTextComponent,
+  installWorkflowProgress,
+  installWorkflowTextWidget,
+  renderAgentLiveRowsText,
+} from "../../../extensions/workflows/progress-widget.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
 import { fleetMenuState } from "../../../extensions/_shared/fleet-menu.js";
 import { workflowAgentLiveRowId } from "../../../extensions/_shared/workflow-journal.js";
@@ -30,7 +37,11 @@ function writeWorkflowRun(root: string, runId: string): void {
     { ts: "2026-01-01T00:00:01.000Z", runId, kind: "error", message: "failed proof" },
   ];
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, "journal.ndjson"), journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+  writeFileSync(
+    path.join(dir, "journal.ndjson"),
+    journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  );
   writeFileSync(path.join(dir, "result.json"), JSON.stringify({ runId, ok: false, journal }), "utf8");
 }
 
@@ -50,9 +61,29 @@ describe("workflow progress widget", () => {
     component.push(line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
     component.push(line({ kind: "log", message: "starting", ts: 2, runId: "r1" }));
     component.push(line({ kind: "agent_start", agent: "explore", label: "note:explore", ts: 3, runId: "r1" }));
-    component.push(line({ kind: "agent_end", agent: "explore", label: "note:explore", status: "failed", durationMs: 22247, ts: 25, runId: "r1" }));
+    component.push(
+      line({
+        kind: "agent_end",
+        agent: "explore",
+        label: "note:explore",
+        status: "failed",
+        durationMs: 22247,
+        ts: 25,
+        runId: "r1",
+      }),
+    );
     component.push(line({ kind: "agent_start", agent: "quick_task", label: "note:quick", ts: 26, runId: "r1" }));
-    component.push(line({ kind: "agent_end", agent: "quick_task", label: "note:quick", status: "completed", durationMs: 4346, ts: 30, runId: "r1" }));
+    component.push(
+      line({
+        kind: "agent_end",
+        agent: "quick_task",
+        label: "note:quick",
+        status: "completed",
+        durationMs: 4346,
+        ts: 30,
+        runId: "r1",
+      }),
+    );
 
     const rendered = component.render(100);
     const text = rendered.join("\n");
@@ -76,7 +107,15 @@ describe("workflow progress widget", () => {
       const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
       const component = new WorkflowProgressComponent(tui, {}, "cancel-smoke", "cancel-r1");
       const start = line({ kind: "agent_start", agent: "reviewer", label: "sleep 60", ts: 1, runId: "cancel-r1" });
-      const end = line({ kind: "agent_end", agent: "reviewer", label: "sleep 60", status: "cancelled", durationMs: 60_000, ts: 2, runId: "cancel-r1" });
+      const end = line({
+        kind: "agent_end",
+        agent: "reviewer",
+        label: "sleep 60",
+        status: "cancelled",
+        durationMs: 60_000,
+        ts: 2,
+        runId: "cancel-r1",
+      });
 
       component.push(start);
       component.render(120); // Seeds the exact row selected by the shared fleet menu.
@@ -91,7 +130,10 @@ describe("workflow progress widget", () => {
       expect(text).toContain("✓ child status reviewer cancelled");
       expect(text).not.toMatch(/[⠿⠻⠽⠾]/u);
       expect(text).not.toContain("stop");
-      expect(agentLiveStore.rows.get(workflowAgentLiveRowId(end))).toMatchObject({ status: "cancelled", currentTools: [] });
+      expect(agentLiveStore.rows.get(workflowAgentLiveRowId(end))).toMatchObject({
+        status: "cancelled",
+        currentTools: [],
+      });
     } finally {
       fleetMenuState.setFocused(false);
       fleetMenuState.setVisibleRows([]);
@@ -163,7 +205,11 @@ describe("workflow progress widget", () => {
 
       expect(rendered).not.toContain("reviewer (review-step)");
       // T-191: `⠿ <petname>  SDK child session …` — no `[Working]`, no `on task`.
-      expect(rendered).toMatch(/⠿ \w+\s+SDK child session/);
+      // Assert the petname the store actually assigned: it is derived from a
+      // time-based row id and may carry a `-2`, `-3`, … collision suffix, so any
+      // guessed pattern is a flake waiting to happen.
+      expect(child.displayName).toBeDefined();
+      expect(rendered).toContain(`⠿ ${child.displayName}  SDK child session`);
       expect(rendered).not.toContain("[Working]");
       expect(rendered).not.toContain("on task");
       expect(rendered).not.toContain("[current task]");
@@ -177,18 +223,29 @@ describe("workflow progress widget", () => {
     try {
       const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 260 } };
       const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "rich-r1");
-      component.push(line({ kind: "group_start", groupId: "parallel-1", groupKind: "parallel", groupTotal: 2, ts: 1, runId: "rich-r1" }));
-      component.push(line({
-        kind: "agent_start",
-        agent: "reviewer",
-        label: "review-step",
-        model: "test/strong",
-        thinking: "high",
-        groupId: "parallel-1",
-        groupKind: "parallel",
-        ts: 2,
-        runId: "rich-r1",
-      }));
+      component.push(
+        line({
+          kind: "group_start",
+          groupId: "parallel-1",
+          groupKind: "parallel",
+          groupTotal: 2,
+          ts: 1,
+          runId: "rich-r1",
+        }),
+      );
+      component.push(
+        line({
+          kind: "agent_start",
+          agent: "reviewer",
+          label: "review-step",
+          model: "test/strong",
+          thinking: "high",
+          groupId: "parallel-1",
+          groupKind: "parallel",
+          ts: 2,
+          runId: "rich-r1",
+        }),
+      );
       const parentRowId = workflowAgentLiveRowId({ runId: "rich-r1", agent: "reviewer", label: "review-step" });
       const child = agentLiveStore.begin({
         parentRowId,
@@ -202,45 +259,51 @@ describe("workflow progress widget", () => {
       agentLiveStore.patch(child.id, {
         status: "working",
         currentTools: ["read"],
-        currentToolArgs: "{\"file\":\"README.md\"}",
+        currentToolArgs: '{"file":"README.md"}',
         turnCount: 1,
         tokenCount: { input: 7, output: 8 },
       });
-      component.push(line({
-        kind: "llm_start",
-        label: "classify",
-        model: "test/fast",
-        thinking: "low",
-        groupId: "parallel-1",
-        groupKind: "parallel",
-        ts: 3,
-        runId: "rich-r1",
-      }));
-      component.push(line({
-        kind: "llm_end",
-        label: "classify",
-        status: "completed",
-        model: "test/fast",
-        thinking: "low",
-        usage: { input: 2, output: 3, totalTokens: 5, costTotal: 0 },
-        durationMs: 123,
-        groupId: "parallel-1",
-        groupKind: "parallel",
-        ts: 4,
-        runId: "rich-r1",
-      }));
-      component.push(line({
-        kind: "group_end",
-        status: "failed",
-        groupId: "parallel-1",
-        groupKind: "parallel",
-        groupTotal: 2,
-        groupCompleted: 1,
-        groupFailed: 1,
-        durationMs: 456,
-        ts: 5,
-        runId: "rich-r1",
-      }));
+      component.push(
+        line({
+          kind: "llm_start",
+          label: "classify",
+          model: "test/fast",
+          thinking: "low",
+          groupId: "parallel-1",
+          groupKind: "parallel",
+          ts: 3,
+          runId: "rich-r1",
+        }),
+      );
+      component.push(
+        line({
+          kind: "llm_end",
+          label: "classify",
+          status: "completed",
+          model: "test/fast",
+          thinking: "low",
+          usage: { input: 2, output: 3, totalTokens: 5, costTotal: 0 },
+          durationMs: 123,
+          groupId: "parallel-1",
+          groupKind: "parallel",
+          ts: 4,
+          runId: "rich-r1",
+        }),
+      );
+      component.push(
+        line({
+          kind: "group_end",
+          status: "failed",
+          groupId: "parallel-1",
+          groupKind: "parallel",
+          groupTotal: 2,
+          groupCompleted: 1,
+          groupFailed: 1,
+          durationMs: 456,
+          ts: 5,
+          runId: "rich-r1",
+        }),
+      );
 
       const rendered = component.render(260).join("\n");
 
@@ -291,9 +354,34 @@ describe("workflow progress widget", () => {
     const component = new WorkflowProgressComponent(tui, {}, "a-very-long-script-reference-name", "run-1234567890");
 
     component.push(line({ kind: "phase", phase: "a-long-phase-name-that-overflows", ts: 1, runId: "run-1234567890" }));
-    component.push(line({ kind: "agent_start", agent: "an_agent_with_a_long_name", label: "a-long-label-too", ts: 2, runId: "run-1234567890" }));
-    component.push(line({ kind: "log", message: "a log line whose message far exceeds forty columns of width", ts: 3, runId: "run-1234567890" }));
-    component.push(line({ kind: "agent_end", agent: "an_agent_with_a_long_name", label: "a-long-label-too", status: "completed", durationMs: 1234, ts: 4, runId: "run-1234567890" }));
+    component.push(
+      line({
+        kind: "agent_start",
+        agent: "an_agent_with_a_long_name",
+        label: "a-long-label-too",
+        ts: 2,
+        runId: "run-1234567890",
+      }),
+    );
+    component.push(
+      line({
+        kind: "log",
+        message: "a log line whose message far exceeds forty columns of width",
+        ts: 3,
+        runId: "run-1234567890",
+      }),
+    );
+    component.push(
+      line({
+        kind: "agent_end",
+        agent: "an_agent_with_a_long_name",
+        label: "a-long-label-too",
+        status: "completed",
+        durationMs: 1234,
+        ts: 4,
+        runId: "run-1234567890",
+      }),
+    );
 
     for (const renderedLine of component.render(40)) {
       expect(renderedLine.length).toBeLessThanOrEqual(40);
@@ -305,8 +393,12 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "provenance-r1");
 
-    component.push(line({ kind: "log", source: "script", message: "compare candidates", ts: 1, runId: "provenance-r1" }));
-    component.push(line({ kind: "log", source: "runtime", message: "[workflow:enter]", ts: 2, runId: "provenance-r1" }));
+    component.push(
+      line({ kind: "log", source: "script", message: "compare candidates", ts: 1, runId: "provenance-r1" }),
+    );
+    component.push(
+      line({ kind: "log", source: "runtime", message: "[workflow:enter]", ts: 2, runId: "provenance-r1" }),
+    );
     component.push(line({ kind: "log", message: "old journal line", ts: 3, runId: "provenance-r1" }));
 
     const text = component.render(100).join("\n");
@@ -334,7 +426,9 @@ describe("workflow progress widget", () => {
       expect(tui.requestRender.mock.calls.length).toBeGreaterThan(afterStart);
 
       // Agent ends -> timer retires -> further wall-clock ticks add no more renders.
-      component.push(line({ kind: "agent_end", agent: "slow", status: "completed", durationMs: 3000, ts: 4, runId: "r1" }));
+      component.push(
+        line({ kind: "agent_end", agent: "slow", status: "completed", durationMs: 3000, ts: 4, runId: "r1" }),
+      );
       const afterEnd = tui.requestRender.mock.calls.length;
       vi.advanceTimersByTime(5000);
       expect(tui.requestRender.mock.calls.length).toBe(afterEnd);
@@ -385,9 +479,14 @@ describe("workflow progress widget", () => {
 
     component.finish({ ok: false, error: "Pi SDK host: connection refused" });
 
-    expect(component.render(100).some((renderedLine) =>
-      renderedLine.includes("failed") || renderedLine.includes("error") || renderedLine.includes("FAIL"),
-    )).toBe(true);
+    expect(
+      component
+        .render(100)
+        .some(
+          (renderedLine) =>
+            renderedLine.includes("failed") || renderedLine.includes("error") || renderedLine.includes("FAIL"),
+        ),
+    ).toBe(true);
   });
 
   it("renders exact semantic failure rows when no technical error exists", () => {
@@ -439,7 +538,10 @@ describe("workflow progress widget", () => {
 
   it("chooses a deterministic semantic completion without exposing arbitrary JSON", () => {
     const cases: Array<{ result: unknown; expected: string }> = [
-      { result: { summary: "  candidates\n agree  ", verdict: "ignored", secret: { raw: true } }, expected: "✓ candidates agree" },
+      {
+        result: { summary: "  candidates\n agree  ", verdict: "ignored", secret: { raw: true } },
+        expected: "✓ candidates agree",
+      },
       { result: { summary: "", verdict: "accepted", secret: { raw: true } }, expected: "✓ accepted" },
       { result: { verdict: false, secret: { raw: true } }, expected: "✓ false" },
       { result: "  plain result  ", expected: "✓ plain result" },
@@ -476,8 +578,20 @@ describe("workflow progress widget", () => {
   it("renders the REQ-004 `└ <verb> · <gist>` action sub-line beneath a row while a tool is active (T-196)", () => {
     agentLiveStore.reset();
     try {
-      agentLiveStore.begin({ id: "workflow:dedupe-r1:reviewer:step:smoke", agentName: "reviewer", label: "reviewer (step)", isolated: false, noMcp: false });
-      const child = agentLiveStore.begin({ parentRowId: "workflow:dedupe-r1:reviewer:step:smoke", agentName: "reviewer", label: "SDK child session", isolated: false, noMcp: false });
+      agentLiveStore.begin({
+        id: "workflow:dedupe-r1:reviewer:step:smoke",
+        agentName: "reviewer",
+        label: "reviewer (step)",
+        isolated: false,
+        noMcp: false,
+      });
+      const child = agentLiveStore.begin({
+        parentRowId: "workflow:dedupe-r1:reviewer:step:smoke",
+        agentName: "reviewer",
+        label: "SDK child session",
+        isolated: false,
+        noMcp: false,
+      });
       agentLiveStore.patch(child.id, { status: "working", currentTools: [], stepCount: 1 });
 
       // «thinking» kind (no active tool): still no sub-line, never the old `[current task]`.
@@ -488,7 +602,10 @@ describe("workflow progress widget", () => {
 
       // Tool active → a `└ <verb> · <gist>` sub-line appears (bash → command-head),
       // with no raw arg-soup (`{`) and no old `tool=`/`[current task]` markers.
-      agentLiveStore.patch(child.id, { currentTools: ["bash"], currentToolArgs: '{"command":"npm test -- sums.spec"}' });
+      agentLiveStore.patch(child.id, {
+        currentTools: ["bash"],
+        currentToolArgs: '{"command":"npm test -- sums.spec"}',
+      });
       const active = renderAgentLiveRowsText();
       expect(active).toContain("└ bash · npm test");
       expect(active).not.toContain("[current task]");
@@ -549,7 +666,14 @@ describe("workflow progress widget", () => {
     harness.ctx.hasUI = true;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-1", runDir: "/tmp/run-1", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-1/result.json" } });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-1",
+      runDir: "/tmp/run-1",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
+    });
 
     try {
       await handler("run live-smoke hello", harness.ctx);
@@ -569,7 +693,14 @@ describe("workflow progress widget", () => {
     harness.ctx.ui.select = undefined as unknown as typeof harness.ctx.ui.select;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
-    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({ runId: "run-2", runDir: "/tmp/run-2", ok: true, result: { ok: true }, journal: [], resultPersistence: { ok: true, path: "/tmp/run-2/result.json" } });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-2",
+      runDir: "/tmp/run-2",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-2/result.json" },
+    });
 
     try {
       await handler("run live-smoke hello", harness.ctx);
@@ -636,7 +767,10 @@ describe("workflow progress widget", () => {
           const payload = harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY);
           expect(typeof payload).toBe("function");
           const stubTui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 220 } };
-          const component = (payload as (tui: typeof stubTui, theme: unknown) => WorkflowProgressComponent)(stubTui, {});
+          const component = (payload as (tui: typeof stubTui, theme: unknown) => WorkflowProgressComponent)(
+            stubTui,
+            {},
+          );
           text = component.render(220).join("\n");
         } else if (surface === "rpc") {
           text = harness.widgets.get(WORKFLOW_LIVE_WIDGET_KEY) ?? "";
@@ -671,7 +805,7 @@ describe("workflow progress widget", () => {
       workflowsExt(harness.pi);
 
       const result = await runTool(harness, "workflow", { scriptPath: "silent.workflow.mjs" });
-      const text = result.content.map((item) => item.type === "text" ? item.text : "").join("\n");
+      const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
 
       expect(text).toContain("✓ workflow silent.workflow.mjs finished · tool-ok");
       expect(text).not.toContain("rawSecret");
@@ -697,17 +831,13 @@ describe("workflow progress widget", () => {
   it("projects a non-JSON-safe trusted-file result as failure through tool, status, and result.json", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-non-json-tool-"));
     try {
-      writeFileSync(
-        path.join(root, "unsafe.workflow.mjs"),
-        "export default function() { return 42n; }\n",
-        "utf8",
-      );
+      writeFileSync(path.join(root, "unsafe.workflow.mjs"), "export default function() { return 42n; }\n", "utf8");
       const harness = createHarness(root);
       harness.ctx.hasUI = true;
       workflowsExt(harness.pi);
 
       const result = await runTool(harness, "workflow", { scriptPath: "unsafe.workflow.mjs" });
-      const text = result.content.map((item) => item.type === "text" ? item.text : "").join("\n");
+      const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
 
       expect(result.isError).toBe(true);
       expect(text).toContain("✗ workflow unsafe.workflow.mjs failed");
@@ -749,7 +879,7 @@ describe("workflow progress widget", () => {
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue(failed);
     try {
       const result = await runTool(harness, "workflow", { scriptPath: "persistence.workflow.mjs" });
-      const text = result.content.map((item) => item.type === "text" ? item.text : "").join("\n");
+      const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
 
       expect(result.isError).toBe(true);
       expect(text.match(/Workflow result was not persisted: blocked/gu)).toHaveLength(1);
@@ -775,7 +905,7 @@ describe("workflow progress widget", () => {
     const toolSpy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue(failed);
     try {
       const result = await runTool(toolHarness, "workflow", { scriptPath: "semantic.workflow.mjs" });
-      const text = result.content.map((item) => item.type === "text" ? item.text : "").join("\n");
+      const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
       expect(result.isError).toBe(true);
       expect(text).toContain("Acceptance remains open");
       expect(text).toContain("R-CODE, R-GIT");
@@ -837,10 +967,37 @@ describe("workflow progress widget", () => {
         {},
       );
       const ownedRowId = `workflow:${component.runId}:group:test`;
-      agentLiveStore.begin({ id: ownedRowId, agentName: "workflow-group", label: "test", groupKind: "parallel", isolated: false, noMcp: false });
-      agentLiveStore.begin({ id: "agent-live-unlabelled", parentRowId: ownedRowId, agentName: "task", label: "child", isolated: false, noMcp: false });
-      agentLiveStore.begin({ id: "agent-live-grandchild", parentRowId: "agent-live-unlabelled", agentName: "task", label: "grandchild", isolated: false, noMcp: false });
-      agentLiveStore.begin({ id: "unrelated-row", agentName: "task", label: "other work", isolated: false, noMcp: false });
+      agentLiveStore.begin({
+        id: ownedRowId,
+        agentName: "workflow-group",
+        label: "test",
+        groupKind: "parallel",
+        isolated: false,
+        noMcp: false,
+      });
+      agentLiveStore.begin({
+        id: "agent-live-unlabelled",
+        parentRowId: ownedRowId,
+        agentName: "task",
+        label: "child",
+        isolated: false,
+        noMcp: false,
+      });
+      agentLiveStore.begin({
+        id: "agent-live-grandchild",
+        parentRowId: "agent-live-unlabelled",
+        agentName: "task",
+        label: "grandchild",
+        isolated: false,
+        noMcp: false,
+      });
+      agentLiveStore.begin({
+        id: "unrelated-row",
+        agentName: "task",
+        label: "other work",
+        isolated: false,
+        noMcp: false,
+      });
       agentLiveStore.patch(ownedRowId, { status: "done" });
       agentLiveStore.patch("agent-live-unlabelled", { status: "done", currentTools: ["bash"] });
       agentLiveStore.patch("agent-live-grandchild", { status: "done", currentTools: ["read"] });
@@ -858,8 +1015,16 @@ describe("workflow progress widget", () => {
       expect(persisted).toHaveLength(1);
       expect(persisted[0]).toContain("● workflow slow.workflow.mjs started");
       expect(persisted[0]).toContain("✓ workflow slow.workflow.mjs finished · completed");
-      expect(harness.sentMessages.every((entry) => entry.message.customType === "locus-workflow-event" && entry.message.display === true)).toBe(true);
-      expect(harness.sentMessages.every((entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined)).toBe(true);
+      expect(
+        harness.sentMessages.every(
+          (entry) => entry.message.customType === "locus-workflow-event" && entry.message.display === true,
+        ),
+      ).toBe(true);
+      expect(
+        harness.sentMessages.every(
+          (entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined,
+        ),
+      ).toBe(true);
     } finally {
       agentLiveStore.reset();
       rmSync(root, { recursive: true, force: true });
@@ -941,7 +1106,14 @@ describe("workflow progress widget", () => {
       { ts: "2026-01-01T00:00:01.000Z", runId, kind: "log", source: "runtime", message: "[workflow:exit]" },
       { ts: "2026-01-01T00:00:02.000Z", runId, kind: "log", message: "old journal line" },
       { ts: "2026-01-01T00:00:03.000Z", runId, kind: "agent_start", agent: "reviewer", label: "check" },
-      { ts: "2026-01-01T00:00:04.000Z", runId, kind: "agent_end", agent: "reviewer", label: "check", status: "completed" },
+      {
+        ts: "2026-01-01T00:00:04.000Z",
+        runId,
+        kind: "agent_end",
+        agent: "reviewer",
+        label: "check",
+        status: "completed",
+      },
       { ts: "2026-01-01T00:00:05.000Z", runId, kind: "llm_start", label: "classify" },
       {
         ts: "2026-01-01T00:00:06.000Z",
@@ -955,7 +1127,11 @@ describe("workflow progress widget", () => {
     ];
     try {
       mkdirSync(runDir, { recursive: true });
-      writeFileSync(path.join(runDir, "journal.ndjson"), journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+      writeFileSync(
+        path.join(runDir, "journal.ndjson"),
+        journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        "utf8",
+      );
       writeFileSync(
         path.join(runDir, "result.json"),
         JSON.stringify({
@@ -1011,7 +1187,15 @@ describe("workflow progress widget", () => {
     const runId = "20260101-000001-marker";
     const journal: WorkflowJournalLine[] = [
       { ts: "2026-01-01T00:00:00.000Z", runId, kind: "agent_start", agent: "reviewer", label: "check" },
-      { ts: "2026-01-01T00:00:01.000Z", runId, kind: "agent_end", agent: "reviewer", label: "check", status: "completed", evidenceWarnings: ["weak proof"] },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        runId,
+        kind: "agent_end",
+        agent: "reviewer",
+        label: "check",
+        status: "completed",
+        evidenceWarnings: ["weak proof"],
+      },
       { ts: "2026-01-01T00:00:02.000Z", runId, kind: "error", message: "boom" },
     ];
     const spy = vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (options) => {
@@ -1040,7 +1224,9 @@ describe("workflow progress widget", () => {
       expect(persisted[0]).toContain("✓ agent ");
       expect(harness.notifications).toContain("⚠ agent evidence · weak proof");
       expect(harness.notificationEvents).toContainEqual({ message: "⚠ agent evidence · weak proof", level: "warning" });
-      expect(persisted.filter((message) => message.includes("boom"))).toEqual([expect.stringContaining("✗ workflow live-smoke failed · boom")]);
+      expect(persisted.filter((message) => message.includes("boom"))).toEqual([
+        expect.stringContaining("✗ workflow live-smoke failed · boom"),
+      ]);
       const finalFailure = harness.sentMessages.find((entry) => String(entry.message.content).includes("boom"));
       expect(finalFailure?.message.details).toMatchObject({ eventKind: "workflow_end", runId });
     } finally {
@@ -1146,7 +1332,11 @@ describe("workflow progress widget", () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;
 
-    installWorkflowTextWidget(harness.ctx, "workflows", Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
+    installWorkflowTextWidget(
+      harness.ctx,
+      "workflows",
+      Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"),
+    );
 
     const factory = harness.widgetPayloads.get("workflows") ?? harness.widgets.get("workflows");
     expect(typeof factory).toBe("function");

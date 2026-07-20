@@ -21,12 +21,17 @@ import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
-import type { WorkflowDsl, WorkflowJournalLine } from "./workflow-runtime.js";
+import type { WorkflowDsl, WorkflowJournalLine, WorkflowRuntime } from "./workflow-runtime.js";
 import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import { createWorkflowLlmRunner } from "./workflow-llm-bridge.js";
-import { newWorkflowRunId, workflowRunDir, createWorkflowJournalSink, readWorkflowRunSummary } from "./workflow-journal.js";
+import {
+  newWorkflowRunId,
+  workflowRunDir,
+  createWorkflowJournalSink,
+  readWorkflowRunSummary,
+} from "./workflow-journal.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import {
   prepareWorkflowResult,
@@ -43,6 +48,16 @@ import {
   workflowScriptExecutionPath,
   type WorkflowScriptIdentity,
 } from "./workflow-script-identity.js";
+import {
+  createWorkflowResourceLoader,
+  type WorkflowResourceEvidence,
+  type WorkflowResourceLoader,
+} from "./workflow-resources.js";
+import {
+  createWorkflowWorkspaceManager,
+  type WorkflowWorkspaceEvidence,
+  type WorkflowWorkspaceManager,
+} from "./workflow-worktree.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 
@@ -98,13 +113,15 @@ export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
   ok: boolean;
-  result: unknown;                   // detached JSON value or explicit diagnostic sentinel
+  result: unknown; // detached JSON value or explicit diagnostic sentinel
   resultDiagnostic?: WorkflowResultDiagnosticSentinel;
   resultPersistence: WorkflowResultPersistence;
   journal: WorkflowJournalLine[];
   error?: string;
   target?: ResolvedWorkflowTarget;
   scriptIdentity?: WorkflowScriptIdentity;
+  resourceEvidence?: WorkflowResourceEvidence[];
+  workspaceEvidence?: WorkflowWorkspaceEvidence[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
 }
@@ -120,12 +137,30 @@ export const CURATED_PACKAGE_WORKFLOW_NAMES = [
   "live-smoke",
   "llm-smoke",
   "requirements-grill",
+  "review",
+  "review-fix",
 ] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
+const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
+  "live-smoke": "live-smoke.workflow.mjs",
+  "llm-smoke": "llm-smoke.workflow.mjs",
+  "requirements-grill": "requirements-grill.workflow.mjs",
+  review: path.join("review", "review.workflow.mjs"),
+  "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),
+};
 
 /** Absolute path to this package's shipped workflow examples directory. */
 export function packagedExamplesDir(): string {
   return PACKAGED_EXAMPLES_DIR;
+}
+
+/** Absolute path to one explicitly curated Package workflow entry module. */
+export function packagedWorkflowPath(name: string): string {
+  if (!CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) {
+    throw new WorkflowNameNotFoundError(name);
+  }
+  const relativePath = CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS[name as (typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number]];
+  return path.join(PACKAGED_EXAMPLES_DIR, relativePath);
 }
 
 function hasPathSeparators(value: string): boolean {
@@ -134,8 +169,7 @@ function hasPathSeparators(value: string): boolean {
 
 function isPathWithinRoot(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
-  return relative === ""
-    || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function resolveConfinedScriptPath(scriptPath: string, projectRoot: string, displayRef = scriptPath): string {
@@ -175,11 +209,13 @@ const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
 function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDirectory: string): ResolvedWorkflowTarget {
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
     if (search.source === "package" && !CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) continue;
-    const candidate = path.join(search.directory, `${name}.workflow.mjs`);
+    const candidate =
+      search.source === "package" ? packagedWorkflowPath(name) : path.join(search.directory, `${name}.workflow.mjs`);
     if (existsSync(candidate)) {
-      const targetPath = search.source === "project"
-        ? resolveConfinedScriptPath(candidate, projectRoot, `${name}.workflow.mjs`)
-        : candidate;
+      const targetPath =
+        search.source === "project"
+          ? resolveConfinedScriptPath(candidate, projectRoot, `${name}.workflow.mjs`)
+          : candidate;
       return { kind: "name", ref: name, path: targetPath, source: search.source };
     }
   }
@@ -197,9 +233,10 @@ function workflowSearchDirectories(projectRoot: string, workingDirectory: string
   const currentRoot = path.resolve(projectRoot);
   const requestedWorkingDirectory = path.resolve(workingDirectory);
   const workingRelative = path.relative(currentRoot, requestedWorkingDirectory);
-  let current = workingRelative === "" || (!workingRelative.startsWith("..") && !path.isAbsolute(workingRelative))
-    ? requestedWorkingDirectory
-    : currentRoot;
+  let current =
+    workingRelative === "" || (!workingRelative.startsWith("..") && !path.isAbsolute(workingRelative))
+      ? requestedWorkingDirectory
+      : currentRoot;
 
   while (true) {
     for (const [first, second] of PROJECT_WORKFLOW_DIRS) {
@@ -216,7 +253,11 @@ function workflowSearchDirectories(projectRoot: string, workingDirectory: string
   return directories;
 }
 
-export function resolveWorkflowTarget(target: { name?: string; scriptPath?: string; script?: string }, projectRoot: string, workingDirectory?: string): ResolvedWorkflowTarget {
+export function resolveWorkflowTarget(
+  target: { name?: string; scriptPath?: string; script?: string },
+  projectRoot: string,
+  workingDirectory?: string,
+): ResolvedWorkflowTarget {
   const supplied = [target.name, target.scriptPath, target.script].filter((v) => v !== undefined);
   if (supplied.length !== 1) {
     throw new Error("Exactly one workflow target field is required: name, scriptPath, or script");
@@ -245,12 +286,30 @@ export function resolveWorkflowTarget(target: { name?: string; scriptPath?: stri
  * the same first-wins source precedence. Project and personal names are scanned;
  * Package names are filtered by the curated registry above.
  */
-export function listWorkflowCatalogTargets(projectRoot: string, workingDirectory = projectRoot): ResolvedWorkflowTarget[] {
+export function listWorkflowCatalogTargets(
+  projectRoot: string,
+  workingDirectory = projectRoot,
+): ResolvedWorkflowTarget[] {
   const targets = new Map<string, ResolvedWorkflowTarget>();
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
-    addCatalogDirectory(targets, search.directory, search.source);
+    if (search.source === "package") addCuratedPackageCatalogTargets(targets);
+    else addCatalogDirectory(targets, search.directory, search.source);
   }
   return [...targets.values()];
+}
+
+function addCuratedPackageCatalogTargets(targets: Map<string, ResolvedWorkflowTarget>): void {
+  const namesByEntryFilename = [...CURATED_PACKAGE_WORKFLOW_NAMES].sort((left, right) => {
+    const leftEntry = `${left}.workflow.mjs`;
+    const rightEntry = `${right}.workflow.mjs`;
+    return leftEntry < rightEntry ? -1 : leftEntry > rightEntry ? 1 : 0;
+  });
+  for (const name of namesByEntryFilename) {
+    if (targets.has(name)) continue;
+    const candidate = packagedWorkflowPath(name);
+    if (!existsSync(candidate)) continue;
+    targets.set(name, { kind: "name", ref: name, path: candidate, source: "package" });
+  }
 }
 
 function addCatalogDirectory(
@@ -309,9 +368,10 @@ export async function loadWorkflowScript(
   if (expectedSha256 !== undefined) {
     const afterImportSha256 = sha256WorkflowBytes(readFileSync(scriptPath));
     if (afterImportSha256 !== expectedSha256) {
-      const reason = executionSource === "snapshot"
-        ? "Workflow script snapshot hash mismatch during module import"
-        : "Workflow script changed during module import";
+      const reason =
+        executionSource === "snapshot"
+          ? "Workflow script snapshot hash mismatch during module import"
+          : "Workflow script changed during module import";
       throw new Error(`${reason}: expected ${expectedSha256}, got ${afterImportSha256}`);
     }
   }
@@ -322,7 +382,7 @@ async function importWorkflowModule(specifier: string): Promise<WorkflowScriptMo
   const importer = new Script("(value) => import(value)", {
     importModuleDynamically: vmConstants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
   }).runInThisContext() as (value: string) => Promise<unknown>;
-  return await importer(specifier) as WorkflowScriptModule;
+  return (await importer(specifier)) as WorkflowScriptModule;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +403,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const resumeFromRunId = opts.resumeFromRunId?.trim();
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
+  let resourceLoader: WorkflowResourceLoader | undefined;
+  let workspaceManager: WorkflowWorkspaceManager | undefined;
+  let runtime: WorkflowRuntime | undefined;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
   const preludeLines: WorkflowJournalLine[] = [];
   const emitPrelude = (line: WorkflowJournalLine): void => {
@@ -350,7 +413,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal.write(line);
     opts.onEvent?.(line);
   };
-  const resultMetadata = (): Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
+  const resultMetadata = ():
+    Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
     if (!hasResume) return {};
     return {
       resumeFromRunId: resumeFromRunId!,
@@ -363,13 +427,29 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   ];
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
+    let enrichedFields: RunResultFields = {
+      ...fields,
+      ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
+    };
+    if (workspaceManager !== undefined) {
+      try {
+        enrichedFields = { ...enrichedFields, workspaceEvidence: workspaceManager.evidence() };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? message,
+        };
+      }
+    }
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
-      ...fields,
+      ...enrichedFields,
       resultPersistence: intendedPersistence,
     });
-    if (resultPersistence.ok) return { runId, runDir, ...fields, resultPersistence };
+    if (resultPersistence.ok) return { runId, runDir, ...enrichedFields, resultPersistence };
 
     const persistenceError: WorkflowJournalLine = {
       ts: new Date().toISOString(),
@@ -386,10 +466,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       // the typed persistence failure returned below.
     }
     const failedFields: RunResultFields = {
-      ...fields,
+      ...enrichedFields,
       ok: false,
-      error: fields.error ?? resultPersistence.message,
-      journal: [...fields.journal, persistenceError],
+      error: enrichedFields.error ?? resultPersistence.message,
+      journal: [...enrichedFields.journal, persistenceError],
     };
     return { runId, runDir, ...failedFields, resultPersistence };
   };
@@ -423,34 +503,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     });
   }
 
-  const agentRunner = createWorkflowAgentRunner({
-    pi: opts.pi,
-    ctx: opts.ctx,
-    signal: opts.signal,
-    workflowRunId: runId,
-    ...(opts.input !== undefined ? { args: opts.input } : {}),
-    ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
-
-  // dsl.llm() shares the agent bridge's model-routing (resolveModel) but reaches the
-  // model directly via pi-ai completeSimple instead of spawning a child session.
-  const llmRunner = createWorkflowLlmRunner({
-    ctx: opts.ctx,
-    signal: opts.signal,
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
-
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner,
-    llmRunner,
-    journal,
-    ...(opts.input !== undefined ? { args: opts.input } : {}),
-    ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
-    ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
-  });
-
   let target: ResolvedWorkflowTarget;
   try {
     const targetInput: { name?: string; scriptPath?: string; script?: string } = {};
@@ -473,6 +525,42 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
 
+  resourceLoader = createWorkflowResourceLoader({
+    workflowSourcePath: target.path,
+    runDir,
+  });
+  workspaceManager = createWorkflowWorkspaceManager({
+    projectRoot,
+    runId,
+  });
+  const agentRunner = createWorkflowAgentRunner({
+    pi: opts.pi,
+    ctx: opts.ctx,
+    signal: opts.signal,
+    workflowRunId: runId,
+    workspaceManager,
+    ...(opts.input !== undefined ? { args: opts.input } : {}),
+    ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
+    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
+  });
+  const llmRunner = createWorkflowLlmRunner({
+    ctx: opts.ctx,
+    signal: opts.signal,
+    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
+  });
+  runtime = createWorkflowRuntime({
+    runId,
+    agentRunner,
+    llmRunner,
+    journal,
+    projectRoot,
+    resourceLoader,
+    workspaceManager,
+    ...(opts.input !== undefined ? { args: opts.input } : {}),
+    ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
+    ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
+  });
+
   let mod: WorkflowScriptModule;
   try {
     // Strict sources execute the retained snapshot. Explicit entry-only sources
@@ -487,19 +575,36 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
 
-  const entry = typeof mod.default === "function"
-    ? mod.default
-    : typeof mod.runWorkflow === "function"
-      ? mod.runWorkflow
-      : undefined;
+  const entry =
+    typeof mod.default === "function"
+      ? mod.default
+      : typeof mod.runWorkflow === "function"
+        ? mod.runWorkflow
+        : undefined;
 
   if (entry === undefined) {
     const error = "Workflow script has no default or runWorkflow export";
     const journalLines = currentJournal(runtime);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
 
   let result: unknown;
@@ -509,7 +614,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // SDK/host machinery we never get a handle to (e.g. a dead-model auth error
     // firing on a detached emit path). Without this run-scoped net those would hit
     // Node's default handler and KILL the whole pi process — the Iskhod-1 defect.
-    result = await runGuardedAgainstHostCrash(() => Promise.resolve(entry(runtime.dsl, opts.input)));
+    result = await runGuardedAgainstHostCrash(() => Promise.resolve(entry(runtime!.dsl, opts.input)));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -535,7 +640,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     verifyWorkflowScriptSnapshot(scriptIdentity);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, scriptIdentity, ...resultMetadata() });
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
   }
   return finishRun({
     ok: semanticOk,
@@ -596,7 +709,8 @@ function routeOutOfBandFailure(error: unknown): void {
 async function runGuardedAgainstHostCrash<T>(run: () => Promise<T>): Promise<T> {
   let sink!: (error: unknown) => void;
   const fatal = new Promise<never>((_resolve, reject) => {
-    sink = (error: unknown) => reject(error instanceof Error ? error : new Error(`workflow run failed out-of-band: ${String(error)}`));
+    sink = (error: unknown) =>
+      reject(error instanceof Error ? error : new Error(`workflow run failed out-of-band: ${String(error)}`));
   });
 
   activeRuns.add(sink);
