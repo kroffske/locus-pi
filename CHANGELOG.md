@@ -6,6 +6,25 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- Added `excalidraw-pipeline` as a repository-local workflow example that turns a
+  free-form diagram intent into a rendered Excalidraw PNG. It is not a curated
+  Package workflow and is not in the npm allowlist, so the installed package
+  surface is unchanged; it exists as an authoring reference for operators writing
+  their own pipelines. Because the engine has no in-run human gate — `ask` refuses
+  without a UI and workflow child sessions are headless — the pipeline is split
+  into two runs around an edited artifact, the same shape as `review` and
+  `review-fix`: `draft` writes one request file and stops, the operator sets
+  `approved: yes`, and `build` refuses to start otherwise. The build run fans out
+  one agent per diagram section; a section agent writes a restricted graph source
+  file that the workflow executes in a separate process and judges by whether it
+  runs, so agent text is never parsed as a protocol and hard execution errors are
+  fed back for a bounded number of repairs. Composition, health checking, and
+  rendering are deterministic workflow code, so the acceptance gate never depends
+  on model judgement: a run is accepted only when `assertDiagramHealthy` reports
+  zero errors and zero warnings and a non-empty PNG exists, and a missing
+  generation package or renderer stops the run before the first child session
+  exists. The generation package resolves globally and is deliberately not a
+  dependency.
 - Added the curated `review` Package workflow as a question-led agent pipeline.
   Six sequential agents resolve the review scope from the operator's free-form
   request, inventory every changed surface, group the inventory into material
