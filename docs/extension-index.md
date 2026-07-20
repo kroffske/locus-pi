@@ -22,13 +22,13 @@ this clean repository or the first public release.
 
 Only these names are registered by `CURATED_PACKAGE_WORKFLOW_NAMES`:
 
-| Workflow             | Purpose                                                                                              |
-| -------------------- | ---------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Proves two small read-only SDK child sessions on a live Pi host.                                     |
-| `llm-smoke`          | Exercises direct workflow `llm()` calls.                                                             |
-| `requirements-grill` | Produces a bounded requirements challenge and handoff.                                               |
-| `review`             | Reviews a free-form target and publishes immutable evidence plus a pending human approval plan.      |
-| `review-fix`         | Applies only accepted findings in a retained linked worktree and publishes independent verification. |
+| Workflow             | Purpose                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Proves two small read-only SDK child sessions on a live Pi host.                                      |
+| `llm-smoke`          | Exercises direct workflow `llm()` calls.                                                              |
+| `requirements-grill` | Produces a bounded requirements challenge and handoff.                                                |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.    |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports. |
 
 Project and user workflow directories remain scan-based. A file found there is
 local trusted code, not a Package workflow promise.

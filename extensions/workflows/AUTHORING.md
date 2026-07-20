@@ -26,7 +26,7 @@ checks are point-in-time trusted-host evidence, not an atomic filesystem guarant
 export const meta = { name: "<name>", description: "<one line>" };
 
 export default async function runWorkflow(dsl, input) {
-  const { agent, llm, phase, log, parallel, pipeline, workflow } = dsl;
+  const { agent, llm, phase, log, promptFile, parallel, pipeline, workflow } = dsl;
   // Authoring policy: use `dsl` only. Runtime does not enforce this boundary;
   // imported modules have full host Node.js capabilities. Run reviewed files only.
   // `input` is the free-text [input] from the run command (string, maybe empty).
@@ -88,10 +88,16 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   `slots` / `partialResults` in memory, and return JSON-safe `partial:true`
   evidence. The runner still projects that deliberate partial as non-success.
 
-For _which shape to pick_ (single-agent, `llm()` gate, loop+judge,
-plan→build→review, adaptive owner-local, pipeline, fan-out+merge, judge-panel,
-loop-until-dry), use the inline skeletons in the pattern catalog
-[`references/patterns.md`](./references/patterns.md). For the full primitive table,
+For _which shape to pick_ (single-agent, `llm()` gate, staged text pipeline,
+loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
+judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog
+[`references/patterns.md`](./references/patterns.md). Multi-step work on one
+subject defaults to the staged text pipeline used by the curated `review` and
+`review-fix` workflows: sequential `agent()` stages with one cognitive job each,
+exact text handoffs the workflow never parses, every `readOnly: true` inspection
+stage before any writing stage, and source mutation kept separate from artifact
+publication. Take the stage count from the requirement — two stages is a
+complete pipeline. For the full primitive table,
 schema/trust rules, and edge-cases, read the canonical doc linked above.
 
 For a non-trivial workflow visual map, use `$pi-workflow-diagram`. Every curated

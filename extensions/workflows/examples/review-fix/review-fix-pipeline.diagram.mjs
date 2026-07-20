@@ -9,10 +9,17 @@ const { AssetRegistry, Bounds, Scene, assertDiagramHealthy, layout } = require("
 const outputDirectory = dirname(fileURLToPath(import.meta.url));
 const outputPath = join(outputDirectory, "review-fix-pipeline.excalidraw");
 const scene = new Scene({
-  seed: 20260719,
+  seed: 20260720,
   assetRegistry: AssetRegistry.bundled(),
   background: "#ffffff",
 });
+
+// One left-to-right column per stage, exactly like the sibling `review`
+// diagram. Lane titles own the left margin, so the first node of every lane
+// starts right of LANE_LABEL_WIDTH.
+const LANE_X = 40;
+const LANE_WIDTH = 5920;
+const LANE_LABEL_WIDTH = 400;
 
 const COLORS = {
   operator: "#087f5b",
@@ -20,366 +27,664 @@ const COLORS = {
   agent: "#0b1fb3",
   directLlm: "#b45309",
   artifact: "#475569",
-  risk: "#b91c1c",
+  // Reserved for the one surface this workflow mutates: the launch checkout.
+  write: "#b91c1c",
   muted: "#64748b",
   operatorFill: "#ecfdf5",
   workflowFill: "#faf5ff",
   agentFill: "#eff6ff",
+  directLlmFill: "#fffbeb",
   artifactFill: "#f8fafc",
+  writeFill: "#fef2f2",
 };
 
-const setFill = (element, color, opacity = 100) => {
-  element.backgroundColor = color;
+const setFrameFill = (element, fill, opacity = 100) => {
+  element.backgroundColor = fill;
   element.fillStyle = "solid";
   element.opacity = opacity;
 };
 
-const tint = (block, stroke, fill) => {
+const tintBlock = (block, color, fill) => {
   for (const element of block.elements) {
-    if (element.type !== "image") element.strokeColor = stroke;
-    if (element.type === "rectangle" || element.type === "ellipse") setFill(element, fill);
+    if (element.type !== "image") {
+      element.strokeColor = color;
+    }
+    if (element.type === "rectangle" || element.type === "ellipse") {
+      setFrameFill(element, fill);
+    }
   }
   return block;
 };
 
-const record = (id, block) => ({
+const nodeRecord = (id, block) => ({
   id,
   block,
   texts: block.elements.filter((element) => element.type === "text"),
 });
 
-const panel = (id, title, bullets, iconId, x, y, width, height, role) => {
-  const stroke = role === "agent" ? COLORS.agent : COLORS.workflow;
-  const fill = role === "agent" ? COLORS.agentFill : COLORS.workflowFill;
-  return record(
+const operatorNode = (id, title, body, iconId, x, y, width, height) => {
+  const frame = scene.ellipse(x, y, width, height, {
+    color: COLORS.operator,
+    strokeWidth: 2,
+  });
+  setFrameFill(frame, COLORS.operatorFill);
+  const icon = scene.placeAsset(iconId, x + 28, y + 34, 48);
+  const titleText = scene.text(x + 90, y + 27, title, {
+    size: 17,
+    color: COLORS.operator,
+    width: width - 112,
+    align: "center",
+  });
+  const bodyText = scene.text(x + 90, y + 57, body, {
+    size: 12,
+    color: COLORS.operator,
+    width: width - 112,
+    align: "center",
+  });
+  return nodeRecord(id, scene.group([frame, icon, titleText, bodyText]));
+};
+
+const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
+  nodeRecord(
     id,
-    tint(
+    tintBlock(
       layout.iconPanel(scene, x, y, width, height, {
         title,
         iconId,
         bullets,
         iconSize: 42,
-        titleSize: 15,
-        bulletSize: 11,
-        bulletGap: 6,
+        titleSize: 16,
+        bulletSize: 12,
+        bulletGap: 7,
       }),
-      stroke,
-      fill,
+      COLORS.workflow,
+      COLORS.workflowFill,
     ),
   );
-};
 
-const operator = (id, title, body, x, y, width, height) => {
-  const frame = scene.ellipse(x, y, width, height, { color: COLORS.operator, strokeWidth: 2 });
-  setFill(frame, COLORS.operatorFill);
-  const icon = scene.placeAsset("chat_message", x + 24, y + 30, 42);
-  const heading = scene.text(x + 78, y + 22, title, {
-    size: 15,
-    color: COLORS.operator,
-    width: width - 96,
-    align: "center",
-  });
-  const text = scene.text(x + 78, y + 52, body, {
-    size: 11,
-    color: COLORS.operator,
-    width: width - 96,
-    align: "center",
-  });
-  return record(id, scene.group([frame, icon, heading, text]));
-};
+const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
+  nodeRecord(
+    id,
+    tintBlock(
+      layout.iconPanel(scene, x, y, width, height, {
+        title,
+        iconId,
+        bullets,
+        iconSize: 48,
+        titleSize: 15,
+        bulletSize: 12,
+        bulletGap: 7,
+      }),
+      COLORS.agent,
+      COLORS.agentFill,
+    ),
+  );
 
-const artifact = (id, title, lines, iconId, x, y, width, height, risk = false) => {
-  const color = risk ? COLORS.risk : COLORS.artifact;
-  const frame = scene.rect(x, y, width, height, { color, strokeWidth: 2, roundness: null });
-  setFill(frame, risk ? "#fef2f2" : COLORS.artifactFill);
-  const icon = scene.placeAsset(iconId, x + 20, y + 35, 38);
-  const heading = scene.text(x + 70, y + 16, title, {
-    size: 13,
-    color,
-    width: width - 88,
-  });
-  const text = scene.text(x + 70, y + 46, lines.join("\n"), {
+const workflowCheck = (id, title, body, x, y, width, height) => {
+  const frame = scene.line(
+    [
+      [x + width / 2, y],
+      [x + width, y + height / 2],
+      [x + width / 2, y + height],
+      [x, y + height / 2],
+      [x + width / 2, y],
+    ],
+    { color: COLORS.workflow, strokeWidth: 2 },
+  );
+  setFrameFill(frame, COLORS.workflowFill);
+  const titleText = scene.text(x + 15, y + 84, title, {
     size: 10,
-    color,
-    width: width - 86,
+    color: COLORS.workflow,
+    width: width - 30,
+    align: "center",
   });
-  return record(id, scene.group([frame, icon, heading, text]));
+  const bodyText = scene.text(x + 50, y + 112, body, {
+    size: 10,
+    color: COLORS.workflow,
+    width: width - 100,
+    align: "center",
+  });
+  return nodeRecord(id, scene.group([frame, titleText, bodyText]));
+};
+
+const artifactNode = (id, title, lines, iconId, x, y, width, height, write = false) => {
+  const color = write ? COLORS.write : COLORS.artifact;
+  const frame = scene.rect(x, y, width, height, {
+    color,
+    strokeWidth: 2,
+    roundness: null,
+  });
+  setFrameFill(frame, write ? COLORS.writeFill : COLORS.artifactFill);
+  const fold = scene.line(
+    [
+      [x + width - 34, y],
+      [x + width - 34, y + 34],
+      [x + width, y + 34],
+    ],
+    { color, strokeWidth: 1 },
+  );
+  const icon = scene.placeAsset(iconId, x + 24, y + 42, 42);
+  const titleText = scene.text(x + 82, y + 20, title, {
+    size: 14,
+    color,
+    width: width - 112,
+    align: "left",
+  });
+  // Titles wrap by hand, so the body starts below the real title line count.
+  const body = scene.text(x + 82, y + 34 + title.split("\n").length * 18, lines.join("\n"), {
+    size: 11,
+    color,
+    width: width - 106,
+    align: "left",
+  });
+  return nodeRecord(id, scene.group([frame, fold, icon, titleText, body]));
 };
 
 const lane = (title, subtitle, y, height, color, fill) => {
-  const frame = scene.rect(40, y, 3920, height, { color, strokeWidth: 1, dashed: true });
-  setFill(frame, fill, 42);
+  const frame = scene.rect(LANE_X, y, LANE_WIDTH, height, {
+    color,
+    strokeWidth: 1,
+    dashed: true,
+  });
+  setFrameFill(frame, fill, 45);
   frame.roughness = 0;
-  scene.text(60, y + 12, title, { size: 18, color, width: 320 });
-  scene.text(60, y + 42, subtitle, { size: 10, color: COLORS.muted, width: 470 });
+  scene.text(LANE_X + 22, y + 14, title, {
+    size: 19,
+    color,
+    width: LANE_LABEL_WIDTH,
+  });
+  scene.text(LANE_X + 22, y + 44, subtitle, {
+    size: 11,
+    color: COLORS.muted,
+    width: LANE_LABEL_WIDTH,
+  });
 };
 
-scene.text(40, 18, "Curated review-fix workflow — accepted findings, isolated changes, verified report", {
-  size: 28,
-  width: 3920,
+scene.text(LANE_X, 20, "Curated review-fix workflow — one deterministic gate, then five sequential agent stages", {
+  size: 29,
+  width: LANE_WIDTH,
   align: "center",
 });
 scene.text(
-  40,
-  58,
-  "Deterministic code validates approval before one runtime-owned worktree and two text-returning agents.",
-  { size: 14, color: COLORS.muted, width: 3920, align: "center" },
+  LANE_X,
+  61,
+  "Deterministic code confines the review path and refuses an empty finding list before any agent exists. Then F1 → F2 → F3 → F4 → F5 forward each exact text inside the operator's own launch checkout.",
+  {
+    size: 15,
+    color: COLORS.muted,
+    width: LANE_WIDTH,
+    align: "center",
+  },
 );
-scene.text(70, 96, "Legend", { size: 15, color: COLORS.artifact, width: 80 });
-scene.text(
-  165,
-  94,
-  "Operator: green ellipse · Workflow: purple card · Agent: blue card · Direct LLM: not used · Artifact: gray document · red artifact: isolated write surface",
-  { size: 11, color: COLORS.artifact, width: 1650 },
+
+scene.text(80, 99, "Legend", {
+  size: 16,
+  color: COLORS.artifact,
+  width: 90,
+});
+const legendOperator = scene.ellipse(170, 92, 92, 50, {
+  color: COLORS.operator,
+  strokeWidth: 2,
+});
+setFrameFill(legendOperator, COLORS.operatorFill);
+scene.text(274, 103, "Operator", {
+  size: 12,
+  color: COLORS.operator,
+  width: 100,
+});
+const legendWorkflow = scene.rect(410, 92, 112, 50, {
+  color: COLORS.workflow,
+  strokeWidth: 2,
+});
+setFrameFill(legendWorkflow, COLORS.workflowFill);
+scene.text(534, 96, "Workflow-owned action\n(round card)", {
+  size: 11,
+  color: COLORS.workflow,
+  width: 185,
+});
+const legendCheck = scene.line(
+  [
+    [780, 92],
+    [836, 117],
+    [780, 142],
+    [724, 117],
+    [780, 92],
+  ],
+  { color: COLORS.workflow, strokeWidth: 2 },
 );
+setFrameFill(legendCheck, COLORS.workflowFill);
+scene.text(850, 96, "Workflow-owned check\n(diamond)", {
+  size: 11,
+  color: COLORS.workflow,
+  width: 175,
+});
+const legendAgent = scene.rect(1080, 92, 112, 50, {
+  color: COLORS.agent,
+  strokeWidth: 2,
+});
+setFrameFill(legendAgent, COLORS.agentFill);
+scene.text(1204, 96, "Full agent session\n(blue card)", {
+  size: 11,
+  color: COLORS.agent,
+  width: 160,
+});
+const legendArtifact = scene.rect(1425, 92, 112, 50, {
+  color: COLORS.artifact,
+  strokeWidth: 2,
+  roundness: null,
+});
+setFrameFill(legendArtifact, COLORS.artifactFill);
+scene.line(
+  [
+    [1513, 92],
+    [1513, 116],
+    [1537, 116],
+  ],
+  { color: COLORS.artifact, strokeWidth: 1 },
+);
+scene.text(1549, 96, "Artifact file\n(gray document)", {
+  size: 11,
+  color: COLORS.artifact,
+  width: 160,
+});
+const legendWrite = scene.rect(1760, 92, 112, 50, {
+  color: COLORS.write,
+  strokeWidth: 2,
+  roundness: null,
+});
+setFrameFill(legendWrite, COLORS.writeFill);
+scene.line(
+  [
+    [1848, 92],
+    [1848, 116],
+    [1872, 116],
+  ],
+  { color: COLORS.write, strokeWidth: 1 },
+);
+scene.text(1884, 96, "Mutated source surface\n(red document)", {
+  size: 11,
+  color: COLORS.write,
+  width: 170,
+});
+const legendDirectLlm = scene.rect(2120, 92, 112, 50, {
+  color: COLORS.directLlm,
+  strokeWidth: 2,
+  dashed: true,
+});
+setFrameFill(legendDirectLlm, COLORS.directLlmFill);
+scene.text(2244, 103, "Direct LLM: not used in review-fix", {
+  size: 11,
+  color: COLORS.directLlm,
+  width: 240,
+});
 
 lane(
   "OPERATOR",
-  "Selects the approved task and later decides what to do with the retained worktree.",
-  145,
-  180,
+  "Edits review.md first, then reads the uncommitted diff this workflow leaves behind.",
+  170,
+  190,
   COLORS.operator,
   "#f0fdf4",
 );
 lane(
   "WORKFLOW-OWNED",
-  "Validates files and hashes, allocates one opaque handle, forwards exact text, and returns.",
-  345,
-  250,
+  "Path confinement, the findings gate, prompt rendering, and capability policy; no fix judgment.",
+  390,
+  330,
   COLORS.workflow,
   "#faf5ff",
 );
 lane(
   "FULL AGENT SESSIONS",
-  "Implementer and verifier receive the same runtime-owned workspace handle.",
-  615,
-  235,
+  "One linear chain: every stage runs directly in the operator's own launch checkout.",
+  750,
+  340,
   COLORS.agent,
   "#eff6ff",
 );
 lane(
   "ARTIFACTS",
-  "Human approval, isolated diff, reader report, and runtime evidence.",
-  870,
-  245,
+  "Human-edited review input, published fix package, mutated source, runtime evidence.",
+  1120,
+  270,
   COLORS.artifact,
   "#f8fafc",
 );
 
-const request = operator(
+const request = operatorNode(
   "operator-request",
   "Operator: fix request",
-  "Task path whose fix-plan has accepted items",
-  70,
-  192,
-  300,
-  95,
-);
-const launchResolver = panel(
-  "launch-resolver",
-  "Workflow: load explicit fix-plan.md",
-  ["Require one project-relative path", "Resolve files inside project root"],
-  "multi_agent_orchestrator",
+  'Free-form intent naming one review.md\n"apply only the P1 items in …/artifacts/review.md"',
+  "chat_message",
+  85,
+  240,
   430,
-  405,
-  285,
-  115,
-  "workflow",
-);
-const resolver = panel(
-  "agent-1",
-  "Workflow: deterministic approval validator",
-  [
-    "Recompute review + plan SHA-256",
-    "Match target, snapshot, and finding ids",
-    "Require at least one accepted finding",
-  ],
-  "signal_quality_magnifier",
-  770,
-  665,
-  305,
-  145,
-  "workflow",
-);
-const checkApproval = panel(
-  "check-approval",
-  "Workflow: allocate one workspace handle",
-  ["Exact reviewed head", "Opaque runtime-owned identity", "Original checkout invariant"],
-  "function_router",
-  1125,
-  390,
-  345,
-  140,
-  "workflow",
-);
-const blocked = panel(
-  "blocked",
-  "Workflow: stop on validation error",
-  ["No worktree creation", "No write-capable agent starts"],
-  "guardrails",
-  3560,
-  500,
-  270,
-  95,
-  "workflow",
-);
-const launchImplementer = panel(
-  "launch-implementer",
-  "Workflow: launch Agent F1",
-  ["Pass accepted findings only", "Pass opaque workspace handle"],
-  "multi_agent_orchestrator",
-  1550,
-  385,
-  270,
   110,
-  "workflow",
-);
-const implementer = panel(
-  "agent-2",
-  "Agent: F1 — implementer prompt",
-  [
-    "catalog default · label: apply accepted fixes",
-    "Edits runtime-owned worktree",
-    "Returns exact implementation text",
-  ],
-  "sandbox_executor",
-  1880,
-  655,
-  315,
-  155,
-  "agent",
-);
-const launchVerifier = panel(
-  "launch-verifier",
-  "Workflow: launch Agent F2",
-  ["Pass exact implementation text", "Reuse same opaque workspace handle"],
-  "multi_agent_orchestrator",
-  2250,
-  405,
-  285,
-  115,
-  "workflow",
-);
-const verifier = panel(
-  "agent-3",
-  "Agent: F2 — verifier prompt",
-  ["catalog default · label: verify and report", "Inspects diff + re-runs checks", "Writes fix-report.md"],
-  "model_validation",
-  2590,
-  655,
-  310,
-  155,
-  "agent",
-);
-const mapResult = panel(
-  "map-result",
-  "Workflow: return Agent F2 exact text",
-  ["No JSON parse", "Recheck plan hashes", "Runtime keeps workspace evidence"],
-  "function_router",
-  2950,
-  390,
-  330,
-  140,
-  "workflow",
-);
-const operatorDecision = operator(
-  "operator-decision",
-  "Operator: inspect worktree",
-  "Keep, edit, commit, or discard — outside workflow",
-  3510,
-  192,
-  330,
-  95,
 );
 
-const source = artifact(
-  "source",
-  "Artifact: review-fix.workflow.mjs + resources/*.prompt.md",
-  ["Deterministic validator + F1/F2 complete prompts"],
-  "prompt_template",
-  430,
-  935,
-  290,
-  105,
-);
-const fixPlan = artifact(
-  "fix-plan",
-  "Artifact: .tasks/<task>/artifacts/fix-plan.md",
+const resolveReview = workflowNode(
+  "resolve-review",
+  "Workflow: resolve-review",
   [
-    "Review publishes every finding pending",
-    "Human disposition is the write gate",
-    "Only accepted ids cross to Agent F1",
+    "phase resolve-review · deterministic, no agent yet",
+    "Extracts the one review.md token from free text",
+    "Confines it inside a project artifacts directory",
+    "Rejects absolute paths and symlink escapes",
   ],
-  "prompt_template",
-  1125,
-  920,
-  345,
-  130,
+  "guardrails",
+  560,
+  460,
+  430,
+  165,
 );
-const worktree = artifact(
-  "worktree",
-  "Artifact: retained linked Git worktree",
+
+const findingsGate = workflowCheck(
+  "findings-gate",
+  "Workflow: require a non-empty finding list",
+  '"## Findings" must still list one "### <id>"\nZero findings, a missing section, a duplicate id,\nor two review.md paths throw before any agent\nOnly heading ids are parsed — nothing else',
+  1080,
+  450,
+  400,
+  230,
+);
+
+const launchScope = workflowNode(
+  "launch-agent-f1",
+  "Workflow: launch Agent F1",
+  ["phase resolve-fix-scope", "Renders resources/scope-resolver.prompt.md", "readOnly: read, git_read, grep, find"],
+  "multi_agent_orchestrator",
+  1600,
+  470,
+  410,
+  145,
+);
+
+const scopeAgent = agentNode(
+  "agent-f1",
+  "Agent: F1 — fix-scope resolver",
   [
-    "Exact reviewed head; separate real path",
-    "Uncommitted accepted-finding diff",
-    "Original checkout remains untouched",
+    "catalog default · label: resolve fix scope",
+    "Host-enforced read-only; no shell, write, or edit",
+    "Reads the kept findings and working-tree state",
+    "Returns exact scopeText — a # Fix Scope block",
+  ],
+  "signal_quality_magnifier",
+  1590,
+  815,
+  440,
+  195,
+);
+
+const forwardCheck = workflowCheck(
+  "forward-exact-text",
+  "Workflow: forward each stage's exact text",
+  "No JSON parse · no verdict or status branch\nAn empty or failed child throws\nEach text becomes the next prompt input",
+  2160,
+  450,
+  360,
+  230,
+);
+
+const launchUnits = workflowNode(
+  "launch-agent-f2",
+  "Workflow: launch Agent F2",
+  ["phase plan-fix-units", "Renders resources/unit-planner.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "multi_agent_orchestrator",
+  2720,
+  470,
+  410,
+  145,
+);
+
+const unitsAgent = agentNode(
+  "agent-f2",
+  "Agent: F2 — fix-unit planner",
+  [
+    "catalog default · label: plan fix units",
+    "Host-enforced read-only; ast_index for symbols",
+    "Revalidates every finding against live source",
+    "Returns exact unitsText — # Fix Units + stale",
+  ],
+  "agent_planner",
+  2710,
+  815,
+  440,
+  195,
+);
+
+const launchImplement = workflowNode(
+  "launch-agent-f3",
+  "Workflow: launch Agent F3",
+  [
+    "phase apply-fix-units",
+    "Renders resources/implementer.prompt.md",
+    "Write-capable: read, write, edit, bash, grep, find",
+  ],
+  "multi_agent_orchestrator",
+  3280,
+  470,
+  410,
+  145,
+);
+
+const implementAgent = agentNode(
+  "agent-f3",
+  "Agent: F3 — implementer",
+  [
+    "catalog default · label: apply fix units",
+    "Edits the operator's launch checkout in place",
+    "Skips stale units; never commits, pushes, or stashes",
+    "Returns exact implementationText",
   ],
   "sandbox_executor",
-  1880,
-  910,
-  355,
-  150,
+  3270,
+  815,
+  440,
+  195,
+);
+
+const launchVerify = workflowNode(
+  "launch-agent-f4",
+  "Workflow: launch Agent F4",
+  ["phase verify-fixes", "Renders resources/verifier.prompt.md", "Shell exception: read, ast_index, bash, grep, find"],
+  "multi_agent_orchestrator",
+  3840,
+  470,
+  410,
+  145,
+);
+
+const verifyAgent = agentNode(
+  "agent-f4",
+  "Agent: F4 — verifier and report author",
+  [
+    "catalog default · label: verify fixes and write report",
+    "Not host-enforced read-only: checks need a shell",
+    "Reopens the working-tree diff and reruns checks",
+    "Returns exact reportText — a # Fix Report",
+  ],
+  "model_validation",
+  3830,
+  815,
+  440,
+  195,
+);
+
+const launchPublish = workflowNode(
+  "launch-agent-f5",
+  "Workflow: launch Agent F5",
+  ["phase publish-fix-report", "Renders resources/publisher.prompt.md", "Write-capable: read, write, bash, grep, find"],
+  "multi_agent_orchestrator",
+  4400,
+  470,
+  410,
+  145,
+);
+
+const publishAgent = agentNode(
+  "agent-f5",
+  "Agent: F5 — publisher and presenter",
+  [
+    "catalog default · label: publish fix package",
+    "The only stage that writes task artifacts",
+    "Writes fix-report.md plus supporting Markdown",
+    "Returns the executive summary as final text",
+  ],
+  "prompt_template",
+  4390,
+  815,
+  440,
+  195,
+);
+
+const mapFinalResult = workflowNode(
+  "map-final-result",
+  "Workflow: return Agent F5 exact text",
+  ["No JSON parse", "The executive summary is the result", "No report file is returned as the result"],
+  "function_router",
+  4960,
+  470,
+  410,
+  145,
+);
+
+const operatorDiff = operatorNode(
+  "operator-review-diff",
+  "Operator: review the diff",
+  "Changes stay uncommitted in the launch checkout\nCommit, amend, or discard outside the workflow",
+  "human_review",
+  5460,
+  240,
+  460,
+  110,
+);
+
+const sourceFile = artifactNode(
+  "source-file",
+  "Artifact: review-fix.workflow.mjs\n+ review-fix-input.mjs\n+ resources/*.prompt.md",
+  ["Deterministic gate in review-fix-input.mjs", "F1–F5 complete stage prompts", "phase() and log() name every stage"],
+  "prompt_template",
+  85,
+  1200,
+  430,
+  175,
+);
+
+const reviewInput = artifactNode(
+  "review-input",
+  "Artifact: human-edited review.md",
+  [
+    ".tasks/<task>/artifacts/review.md",
+    "Input only; this workflow never rewrites it",
+    "A deleted finding is a rejected finding",
+    "A note under a finding steers the fix",
+  ],
+  "human_review",
+  580,
+  1200,
+  420,
+  175,
+);
+
+const journalFile = artifactNode(
+  "journal-file",
+  "Artifact: journal.ndjson",
+  ["Runtime execution journal", "phase, log, and child-session evidence", "Six phases: one deterministic, five agents"],
+  "audit_log",
+  2140,
+  1200,
+  400,
+  175,
+);
+
+const launchCheckout = artifactNode(
+  "launch-checkout",
+  "Artifact: uncommitted changes\nin the launch checkout",
+  [
+    "workspaceMode: project — the launch checkout",
+    "is the whole workspace; nothing is isolated",
+    "A review often covers uncommitted work",
+    "Never committed, pushed, or stashed",
+  ],
+  "sandbox_executor",
+  3200,
+  1200,
+  430,
+  175,
   true,
 );
-const fixReport = artifact(
-  "fix-report",
-  "Artifact: .tasks/<task>/artifacts/fix-report.md",
-  ["Applied + unresolved ids", "Changed files, checks, retained path"],
-  "audit_log",
-  2545,
-  920,
-  345,
-  130,
+
+const supportingFiles = artifactNode(
+  "supporting-files",
+  "Artifact: supporting fix Markdown",
+  [
+    "fix-scope.md and fix-units.md",
+    "Written under .tasks/<task>/artifacts/",
+    "Beside the review that produced them",
+    "Optional: skipped when empty or duplicated",
+  ],
+  "aggregation_puzzle",
+  3800,
+  1200,
+  420,
+  175,
 );
-const journal = artifact(
-  "journal",
-  "Artifact: journal.ndjson",
-  ["Phase, log, and child-session evidence"],
-  "audit_log",
-  2990,
-  940,
-  285,
-  105,
-);
-const result = artifact(
-  "result",
+
+const resultFile = artifactNode(
+  "result-file",
   "Artifact: result.json",
-  ["Mandatory run envelope", "Exact verifier text + runtime workspace evidence"],
+  [
+    "Mandatory machine-readable run envelope",
+    "result is the Agent F5 executive summary",
+    "Child metadata stays separate",
+  ],
   "data_catalog",
-  3480,
-  920,
-  330,
-  130,
+  4880,
+  1200,
+  400,
+  175,
+);
+
+const fixReportFile = artifactNode(
+  "fix-report-file",
+  "Artifact: fix-report.md",
+  [
+    ".tasks/<task>/artifacts/fix-report.md",
+    "Mandatory. Primary reader-facing report",
+    "Applied units, not applied, changed files, checks",
+    "Live working tree; no snapshot and no hash",
+  ],
+  "news_document",
+  5440,
+  1200,
+  480,
+  175,
 );
 
 const nodes = [
   request,
-  launchResolver,
-  resolver,
-  checkApproval,
-  blocked,
-  launchImplementer,
-  implementer,
-  launchVerifier,
-  verifier,
-  mapResult,
-  operatorDecision,
-  source,
-  fixPlan,
-  worktree,
-  fixReport,
-  journal,
-  result,
+  resolveReview,
+  findingsGate,
+  launchScope,
+  scopeAgent,
+  forwardCheck,
+  launchUnits,
+  unitsAgent,
+  launchImplement,
+  implementAgent,
+  launchVerify,
+  verifyAgent,
+  launchPublish,
+  publishAgent,
+  mapFinalResult,
+  operatorDiff,
+  sourceFile,
+  reviewInput,
+  journalFile,
+  launchCheckout,
+  supportingFiles,
+  resultFile,
+  fixReportFile,
 ];
 
 const edges = [];
@@ -387,9 +692,9 @@ const connect = (id, from, to, options = {}) => {
   const routed = layout.connectRouted(scene, from.block, to.block, {
     path: "orthogonal",
     direction: "left-to-right",
-    labelSize: 10,
+    labelSize: 11,
     labelColor: COLORS.artifact,
-    labelWidth: 145,
+    labelWidth: 150,
     ...options,
   });
   edges.push({
@@ -397,129 +702,173 @@ const connect = (id, from, to, options = {}) => {
     from: from.id,
     to: to.id,
     points: routed.points,
-    ...(routed.label ? { label: { id: `${id}-label`, bounds: scene.bounds([routed.label]) } } : {}),
+    ...(routed.label
+      ? {
+          label: {
+            id: `${id}-label`,
+            bounds: scene.bounds([routed.label]),
+          },
+        }
+      : {}),
   });
 };
 
-connect("request-launch", request, launchResolver, { label: "input:string" });
-connect("source-launch", source, launchResolver, {
+// Start a stage: the workflow card drops into the agent session it launches.
+const launchEdge = (id, launchNode, agent, label) => {
+  connect(id, launchNode, agent, {
+    direction: "top-down",
+    label,
+    labelWidth: 160,
+    from: { side: "bottom", slot: 0.3 },
+    to: { side: "top", slot: 0.3 },
+  });
+};
+
+// Finish a stage: the agent's exact text rises into the next workflow card.
+const handoffEdge = (id, agent, nextNode, label) => {
+  connect(id, agent, nextNode, {
+    direction: "bottom-up",
+    label,
+    labelWidth: 145,
+    from: { side: "top", slot: 0.78 },
+    to: { side: "bottom", slot: 0.35 },
+  });
+};
+
+connect("operator-to-resolve", request, resolveReview, {
+  label: "free-form request",
+  from: { side: "right", slot: 0.5 },
+  to: { side: "left", slot: 0.5 },
+});
+connect("source-to-resolve", sourceFile, resolveReview, {
   direction: "bottom-up",
   dashed: true,
   color: COLORS.artifact,
   label: "workflow definition",
   from: { side: "top", slot: 0.5 },
+  to: { side: "bottom", slot: 0.15 },
+  labelOffset: { dx: -80, dy: 0 },
+});
+connect("review-to-resolve", reviewInput, resolveReview, {
+  direction: "bottom-up",
+  dashed: true,
+  color: COLORS.operator,
+  label: "kept findings",
+  labelWidth: 120,
+  from: { side: "top", slot: 0.5 },
+  to: { side: "bottom", slot: 0.8 },
+});
+connect("resolve-to-gate", resolveReview, findingsGate, {
+  label: "confined review path",
+  labelWidth: 130,
+  from: { side: "right", slot: 0.5 },
+  to: { side: "left", slot: 0.5 },
+});
+connect("gate-to-launch-f1", findingsGate, launchScope, {
+  label: "at least one\nremaining finding",
+  labelWidth: 130,
+  from: { side: "right", slot: 0.5 },
+  to: { side: "left", slot: 0.5 },
+});
+
+launchEdge("launch-to-agent-f1", launchScope, scopeAgent, "agent(scopePrompt)");
+connect("agent-f1-to-forward", scopeAgent, forwardCheck, {
+  direction: "bottom-up",
+  label: "exact scopeText",
+  labelWidth: 130,
+  from: { side: "top", slot: 0.9 },
+  to: { side: "left", slot: 0.5 },
+});
+connect("forward-to-launch-f2", forwardCheck, launchUnits, {
+  label: "scopeText verbatim",
+  labelWidth: 130,
+  from: { side: "right", slot: 0.5 },
+  to: { side: "left", slot: 0.5 },
+});
+connect("forward-to-journal", forwardCheck, journalFile, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "phase + log events",
+  from: { side: "bottom", slot: 0.5 },
+  to: { side: "top", slot: 0.5 },
+  labelOffset: { dx: 96, dy: 0 },
+});
+
+launchEdge("launch-to-agent-f2", launchUnits, unitsAgent, "scopeText + reviewText");
+handoffEdge("agent-f2-to-launch-f3", unitsAgent, launchImplement, "exact unitsText");
+
+launchEdge("launch-to-agent-f3", launchImplement, implementAgent, "scopeText + unitsText\n+ reviewText");
+handoffEdge("agent-f3-to-launch-f4", implementAgent, launchVerify, "exact implementationText");
+
+launchEdge("launch-to-agent-f4", launchVerify, verifyAgent, "scopeText + unitsText\n+ implementationText");
+handoffEdge("agent-f4-to-launch-f5", verifyAgent, launchPublish, "exact reportText");
+
+launchEdge("launch-to-agent-f5", launchPublish, publishAgent, "scope + units + report verbatim");
+handoffEdge("agent-f5-to-map", publishAgent, mapFinalResult, "exact executive summary text");
+
+connect("agent-f3-to-checkout", implementAgent, launchCheckout, {
+  direction: "top-down",
+  color: COLORS.write,
+  label: "edits source in place",
+  labelWidth: 140,
+  from: { side: "bottom", slot: 0.2 },
+  to: { side: "top", slot: 0.6 },
+});
+connect("checkout-to-agent-f4", launchCheckout, verifyAgent, {
+  direction: "bottom-up",
+  dashed: true,
+  color: COLORS.write,
+  label: "re-reads the diff,\nreruns the checks",
+  labelWidth: 140,
+  from: { side: "top", slot: 0.72 },
+  to: { side: "bottom", slot: 0.25 },
+});
+connect("agent-f5-to-supporting", publishAgent, supportingFiles, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "writes supporting Markdown",
+  labelWidth: 160,
+  from: { side: "bottom", slot: 0.15 },
+  to: { side: "top", slot: 0.5 },
+});
+connect("agent-f5-to-report", publishAgent, fixReportFile, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "writes + re-reads fix-report.md",
+  labelWidth: 175,
+  from: { side: "bottom", slot: 0.85 },
+  to: { side: "top", slot: 0.3 },
+  labelOffset: { dx: 210, dy: 0 },
+});
+connect("report-to-operator", fixReportFile, operatorDiff, {
+  direction: "bottom-up",
+  dashed: true,
+  color: COLORS.operator,
+  label: "operator reads the report",
+  labelWidth: 150,
+  from: { side: "top", slot: 0.5 },
   to: { side: "bottom", slot: 0.5 },
 });
-connect("launch-resolver", launchResolver, resolver, {
-  direction: "top-down",
-  label: "path + file bytes",
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("plan-resolver", fixPlan, resolver, {
-  direction: "bottom-up",
-  dashed: true,
-  color: COLORS.operator,
-  label: "read dispositions + hash",
-  from: { side: "top", slot: 0.35 },
-  to: { side: "bottom", slot: 0.65 },
-});
-connect("resolver-check", resolver, checkApproval, {
-  direction: "bottom-up",
-  label: "validated plan + reviewed head",
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("approval-ready", checkApproval, launchImplementer, {
-  label: "workspaceHandle",
-  labelOffset: { dx: 0, dy: -100 },
-});
-connect("approval-blocked", checkApproval, blocked, {
-  label: "validation/allocation error",
-  path: "outer",
-  outerSide: "top",
-  outerGap: 38,
-  from: { side: "right", slot: 0.7 },
-  to: { side: "left", slot: 0.5 },
-  labelOffset: { dx: 0, dy: -220 },
-});
-connect("launch-implementer", launchImplementer, implementer, {
-  direction: "top-down",
-  label: "accepted ids + plan text + handle",
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("implementer-worktree", checkApproval, worktree, {
-  direction: "top-down",
-  color: COLORS.risk,
-  label: "allocates exact reviewed head",
-  path: "outer",
-  outerSide: "right",
-  outerGap: 42,
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("implementer-launch-verifier", implementer, launchVerifier, {
-  direction: "bottom-up",
-  label: "exact implementationText",
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("launch-verifier", launchVerifier, verifier, {
-  direction: "top-down",
-  label: "plan + text + same handle",
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("worktree-verifier", worktree, verifier, {
-  direction: "bottom-up",
-  dashed: true,
-  color: COLORS.risk,
-  label: "re-open diff + run checks",
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("verifier-report", verifier, fixReport, {
-  direction: "top-down",
-  dashed: true,
-  color: COLORS.artifact,
-  label: "writes + re-reads",
-  from: { side: "bottom", slot: 0.7 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("verifier-map", verifier, mapResult, {
-  direction: "bottom-up",
-  label: "exact verificationText",
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("map-result", mapResult, result, {
+connect("map-to-result", mapFinalResult, resultFile, {
   direction: "top-down",
   label: "serialized return",
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("map-operator-decision", mapResult, operatorDecision, {
-  color: COLORS.operator,
-  label: "report + retained path",
-  from: { side: "right", slot: 0.35 },
-  to: { side: "left", slot: 0.65 },
-  labelOffset: { dx: 0, dy: -45 },
-});
-connect("verifier-journal", verifier, journal, {
-  direction: "top-down",
-  dashed: true,
-  color: COLORS.artifact,
-  label: "phase + agent events",
-  from: { side: "bottom", slot: 0.85 },
-  to: { side: "top", slot: 0.35 },
+  from: { side: "bottom", slot: 0.5 },
+  to: { side: "top", slot: 0.5 },
 });
 
 const health = assertDiagramHealthy({
-  blocks: nodes.map(({ id, block, texts }) => ({ id, bounds: block.bounds, texts, padding: 0 })),
+  blocks: nodes.map(({ id, block, texts }) => ({
+    id,
+    bounds: block.bounds,
+    texts,
+    padding: 0,
+  })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 4000, 1170),
+  renderBounds: new Bounds(0, 0, 6040, 1450),
   sceneBounds: scene.bounds(),
 });
 
@@ -540,7 +889,11 @@ console.log(
   JSON.stringify(
     {
       outputPath,
-      validation: { ok: health.ok, errors: health.errors.length, warnings: health.warnings.length },
+      validation: {
+        ok: health.ok,
+        errors: health.errors.length,
+        warnings: health.warnings.length,
+      },
       elements: output.elements.length,
       files: Object.keys(output.files).length,
     },

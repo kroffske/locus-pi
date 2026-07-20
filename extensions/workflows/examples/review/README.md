@@ -3,8 +3,8 @@
 The package contains two related workflows:
 
 - `review` inspects a target and publishes review evidence;
-- `review-fix` applies only findings that a human explicitly marks
-  `accepted`.
+- `review-fix` applies the findings a human left in that report, after
+  revalidating each one against live source.
 
 The core contract is deliberately small:
 
@@ -29,20 +29,24 @@ extensions/workflows/examples/
 │   ├── review-pipeline.excalidraw
 │   ├── review-pipeline.png
 │   └── resources/
-│       ├── target-resolver.prompt.md
-│       ├── change-review.prompt.md
-│       ├── context-review.prompt.md
-│       ├── adjudicator.prompt.md
+│       ├── scope-resolver.prompt.md
+│       ├── change-inventory.prompt.md
+│       ├── unit-planner.prompt.md
+│       ├── interrogator.prompt.md
+│       ├── verifier.prompt.md
 │       └── publisher.prompt.md
 └── review-fix/
     ├── review-fix.workflow.mjs
-    ├── review-fix-plan.mjs
+    ├── review-fix-input.mjs
     ├── review-fix-pipeline.diagram.mjs
     ├── review-fix-pipeline.excalidraw
     ├── review-fix-pipeline.png
     └── resources/
+        ├── scope-resolver.prompt.md
+        ├── unit-planner.prompt.md
         ├── implementer.prompt.md
-        └── verifier.prompt.md
+        ├── verifier.prompt.md
+        └── publisher.prompt.md
 ```
 
 There are no workflow-local `*.agent.md` files. Catalog agents provide the
@@ -52,14 +56,13 @@ behavior.
 ## How one stage is launched
 
 ```js
-const prompt = await promptFile("./resources/change-review.prompt.md", {
-  ORIGINAL_REQUEST: originalRequest,
-  TARGET_TEXT: targetText,
+const prompt = await promptFile("./resources/change-inventory.prompt.md", {
+  SCOPE_TEXT: scopeText,
 });
 
 const text = await agent(prompt, {
   ...REVIEW_READ_OPTIONS,
-  label: "review introduced changes",
+  label: "inventory changes",
 });
 ```
 
@@ -69,12 +72,20 @@ escapes, missing files, wrong suffixes, missing variables, and unused
 variables. It reads each prompt once, stores an immutable run copy, and records
 SHA-256 evidence.
 
-`REVIEW_READ_OPTIONS` is declared once near the top of
-`review.workflow.mjs`. The 1,000-call limit is a runaway fuse, not a normal
-budget. `workspaceMode: "project"` keeps inspection in the launch checkout.
-`readOnly: true` causes the SDK host to remove shell, write/edit, nested
-workflow, and unknown tools. Git inspection uses the allowlisted `git_read`
-argv tool.
+`REVIEW_READ_OPTIONS` and `REVIEW_NAVIGATE_OPTIONS` are declared once near the
+top of `review.workflow.mjs`. The 1,000-call limit is a runaway fuse, not a
+normal budget. `workspaceMode: "project"` keeps inspection in the launch
+checkout. `readOnly: true` causes the SDK host to remove shell, write/edit,
+nested workflow, and unknown tools. Git inspection uses the allowlisted
+`git_read` argv tool.
+
+The three stages that reason about code relationships also get `ast_index`, an
+allowlisted argv tool over the installed `ast-index` binary. Query commands and
+the cache-only `update`/`rebuild` are allowed; `clear`, `watch`, unknown
+commands, and output-file options are rejected. The index database lives in the
+user cache directory, so refreshing it never touches reviewed source. When the
+binary or index is unavailable, the prompts fall back to `grep`/`find` and
+record the gap; a missing AST Index never blocks a review.
 
 ## Where `phase()` and `log()` come from
 
@@ -95,124 +106,173 @@ flowchart LR
     U["Operator: review request"]
 
     subgraph R["Workflow: review"]
-        R1["Agent R1: resolve target<br/>read-only"]
-        P["Workflow: launch R2 and R3 in parallel"]
-        R2["Agent R2: inspect introduced changes<br/>read-only"]
-        R3["Agent R3: inspect full repository context<br/>read-only"]
-        R4["Agent R4: verify and adjudicate findings<br/>read-only"]
-        R5["Agent R5: publish review artifacts<br/>write-capable"]
+        R1["Agent R1: resolve review scope<br/>read-only"]
+        R2A["Agent R2a: inventory changes<br/>read-only"]
+        R2B["Agent R2b: plan review units<br/>read-only + ast_index"]
+        R3["Agent R3: ask falsifiable questions<br/>read-only + ast_index"]
+        R4["Agent R4: verify and write review<br/>read-only + ast_index"]
+        R5["Agent R5: publish review package<br/>write-capable"]
 
-        R1 -->|"exact targetText"| P
-        P --> R2
-        P --> R3
-        R2 -->|"exact changesText"| R4
-        R3 -->|"exact contextText"| R4
-        R4 -->|"exact adjudicatedText"| R5
+        R1 -->|"exact scopeText"| R2A
+        R2A -->|"exact inventoryText"| R2B
+        R2B -->|"exact unitsText"| R3
+        R3 -->|"exact questionsText"| R4
+        R4 -->|"exact reviewText"| R5
     end
 
     U --> R1
-    R5 -->|"review.md + optional fix-plan.md"| H["Human: edit dispositions"]
+    R5 -->|"review.md + supporting artifacts"| H["Human: edit or delete findings"]
 
     subgraph F["Workflow: review-fix"]
-        V["Workflow: validate plan and hashes"]
-        W["Workflow: allocate one workspaceHandle"]
-        F1["Agent F1: apply accepted findings"]
-        F2["Agent F2: verify diff and publish fix-report.md"]
+        V["Workflow: confine path, require findings"]
+        F1["Agent F1: resolve fix scope<br/>read-only"]
+        F2["Agent F2: revalidate and plan fix units<br/>read-only + ast_index"]
+        F3["Agent F3: apply fix units<br/>write-capable"]
+        F4["Agent F4: verify and write report<br/>shell, no edit"]
+        F5["Agent F5: publish fix package<br/>write-capable"]
 
-        V --> W --> F1
-        F1 -->|"exact implementationText"| F2
+        V --> F1
+        F1 -->|"exact scopeText"| F2
+        F2 -->|"exact unitsText"| F3
+        F3 -->|"exact implementationText"| F4
+        F4 -->|"exact reportText"| F5
     end
 
-    H -->|"explicit fix-plan.md path"| V
+    H -->|"explicit review.md path"| V
 ```
 
 ## `review` algorithm
 
-### 1. R1 resolves the target
+Six sequential stages. No branching, no parallel barrier, no loop, no fan-out.
+Each stage receives the exact previous text; the workflow never parses it.
 
-The workflow renders `target-resolver.prompt.md`. R1 inspects Git state,
-repository rules, remotes, and the requested object. It returns readable text
-containing the exact comparison and an immutable snapshot, normally
-`base=<commit> head=<commit>`.
+### 1. R1 resolves the scope
 
-The workflow does not parse `ready`, `blocked`, branch names, or hashes from
-the answer. The complete answer becomes `targetText`.
+The workflow renders `scope-resolver.prompt.md`. R1 inspects Git state and
+repository guidance and turns the free-form request into one explicit
+`# Review Scope` with target, includes, excludes, and focus, or one blocked
+scope with a single rerun instruction. It returns no hashes or snapshot.
 
-### 2. R2 and R3 inspect independently
+Later stages receive `scopeText` instead of the operator conversation, so the
+scope has to stand alone.
 
-The workflow starts two child sessions behind one fail-closed parallel barrier.
+### 2. R2a inventories the change
 
-- R2 focuses on defects introduced by the exact change.
-- R3 reads complete files, repository rules, tests, configuration, and direct
-  consumers.
+R2a owns coverage, not meaning: it maps every changed surface, including
+staged, unstaged, and untracked work, and batches generated or mechanical
+changes instead of dropping them. Its `# Change Inventory` becomes
+`inventoryText`.
 
-Each session receives the original request and exact `targetText`, then reopens
-the target with its own tools. Their final texts become `changesText` and
-`contextText`.
+### 3. R2b plans review units
 
-If either child technically fails, is blocked, is cancelled, or returns empty
-text, the parallel stage fails after its sibling settles. Text that merely
-looks like a failure envelope is still ordinary text.
+R2b groups the inventory into material decisions. Several files that implement
+one decision form one unit; one file with two unrelated decisions becomes two.
+Each unit carries one or more `Path:` lines, an optional `Anchor:`, and a
+`Change:` sentence. `Anchor:` is a navigation hint — a symbol, heading, config
+key, CLI flag, schema property, test case, or workflow stage — never an
+identifier the runtime parses.
 
-### 3. R4 adjudicates
+### 4. R3 asks falsifiable questions
 
-R4 receives the original request plus exact `targetText`, `changesText`, and
-`contextText`. It reopens the target, verifies proposed findings, removes
-duplicates, corrects severity and scope, reconciles prior claims, and returns
-one complete Markdown review as `adjudicatedText`.
+R3 asks the smallest set of questions that could change acceptance, as
+`## U<n>-Q<m>` blocks. Several questions per unit are normal. Documentation
+questions are conditional: they appear only when the unit changes a public
+signature, user-visible behavior, a CLI/API/config/schema contract, or a
+workflow already described in the docs, and only about documents that exist.
 
-### 4. R5 publishes
+### 5. R4 verifies and writes the review
+
+R4 treats units as a work map and questions as hypotheses. It reopens the
+changed code, direct callers, tests, configuration, and existing documentation,
+answers every question exactly once, and promotes only confirmed problems to
+findings. Its `# Code Review` records reviewed scope, verdict, findings,
+question resolutions, and explicit coverage limits.
+
+### 6. R5 publishes and presents
 
 R5 is the only write-capable review session. It first proves `.tasks/` is
-ignored, then creates one local review task and writes:
+ignored, then creates one local review task and publishes the handoffs as
+Markdown: `review-scope.md`, `review-inventory.md`, `review-units.md`,
+`review-questions.md`, and the mandatory `review.md`.
 
-- `artifacts/review.md` with the exact adjudicated review;
-- `artifacts/fix-plan.md` when actionable findings exist;
-- review paths, hashes, target, snapshot, and finding ids in `task.md`.
-
-Every new plan disposition is `pending`. R5 copies findings mechanically and
-does not edit reviewed source code.
+R5 may repair presentation — headings, broken Markdown, identifier consistency,
+file boundaries — but must not invent, delete, or soften a finding, re-review
+the code, or edit source. Its final text is the executive summary the operator
+reads: verdict, counts, and every created path. The summary is the workflow
+result, not a file.
 
 ## Human approval
 
-The operator reads immutable `review.md` and edits only the disposition in
-`fix-plan.md`:
+The operator reads `review.md` and edits it directly. Deleting a finding
+rejects it; a free-form note under a finding is an instruction to the fix
+workflow. There are no dispositions, hashes, or snapshots to maintain.
 
-- `accepted` authorizes a source change;
-- `waived` records a conscious non-fix;
-- `deferred` postpones the finding;
-- `pending` grants no write authority.
-
-No remediation starts until at least one finding is `accepted`.
+Remediation is always a separate, explicitly started workflow. Nothing in
+`review` grants write authority over source.
 
 ## `review-fix` algorithm
 
-### 1. Deterministic validation
+`review-fix` mirrors the `review` shape: interpret intent, plan, act, verify,
+present. Five sequential agents follow one deterministic gate, and each stage
+receives the exact previous text.
 
-`review-fix-plan.mjs` validates path confinement, review and plan hashes,
-target, snapshot, finding identity, proof that the plan changed after
-publication, at least one accepted finding, and an addressable reviewed commit.
-No child or worktree exists before this check passes.
+The operator passes the edited `review.md` path, optionally wrapped in ordinary
+words such as `apply only the P1 items in .tasks/T-1/artifacts/review.md`.
 
-### 2. One runtime-owned worktree
+### 1. Deterministic input confinement
 
-The workflow allocates one retained linked worktree at the reviewed head and
-keeps only its opaque `workspaceHandle`. Model-returned paths never select the
-workspace.
+`review-fix-input.mjs` extracts the one `review.md` token from the request and
+proves what a prompt cannot: the path is project-relative, lives in a task
+`artifacts` directory, resolves without a symlink escape, and its `## Findings`
+section still lists at least one `### <id>` block. A review whose findings the
+operator deleted throws before any agent exists, and two different `review.md`
+paths in one request are rejected rather than guessed.
 
-### 3. F1 applies accepted findings
+It validates no hashes, snapshot, disposition, or reviewed commit. `review.md`
+is meant to be edited, and the reviewed work is often uncommitted, so there is
+nothing immutable to bind to.
 
-The implementer receives immutable review text, the approved plan, accepted
-ids, ignored ids, and exact hashes. It applies only accepted findings, runs
-focused checks, and returns ordinary text as `implementationText`. It does not
-commit, push, merge, deploy, or edit the original checkout.
+### 2. F1 resolves the fix scope
 
-### 4. F2 verifies and reports
+The scope resolver reads the request and the edited report and decides which
+remaining findings this run addresses, under which constraints, and which
+repository checks matter. It also records whether the working tree already
+carries unrelated uncommitted work. Later stages receive `scopeText`, not the
+operator conversation.
 
-The verifier reuses the same `workspaceHandle`. It treats
-`implementationText` as a claim, reopens the actual diff, verifies each
-accepted finding, and writes `artifacts/fix-report.md` plus matching task
-evidence. Source changes remain uncommitted in the retained worktree.
+### 3. F2 revalidates and plans fix units
+
+The unit planner reopens each in-scope finding against the code as it is now.
+The code may have moved, been fixed already, or never had the described defect;
+`Path:` and `Anchor:` are navigation hints, not addresses. Findings that no
+longer hold are listed under `## Stale findings`. The survivors are grouped into
+atomic fix units — one coherent change each, ordered by dependency — with the
+risk and the check that would catch it.
+
+### 4. F3 applies the units
+
+The implementer applies the planned units in order in the operator's launch
+checkout, runs the checks named in the scope, and states which units it skipped
+and why. It fixes nothing the plan did not ask for.
+
+### 5. F4 verifies and writes the report
+
+The verifier treats `implementationText` as a claim, reopens the working-tree
+diff and affected files, reruns the checks, and writes the complete
+`# Fix Report`. It reports any diff hunk no unit asked for. This stage keeps a
+shell so it can run tests, so it is not host-enforced read-only; its no-edit
+rule is a prompt rule plus Pi approval.
+
+### 6. F5 publishes and presents
+
+The publisher writes `fix-scope.md`, `fix-units.md`, and the mandatory
+`fix-report.md` beside the review, repairing presentation only, and returns the
+executive summary as the workflow result.
+
+All fix stages work in the operator's launch checkout, not in a worktree,
+because the review may cover staged, unstaged, or untracked work that exists in
+no commit. Changes stay uncommitted so the operator reviews them as an ordinary
+diff.
 
 ## Output and safety boundaries
 
@@ -220,8 +280,14 @@ evidence. Source changes remain uncommitted in the retained worktree.
   data, and artifacts remain runtime-owned evidence.
 - `llm({ schema })` is the separate direct-model JSON contract; `agent()` does
   not parse JSON.
-- `readOnly: true` is host-enforced capability narrowing.
+- `readOnly: true` is host-enforced capability narrowing. The `review-fix`
+  verifier deliberately does not set it, because running repository checks
+  needs a shell; a shell can write, so its no-edit rule is prompt-level.
 - `permissionMode` is trace intent, and Pi still owns operator approval.
-- A worktree isolates file changes for review. It is not a security sandbox.
+- `review-fix` edits the launch checkout. Its boundaries are the explicit
+  operator start, the deterministic input gate, revalidation of every finding
+  before a change, prompt prohibitions on commit, push, merge, deploy, and
+  discarding foreign uncommitted work, and the fact that every change stays
+  uncommitted.
 - Prompt restrictions guide write-capable sessions but do not replace host
   approval or deterministic validation.

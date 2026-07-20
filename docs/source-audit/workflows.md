@@ -173,33 +173,50 @@ or borrowed runtime implementation was identified for this source-audit slice.
   a zero-token provider failure to a generic workflow error.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
   review composition, not a new runtime primitive. It accepts an opaque
-  free-form request. Five catalog-agent sessions own target resolution, two
-  independent review lanes, adjudication, and publication. Complete stage
+  free-form request. Six catalog-agent sessions run strictly in sequence and
+  own scope resolution, change inventory, review-unit planning, question
+  formulation, independent verification, and publication. Complete stage
   prompts live beside the entry under `resources/`; runtime resolves them from
   the original workflow source, rejects path escapes, snapshots each loaded
   file once, and records SHA-256 evidence. Every `agent()` call returns
-  exact non-empty text. The coordinator forwards `targetText`, `changesText`,
-  `contextText`, and `adjudicatedText` verbatim and never parses verdicts,
-  statuses, ids, paths, or JSON. A publisher creates a local review task and
-  writes immutable `.tasks/<task>/artifacts/review.md` plus an all-pending
-  `fix-plan.md` only after proving `.tasks/` is ignored. Repository/forge
-  evidence remains child-session-owned; the workflow performs no direct Git,
-  network, forge-specific, packet-building, or `llm()` work. R1-R4 pass
+  exact non-empty text. The coordinator forwards `scopeText`, `inventoryText`,
+  `unitsText`, `questionsText`, and `reviewText` verbatim and never parses
+  verdicts, statuses, ids, paths, or JSON. The raw operator request stops at
+  the scope resolver. A publisher creates a local review task and writes
+  task-local review Markdown, of which `.tasks/<task>/artifacts/review.md` is
+  the mandatory reader-facing report, only after proving `.tasks/` is ignored;
+  it writes no fix plan, dispositions, or hashes. Repository/forge evidence
+  remains child-session-owned; the workflow performs no direct Git, network,
+  forge-specific, packet-building, or `llm()` work. R1-R4 pass
   `readOnly: true`; the shared SDK host narrows their sessions to known read
   tools and removes shell, write/edit, nested workflow, and unknown tools.
   Their local Git evidence comes through `git_read`, which invokes only
   allowlisted query subcommands without a shell and rejects mutating or
-  process-spawning options. The publisher remains the only write-capable
-  review agent. A failed parallel child remains a typed group failure.
+  process-spawning options. The unit planner, interrogator, and verifier also
+  receive `ast_index`, an allowlisted argv tool over the installed `ast-index`
+  binary whose database lives in the user cache directory; `clear`, `watch`,
+  unknown commands, and output-file options are rejected, and a missing binary
+  or index degrades to `grep`/`find` instead of blocking the review. The
+  publisher remains the only write-capable review agent.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the curated,
-  human-gated remediation exception. Deterministic `review-fix-plan.mjs`
-  validates path confinement, hashes, target, snapshot, finding identity,
-  explicit plan edit, accepted findings, and reviewed commit before writes.
-  Runtime creates one retained linked worktree and exposes only an opaque
-  workspace handle. Prompt-configured implementer and verifier sessions share
-  that handle; the verifier receives implementation text verbatim but reopens the
-  diff as evidence. Prompts prohibit original-checkout edits, commit, push,
-  pull-request creation, merge, deployment, and remote mutation. These are
+  human-gated remediation exception. Deterministic `review-fix-input.mjs`
+  validates path confinement — project-relative, named `review.md`, inside a
+  task `artifacts` directory, no symlink escape — and refuses a review whose
+  `## Findings` section is missing or lists no remaining `### <id>` block, so
+  an operator who deleted every finding never reaches an agent. The single
+  `review.md` token is extracted from an otherwise free-form request; two
+  different candidates are rejected rather than guessed. No hash, snapshot,
+  disposition, or reviewed commit is validated, because `review.md` is
+  deliberately a human-edited document and the review may cover uncommitted
+  work. Five prompt-configured sessions then mirror the review shape: scope
+  resolution, finding revalidation plus atomic fix-unit planning, application,
+  verification, and publication. All run in the launch checkout with
+  `workspaceMode: "project"`. Scope resolution and unit planning pass
+  host-enforced `readOnly`; the verifier deliberately does not, because
+  repository checks need a shell, and it receives implementation text verbatim
+  but reopens the working-tree diff as evidence. Prompts prohibit commit, push, pull-request creation, merge,
+  deployment, remote mutation, and discarding uncommitted work the agent did
+  not create; changes stay uncommitted for operator diff review. These are
   agent instructions plus Pi approvals, not a new sandbox.
 - Workflow rows and the `agents` entrypoint share the versioned process-local
   live store required by Pi's per-entrypoint `jiti` loading. This makes active

@@ -6,21 +6,36 @@ This file records user-visible changes to the public package.
 
 ### Added
 
-- Added the curated `review` Package workflow as an agent-owned pipeline. A
-  target agent interprets the operator's free-form request and proves access;
-  independent change and whole-context agents obtain their own evidence; a
-  final adjudicator reopens the target and verifies findings; then a publisher
-  agent creates a local review task and writes both the complete reader-facing
-  `.tasks/<task>/artifacts/review.md` and a mechanically copied, all-pending
-  `fix-plan.md` for human disposition editing. Workflow-local prompts are
-  ordinary neighboring Markdown files containing both stable role instructions
-  and dynamic handoffs; exact child text is passed between stages without a
-  model-written JSON protocol.
-- Added the curated `review-fix` workflow. It applies only explicit `accepted`
-  findings from a deterministically validated review plan in one runtime-owned
-  retained linked worktree, independently verifies the diff with the same
-  opaque workspace handle, and writes `fix-report.md` without commit, push,
-  merge, deployment, or original-checkout edits.
+- Added the curated `review` Package workflow as a question-led agent pipeline.
+  Six sequential agents resolve the review scope from the operator's free-form
+  request, inventory every changed surface, group the inventory into material
+  review units, ask falsifiable questions about them, independently reopen the
+  evidence to answer those questions, and publish a readable review package
+  whose primary report is `.tasks/<task>/artifacts/review.md`. The workflow
+  result is an executive summary. Only confirmed problems become findings, and
+  a human edits the report directly instead of maintaining dispositions,
+  commit hashes, or snapshots. Workflow-local prompts are ordinary neighboring
+  Markdown files containing both stable role instructions and dynamic handoffs;
+  exact child text is passed between stages without a model-written JSON
+  protocol.
+- Added the read-only `ast_index` agent tool. Read-only child sessions that ask
+  for it get allowlisted `ast-index` navigation commands executed with argv and
+  no shell; `clear`, `watch`, unknown commands, and output-file options are
+  rejected, and the index database stays in the user cache directory. The
+  review stages that trace code relationships prefer it and fall back to
+  `grep`/`find` when the binary or index is unavailable.
+- Added the curated `review-fix` workflow as the remediation half of the same
+  question-led shape. It takes the human-edited `review.md` path, optionally
+  wrapped in ordinary words such as "apply only the P1 items in <path>";
+  deterministic code extracts and confines that path and refuses a review whose
+  findings the operator deleted. Five sequential agents then resolve the fix
+  scope, revalidate every finding against live source and group the survivors
+  into atomic fix units, apply those units, verify the working-tree diff by
+  rerunning the project's checks, and publish `fix-scope.md`, `fix-units.md`,
+  and the mandatory `fix-report.md`. All stages work in the operator's launch
+  checkout, because a review often covers uncommitted work, and leave every
+  change uncommitted without commit, push, merge, or deployment. There is no fix
+  plan, no disposition field, and no hash or snapshot binding.
 - Added workflow-local `promptFile()` resources with strict variable rendering,
   source-relative confinement, immutable run copies, and SHA-256 evidence.
 - Added per-call `readOnly: true` policy for workflow agents so prompt-only
@@ -60,12 +75,12 @@ This file records user-visible changes to the public package.
   `agent()`, `promptFile()`, `phase()`, and `log()` to their definitions.
 - Expanded the supported curated Package registry from three workflows to five.
   Generic implementation, release, deploy, and incident workflows remain
-  project-local; the narrow review remediation family is human-gated and
-  worktree-isolated.
+  project-local; the narrow review remediation family is human-gated, gated by
+  deterministic input validation, and never commits.
 - Kept review and fixing as two workflows instead of adding a separate
-  `review-plan` run. The review publisher can copy verified findings into a
-  pending approval manifest without three more agent sessions, while immutable
-  evidence and the human write gate remain separate files.
+  `review-plan` run. The review report is itself the approval surface: the
+  operator edits `review.md` in place, and remediation stays a separate,
+  explicitly started workflow with no write authority carried over.
 - Added an executable diagram contract so future curated workflows cannot ship
   without a reproducible generator, editable source, preview, ownership legend,
   and actual runtime persistence surfaces.

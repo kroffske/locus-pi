@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-18
+- Amended: 2026-07-20
 
 ## Decision
 
@@ -13,64 +13,75 @@ a permission posture that the package can support as a public promise.
 
 The accepted Package portfolio is:
 
-| Workflow             | Product role                | Why it belongs                                                                                                                    |
-| -------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                         |
-| `llm-smoke`          | Direct-model diagnostic     | It proves `llm()` routing independently from child-session behavior.                                                              |
-| `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                              |
-| `review`             | Evidence-backed code review | It covers a recurring merge gate and publishes immutable evidence plus a separate, all-pending human approval manifest.           |
-| `review-fix`         | Isolated accepted fixes     | It applies only explicit human approvals in a retained linked worktree and publishes independent verification without committing. |
+| Workflow             | Product role                | Why it belongs                                                                                                                     |
+| -------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                          |
+| `llm-smoke`          | Direct-model diagnostic     | It proves `llm()` routing independently from child-session behavior.                                                               |
+| `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                               |
+| `review`             | Evidence-backed code review | It covers a recurring merge gate and publishes a readable, question-resolved report a human can edit directly.                     |
+| `review-fix`         | Human-directed fixes        | It applies the findings a human left in that report, revalidating each against live source, and verifies the result independently. |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
 evidence adapter. Each workflow owns ordinary `resources/*.prompt.md` step
 prompts beside its entry file. Each prompt contains the stable stage role plus
-the dynamic per-run handoffs. The first full child session resolves
-the target and proves access, two independent agents obtain their own change and
-whole-context evidence, and the final agent reopens the target before
-adjudicating findings. This design keeps private-forge authentication and
+the dynamic per-run handoffs. Six sequential child sessions resolve the review
+scope from free-form operator intent, inventory the changed surface, group it
+into material review units, ask falsifiable questions, independently reopen the
+evidence to answer them, and publish the package. Questions are hypotheses:
+only what the verifier confirms from re-read evidence becomes a finding. This
+design keeps private-forge authentication and
 repository operations inside the existing agent/tool environment instead of
 creating a second provider-specific integration in the package.
 
-The four inspection calls set `readOnly: true` in workflow code. The SDK host
+The five inspection calls set `readOnly: true` in workflow code. The SDK host
 turns that per-call policy into a capability allowlist: shell, write/edit,
 nested workflow, and unknown tools are unavailable. Git inspection uses the package-owned
 `git_read` tool, which executes only allowlisted query subcommands without a
-shell, pager, external diff, textconv, hooks, fsmonitor, or optional locks.
-`permissionMode: "agent-defined"` remains trace intent and Pi still owns
+shell, pager, external diff, textconv, hooks, fsmonitor, or optional locks. The
+three stages that trace code relationships also receive `ast_index`, an
+allowlisted argv tool over the installed `ast-index` binary whose database lives
+outside the reviewed project; it degrades to `grep`/`find` instead of blocking a
+review. `permissionMode: "agent-defined"` remains trace intent and Pi still owns
 operator approval, but the publisher-only write rule no longer depends on
-prompt compliance. The adjudicator returns reader-facing Markdown; a separate
-publisher agent writes the complete reader-facing report to
-`.tasks/<task>/artifacts/review.md` after proving `.tasks/` is ignored. The same
-publisher mechanically copies every verified finding into `fix-plan.md` with
-every disposition initially `pending`; it does not add findings or invent a
-second implementation plan. Mandatory `result.json` remains technical runtime
-evidence rather than the primary report.
+prompt compliance. The verifier returns reader-facing Markdown; a separate
+publisher agent publishes the review package to `.tasks/<task>/artifacts/` after
+proving `.tasks/` is ignored, with `review.md` as the mandatory primary report
+and the stage handoffs as supporting artifacts. The publisher may repair
+presentation but may not invent, delete, or soften a finding. Mandatory
+`result.json` remains technical runtime evidence rather than the primary
+report; the workflow result itself is the publisher's executive summary.
 
 Externalizing prompts is an explicit readability trade-off. The workflow uses
-catalog agents and does not define neighboring workflow-local agents. Both
-entry modules declare `identityCoverage: "entry-only"` because their SHA-256
-does not bind neighboring resources; `review-fix` also imports a deterministic
-local plan validator. Runtime snapshots each loaded prompt once and records its
-SHA-256 instead of pretending the entry hash covers it.
+catalog agents and does not define neighboring workflow-local agents. `review`
+imports nothing and keeps the default `self-contained-static` identity, so the
+runner executes its retained snapshot; only `review-fix` declares
+`identityCoverage: "entry-only"`, because it imports a deterministic local input
+validator whose bytes its entry hash cannot bind. Identity coverage never
+covered prompts either way: runtime snapshots each loaded prompt once and
+records its SHA-256 instead of pretending the entry hash covers it.
 
-Keeping `review.md` and `fix-plan.md` as separate files preserves the human gate
-without a separate `review-plan` workflow. The operator may change individual
-findings in the approval manifest to `accepted`, `waived`, or `deferred` without
-rewriting review evidence. `review-fix` treats only `accepted` as write
-authority. Deterministic code validates file confinement, hashes, target,
-snapshot, finding identity, explicit plan edit, and the reviewed commit before
-allocating one runtime-owned linked worktree. Implementer and verifier share
-one opaque workspace handle. The workflow does not edit the original checkout,
-commit, push, create a pull request, merge, or deploy.
+The human gate is `review.md` itself, edited in place. Deleting a finding
+rejects it, rewording one changes the request, and a note under a finding
+instructs the fix agents. This replaces the earlier `fix-plan.md` disposition
+manifest and its hash, snapshot, and reviewed-commit binding, which could not
+express a review of uncommitted work — the common case for "review what I have
+right now". `review-fix` therefore validates only what a prompt cannot: path
+confinement and a non-empty finding list, before any write-capable child exists.
+Its five agents mirror the review shape — scope, units, apply, verify,
+publish — run in the launch checkout for the same reason, revalidate each
+finding against live source before changing anything, and leave every change
+uncommitted; they do not commit, push, create a pull request, merge, deploy, or
+discard uncommitted work they did not create.
 
 ## Selection boundary
 
 The following shapes are not curated now:
 
 - Generic plan/build/fix orchestration remains project-local. The curated
-  exception is the narrow review family: it has an immutable source report,
-  per-finding human dispositions, an exact reviewed snapshot, a mandatory
-  linked-worktree boundary, and no commit or remote action.
+  exception is the narrow review family: it has one readable source report, an
+  explicit human edit as the approval signal, a deterministic input gate before
+  any write-capable child, per-finding revalidation against live source, and no
+  commit or remote action.
 - Release and deploy workflows remain project-local because providers,
   credentials, rollback, and blast radius are not package-neutral.
 - Incident-response workflows remain project-local because infrastructure access
@@ -88,7 +99,15 @@ together.
 
 The Package surface grows from three to five names, but not into a general
 automation catalog. The two review-family names expose one deliberate
-sequence—evidence plus human approval, then isolated fix—while keeping
-deployment and publication outside the workflow boundary. Removing a separate
-`review-plan` run avoids three redundant agent sessions without weakening the
-immutable-report or human-approval boundaries.
+sequence—question-led evidence, then a human-directed fix—while keeping
+deployment and publication outside the workflow boundary.
+
+Dropping the hash-bound approval manifest is a real trade. The package no
+longer proves that the fixed code is byte-identical to the reviewed code; it
+proves instead that a human chose which findings survived and that an agent
+rechecked each one against the code as it is now. That fits a review of
+uncommitted work, which the previous contract could not address at all, and it
+removes a bookkeeping layer that weak models handled badly. The remaining
+guardrails are deliberate and small: deterministic path confinement, a
+non-empty finding list before any write-capable child, and changes that stay
+uncommitted for ordinary diff review.

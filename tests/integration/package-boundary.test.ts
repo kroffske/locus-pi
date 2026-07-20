@@ -71,6 +71,20 @@ describe("npm public package boundary", () => {
     expect(actual).toEqual(expected);
   });
 
+  it("ships every prompt resource a curated workflow renders", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+
+    for (const [name, workflowPath] of Object.entries(CURATED_PACKAGE_WORKFLOW_PATHS)) {
+      const source = readFileSync(path.join(root, workflowPath), "utf8");
+      const directory = path.posix.dirname(workflowPath);
+      for (const match of source.matchAll(/promptFile\(\s*"(\.\/[^"]+\.prompt\.md)"/gu)) {
+        const resource = path.posix.normalize(path.posix.join(directory, match[1]!));
+        expect(existsSync(path.join(root, resource)), `${name} renders a missing prompt: ${resource}`).toBe(true);
+        expect(packedPaths.has(resource), `${name} renders an unpacked prompt: ${resource}`).toBe(true);
+      }
+    }
+  });
+
   it("ships ten active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
     expect(pkg.pi.extensions).toHaveLength(10);

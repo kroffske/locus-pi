@@ -1046,6 +1046,56 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     );
   });
 
+  it("offers ast_index only when requested and blocks its destructive commands", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-ast-index-agent-"));
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "Read-only answer." });
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    await executor.run(
+      { ...request(), projectRoot: root, workingDirectory: root, allowedTools: ["read", "grep", "find"] },
+      new AbortController().signal,
+    );
+    expect(capturedOptions?.customTools?.some((tool) => tool.name === "ast_index")).not.toBe(true);
+
+    await executor.run(
+      {
+        ...request(),
+        projectRoot: root,
+        workingDirectory: root,
+        allowedTools: ["read", "ast_index", "grep", "find", "bash"],
+      },
+      new AbortController().signal,
+    );
+
+    expect(capturedOptions?.tools).toEqual(["read", "ast_index", "grep", "find"]);
+    expect(capturedOptions?.excludeTools).toEqual(expect.arrayContaining(["bash", "write", "edit"]));
+    const astIndex = capturedOptions?.customTools?.find((tool) => tool.name === "ast_index");
+    expect(astIndex).toBeDefined();
+
+    for (const [args, expected] of [
+      [["clear"], "blocks destructive or unsupported command: clear"],
+      [["watch"], "blocks destructive or unsupported command: watch"],
+      [["symbol; rm -rf /"], "blocks destructive or unsupported command"],
+      [["search", "--output=/tmp/out.txt", "run"], "blocks output-file options"],
+    ] as Array<[string[], string]>) {
+      const blockedResult = await astIndex!.execute("blocked", { args }, new AbortController().signal);
+      expect(blockedResult, args.join(" ")).toMatchObject({ isError: true, details: { blocked: true } });
+      expect(blockedResult.content[0]?.text, args.join(" ")).toContain(expected);
+    }
+
+    const missingArgs = await astIndex!.execute("bad-input", { command: "symbol" }, new AbortController().signal);
+    expect(missingArgs).toMatchObject({ isError: true, details: { blocked: true } });
+    expect(missingArgs.content[0]?.text).toContain("ast_index requires one `args` string array.");
+  });
+
   it("returns a blocked result with the unavailable diagnostic when the host is too old", async () => {
     const createSession: CreateAgentSessionFactory = async () => {
       throw new AgentSdkUnavailableError("Installed Pi host does not export createAgentSession (host too old).");

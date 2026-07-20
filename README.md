@@ -34,13 +34,13 @@ evidence remains in the public GitHub repository rather than the npm artifact.
 
 Only these names are registered as Package workflows:
 
-| Workflow             | Intended use                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.   |
-| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                          |
-| `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.       |
-| `review`             | Reviews a free-form target and publishes immutable `review.md` plus a pending human approval plan.              |
-| `review-fix`         | Applies only explicitly accepted findings in a retained linked worktree and publishes independent verification. |
+| Workflow             | Intended use                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
+| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                        |
+| `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
 
 Use the operator catalog to inspect and run them:
 

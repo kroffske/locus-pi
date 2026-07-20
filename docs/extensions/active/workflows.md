@@ -75,22 +75,35 @@ with real session ids. See "Run a real workflow (live)" below.
 | `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                   |
 | `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                  |
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`. |
-| `review`             | **Agent-owned code review**: five prompt-configured catalog-agent sessions resolve, inspect, adjudicate, and publish immutable `review.md` plus an all-pending human approval manifest as `fix-plan.md`.                                                                                                                                                                                                                                                                                        |
-| `review-fix`         | **Human-gated remediation**: deterministic code validates the approval plan, then two prompt-configured catalog-agent sessions share one runtime-owned linked worktree, verify the diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, deploy, or modify the original checkout.                                                                                                                                                                                        |
+| `review`             | **Question-led code review**: six prompt-configured catalog-agent sessions resolve the scope, inventory the change, plan review units, ask falsifiable questions, verify them independently, and publish a readable review package whose primary report is `review.md`.                                                                                                                                                                                                                         |
+| `review-fix`         | **Human-gated remediation**: deterministic code confines the operator-supplied `review.md` path and refuses an empty finding list, then five prompt-configured catalog-agent sessions resolve the fix scope, revalidate each finding and plan atomic fix units, apply them, verify the working-tree diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, or deploy.                                                                                                     |
 
-`review` passes the operator request and exact text handoffs between agents. The
-first agent resolves the target and immutable snapshot.
-Two independent agents obtain and inspect the diff, complete changed files,
-related consumers, repository standards, tests, and documentation themselves.
-The adjudicator reopens the target, verifies and deduplicates findings. A final
+`review` passes exact text handoffs between six sequential agents. The scope
+resolver turns the free-form operator request into one explicit review scope;
+later stages receive that scope instead of the original conversation. The
+inventory agent proves coverage of every changed surface, including staged,
+unstaged, and untracked work. The unit planner groups the inventory into
+material decisions rather than one unit per file. The interrogator asks
+falsifiable questions about those units. The verifier treats units and
+questions as a work map and hypotheses, reopens the code, callers, tests, and
+existing documentation itself, answers every question, and writes the complete
+reader-facing review; only confirmed problems become findings. A final
 publisher agent creates a real local review task in the Pi launch project,
-writes the complete reader-facing report to
-`.tasks/<task>/artifacts/review.md`, and mechanically copies every verified
-finding into `fix-plan.md` with `Disposition: pending`. It first proves that
+publishes the handoffs as task-local Markdown with
+`.tasks/<task>/artifacts/review.md` as the mandatory primary report, and
+returns an executive summary as the workflow result. It first proves that
 `.tasks/` is ignored and never writes into a different reviewed repository.
-The report has explicit sections for confirmed target identity, verdict, new
-findings, reconciliation of earlier claims, independently executed checks, and
-residual risks.
+The review records reviewed scope, verdict, findings, one resolution per
+question id, and explicit coverage limits. It contains no commit hashes,
+snapshots, fix plan, or dispositions: a human edits `review.md` directly, and
+deleting a finding rejects it.
+
+The unit planner, interrogator, and verifier may also use `ast_index`, an
+allowlisted argv tool over the installed `ast-index` binary, for code-symbol
+relationships. Its database lives in the user cache directory, so index
+refreshes never touch reviewed source. A missing binary or index degrades to
+`grep`/`find` and is recorded as a coverage limit instead of blocking the
+review.
 
 The two review workflows have independent package directories:
 `extensions/workflows/examples/review/` and
@@ -101,29 +114,57 @@ role instructions and the dynamic handoffs for one concrete stage.
 lexical or symlink escapes, copies bytes once into the run directory, and
 records SHA-256 evidence.
 
-The separate review artifacts preserve the human gate without a separate planning
-workflow: `review.md` remains immutable evidence, while the operator edits only
-`fix-plan.md` to mark findings `accepted`, `waived`, `deferred`, or leave them
-`pending`. `review-fix-plan.mjs` validates the edited Markdown before any
-write-capable agent runs: file confinement, review and plan hashes, target,
-snapshot, finding identity, human edit proof, at least one `accepted`, and an
-addressable reviewed commit must all match. Runtime then creates one retained
-linked worktree and gives both agents the same opaque workspace handle. Only
-explicit `accepted` dispositions authorize source changes; every other state is
-ignored.
+The human gate is the review document itself. The operator edits `review.md`
+directly: deleting a finding rejects it, rewording one changes the request, and
+a free-form note under a finding is an instruction to the fix agents. Nothing is
+carried over as a hash, snapshot, disposition field, or reviewed commit, so a
+review of uncommitted work stays actionable.
 
-Both entry scripts use `agent()`, `promptFile()`, `phase()`, and `log()`;
-`review` also uses `parallel()`, while `review-fix` uses `workspace()`.
-Repository and private-forge evidence acquisition remains owned by full child
-agents. There is no prepared evidence packet or `llm()` merge. Prompts constrain
-writes to documented task/worktree boundaries, but prompt text and permission
-metadata are not a sandbox; Pi's tool approval remains the enforcement boundary.
-Resource validation or child execution failure remains fail-closed.
+`review-fix` mirrors the `review` shape — interpret intent, plan, act, verify,
+present — as one deterministic gate plus five sequential agents. Deterministic
+`review-fix-input.mjs` extracts the single `review.md` token from the operator
+request, so `apply only the P1 items in .tasks/T-1/artifacts/review.md` is a
+valid input, and proves what a prompt cannot: the path is project-relative,
+inside a task `artifacts` directory, reachable without a symlink escape, and its
+`## Findings` section still lists at least one `### <id>` block. An empty or
+missing findings section throws before any agent exists.
 
-`review` declares `meta.identityCoverage: "entry-only"` so resource bytes are
-tracked separately from the entry hash. `review-fix` also imports
-`review-fix-plan.mjs`, so its entry hash does not bind that deterministic helper.
-Every loaded agent/prompt resource has its own immutable run copy and SHA-256.
+Everything after that is agent judgement. The scope resolver decides which
+remaining findings this run addresses and under which constraints. The unit
+planner reopens each in-scope finding against live source, lists the ones that
+no longer hold as stale, and groups the survivors into atomic, dependency-ordered
+fix units. The implementer applies those units. The verifier reopens the
+working-tree diff, reruns the checks, and writes the report. The publisher writes
+`fix-scope.md`, `fix-units.md`, and the mandatory `fix-report.md` beside the
+review and returns an executive summary.
+
+All `review-fix` agents run in the operator's launch checkout with
+`workspaceMode: "project"` rather than in a linked worktree. That is a
+deliberate trade: the review may cover staged, unstaged, or untracked work that
+exists in no commit, and a worktree at some commit would hand the fix agent
+different code than the one that was reviewed. The compensating boundaries are
+that the operator starts the workflow explicitly, every finding is revalidated
+before a change, the prompts forbid commit, push, merge, deploy, and discarding
+uncommitted work the agent did not create, and every change stays uncommitted
+for an ordinary diff review. The scope resolver and unit planner are
+host-enforced `readOnly`; the verifier is not, because running repository checks
+requires a shell.
+
+Both entry scripts use `agent()`, `promptFile()`, `phase()`, and `log()` and run
+strictly sequentially. Repository and private-forge evidence acquisition remains
+owned by full child agents. There is no prepared evidence packet or `llm()`
+merge. Prompts constrain writes to documented task boundaries, but prompt text
+and permission metadata are not a sandbox; Pi's tool approval remains the
+enforcement boundary. Resource validation or child execution failure remains
+fail-closed.
+
+`review` imports nothing, so it keeps the default `self-contained-static`
+identity and the runner executes its retained snapshot. `review-fix` imports
+`review-fix-input.mjs` and therefore declares
+`meta.identityCoverage: "entry-only"`: it executes from the hash-qualified
+source and its entry hash does not bind that deterministic helper. Neither
+coverage says anything about prompts — every loaded agent/prompt resource has
+its own immutable run copy and SHA-256 regardless.
 
 The Markdown files are the human-facing artifacts. Mandatory `result.json`
 remains the machine-readable runtime envelope and provenance surface. Its
@@ -599,8 +640,8 @@ The diagram is an ownership map, not a decorative code trace:
   `.locus/runtime/workflows/<runId>/result.json`, and `journal.ndjson` when it
   records meaningful execution evidence. Draw a Markdown report as a separate
   artifact only when an agent really persists that file; the review family
-  therefore shows `.tasks/<task>/artifacts/review.md`, `fix-plan.md`, or
-  `fix-report.md` alongside the mandatory runtime JSON.
+  therefore shows `.tasks/<task>/artifacts/review.md`, its supporting stage
+  artifacts, or `fix-report.md` alongside the mandatory runtime JSON.
 - Include a legend that explains the visual types and any accent colors. A
   reader must understand the graph without opening the workflow source.
 

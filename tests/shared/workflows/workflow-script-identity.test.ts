@@ -96,17 +96,11 @@ describe("workflow script identity coverage", () => {
   it("keeps curated identity coverage explicit for static and resource-backed workflows", () => {
     for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
       const assessment = assessWorkflowSourceIdentity(readFileSync(packagedWorkflowPath(name), "utf8"));
-      if (name === "review") {
+      if (name === "review-fix") {
         expect(assessment, name).toEqual({
           identityCoverage: "entry-only",
           builtinImports: [],
-          unboundDependencies: [],
-        });
-      } else if (name === "review-fix") {
-        expect(assessment, name).toEqual({
-          identityCoverage: "entry-only",
-          builtinImports: [],
-          unboundDependencies: ["import:./review-fix-plan.mjs"],
+          unboundDependencies: ["import:./review-fix-input.mjs"],
         });
       } else {
         expect(assessment, name).toMatchObject({

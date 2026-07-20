@@ -14,6 +14,12 @@ const scene = new Scene({
   background: "#ffffff",
 });
 
+// One left-to-right column per stage. Lane titles own the left margin, so the
+// first node of every lane starts right of LANE_LABEL_WIDTH.
+const LANE_X = 40;
+const LANE_WIDTH = 5360;
+const LANE_LABEL_WIDTH = 400;
+
 const COLORS = {
   operator: "#087f5b",
   workflow: "#7e22ce",
@@ -52,26 +58,26 @@ const nodeRecord = (id, block) => ({
   texts: block.elements.filter((element) => element.type === "text"),
 });
 
-const operatorNode = (id, x, y, width, height) => {
+const operatorNode = (id, title, body, iconId, x, y, width, height) => {
   const frame = scene.ellipse(x, y, width, height, {
     color: COLORS.operator,
     strokeWidth: 2,
   });
   setFrameFill(frame, COLORS.operatorFill);
-  const icon = scene.placeAsset("chat_message", x + 28, y + 34, 48);
-  const title = scene.text(x + 90, y + 27, "Operator: request", {
+  const icon = scene.placeAsset(iconId, x + 28, y + 34, 48);
+  const titleText = scene.text(x + 90, y + 27, title, {
     size: 17,
     color: COLORS.operator,
     width: width - 112,
     align: "center",
   });
-  const body = scene.text(x + 90, y + 57, "Free-form intent\nLocal branch, working tree, or PR", {
+  const bodyText = scene.text(x + 90, y + 57, body, {
     size: 12,
     color: COLORS.operator,
     width: width - 112,
     align: "center",
   });
-  return nodeRecord(id, scene.group([frame, icon, title, body]));
+  return nodeRecord(id, scene.group([frame, icon, titleText, bodyText]));
 };
 
 const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
@@ -110,7 +116,7 @@ const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
     ),
   );
 
-const workflowCheck = (id, x, y, width, height) => {
+const workflowCheck = (id, title, body, x, y, width, height) => {
   const frame = scene.line(
     [
       [x + width / 2, y],
@@ -122,24 +128,19 @@ const workflowCheck = (id, x, y, width, height) => {
     { color: COLORS.workflow, strokeWidth: 2 },
   );
   setFrameFill(frame, COLORS.workflowFill);
-  const title = scene.text(x + 15, y + 91, "Workflow: forward Agent R1 exact text", {
+  const titleText = scene.text(x + 15, y + 84, title, {
     size: 10,
     color: COLORS.workflow,
     width: width - 30,
     align: "center",
   });
-  const body = scene.text(
-    x + 50,
-    y + 118,
-    "No JSON parse\nNo verdict/status branch\nText becomes targetText prompt input",
-    {
-      size: 10,
-      color: COLORS.workflow,
-      width: width - 100,
-      align: "center",
-    },
-  );
-  return nodeRecord(id, scene.group([frame, title, body]));
+  const bodyText = scene.text(x + 50, y + 112, body, {
+    size: 10,
+    color: COLORS.workflow,
+    width: width - 100,
+    align: "center",
+  });
+  return nodeRecord(id, scene.group([frame, titleText, bodyText]));
 };
 
 const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
@@ -164,7 +165,8 @@ const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
     width: width - 112,
     align: "left",
   });
-  const body = scene.text(x + 82, y + 52, lines.join("\n"), {
+  // Titles wrap by hand, so the body starts below the real title line count.
+  const body = scene.text(x + 82, y + 34 + title.split("\n").length * 18, lines.join("\n"), {
     size: 11,
     color: COLORS.artifact,
     width: width - 106,
@@ -174,38 +176,38 @@ const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
 };
 
 const lane = (title, subtitle, y, height, color, fill) => {
-  const frame = scene.rect(40, y, 4820, height, {
+  const frame = scene.rect(LANE_X, y, LANE_WIDTH, height, {
     color,
     strokeWidth: 1,
     dashed: true,
   });
   setFrameFill(frame, fill, 45);
   frame.roughness = 0;
-  scene.text(62, y + 14, title, {
+  scene.text(LANE_X + 22, y + 14, title, {
     size: 19,
     color,
-    width: 390,
+    width: LANE_LABEL_WIDTH,
   });
-  scene.text(62, y + 44, subtitle, {
+  scene.text(LANE_X + 22, y + 44, subtitle, {
     size: 11,
     color: COLORS.muted,
-    width: 390,
+    width: LANE_LABEL_WIDTH,
   });
 };
 
-scene.text(40, 20, "Curated review workflow — findings, immutable report, and human approval plan", {
+scene.text(LANE_X, 20, "Curated review workflow — six sequential agent stages and one write-capable publisher", {
   size: 29,
-  width: 4820,
+  width: LANE_WIDTH,
   align: "center",
 });
 scene.text(
-  40,
+  LANE_X,
   61,
-  "Agents exchange exact readable text. The workflow launches, waits, forwards handoffs verbatim, and returns.",
+  "Strictly linear: R1 → R2a → R2b → R3 → R4 → R5. The workflow renders prompts, enforces capabilities, forwards each exact text, and returns the executive summary.",
   {
     size: 15,
     color: COLORS.muted,
-    width: 4820,
+    width: LANE_WIDTH,
     align: "center",
   },
 );
@@ -292,234 +294,290 @@ scene.text(1884, 103, "Direct LLM: not used in review", {
   width: 220,
 });
 
-lane("OPERATOR", "Owns review intent and any follow-up answer.", 170, 190, COLORS.operator, "#f0fdf4");
+lane("OPERATOR", "Owns the review request and edits the published review.", 170, 190, COLORS.operator, "#f0fdf4");
 lane(
   "WORKFLOW-OWNED",
-  "Orchestration and checks only; no repository review judgment.",
-  380,
-  320,
+  "Prompt rendering, phase names, and capability policy; no review judgment.",
+  390,
+  330,
   COLORS.workflow,
   "#faf5ff",
 );
 lane(
   "FULL AGENT SESSIONS",
-  "Each session uses its own tools to acquire and verify live evidence.",
-  720,
-  360,
+  "One linear chain: no parallel lane and no adjudicator.",
+  750,
+  340,
   COLORS.agent,
   "#eff6ff",
 );
 lane(
   "ARTIFACTS",
-  "Workflow source, complete stage prompts, reports, approval plan, and runtime evidence.",
-  1100,
-  250,
+  "Workflow source, stage prompts, task-local Markdown, runtime evidence.",
+  1120,
+  270,
   COLORS.artifact,
   "#f8fafc",
 );
 
-const request = operatorNode("operator-request", 85, 222, 300, 105);
-
-const launchTarget = workflowNode(
-  "launch-agent-1",
-  "Workflow: launch Agent R1",
-  ["Render complete target-resolver.prompt.md", "Apply readOnly + tool policy in code"],
-  "multi_agent_orchestrator",
-  455,
-  462,
-  295,
-  120,
+const request = operatorNode(
+  "operator-request",
+  "Operator: request",
+  "Free-form intent\nBranch, working tree, commit, or range",
+  "chat_message",
+  85,
+  240,
+  400,
+  110,
 );
 
-const targetAgent = agentNode(
-  "agent-1",
-  "Agent: R1 — target prompt",
+const launchScope = workflowNode(
+  "launch-agent-r1",
+  "Workflow: launch Agent R1",
+  ["phase resolve-scope", "Renders resources/scope-resolver.prompt.md", "readOnly: read, git_read, grep, find"],
+  "multi_agent_orchestrator",
+  480,
+  470,
+  390,
+  145,
+);
+
+const scopeAgent = agentNode(
+  "agent-r1",
+  "Agent: R1 — scope resolver",
   [
-    "catalog default · label: resolve target",
-    "Inspects Git, remotes, guidance, and auth",
-    "Returns exact readable target text",
+    "catalog default · label: resolve review scope",
+    "Host-enforced read-only; no shell, write, or edit",
+    "Reads Git state and repository guidance",
+    "Returns exact scopeText — one explicit scope",
   ],
   "signal_quality_magnifier",
-  800,
-  790,
-  315,
-  175,
-);
-
-const targetStatusCheck = workflowCheck("agent-1-status", 1080, 430, 380, 210);
-
-const launchReviewLanes = workflowNode(
-  "launch-agents-2-3",
-  "Workflow: launch Agents R2+R3 in parallel",
-  ["Same request + targetText", "Independent complete prompt files"],
-  "multi_agent_orchestrator",
-  1530,
-  418,
-  310,
-  125,
-);
-
-const mapBlockedTarget = workflowNode(
-  "map-blocked-target",
-  "Workflow: child failure boundary",
-  ["Empty/failed child throws", "No model text is parsed", "Runtime records diagnostics"],
-  "function_router",
-  1530,
   570,
-  310,
-  105,
+  815,
+  410,
+  195,
 );
 
-const changesAgent = agentNode(
-  "agent-2",
-  "Agent: R2 — change-review prompt",
-  ["catalog default · label: review changes", "Reads diff + full candidate files", "Returns exact review text"],
-  "robot_agent",
-  1900,
-  752,
-  305,
-  145,
+const forwardCheck = workflowCheck(
+  "forward-exact-text",
+  "Workflow: forward each stage's exact text",
+  "No JSON parse · no verdict or status branch\nAn empty or failed child throws\nEach text becomes the next prompt input",
+  1040,
+  450,
+  360,
+  230,
 );
 
-const contextAgent = agentNode(
-  "agent-3",
-  "Agent: R3 — context-review prompt",
-  [
-    "catalog default · label: review context",
-    "Checks standards, config, tests, and docs",
-    "Returns exact context-review text",
-  ],
-  "context_window",
-  1900,
-  918,
-  305,
-  145,
-);
-
-const waitForLanes = workflowNode(
-  "wait-for-lanes",
-  "Workflow: wait for both lane results",
-  ["Collect two exact strings", "Fail closed after sibling settles"],
-  "guardrails",
-  2260,
-  462,
-  300,
-  120,
-);
-
-const launchAdjudicator = workflowNode(
-  "launch-agent-4",
-  "Workflow: launch Agent R4",
-  ["Pass targetText + both lane texts", "No parsing or normalization"],
+const launchInventory = workflowNode(
+  "launch-agent-r2a",
+  "Workflow: launch Agent R2a",
+  ["phase inventory-changes", "Renders resources/change-inventory.prompt.md", "readOnly: read, git_read, grep, find"],
   "multi_agent_orchestrator",
-  2620,
-  462,
-  290,
-  120,
+  1600,
+  470,
+  390,
+  145,
 );
 
-const adjudicator = agentNode(
-  "agent-4",
-  "Agent: R4 — adjudicator prompt",
+const inventoryAgent = agentNode(
+  "agent-r2a",
+  "Agent: R2a — change inventory",
   [
-    "catalog default · label: adjudicate findings",
-    "Reopens target; verifies findings",
-    "Writes reader-facing Markdown verdict",
-    "Returns exact adjudicated text",
+    "catalog default · label: inventory changes",
+    "Host-enforced read-only; coverage, not meaning",
+    "Covers staged, unstaged, and untracked paths",
+    "Returns exact inventoryText — full coverage",
+  ],
+  "change_data_capture",
+  1590,
+  815,
+  410,
+  195,
+);
+
+const launchUnits = workflowNode(
+  "launch-agent-r2b",
+  "Workflow: launch Agent R2b",
+  ["phase plan-units", "Renders resources/unit-planner.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "multi_agent_orchestrator",
+  2160,
+  470,
+  390,
+  145,
+);
+
+const unitsAgent = agentNode(
+  "agent-r2b",
+  "Agent: R2b — review-unit planner",
+  [
+    "catalog default · label: plan review units",
+    "Host-enforced read-only; ast_index for symbols",
+    "Groups the inventory into material decisions",
+    "Returns exact unitsText — boundaries only",
+  ],
+  "agent_planner",
+  2150,
+  815,
+  410,
+  195,
+);
+
+const launchQuestions = workflowNode(
+  "launch-agent-r3",
+  "Workflow: launch Agent R3",
+  ["phase ask-questions", "Renders resources/interrogator.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "multi_agent_orchestrator",
+  2720,
+  470,
+  390,
+  145,
+);
+
+const questionsAgent = agentNode(
+  "agent-r3",
+  "Agent: R3 — interrogator",
+  [
+    "catalog default · label: ask review questions",
+    "Host-enforced read-only; ast_index for symbols",
+    "Asks falsifiable questions; answers none",
+    "Returns exact questionsText — ids mirror units",
+  ],
+  "agent_debate",
+  2710,
+  815,
+  410,
+  195,
+);
+
+const launchVerify = workflowNode(
+  "launch-agent-r4",
+  "Workflow: launch Agent R4",
+  ["phase verify-review", "Renders resources/verifier.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "multi_agent_orchestrator",
+  3280,
+  470,
+  390,
+  145,
+);
+
+const verifyAgent = agentNode(
+  "agent-r4",
+  "Agent: R4 — verifier and review author",
+  [
+    "catalog default · label: verify and write review",
+    "Host-enforced read-only; reopens the evidence",
+    "Answers every question from what it read",
+    "Only confirmed problems become findings",
+    "Returns exact reviewText — Markdown verdict",
   ],
   "model_validation",
-  2960,
-  792,
-  325,
-  190,
+  3270,
+  815,
+  410,
+  195,
 );
 
-const launchPublisher = workflowNode(
-  "launch-agent-5",
+const launchPublish = workflowNode(
+  "launch-agent-r5",
   "Workflow: launch Agent R5",
-  ["Pass targetText + reviewText", "No parsed ids, paths, or status"],
+  ["phase publish-review", "Renders resources/publisher.prompt.md", "Write-capable: read, write, bash, grep, find"],
   "multi_agent_orchestrator",
-  3325,
-  462,
-  285,
-  120,
+  3840,
+  470,
+  390,
+  145,
 );
 
-const publisher = agentNode(
-  "agent-5",
-  "Agent: R5 — publisher prompt",
+const publishAgent = agentNode(
+  "agent-r5",
+  "Agent: R5 — publisher and presenter",
   [
-    "catalog default · label: publish report",
-    "Proves .tasks/ is ignored",
-    "Creates review task in launch project",
-    "Writes review.md + pending fix-plan.md",
+    "catalog default · label: publish review package",
+    "The only write-capable review stage",
+    "Proves .tasks/ is ignored; creates one task",
+    "Writes review.md plus supporting Markdown",
+    "Returns the executive summary as final text",
   ],
   "prompt_template",
-  3330,
-  790,
-  315,
-  175,
+  3830,
+  815,
+  410,
+  195,
 );
 
 const mapFinalResult = workflowNode(
   "map-final-result",
   "Workflow: return Agent R5 exact text",
-  ["No JSON parse", "Metadata stays in runtime journal", "Text is workflow result"],
+  ["No JSON parse", "The executive summary is the result", "No report file is returned as the result"],
   "function_router",
-  3710,
-  442,
-  330,
-  165,
+  4400,
+  470,
+  390,
+  145,
 );
 
-const humanGate = operatorNode("operator-fix-plan", 4140, 222, 360, 105);
-humanGate.texts[0].text = "Operator: edit fix-plan dispositions";
-humanGate.texts[0].originalText = "Operator: edit fix-plan dispositions";
-humanGate.texts[1].text = "accepted / waived / deferred / pending\nHuman decision before review-fix";
-humanGate.texts[1].originalText = "accepted / waived / deferred / pending\nHuman decision before review-fix";
+const humanEdit = operatorNode(
+  "operator-edit-review",
+  "Operator: edit review.md",
+  "Deleting a finding rejects it\nA note under a finding instructs the fix workflow",
+  "human_review",
+  4880,
+  240,
+  440,
+  110,
+);
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs + resources/*.prompt.md",
-  ["Routing + capability policy in entry", "R1–R5 complete stage prompts", "Copied bytes + SHA-256 evidence"],
+  "Artifact: review.workflow.mjs\n+ resources/*.prompt.md",
+  ["Routing and capability policy in the entry", "R1–R5 complete stage prompts", "phase() and log() name every stage"],
   "prompt_template",
-  455,
-  1160,
-  310,
-  125,
+  85,
+  1200,
+  400,
+  175,
 );
 
 const journalFile = artifactNode(
   "journal-file",
   "Artifact: journal.ndjson",
-  ["Runtime execution journal", "phase, log, and child-session evidence"],
+  ["Runtime execution journal", "phase, log, and child-session evidence", "Six phases, one per stage"],
   "audit_log",
-  2700,
-  1160,
-  315,
-  125,
+  1040,
+  1200,
+  340,
+  175,
+);
+
+const supportingFiles = artifactNode(
+  "supporting-files",
+  "Artifact: supporting review Markdown",
+  [
+    "review-scope.md, review-inventory.md,",
+    "review-units.md, review-questions.md",
+    "Written under .tasks/<task>/artifacts/",
+    "Optional: skipped when empty or duplicated",
+  ],
+  "aggregation_puzzle",
+  3300,
+  1200,
+  380,
+  175,
 );
 
 const reportFile = artifactNode(
   "report-file",
   "Artifact: .tasks/<task>/artifacts/review.md",
-  ["Primary reader-facing report", "Full evidence, impact, and recommended fix", "Immutable evidence for review-fix"],
-  "prompt_template",
-  3330,
-  1142,
-  340,
-  165,
-);
-
-const fixPlanFile = artifactNode(
-  "fix-plan-file",
-  "Artifact: .tasks/<task>/artifacts/fix-plan.md",
-  ["Human-editable approval manifest", "Every finding starts pending", "Only accepted ids authorize review-fix"],
-  "guardrails",
-  3710,
-  1142,
-  350,
-  165,
+  [
+    "Mandatory. Primary reader-facing report",
+    "Verdict, findings, and question resolutions",
+    "Live working tree; no snapshot, hash, or SHA",
+  ],
+  "news_document",
+  4880,
+  1200,
+  460,
+  175,
 );
 
 const resultFile = artifactNode(
@@ -527,36 +585,37 @@ const resultFile = artifactNode(
   "Artifact: result.json",
   [
     "Mandatory machine-readable run envelope",
-    "result is Agent R5 exact text",
-    "Resource hashes and child metadata stay separate",
+    "result is the Agent R5 executive summary",
+    "Child metadata stays separate",
   ],
   "data_catalog",
-  4460,
-  1138,
-  320,
-  170,
+  4400,
+  1200,
+  380,
+  175,
 );
 
 const nodes = [
   request,
-  launchTarget,
-  targetAgent,
-  targetStatusCheck,
-  launchReviewLanes,
-  mapBlockedTarget,
-  changesAgent,
-  contextAgent,
-  waitForLanes,
-  launchAdjudicator,
-  adjudicator,
-  launchPublisher,
-  publisher,
+  launchScope,
+  scopeAgent,
+  forwardCheck,
+  launchInventory,
+  inventoryAgent,
+  launchUnits,
+  unitsAgent,
+  launchQuestions,
+  questionsAgent,
+  launchVerify,
+  verifyAgent,
+  launchPublish,
+  publishAgent,
   mapFinalResult,
-  humanGate,
+  humanEdit,
   sourceFile,
   journalFile,
+  supportingFiles,
   reportFile,
-  fixPlanFile,
   resultFile,
 ];
 
@@ -586,159 +645,116 @@ const connect = (id, from, to, options = {}) => {
   });
 };
 
-connect("operator-to-launch", request, launchTarget, {
+// Start a stage: the workflow card drops into the agent session it launches.
+const launchEdge = (id, launchNode, agent, label) => {
+  connect(id, launchNode, agent, {
+    direction: "top-down",
+    label,
+    labelWidth: 160,
+    from: { side: "bottom", slot: 0.3 },
+    to: { side: "top", slot: 0.3 },
+  });
+};
+
+// Finish a stage: the agent's exact text rises into the next workflow card.
+const handoffEdge = (id, agent, nextNode, label) => {
+  connect(id, agent, nextNode, {
+    direction: "bottom-up",
+    label,
+    labelWidth: 145,
+    from: { side: "top", slot: 0.78 },
+    to: { side: "bottom", slot: 0.35 },
+  });
+};
+
+connect("operator-to-launch", request, launchScope, {
   label: "free-form request",
   from: { side: "right", slot: 0.5 },
   to: { side: "left", slot: 0.5 },
 });
-connect("source-to-workflow", sourceFile, launchTarget, {
+connect("source-to-workflow", sourceFile, launchScope, {
   direction: "bottom-up",
   dashed: true,
   color: COLORS.artifact,
   label: "workflow definition",
   from: { side: "top", slot: 0.5 },
-  to: { side: "bottom", slot: 0.5 },
-  labelOffset: { dx: -82, dy: 0 },
+  to: { side: "bottom", slot: 0.15 },
+  labelOffset: { dx: -80, dy: 0 },
 });
-connect("launch-to-agent-1", launchTarget, targetAgent, {
-  direction: "top-down",
-  label: "agent(...)",
-  from: { side: "bottom", slot: 0.7 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("agent-1-to-status", targetAgent, targetStatusCheck, {
+
+launchEdge("launch-to-agent-r1", launchScope, scopeAgent, "agent(scopePrompt)");
+connect("agent-r1-to-forward", scopeAgent, forwardCheck, {
   direction: "bottom-up",
-  label: "exact target text",
-  from: { side: "top", slot: 0.7 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("status-ready", targetStatusCheck, launchReviewLanes, {
-  label: "targetText verbatim",
-  labelWidth: 115,
-  labelOffset: { dx: 0, dy: -105 },
-  from: { side: "right", slot: 0.36 },
+  label: "exact scopeText",
+  labelWidth: 130,
+  from: { side: "top", slot: 0.9 },
   to: { side: "left", slot: 0.5 },
 });
-connect("status-blocked", targetAgent, mapBlockedTarget, {
-  label: "runtime failure",
-  labelWidth: 90,
-  dashed: true,
-  path: "outer",
-  outerSide: "bottom",
-  outerGap: 46,
-  labelOffset: { dx: 0, dy: 145 },
-  from: { side: "top", slot: 0.72 },
+connect("forward-to-launch-r2a", forwardCheck, launchInventory, {
+  label: "scopeText verbatim",
+  labelWidth: 130,
+  from: { side: "right", slot: 0.5 },
   to: { side: "left", slot: 0.5 },
 });
-connect("launch-to-agent-2", launchReviewLanes, changesAgent, {
-  direction: "top-down",
-  label: "request + targetText",
-  from: { side: "right", slot: 0.36 },
-  to: { side: "top", slot: 0.35 },
-  labelOffset: { dx: 250, dy: -58 },
-});
-connect("launch-to-agent-3", launchReviewLanes, contextAgent, {
-  direction: "top-down",
-  label: "request + targetText",
-  from: { side: "right", slot: 0.72 },
-  to: { side: "left", slot: 0.35 },
-  path: "outer",
-  outerSide: "left",
-  outerGap: 40,
-});
-connect("agent-2-to-wait", changesAgent, waitForLanes, {
-  direction: "bottom-up",
-  label: "exact changesText",
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("agent-3-to-wait", contextAgent, waitForLanes, {
-  direction: "bottom-up",
-  label: "exact contextText",
-  from: { side: "right", slot: 0.55 },
-  to: { side: "bottom", slot: 0.72 },
-  path: "outer",
-  outerSide: "right",
-  outerGap: 46,
-  labelOffset: { dx: 180, dy: 0 },
-});
-connect("wait-to-launch-agent-4", waitForLanes, launchAdjudicator, {
-  label: "both lane results",
-  labelWidth: 135,
-  labelOffset: { dx: 0, dy: -92 },
-});
-connect("launch-to-agent-4", launchAdjudicator, adjudicator, {
-  direction: "top-down",
-  label: "targetText +\nchangesText + contextText",
-  labelWidth: 170,
-  from: { side: "bottom", slot: 0.62 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("agent-4-to-launch-agent-5", adjudicator, launchPublisher, {
-  direction: "bottom-up",
-  label: "exact adjudicatedText",
-  labelWidth: 130,
-  labelSize: 10,
-  from: { side: "top", slot: 0.65 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("launch-to-agent-5", launchPublisher, publisher, {
-  direction: "top-down",
-  label: "targetText + reviewText",
-  labelWidth: 165,
-  from: { side: "bottom", slot: 0.62 },
-  to: { side: "top", slot: 0.35 },
-});
-connect("agent-5-to-map", publisher, mapFinalResult, {
-  direction: "bottom-up",
-  label: "exact publisher text",
-  labelWidth: 190,
-  labelSize: 10,
-  from: { side: "top", slot: 0.7 },
-  to: { side: "bottom", slot: 0.35 },
-});
-connect("agent-5-to-report", publisher, reportFile, {
-  direction: "top-down",
-  dashed: true,
-  color: COLORS.artifact,
-  label: "writes + re-reads",
-  labelWidth: 130,
-  from: { side: "bottom", slot: 0.65 },
-  to: { side: "top", slot: 0.4 },
-});
-connect("agent-5-to-fix-plan", publisher, fixPlanFile, {
-  direction: "top-down",
-  dashed: true,
-  color: COLORS.artifact,
-  label: "copies findings + pending",
-  labelWidth: 150,
-  from: { side: "bottom", slot: 0.82 },
-  to: { side: "top", slot: 0.4 },
-});
-connect("fix-plan-to-operator", fixPlanFile, humanGate, {
-  direction: "bottom-up",
-  dashed: true,
-  color: COLORS.operator,
-  label: "human disposition gate",
-  labelWidth: 150,
-  from: { side: "top", slot: 0.96 },
-  to: { side: "bottom", slot: 0.04 },
-});
-connect("map-to-result", mapFinalResult, resultFile, {
-  direction: "top-down",
-  label: "serialized return",
-  from: { side: "bottom", slot: 0.72 },
-  to: { side: "top", slot: 0.5 },
-});
-connect("wait-to-journal", waitForLanes, journalFile, {
+connect("forward-to-journal", forwardCheck, journalFile, {
   direction: "top-down",
   dashed: true,
   color: COLORS.artifact,
   label: "phase + log events",
-  from: { side: "bottom", slot: 0.72 },
-  to: { side: "top", slot: 0.35 },
-  labelOffset: { dx: 68, dy: 0 },
+  from: { side: "bottom", slot: 0.5 },
+  to: { side: "top", slot: 0.5 },
+  labelOffset: { dx: 96, dy: 0 },
 });
+
+launchEdge("launch-to-agent-r2a", launchInventory, inventoryAgent, "scopeText");
+handoffEdge("agent-r2a-to-launch-r2b", inventoryAgent, launchUnits, "exact inventoryText");
+
+launchEdge("launch-to-agent-r2b", launchUnits, unitsAgent, "scopeText + inventoryText");
+handoffEdge("agent-r2b-to-launch-r3", unitsAgent, launchQuestions, "exact unitsText");
+
+launchEdge("launch-to-agent-r3", launchQuestions, questionsAgent, "scopeText + unitsText");
+handoffEdge("agent-r3-to-launch-r4", questionsAgent, launchVerify, "exact questionsText");
+
+launchEdge("launch-to-agent-r4", launchVerify, verifyAgent, "scopeText + unitsText\n+ questionsText");
+handoffEdge("agent-r4-to-launch-r5", verifyAgent, launchPublish, "exact reviewText");
+
+launchEdge("launch-to-agent-r5", launchPublish, publishAgent, "all five handoffs verbatim");
+handoffEdge("agent-r5-to-map", publishAgent, mapFinalResult, "exact executive summary text");
+
+connect("agent-r5-to-supporting", publishAgent, supportingFiles, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "writes supporting Markdown",
+  labelWidth: 160,
+  from: { side: "bottom", slot: 0.15 },
+  to: { side: "top", slot: 0.5 },
+});
+connect("agent-r5-to-report", publishAgent, reportFile, {
+  direction: "top-down",
+  dashed: true,
+  color: COLORS.artifact,
+  label: "writes + re-reads review.md",
+  labelWidth: 165,
+  from: { side: "bottom", slot: 0.85 },
+  to: { side: "top", slot: 0.3 },
+});
+connect("report-to-operator", reportFile, humanEdit, {
+  direction: "bottom-up",
+  dashed: true,
+  color: COLORS.operator,
+  label: "human edits the report",
+  labelWidth: 150,
+  from: { side: "top", slot: 0.5 },
+  to: { side: "bottom", slot: 0.5 },
+});
+connect("map-to-result", mapFinalResult, resultFile, {
+  direction: "top-down",
+  label: "serialized return",
+  from: { side: "bottom", slot: 0.5 },
+  to: { side: "top", slot: 0.5 },
+});
+
 const health = assertDiagramHealthy({
   blocks: nodes.map(({ id, block, texts }) => ({
     id,
@@ -748,7 +764,7 @@ const health = assertDiagramHealthy({
   })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 4900, 1460),
+  renderBounds: new Bounds(0, 0, 5480, 1450),
   sceneBounds: scene.bounds(),
 });
 
