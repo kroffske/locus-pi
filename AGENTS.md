@@ -16,7 +16,7 @@
 5. Merge release pull requests with a merge commit, then create the matching `vX.Y.Z` tag.
 6. Keep `main` as the GitHub default so visitors land on the stable release surface.
 
-GitHub branch rules are not available while this repository is private on the current account plan. Until the repository becomes public or the plan changes, tracked hooks, CI, and pull-request discipline are the enforceable local boundary.
+This repository is public, so GitHub branch protection and rulesets are available on the current plan — but neither is configured. `main` and `dev` both report `protected: false` and the repository has no rulesets, so the rules above are currently enforced only by the tracked pre-commit and pre-push hooks, CI, and review discipline. Those hooks are local and skippable (`--no-verify`, an unhooked clone), which makes the boundary a convention rather than a server-side guarantee. Enabling branch protection or a ruleset on `main` and `dev` — for example requiring pull requests and the `Node 22 package contract` CI check — is an owner decision and an explicit repository-settings change; agents must not make it.
 
 ## Local setup
 
