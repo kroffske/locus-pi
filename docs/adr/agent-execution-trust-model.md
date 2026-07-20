@@ -25,7 +25,7 @@ the parent Pi permissions into a smaller child permission set.
 
 ## Completion contract
 
-A general agent may finish without tool calls. It is **не обязан вызывать
+A general agent may finish without tool calls. It is **not required to call
 tools**.
 
 Successful completion requires a real non-empty child answer. Tool activity,

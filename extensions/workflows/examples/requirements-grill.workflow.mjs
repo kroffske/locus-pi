@@ -122,13 +122,6 @@ function repositorySearchPattern(request) {
     "this",
     "with",
     "without",
-    "давай",
-    "добавить",
-    "когда",
-    "который",
-    "нужно",
-    "сделать",
-    "чтобы",
   ]);
   const words = request.match(/\p{L}[\p{L}\p{N}_]{2,}/gu) ?? [];
   const keywords = [];

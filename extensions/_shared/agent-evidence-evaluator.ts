@@ -1,8 +1,9 @@
 import type { EvidenceEvaluation, EvidenceEvaluationInput } from "./types.js";
 
 const ANY_TOOL_CALL = "<any tool call>";
+// Child agents are prompted in English, so this honesty check only matches English claims.
 const CLAIM_WITHOUT_EVIDENCE_PATTERN =
-  /\b(?:i|we)\s+(?:read|changed|edited|modified|updated|ran|run|executed)\b|\b(?:ran|run|executed)\s+(?:the\s+)?tests\b|(?:прочитал|прочитала|читал|читала|изменил|изменила|поменял|поменяла|отредактировал|отредактировала|запустил|запустила|выполнил|выполнила)(?:а)?(?:\s+тесты)?/iu;
+  /\b(?:i|we)\s+(?:read|changed|edited|modified|updated|ran|run|executed)\b|\b(?:ran|run|executed)\s+(?:the\s+)?tests\b/iu;
 
 export function evaluateEvidence(input: EvidenceEvaluationInput): EvidenceEvaluation {
   const observedTools = normalizeObservedTools(input.observedToolNames);
@@ -67,7 +68,11 @@ function claimsConcreteRuntimeWork(outputText: string): boolean {
   return CLAIM_WITHOUT_EVIDENCE_PATTERN.test(outputText);
 }
 
-function formatMissingEvidenceWarning(agentName: string, mode: "warn" | "require", missingRequiredTools: string[]): string {
+function formatMissingEvidenceWarning(
+  agentName: string,
+  mode: "warn" | "require",
+  missingRequiredTools: string[],
+): string {
   const expected = missingRequiredTools.join(", ");
   if (mode === "require") {
     return `${agentName} is missing required runtime evidence (${expected}); mode=require should be mapped by the caller to failed or needs_review.`;
