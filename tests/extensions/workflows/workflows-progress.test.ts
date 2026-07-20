@@ -205,8 +205,11 @@ describe("workflow progress widget", () => {
 
       expect(rendered).not.toContain("reviewer (review-step)");
       // T-191: `⠿ <petname>  SDK child session …` — no `[Working]`, no `on task`.
-      // A colliding petname gets a `-2`, `-3`, … suffix from the name registry.
-      expect(rendered).toMatch(/⠿ [\w-]+\s+SDK child session/);
+      // Assert the petname the store actually assigned: it is derived from a
+      // time-based row id and may carry a `-2`, `-3`, … collision suffix, so any
+      // guessed pattern is a flake waiting to happen.
+      expect(child.displayName).toBeDefined();
+      expect(rendered).toContain(`⠿ ${child.displayName}  SDK child session`);
       expect(rendered).not.toContain("[Working]");
       expect(rendered).not.toContain("on task");
       expect(rendered).not.toContain("[current task]");
@@ -663,16 +666,14 @@ describe("workflow progress widget", () => {
     harness.ctx.hasUI = true;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-1",
-        runDir: "/tmp/run-1",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-1",
+      runDir: "/tmp/run-1",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
+    });
 
     try {
       await handler("run live-smoke hello", harness.ctx);
@@ -692,16 +693,14 @@ describe("workflow progress widget", () => {
     harness.ctx.ui.select = undefined as unknown as typeof harness.ctx.ui.select;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-2",
-        runDir: "/tmp/run-2",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-2/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-2",
+      runDir: "/tmp/run-2",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-2/result.json" },
+    });
 
     try {
       await handler("run live-smoke hello", harness.ctx);
