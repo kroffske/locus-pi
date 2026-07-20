@@ -59,6 +59,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- Translated the public documentation surface to English. The docs map, the
+  agent-execution trust-model ADR, the extension manual index, and the manuals
+  for `agents`, `ask-user-question`, `ast-structural-edit`, `devext-doctor`,
+  `loop`, `model`, `security-gate`, and `todo-context` were partly written in
+  Russian; every published manual is now English-only. Behavior, command names,
+  tool names, and permissions are unchanged.
 - Agent execution now has one output contract: the exact final non-empty child
   text. `spawn_agent` and `task` accept one required `task` string and create one
   child. Model-written result markers, JSON envelopes, agent schemas, parser

@@ -1,22 +1,22 @@
 # locus-pi docs map
 
-Эта директория хранит публичную карту пакета `locus-pi`: что грузится Pi,
-какие расширения доступны, где описаны права/риски и какие ограничения важны
-перед публикацией. Внутренние планы, runtime state, черновики и одноразовые
-артефакты не являются частью этой карты.
+This directory holds the public map of the `locus-pi` package: what Pi loads,
+which extensions are available, where permissions and risks are described, and
+which constraints matter before publishing. Internal plans, runtime state,
+drafts and one-off artifacts are not part of this map.
 
 ## Source truth
 
-- `package.json#pi.extensions` — единственный список расширений, которые
-  загружаются по умолчанию.
-- `extensions/<name>/manifest.json` — machine-readable metadata расширения:
-  commands, tools, hooks, permissions, risk и review/source status.
+- `package.json#pi.extensions` — the single list of extensions that are loaded
+  by default.
+- `extensions/<name>/manifest.json` — machine-readable metadata for an
+  extension: commands, tools, hooks, permissions, risk and review/source status.
 - [extension-index.md](extension-index.md) — public status index for the ten
   retained active extensions and five curated workflows.
-- [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership и
-  promotion decisions. Если extension меняет default surface, решение должно
-  появиться там.
-- [extensions/active/](extensions/active/) — ручные страницы для десяти default
+- [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
+  promotion decisions. If an extension changes the default surface, the decision
+  must show up there.
+- [extensions/active/](extensions/active/) — manual pages for the ten default
   extensions.
 - [prd/todo-session-auto-continuation.md](prd/todo-session-auto-continuation.md)
   — repository product contract for bounded session queue execution.

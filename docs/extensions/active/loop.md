@@ -1,18 +1,18 @@
 # loop
 
-## Назначение
+## Purpose
 
-`loop` — default-loaded compat-wrapper for bounded continuation. It gives operators a visible `/loop` command and models a callable `loopControl` tool so the repo can continue work in one manual step without hidden auto-run.
+`loop` is a default-loaded compat-wrapper for bounded continuation. It gives operators a visible `/loop` command and models a callable `loopControl` tool so the repo can continue work in one manual step without hidden auto-run.
 
-## Кто использует
+## Who uses it
 
-- Оператор вызывает bare `/loop`, вводит `goal [focus]` или `workflow <runId> [focus]` и создает ровно один bounded continuation.
-- Оператор вызывает `/loop status`, чтобы увидеть, какой source доступен для continuation.
-- Оператор или модель вызывает `/loop once goal` для bounded continuation поверх текущего goal runtime.
-- Оператор или модель вызывает `/loop once workflow <runId>` для bounded continuation поверх persisted workflow metadata.
+- The operator runs bare `/loop`, enters `goal [focus]` or `workflow <runId> [focus]`, and creates exactly one bounded continuation.
+- The operator runs `/loop status` to see which source is available for continuation.
+- The operator or the model runs `/loop once goal` for a bounded continuation on top of the current goal runtime.
+- The operator or the model runs `/loop once workflow <runId>` for a bounded continuation on top of persisted workflow metadata.
 - `review` continuation intentionally remains unsupported.
 
-## Поверхность
+## Surface
 
 - Command: `/loop`
 - Tool: `loopControl`
@@ -26,7 +26,7 @@ Supported actions:
 - Legacy `start`, `stop`, and `until` still parse but fail closed with a clear reason.
 - Unsupported sources also fail closed with a clear reason.
 
-## Как это работает
+## How it works
 
 `extensions/loop/index.ts` registers only the tool and command. The runtime is intentionally manual:
 
@@ -38,7 +38,7 @@ Supported actions:
 
 The command and tool both return compact text plus machine-readable details. Command output uses typed `INPUT`, `VIEW`, `RUN`, `RESULT`, and `WARN` blocks, so input, status, action, and failure do not collapse into one white text stream. A successful manual preparation contributes one bounded `loop.manual` activity label to the shared `status:locus` budget. Full prompt text remains in the artifact and in tool details, not in the TUI widget. No background auto-dispatch, hidden follow-up, or `agent_end` continuation hook is registered.
 
-## Ограничения
+## Limitations
 
 - No hidden endless loop.
 - No automatic dispatch after `once`.
@@ -48,7 +48,7 @@ The command and tool both return compact text plus machine-readable details. Com
 - Workflow continuation only becomes available when persisted run metadata exists; missing integration fails closed and does not auto-create a continuation.
 - Historical beta shells are excluded from the clean release repository.
 
-## Карта кода
+## Code map
 
 - Entrypoint: `./extensions/loop/index.ts`
 - Manifest: `extensions/loop/manifest.json`
