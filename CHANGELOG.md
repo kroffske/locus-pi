@@ -59,6 +59,11 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- Made the package English-only end to end. Child agents are prompted in
+  English, so the evidence honesty check no longer matches Russian claim verbs
+  and the `requirements-grill` search-term extractor no longer carries Russian
+  stop words. An operator writing in another language states the request through
+  the parent agent, which hands the child an English task.
 - Translated the public documentation surface to English. The docs map, the
   agent-execution trust-model ADR, the extension manual index, and the manuals
   for `agents`, `ask-user-question`, `ast-structural-edit`, `devext-doctor`,

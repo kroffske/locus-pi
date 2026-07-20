@@ -128,7 +128,7 @@ export function formatAgentIdentity(row: AgentLiveRow): string {
 }
 
 /**
- * The fleet row grammar (REQ-001), normative per spec «### Анатомия строки агента»:
+ * The fleet row grammar (REQ-001), normative per spec "### Agent row anatomy":
  *
  *   `<icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↓<tok>`
  *
@@ -190,7 +190,7 @@ function agentRowRightSegments(row: AgentLiveRow): string[] {
   const segments: string[] = [];
   const badge = formatModelBadge(row);
   if (badge !== "") segments.push(badge);
-  // `[· r<N>]` slot from «### Анатомия строки агента» (REQ-009): after model+effort, before
+  // `[· r<N>]` slot from "### Agent row anatomy" (REQ-009): after model+effort, before
   // elapsed. Rendered only from r2 up — r1 is implicit, so a linear run shows no badge.
   const round = formatRoundBadge(row);
   if (round !== undefined) segments.push(round);
@@ -247,7 +247,7 @@ function trimTrailingZero(value: string): string {
 
 /**
  * Compose the row, sacrificing the title first when the line overflows a finite
- * width (REQ-001: «title усекается первым; мета справа не усекается»). At infinite
+ * width (REQ-001: the title truncates first; the right-hand meta never truncates). At infinite
  * width (unit tests / unbounded panels) the full line is returned untouched.
  */
 function assembleRowLine(
@@ -339,11 +339,12 @@ export function formatAgentStartedEventLine(row: AgentLiveRow): string {
  * Terminal lifecycle line with status-specific marker and verb (REQ-011).
  */
 export function formatAgentFinishedEventLine(row: AgentLiveRow): string {
-  const lifecycle = row.status === "done"
-    ? { marker: "✓", verb: "finished" }
-    : row.status === "cancelled"
-      ? { marker: "⊘", verb: "cancelled" }
-      : { marker: "✗", verb: "failed" };
+  const lifecycle =
+    row.status === "done"
+      ? { marker: "✓", verb: "finished" }
+      : row.status === "cancelled"
+        ? { marker: "⊘", verb: "cancelled" }
+        : { marker: "✗", verb: "failed" };
   const parts = [`${lifecycle.marker} agent ${agentRowName(row)} ${lifecycle.verb}`];
   const elapsed = formatDuration(row.elapsedMs ?? elapsedSinceStart(row));
   if (elapsed !== "") parts.push(elapsed);
@@ -416,14 +417,14 @@ function formatFlagsDetail(row: AgentLiveRow): string | undefined {
 // Ports the *logic* (not the panel): OMP's `extractToolArgsPreview` priority-key
 // order (`task/executor.ts:421`) and the `renderAgentProgress` sub-line composition
 // (`task/render.ts:632-645`). The sub-line is a short activity *signal*, not a raw
-// command echo — the raw command / output tail live in drill (spec «Строка действия»).
+// command echo — the raw command / output tail live in drill (spec "Action line").
 
-/** Tree hook + indent for the sub-line, per «### Анатомия строки агента». */
+/** Tree hook + indent for the sub-line, per "### Agent row anatomy". */
 const TOOL_ACTIVITY_HOOK = "└";
 const TOOL_ACTIVITY_INDENT = "   ";
 /** Field separator inside the sub-line (` · `, single-spaced — see the mockups). */
 const TOOL_ACTIVITY_SEP = " · ";
-/** Max columns for the extracted gist (REQ-004: «итоговый gist ≤ 24 кол.»). */
+/** Max columns for the extracted gist (REQ-004: the final gist is at most 24 columns). */
 const TOOL_GIST_MAX_COLS = 24;
 /** Tool elapsed shows only once past this — OMP's 5s quiets fast-call noise (V3). */
 const TOOL_ELAPSED_THRESHOLD_MS = 5000;
@@ -507,7 +508,9 @@ function parseToolArgs(raw: string | undefined): Record<string, unknown> | undef
   if (!trimmed.startsWith("{")) return undefined;
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }
