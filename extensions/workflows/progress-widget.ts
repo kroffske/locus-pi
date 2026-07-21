@@ -11,8 +11,16 @@ import {
   truncate,
 } from "../_shared/agent-live-panel.js";
 import { fleetMenuState, renderFleetMenuRows, selectFleetMenuRows } from "../_shared/fleet-menu.js";
-import { applyWorkflowJournalLineToAgentLiveStore, workflowAgentLiveRowId, llmLiveRowId, workflowGroupLiveRowId } from "../_shared/workflow-journal.js";
-import { formatWorkflowFailureSummary, formatWorkflowResultSummary, type WorkflowResultPersistence } from "../_shared/workflow-result.js";
+import {
+  applyWorkflowJournalLineToAgentLiveStore,
+  workflowAgentLiveRowId,
+  workflowGroupLiveRowId,
+} from "../_shared/workflow-journal.js";
+import {
+  formatWorkflowFailureSummary,
+  formatWorkflowResultSummary,
+  type WorkflowResultPersistence,
+} from "../_shared/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../_shared/widget-render.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
 
@@ -53,7 +61,13 @@ const OBSERVER_STATUS_ORDER: Record<AgentLiveStatus, number> = {
 
 export class WorkflowProgressComponent implements CustomUiComponent {
   journal: WorkflowJournalLine[] = [];
-  done?: { ok: boolean; failureSummary?: string; resultSummary?: string; runDir?: string; resultPersistence?: WorkflowResultPersistence };
+  done?: {
+    ok: boolean;
+    failureSummary?: string;
+    resultSummary?: string;
+    runDir?: string;
+    resultPersistence?: WorkflowResultPersistence;
+  };
   #tickTimer: ReturnType<typeof setInterval> | undefined;
   #spinnerIndex = 0;
   #disposed = false;
@@ -95,9 +109,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   push(line: WorkflowJournalLine): void {
     this.journal.push(line);
     if (line.agent !== undefined) this.#knownRowIds.add(workflowAgentLiveRowId(line));
-    else if (line.kind === "llm_start" || line.kind === "llm_end" || line.kind === "llm_delta") {
-      this.#knownRowIds.add(llmLiveRowId(line));
-    } else if (line.kind === "group_start" || line.kind === "group_end") {
+    else if (line.kind === "group_start" || line.kind === "group_end") {
       this.#knownRowIds.add(workflowGroupLiveRowId(line));
     }
     applyWorkflowJournalLineToAgentLiveStore(line);
@@ -105,7 +117,13 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     this.tui.requestRender();
   }
 
-  finish(res: { ok: boolean; error?: string; result?: unknown; runDir?: string; resultPersistence?: WorkflowResultPersistence }): void {
+  finish(res: {
+    ok: boolean;
+    error?: string;
+    result?: unknown;
+    runDir?: string;
+    resultPersistence?: WorkflowResultPersistence;
+  }): void {
     this.done = {
       ok: res.ok,
       ...(!res.ok ? { failureSummary: formatWorkflowFailureSummary(res.result, res.error) } : {}),
@@ -136,20 +154,18 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     // ordering even when workflow tail diagnostics consume the line budget.
     const fleetFooter = fleetLines.at(-1);
     const fleetBody = fleetFooter === undefined ? [] : fleetLines.slice(0, -1);
-    const fixedLines = [
-      this.renderHeader(width, liveRows),
-      ...fleetBody,
-      ...doneLines,
-    ];
+    const fixedLines = [this.renderHeader(width, liveRows), ...fleetBody, ...doneLines];
     const tailLines = this.journal
-      .filter((line) => line.kind === "log" || line.kind === "error" || (line.kind === "agent_end" && line.evidenceWarnings !== undefined && line.evidenceWarnings.length > 0))
+      .filter(
+        (line) =>
+          line.kind === "log" ||
+          line.kind === "error" ||
+          (line.kind === "agent_end" && line.evidenceWarnings !== undefined && line.evidenceWarnings.length > 0),
+      )
       .slice(-3)
       .map((line) => truncate(formatProgressTailLine(line), width));
     if (fleetFooter === undefined) return fitLines(fixedLines, tailLines, budget, width, doneLines.length);
-    return [
-      ...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length),
-      fleetFooter,
-    ];
+    return [...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length), fleetFooter];
   }
 
   private visibleRows(): AgentLiveRow[] {
@@ -159,7 +175,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     }
     const prefix = `workflow:${this.runId}:`;
     const scopedParentIds = new Set(all.filter((row) => row.id.startsWith(prefix)).map((row) => row.id));
-    const scoped = all.filter((row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)));
+    const scoped = all.filter(
+      (row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
+    );
     return compactWorkflowParentRows(scoped.length > 0 ? scoped : all);
   }
 
@@ -170,15 +188,21 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const terminalCount = counts.done + counts.cancelled + counts.error;
     const cancelledText = counts.cancelled > 0 ? ` cancelled=${counts.cancelled}` : "";
     const failedText = counts.error > 0 ? ` failed=${counts.error}` : "";
-    const text = `workflow ${this.scriptRef} (${this.runId}) - ${headerStatus.toUpperCase()} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}`;
+    // Replay is a property of the EVIDENCE, so it belongs in the header beside
+    // the status word rather than in the scrolling tail a reader may miss.
+    const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
+    const replayedText = replayedCount > 0 ? ` replayed=${replayedCount}` : "";
+    const text = `workflow ${this.scriptRef} (${this.runId}) - ${headerStatus.toUpperCase()} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}${replayedText}`;
     return this.#bold(truncate(text, width));
   }
 
   private doneLines(width: number): string[] {
     if (this.done === undefined) return [];
     const lines: string[] = [];
-    if (this.done.failureSummary !== undefined) lines.push(this.#fg("error", truncate(`✗ ${this.done.failureSummary}`, width)));
-    else if (this.done.resultSummary !== undefined) lines.push(this.#fg("success", truncate(`✓ ${this.done.resultSummary}`, width)));
+    if (this.done.failureSummary !== undefined)
+      lines.push(this.#fg("error", truncate(`✗ ${this.done.failureSummary}`, width)));
+    else if (this.done.resultSummary !== undefined)
+      lines.push(this.#fg("success", truncate(`✓ ${this.done.resultSummary}`, width)));
     if (this.done.resultPersistence?.ok === false) {
       lines.push(this.#fg("warning", truncate(`persistence: ${this.done.resultPersistence.code}`, width)));
     }
@@ -272,14 +296,11 @@ export function installWorkflowTextWidget(ctx: ExtensionContext, key: string, co
       return component;
     }
     try {
-      ctx.ui?.setWidget?.(
-        key,
-        (tui, theme) => {
-          component.attachTui(tui as WidgetFactoryTui);
-          component.theme = coerceTheme(theme);
-          return component;
-        },
-      );
+      ctx.ui?.setWidget?.(key, (tui, theme) => {
+        component.attachTui(tui as WidgetFactoryTui);
+        component.theme = coerceTheme(theme);
+        return component;
+      });
     } catch {
       try {
         ctx.ui?.setWidget?.(key, content.split(/\r?\n/));
@@ -328,16 +349,18 @@ export function installWorkflowProgress(
 export function renderAgentLiveRowsText(): string {
   const rows = [...agentLiveStore.rows.values()];
   if (rows.length === 0) return "Agents: no live rows.";
-  return new AgentLivePanel({}).renderRows(orderAgentLiveRows(compactWorkflowParentRows(rows)), Number.POSITIVE_INFINITY).join("\n");
+  return new AgentLivePanel({})
+    .renderRows(orderAgentLiveRows(compactWorkflowParentRows(rows)), Number.POSITIVE_INFINITY)
+    .join("\n");
 }
 
 export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   const rowById = new Map(rows.map((row) => [row.id, row]));
-  const parentIdsWithChildren = new Set(rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined));
+  const parentIdsWithChildren = new Set(
+    rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined),
+  );
   const collapsedParentIds = new Set(
-    rows
-      .filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row))
-      .map((row) => row.id),
+    rows.filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row)).map((row) => row.id),
   );
   if (collapsedParentIds.size === 0) return rows;
 
@@ -353,7 +376,7 @@ export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] 
 }
 
 function isWorkflowAgentParentRow(row: AgentLiveRow): boolean {
-  return row.id.startsWith("workflow:") && !row.id.includes(":group:") && !row.id.includes(":llm:");
+  return row.id.startsWith("workflow:") && !row.id.includes(":group:");
 }
 
 export function renderAgentObserverText(): string {
@@ -400,7 +423,8 @@ function selectAgentObserverRows(rows: AgentLiveRow[], limit: number): AgentLive
       if (statusDelta !== 0) return statusDelta;
       const aStartedAt = a.row.startedAt;
       const bStartedAt = b.row.startedAt;
-      if (aStartedAt !== undefined && bStartedAt !== undefined && aStartedAt !== bStartedAt) return bStartedAt - aStartedAt;
+      if (aStartedAt !== undefined && bStartedAt !== undefined && aStartedAt !== bStartedAt)
+        return bStartedAt - aStartedAt;
       if (aStartedAt !== undefined) return -1;
       if (bStartedAt !== undefined) return 1;
       return a.index - b.index;

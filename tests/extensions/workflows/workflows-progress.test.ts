@@ -99,6 +99,52 @@ describe("workflow progress widget", () => {
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
   });
 
+  // The live panel is the surface an operator watches while the run happens, so
+  // a resumed run has to declare reused evidence here too. Counted from explicit
+  // `replayed: true` markers only — never inferred from a zero duration or a
+  // missing token count, which a fast real call would also produce.
+  it("declares reused recorded evidence with replayed=<n> in the header, and omits it on a fresh run", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
+    const component = new WorkflowProgressComponent(tui, {}, "stages", "run-1");
+
+    const stage = (n: number, replayed: boolean): void => {
+      const common = {
+        agent: "default",
+        label: `note:stage-${n}`,
+        runId: "run-1",
+        ...(replayed ? { replayed: true } : {}),
+      };
+      component.push(line({ ...common, kind: "agent_start", ts: n * 2 }));
+      component.push(line({ ...common, kind: "agent_end", status: "completed", durationMs: 0, ts: n * 2 + 1 }));
+    };
+
+    stage(1, true);
+    stage(2, true);
+    stage(3, false);
+    expect(component.render(120).join("\n")).toContain(
+      "workflow stages (run-1) - RUNNING phase=not-set active=0 done=3/3 replayed=2",
+    );
+
+    agentLiveStore.reset();
+    const fresh = new WorkflowProgressComponent(tui, {}, "stages", "run-2");
+    fresh.push(line({ kind: "agent_start", agent: "default", label: "note:only", ts: 1, runId: "run-2" }));
+    fresh.push(
+      line({
+        kind: "agent_end",
+        agent: "default",
+        label: "note:only",
+        status: "completed",
+        durationMs: 0,
+        ts: 2,
+        runId: "run-2",
+      }),
+    );
+    const freshText = fresh.render(120).join("\n");
+    expect(freshText).toContain("workflow stages (run-2) - RUNNING phase=not-set active=0 done=1/1");
+    expect(freshText).not.toContain("replayed=");
+  });
+
   it("projects a cancelled agent_end as terminal while the workflow may still finish successfully", () => {
     agentLiveStore.reset();
     fleetMenuState.setFocused(false);
@@ -265,33 +311,6 @@ describe("workflow progress widget", () => {
       });
       component.push(
         line({
-          kind: "llm_start",
-          label: "classify",
-          model: "test/fast",
-          thinking: "low",
-          groupId: "parallel-1",
-          groupKind: "parallel",
-          ts: 3,
-          runId: "rich-r1",
-        }),
-      );
-      component.push(
-        line({
-          kind: "llm_end",
-          label: "classify",
-          status: "completed",
-          model: "test/fast",
-          thinking: "low",
-          usage: { input: 2, output: 3, totalTokens: 5, costTotal: 0 },
-          durationMs: 123,
-          groupId: "parallel-1",
-          groupKind: "parallel",
-          ts: 4,
-          runId: "rich-r1",
-        }),
-      );
-      component.push(
-        line({
           kind: "group_end",
           status: "failed",
           groupId: "parallel-1",
@@ -311,7 +330,7 @@ describe("workflow progress widget", () => {
       expect(rendered).toContain("parallel (2)");
       expect(rendered).toContain("1/2 done");
       expect(rendered).toContain("1 failed");
-      expect(rendered).toMatch(/parallel \(2\).*↓20/);
+      expect(rendered).toMatch(/parallel \(2\).*↓15/);
       // SDK child agent row: petname + title, model+effort badge (provider stripped),
       // no `on task`/`/effort=`/`args=`/`turns=`/`flags=`/`[current task]` sub-line.
       expect(rendered).toContain("SDK child session");
@@ -321,10 +340,6 @@ describe("workflow progress widget", () => {
       expect(rendered).not.toContain("[current task]");
       expect(rendered).not.toContain("turns=");
       expect(rendered).not.toContain("flags=");
-      // llm() row: petname + title + badge + token counter `↓(input+output)` (was `tokens=5`).
-      expect(rendered).toContain("classify");
-      expect(rendered).toContain("fast low");
-      expect(rendered).toContain("↓5");
       component.dispose();
     } finally {
       agentLiveStore.reset();
@@ -1046,8 +1061,8 @@ describe("workflow progress widget", () => {
         { requestRender: () => {} },
         {},
       );
-      const ownedRowId = `workflow:${component.runId}:llm:test:`;
-      agentLiveStore.begin({ id: ownedRowId, agentName: "llm", label: "test", isolated: false, noMcp: false });
+      const ownedRowId = `workflow:${component.runId}:default:test:`;
+      agentLiveStore.begin({ id: ownedRowId, agentName: "default", label: "test", isolated: false, noMcp: false });
       agentLiveStore.patch(ownedRowId, { status: "done", currentTools: ["read"] });
 
       await emit(harness, "turn_end");
@@ -1114,15 +1129,12 @@ describe("workflow progress widget", () => {
         label: "check",
         status: "completed",
       },
-      { ts: "2026-01-01T00:00:05.000Z", runId, kind: "llm_start", label: "classify" },
       {
         ts: "2026-01-01T00:00:06.000Z",
         runId,
-        kind: "llm_end",
+        kind: "error",
         label: "classify",
-        status: "failed",
-        model: "openai-codex/gpt-5.6-sol",
-        message: "Workflow llm bridge: request auth failed: No API key found",
+        message: "Workflow agent bridge: request auth failed: No API key found",
       },
     ];
     try {
@@ -1171,8 +1183,7 @@ describe("workflow progress widget", () => {
       expect(text).toContain("[journal] old journal line");
       expect(text).toContain("[agent] -> reviewer (check)");
       expect(text).toContain("[agent] <- reviewer completed");
-      expect(text).toContain("[llm]   <- classify failed");
-      expect(text).toContain("Workflow llm bridge: request auth failed: No API key found");
+      expect(text).toContain("[error] Workflow agent bridge: request auth failed: No API key found");
       expect(text).toContain('"rawEvidence"');
       expect(text).not.toContain("[log]");
     } finally {

@@ -30,7 +30,7 @@ import type {
   WorkflowAgentRunner,
   WorkflowAgentRequest,
   WorkflowAgentResult,
-  WorkflowLlmUsage,
+  WorkflowUsage,
 } from "./workflow-runtime.js";
 import { defaultResolveModel } from "./workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode, WorkspaceMode } from "./types.js";
@@ -363,7 +363,7 @@ function nextRound(counter: Map<string, number>, rowId: string): number {
 }
 
 /** Project a live row's accumulated child tokens into a round `usage`, or undefined when absent. */
-function usageFromRow(row: AgentLiveRow | undefined): WorkflowLlmUsage | undefined {
+function usageFromRow(row: AgentLiveRow | undefined): WorkflowUsage | undefined {
   if (row?.tokenCount === undefined) return undefined;
   const { input, output } = row.tokenCount;
   return { input, output, totalTokens: input + output, costTotal: 0 };

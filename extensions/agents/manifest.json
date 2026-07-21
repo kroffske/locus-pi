@@ -24,6 +24,7 @@
     "readOnly=true is host-enforced: the child allowlist is narrowed to read, grep, find, ls, yield, and explicitly requested git_read; bash, write, edit, workflow, and unknown tools are removed; git_read invokes only allowlisted local Git query subcommands without a shell and rejects mutating or process-spawning options",
     "task spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
     "task resolves missing agent and default to task; general resolves to task only when no project/user general agent exists",
+    "the agent parameter of spawn_agent/task advertises the resolved first-match-wins catalog as bounded name - description lines (at most 12 entries, each description clamped to 96 characters, overflow stated as +N more); it is republished on every agent discovery pass including one before_agent_start refresh per turn, and it never replaces the unknown-agent check",
     "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
     "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs keep the scroll overlay while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
     "unknown-target and headless settled-run chrome use typed ERROR/RESULT blocks without replacing the domain-owned live fleet, focus, drill, stop, resolver, or runtime store",
@@ -68,7 +69,7 @@
       "agent ps",
       "ps"
     ],
-    "hooks": ["session_start", "tool_call", "tool_result"],
+    "hooks": ["session_start", "before_agent_start", "tool_call", "tool_result"],
     "shortcuts": ["shift+down"]
   },
   "uiLifecycle": {
@@ -124,6 +125,7 @@
   "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/agents.md",
   "tests": [
     "tests/extensions/agents/agents-discovery.test.ts",
+    "tests/extensions/agents/agent-catalog-hint.test.ts",
     "tests/shared/agents/agent-runner.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
     "tests/shared/agents/agent-sdk-host.test.ts",

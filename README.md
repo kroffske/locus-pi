@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and five curated
+It provides ten default extensions, a bundled agent catalog, and four curated
 Package workflows through a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private
@@ -37,7 +37,6 @@ Only these names are registered as Package workflows:
 | Workflow             | Intended use                                                                                                  |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
-| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                        |
 | `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
@@ -50,12 +49,14 @@ Use the operator catalog to inspect and run them:
 /workflows run live-smoke
 ```
 
-Project and user workflow directories remain scan-based. A valid file in
-`.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
-`~/.pi/workflows/` can change the next resolution result without changing the
-Package registry. Files that merely exist under the repository's workflow
-examples are not Package workflows and cannot be launched by bare name unless
-they are in the curated registry.
+Project and user workflow directories remain scan-based. A pi-native
+`<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,
+`.agents/workflows/`, or `~/.pi/workflows/` can change the next resolution result
+without changing the Package registry. That exact filename is the only one these
+directories accept, and a workflow written for another host's DSL is not portable
+here. Files that merely exist under the repository's workflow examples are not
+Package workflows and cannot be launched by bare name unless they are in the
+curated registry.
 
 ## Trust and safety boundary
 

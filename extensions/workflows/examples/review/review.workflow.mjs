@@ -36,6 +36,16 @@ const REVIEW_PUBLISH_OPTIONS = Object.freeze({
 export const meta = {
   name: "review",
   description: "Runs a question-led agent review and publishes a readable review package plus an executive summary.",
+  // Declared shape, read statically by /workflows info before any run starts.
+  // Titles must equal the phase() calls below; a test enforces that.
+  phases: [
+    { title: "resolve-scope", detail: "Turn the operator request into one explicit, self-contained review scope." },
+    { title: "inventory-changes", detail: "Prove complete coverage of the changed surface." },
+    { title: "plan-units", detail: "Group the inventory into atomic units of meaning." },
+    { title: "ask-questions", detail: "Write falsifiable questions per unit, without answering them." },
+    { title: "verify-review", detail: "Reopen the evidence, answer the questions, and author the report." },
+    { title: "publish-review", detail: "Write the review package and return an executive summary." },
+  ],
 };
 
 /**

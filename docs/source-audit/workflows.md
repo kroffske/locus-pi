@@ -25,7 +25,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/workflow-catalog.ts` owns the single current/history
   model over `listWorkflowCatalogTargets()`, query filtering, exact current
   source/path projection, run-specific history identity, deterministic browser
-  intents and bounded AST extraction of literal exported `meta.description`. Its
+  intents and bounded AST extraction of literal exported `meta.description` and
+  optional `meta.phases` (one read and one parse per row; a non-literal phase
+  entry discards the whole declaration). Its
   exact-source boundary retains the selected `ResolvedWorkflowTarget`,
   revalidates it through the same first-wins resolver, and only then reads the
   file as inert full UTF-8 text. Missing, unreadable, and newly shadowed current
@@ -78,7 +80,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   older terminal subtrees are pruned, and active, queued, or zero-row runs are not
   counted or pruned. No timer or second workflow registry is used.
 - `extensions/_shared/workflow-runtime.ts` owns the DSL primitives:
-  `agent`, `llm`, `parallel`, `pipeline`, `phase`, `log`, and `workflow`.
+  `agent`, `parallel`, `pipeline`, `phase`, `log`, and `workflow`. `agent()` is the
+  single model-calling primitive; the former direct-completion node `llm()` and its
+  pi-ai bridge were removed, together with the `llm_start`/`llm_end`/`llm_delta`
+  journal kinds and the synthetic `llm` live row.
   It also owns the fail-closed group barrier. Ordinary thrown work and direct
   `ok:false` / `status:failed|blocked|cancelled` returns become ordered failed
   slots; scheduled siblings settle before one `WorkflowGroupFailureError` is
@@ -117,6 +122,21 @@ or borrowed runtime implementation was identified for this source-audit slice.
   eval-generated imports or arbitrary host-code loading. Only the old unversioned
   identity reads as `entry-only-legacy`; unknown/inconsistent schemas fail closed.
   This is point-in-time source accounting, not a sandbox or atomic race guarantee.
+  The same parse also owns replay-safety: `assessWorkflowReplaySafety()` reports
+  `unproven` when the source names direct clock/randomness syntax. That verdict
+  is machine-derived on purpose — there is no author-asserted `meta` field,
+  because an assertion would fail open. It reads syntax, not behavior, so an
+  aliased root or an imported module is outside it.
+- `extensions/_shared/workflow-replay.ts` owns the recorded-call store behind
+  `--resume`: the `replay.ndjson` record inside the existing run directory, the
+  sha-256 call key, the per-kind read cursors, and the single divergence latch
+  that makes replay a strict prefix. Every unresolved lookup is an explicit miss
+  the caller answers by running the real child; no path in the module can produce
+  an answer that was not recorded by an earlier execution of the identical
+  request. Records are kept out of `journal.ndjson` deliberately: the journal
+  carries the `replayed` marker only, so bounded status/digest surfaces never
+  receive unbounded child text. Write failures are swallowed like the journal
+  sink's — they cost a future resume, never the current run.
 - `extensions/_shared/workflow-runner.ts` owns target resolution and load order.
   It imports the snapshot for strict coverage or the hash-keyed source URL for
   explicit entry-only coverage, with a per-run cache key and pre/post byte checks. At resolution time,
@@ -162,15 +182,11 @@ or borrowed runtime implementation was identified for this source-audit slice.
   in the request capsule and live/artifact metadata rather than silently treated
   as the executor model. The bridge fails closed when the host cannot spawn a
   child session.
-- `extensions/_shared/workflow-llm-bridge.ts` owns direct `llm()` model selection.
-  An explicit per-call selector must resolve through `getModel`; an omitted
-  selector uses `ctx.model`. Before `completeSimple` / `streamSimple`, it resolves
-  request auth through `ctx.modelRegistry.getApiKeyAndHeaders(model)` and forwards
-  the API key, provider/model headers, and provider environment. It does not use
-  agent catalog roles and returns `ok:false` when no model or request auth resolves.
-  `workflow-runtime.ts` retains the first bounded failure diagnostic on `llm_end`;
-  status/detail and the final transcript fallback expose it instead of collapsing
-  a zero-token provider failure to a generic workflow error.
+- No direct-model bridge exists. Every model call in a workflow is a child agent
+  session through `workflow-agent-bridge.ts`. `workflow-runtime.ts` retains the
+  latest bounded journal `error` message; status/detail and the final transcript
+  fallback expose it instead of collapsing a failed run to a generic workflow
+  error. The run-level token/cost budget is summed from `agent_end` `usage`.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
   review composition, not a new runtime primitive. It accepts an opaque
   free-form request. Six catalog-agent sessions run strictly in sequence and
@@ -187,7 +203,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   the mandatory reader-facing report, only after proving `.tasks/` is ignored;
   it writes no fix plan, dispositions, or hashes. Repository/forge evidence
   remains child-session-owned; the workflow performs no direct Git, network,
-  forge-specific, packet-building, or `llm()` work. R1-R4 pass
+  forge-specific, or packet-building work. R1-R4 pass
   `readOnly: true`; the shared SDK host narrows their sessions to known read
   tools and removes shell, write/edit, nested workflow, and unknown tools.
   Their local Git evidence comes through `git_read`, which invokes only
@@ -295,7 +311,9 @@ surface. The active default package surface remains the `workflows` extension at
   `tests/extensions/workflows/review-workflow.test.ts`,
   `tests/extensions/workflows/workflow-transcript.test.ts`,
   `tests/extensions/workflows/workflows-launch-gate.test.ts`,
-  `tests/extensions/workflows/workflows-progress.test.ts`, and
+  `tests/extensions/workflows/workflows-progress.test.ts`,
+  `tests/shared/workflows/workflow-agent-schema.test.ts`,
+  `tests/shared/workflows/workflow-replay.test.ts`, and
   `tests/integration/public-registration.test.ts` are the local regression checks for
   the current active behavior claims.
 

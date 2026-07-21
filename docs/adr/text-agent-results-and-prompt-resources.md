@@ -32,7 +32,8 @@ Every successful agent call returns its exact final non-empty text.
 - Empty text and runtime child failures remain technical failures.
 - Child session ids, evidence, diagnostics, artifacts, model data, and workspace
   data stay in runtime-owned details, journals, and result envelopes.
-- `llm({ schema })` keeps its separate explicit JSON validation contract.
+- Structured output is an explicit per-call opt-in, never implicit. See the
+  2026-07-21 amendment below for the surviving contract, `agent({ schema })`.
 
 A workflow selects a normal project, user, or bundled catalog agent. Omitted
 `agent` uses the catalog `default` role. Workflow-specific behavior lives in
@@ -66,15 +67,38 @@ write-capable child or worktree exists. Runtime creates one linked worktree at
 the reviewed commit and returns an opaque handle. Implementer and verifier use
 that same handle; model-returned paths are never workspace authority.
 
+## Amendment 2026-07-21 — opt-in `agent({ schema })`
+
+This is the "separate protocol in a future scoped change" the Consequences below
+anticipate. The default is unchanged: without `schema`, `dsl.agent()` still
+resolves to the child's exact final text and parses nothing.
+
+- `dsl.agent(prompt, { schema })` is an explicit per-call contract. The runtime
+  appends a deterministic shape block to the child prompt, validates the child's
+  final text against the declared JSON-Schema subset, retries within the shared
+  `SCHEMA_MAX_ATTEMPTS` budget, and resolves to the validated value.
+- It fails closed: exhausting the budget throws `SchemaValidationError`. A child
+  that fails to run still throws `WorkflowAgentExecutionError`.
+- Structure remains an author decision, never an implicit protocol. Runtime
+  status is still not model-controlled: the schema shapes the answer only, and
+  `status`, `summary`, ids, artifacts, and diagnostics stay runtime-owned.
+- Validation is journaled per attempt as `schemaValidation` on `agent_end`.
+
+Reason for the amendment: `llm({ schema })` was the only schema-validated path in
+the DSL, and it was removed in favour of one model-calling primitive (T-108,
+2026-07-21). The shaped path had to exist on `agent()` first, so it landed first.
+The subset validator, the JSON extractor, the shared `SCHEMA_MAX_ATTEMPTS` budget,
+and `SchemaValidationError` survived the removal and now belong to `agent()` alone.
+
 ## Consequences
 
 Workflow source and resources become shorter: every stage has one prompt, while
 runtime policy stays visible in the workflow entry. Handoffs remain ordinary
 text.
 Runtime status can no longer be forged by writing `{"status":"completed"}` in a
-model answer. Workflows that need structured model output must use an explicit
-direct-LLM schema step or implement a separate protocol in a future scoped
-change.
+model answer. Workflows that need structured model output declare it per call with
+`agent({ schema })` (the 2026-07-21 amendment above); there is no second
+model-calling surface to reach for.
 
 The old agent result envelope, `agents.yaml` review loader, workflow-local
 `agentFile` loader, agent-side schema option, batch `tasks:[]` tool shape, and

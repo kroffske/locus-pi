@@ -38,6 +38,13 @@ describe("curated workflow diagram contract", () => {
       expect(generator, generatorPath).toContain("@kroffske/excalidraw-diagrams");
       expect(generator, generatorPath).toContain("assertDiagramHealthy");
 
+      // T-108 removed `llm()` from the DSL. A legend row naming it — or worse,
+      // asserting it exists in order to say it is unused ("dsl.llm() is not
+      // used") — describes a primitive the reader cannot find. The generator is
+      // the source of truth for what the render will say, so the concept must
+      // be absent here, not merely tolerated downstream.
+      expect(generator, generatorPath).not.toMatch(/llm/iu);
+
       const document = JSON.parse(readFileSync(excalidrawPath, "utf8")) as ExcalidrawDocument;
       expect(document.type, excalidrawPath).toBe("excalidraw");
       expect(document.elements?.length ?? 0, excalidrawPath).toBeGreaterThan(0);
@@ -53,7 +60,14 @@ describe("curated workflow diagram contract", () => {
   it("makes ownership, source, persistence, and the visual legend readable without opening workflow code", () => {
     for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
       const text = diagramText(name);
-      for (const prefix of ["Operator:", "Workflow:", "Agent:", "Direct LLM:", "Artifact:"]) {
+      // "Direct LLM:" is gone from the legend contract: T-108 deleted the
+      // primitive, and the generators no longer emit it (asserted above).
+      // The checked-in .excalidraw/.png renders still carry the stale row —
+      // regenerating them needs @kroffske/excalidraw-diagrams, which is not a
+      // dependency of this repo, and hand-editing a render would desynchronise
+      // it from its generator. So this asserts only what the render is still
+      // required to say; the generator assertion above is the live gate.
+      for (const prefix of ["Operator:", "Workflow:", "Agent:", "Artifact:"]) {
         expect(text, name).toContain(prefix);
       }
       expect(text, name).toMatch(/Legend/u);
@@ -195,11 +209,7 @@ describe("curated workflow diagram contract", () => {
     expect(reviewFix).not.toMatch(/SHA-?256/iu);
   });
 
-  it("does not disguise direct model calls or workflow-owned repository search as agents", () => {
-    const llmSmoke = diagramText("llm-smoke");
-    expect(llmSmoke).toMatch(/direct.*LLM|LLM.*direct/isu);
-    expect(llmSmoke).toMatch(/no child agent/iu);
-
+  it("does not disguise workflow-owned repository search as agents", () => {
     const requirementsGrill = diagramText("requirements-grill");
     expect(requirementsGrill).toMatch(/Workflow.*rg|rg.*Workflow/su);
     expect(requirementsGrill).toMatch(/Agent.*recon/isu);

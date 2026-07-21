@@ -61,16 +61,14 @@ export function createWorkflowTranscript(
         }
         if (surface === "command") {
           for (const warning of line.evidenceWarnings ?? []) {
-            if (warning.trim() !== "") notifyFallback(ctx, `⚠ agent evidence · ${compactTranscriptText(warning)}`, "warning");
+            if (warning.trim() !== "")
+              notifyFallback(ctx, `⚠ agent evidence · ${compactTranscriptText(warning)}`, "warning");
           }
         }
-      } else if (
-        line.kind === "error"
-        || (line.kind === "llm_end" && line.status !== "completed" && line.message !== undefined)
-      ) {
+      } else if (line.kind === "error") {
         // Journal errors may be intermediate or duplicated by the final result.
-        // Failed direct-model diagnostics follow the same rule. Retain only the
-        // latest bounded text as fallback for one final workflow_end record.
+        // Retain only the latest bounded text as fallback for one final
+        // workflow_end record.
         lastJournalError = compactTranscriptText(line.message ?? "unknown error");
       }
     },
@@ -79,20 +77,27 @@ export function createWorkflowTranscript(
       if (!announced) this.start(res.runId);
       const elapsed = startedAt === undefined ? "" : formatDuration(Math.max(0, Date.now() - startedAt));
       const agentCount = res.journal.filter((line) => line.kind === "agent_end").length;
-      if (res.ok) {
-        const parts = [
-          `✓ workflow ${safeTarget} finished`,
-          compactTranscriptText(formatWorkflowResultSummary(res.result)),
-          ...(agentCount > 0 ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`] : []),
-          ...(elapsed !== "" ? [elapsed] : []),
-        ];
-        recordLifecycle(parts.join(" · "));
-      } else {
-        const error = compactTranscriptText(formatWorkflowFailureSummary(res.result, res.error, lastJournalError));
-        recordLifecycle(
-          `✗ workflow ${safeTarget} failed · ${error}${elapsed !== "" ? ` · ${elapsed}` : ""}`,
-        );
-      }
+      // This digest is the one workflow surface that enters LLM context, so a
+      // replayed run has to declare itself here too — otherwise the model reads
+      // recorded evidence as if the work had just been done.
+      const replayedCount = res.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
+      // A failed run reused recorded evidence just as much as a successful one,
+      // and a model reading only the last line must not have to infer it from
+      // the per-agent markers above — which the 20-event cap can drop.
+      const replayedPart = replayedCount > 0 ? [`${replayedCount} replayed from a recorded run`] : [];
+      const parts = res.ok
+        ? [
+            `✓ workflow ${safeTarget} finished`,
+            compactTranscriptText(formatWorkflowResultSummary(res.result)),
+            ...(agentCount > 0 ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`] : []),
+            ...replayedPart,
+          ]
+        : [
+            `✗ workflow ${safeTarget} failed`,
+            compactTranscriptText(formatWorkflowFailureSummary(res.result, res.error, lastJournalError)),
+            ...replayedPart,
+          ];
+      recordLifecycle([...parts, ...(elapsed !== "" ? [elapsed] : [])].join(" · "));
       completion = {
         eventKind: "workflow_end",
         runId: res.runId,
@@ -112,19 +117,21 @@ export function createWorkflowTranscript(
 function formatWorkflowAgentLifecycle(line: WorkflowJournalLine): string {
   const agent = compactTranscriptText(line.agent ?? "agent");
   const label = line.label === undefined ? "" : compactTranscriptText(line.label);
+  const replayed = line.replayed === true ? " [replayed]" : "";
   if (line.kind === "agent_start") {
-    return `● agent ${agent} started${label !== "" ? ` — ${label}` : ""}`;
+    return `● agent ${agent} started${replayed}${label !== "" ? ` — ${label}` : ""}`;
   }
   const status = line.status ?? "unknown";
-  const lifecycle = status === "completed"
-    ? { marker: "✓", verb: "finished" }
-    : status === "cancelled"
-      ? { marker: "⊘", verb: "cancelled" }
-      : status === "failed" || status === "blocked"
-        ? { marker: "✗", verb: status === "blocked" ? "blocked" : "failed" }
-        : { marker: "■", verb: `ended (${compactTranscriptText(status)})` };
+  const lifecycle =
+    status === "completed"
+      ? { marker: "✓", verb: "finished" }
+      : status === "cancelled"
+        ? { marker: "⊘", verb: "cancelled" }
+        : status === "failed" || status === "blocked"
+          ? { marker: "✗", verb: status === "blocked" ? "blocked" : "failed" }
+          : { marker: "■", verb: `ended (${compactTranscriptText(status)})` };
   const elapsed = formatDuration(line.durationMs);
-  return `${lifecycle.marker} agent ${agent} ${lifecycle.verb}${elapsed !== "" ? ` · ${elapsed}` : ""}${label !== "" ? ` — ${label}` : ""}`;
+  return `${lifecycle.marker} agent ${agent} ${lifecycle.verb}${replayed}${elapsed !== "" ? ` · ${elapsed}` : ""}${label !== "" ? ` — ${label}` : ""}`;
 }
 
 /**
@@ -183,11 +190,6 @@ export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | un
     if (warnings.length > 0) return `warning: ${warnings.join("; ")}`;
     if (line.status !== undefined && line.status !== "completed") return `agent ${line.agent ?? ""} ${line.status}`;
     return undefined;
-  }
-  if (line.kind === "llm_start") return `[llm] -> ${line.label ?? "model"}`;
-  if (line.kind === "llm_end") {
-    const diagnostic = line.message === undefined ? "" : ` · ${compactTranscriptText(line.message)}`;
-    return `[llm] <- ${line.label ?? "model"} ${line.status ?? ""}${diagnostic}`;
   }
   if (line.kind === "log") {
     const label = line.source === "script" ? "script" : line.source === "runtime" ? "runtime" : "journal";

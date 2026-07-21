@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { agentLiveStore, type AgentLiveStatus } from "./agent-sdk-host.js";
 import { runtimeStateDir } from "./files.js";
-import type { WorkflowJournalLine, WorkflowJournalSink, WorkflowLlmUsage } from "./workflow-runtime.js";
+import type { WorkflowJournalLine, WorkflowJournalSink, WorkflowUsage } from "./workflow-runtime.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
@@ -24,14 +24,8 @@ const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
 export function newWorkflowRunId(now?: () => Date): string {
   const d = now !== undefined ? now() : new Date();
   const pad2 = (n: number) => String(n).padStart(2, "0");
-  const datePart =
-    String(d.getUTCFullYear()) +
-    pad2(d.getUTCMonth() + 1) +
-    pad2(d.getUTCDate());
-  const timePart =
-    pad2(d.getUTCHours()) +
-    pad2(d.getUTCMinutes()) +
-    pad2(d.getUTCSeconds());
+  const datePart = String(d.getUTCFullYear()) + pad2(d.getUTCMonth() + 1) + pad2(d.getUTCDate());
+  const timePart = pad2(d.getUTCHours()) + pad2(d.getUTCMinutes()) + pad2(d.getUTCSeconds());
   const rand = Math.floor(Math.random() * 0x10000)
     .toString(16)
     .padStart(4, "0");
@@ -86,10 +80,6 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
     applyGroupLineToAgentLiveStore(line);
     return;
   }
-  if (line.kind === "llm_start" || line.kind === "llm_end" || line.kind === "llm_delta") {
-    applyLlmLineToAgentLiveStore(line);
-    return;
-  }
   if (line.agent === undefined) return;
   const id = workflowAgentLiveRowId(line);
   if (line.kind === "agent_start") {
@@ -135,7 +125,9 @@ export function workflowAgentLiveRowId(line: Pick<WorkflowJournalLine, "runId" |
  * loop rounds (round++) while the anchor still collapses via `compactWorkflowParentRows`. The
  * `workflow-agent:` prefix keeps it a leaf (not a `workflow:` parent) so it renders directly.
  */
-export function workflowAgentLiveChildRowId(line: Pick<WorkflowJournalLine, "runId" | "agent" | "label" | "phase">): string {
+export function workflowAgentLiveChildRowId(
+  line: Pick<WorkflowJournalLine, "runId" | "agent" | "label" | "phase">,
+): string {
   return `workflow-agent:${line.runId}:${line.agent ?? ""}:${line.label ?? ""}:${line.phase ?? ""}`;
 }
 
@@ -155,10 +147,12 @@ export function pruneCompletedWorkflowRunLiveRows(latestCompletedRunId: string):
     return rows.length > 0 && rows.every((row) => isTerminalStatus(row.status));
   });
   const newestFirst = terminalRunIds.sort((left, right) => right.localeCompare(left));
-  const retained = new Set((newestFirst.includes(latestCompletedRunId)
-    ? [latestCompletedRunId, ...newestFirst.filter((runId) => runId !== latestCompletedRunId)]
-    : newestFirst
-  ).slice(0, RETAINED_COMPLETED_WORKFLOW_RUNS));
+  const retained = new Set(
+    (newestFirst.includes(latestCompletedRunId)
+      ? [latestCompletedRunId, ...newestFirst.filter((runId) => runId !== latestCompletedRunId)]
+      : newestFirst
+    ).slice(0, RETAINED_COMPLETED_WORKFLOW_RUNS),
+  );
   let removed = 0;
   for (const runId of terminalRunIds) {
     if (!retained.has(runId)) removed += clearWorkflowRunLiveRows(runId);
@@ -166,7 +160,7 @@ export function pruneCompletedWorkflowRunLiveRows(latestCompletedRunId: string):
   return removed;
 }
 
-/** Remove every parent/child/group/llm row owned by one retired workflow run. */
+/** Remove every parent/child/group row owned by one retired workflow run. */
 export function clearWorkflowRunLiveRows(runId: string): number {
   return agentLiveStore.removeRows(workflowRunLiveRowIds(runId));
 }
@@ -191,9 +185,7 @@ function workflowRunLiveRowIds(runId: string): Set<string> {
 }
 
 function workflowRunLiveRows(runId: string) {
-  return [...workflowRunLiveRowIds(runId)]
-    .map((id) => agentLiveStore.rows.get(id))
-    .filter((row) => row !== undefined);
+  return [...workflowRunLiveRowIds(runId)].map((id) => agentLiveStore.rows.get(id)).filter((row) => row !== undefined);
 }
 
 function workflowLiveRunIds(): string[] {
@@ -207,11 +199,6 @@ function workflowLiveRunIds(): string[] {
 
 function isTerminalStatus(status: AgentLiveStatus): boolean {
   return status === "done" || status === "cancelled" || status === "error";
-}
-
-/** Stable live-store row id for an llm() node (it has no `agent` field). */
-export function llmLiveRowId(line: Pick<WorkflowJournalLine, "runId" | "label" | "phase">): string {
-  return `workflow:${line.runId}:llm:${line.label ?? ""}:${line.phase ?? ""}`;
 }
 
 export function workflowGroupLiveRowId(line: Pick<WorkflowJournalLine, "runId" | "groupId">): string {
@@ -245,42 +232,6 @@ function applyGroupLineToAgentLiveStore(line: WorkflowJournalLine): void {
   });
 }
 
-/** Surface llm() nodes as live rows too (synthetic agentName "llm"); deltas bump stepCount. */
-function applyLlmLineToAgentLiveStore(line: WorkflowJournalLine): void {
-  const id = llmLiveRowId(line);
-  if (line.kind === "llm_start") {
-    agentLiveStore.begin({
-      id,
-      ...(line.groupId !== undefined ? { parentRowId: workflowGroupLiveRowId(line) } : {}),
-      agentName: "llm",
-      label: line.label !== undefined ? `llm (${line.label})` : "llm",
-      ...(line.model !== undefined ? { model: line.model } : {}),
-      ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
-      isolated: false,
-      noMcp: false,
-    });
-    agentLiveStore.patch(id, { status: "working", startedAt: Date.now() });
-    return;
-  }
-  if (line.kind === "llm_delta") {
-    const row = agentLiveStore.rows.get(id);
-    if (row !== undefined) agentLiveStore.patch(id, { stepCount: row.stepCount + 1, lastActivityAt: Date.now() });
-    return;
-  }
-  // llm_end
-  const status = workflowStatusToAgentLiveStatus(line.status ?? "");
-  if (status === undefined) return;
-  if (agentLiveStore.rows.get(id) === undefined) return;
-  agentLiveStore.patch(id, {
-    status,
-    ...(line.model !== undefined ? { model: line.model } : {}),
-    ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
-    ...(line.usage !== undefined ? { tokenCount: { input: line.usage.input, output: line.usage.output } } : {}),
-    ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
-    ...(status !== "working" ? { currentTools: [] } : {}),
-  });
-}
-
 function workflowStatusToAgentLiveStatus(status: string): AgentLiveStatus | undefined {
   switch (status) {
     case "running":
@@ -308,17 +259,18 @@ export type WorkflowRunStatus = "running" | "completed" | "failed" | "unknown";
 export interface WorkflowRunSummary {
   runId: string;
   status: WorkflowRunStatus;
-  phase: string | null;       // last phase seen
+  phase: string | null; // last phase seen
   agentsStarted: number;
   agentsEnded: number;
-  llmStarted: number;         // dsl.llm() direct-model calls started
-  llmEnded: number;           // dsl.llm() direct-model calls ended
-  /** Run-level token/cost budget summed from llm_end usage; null when no llm() reported usage. */
-  usage: WorkflowLlmUsage | null;
+  /** Agent calls served from a recorded run instead of a fresh child (T-109).
+   *  A non-zero count means part of this run's evidence is not fresh. */
+  agentsReplayed: number;
+  /** Run-level token/cost budget summed from agent_end usage; null when no child reported usage. */
+  usage: WorkflowUsage | null;
   errors: number;
   lastKind: string | null;
-  lastTs: string | null;      // ISO timestamp of the last journal line
-  hasResult: boolean;         // result.json present (run finished writing a result)
+  lastTs: string | null; // ISO timestamp of the last journal line
+  hasResult: boolean; // result.json present (run finished writing a result)
 }
 
 export interface WorkflowRunResultEnvelope {
@@ -444,7 +396,9 @@ export function readWorkflowRunJournal(projectRoot: string, runId: string): Work
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
 export function readWorkflowRunResult(projectRoot: string, runId: string): WorkflowRunResultEnvelope | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"));
+    const parsed: unknown = JSON.parse(
+      readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"),
+    );
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
     const target = parsePersistedWorkflowTarget(record.target);
@@ -477,9 +431,19 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   const identity = result.scriptIdentity;
   if (identity === undefined) {
     if (persistedResultHasScriptIdentity(projectRoot, runId)) {
-      return snapshotUnavailable("invalid", runId, `Run ${runId} has malformed persisted workflow snapshot identity.`, result.target);
+      return snapshotUnavailable(
+        "invalid",
+        runId,
+        `Run ${runId} has malformed persisted workflow snapshot identity.`,
+        result.target,
+      );
     }
-    return snapshotUnavailable("legacy", runId, `Run ${runId} predates retained workflow source snapshots.`, result.target);
+    return snapshotUnavailable(
+      "legacy",
+      runId,
+      `Run ${runId} predates retained workflow source snapshots.`,
+      result.target,
+    );
   }
   const details = {
     target: result.target,
@@ -488,7 +452,13 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
     identityCoverage: identity.identityCoverage,
   };
   if (identity.schemaVersion !== 2) {
-    return snapshotUnavailable("legacy", runId, `Run ${runId} has legacy entry identity but no trusted executed snapshot.`, result.target, details);
+    return snapshotUnavailable(
+      "legacy",
+      runId,
+      `Run ${runId} has legacy entry identity but no trusted executed snapshot.`,
+      result.target,
+      details,
+    );
   }
 
   const lexicalProjectRoot = path.resolve(projectRoot);
@@ -496,17 +466,31 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   const lexicalRunDir = path.resolve(lexicalWorkflowsRoot, runId);
   const expectedName = `script-${identity.scriptSha256}.workflow.mjs`;
   const lexicalSnapshot = path.resolve(identity.snapshotPath);
-  if (path.dirname(lexicalRunDir) !== lexicalWorkflowsRoot
-    || path.dirname(lexicalSnapshot) !== lexicalRunDir
-    || path.basename(lexicalSnapshot) !== expectedName
-    || identity.snapshotPath !== path.join(lexicalRunDir, expectedName)) {
-    return snapshotUnavailable("invalid", runId, `Run ${runId} records a snapshot outside its exact run directory or with the wrong hash-derived filename.`, result.target, details);
+  if (
+    path.dirname(lexicalRunDir) !== lexicalWorkflowsRoot ||
+    path.dirname(lexicalSnapshot) !== lexicalRunDir ||
+    path.basename(lexicalSnapshot) !== expectedName ||
+    identity.snapshotPath !== path.join(lexicalRunDir, expectedName)
+  ) {
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} records a snapshot outside its exact run directory or with the wrong hash-derived filename.`,
+      result.target,
+      details,
+    );
   }
 
   try {
     assertNonSymlinkDirectoryChain(lexicalProjectRoot, lexicalRunDir);
   } catch (error) {
-    return snapshotUnavailable("invalid", runId, `Run ${runId} snapshot directory is not a regular non-symlink path: ${errorMessage(error)}.`, result.target, details);
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} snapshot directory is not a regular non-symlink path: ${errorMessage(error)}.`,
+      result.target,
+      details,
+    );
   }
 
   let snapshotStat;
@@ -514,28 +498,60 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
     snapshotStat = lstatSync(lexicalSnapshot);
   } catch (error) {
     const kind = isMissingFileError(error) ? "missing" : "unreadable";
-    return snapshotUnavailable(kind, runId, `Run ${runId} snapshot is ${kind}: ${errorMessage(error)}.`, result.target, details);
+    return snapshotUnavailable(
+      kind,
+      runId,
+      `Run ${runId} snapshot is ${kind}: ${errorMessage(error)}.`,
+      result.target,
+      details,
+    );
   }
   if (snapshotStat.isSymbolicLink() || !snapshotStat.isFile()) {
-    return snapshotUnavailable("invalid", runId, `Run ${runId} snapshot is not a regular non-symlink file.`, result.target, details);
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} snapshot is not a regular non-symlink file.`,
+      result.target,
+      details,
+    );
   }
 
   try {
     const physicalProjectRoot = realpathSync(lexicalProjectRoot);
     const physicalRunDir = realpathSync(lexicalRunDir);
     const physicalSnapshot = realpathSync(lexicalSnapshot);
-    if (!isContainedPath(physicalProjectRoot, physicalRunDir)
-      || path.dirname(physicalSnapshot) !== physicalRunDir
-      || path.basename(physicalSnapshot) !== expectedName) {
-      return snapshotUnavailable("invalid", runId, `Run ${runId} snapshot escapes its canonical run directory.`, result.target, details);
+    if (
+      !isContainedPath(physicalProjectRoot, physicalRunDir) ||
+      path.dirname(physicalSnapshot) !== physicalRunDir ||
+      path.basename(physicalSnapshot) !== expectedName
+    ) {
+      return snapshotUnavailable(
+        "invalid",
+        runId,
+        `Run ${runId} snapshot escapes its canonical run directory.`,
+        result.target,
+        details,
+      );
     }
     const sourceBytes = readFileSync(lexicalSnapshot);
     const actualSha256 = createHash("sha256").update(sourceBytes).digest("hex");
     if (actualSha256 !== identity.scriptSha256) {
-      return snapshotUnavailable("tampered", runId, `Run ${runId} snapshot hash mismatch: expected ${identity.scriptSha256}, got ${actualSha256}.`, result.target, details);
+      return snapshotUnavailable(
+        "tampered",
+        runId,
+        `Run ${runId} snapshot hash mismatch: expected ${identity.scriptSha256}, got ${actualSha256}.`,
+        result.target,
+        details,
+      );
     }
     if (result.target === undefined) {
-      return snapshotUnavailable("invalid", runId, `Run ${runId} has snapshot identity but no valid persisted workflow target.`, undefined, details);
+      return snapshotUnavailable(
+        "invalid",
+        runId,
+        `Run ${runId} has snapshot identity but no valid persisted workflow target.`,
+        undefined,
+        details,
+      );
     }
     return {
       kind: "ready",
@@ -547,17 +563,27 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
       source: sourceBytes.toString("utf8"),
     };
   } catch (error) {
-    return snapshotUnavailable("unreadable", runId, `Run ${runId} snapshot could not be read: ${errorMessage(error)}.`, result.target, details);
+    return snapshotUnavailable(
+      "unreadable",
+      runId,
+      `Run ${runId} snapshot could not be read: ${errorMessage(error)}.`,
+      result.target,
+      details,
+    );
   }
 }
 
 function persistedResultHasScriptIdentity(projectRoot: string, runId: string): boolean {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"));
-    return typeof parsed === "object"
-      && parsed !== null
-      && !Array.isArray(parsed)
-      && Object.prototype.hasOwnProperty.call(parsed, "scriptIdentity");
+    const parsed: unknown = JSON.parse(
+      readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"),
+    );
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      Object.prototype.hasOwnProperty.call(parsed, "scriptIdentity")
+    );
   } catch {
     return false;
   }
@@ -619,7 +645,8 @@ function parsePersistedWorkflowScriptIdentity(value: unknown): WorkflowRunResult
   if (typeof identity.scriptSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(identity.scriptSha256)) return undefined;
   if (identity.schemaVersion === 2) {
     if (identity.identityPolicy !== "static-node-only-v1") return undefined;
-    if (identity.identityCoverage !== "self-contained-static" && identity.identityCoverage !== "entry-only") return undefined;
+    if (identity.identityCoverage !== "self-contained-static" && identity.identityCoverage !== "entry-only")
+      return undefined;
     if (identity.executionSource !== "snapshot" && identity.executionSource !== "source") return undefined;
     if (typeof identity.nodeVersion !== "string" || identity.nodeVersion === "") return undefined;
     if (typeof identity.platform !== "string" || identity.platform === "") return undefined;
@@ -654,16 +681,19 @@ function parsePersistedWorkflowScriptIdentity(value: unknown): WorkflowRunResult
   // The only legacy format ever written by the old runner was an unversioned
   // three-field entry identity. Unknown/future versions and partial v2 records
   // must not be silently promoted to trusted legacy evidence.
-  if (identity.schemaVersion !== undefined || [
-    "identityPolicy",
-    "identityCoverage",
-    "executionSource",
-    "nodeVersion",
-    "platform",
-    "arch",
-    "builtinImports",
-    "unboundDependencies",
-  ].some((field) => Object.prototype.hasOwnProperty.call(identity, field))) {
+  if (
+    identity.schemaVersion !== undefined ||
+    [
+      "identityPolicy",
+      "identityCoverage",
+      "executionSource",
+      "nodeVersion",
+      "platform",
+      "arch",
+      "builtinImports",
+      "unboundDependencies",
+    ].some((field) => Object.prototype.hasOwnProperty.call(identity, field))
+  ) {
     return undefined;
   }
   return {
@@ -723,14 +753,17 @@ export function listWorkflowRoundsForSlot(projectRoot: string, runId: string, sl
  * past round shows its recorded status/model/duration/tokens, not a re-hydrated transcript.
  * Returns undefined when no matching record exists (old journal / unknown round). Never throws.
  */
-export function readWorkflowRoundBody(projectRoot: string, runId: string, slotKey: string, round: number): string[] | undefined {
+export function readWorkflowRoundBody(
+  projectRoot: string,
+  runId: string,
+  slotKey: string,
+  round: number,
+): string[] | undefined {
   const end = readWorkflowRunJournal(projectRoot, runId).find(
     (line) => line.kind === "agent_end" && line.slotKey === slotKey && line.round === round,
   );
   if (end === undefined) return undefined;
-  const body = [
-    `round ${round} — ${end.agent ?? "agent"}${end.status !== undefined ? ` ${end.status}` : ""}`,
-  ];
+  const body = [`round ${round} — ${end.agent ?? "agent"}${end.status !== undefined ? ` ${end.status}` : ""}`];
   const meta = [
     ...(end.phase !== undefined ? [`phase ${end.phase}`] : []),
     ...(end.model !== undefined ? [`${end.model}${end.thinking !== undefined ? ` ${end.thinking}` : ""}`] : []),
@@ -752,8 +785,7 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
   let phase: string | null = null;
   let agentsStarted = 0;
   let agentsEnded = 0;
-  let llmStarted = 0;
-  let llmEnded = 0;
+  let agentsReplayed = 0;
   let errors = 0;
   let usageInput = 0;
   let usageOutput = 0;
@@ -763,10 +795,13 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
   for (const line of lines) {
     if (line.kind === "phase" && typeof line.phase === "string") phase = line.phase;
     else if (line.kind === "agent_start") agentsStarted += 1;
-    else if (line.kind === "agent_end") agentsEnded += 1;
-    else if (line.kind === "llm_start") llmStarted += 1;
-    else if (line.kind === "llm_end") {
-      llmEnded += 1;
+    else if (line.kind === "agent_end") {
+      agentsEnded += 1;
+      // Only an explicit marker counts. Replay is never inferred from a missing
+      // duration, a zero token count, or any other side effect of not running.
+      if (line.replayed === true) agentsReplayed += 1;
+      // Run-level budget. Every model-backed child reports its own usage on agent_end, so the
+      // sum is the whole run's cost; a child whose host reported none simply does not contribute.
       if (line.usage !== undefined && line.usage !== null) {
         sawUsage = true;
         usageInput += line.usage.input;
@@ -774,10 +809,9 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
         usageTotal += line.usage.totalTokens;
         usageCost += line.usage.costTotal;
       }
-    }
-    else if (line.kind === "error") errors += 1;
+    } else if (line.kind === "error") errors += 1;
   }
-  const usage: WorkflowLlmUsage | null = sawUsage
+  const usage: WorkflowUsage | null = sawUsage
     ? { input: usageInput, output: usageOutput, totalTokens: usageTotal, costTotal: usageCost }
     : null;
   const last = lines.length > 0 ? lines[lines.length - 1] : undefined;
@@ -805,8 +839,7 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
     phase,
     agentsStarted,
     agentsEnded,
-    llmStarted,
-    llmEnded,
+    agentsReplayed,
     usage,
     errors,
     lastKind: last?.kind ?? null,

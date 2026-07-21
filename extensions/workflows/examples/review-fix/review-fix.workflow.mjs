@@ -39,6 +39,16 @@ export const meta = {
   name: "review-fix",
   description: "Applies the findings a human kept in review.md, after revalidating each one against live source.",
   identityCoverage: "entry-only",
+  // Declared shape, read statically by /workflows info before any run starts.
+  // Titles must equal the phase() calls below; a test enforces that.
+  phases: [
+    { title: "resolve-review", detail: "Locate the human-kept review.md this run is allowed to act on." },
+    { title: "resolve-fix-scope", detail: "Revalidate each kept finding against live source." },
+    { title: "plan-fix-units", detail: "Group the surviving findings into atomic fix units." },
+    { title: "apply-fix-units", detail: "Mutate source, one planned unit at a time." },
+    { title: "verify-fixes", detail: "Reopen the evidence and confirm each unit actually landed." },
+    { title: "publish-fix-report", detail: "Write fix-report.md and return an executive summary." },
+  ],
 };
 
 /**

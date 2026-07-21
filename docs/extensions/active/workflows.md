@@ -19,14 +19,16 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / llm / parallel / pipeline / phase / log / promptFile / workspace`) for orchestrating catalog-agent sessions through the existing `task / createAgentSession` path, plus a direct model-call node.
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / parallel / pipeline / phase / log / promptFile / workspace`) for orchestrating catalog-agent sessions through the existing `task / createAgentSession` path.
 
-Two ways a workflow reaches a model:
+One way a workflow reaches a model:
 
 - **`agent()`** — spawns a full catalog or workflow-local child session and returns
   its exact non-empty final text, routed through the same code path as the `task`
-  tool.
-- **`llm()`** — makes ONE direct model completion via the pi-ai host (`completeSimple` / `streamSimple`), with no child session and no tools. Use it for cheap classify/summarize/synthesis nodes where a full agent is overkill. See "Direct model calls" below.
+  tool. With `opts.schema` it returns a validated value instead; see "Opt-in shaped
+  answers" below. There is no second model-calling primitive: a direct one-shot
+  completion node (`llm()`) existed until 0.2.x and was removed so that an author
+  never has to choose a surface before writing a stage.
 
 Every `agent()` call in a workflow script routes through exactly the same code path as the `task` tool:
 
@@ -73,7 +75,6 @@ with real session ids. See "Run a real workflow (live)" below.
 | Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                   |
-| `llm-smoke`          | Minimal **live proof of `llm()`**: 4 direct model calls (plain, system-prompt, streamed, schema=) — no child agent sessions. Run it to confirm the host can make a direct model completion; verify real text + `classified.output` in `result.json` and `llm_start`/`llm_end`/`llm_delta` in `journal.ndjson`.                                                                                                                                                                                  |
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`. |
 | `review`             | **Question-led code review**: six prompt-configured catalog-agent sessions resolve the scope, inventory the change, plan review units, ask falsifiable questions, verify them independently, and publish a readable review package whose primary report is `review.md`.                                                                                                                                                                                                                         |
 | `review-fix`         | **Human-gated remediation**: deterministic code confines the operator-supplied `review.md` path and refuses an empty finding list, then five prompt-configured catalog-agent sessions resolve the fix scope, revalidate each finding and plan atomic fix units, apply them, verify the working-tree diff, and publish `artifacts/fix-report.md`. They never commit, push, merge, or deploy.                                                                                                     |
@@ -152,7 +153,7 @@ requires a shell.
 
 Both entry scripts use `agent()`, `promptFile()`, `phase()`, and `log()` and run
 strictly sequentially. Repository and private-forge evidence acquisition remains
-owned by full child agents. There is no prepared evidence packet or `llm()`
+owned by full child agents. There is no prepared evidence packet or direct-model
 merge. Prompts constrain writes to documented task boundaries, but prompt text
 and permission metadata are not a sandbox; Pi's tool approval remains the
 enforcement boundary. Resource validation or child execution failure remains
@@ -171,7 +172,7 @@ remains the machine-readable runtime envelope and provenance surface. Its
 workflow `result` is the final agent's exact text; it is not a parsed findings,
 status, or path object.
 
-These five names form the Package registry. They are intentionally small and
+These four names form the Package registry. They are intentionally small and
 owned as part of the package product surface, not discovered merely because a file
 exists in `extensions/workflows/examples/`.
 
@@ -180,9 +181,6 @@ Editable pipeline maps:
 - `live-smoke`:
   [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.png) ·
   [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.excalidraw)
-- `llm-smoke`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/llm-smoke-pipeline.excalidraw)
 - `requirements-grill`:
   [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
   [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
@@ -200,10 +198,10 @@ The clean release contains no uncurated Package examples. The pattern catalog
 operator may save under a reviewed project or user workflow directory. Saving a
 local workflow does not add it to the Package registry.
 
-For _which shape to pick_ (single-agent, llm()-gate, loop+judge, plan→build→review,
+For _which shape to pick_ (single-agent, shaped-answer gate, loop+judge, plan→build→review,
 pipeline, fan-out+merge, judge-panel, loop-until-dry), see the pattern catalog
 `extensions/workflows/references/patterns.md` — it maps each requirement to a minimal
-skeleton to adapt. Only the five workflows in the curated table
+skeleton to adapt. Only the four workflows in the curated table
 above are registered Package workflows. (Single source: that file is the catalog of
 _forms_; this doc remains the DSL _contract_.)
 
@@ -215,11 +213,19 @@ order:
 1. `./.pi/workflows/<name>.workflow.mjs` — human source `Project`; the canonical
    Pi-native authoring target.
 2. `./.claude/workflows/<name>.workflow.mjs`, then
-   `./.agents/workflows/<name>.workflow.mjs` — human source `Project`; interoperability
-   inputs that may use a different workflow format.
+   `./.agents/workflows/<name>.workflow.mjs` — human source `Project`; additional
+   project directories for repositories that already keep agent assets there. The
+   accepted file is the same pi-native `<name>.workflow.mjs`: the resolver and the
+   catalog scan build that exact filename and nothing else, so a `<name>.js` in
+   these directories is not found. A script authored against another host's
+   workflow DSL is **not portable as is** even when its filename matches — it
+   would expect globals and primitives this runtime does not provide (for example
+   an `args` global or a `budget` object), and here `agent()` returns the child's
+   exact text unless the call declares a `schema`. Port such a script to the DSL
+   contract below rather than dropping it in.
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
 4. The curated Package registry — human source `Package`; currently `live-smoke`,
-   `llm-smoke`, `requirements-grill`, `review`, and `review-fix`.
+   `requirements-grill`, `review`, and `review-fix`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
@@ -247,11 +253,11 @@ JavaScript is not supported.
 ```
 /workflows                        typed command view; clears stale workflow widget
 /workflows run live-smoke         run a workflow (live progress panel)
-/workflows run live-smoke --resume <runId>  link a new run to a prior persisted workflow summary
+/workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
 /workflows list                   current first-wins workflows + run-specific immutable history
 /workflows list <query>           filter catalog by name or description
 /workflows info                   explain discovery, metadata, trust, DSL, agents, and model routing
-/workflows info <name>            add exact first-wins source/path and static meta.description
+/workflows info <name>            add exact first-wins source/path, static meta.description and declared phases
 /workflows status                 bounded recent runs with total/shown/older summary
 /workflows status <runId>         bounded newest journal rows + result artifact pointer
 ```
@@ -365,8 +371,7 @@ bounded current-task args, `steps=<n>(events)`, `turns=<n>(model turns)`, token 
 child session id after SDK creation, result artifact, final answer, flags with inline meaning
 such as `no-mcp(no MCP tools)`, errors, and elapsed time. `parallel()` and `pipeline()` also emit local
 `group_start` / `group_end` journal lines so the panel can show bounded group
-summaries such as completed/failed counts while preserving individual agent and
-`llm()` rows.
+summaries such as completed/failed counts while preserving individual agent rows.
 
 The live store is process-shared through a versioned `globalThis` symbol. This is
 required by Pi's real extension loader: each package entrypoint is evaluated by a
@@ -469,7 +474,8 @@ source. Bare `info` explains the commands, exact source precedence, static
 metadata boundary, trusted-code limit, history, DSL primitives, catalog-agent
 selection, model-role metadata, and actual model routing. Named `info` uses the
 same first-wins resolver and adds the exact human source/path plus statically
-parsed `meta.description`; an unknown name fails explicitly.
+parsed `meta.description` and, when the workflow declares them, its
+`meta.phases`; an unknown name fails explicitly.
 
 In an interactive Pi TUI with custom UI support, the command opens that complete
 block in a workflow-owned read-only scroll view. Up/Down moves one line,
@@ -518,6 +524,10 @@ opening a human launch prompt.
 ```json
 { "name": "live-smoke", "input": "hello" }
 ```
+
+Unlike `/workflows run`, the tool's `input` also accepts a JSON object of named
+parameters; both shapes are bounded at 16000 characters and reach the script
+unchanged. See "Workflow input — free text or named parameters".
 
 Legacy compatibility still accepts `script`, but it only maps to saved names or
 project-relative paths.
@@ -577,21 +587,23 @@ Fresh evidence:
 
 A workflow is a single ESM module `<name>.workflow.mjs` with two exports:
 
-- `export const meta = { name, description }` — catalog metadata only. `name`
-  should match the saved file's `<name>` so it resolves by bare name;
-  `description` appears in `/workflows list` and `/workflows info <name>`. Metadata
-  does not declare the execution graph, agents, permissions, or runtime model.
+- `export const meta = { name, description, phases? }` — catalog metadata only.
+  `name` should match the saved file's `<name>` so it resolves by bare name;
+  `description` appears in `/workflows list` and `/workflows info <name>`;
+  optional `phases` declares the pipeline's shape before the run (see "Declared
+  phases" below). Metadata does not declare the execution graph, agents,
+  permissions, or runtime model, and nothing in it is enforced at runtime.
 - `export default async function runWorkflow(dsl, input) { ... }` — executable
-  behavior. `dsl` is the intended authoring handle; `input` is the free-text
-  `[input]` from the run command (a string, possibly empty). Whatever the function
-  returns is written to `result.json` as `result`. Trusted JavaScript can still use
-  host capabilities allowed by its identity mode, so `dsl`-only is a convention,
-  not enforcement.
+  behavior. `dsl` is the intended authoring handle; `input` is the run's task,
+  either free text or a JSON object of named parameters (see "Workflow input"
+  below). Whatever the function returns is written to `result.json` as `result`.
+  Trusted JavaScript can still use host capabilities allowed by its identity mode,
+  so `dsl`-only is a convention, not enforcement.
 
 Destructure the primitives you need from the first arg:
 
 ```js
-const { agent, llm, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;
+const { agent, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;
 ```
 
 The DSL is injected by Pi, so a workflow does not import runtime functions at
@@ -625,7 +637,11 @@ curated Package workflow must keep three sibling artifacts beside
 The diagram is an ownership map, not a decorative code trace:
 
 - Prefix each executable or data node with exactly one real owner/type:
-  `Operator:`, `Workflow:`, `Agent:`, `Direct LLM:`, or `Artifact:`.
+  `Operator:`, `Workflow:`, `Agent:`, or `Artifact:`. (`Direct LLM:` was a fifth
+  owner before 0.2.x. The primitive it named no longer exists and the generators
+  no longer emit it, but the checked-in `.excalidraw`/`.png` renders still show
+  the row until they are next regenerated — the generator is the source of truth,
+  and hand-editing a render would desynchronise it from its generator.)
 - A branch must say who produced the decision and who routes it. A text-only
   `agent()` result is not implicit decision data: show the exact text handoff,
   and show a deterministic workflow check only when trusted workflow code
@@ -634,8 +650,8 @@ The diagram is an ownership map, not a decorative code trace:
 - Name workflow control explicitly: `Workflow: launch Agents 2 + 3 in parallel`
   and `Workflow: wait for both lane results`, not `fan-out` or `barrier` alone.
 - Label important edges with the actual handoff. For text-only agents, name the
-  exact string such as `targetText` or `implementationText`; for `llm({ schema })`,
-  name the schema and inspected field.
+  exact string such as `targetText` or `implementationText`; for a schema-bearing
+  call (`agent({ schema })`), name the schema and inspected field.
 - Show the source `<name>.workflow.mjs`, the persisted
   `.locus/runtime/workflows/<runId>/result.json`, and `journal.ndjson` when it
   records meaningful execution evidence. Draw a Markdown report as a separate
@@ -686,20 +702,127 @@ Notes:
   the first 64 KiB, accepts no interpolation/computed value, and shortens catalog
   display after 96 characters. Project and user workflows are never rewritten by
   the browser.
-- `agent()` always returns the child's exact non-empty final text. It does not
-  accept `schema`, parse JSON-looking text, or expose child status fields as a
-  model-controlled result. Technical metadata is written to the workflow journal.
+- `agent()` returns the child's exact non-empty final text by default. It never
+  exposes child status fields as a model-controlled result, and it parses
+  JSON-looking text only when the call declared a `schema` — the opt-in shaped
+  path below. Technical metadata is written to the workflow journal.
 - Use `promptFile("./resources/name.prompt.md", variables)` when a stage needs
   substantial workflow-specific instructions or dynamic handoffs. Keep the
   stable role and the per-run task in that one prompt. The path is
   source-relative and hash-backed. Runtime policy such as `readOnly`, `tools`,
   and `workspaceMode` remains visible in the `agent()` options.
-- Choose `agent()` when the step must **do tool work** or be an authoritative judge
-  whose verdict is a real child session; choose `llm()` for a **cheap one-shot
-  decision / text** (a gate, a classification, a draft) with no tools and no session.
-  The common useful shape is agents-in-a-loop with a judge that breaks the loop on its
-  `verdict`, optionally fronted by a cheap `llm()` gate. The pattern catalog contains
-  an inline skeleton.
+- `agent()` is the only model-calling step. For a **cheap one-shot decision**
+  (a gate, a classification, a draft), reuse a catalog agent constrained to a fixed
+  answer shape — `agent(prompt, { schema, tools: [], maxToolCalls: 0 })` — instead of
+  reaching for a second primitive. The common useful shape is agents-in-a-loop with a
+  judge that breaks the loop on its `verdict`, optionally fronted by a cheap shaped
+  gate. The pattern catalog contains an inline skeleton.
+
+### Declared phases — `meta.phases`
+
+A run's shape is otherwise only knowable by executing it, because phases are
+declared imperatively by `phase()` calls inside the body. Optional `meta.phases`
+states the pipeline up front, and it is read by the same bounded catalog scan
+that already extracts `description` — first 64 KiB, AST only, module never
+imported or evaluated:
+
+```js
+export const meta = {
+  name: "review",
+  description: "Runs a question-led agent review and publishes a readable review package.",
+  phases: [
+    { title: "resolve-scope", detail: "Turn the operator request into one explicit review scope." },
+    { title: "inventory-changes", detail: "Prove complete coverage of the changed surface." },
+    { title: "publish-review", detail: "Write the review package and return an executive summary." },
+  ],
+};
+```
+
+Rules:
+
+- **Optional.** A workflow without `phases` is valid and every surface renders
+  exactly as before. The curated `requirements-grill`, `review`, and `review-fix`
+  declare theirs; single-stage `live-smoke` does not.
+- **Literal only, all or nothing.** Each entry is an object literal with a
+  non-empty static string `title` and an optional static string `detail`. One
+  computed value, template interpolation, spread, or non-object element discards
+  the entire declaration rather than reporting a partial pipeline — the same
+  fail-closed rule an interpolated `description` already follows.
+- **A declaration, not a contract.** Nothing validates `phases` at runtime.
+  `/workflows status <runId>` matches declared titles against the `phase()` lines
+  the run actually emitted: a declared phase that never ran shows as unreached,
+  and a `phase()` with no declaration is appended as its own group marked
+  `(undeclared)`. Neither fails a run — a `phase()` inside a branch may
+  legitimately never execute.
+- **Where it shows.** `/workflows info <name>` lists the declared stages with
+  their details; `/workflows list` adds `phases=<count>` to the row; `detail` is
+  shortened past 96 characters like `description`.
+
+Titles should equal the `phase()` argument they describe, so the two stay
+readable together. A curated workflow's declaration is regression-tested against
+its own `phase()` calls for exactly that reason.
+
+### Workflow input — free text or named parameters
+
+`input` is whatever the caller passed, handed to the script untouched as the
+second parameter of `runWorkflow(dsl, input)`. Two shapes are accepted, and the
+surface decides which one is reachable:
+
+| Surface                         | Shape                     | Why                                                                                                                                                                           |
+| ------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/workflows run <name> [input]` | string only               | The command line is a human surface. A trailing `{...}` is prose, never re-read as JSON — otherwise `/workflows run review {the auth module}` would silently change category. |
+| `workflow` tool                 | string **or** JSON object | The programmatic surface, where a caller that already has named parameters should not have to flatten them into a sentence.                                                   |
+
+```json
+{ "name": "audit-module", "input": { "target": "src/auth", "mode": "strict", "maxFindings": 5 } }
+```
+
+Both shapes are recorded under the run's existing `args` key, so run artifacts
+keep their layout. Either shape is bounded at 16000 characters — a string by the
+declared `maxLength`, an object by its serialized length. An over-budget or
+non-JSON-serializable object is refused before a run id, run directory, or
+journal exists; nothing partial is persisted.
+
+A workflow that wants parameters normalises both shapes once, at the top, and
+uses named fields from there on:
+
+```js
+// audit-module.workflow.mjs
+export const meta = {
+  name: "audit-module",
+  description: "Audits one module and returns findings under a declared severity floor.",
+};
+
+/** Accept `{ target, mode }` from the tool, or a bare path/sentence from the command. */
+function readParams(input) {
+  if (typeof input === "string") return { target: input.trim(), mode: "normal" };
+  if (input === null || typeof input !== "object") return { target: "", mode: "normal" };
+  const { target, mode } = input;
+  return {
+    target: typeof target === "string" ? target.trim() : "",
+    mode: mode === "strict" ? "strict" : "normal",
+  };
+}
+
+export default async function runWorkflow(dsl, input) {
+  const { agent, phase } = dsl;
+  const { target, mode } = readParams(input);
+  if (target === "") return { ok: false, summary: "A target path or module name is required." };
+
+  phase("audit");
+  return agent(`Audit ${target}. Severity floor: ${mode}. Report findings as Markdown.`, {
+    agent: "reviewer",
+    readOnly: true,
+    label: "audit",
+  });
+}
+```
+
+Two rules make this survive a weak model. Validate the fields the script branches
+on — `mode === "strict"` above, not `input.mode` used raw — because an object
+from a caller is untrusted data exactly like free text is. And keep the string
+branch meaningful: a workflow that only works with an object cannot be started
+from `/workflows run` at all.
 
 ### What is NOT supported
 
@@ -709,7 +832,7 @@ Notes:
 - **No custom primitives / event kinds / lifecycle states.** The DSL surface below is
   the whole contract; do not invent a primitive the runtime does not expose.
 - **Use `dsl` only as an authoring policy.** Reach the filesystem/model through
-  `agent()` (tools) or `llm()` (direct model) in reviewed workflows. This is not
+  `agent()` in reviewed workflows. This is not
   enforced: static Node builtins and explicit `entry-only` scripts retain full
   Node.js/module capabilities in the Pi host process. Do not run an unreviewed
   file or treat identity coverage, a worktree or an approval receipt as a
@@ -734,15 +857,24 @@ the package surface remains `./extensions/workflows/index.ts`.
 
 ```ts
 agent(prompt, opts?)          // Run a catalog/local agent; returns exact child text
+agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
 projectRoot()                 // Absolute launch project root
-llm(prompt, opts?)            // ONE direct model completion (no session/tools); returns WorkflowLlmResult
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
 phase(name)                   // Progress grouping + journal line
 log(msg)                      // Journal line
+now()                         // Recorded wall clock (ms); replayed on --resume
+random()                      // Recorded randomness in [0,1); replayed on --resume
 ```
+
+`now()` and `random()` exist so a workflow can be nondeterministic AND replayable.
+They return exactly what `Date.now()` / `Math.random()` would, and the runtime
+records each value in the run's replay record; a resumed run reads the recorded
+value instead of producing a new one. Calling `Date.now()` or `Math.random()`
+directly is not forbidden — those values are simply unrecorded, and a script
+containing them is refused for replay. See "Resume and replay".
 
 ### Group failure contract
 
@@ -818,62 +950,111 @@ contract, not an enforcement or security boundary.
 | `workspaceHandle` | string                    | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                      |
 | `sandbox`         | string                    | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win. |
 | `model`           | string                    | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.   |
+| `schema`          | object (JSON Schema)      | none                                                                   | **Opt-in.** Declare the answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion.   |
 
 `agent()` resolves to exact non-empty text. Child metadata and diagnostics stay
-in journal/result evidence; model text is never parsed as status or JSON. Schema
-validation belongs only to `llm()` below.
+in journal/result evidence; model text is never parsed as status or JSON.
 
 The host may replace the default agent fuse through
 `WorkflowRuntimeOptions.defaultMaxToolCalls`; an explicit per-call value wins.
 There is no small authoring ceiling such as the former 100-call cap.
 
+### Opt-in shaped answers — `agent({ schema })`
+
+The default above is the contract for every stage that hands work to the next
+stage as prose. `schema` is the explicit exception, for the stages that need a
+decision rather than a paragraph — a yes/no gate, a small fixed field set:
+
+```js
+const gate = await agent(await promptFile("resources/gate.prompt.md", { diff }), {
+  agent: "reviewer",
+  readOnly: true,
+  label: "gate",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["verdict", "reason"],
+    properties: {
+      verdict: { type: "string", enum: ["pass", "fail"] },
+      reason: { type: "string" },
+    },
+  },
+});
+if (gate.verdict === "fail") return { ok: false, summary: gate.reason };
+```
+
+What the runtime does, in order:
+
+1. Appends a deterministic shape block (the JSON Schema plus "one JSON value,
+   no prose") to the prompt the child receives.
+2. Runs the child exactly as an ordinary `agent()` call — same catalog agent,
+   same capability options, same live row, same `agent_start`/`agent_end` lines.
+3. Parses the child's final text as JSON (a `json` code fence is tolerated) and
+   validates it with the DSL's JSON-Schema subset validator:
+   `type` (object/array/string/number/boolean), `required`, `properties`,
+   `additionalProperties:false`, `items`, `enum`.
+4. On mismatch, retries with a fresh child whose prompt carries the previous
+   attempt's validator errors, up to `SCHEMA_MAX_ATTEMPTS` (2) child runs total.
+5. Resolves to the validated value, or throws `SchemaValidationError` carrying
+   `errors` and `attempts`.
+
+**The host cannot force the child to answer in shape; the runtime enforces it
+after the fact.** The Pi agent-session surface exposes no forced tool choice, so
+the prompt block is advice and the parse/validate/retry/fail-closed boundary is
+the actual contract. Practical consequence for authors: keep shaped stages small
+and closed (`enum`, `additionalProperties: false`, few required fields) — a wide
+schema is where a weak model spends both attempts.
+
+**Fail closed.** There is no partial and no untyped fallback: either the value
+validated, or the call throws. Inside `parallel()` / `pipeline()` the throw
+becomes ordinary typed branch evidence and the group rejects after the barrier.
+A child run that itself fails or returns empty text still throws
+`WorkflowAgentExecutionError` and does **not** consume a schema retry.
+
+**Evidence.** Every attempt stamps `schemaValidation`
+(`{status: "valid"|"mismatch", attempts, errors}`) on its own `agent_end`
+journal line, so a run's evidence shows whether a stage was shape-checked and
+how many tries it took. Each attempt is a real child run and counts against
+`maxTotalAgentInvocations`; a call without `schema` counts exactly once, as
+before.
+
 ---
 
-## Direct model calls — `llm()`
+## Cheap one-shot decisions without a second primitive
 
-`llm(prompt, opts?)` makes ONE direct model completion through the pi-ai host
-(`completeSimple`, or `streamSimple` when `opts.stream`). It does **not** spawn a child
-agent session and passes **no tools** — it is the cheap path for classify / summarize /
-synthesize nodes. It funnels through the same bounded scheduler seam as `agent()`.
-Before either pi-ai call, the bridge asks `ctx.modelRegistry.getApiKeyAndHeaders(model)`
-for the selected model's API key, provider/model headers, and provider environment,
-then passes that request auth to `completeSimple` / `streamSimple`. This matches Pi's
-own direct-provider call boundary; using `ctx.model` alone is not sufficient for OAuth
-or registry-backed credentials.
+There is no direct model-call node. `llm(prompt, opts?)` — one pi-ai
+`completeSimple` / `streamSimple` completion with no child session and no tools —
+existed until 0.2.x and was removed: two model-calling surfaces forced an author to
+choose one before writing a stage, and a reused catalog agent constrained to a fixed
+answer shape is not meaningfully more expensive than a direct call.
 
-Returns a `WorkflowLlmResult`: `{ ok, text, stopReason, model?, usage?, output?, diagnostics, label?, schemaValidation? }`.
-`ok` is true when the model returned normally (`stopReason` `stop`/`length`).
+The replacement for a gate, a classification, or a short draft is a shaped child run:
 
-`opts` for `llm()`:
+```js
+const gate = await agent(`Does this change need tool work? ${input}`, {
+  label: "gate",
+  tools: [], // no-tool child — nothing to call, so nothing to wait for
+  maxToolCalls: 0,
+  schema: { type: "object", required: ["needsWork"], properties: { needsWork: { type: "boolean" } } },
+});
+if (gate.needsWork) {
+  /* … */
+}
+```
 
-| Field                   | Type                 | Default       | Description                                                                                                                                    |
-| ----------------------- | -------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system`                | string               | —             | Maps to `Context.systemPrompt`                                                                                                                 |
-| `model`                 | string               | session model | Per-call selector `"provider/id[:thinking]"`; resolved via the same `getModel` path as `agent()`, else `ctx.model`                             |
-| `reasoning`             | string               | —             | Provider thinking level (`minimal`/`low`/`medium`/`high`/`xhigh`)                                                                              |
-| `stream`                | boolean              | `false`       | Use `streamSimple`; emits an `llm_delta` journal line per text chunk (live rows in the progress panel)                                         |
-| `schema`                | object (JSON Schema) | none          | Parse `result.text` as JSON and validate against this schema (retry up to `SCHEMA_MAX_ATTEMPTS`); a valid value is returned in `result.output` |
-| `throwOnSchemaMismatch` | boolean              | `false`       | Throw `SchemaValidationError` on final mismatch instead of returning `ok:false`                                                                |
-| `label` / `phase`       | string               | —             | Journal / UI label; phase tag                                                                                                                  |
+That keeps one execution path, one journal shape, one option set, and one retry
+budget. See "Opt-in shaped answers" above for the full contract.
 
-**Model and host permissions.** Because `llm()` calls the model directly in-process,
-the manifest declares `models: true`. Separately, trusted workflow JavaScript can
-use network-capable Node builtins or explicitly downgraded installed modules, so manifest filesystem,
-subprocess, network and browser fields are conservative `*`/enabled declarations.
-Those fields describe possible host capability; they do not add a DSL primitive.
+**Model and host permissions.** The manifest still declares `models: true`: child
+agent sessions reach models through the host. Separately, trusted workflow JavaScript
+can use network-capable Node builtins or explicitly downgraded installed modules, so
+manifest filesystem, subprocess, network and browser fields are conservative
+`*`/enabled declarations. Those fields describe possible host capability; they do not
+add a DSL primitive.
 
-**Fail-closed.** No model resolved, request-auth resolution failed, a model/network
-error, or a final schema mismatch returns `ok:false` with diagnostics — never a fabricated
-completion, never a throw into the script (except the opt-in `throwOnSchemaMismatch`).
-The first failed-call diagnostic is retained on `llm_end`, shown by status/detail, and
-used as the final workflow receipt fallback when the script returns only `ok:false`.
-Parser and validator exhaustion is typed as
-`schemaValidation.status:'mismatch'`; model/network failure is not. When such a result is
-returned directly from a `parallel()` branch or `pipeline()` stage, it becomes typed group
-failure after the barrier.
-
-**Budget.** Each `llm()` records token/cost `usage`; `/workflows status` sums it per run
-(`tokens=… cost=$…`). Observational only — there is no hard cap.
+**Budget.** Each child run records token/cost `usage` on its `agent_end` journal line;
+`/workflows status` sums it per run (`tokens=… cost=$…`). Observational only — there
+is no hard cap.
 
 ---
 
@@ -909,24 +1090,172 @@ When the Pi SDK host cannot spawn a child agent session:
 
 ---
 
+## Resume and replay
+
+`/workflows run <name> --resume <runId>` reruns the workflow against a recorded
+run. Every `agent()` call whose **position** and **exact request** match the
+record returns the recorded child text without spawning a child, so iterating on
+the last stage of a long pipeline no longer pays for the earlier stages.
+
+### What is compared
+
+The key is the call's ordinal position plus its fully resolved request: the
+prompt, the catalog `agent`, `readOnly`, `tools`, `maxToolCalls`, `model`,
+`label`, `phase`, `permissionMode`, `workspaceMode`, and any `workspaceHandle`.
+A declared `schema` needs no separate field — the shape contract is already part
+of the prompt the child receives, and each schema retry is recorded as its own
+call, so a shaped stage replays its retries exactly as it ran them.
+
+Replay is a **strict prefix**. The first call whose key does not match the record
+invalidates that call _and every later call_, including calls whose own prompt
+did not change: a later recorded answer was produced after an earlier answer that
+no longer exists, so reusing it would misreport what the run observed.
+
+### When replay is refused
+
+Refusal is never silent — the reason is written to the journal and to
+`result.json`, and the run executes normally.
+
+| Reason                       | Meaning                                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `source-run-unusable`        | the named run has no readable persisted script identity                                              |
+| `script-changed`             | `scriptSha256` differs from the recorded run's                                                       |
+| `identity-coverage-unproven` | the script declares `entry-only`, so imported bytes could move calls without changing the entry hash |
+| `replay-unsafe-script`       | the AST found direct clock/randomness syntax (below)                                                 |
+| `no-recorded-calls`          | the recorded run wrote no replay record                                                              |
+
+### Replay-safety is scanned, not asserted
+
+There is no `meta.replaySafe` field, deliberately. An author assertion fails
+open: a script that claims to be replay-safe and calls `Date.now()` would replay
+answers produced in a different world and look green. Instead the same AST scan
+that classifies import edges also looks for direct clock and randomness syntax.
+Any hit makes the script `unproven`: it still runs normally, it is simply never
+recorded and never replayed.
+
+The nondeterministic roots are `Date.now`, `new Date(…)`, `Math.random`,
+`performance.now`/`timeOrigin`, `crypto.randomUUID`/`getRandomValues`, and
+`process.hrtime`/`uptime`. The scan folds these forms of reaching them:
+
+| Form                                  | Example                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| direct member access                  | `Date.now()`, `Math.random()`                                                                  |
+| computed member access                | `Date["now"]()`                                                                                |
+| through the global object             | `globalThis.Date.now()`, `global.Date.now()`, `self.Math.random()`, `globalThis["Date"].now()` |
+| a computed global member              | `globalThis[key].now()` — unfoldable, so always unproven                                       |
+| construction, parenthesised or not    | `new Date()`, `new (Date)()`, `new globalThis.Date()`                                          |
+| a fresh binding for the root          | `const d = Date`, `const { random } = Math`, `m = Math`                                        |
+| a named `node:` import                | `import { randomUUID } from "node:crypto"`, `import { performance } from "node:perf_hooks"`    |
+| a default or namespace `node:` import | `import c from "node:crypto"` — the module is renamed, so it is flagged wholesale              |
+
+That last pair matters more than it looks: `node:` specifiers are exactly what
+keeps a script `self-contained-static`, so an ESM import of `randomUUID` would
+otherwise be the one bypass the identity gate actively invites.
+
+**What the scan still cannot see.** It reads syntax, not behavior, so it is a
+filter and not a proof:
+
+- access assembled at runtime — `globalThis[k]` where `k` is computed elsewhere,
+  `Reflect.get`, or a root threaded through a function parameter or property bag;
+- a nondeterministic value smuggled in through `process.env`, `argv`, or a file;
+- anything inside an imported module — which is exactly why `entry-only`
+  coverage counts as unproven and is never recorded at all.
+
+So the honest claim is narrower than "replay is proven safe". The gate that
+actually prevents a wrong replay is the per-call request key plus the prefix
+latch above: nondeterminism that reaches a prompt, or that changes call order or
+count, produces a key mismatch and fails closed. This scan reduces how often that
+gate is the only thing standing, and it errs toward `unproven` — a false positive
+costs a cache miss, a false negative would replay an answer from a different
+world. Reach for `dsl.now()` / `dsl.random()` and the question does not arise.
+
+The folded forms above are each covered by a case in
+`tests/shared/workflows/workflow-replay.test.ts` (`static replay-safety
+assessment` and `replay-safety bypasses are refused end to end`).
+
+### A replayed run is always marked
+
+A replayed call is recorded evidence, not fresh evidence, and every surface says
+so:
+
+- `journal.ndjson` — `agent_start` / `agent_end` carry `replayed: true`.
+- `result.json` — a `replay` envelope with `replayed`, `recorded`, `sourceRunId`,
+  `refusedReason`, `notRecordedReason`, `replayedCalls`, `freshCalls`, and
+  `divergedAtCall`.
+- `/workflows status` — `replayed=<n>` on the run row, and a detail line reading
+  `N/M agent call(s) reused a recorded run — not fresh evidence`.
+- the live progress panel — `replayed=<n>` in the header.
+- `/workflows status <runId>` timeline — `[replayed]` on the agent rows.
+- the bounded command/tool lifecycle digest — `[replayed]` on the agent lines and
+  `N replayed from a recorded run` on the final line. This is the one workflow
+  surface that enters LLM context, so a model reading it cannot mistake recorded
+  evidence for work that just happened.
+
+A replayed call reports **no** token usage, so the run budget shown by
+`/workflows status` counts only work that actually happened.
+
+### Limits, stated plainly
+
+- **Replay reuses answers, not side effects.** A child that wrote a file on the
+  first run does not write it again. Calls that ran under a worktree
+  (`workspaceMode` other than `project`, or any `workspaceHandle`) are therefore
+  never replayed even on a clean key match; they re-run. For a
+  `project`-mode child that wrote a file, the marking above is the mitigation,
+  not a guarantee that the filesystem still matches.
+- **A replayed call does not re-read either — its answer describes the tree as
+  it was.** Replay is keyed on `(ordinal, resolved request)` and never on the
+  state the child read. This is the sharper edge of the bullet above, because it
+  bites in exactly the scenario `--resume` exists for: you changed something and
+  want to rerun the last stage. An earlier `project`-mode stage that had read
+  those files replays its recorded answer about the _old_ tree, with a
+  byte-identical prompt and no divergence. That is by design — nothing is
+  fabricated and every surface marks it `replayed` — but if an early stage's
+  answer must reflect your edit, change that stage's prompt or resume from
+  further back.
+- **`parallel()` wider than the scheduler is a cache miss, not a wrong answer.**
+  Ordinals are assigned as calls start, and a group with more branches than the
+  scheduler width (4) may start them in a different order on the second run. That
+  breaks the prefix and the remaining calls run for real. Sequential pipelines —
+  the case this feature exists for — are fully deterministic.
+- **Resume is not Pi session continuation.** The child session is not resumed;
+  only the workflow-level answer is reused.
+- **A recorded failure is not replayed.** It keeps its ordinal so the prefix
+  before it still replays, and the call itself runs again — which is what
+  "resume to fix the stage that failed" means.
+- **The prefix latch fires on key mismatch, not on a changed outcome.** A call
+  that re-runs at a matching key — a recorded failure that now succeeds, or a
+  worktree stage that is never replayed — does _not_ break the prefix. Its
+  successors, if their own keys still match, keep replaying. So a stage whose
+  recorded answer was produced in a run where its predecessor had failed can be
+  replayed into a run where that predecessor succeeded. Nothing is fabricated:
+  the text is a real child answer to a byte-identical request, and the run is
+  marked `replayed`. But "the prefix before the divergence replays" is only half
+  the rule — the prefix _after_ an outcome change replays too, and only a
+  changed request key stops it.
+- Recording is skipped entirely for `unproven` and `entry-only` scripts, so those
+  runs write no `replay.ndjson` and cannot be resumed.
+
+---
+
 ## Journal layout
 
 ```
 .locus/runtime/workflows/<runId>/
   script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
-  journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, ...}
+  journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
                       kinds: phase | log | agent_start | agent_end |
-                             llm_start | llm_end | llm_delta |
                              group_start | group_end | error
-  result.json       — Final result + full journal snapshot + script identity
+  replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
+                      absent for scripts that are not replay-safe (see "Resume and replay")
+  result.json       — Final result + full journal snapshot + script identity + replay envelope
 .locus/runtime/reports/
   agent-sdk-<name>-<stamp>.jsonl  — Per-child SDK session evidence (one per agent() call)
 ```
 
-`llm()` nodes journal `llm_start` / `llm_end` (the latter carries `usage`, resolved `model`,
-and a bounded first diagnostic when failed)
-and, when streaming, an `llm_delta` per text chunk. They are counted separately from agents,
-so `/workflows status` shows `agents=…` and `llm=…` independently.
+`agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
+`schemaValidation`. `/workflows status` shows `agents=…` and sums the run budget from those
+`usage` values. Journals written before 0.2.x may still contain `llm_start` / `llm_end` /
+`llm_delta` lines; they parse but are no longer counted or specially rendered.
 `parallel()` and `pipeline()` group lines are local observability metadata: they
 summarize current DSL structure and record accurate completed/failed barrier counts.
 They do not add upstream dynamic fanout, acceptance evaluation, async detach,
@@ -970,9 +1299,6 @@ The runtime has two different model paths:
   artifacts, and live display. In the current workflow bridge it does not replace
   the executor's `ctx.model`; it is provenance/routing metadata unless a per-call
   `opts.model` is supplied.
-- `llm(prompt, { model })` is separate. An explicit selector must resolve or the
-  call returns `ok:false`; only an omitted selector uses `ctx.model`. `llm()` does
-  not use agent catalog definitions or model-role metadata.
 
 `meta.description` has no effect on any of these choices. `/workflows info`
 reports the rules but never resolves them into a claimed future execution graph.

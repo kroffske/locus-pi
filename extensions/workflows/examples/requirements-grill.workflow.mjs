@@ -9,6 +9,15 @@ import { readdirSync } from "node:fs";
 export const meta = {
   name: "requirements-grill",
   description: "Maps repository facts, challenges a request, and returns implementation-ready requirements.",
+  // Declared shape, read statically by /workflows info before any run starts.
+  // Titles must equal the phase() calls below; a test enforces that.
+  phases: [
+    { title: "validate-input", detail: "Refuse an empty request before spending a single child call." },
+    { title: "collect-context", detail: "Read the repository facts the request depends on." },
+    { title: "recon", detail: "Map the surfaces a change would touch." },
+    { title: "challenge", detail: "Attack the request's assumptions with falsifiable questions." },
+    { title: "synthesis", detail: "Return implementation-ready requirements." },
+  ],
 };
 
 export default async function runWorkflow(dsl, input) {

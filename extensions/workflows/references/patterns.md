@@ -5,22 +5,24 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 `~/.pi/workflows/` before running it. Workflow JavaScript executes with full
 Node.js host access and is not sandboxed.
 
-The only curated Package workflows are `live-smoke`, `llm-smoke`,
-`requirements-grill`, `review`, and `review-fix`.
+The only curated Package workflows are `live-smoke`, `requirements-grill`,
+`review`, and `review-fix`.
 
 ## Choose a shape
 
-| Requirement                            | Minimal shape                         |
-| -------------------------------------- | ------------------------------------- |
-| One bounded tool-using task            | one `agent()`                         |
-| Cheap classification or draft          | one `llm()`                           |
-| Cheap gate before tool work            | `llm()` then conditional `agent()`    |
-| Multi-step work on one subject         | staged text pipeline (see below)      |
-| Repeat until an evidenced verdict      | bounded loop plus judge               |
-| Plan, implement, and verify            | planner, writer stages, reviewer loop |
-| Ordered transformation per item        | `pipeline()`                          |
-| Independent work followed by synthesis | `parallel()` then merge               |
-| Independent acceptance votes           | `parallel()` judge panel              |
+| Requirement                             | Minimal shape                               |
+| --------------------------------------- | ------------------------------------------- |
+| One bounded tool-using task             | one `agent()`                               |
+| Cheap classification or draft           | one no-tool `agent({ schema })`             |
+| Cheap gate before tool work             | shaped `agent()` then conditional `agent()` |
+| Yes/no answer the script must branch on | `agent({ schema })` with an `enum`          |
+| A few fixed fields for the next stage   | `agent({ schema })`, closed object          |
+| Multi-step work on one subject          | staged text pipeline (see below)            |
+| Repeat until an evidenced verdict       | bounded loop plus judge                     |
+| Plan, implement, and verify             | planner, writer stages, reviewer loop       |
+| Ordered transformation per item         | `pipeline()`                                |
+| Independent work followed by synthesis  | `parallel()` then merge                     |
+| Independent acceptance votes            | `parallel()` judge panel                    |
 
 Prefer the staged text pipeline for any requirement that reads "understand X,
 then decide about X, then act on X". Reach for a loop, `parallel()`,
@@ -145,6 +147,37 @@ Runnable examples to adapt: `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`, with the reader algorithm in
 `examples/review/README.md`.
 
+## Parameterised input
+
+`/workflows run <name> [input]` passes free text. The `workflow` tool passes free
+text **or** a JSON object of named parameters. A workflow that takes parameters
+normalises both at the top, so one script serves both callers:
+
+```js
+/** `{ target, mode }` from the tool, or a bare path/sentence from the command. */
+function readParams(input) {
+  if (typeof input === "string") return { target: input.trim(), mode: "normal" };
+  if (input === null || typeof input !== "object") return { target: "", mode: "normal" };
+  const { target, mode } = input;
+  return {
+    target: typeof target === "string" ? target.trim() : "",
+    mode: mode === "strict" ? "strict" : "normal",
+  };
+}
+
+export default async function run({ agent, phase }, input) {
+  const { target, mode } = readParams(input);
+  if (target === "") return { ok: false, summary: "A target path or module name is required." };
+
+  phase("audit");
+  return agent(`Audit ${target}. Severity floor: ${mode}.`, { agent: "reviewer", readOnly: true, label: "audit" });
+}
+```
+
+Validate the fields the script branches on — an object from a caller is
+untrusted data exactly like free text. Keep the string branch meaningful: a
+workflow that only accepts an object cannot be started from `/workflows run`.
+
 ## Single agent
 
 ```js
@@ -164,7 +197,12 @@ export default async function run({ agent, phase }, input) {
 ## Cheap gate before tool work
 
 ```js
-const gate = await llm(`Classify whether tool work is needed: ${input}`, {
+// A no-tool child is the cheap path: nothing to call, and the declared shape is
+// enforced by the runtime, so the script branches on a value it did not parse.
+const gate = await agent(`Classify whether tool work is needed: ${input}`, {
+  label: "gate",
+  tools: [],
+  maxToolCalls: 0,
   schema: {
     type: "object",
     required: ["needsTools"],
@@ -172,12 +210,68 @@ const gate = await llm(`Classify whether tool work is needed: ${input}`, {
   },
 });
 
-if (!gate?.ok) return { ok: false, error: gate?.error ?? "Gate failed" };
-if (!gate.output.needsTools) return { ok: true, skipped: true };
+if (!gate.needsTools) return { ok: true, skipped: true };
 
 const work = await agent(input, { agent: "quick_task", label: "work" });
 return work;
 ```
+
+## Shaped answer from an agent
+
+Use `agent({ schema })` when the script itself must branch on the answer. The
+call runs an ordinary child agent — same catalog agent, same capability options
+— but returns the **validated value** instead of text, and throws
+`SchemaValidationError` if the child cannot produce that shape within the retry
+budget. Nothing unshaped ever reaches the script.
+
+Yes/no answer — an `enum` leaves the child no room to answer "it depends":
+
+```js
+const gate = await agent(`Does this diff need a security review?\n${diff}`, {
+  agent: "reviewer",
+  readOnly: true,
+  label: "security-gate",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["needsSecurityReview"],
+    properties: { needsSecurityReview: { type: "boolean" } },
+  },
+});
+
+if (!gate.needsSecurityReview) return { ok: true, skipped: "no security surface" };
+```
+
+Small fixed field set — one closed object handed to the next stage:
+
+```js
+const triage = await agent(`Triage this failure report:\n${report}`, {
+  agent: "reviewer",
+  readOnly: true,
+  label: "triage",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["severity", "component", "summary"],
+    properties: {
+      severity: { type: "string", enum: ["low", "medium", "high"] },
+      component: { type: "string" },
+      summary: { type: "string" },
+    },
+  },
+});
+
+const fix = await agent(`Fix the ${triage.severity} defect in ${triage.component}: ${triage.summary}`, {
+  agent: "task",
+  label: "fix",
+  workspaceMode: "worktree",
+});
+```
+
+Keep shaped stages small and closed. `enum`, `additionalProperties: false`, and
+a short `required` list are what make the answer machine-checkable; a wide schema
+with free-form prose fields is where a weak model spends both attempts and the
+stage fails closed. Everything narrative stays a plain `agent()` call.
 
 ## Bounded loop plus judge
 
@@ -186,14 +280,17 @@ const maxRounds = 3;
 for (let round = 1; round <= maxRounds; round += 1) {
   const work = await agent(`Round ${round}: ${input}`, { label: `work:${round}` });
 
-  const judge = await llm(`Is this complete? Reply with done boolean.\n${work}`, {
+  const judge = await agent(`Is this complete? Reply with done boolean.\n${work}`, {
+    label: `judge:${round}`,
+    tools: [],
+    maxToolCalls: 0,
     schema: {
       type: "object",
       required: ["done"],
       properties: { done: { type: "boolean" } },
     },
   });
-  if (judge?.ok && judge.output.done) return { ok: true, stoppedBy: "judge", round };
+  if (judge.done) return { ok: true, stoppedBy: "judge", round };
 }
 return { ok: false, stoppedBy: "round-cap", error: "Completion was not proven" };
 ```
@@ -222,7 +319,7 @@ return review;
 const outputs = await pipeline(
   items,
   async ({ item }) => ({ item, extracted: await agent(`Inspect ${item}`) }),
-  async (state) => ({ ...state, classified: await llm(`Classify ${state.extracted}`) }),
+  async (state) => ({ ...state, classified: await agent(`Classify ${state.extracted}`) }),
 );
 return { ok: true, outputs };
 ```
@@ -249,10 +346,11 @@ return merge;
 ```js
 const votes = await parallel(
   ["strict", "balanced", "skeptical"].map(
-    (perspective) => () => llm(`${perspective} judge: ${input}`, { schema: VERDICT_SCHEMA }),
+    (perspective) => () =>
+      agent(`${perspective} judge: ${input}`, { label: `judge:${perspective}`, schema: VERDICT_SCHEMA }),
   ),
 );
-const passed = votes.filter((vote) => vote.ok && vote.output.verdict === "pass").length;
+const passed = votes.filter((vote) => vote.verdict === "pass").length;
 return { ok: passed > votes.length / 2, passed, total: votes.length };
 ```
 
@@ -265,15 +363,17 @@ panels are not accepted by requirements, let the group fail closed.
 let emptyStreak = 0;
 for (let round = 1; round <= 5; round += 1) {
   const sweep = await agent(`Find remaining work, round ${round}`, { label: `sweep:${round}` });
-  const measured = await llm(`Count evidenced remaining items in this report:\n${sweep}`, {
+  const measured = await agent(`Count evidenced remaining items in this report:\n${sweep}`, {
+    label: `measure:${round}`,
+    tools: [],
+    maxToolCalls: 0,
     schema: {
       type: "object",
       required: ["remaining"],
       properties: { remaining: { type: "number" } },
     },
   });
-  if (!measured.ok) return { ok: false, error: "Remaining-work measurement failed" };
-  const remaining = measured.output.remaining;
+  const remaining = measured.remaining;
   emptyStreak = remaining === 0 ? emptyStreak + 1 : 0;
   if (emptyStreak >= 2) return { ok: true, stoppedBy: "dry", round };
 }

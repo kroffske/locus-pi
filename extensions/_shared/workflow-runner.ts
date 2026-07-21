@@ -25,14 +25,23 @@ import type { WorkflowDsl, WorkflowJournalLine, WorkflowRuntime } from "./workfl
 import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
-import { createWorkflowLlmRunner } from "./workflow-llm-bridge.js";
 import {
   newWorkflowRunId,
   workflowRunDir,
   createWorkflowJournalSink,
+  readWorkflowRunResult,
   readWorkflowRunSummary,
 } from "./workflow-journal.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
+import {
+  createWorkflowReplayController,
+  readWorkflowReplayLog,
+  type WorkflowReplayController,
+  type WorkflowReplayEntry,
+  type WorkflowReplayEnvelope,
+  type WorkflowReplayNotRecordedReason,
+  type WorkflowReplayRefusalReason,
+} from "./workflow-replay.js";
 import {
   prepareWorkflowResult,
   isWorkflowResultExplicitFailure,
@@ -42,10 +51,12 @@ import {
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
 import {
+  assessWorkflowReplaySafety,
   createWorkflowScriptSnapshot,
   sha256WorkflowBytes,
   verifyWorkflowScriptSnapshot,
   workflowScriptExecutionPath,
+  type WorkflowReplaySafety,
   type WorkflowScriptIdentity,
 } from "./workflow-script-identity.js";
 import {
@@ -124,6 +135,9 @@ export interface RunWorkflowScriptResult {
   workspaceEvidence?: WorkflowWorkspaceEvidence[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
+  /** What this run did about recorded-call replay. Absent only when the run
+   *  failed before its script identity was established. */
+  replay?: WorkflowReplayEnvelope;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,17 +147,10 @@ export interface RunWorkflowScriptResult {
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
 /** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "llm-smoke",
-  "requirements-grill",
-  "review",
-  "review-fix",
-] as const;
+export const CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
 const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
   "live-smoke": "live-smoke.workflow.mjs",
-  "llm-smoke": "llm-smoke.workflow.mjs",
   "requirements-grill": "requirements-grill.workflow.mjs",
   review: path.join("review", "review.workflow.mjs"),
   "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),
@@ -195,10 +202,12 @@ function resolveConfinedScriptPath(scriptPath: string, projectRoot: string, disp
  * Project-relative directories a saved workflow may live in, in first-wins order.
  *
  * `.pi/workflows/` is the canonical pi-native save target (where `workflow-author`
- * writes). The other two are interop sources: a workflow found under `.claude/workflows/`
- * or `.agents/workflows/` may have been authored for a different tool and can differ
- * slightly in format from the pi-native DSL — they are scanned for convenience, not
- * guaranteed to be pi-native. All three carry `source: "project"`.
+ * writes). The other two exist for repositories that already keep agent assets under
+ * `.claude/` or `.agents/`; they are NOT foreign-format interop sources. Every entry
+ * here accepts exactly `<name>.workflow.mjs` (see `resolveSavedWorkflowPath`), so a
+ * host that writes `<name>.js` is never resolved, and a script authored against a
+ * different workflow DSL would fail at execution regardless of its filename. All
+ * three carry `source: "project"`.
  */
 const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
   [".pi", "workflows"],
@@ -403,6 +412,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const resumeFromRunId = opts.resumeFromRunId?.trim();
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
+  let replayPlan: WorkflowReplayPlan | undefined;
+  let replayController: WorkflowReplayController | undefined;
   let resourceLoader: WorkflowResourceLoader | undefined;
   let workspaceManager: WorkflowWorkspaceManager | undefined;
   let runtime: WorkflowRuntime | undefined;
@@ -430,6 +441,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
+      ...(replayPlan === undefined ? {} : { replay: workflowReplayEnvelope(replayPlan, replayController) }),
     };
     if (workspaceManager !== undefined) {
       try {
@@ -525,6 +537,32 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
 
+  replayPlan = planWorkflowReplay({
+    projectRoot,
+    scriptIdentity,
+    ...(hasResume ? { resumeFromRunId: resumeFromRunId! } : {}),
+  });
+  if (replayPlan.record) {
+    replayController = createWorkflowReplayController({
+      runDir,
+      ...(replayPlan.recorded === undefined ? {} : { recorded: replayPlan.recorded }),
+    });
+  }
+  // Silent on the default path. A plain run that records normally is the norm,
+  // and announcing it would turn every zero-event run into an eventful one; the
+  // record itself and the `replay` envelope in result.json carry that fact.
+  const replayPlanNote = describeWorkflowReplayPlan(replayPlan);
+  if (replayPlanNote !== undefined) {
+    emitPrelude({
+      ts: new Date().toISOString(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: replayPlanNote,
+      ...(hasResume ? { resumeFromRunId: resumeFromRunId! } : {}),
+    });
+  }
+
   resourceLoader = createWorkflowResourceLoader({
     workflowSourcePath: target.path,
     runDir,
@@ -543,19 +581,14 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
   });
-  const llmRunner = createWorkflowLlmRunner({
-    ctx: opts.ctx,
-    signal: opts.signal,
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
   runtime = createWorkflowRuntime({
     runId,
     agentRunner,
-    llmRunner,
     journal,
     projectRoot,
     resourceLoader,
     workspaceManager,
+    ...(replayController !== undefined ? { replay: replayController } : {}),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
@@ -661,6 +694,110 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     scriptIdentity,
     ...resultMetadata(),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Replay gating (T-109)
+// ---------------------------------------------------------------------------
+
+interface WorkflowReplayPlan {
+  /** Whether this run writes a record a later `--resume` can consume. */
+  record: boolean;
+  /** Recorded entries to replay from. Present only when replay is active. */
+  recorded?: readonly WorkflowReplayEntry[];
+  sourceRunId?: string;
+  refusedReason?: WorkflowReplayRefusalReason;
+  notRecordedReason?: WorkflowReplayNotRecordedReason;
+}
+
+interface PlanWorkflowReplayInput {
+  projectRoot: string;
+  scriptIdentity: WorkflowScriptIdentity;
+  resumeFromRunId?: string;
+}
+
+/**
+ * Decide, once per run, whether recorded calls may be replayed and whether this
+ * run may be recorded. Every path out of here is fail-closed: an unproven
+ * script, an unreadable source run, or a moved script yields a NAMED refusal and
+ * a completely fresh execution, never a partially trusted one.
+ */
+function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan {
+  const { projectRoot, scriptIdentity, resumeFromRunId } = input;
+  // `entry-only` binds only the entry file's bytes, so an imported module can
+  // move the call sequence without changing `scriptSha256`. Unproven by
+  // construction — the AST never saw those bytes.
+  const coverageProven = scriptIdentity.identityCoverage === "self-contained-static";
+  const replaySafety = coverageProven ? readWorkflowReplaySafety(scriptIdentity) : "unproven";
+  const notRecordedReason: WorkflowReplayNotRecordedReason | undefined = !coverageProven
+    ? "identity-coverage-unproven"
+    : replaySafety === "unproven"
+      ? "replay-unsafe-script"
+      : undefined;
+  const record = notRecordedReason === undefined;
+
+  if (resumeFromRunId === undefined)
+    return { record, ...(notRecordedReason !== undefined ? { notRecordedReason } : {}) };
+
+  const refuse = (refusedReason: WorkflowReplayRefusalReason): WorkflowReplayPlan => ({
+    record,
+    sourceRunId: resumeFromRunId,
+    refusedReason,
+    ...(notRecordedReason !== undefined ? { notRecordedReason } : {}),
+  });
+
+  const sourceSha256 = readWorkflowRunResult(projectRoot, resumeFromRunId)?.scriptIdentity?.scriptSha256;
+  if (sourceSha256 === undefined) return refuse("source-run-unusable");
+  if (sourceSha256 !== scriptIdentity.scriptSha256) return refuse("script-changed");
+  if (!coverageProven) return refuse("identity-coverage-unproven");
+  if (replaySafety === "unproven") return refuse("replay-unsafe-script");
+
+  const recorded = readWorkflowReplayLog(projectRoot, resumeFromRunId);
+  if (recorded.length === 0) return refuse("no-recorded-calls");
+  return { record, recorded, sourceRunId: resumeFromRunId };
+}
+
+/** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
+function readWorkflowReplaySafety(scriptIdentity: WorkflowScriptIdentity): WorkflowReplaySafety {
+  try {
+    return assessWorkflowReplaySafety(readFileSync(scriptIdentity.snapshotPath, "utf8")).replaySafety;
+  } catch {
+    return "unproven";
+  }
+}
+
+function workflowReplayEnvelope(
+  plan: WorkflowReplayPlan,
+  controller: WorkflowReplayController | undefined,
+): WorkflowReplayEnvelope {
+  const counts = controller?.counts() ?? { replayedCalls: 0, freshCalls: 0 };
+  return {
+    replayed: counts.replayedCalls > 0,
+    recorded: plan.record,
+    ...(plan.sourceRunId !== undefined ? { sourceRunId: plan.sourceRunId } : {}),
+    ...(plan.refusedReason !== undefined ? { refusedReason: plan.refusedReason } : {}),
+    ...(plan.notRecordedReason !== undefined ? { notRecordedReason: plan.notRecordedReason } : {}),
+    replayedCalls: counts.replayedCalls,
+    freshCalls: counts.freshCalls,
+    ...(counts.divergedAtCall !== undefined ? { divergedAtCall: counts.divergedAtCall } : {}),
+  };
+}
+
+/**
+ * One journal line for the cases an operator must not have to infer, and
+ * `undefined` for the silent default (no resume asked for, recording on).
+ */
+function describeWorkflowReplayPlan(plan: WorkflowReplayPlan): string | undefined {
+  if (plan.recorded !== undefined) {
+    return `replay: active source=${plan.sourceRunId ?? "?"} recordedCalls=${plan.recorded.length}`;
+  }
+  if (plan.refusedReason !== undefined) {
+    return `replay: refused source=${plan.sourceRunId ?? "?"} reason=${plan.refusedReason} — every call runs fresh`;
+  }
+  if (plan.notRecordedReason !== undefined) {
+    return `replay: not recorded reason=${plan.notRecordedReason} — this run cannot be resumed`;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,6 @@ const COLORS = {
   operator: "#087f5b",
   workflow: "#7e22ce",
   agent: "#0b1fb3",
-  directLlm: "#b45309",
   artifact: "#475569",
   // Reserved for the one surface this workflow mutates: the launch checkout.
   write: "#b91c1c",
@@ -33,7 +32,6 @@ const COLORS = {
   operatorFill: "#ecfdf5",
   workflowFill: "#faf5ff",
   agentFill: "#eff6ff",
-  directLlmFill: "#fffbeb",
   artifactFill: "#f8fafc",
   writeFill: "#fef2f2",
 };
@@ -306,18 +304,6 @@ scene.text(1884, 96, "Mutated source surface\n(red document)", {
   color: COLORS.write,
   width: 170,
 });
-const legendDirectLlm = scene.rect(2120, 92, 112, 50, {
-  color: COLORS.directLlm,
-  strokeWidth: 2,
-  dashed: true,
-});
-setFrameFill(legendDirectLlm, COLORS.directLlmFill);
-scene.text(2244, 103, "Direct LLM: not used in review-fix", {
-  size: 11,
-  color: COLORS.directLlm,
-  width: 240,
-});
-
 lane(
   "OPERATOR",
   "Edits review.md first, then reads the uncommitted diff this workflow leaves behind.",

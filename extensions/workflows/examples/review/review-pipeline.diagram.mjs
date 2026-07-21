@@ -24,13 +24,11 @@ const COLORS = {
   operator: "#087f5b",
   workflow: "#7e22ce",
   agent: "#0b1fb3",
-  directLlm: "#b45309",
   artifact: "#475569",
   muted: "#64748b",
   operatorFill: "#ecfdf5",
   workflowFill: "#faf5ff",
   agentFill: "#eff6ff",
-  directLlmFill: "#fffbeb",
   artifactFill: "#f8fafc",
 };
 
@@ -282,18 +280,6 @@ scene.text(1549, 96, "Artifact file\n(gray document)", {
   color: COLORS.artifact,
   width: 160,
 });
-const legendDirectLlm = scene.rect(1760, 92, 112, 50, {
-  color: COLORS.directLlm,
-  strokeWidth: 2,
-  dashed: true,
-});
-setFrameFill(legendDirectLlm, COLORS.directLlmFill);
-scene.text(1884, 103, "Direct LLM: not used in review", {
-  size: 11,
-  color: COLORS.directLlm,
-  width: 220,
-});
-
 lane("OPERATOR", "Owns the review request and edits the published review.", 170, 190, COLORS.operator, "#f0fdf4");
 lane(
   "WORKFLOW-OWNED",

@@ -22,12 +22,26 @@ const DESCRIPTION_MAX_CHARS = 96;
 const HISTORICAL_WORKFLOW_DESCRIPTION = "historical run snapshot";
 export const WORKFLOW_SOURCE_LEGEND = "Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history";
 
+/** One statically declared stage from a workflow's exported `meta.phases`. */
+export interface WorkflowMetaPhase {
+  title: string;
+  detail?: string;
+}
+
+/** Everything the bounded static scan accepts from one literal exported `meta`. */
+export interface WorkflowStaticMeta {
+  description: string;
+  /** Empty when nothing was declared, or when a declaration was not fully literal. */
+  phases: WorkflowMetaPhase[];
+}
+
 export interface WorkflowCatalogRow {
   name: string;
   source: ResolvedWorkflowTarget["source"];
   sourceLabel: "Project" | "User" | "Package";
   originPath: string;
   description: string;
+  phases: WorkflowMetaPhase[];
 }
 
 export interface WorkflowCatalogCurrentRow extends WorkflowCatalogRow {
@@ -92,15 +106,19 @@ export function buildWorkflowCatalogModel(
   query?: string,
 ): WorkflowCatalogModel {
   const catalogRows: WorkflowCatalogCurrentRow[] = listWorkflowCatalogTargets(projectRoot, workingDirectory).map(
-    (target) => ({
-      kind: "current",
-      target,
-      name: target.ref,
-      source: target.source,
-      sourceLabel: workflowSourceLabel(target.source),
-      originPath: target.path,
-      description: readWorkflowMetaDescription(target.path),
-    }),
+    (target) => {
+      const meta = readWorkflowMeta(target.path);
+      return {
+        kind: "current",
+        target,
+        name: target.ref,
+        source: target.source,
+        sourceLabel: workflowSourceLabel(target.source),
+        originPath: target.path,
+        description: meta.description,
+        phases: meta.phases,
+      };
+    },
   );
   const recentRows = recentWorkflowRows(projectRoot);
   const matches = (row: WorkflowCatalogRow): boolean => workflowCatalogRowMatches(row, query);
@@ -268,7 +286,8 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
       body: [
         `source: ${row.sourceLabel} (${row.source})`,
         `target: ${row.target.kind}:${row.target.ref}`,
-        "metadata: static top-level export const meta.description only; the module was not imported or evaluated",
+        "metadata: static top-level export const meta.description and meta.phases only; the module was not imported or evaluated",
+        ...declaredPhaseLines(row.phases),
         ...workflowContractLines(projectRoot, workingDirectory),
         `resolved path: ${row.target.path}`,
       ],
@@ -291,17 +310,31 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
   };
 }
 
+/**
+ * Project a declared pipeline for `/workflows info <name>`. Nothing is emitted
+ * when a workflow declares no phases, so the block that an existing workflow
+ * produces is unchanged — `phases` is optional and must stay free.
+ */
+function declaredPhaseLines(phases: readonly WorkflowMetaPhase[]): string[] {
+  if (phases.length === 0) return [];
+  return [
+    `phases: ${phases.length} declared before the run starts (declaration, not enforcement)`,
+    ...phases.map(
+      (phase, index) => `  ${index + 1}. ${phase.title}${phase.detail === undefined ? "" : ` — ${phase.detail}`}`,
+    ),
+  ];
+}
+
 function workflowContractLines(projectRoot: string, workingDirectory: string): string[] {
   return [
     "commands: list [query] browses; info [name] explains; run <name|path> executes only after explicit command use; status [runId] reads persisted progress",
     "trust: executed workflow files are reviewed JavaScript with full Pi host Node.js/module access; inspection and info are inert text/static-metadata reads",
     "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
     "agent models: opts.model selects the child-session model for that agent() call; otherwise the active Pi session model is passed to the child executor; agent frontmatter and saved model-role assignments remain routing/display metadata, not executor selection",
-    "llm models: llm() is a direct one-shot model call with no child session or tools; opts.model overrides the active session model for that call",
-    'agents: agent() returns exact non-empty child text; opts.agent selects a discovered catalog role, omitted agent uses role "default", and opts.readOnly can impose a host-enforced per-call read boundary',
+    'agents: agent() is the single model-calling primitive and returns exact non-empty child text; opts.agent selects a discovered catalog role, omitted agent uses role "default", opts.readOnly can impose a host-enforced per-call read boundary, and opts.schema opts into a validated shaped answer instead of text',
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
-    "DSL: agent(), llm(), parallel(), pipeline(), phase(), log(), workflow(), promptFile(), workspace()",
+    "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), promptFile(), workspace()",
     `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then curated Package names ${CURATED_PACKAGE_WORKFLOW_NAMES.join(", ")}`,
     "registration: project and user directories are scanned on every call; Package files are not registered by existence and require an explicit curated-list change",
   ];
@@ -369,17 +402,29 @@ function compactWorkflowCatalogBody(
 }
 
 /**
- * Read only a bounded prefix and accept description from the top-level literal
- * `export const meta = { description: <static string> }`. No module executes.
+ * Read only a bounded prefix and accept metadata from the top-level literal
+ * `export const meta = { description: <static string>, phases?: [...] }`. One
+ * read and one parse serve every field, because the catalog rebuilds this per
+ * row on each list/info call. No module is imported or executed: this function
+ * only ever holds the file's bytes as a string.
  */
-export function readWorkflowMetaDescription(file: string): string {
+export function readWorkflowMeta(file: string): WorkflowStaticMeta {
   let source: string;
   try {
     source = readBoundedSource(file);
   } catch {
-    return "description unavailable";
+    return { description: "description unavailable", phases: [] };
   }
-  return staticWorkflowMetaDescription(source) ?? "no description";
+  const meta = staticWorkflowMeta(source);
+  return {
+    description: meta.description ?? "no description",
+    phases: meta.phases,
+  };
+}
+
+/** Description-only projection of {@link readWorkflowMeta}. */
+export function readWorkflowMetaDescription(file: string): string {
+  return readWorkflowMeta(file).description;
 }
 
 /** Privacy projection for persisted path targets; never returns an absolute path. */
@@ -408,6 +453,7 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
     const target = snapshot.target;
     if (target === undefined) continue;
     const safeName = safeRecentWorkflowLabel(target, projectRoot);
+    const meta = snapshot.kind === "ready" ? staticWorkflowMeta(snapshot.source) : undefined;
     recent.push({
       kind: "history",
       runId,
@@ -417,34 +463,130 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
       source: target.source,
       sourceLabel: workflowSourceLabel(target.source),
       originPath: snapshot.path ?? `(snapshot unavailable for run ${runId})`,
-      description:
-        snapshot.kind === "ready"
-          ? (staticWorkflowMetaDescription(snapshot.source) ?? HISTORICAL_WORKFLOW_DESCRIPTION)
-          : HISTORICAL_WORKFLOW_DESCRIPTION,
+      description: meta?.description ?? HISTORICAL_WORKFLOW_DESCRIPTION,
+      phases: meta?.phases ?? [],
     });
     if (recent.length >= RECENT_WORKFLOW_LIMIT) break;
   }
   return recent;
 }
 
-function staticWorkflowMetaDescription(source: string): string | undefined {
+/**
+ * Parse one bounded source prefix and project every accepted literal `meta`
+ * field. Both fields come from the same parse; a source with no literal `meta`
+ * yields an undefined description and no phases.
+ */
+export function staticWorkflowMeta(source: string): { description: string | undefined; phases: WorkflowMetaPhase[] } {
+  let description: string | undefined;
+  let phases: WorkflowMetaPhase[] = [];
   try {
     const root = parse(Lang.JavaScript, source).root();
     for (const statement of root.findAll("export const meta = $META")) {
       const value = exportedMetaObject(statement);
       if (value === undefined) continue;
-      const descriptionPair = value
-        .children()
-        .find((child) => child.kind() === "pair" && staticObjectKey(child.field("key")) === "description");
-      const description = staticStringValue(descriptionPair?.field("value"));
-      if (description !== undefined && description.trim() !== "") {
-        return compactCatalogText(description.replace(/\s+/gu, " ").trim());
+      const pairs = value.children().filter((child) => child.kind() === "pair");
+      if (description === undefined) {
+        const literal = staticStringValue(
+          pairs.find((pair) => staticObjectKey(pair.field("key")) === "description")?.field("value"),
+        );
+        if (literal !== undefined && literal.trim() !== "") {
+          description = compactCatalogText(literal.replace(/\s+/gu, " ").trim());
+        }
+      }
+      if (phases.length === 0) {
+        phases = staticMetaPhases(
+          pairs.find((pair) => staticObjectKey(pair.field("key")) === "phases")?.field("value"),
+        );
       }
     }
   } catch {
-    return undefined;
+    return { description: undefined, phases: [] };
   }
-  return undefined;
+  return { description, phases };
+}
+
+/** Declared phases from one bounded source prefix; empty when nothing literal was declared. */
+export function staticWorkflowMetaPhases(source: string): WorkflowMetaPhase[] {
+  return staticWorkflowMeta(source).phases;
+}
+
+/**
+ * Accept `phases: [{ title: <static string>, detail?: <static string> }, ...]`
+ * and nothing else. One non-literal entry discards the whole array: a partially
+ * read pipeline would describe a shape the workflow does not have, with no
+ * marker telling the reader so.
+ */
+function staticMetaPhases(node: SgNode | null | undefined): WorkflowMetaPhase[] {
+  if (node == null || node.kind() !== "array") return [];
+  const declared: WorkflowMetaPhase[] = [];
+  for (const element of node.children()) {
+    if (isStructuralLiteralNode(element)) continue;
+    if (element.kind() !== "object") return [];
+    // A spread, shorthand, or method member means the element is not fully
+    // literal, so the declaration cannot be trusted as a whole.
+    if (element.children().some((child) => !isStructuralLiteralNode(child) && child.kind() !== "pair")) return [];
+    const pairs = element.children().filter((child) => child.kind() === "pair");
+    const title = staticStringValue(
+      pairs.find((pair) => staticObjectKey(pair.field("key")) === "title")?.field("value"),
+    );
+    if (title === undefined || title.trim() === "") return [];
+    const detailPair = pairs.find((pair) => staticObjectKey(pair.field("key")) === "detail");
+    if (detailPair !== undefined) {
+      const detail = staticStringValue(detailPair.field("value"));
+      if (detail === undefined) return [];
+      const compacted = detail.replace(/\s+/gu, " ").trim();
+      declared.push(
+        compacted === "" ? { title: title.trim() } : { title: title.trim(), detail: compactCatalogText(compacted) },
+      );
+      continue;
+    }
+    declared.push({ title: title.trim() });
+  }
+  return declared;
+}
+
+/** Punctuation and comments carry no declaration; everything else must be literal. */
+function isStructuralLiteralNode(node: SgNode): boolean {
+  const kind = node.kind();
+  return kind === "{" || kind === "}" || kind === "[" || kind === "]" || kind === "," || kind === "comment";
+}
+
+/** One declared-or-observed phase group for a finished or in-flight run. */
+export interface WorkflowPhaseGroup {
+  title: string;
+  detail?: string;
+  /** The workflow's `meta.phases` named this stage before the run started. */
+  declared: boolean;
+  /** The run actually emitted a `phase()` line with this exact title. */
+  reached: boolean;
+}
+
+/**
+ * Match a static declaration against the titles a run actually emitted.
+ * Declared order is kept; an observed title with no declaration is appended in
+ * first-seen order as its own undeclared group. Nothing fails on a mismatch —
+ * a `phase()` inside a branch may legitimately never run, and a drifted
+ * declaration is evidence a reader should see, not a rule to enforce.
+ */
+export function matchWorkflowPhaseGroups(
+  declared: readonly WorkflowMetaPhase[],
+  observedTitles: readonly string[],
+): WorkflowPhaseGroup[] {
+  const observed = new Set(observedTitles);
+  const declaredTitles = new Set(declared.map((phase) => phase.title));
+  const groups: WorkflowPhaseGroup[] = declared.map((phase) => ({
+    title: phase.title,
+    ...(phase.detail !== undefined ? { detail: phase.detail } : {}),
+    declared: true,
+    reached: observed.has(phase.title),
+  }));
+  const appended = new Set<string>();
+  for (const title of observedTitles) {
+    if (declaredTitles.has(title) || appended.has(title)) continue;
+    appended.add(title);
+    groups.push({ title, declared: false, reached: true });
+  }
+  return groups;
 }
 
 function sameRunSnapshotIdentity(left: WorkflowRunScriptSnapshot, right: WorkflowRunScriptSnapshot): boolean {
@@ -540,8 +682,11 @@ function appendWorkflowCatalogGroup(
   }
   for (const row of rows) {
     const historyBadge = history ? "[R] " : "";
+    // Stage count only: the full declaration belongs to /workflows info, and a
+    // catalog row that grows with the pipeline stops being scannable.
+    const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
     out.push(
-      `  ${historyBadge}${workflowSourceBadge(row.source)} ${row.name} · ${row.description} · ${row.originPath}`,
+      `  ${historyBadge}${workflowSourceBadge(row.source)} ${row.name} · ${row.description}${phases} · ${row.originPath}`,
     );
   }
 }

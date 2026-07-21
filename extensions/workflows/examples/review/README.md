@@ -278,8 +278,9 @@ diff.
 
 - Model output is always text. Runtime status, diagnostics, session ids, model
   data, and artifacts remain runtime-owned evidence.
-- `llm({ schema })` is the separate direct-model JSON contract; `agent()` does
-  not parse JSON.
+- Plain `agent()` parses nothing. A stage that needs validated JSON opts in per
+  call with `agent(prompt, { schema })`; the review family does not, and passes
+  exact text between stages instead.
 - `readOnly: true` is host-enforced capability narrowing. The `review-fix`
   verifier deliberately does not set it, because running repository checks
   needs a shell; a shell can write, so its no-edit rule is prompt-level.

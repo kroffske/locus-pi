@@ -25,6 +25,23 @@ This file records user-visible changes to the public package.
   generation package or renderer stops the run before the first child session
   exists. The generation package resolves globally and is deliberately not a
   dependency.
+- `/workflows run <name> --resume <runId>` is now a real replay instead of a
+  metadata link. Every `agent()` call whose ordinal position and fully resolved
+  request match the recorded run returns the recorded child text without
+  spawning a child, so iterating on the last stage of a long pipeline no longer
+  pays for the earlier stages. Replay is a strict prefix: the first mismatched
+  call invalidates itself and every later call. `dsl.now()` and `dsl.random()`
+  are new DSL primitives whose values are recorded and replayed, which is how a
+  workflow stays nondeterministic and resumable at the same time; a script that
+  calls `Date.now()` / `Math.random()` directly is not rejected, it is simply
+  detected by the AST scan and never recorded or replayed. Replay is refused
+  with a named reason when the script bytes changed, when identity coverage is
+  `entry-only`, when the script is not replay-safe, or when no record exists —
+  and every refused or unresolvable call runs for real. A run that reused
+  recorded calls is marked `replayed` in `journal.ndjson`, in the `result.json`
+  replay envelope, in `/workflows status`, and in the live progress panel, and a
+  replayed call reports no token usage, so a green rerun can never be mistaken
+  for fresh evidence.
 - Added the curated `review` Package workflow as a question-led agent pipeline.
   Six sequential agents resolve the review scope from the operator's free-form
   request, inventory every changed surface, group the inventory into material
@@ -76,7 +93,32 @@ This file records user-visible changes to the public package.
   successful queue transition.
 - Added atomic `/todo append` batches with `;;` separators and a 20-item limit.
 
+### Removed
+
+- **Breaking:** removed the workflow DSL's `llm()` primitive. `agent()` is now
+  the only way a workflow reaches a model. The direct one-shot pi-ai completion
+  path (`completeSimple` / `streamSimple`), its options and result types, the
+  `llm_start` / `llm_end` / `llm_delta` journal kinds, and the synthetic `llm`
+  live row are all gone. A saved workflow that calls `dsl.llm()` now fails at
+  run time. Replace a cheap gate, classification, or draft with a no-tool child
+  under a declared shape — `agent(prompt, { schema, tools: [], maxToolCalls: 0 })`
+  — which keeps one execution path, one journal shape, and one retry budget. Two
+  model-calling surfaces forced an author to choose one before writing a stage,
+  and a constrained reused agent is not meaningfully more expensive than a direct
+  call. The JSON-Schema subset validator, the shared `SCHEMA_MAX_ATTEMPTS` budget,
+  and `SchemaValidationError` survive as `agent({ schema })`'s machinery.
+- **Breaking:** retired the `llm-smoke` curated Package workflow. The curated
+  registry is now four names: `live-smoke`, `requirements-grill`, `review`, and
+  `review-fix`. Its only job was proving `llm()` routing, and nothing was folded
+  into `live-smoke`; see the 2026-07-21 amendment in
+  `docs/adr/curated-workflow-portfolio.md`.
+
 ### Changed
+
+- The run-level token/cost budget in `/workflows status` is now summed from
+  `agent_end` usage instead of `llm_end` usage, and the per-run `llm=…` counter
+  is gone. Journals written before this change still parse; their `llm_*` lines
+  are no longer counted or specially rendered.
 
 - Made the package English-only end to end. Child agents are prompted in
   English, so the evidence honesty check no longer matches Russian claim verbs

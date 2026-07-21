@@ -34,7 +34,7 @@ scene.text(40, 24, "Requirements grill — explicit evidence handoff", {
 scene.text(
   40,
   68,
-  "The trusted workflow validates input, runs bounded rg directly, and gates three sequential full agent sessions. No direct llm() call is used.",
+  "The trusted workflow validates input, runs bounded rg directly, and gates three sequential full agent sessions.",
   {
     size: 16,
     color: GRAY,
@@ -60,7 +60,7 @@ const lane = (title, y) => {
 
 lane("Operator", 150);
 lane("Workflow-owned execution and checks", 370);
-lane("Full agent sessions, absent direct LLM type, and fail-closed exits", 680);
+lane("Full agent sessions and fail-closed exits", 680);
 lane("Artifacts and exact text handoffs", 1010);
 lane("Legend", 1340);
 
@@ -261,21 +261,6 @@ const runtime = card({
   x: 4490,
   y: 430,
   width: 360,
-  color: "external",
-});
-
-const directLlmNone = card({
-  id: "direct-llm-none",
-  title: "Direct LLM: not used",
-  iconId: "function_router",
-  bullets: [
-    "No model-only completion in this workflow",
-    "All model work uses full agent() children",
-    "Shown to distinguish the unused DSL type",
-  ],
-  x: 40,
-  y: 730,
-  width: 340,
   color: "external",
 });
 
@@ -626,13 +611,6 @@ scene.rect(1380, 1405, 64, 42, {
   roundness: { type: 3 },
 });
 scene.text(1460, 1408, "Full agent() child session", { size: 15, width: 520 });
-
-scene.rect(2070, 1405, 64, 42, {
-  color: GRAY,
-  strokeWidth: 2,
-  dashed: true,
-});
-scene.text(2150, 1408, "Direct llm() call type; absent here", { size: 15, width: 620 });
 
 scene.rect(2900, 1405, 64, 42, {
   color: GRAY,

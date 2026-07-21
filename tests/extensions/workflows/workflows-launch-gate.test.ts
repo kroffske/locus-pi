@@ -37,16 +37,14 @@ describe("/workflows run launch gate", () => {
   it("runs an explicit operator command without a second approval prompt", async () => {
     const h = registerHarness();
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-1",
-        runDir: "/tmp/run-1",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-1",
+      runDir: "/tmp/run-1",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
+    });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke hello", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -195,16 +193,14 @@ describe("/workflows run launch gate", () => {
   it("passes resume metadata to the workflow run call without a Locus approval request", async () => {
     const h = registerHarness();
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-3",
-        runDir: "/tmp/run-3",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-3",
+      runDir: "/tmp/run-3",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
+    });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke --resume run-old input", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -219,16 +215,14 @@ describe("/workflows run launch gate", () => {
 
   it("keeps the programmatic workflow tool headless", async () => {
     const h = registerHarness();
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-4",
-        runDir: "/tmp/run-4",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-4/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-4",
+      runDir: "/tmp/run-4",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-4/result.json" },
+    });
     try {
       await h.tools
         .get("workflow")!
@@ -265,16 +259,14 @@ describe("/workflows run launch gate", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wf-launch-deny-"));
     const h = registerCommandHarness(root);
     const approval = vi.spyOn(h.ctx.ui, "select");
-    const spy = vi
-      .spyOn(runner, "runWorkflowScript")
-      .mockResolvedValue({
-        runId: "run-deny",
-        runDir: "/tmp/run-deny",
-        ok: true,
-        result: { ok: true },
-        journal: [],
-        resultPersistence: { ok: true, path: "/tmp/run-deny/result.json" },
-      });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-deny",
+      runDir: "/tmp/run-deny",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-deny/result.json" },
+    });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
       expect(approval).not.toHaveBeenCalled();
@@ -309,16 +301,14 @@ describe("/workflows run launch gate", () => {
       const h = registerCommandHarness(root);
       h.ctx.session = { ...h.ctx.session!, workingDirectory: path.join(root, "nested") };
       const approval = vi.spyOn(h.ctx.ui, "select");
-      const spy = vi
-        .spyOn(runner, "runWorkflowScript")
-        .mockResolvedValue({
-          runId: "run-3",
-          runDir: "/tmp/run-3",
-          ok: true,
-          result: { ok: true },
-          journal: [],
-          resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
-        });
+      const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+        runId: "run-3",
+        runDir: "/tmp/run-3",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
+      });
       try {
         await h.commands.get("workflows")!.handler("run same", h.ctx);
         expect(approval).not.toHaveBeenCalled();
@@ -369,7 +359,6 @@ describe("/workflows run launch gate", () => {
       expect(widget).toContain("[ERROR]");
       expect(widget).toContain("Available curated Package workflows:");
       expect(widget).toContain("live-smoke");
-      expect(widget).toContain("llm-smoke");
       expect(widget).toContain("requirements-grill");
       expect(widget).toContain("review");
       expect(widget).not.toContain("plan-build-review");

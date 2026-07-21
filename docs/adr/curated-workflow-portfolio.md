@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20
+- Amended: 2026-07-20, 2026-07-21
 
 ## Decision
 
@@ -16,7 +16,6 @@ The accepted Package portfolio is:
 | Workflow             | Product role                | Why it belongs                                                                                                                     |
 | -------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                          |
-| `llm-smoke`          | Direct-model diagnostic     | It proves `llm()` routing independently from child-session behavior.                                                               |
 | `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                               |
 | `review`             | Evidence-backed code review | It covers a recurring merge gate and publishes a readable, question-resolved report a human can edit directly.                     |
 | `review-fix`         | Human-directed fixes        | It applies the findings a human left in that report, revalidating each against live source, and verifies the result independently. |
@@ -73,6 +72,44 @@ finding against live source before changing anything, and leave every change
 uncommitted; they do not commit, push, create a pull request, merge, deploy, or
 discard uncommitted work they did not create.
 
+## Amendment 2026-07-21 — the portfolio drops to four with `llm-smoke`
+
+`llm-smoke` was the direct-model diagnostic in the table above. It is retired,
+and the accepted portfolio is now four names. The reason is not that the workflow
+was weak: it is that the thing it proved no longer exists. `llm()` — one direct
+pi-ai completion with no child session and no tools — was removed from the DSL by
+owner decision (T-108), because two model-calling surfaces forced an author to
+choose one before writing a stage, and a reused catalog agent constrained to a
+fixed answer shape is not meaningfully more expensive than a direct call. A
+curated workflow whose entire contract is "prove primitive X routes correctly"
+cannot outlive primitive X.
+
+**Nothing is folded into `live-smoke`.** `llm-smoke` exercised four things: a
+plain completion, a system prompt, a streamed completion (`llm_delta`), and
+`schema=` validation. The first three are properties of a call path that has been
+deleted; there is no surviving surface to point them at. The fourth moved to the
+runtime boundary as `agent(prompt, { schema })`, which appends a shape contract to
+the child prompt, validates the child's exact final text with the same JSON-Schema
+subset validator, retries within `SCHEMA_MAX_ATTEMPTS`, and throws
+`SchemaValidationError` rather than returning a partial value. That contract is
+proven at source level by `tests/shared/workflows/workflow-agent-schema.test.ts`.
+
+Extending `live-smoke` with a shaped stage was considered and rejected here.
+`live-smoke`'s curated contract is exactly "two read-only child agents, each doing
+one small tool action" — the minimum that proves child-session creation on a live
+host. Adding a schema stage would change its public result shape and its cost
+inside a removal task, for a check that is about validation logic rather than host
+capability. The portfolio criterion is a stable bounded contract, not maximal
+coverage per workflow.
+
+**Named residual gap.** No curated workflow now exercises `agent({ schema })`
+against a live host, so the weak-model behaviour of the shape contract — does a
+weak model actually produce conforming JSON within two attempts, and does the
+fail-closed path read correctly to an operator — is unproven outside the test
+suite. This is a `live-host-proof` gap, recorded rather than closed: closing it is
+a live-smoke concern to decide on its own merits, not a side effect of deleting a
+primitive.
+
 ## Selection boundary
 
 The following shapes are not curated now:
@@ -97,10 +134,11 @@ together.
 
 ## Consequences
 
-The Package surface grows from three to five names, but not into a general
-automation catalog. The two review-family names expose one deliberate
-sequence—question-led evidence, then a human-directed fix—while keeping
-deployment and publication outside the workflow boundary.
+The Package surface grew from three to five names, and then back to four when
+`llm-smoke` retired with the primitive it proved (2026-07-21 amendment). It is
+not a general automation catalog. The two review-family names expose one
+deliberate sequence—question-led evidence, then a human-directed fix—while
+keeping deployment and publication outside the workflow boundary.
 
 Dropping the hash-bound approval manifest is a real trade. The package no
 longer proves that the fixed code is byte-identical to the reviewed code; it

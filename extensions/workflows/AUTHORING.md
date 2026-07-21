@@ -23,13 +23,19 @@ behavior still requires an author-declared `entry-only` downgrade. Snapshot/hash
 checks are point-in-time trusted-host evidence, not an atomic filesystem guarantee.
 
 ```js
-export const meta = { name: "<name>", description: "<one line>" };
+export const meta = {
+  name: "<name>",
+  description: "<one line>",
+  // Optional. Declares the pipeline before the run; read statically, never enforced.
+  // phases: [{ title: "<phase() name>", detail: "<what this stage owns>" }],
+};
 
 export default async function runWorkflow(dsl, input) {
-  const { agent, llm, phase, log, promptFile, parallel, pipeline, workflow } = dsl;
+  const { agent, phase, log, promptFile, parallel, pipeline, workflow } = dsl;
   // Authoring policy: use `dsl` only. Runtime does not enforce this boundary;
   // imported modules have full host Node.js capabilities. Run reviewed files only.
-  // `input` is the free-text [input] from the run command (string, maybe empty).
+  // `input` is the run's task: the free-text [input] from the run command, or a
+  // JSON object of named parameters when the caller used the `workflow` tool.
   // The returned value is written to result.json as `result`.
 }
 ```
@@ -53,17 +59,31 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   1. `.pi/workflows/<name>.workflow.mjs` — the **canonical pi-native save target**
      (where `workflow-author` writes).
   2. `.claude/workflows/<name>.workflow.mjs`, then `.agents/workflows/<name>.workflow.mjs`
-     — **interop sources**: a workflow authored for a different tool, scanned for
-     convenience. These may differ slightly from the pi-native DSL format.
+     — **additional project directories** for repositories that already keep agent
+     assets there. Same pi-native format and same exact filename: a `<name>.js`
+     in these directories is not found, and a script written against another
+     host's workflow DSL will not run here even if renamed. Port it to the DSL
+     contract instead.
   3. personal `~/.pi/workflows/<name>.workflow.mjs`.
   4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES`. Files under
      `extensions/workflows/examples/` are not registered merely because they exist.
 - **Run:** `/workflows run <name|path> [input]` or the
-  `workflow { name | scriptPath, input }` tool. Arbitrary inline JS is **not**
-  supported — trusted-file only.
+  `workflow { name | scriptPath, input }` tool. The command passes free text; the
+  tool also accepts a JSON object of named parameters. A parameterised workflow
+  normalises both shapes once at the top and keeps the string branch usable —
+  see "Workflow input" in the canonical doc and the pattern catalog. Arbitrary
+  inline JS is **not** supported — trusted-file only.
   Project targets are checked lexically and by canonical `realpath`; symlinks may
   point only to files that remain inside the project root when resolved. Do not replace
   a workflow target concurrently during launch: validation and Node import are not atomic.
+- **Keep the workflow resumable:** take wall-clock time and randomness from
+  `dsl.now()` / `dsl.random()`, never from `Date.now()` / `new Date()` /
+  `Math.random()`. Those values are recorded, so
+  `/workflows run <name> --resume <runId>` can replay the recorded `agent()`
+  answers instead of paying for the earlier stages again. A direct clock or
+  randomness call is not rejected — the AST scan simply marks the script
+  unproven and refuses to record or replay it. Replay rules, refusal reasons, and
+  the replayed-run marking are in the canonical doc.
 - **Read the result:** `.locus/runtime/workflows/<runId>/result.json`. Top-level
   boolean `result.ok` is reserved as the script's run outcome: `false` makes the
   outer run fail even without a technical `error`; missing, nested, or
@@ -88,7 +108,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   `slots` / `partialResults` in memory, and return JSON-safe `partial:true`
   evidence. The runner still projects that deliberate partial as non-success.
 
-For _which shape to pick_ (single-agent, `llm()` gate, staged text pipeline,
+For _which shape to pick_ (single-agent, shaped `agent({ schema })` gate, staged text pipeline,
 loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
 judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog
 [`references/patterns.md`](./references/patterns.md). Multi-step work on one
@@ -104,6 +124,5 @@ For a non-trivial workflow visual map, use `$pi-workflow-diagram`. Every curated
 Package workflow must keep `<name>-pipeline.diagram.mjs`, editable
 `<name>-pipeline.excalidraw`, and `<name>-pipeline.png` beside its source. The
 diagram must distinguish operator input, workflow-owned routing, child agents,
-direct `llm()` calls, and persisted artifacts; every decision and branch names
-its real owner. The canonical diagram contract lives in the authoring section of
+and persisted artifacts; every decision and branch names its real owner. The canonical diagram contract lives in the authoring section of
 the workflow documentation linked above.

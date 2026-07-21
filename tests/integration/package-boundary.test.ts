@@ -20,16 +20,9 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "llm-smoke",
-  "requirements-grill",
-  "review",
-  "review-fix",
-] as const;
+const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
 const CURATED_PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
-  "llm-smoke": "extensions/workflows/examples/llm-smoke.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",

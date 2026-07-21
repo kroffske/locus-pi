@@ -11,8 +11,20 @@ import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { errorResult, getCommandText, getProjectRoot, getWorkingDirectory, setTextWidget, textResult } from "../_shared/pi-api.js";
-import { pinTransientUiKey, registerCommandWithUiLifecycle, registerTransientUiCleanup, unpinTransientUiKey } from "../_shared/command-ui.js";
+import {
+  errorResult,
+  getCommandText,
+  getProjectRoot,
+  getWorkingDirectory,
+  setTextWidget,
+  textResult,
+} from "../_shared/pi-api.js";
+import {
+  pinTransientUiKey,
+  registerCommandWithUiLifecycle,
+  registerTransientUiCleanup,
+  unpinTransientUiKey,
+} from "../_shared/command-ui.js";
 import { validateParams } from "../_shared/validation.js";
 import {
   runWorkflowScript,
@@ -27,30 +39,55 @@ import {
   listWorkflowRunIds,
   readWorkflowRunJournal,
   readWorkflowRunResult,
+  readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
   workflowRunDir,
 } from "../_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { formatWorkflowFailureSummary, formatWorkflowResultDetail, formatWorkflowResultSummary } from "../_shared/workflow-result.js";
+import {
+  formatWorkflowFailureSummary,
+  formatWorkflowResultDetail,
+  formatWorkflowResultSummary,
+} from "../_shared/workflow-result.js";
 import type { OperatorBlock, OperatorTone } from "../_shared/operator-ui.js";
 import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator-status.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
-import { WORKFLOW_LIVE_WIDGET_KEY, installWorkflowProgress, renderAgentLiveRowsText, type WorkflowProgressComponent } from "./progress-widget.js";
+import {
+  WORKFLOW_LIVE_WIDGET_KEY,
+  installWorkflowProgress,
+  renderAgentLiveRowsText,
+  type WorkflowProgressComponent,
+} from "./progress-widget.js";
 import {
   buildWorkflowActionPrompt,
   buildWorkflowCatalogBlockFromModel,
   buildWorkflowCatalogModel,
   buildWorkflowInfoBlock,
+  matchWorkflowPhaseGroups,
+  staticWorkflowMetaPhases,
   WORKFLOW_SOURCE_LEGEND,
   workflowSourceBadge,
   type WorkflowBrowserIntent,
 } from "./workflow-catalog.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
-import { createWorkflowTranscript, persistCommandWorkflowTranscript, renderMainWorkflowStatus } from "./workflow-transcript.js";
+import {
+  createWorkflowTranscript,
+  persistCommandWorkflowTranscript,
+  renderMainWorkflowStatus,
+} from "./workflow-transcript.js";
 
 // ---------------------------------------------------------------------------
 // Tool params schema
 // ---------------------------------------------------------------------------
+
+/**
+ * One budget for both input shapes. The string form has always been bounded;
+ * an object form without an equivalent bound would let a single tool call write
+ * an unbounded payload into the run journal, `result.json`, and the replay
+ * record. TypeBox has no serialized-size keyword, so the object side is checked
+ * explicitly in `execute` before a run is created.
+ */
+const WORKFLOW_INPUT_MAX_CHARS = 16000;
 
 const WorkflowParams = Type.Object({
   name: Type.Optional(
@@ -72,10 +109,13 @@ const WorkflowParams = Type.Object({
     }),
   ),
   input: Type.Optional(
-    Type.String({
-      description: "Optional free-text input passed to the workflow",
-      maxLength: 16000,
-    }),
+    Type.Union(
+      [Type.String({ maxLength: WORKFLOW_INPUT_MAX_CHARS }), Type.Object({}, { additionalProperties: true })],
+      {
+        description:
+          "Optional input passed to the workflow as the second parameter of runWorkflow(dsl, input). Either free text, or a JSON object of named parameters when the workflow documents field names. Both shapes are journalled under `args`.",
+      },
+    ),
   ),
   resumeFromRunId: Type.Optional(
     Type.String({
@@ -90,11 +130,12 @@ const WORKFLOW_RPC_DETAIL_EVENT_LIMIT = 1;
 
 const RUNS_IN_STATUS_LIST = 10;
 const WORKFLOW_DETAIL_EVENT_LIMIT = 20;
-const WORKFLOW_BUSY_MESSAGE = "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";
+const WORKFLOW_BUSY_MESSAGE =
+  "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";
 const WORKFLOW_STATUS_ID = "workflow.run";
 
 function workflowApprovalDetails(args: unknown): string[] {
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const target = String(record.name ?? record.scriptPath ?? record.script ?? "unspecified");
   return [
     `Workflow: ${target}`,
@@ -102,6 +143,31 @@ function workflowApprovalDetails(args: unknown): string[] {
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
   ];
+}
+
+/**
+ * Fail closed on an over-budget or non-serializable structured input, before a
+ * run id, run directory, or journal exists. A string is already bounded by the
+ * schema, so it passes through untouched.
+ */
+export function checkWorkflowInputBudget(input: unknown): { ok: true } | { ok: false; error: string } {
+  if (input === undefined || typeof input === "string") return { ok: true };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(input) ?? "";
+  } catch (error) {
+    return {
+      ok: false,
+      error: `workflow: input object is not JSON-serializable: ${errorMessage(error)}. No workflow run was created.`,
+    };
+  }
+  if (serialized.length > WORKFLOW_INPUT_MAX_CHARS) {
+    return {
+      ok: false,
+      error: `workflow: input object serializes to ${serialized.length} characters; the limit is ${WORKFLOW_INPUT_MAX_CHARS}. No workflow run was created.`,
+    };
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -137,15 +203,20 @@ export default function workflows(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "workflow",
     description:
-      "Run a reviewed trusted-file workflow script by saved name or project-relative path. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then .claude/workflows/ and .agents/workflows/ interop sources, then ~/.pi/workflows/, then the curated Package registry). The DSL (agent/llm/parallel/pipeline/phase/log) orchestrates .agents catalog sub-agents through the task/createAgentSession host, and llm() makes direct one-shot model calls via the pi-ai host. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to the `workflow-author` agent (it writes to .pi/workflows/); the DSL contract is extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
+      "Run a reviewed trusted-file workflow script by saved name or project-relative path. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL (agent/parallel/pipeline/phase/log) orchestrates .agents catalog sub-agents through the task/createAgentSession host; agent() is the single model-calling primitive. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to the `workflow-author` agent (it writes to .pi/workflows/); the DSL contract is extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
     parameters: WorkflowParams,
     approval: "exec",
     formatApprovalDetails: workflowApprovalDetails,
     async execute(_toolCallId, params, signal, update, ctx) {
       const valid = validateParams(WorkflowParams, params);
       if (!valid.ok) return valid.result;
-      const targetFields = [valid.value.name, valid.value.scriptPath, valid.value.script].filter((v) => v !== undefined);
-      if (targetFields.length !== 1) return errorResult("workflow: exactly one of name, scriptPath, or script is required", { owner: "workflows" });
+      const targetFields = [valid.value.name, valid.value.scriptPath, valid.value.script].filter(
+        (v) => v !== undefined,
+      );
+      if (targetFields.length !== 1)
+        return errorResult("workflow: exactly one of name, scriptPath, or script is required", { owner: "workflows" });
+      const inputBudget = checkWorkflowInputBudget(valid.value.input);
+      if (!inputBudget.ok) return errorResult(inputBudget.error, { owner: "workflows" });
       const transcript = createWorkflowTranscript(ctx, workflowTargetLabel(valid.value), "tool");
 
       const res = await runWorkflowScript({
@@ -193,11 +264,15 @@ export default function workflows(pi: ExtensionAPI): void {
           ...(res.resultDiagnostic !== undefined ? { resultDiagnostic: res.resultDiagnostic } : {}),
           journal: res.journal,
           target: operatorWorkflowTarget(res.target),
-          ...(res.scriptIdentity !== undefined ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) } : {}),
-          ...(res.resumeFromRunId !== undefined ? {
-            resumeFromRunId: res.resumeFromRunId,
-            resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
-          } : {}),
+          ...(res.scriptIdentity !== undefined
+            ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) }
+            : {}),
+          ...(res.resumeFromRunId !== undefined
+            ? {
+                resumeFromRunId: res.resumeFromRunId,
+                resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
+              }
+            : {}),
         });
       }
       return errorResult(summary, {
@@ -212,11 +287,15 @@ export default function workflows(pi: ExtensionAPI): void {
         journal: res.journal,
         error: res.error,
         target: operatorWorkflowTarget(res.target),
-        ...(res.scriptIdentity !== undefined ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) } : {}),
-        ...(res.resumeFromRunId !== undefined ? {
-          resumeFromRunId: res.resumeFromRunId,
-          resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
-        } : {}),
+        ...(res.scriptIdentity !== undefined
+          ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) }
+          : {}),
+        ...(res.resumeFromRunId !== undefined
+          ? {
+              resumeFromRunId: res.resumeFromRunId,
+              resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
+            }
+          : {}),
       });
     },
   });
@@ -224,255 +303,284 @@ export default function workflows(pi: ExtensionAPI): void {
   // -------------------------------------------------------------------------
   // `/workflows` command
   // -------------------------------------------------------------------------
-  registerCommandWithUiLifecycle(pi, {
-    command: "workflows",
-    group: "workflows",
-    surfaces: ["transient-widget", "status", "artifact-write", "no-ui"],
-    transientWidgets: ["workflows", WORKFLOW_LIVE_WIDGET_KEY],
-  }, {
-    description:
-      "Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]. Browse, inspect, explain, or deliberately run a workflow.",
-    handler: async (args, ctx) => {
-      const text = getCommandText(args).trim();
-      const projectRoot = getProjectRoot(ctx);
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "workflows",
+      group: "workflows",
+      surfaces: ["transient-widget", "status", "artifact-write", "no-ui"],
+      transientWidgets: ["workflows", WORKFLOW_LIVE_WIDGET_KEY],
+    },
+    {
+      description:
+        "Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]. Browse, inspect, explain, or deliberately run a workflow.",
+      handler: async (args, ctx) => {
+        const text = getCommandText(args).trim();
+        const projectRoot = getProjectRoot(ctx);
 
-      // Bare `/workflows` is a static command view; it never starts a run.
-      if (text === "" || text === "dashboard") {
-        clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
-        setOperatorWidget(ctx, "workflows", workflowHelpBlock());
-        return;
-      }
+        // Bare `/workflows` is a static command view; it never starts a run.
+        if (text === "" || text === "dashboard") {
+          clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
+          setOperatorWidget(ctx, "workflows", workflowHelpBlock());
+          return;
+        }
 
-      // `/workflows list [query]` — operator catalog over the existing sources.
-      const listMatch = /^list(?:\s+([\s\S]+))?$/.exec(text);
-      if (listMatch !== null) {
-        const query = listMatch[1]?.trim();
-        const workingDirectory = getWorkingDirectory(ctx);
-        const catalog = buildWorkflowCatalogModel(
-          projectRoot,
-          workingDirectory,
-          query === "" ? undefined : query,
-        );
-        if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
-          clearWorkflowWidget(ctx, "workflows");
-          let intent: WorkflowBrowserIntent | undefined;
-          try {
-            intent = await ctx.ui.custom<WorkflowBrowserIntent | undefined>((tui, theme, keybindings, done) => new WorkflowCatalogViewer(
-              tui,
-              theme,
-              keybindings,
-              catalog,
-              projectRoot,
-              workingDirectory,
-              done,
-            ));
-          } catch (error) {
-            setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-              `Workflow browser closed with an error: ${errorMessage(error)}.`,
-              "No editor text was changed and no workflow was started.",
-            ));
+        // `/workflows list [query]` — operator catalog over the existing sources.
+        const listMatch = /^list(?:\s+([\s\S]+))?$/.exec(text);
+        if (listMatch !== null) {
+          const query = listMatch[1]?.trim();
+          const workingDirectory = getWorkingDirectory(ctx);
+          const catalog = buildWorkflowCatalogModel(projectRoot, workingDirectory, query === "" ? undefined : query);
+          if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
+            clearWorkflowWidget(ctx, "workflows");
+            let intent: WorkflowBrowserIntent | undefined;
+            try {
+              intent = await ctx.ui.custom<WorkflowBrowserIntent | undefined>(
+                (tui, theme, keybindings, done) =>
+                  new WorkflowCatalogViewer(tui, theme, keybindings, catalog, projectRoot, workingDirectory, done),
+              );
+            } catch (error) {
+              setOperatorWidget(
+                ctx,
+                "workflows",
+                workflowWarningBlock(
+                  `Workflow browser closed with an error: ${errorMessage(error)}.`,
+                  "No editor text was changed and no workflow was started.",
+                ),
+              );
+              return;
+            }
+            if (intent === undefined) return;
+            const prompt = buildWorkflowActionPrompt(intent);
+            if (ctx.ui.setEditorText === undefined) {
+              setOperatorWidget(
+                ctx,
+                "workflows",
+                workflowWarningBlock(
+                  "Workflow action could not fill the editor because this Pi host does not expose setEditorText().",
+                  "No workflow was started; reopen in an interactive Pi TUI with editor-prefill support.",
+                ),
+              );
+              return;
+            }
+            try {
+              ctx.ui.setEditorText(prompt);
+            } catch (error) {
+              setOperatorWidget(
+                ctx,
+                "workflows",
+                workflowWarningBlock(
+                  `Workflow action could not fill the editor: ${errorMessage(error)}.`,
+                  "No workflow was started and no message was sent.",
+                ),
+              );
+            }
             return;
           }
-          if (intent === undefined) return;
-          const prompt = buildWorkflowActionPrompt(intent);
-          if (ctx.ui.setEditorText === undefined) {
-            setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-              "Workflow action could not fill the editor because this Pi host does not expose setEditorText().",
-              "No workflow was started; reopen in an interactive Pi TUI with editor-prefill support.",
-            ));
-            return;
-          }
-          try {
-            ctx.ui.setEditorText(prompt);
-          } catch (error) {
-            setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-              `Workflow action could not fill the editor: ${errorMessage(error)}.`,
-              "No workflow was started and no message was sent.",
-            ));
-          }
-          return;
-        }
-        const passive = buildWorkflowCatalogBlockFromModel(catalog, { compact: ctx.mode !== "tui" });
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          ctx.mode === "tui"
-            ? {
-                ...passive,
-                hint: [...(passive.hint ?? []), "Interactive catalog unavailable: this Pi host did not expose custom UI."],
-                controls: [...(passive.controls ?? []), "Read-only fallback shown; retry in an interactive Pi TUI with custom UI support."],
-              }
-            : passive,
-        );
-        return;
-      }
-
-      const infoMatch = /^info(?:\s+([\s\S]+))?$/.exec(text);
-      if (infoMatch !== null) {
-        const name = infoMatch[1]?.trim();
-        const infoBlock = buildWorkflowInfoBlock(
-          projectRoot,
-          getWorkingDirectory(ctx),
-          name === "" ? undefined : name,
-        );
-        if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
-          try {
-            await ctx.ui.custom<void>((tui, theme, keybindings, done) => new WorkflowInfoViewer(
-              tui,
-              theme,
-              keybindings,
-              infoBlock,
-              done,
-            ));
-          } catch (error) {
-            setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-              `Workflow info viewer closed with an error: ${errorMessage(error)}.`,
-              "No editor text was changed and no workflow was started.",
-            ));
-          }
-          return;
-        }
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          ctx.mode === "tui"
-            ? {
-                ...infoBlock,
-                hint: [...(infoBlock.hint ?? []), "Interactive workflow info unavailable: this Pi host did not expose custom UI."],
-                controls: [...(infoBlock.controls ?? []), "Read-only fallback shown; retry in an interactive Pi TUI with custom UI support."],
-              }
-            : infoBlock,
-        );
-        return;
-      }
-
-      // `/workflows status` — recent runs; `/workflows status <runId>` — one run's progress.
-      if (text === "status") {
-        const compact = ctx.mode !== "tui";
-        setOperatorWidget(ctx, "workflows", buildRunsListBlock(
-          projectRoot,
-          compact ? WORKFLOW_RPC_STATUS_ROWS : RUNS_IN_STATUS_LIST,
-          compact,
-        ));
-        return;
-      }
-      const statusMatch = /^status\s+(\S+)$/.exec(text);
-      if (statusMatch !== null) {
-        setOperatorWidget(ctx, "workflows", buildRunDetailBlock(
-          projectRoot,
-          statusMatch[1] ?? "",
-          ctx.mode !== "tui",
-        ));
-        return;
-      }
-
-      // `/workflows run <name|path> [--resume <runId>] [input]` — run with a live progress panel.
-      const parsedRun = parseRunCommand(text);
-      if (parsedRun !== null) {
-        if (parsedRun.missingResumeId === true) {
-          setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-            "Missing run id after --resume.",
-            "Retry: /workflows run <name|path> --resume <runId> [input]",
-          ));
-          return;
-        }
-        const idleBlock = workflowCommandIdleBlock(ctx);
-        if (idleBlock !== undefined) {
-          setOperatorWidget(ctx, "workflows", workflowWarningBlock(
-            idleBlock,
-            "Recovery: wait for the current response to finish, then retry the same /workflows run command.",
-          ));
-          return;
-        }
-        const scriptRef = parsedRun.scriptRef;
-        const workingDirectory = getWorkingDirectory(ctx);
-        let target;
-        try {
-          target = resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory);
-        } catch (err) {
-          if (err instanceof WorkflowNameNotFoundError) {
-            setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
-            return;
-          }
-          const controller = new AbortController();
-          const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
-          const res = await runWorkflowScript({
-            pi,
+          const passive = buildWorkflowCatalogBlockFromModel(catalog, { compact: ctx.mode !== "tui" });
+          setOperatorWidget(
             ctx,
-            signal: controller.signal,
-            script: scriptRef,
-            ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
-            ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
-            onRunStart: ({ runId }) => transcript.start(runId),
-            onEvent: (line: WorkflowJournalLine) => {
-              applyWorkflowJournalLineToAgentLiveStore(line);
-              transcript.event(line);
-              setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
-              setWorkflowEventStatus(ctx, line);
-            },
-          });
+            "workflows",
+            ctx.mode === "tui"
+              ? {
+                  ...passive,
+                  hint: [
+                    ...(passive.hint ?? []),
+                    "Interactive catalog unavailable: this Pi host did not expose custom UI.",
+                  ],
+                  controls: [
+                    ...(passive.controls ?? []),
+                    "Read-only fallback shown; retry in an interactive Pi TUI with custom UI support.",
+                  ],
+                }
+              : passive,
+          );
+          return;
+        }
+
+        const infoMatch = /^info(?:\s+([\s\S]+))?$/.exec(text);
+        if (infoMatch !== null) {
+          const name = infoMatch[1]?.trim();
+          const infoBlock = buildWorkflowInfoBlock(
+            projectRoot,
+            getWorkingDirectory(ctx),
+            name === "" ? undefined : name,
+          );
+          if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
+            try {
+              await ctx.ui.custom<void>(
+                (tui, theme, keybindings, done) => new WorkflowInfoViewer(tui, theme, keybindings, infoBlock, done),
+              );
+            } catch (error) {
+              setOperatorWidget(
+                ctx,
+                "workflows",
+                workflowWarningBlock(
+                  `Workflow info viewer closed with an error: ${errorMessage(error)}.`,
+                  "No editor text was changed and no workflow was started.",
+                ),
+              );
+            }
+            return;
+          }
+          setOperatorWidget(
+            ctx,
+            "workflows",
+            ctx.mode === "tui"
+              ? {
+                  ...infoBlock,
+                  hint: [
+                    ...(infoBlock.hint ?? []),
+                    "Interactive workflow info unavailable: this Pi host did not expose custom UI.",
+                  ],
+                  controls: [
+                    ...(infoBlock.controls ?? []),
+                    "Read-only fallback shown; retry in an interactive Pi TUI with custom UI support.",
+                  ],
+                }
+              : infoBlock,
+          );
+          return;
+        }
+
+        // `/workflows status` — recent runs; `/workflows status <runId>` — one run's progress.
+        if (text === "status") {
+          const compact = ctx.mode !== "tui";
+          setOperatorWidget(
+            ctx,
+            "workflows",
+            buildRunsListBlock(projectRoot, compact ? WORKFLOW_RPC_STATUS_ROWS : RUNS_IN_STATUS_LIST, compact),
+          );
+          return;
+        }
+        const statusMatch = /^status\s+(\S+)$/.exec(text);
+        if (statusMatch !== null) {
+          setOperatorWidget(
+            ctx,
+            "workflows",
+            buildRunDetailBlock(projectRoot, statusMatch[1] ?? "", ctx.mode !== "tui"),
+          );
+          return;
+        }
+
+        // `/workflows run <name|path> [--resume <runId>] [input]` — run with a live progress panel.
+        const parsedRun = parseRunCommand(text);
+        if (parsedRun !== null) {
+          if (parsedRun.missingResumeId === true) {
+            setOperatorWidget(
+              ctx,
+              "workflows",
+              workflowWarningBlock(
+                "Missing run id after --resume.",
+                "Retry: /workflows run <name|path> --resume <runId> [input]",
+              ),
+            );
+            return;
+          }
+          const idleBlock = workflowCommandIdleBlock(ctx);
+          if (idleBlock !== undefined) {
+            setOperatorWidget(
+              ctx,
+              "workflows",
+              workflowWarningBlock(
+                idleBlock,
+                "Recovery: wait for the current response to finish, then retry the same /workflows run command.",
+              ),
+            );
+            return;
+          }
+          const scriptRef = parsedRun.scriptRef;
+          const workingDirectory = getWorkingDirectory(ctx);
+          let target;
+          try {
+            target = resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory);
+          } catch (err) {
+            if (err instanceof WorkflowNameNotFoundError) {
+              setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
+              return;
+            }
+            const controller = new AbortController();
+            const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
+            const res = await runWorkflowScript({
+              pi,
+              ctx,
+              signal: controller.signal,
+              script: scriptRef,
+              ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
+              ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
+              onRunStart: ({ runId }) => transcript.start(runId),
+              onEvent: (line: WorkflowJournalLine) => {
+                applyWorkflowJournalLineToAgentLiveStore(line);
+                transcript.event(line);
+                setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
+                setWorkflowEventStatus(ctx, line);
+              },
+            });
+            const transcriptCompletion = transcript.finish(res);
+            completedRunIds.add(res.runId);
+            setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
+            await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion);
+            return;
+          }
+          clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
+          const controller = new AbortController();
+          const hasUI = ctx.hasUI === true;
+          setWorkflowLaunchStatus(ctx, target.kind, target.ref);
+          let panel: WorkflowProgressComponent | undefined;
+          const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
+          activeCommandRuns += 1;
+          if (hasUI) pinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
+          let res: RunWorkflowScriptResult;
+          try {
+            res = await runWorkflowScript({
+              pi,
+              ctx,
+              signal: controller.signal,
+              script: scriptRef,
+              ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
+              ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
+              onRunStart: ({ runId }) => {
+                transcript.start(runId);
+                if (hasUI && !panel) panel = installWorkflowProgress(ctx, WORKFLOW_LIVE_WIDGET_KEY, scriptRef, runId);
+              },
+              onEvent: (line: WorkflowJournalLine) => {
+                if (hasUI) panel?.push(line);
+                else {
+                  applyWorkflowJournalLineToAgentLiveStore(line);
+                  setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
+                }
+                transcript.event(line);
+                setWorkflowEventStatus(ctx, line);
+              },
+            });
+            completedRunIds.add(res.runId);
+          } finally {
+            if (hasUI) unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
+            activeCommandRuns = Math.max(0, activeCommandRuns - 1);
+          }
           const transcriptCompletion = transcript.finish(res);
-          completedRunIds.add(res.runId);
-          setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
+          if (hasUI && panel) {
+            panel.finish(res);
+          } else {
+            setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
+          }
           await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion);
           return;
         }
-        clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
-        const controller = new AbortController();
-        const hasUI = ctx.hasUI === true;
-        setWorkflowLaunchStatus(ctx, target.kind, target.ref);
-        let panel: WorkflowProgressComponent | undefined;
-        const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
-        activeCommandRuns += 1;
-        if (hasUI) pinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
-        let res: RunWorkflowScriptResult;
-        try {
-          res = await runWorkflowScript({
-            pi,
-            ctx,
-            signal: controller.signal,
-            script: scriptRef,
-            ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
-            ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
-            onRunStart: ({ runId }) => {
-              transcript.start(runId);
-              if (hasUI && !panel) panel = installWorkflowProgress(ctx, WORKFLOW_LIVE_WIDGET_KEY, scriptRef, runId);
-            },
-            onEvent: (line: WorkflowJournalLine) => {
-              if (hasUI) panel?.push(line);
-              else {
-                applyWorkflowJournalLineToAgentLiveStore(line);
-                setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
-              }
-              transcript.event(line);
-              setWorkflowEventStatus(ctx, line);
-            },
-          });
-          completedRunIds.add(res.runId);
-        } finally {
-          if (hasUI) unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
-          activeCommandRuns = Math.max(0, activeCommandRuns - 1);
-        }
-        const transcriptCompletion = transcript.finish(res);
-        if (hasUI && panel) {
-          panel.finish(res);
-        } else {
-          setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
-        }
-        await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion);
-        return;
-      }
 
-      const available = text.startsWith("run") ? listExampleNames() : [];
-      setOperatorWidget(ctx, "workflows", {
-        type: "WARN",
-        subject: "Workflow command",
-        primary: `Unknown workflow command: ${text}`,
-        body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
-        controls: ["Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]"],
-      });
+        const available = text.startsWith("run") ? listExampleNames() : [];
+        setOperatorWidget(ctx, "workflows", {
+          type: "WARN",
+          subject: "Workflow command",
+          primary: `Unknown workflow command: ${text}`,
+          body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
+          controls: [
+            "Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]",
+          ],
+        });
+      },
     },
-  });
+  );
 }
 
 function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefined {
@@ -583,7 +691,7 @@ function buildRunsListBlock(projectRoot: string, limit: number, compact = false)
       subject: "Workflow runs",
       primary: "No workflow runs yet.",
       metadata: ["status: ok; total=0 shown=0 older=0", WORKFLOW_SOURCE_LEGEND],
-      controls: ["Run one: /workflows run requirements-grill \"<your request>\""],
+      controls: ['Run one: /workflows run requirements-grill "<your request>"'],
     };
   }
   const shownIds = ids.slice(0, Math.max(0, Math.min(limit, ids.length)));
@@ -606,8 +714,11 @@ function formatRunRow(projectRoot: string, runId: string, compact = false): stri
   const s = readWorkflowRunSummary(projectRoot, runId);
   const source = readWorkflowRunResult(projectRoot, runId)?.target?.source;
   if (compact) {
+    // The replayed marker survives compaction: a reader must never see a green
+    // row and assume every agent in it actually ran.
+    const replayed = s.agentsReplayed > 0 ? ` replayed=${s.agentsReplayed}` : "";
     return compactWorkflowLine(
-      `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${s.status} ${runId} phase=${s.phase ?? "-"}`,
+      `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${s.status} ${runId} phase=${s.phase ?? "-"}${replayed}`,
     );
   }
   const parts = [
@@ -617,7 +728,7 @@ function formatRunRow(projectRoot: string, runId: string, compact = false): stri
     `phase=${s.phase ?? "-"}`,
     `agents=${s.agentsEnded}/${s.agentsStarted}`,
   ];
-  if (s.llmStarted > 0) parts.push(`llm=${s.llmEnded}/${s.llmStarted}`);
+  if (s.agentsReplayed > 0) parts.push(`replayed=${s.agentsReplayed}`);
   if (s.usage !== null) parts.push(`tok=${s.usage.totalTokens}`);
   if (s.errors > 0) parts.push(`err=${s.errors}`);
   return parts.join("  ");
@@ -639,44 +750,60 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
     summary.usage !== null
       ? `budget: tokens=${summary.usage.totalTokens} (in ${summary.usage.input} / out ${summary.usage.output}) cost=$${summary.usage.costTotal.toFixed(4)}`
       : null;
+  // Stated as evidence provenance, not as a performance note: these agents did
+  // not run in this run, so this run's green is partly inherited.
+  const replayLine =
+    summary.agentsReplayed > 0
+      ? `replay: ${summary.agentsReplayed}/${summary.agentsEnded} agent call(s) reused a recorded run — not fresh evidence`
+      : null;
+  const phaseLine = declaredPhaseProgressLine(projectRoot, runId, journal);
   const allJournalLines = renderJournalLines(journal);
   const eventLimit = compact ? WORKFLOW_RPC_DETAIL_EVENT_LIMIT : WORKFLOW_DETAIL_EVENT_LIMIT;
   const newestJournalLines = allJournalLines.slice(-eventLimit).reverse();
   const older = Math.max(0, allJournalLines.length - newestJournalLines.length);
-  const resultDetail = persisted === null
-    ? summary.hasResult
-      ? "result detail: unavailable (result.json is unreadable)"
-      : "result: unavailable (run is in flight or was interrupted)"
-    : persisted.error !== undefined
-      ? `error: ${persisted.error}`
-      : `result: ${formatWorkflowResultDetail(persisted.result)}`;
+  const resultDetail =
+    persisted === null
+      ? summary.hasResult
+        ? "result detail: unavailable (result.json is unreadable)"
+        : "result: unavailable (run is in flight or was interrupted)"
+      : persisted.error !== undefined
+        ? `error: ${persisted.error}`
+        : `result: ${formatWorkflowResultDetail(persisted.result)}`;
   const source = persisted?.target?.source;
   const scriptIdentity = persisted?.scriptIdentity;
-  const compactResult = persisted === null
-    ? resultDetail
-    : persisted.error !== undefined
-      ? `error: ${persisted.error}`
-      : `result: ${formatWorkflowResultSummary(persisted.result)}`;
+  const compactResult =
+    persisted === null
+      ? resultDetail
+      : persisted.error !== undefined
+        ? `error: ${persisted.error}`
+        : `result: ${formatWorkflowResultSummary(persisted.result)}`;
   return {
     type: "VIEW",
     subject: "Workflow run",
     primary: compact
-      ? compactWorkflowLine(`[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${runId} · ${summary.status}${summary.phase === null ? "" : ` · phase=${summary.phase}`}`)
+      ? compactWorkflowLine(
+          `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${runId} · ${summary.status}${summary.phase === null ? "" : ` · phase=${summary.phase}`}`,
+        )
       : `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${runId} · ${summary.status}${summary.phase === null ? "" : ` · phase=${summary.phase}`}`,
     badges: [
       { text: `status:${summary.status}`, tone: workflowStatusTone(summary.status) },
       ...(source === undefined ? [] : [{ text: workflowSourceBadge(source).slice(1, -1), tone: "muted" as const }]),
     ],
-    body: newestJournalLines.length === 0
-      ? ["No journal events recorded."]
-      : compact
-        ? newestJournalLines.map(compactWorkflowLine)
-        : newestJournalLines,
+    body:
+      newestJournalLines.length === 0
+        ? ["No journal events recorded."]
+        : compact
+          ? newestJournalLines.map(compactWorkflowLine)
+          : newestJournalLines,
     metadata: compact
       ? [
           WORKFLOW_SOURCE_LEGEND,
           compactWorkflowLine(`runDir: ${workflowRunDir(projectRoot, runId)}`),
-          ...(scriptIdentity === undefined ? [] : [compactWorkflowLine(formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref))]),
+          ...(scriptIdentity === undefined
+            ? []
+            : [compactWorkflowLine(formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref))]),
+          ...(phaseLine === null ? [] : [compactWorkflowLine(phaseLine)]),
+          ...(replayLine === null ? [] : [compactWorkflowLine(replayLine)]),
           ...(budgetLine === null ? [] : [compactWorkflowLine(budgetLine)]),
           compactWorkflowLine(compactResult),
           ...(older > 0 ? [`+${older} older journal row(s) hidden`] : []),
@@ -685,13 +812,43 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
           WORKFLOW_SOURCE_LEGEND,
           `Source: [R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`}`,
           `runDir: ${workflowRunDir(projectRoot, runId)}`,
-          ...(scriptIdentity === undefined ? [] : [formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref)]),
+          ...(scriptIdentity === undefined
+            ? []
+            : [formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref)]),
+          ...(phaseLine === null ? [] : [phaseLine]),
+          ...(replayLine === null ? [] : [replayLine]),
           ...(budgetLine === null ? [] : [budgetLine]),
           resultDetail,
           ...(older > 0 ? [`+${older} older journal row(s) hidden`] : []),
         ],
     controls: ["Refresh/list: /workflows status · Full artifact: result.json"],
   };
+}
+
+/**
+ * Declared pipeline versus what the run actually did. The declaration is read
+ * from the run's retained script snapshot as inert text — the same bounded AST
+ * scan the catalog uses, never an import. Absent when the script declared
+ * nothing, so a workflow without `meta.phases` renders exactly as before.
+ */
+function declaredPhaseProgressLine(
+  projectRoot: string,
+  runId: string,
+  journal: readonly WorkflowJournalLine[],
+): string | null {
+  const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId);
+  if (snapshot.kind !== "ready") return null;
+  const declared = staticWorkflowMetaPhases(snapshot.source);
+  if (declared.length === 0) return null;
+  const observed = journal
+    .filter((line) => line.kind === "phase" && typeof line.phase === "string" && line.phase.trim() !== "")
+    .map((line) => line.phase!);
+  const groups = matchWorkflowPhaseGroups(declared, observed);
+  const reached = groups.filter((group) => group.reached).length;
+  const rendered = groups
+    .map((group) => `${group.reached ? "[x]" : "[ ]"} ${group.title}${group.declared ? "" : " (undeclared)"}`)
+    .join(" · ");
+  return `phases: ${reached}/${groups.length} reached — ${rendered}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -701,9 +858,9 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
 function buildWorkflowResultBlock(res: RunWorkflowScriptResult, compact = false): OperatorBlock {
   const source = res.target?.source;
   const status = res.ok ? "completed" : "failed";
-  const primary = `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${res.ok
-    ? formatWorkflowResultSummary(res.result)
-    : formatWorkflowFailureSummary(res.result, res.error)}`;
+  const primary = `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${
+    res.ok ? formatWorkflowResultSummary(res.result) : formatWorkflowFailureSummary(res.result, res.error)
+  }`;
   return {
     type: res.ok ? "RESULT" : "ERROR",
     subject: "Workflow run",
@@ -717,13 +874,23 @@ function buildWorkflowResultBlock(res: RunWorkflowScriptResult, compact = false)
       `runId: ${res.runId}`,
       `Source: [R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`}`,
       compact ? compactWorkflowLine(`runDir: ${res.runDir}`) : `runDir: ${res.runDir}`,
-      ...(res.scriptIdentity === undefined ? [] : [compact
-        ? compactWorkflowLine(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref))
-        : formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref)]),
-      compact ? compactWorkflowLine(`resultPath: ${res.resultPersistence.path}`) : `resultPath: ${res.resultPersistence.path}`,
-      ...(res.resultPersistence.ok ? [] : [compact
-        ? compactWorkflowLine(`persistence: ${res.resultPersistence.code}`)
-        : `persistence: ${res.resultPersistence.code}`]),
+      ...(res.scriptIdentity === undefined
+        ? []
+        : [
+            compact
+              ? compactWorkflowLine(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref))
+              : formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref),
+          ]),
+      compact
+        ? compactWorkflowLine(`resultPath: ${res.resultPersistence.path}`)
+        : `resultPath: ${res.resultPersistence.path}`,
+      ...(res.resultPersistence.ok
+        ? []
+        : [
+            compact
+              ? compactWorkflowLine(`persistence: ${res.resultPersistence.code}`)
+              : `persistence: ${res.resultPersistence.code}`,
+          ]),
     ],
     controls: [compactWorkflowLine(`Detail: /workflows status ${res.runId}`)],
   };
@@ -757,18 +924,16 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
   return lines.join("\n");
 }
 
-function formatOperatorScriptIdentity(
-  identity: OperatorScriptIdentityInput,
-  sourceRef?: string,
-): string {
+function formatOperatorScriptIdentity(identity: OperatorScriptIdentityInput, sourceRef?: string): string {
   const source = safeOperatorSourceRef(sourceRef);
   const coverage = identity.identityCoverage ?? "entry-only-legacy";
   const execution = identity.executionSource ?? "source";
-  const dependencySummary = coverage === "self-contained-static"
-    ? `builtins=${identity.builtinImports?.length ?? 0}`
-    : coverage === "entry-only-legacy"
-      ? "unbound=unknown"
-      : `unbound=${identity.unboundDependencies?.length ?? "?"}`;
+  const dependencySummary =
+    coverage === "self-contained-static"
+      ? `builtins=${identity.builtinImports?.length ?? 0}`
+      : coverage === "entry-only-legacy"
+        ? "unbound=unknown"
+        : `unbound=${identity.unboundDependencies?.length ?? "?"}`;
   const node = identity.nodeVersion === undefined ? "" : ` · node=${identity.nodeVersion}`;
   return `script: ${source} · coverage=${coverage} · exec=${execution} · ${dependencySummary} · snapshot=${path.basename(identity.snapshotPath)} · sha256=${identity.scriptSha256.slice(0, 12)}${node}`;
 }
@@ -793,12 +958,14 @@ function operatorScriptIdentity(
     identityCoverage: identity.identityCoverage ?? "entry-only-legacy",
     executionSource: identity.executionSource ?? "source",
     nodeVersion: identity.nodeVersion ?? "unknown",
-    builtinImportCount: (identity.identityCoverage ?? "entry-only-legacy") === "entry-only-legacy"
-      ? null
-      : identity.builtinImports?.length ?? 0,
-    unboundDependencyCount: (identity.identityCoverage ?? "entry-only-legacy") === "entry-only-legacy"
-      ? null
-      : identity.unboundDependencies?.length ?? null,
+    builtinImportCount:
+      (identity.identityCoverage ?? "entry-only-legacy") === "entry-only-legacy"
+        ? null
+        : (identity.builtinImports?.length ?? 0),
+    unboundDependencyCount:
+      (identity.identityCoverage ?? "entry-only-legacy") === "entry-only-legacy"
+        ? null
+        : (identity.unboundDependencies?.length ?? null),
   };
 }
 
@@ -841,18 +1008,12 @@ function renderJournalLines(journal: readonly WorkflowJournalLine[]): string[] {
       const label = line.source === "script" ? "script" : line.source === "runtime" ? "runtime" : "journal";
       out.push(`  [${label}] ${line.message ?? ""}`);
     } else if (line.kind === "agent_start") {
-      out.push(`  [agent] -> ${line.agent ?? ""}${line.label !== undefined ? ` (${line.label})` : ""}`);
+      out.push(
+        `  [agent] -> ${line.agent ?? ""}${line.label !== undefined ? ` (${line.label})` : ""}${line.replayed === true ? " [replayed]" : ""}`,
+      );
     } else if (line.kind === "agent_end") {
       out.push(
-        `  [agent] <- ${line.agent ?? ""} ${line.status ?? ""}${line.durationMs !== undefined ? ` ${line.durationMs}ms` : ""}`,
-      );
-    } else if (line.kind === "llm_start") {
-      out.push(`  [llm]   -> ${line.label ?? "model"}`);
-    } else if (line.kind === "llm_end") {
-      const usage = line.usage !== undefined ? ` tok=${line.usage.totalTokens}` : "";
-      const diagnostic = line.message !== undefined ? ` · ${line.message}` : "";
-      out.push(
-        `  [llm]   <- ${line.label ?? "model"} ${line.status ?? ""}${line.durationMs !== undefined ? ` ${line.durationMs}ms` : ""}${usage}${diagnostic}`,
+        `  [agent] <- ${line.agent ?? ""} ${line.status ?? ""}${line.durationMs !== undefined ? ` ${line.durationMs}ms` : ""}${line.replayed === true ? " [replayed]" : ""}`,
       );
     } else if (line.kind === "error") {
       out.push(`  [error] ${line.message ?? ""}`);

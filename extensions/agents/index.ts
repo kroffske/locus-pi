@@ -13,7 +13,12 @@ import {
 import { validateParams } from "../_shared/validation.js";
 import { pinTransientUiKey, registerCommandWithUiLifecycle, unpinTransientUiKey } from "../_shared/command-ui.js";
 import { sharedState } from "../_shared/state.js";
-import { discoverAgentDefinitions, formatAgentListItem, type AgentDiagnostic } from "../_shared/agents.js";
+import {
+  discoverAgentDefinitions,
+  formatAgentCatalogHint,
+  formatAgentListItem,
+  type AgentDiagnostic,
+} from "../_shared/agents.js";
 import { createAgentRunRequest, executeAgentRunBoundary, type ApprovalTier } from "../_shared/agent-runner.js";
 import { createRuntimeArtifactStore } from "../_shared/artifacts.js";
 import {
@@ -62,13 +67,12 @@ import type { AgentDefinition } from "../_shared/types.js";
 import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator-ui.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
 
+const AGENT_PARAM_BASE_DESCRIPTION =
+  "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.";
+const AGENT_PARAM_CATALOG_HEADING = "Available agents (name — description):";
+
 const TaskParams = Type.Object({
-  agent: Type.Optional(
-    Type.String({
-      description:
-        "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.",
-    }),
-  ),
+  agent: Type.Optional(Type.String({ description: AGENT_PARAM_BASE_DESCRIPTION })),
   task: Type.String({ description: "Self-contained subagent instructions", minLength: 1, maxLength: 16000 }),
   title: Type.Optional(
     Type.String({
@@ -150,6 +154,12 @@ export default function agents(pi: ExtensionAPI): void {
     // Parent Pi owns bare Up/Down. Fleet entry is explicit via /ps or shift+down.
     fleetMenuState.setEmptyEditorFocusAvailable(false);
     warnOnPsCollision(pi, ctx);
+  });
+  // The catalog the caller reads must be current at the moment it picks a name,
+  // not at the moment it calls: refresh before the turn, exactly like the other
+  // refreshAgents call sites do before a command or a tool body runs.
+  pi.on("before_agent_start", (_event, ctx) => {
+    refreshAgents(getProjectRoot(ctx));
   });
   pi.registerTool({
     name: "locus_workload_proof",
@@ -970,7 +980,27 @@ function refreshAgents(projectRoot: string) {
   for (const agent of discovered.definitions) {
     sharedState.agents.set(agent.name, agent);
   }
+  writeAgentCatalogHint(discovered.definitions);
   return discovered;
+}
+
+/**
+ * T-111: publish the resolved catalog on the `agent` parameter of
+ * `spawn_agent`/`task`, which is where the calling model chooses the name. Both
+ * tools are registered with the same `TaskParams` object and Pi hands
+ * `ToolDefinition.parameters` to the provider by reference on every request
+ * (unlike `description`, which it snapshots when the tool is wrapped), so
+ * rewriting the schema field here is what makes the catalog refreshable instead
+ * of frozen at registration. Every `refreshAgents` caller therefore republishes
+ * it, and `before_agent_start` runs one refresh per turn so an agent added to
+ * `.agents/agents/` mid-session is selectable without a restart.
+ */
+function writeAgentCatalogHint(definitions: readonly AgentDefinition[]): void {
+  const catalog = formatAgentCatalogHint(definitions);
+  TaskParams.properties.agent.description =
+    catalog === ""
+      ? AGENT_PARAM_BASE_DESCRIPTION
+      : `${AGENT_PARAM_BASE_DESCRIPTION}\n${AGENT_PARAM_CATALOG_HEADING}\n${catalog}`;
 }
 
 function resolveAgentSelection(agentName: string | undefined): AgentResolution | undefined {

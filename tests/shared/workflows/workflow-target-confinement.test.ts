@@ -1,19 +1,13 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  listWorkflowCatalogTargets,
   packagedExamplesDir,
   resolveWorkflowTarget,
   runWorkflowScript,
+  WorkflowNameNotFoundError,
 } from "../../../extensions/_shared/workflow-runner.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -36,8 +30,9 @@ describe("workflow target physical confinement", () => {
       );
       symlinkSync(externalScript, path.join(root, "escape.workflow.mjs"));
 
-      expect(() => resolveWorkflowTarget({ scriptPath: "escape.workflow.mjs" }, root, root))
-        .toThrow(/escapes project root through a symlink/u);
+      expect(() => resolveWorkflowTarget({ scriptPath: "escape.workflow.mjs" }, root, root)).toThrow(
+        /escapes project root through a symlink/u,
+      );
 
       const harness = createHarness(root, { sessionId: "wf-confined-explicit" });
       const result = await runWorkflowScript({
@@ -67,8 +62,9 @@ describe("workflow target physical confinement", () => {
       writeFileSync(externalScript, "export default () => ({ escaped: true });\n", "utf8");
       symlinkSync(externalScript, path.join(projectWorkflows, "named.workflow.mjs"));
 
-      expect(() => resolveWorkflowTarget({ name: "named" }, root, root))
-        .toThrow(/escapes project root through a symlink/u);
+      expect(() => resolveWorkflowTarget({ name: "named" }, root, root)).toThrow(
+        /escapes project root through a symlink/u,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
@@ -149,5 +145,66 @@ describe("workflow target physical confinement", () => {
       rmSync(root, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * T-112 — the docs used to call `.claude/workflows/` an interop source for
+ * foreign workflows. It is not one: these directories accept exactly the
+ * pi-native `<name>.workflow.mjs`, which is what the narrowed wording now says.
+ * This test is what that claim resolves to, and it is what must be changed
+ * deliberately if the still-open `.js` decision is ever implemented.
+ */
+describe("interop-directory file layout", () => {
+  const withProject = (run: (root: string) => void): void => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-interop-"));
+    const previousHome = process.env.HOME;
+    try {
+      // Keep a real personal directory out of the resolution path.
+      process.env.HOME = path.join(root, "home");
+      mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
+      run(root);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it("does not resolve a foreign host's <name>.js dropped into .claude/workflows", () => {
+    withProject((root) => {
+      writeFileSync(
+        path.join(root, ".claude", "workflows", "foreign.js"),
+        "export default async function () { return args; }\n",
+        "utf8",
+      );
+
+      expect(() => resolveWorkflowTarget({ name: "foreign" }, root, root)).toThrow(WorkflowNameNotFoundError);
+      expect(listWorkflowCatalogTargets(root, root).map((target) => target.ref)).not.toContain("foreign");
+    });
+  });
+
+  it("resolves a pi-native <name>.workflow.mjs there as an ordinary project source", () => {
+    withProject((root) => {
+      const file = path.join(root, ".claude", "workflows", "native.workflow.mjs");
+      writeFileSync(file, 'export const meta = { description: "d." };\nexport default () => "native";\n', "utf8");
+
+      expect(resolveWorkflowTarget({ name: "native" }, root, root)).toMatchObject({
+        kind: "name",
+        ref: "native",
+        source: "project",
+        path: file,
+      });
+    });
+  });
+
+  it("never lets a sibling .js win over the accepted .mjs", () => {
+    withProject((root) => {
+      const dir = path.join(root, ".claude", "workflows");
+      writeFileSync(path.join(dir, "both.js"), "export default () => 'js';\n", "utf8");
+      writeFileSync(path.join(dir, "both.workflow.mjs"), "export default () => 'mjs';\n", "utf8");
+
+      expect(resolveWorkflowTarget({ name: "both" }, root, root).path).toBe(path.join(dir, "both.workflow.mjs"));
+    });
   });
 });

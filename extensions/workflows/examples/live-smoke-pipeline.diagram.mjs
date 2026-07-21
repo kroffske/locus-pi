@@ -25,9 +25,8 @@ const canvas = new Bounds(0, 0, 3840, 1260);
 const BLUE = "#0b1fb3";
 const GREEN = "#087f3f";
 const GRAY = "#475569";
-const PURPLE = "#7c3aed";
 
-scene.text(40, 24, "LIVE smoke workflow — full agent sessions, no direct LLM call", {
+scene.text(40, 24, "LIVE smoke workflow — two sequential full agent sessions", {
   size: 30,
   width: 3760,
   align: "center",
@@ -49,7 +48,6 @@ const lanes = [
   { label: "OPERATOR", top: 130, bottom: 315 },
   { label: "WORKFLOW-OWNED ORCHESTRATION / CHECKS", top: 315, bottom: 590 },
   { label: "FULL AGENT SESSIONS", top: 590, bottom: 820 },
-  { label: "DIRECT LLM CALLS", top: 820, bottom: 985 },
   { label: "ARTIFACTS", top: 985, bottom: 1240 },
 ];
 
@@ -160,32 +158,6 @@ function agentNode(id, agentName, bullets, x, y, width = 360, height = 205) {
   return { id, block: scene.group([outer, ...panel.elements]) };
 }
 
-function directLlmNoneNode(id, x, y, width, height) {
-  const elements = [
-    scene.ellipse(x, y, width, height, { color: PURPLE, strokeWidth: 2, dashed: true }),
-    scene.placeAsset("model_validation", x + 24, y + 31, 54),
-    scene.text(x + 94, y + 20, "Direct LLM: not used", {
-      size: 18,
-      color: PURPLE,
-      width: width - 116,
-      align: "center",
-    }),
-    scene.text(x + 94, y + 58, "dsl.llm() is not used", {
-      size: 13,
-      color: GRAY,
-      width: width - 116,
-      align: "center",
-    }),
-    scene.text(x + 94, y + 84, "all model work runs inside agents", {
-      size: 13,
-      color: GRAY,
-      width: width - 116,
-      align: "center",
-    }),
-  ];
-  return { id, block: scene.group(elements) };
-}
-
 function artifactNode(id, title, iconId, bullets, x, y, width, height) {
   const panel = layout.iconPanel(scene, x, y, width, height, {
     title,
@@ -283,7 +255,6 @@ const resultCheck = workflowNode(
   310,
   180,
 );
-const noDirectLlm = directLlmNoneNode("no-direct-llm", 1320, 842, 420, 126);
 
 const sourceFile = artifactNode(
   "source-file",
@@ -326,7 +297,6 @@ const nodes = [
   sequentialAwait,
   quickAgent,
   resultCheck,
-  noDirectLlm,
   sourceFile,
   journalFile,
   resultFile,
@@ -534,22 +504,6 @@ scene.text(legendX + 145, legendY + 337, "Double rectangle", {
   width: 350,
 });
 scene.text(legendX + 145, legendY + 360, "full agent session with tools + childSessionId", {
-  size: 12,
-  color: GRAY,
-  width: 350,
-});
-
-scene.ellipse(legendX + 28, legendY + 423, 92, 54, {
-  color: PURPLE,
-  strokeWidth: 2,
-  dashed: true,
-});
-scene.text(legendX + 145, legendY + 430, "Dashed ellipse", {
-  size: 15,
-  color: PURPLE,
-  width: 350,
-});
-scene.text(legendX + 145, legendY + 453, "direct LLM call; explicitly unused here", {
   size: 12,
   color: GRAY,
   width: 350,

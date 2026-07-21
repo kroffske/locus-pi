@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createWorkflowTranscript, persistCommandWorkflowTranscript, WORKFLOW_EVENT_CUSTOM_TYPE } from "../../../extensions/workflows/workflow-transcript.js";
+import {
+  createWorkflowTranscript,
+  persistCommandWorkflowTranscript,
+  WORKFLOW_EVENT_CUSTOM_TYPE,
+} from "../../../extensions/workflows/workflow-transcript.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
-import { applyWorkflowJournalLineToAgentLiveStore, workflowAgentLiveRowId } from "../../../extensions/_shared/workflow-journal.js";
+import {
+  applyWorkflowJournalLineToAgentLiveStore,
+  workflowAgentLiveRowId,
+} from "../../../extensions/_shared/workflow-journal.js";
 import type { RunWorkflowScriptResult } from "../../../extensions/_shared/workflow-runner.js";
 import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
 import { compactWorkflowParentRows } from "../../../extensions/workflows/progress-widget.js";
@@ -24,8 +31,12 @@ describe("workflow persistent transcript", () => {
     expect(harness.sentMessages).toEqual([]);
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
     expect(harness.sentMessages).toHaveLength(1);
-    expect(harness.sentMessages[0]?.message.content).toEqual(expect.stringContaining("● workflow demo.workflow.mjs started"));
-    expect(harness.sentMessages[0]?.message.content).toEqual(expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"));
+    expect(harness.sentMessages[0]?.message.content).toEqual(
+      expect.stringContaining("● workflow demo.workflow.mjs started"),
+    );
+    expect(harness.sentMessages[0]?.message.content).toEqual(
+      expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"),
+    );
     for (const entry of harness.sentMessages) {
       expect(entry.message).toMatchObject({ customType: WORKFLOW_EVENT_CUSTOM_TYPE, display: true });
       expect(String(entry.message.content).length).toBeLessThanOrEqual(4096);
@@ -111,28 +122,27 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("host bridge failed");
   });
 
-  it("uses a failed llm diagnostic as fallback when the script returns only ok:false", () => {
-    const transcript = createWorkflowTranscript(createHarness().ctx, "llm-smoke", "tool");
-    transcript.start("llm-auth-failure");
+  it("uses a journal error as fallback when the script returns only ok:false", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "live-smoke", "tool");
+    transcript.start("agent-auth-failure");
     transcript.event({
       ts: "t",
-      runId: "llm-auth-failure",
-      kind: "llm_end",
-      status: "failed",
-      label: "schema",
-      message: "Workflow llm bridge: request auth failed: No API key found",
+      runId: "agent-auth-failure",
+      kind: "error",
+      label: "classify",
+      message: "Workflow agent bridge: request auth failed: No API key found",
     });
 
     const completion = transcript.finish({
-      runId: "llm-auth-failure",
-      runDir: "/tmp/llm-auth-failure",
+      runId: "agent-auth-failure",
+      runDir: "/tmp/agent-auth-failure",
       ok: false,
       result: { ok: false },
       journal: [],
-      resultPersistence: { ok: true, path: "/tmp/llm-auth-failure/result.json" },
+      resultPersistence: { ok: true, path: "/tmp/agent-auth-failure/result.json" },
     });
 
-    expect(completion.digest).toContain("Workflow llm bridge: request auth failed: No API key found");
+    expect(completion.digest).toContain("Workflow agent bridge: request auth failed: No API key found");
     expect(completion.digest).not.toContain("Workflow execution failed");
   });
 
@@ -193,7 +203,12 @@ describe("workflow persistent transcript", () => {
       expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 22 });
       expect(completion.digest.match(/final failure/g)).toHaveLength(1);
       expect(completion.digest).not.toContain("intermediate journal failure");
-      expect(completion.digest.split("\n").slice(1).every((line) => line.length <= 160)).toBe(true);
+      expect(
+        completion.digest
+          .split("\n")
+          .slice(1)
+          .every((line) => line.length <= 160),
+      ).toBe(true);
       expect(completion.digest.length).toBeLessThanOrEqual(4096);
     } finally {
       agentLiveStore.reset();

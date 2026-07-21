@@ -1,14 +1,5 @@
-import {
-  createHash,
-} from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -16,7 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderOperatorBlock, type OperatorBlock } from "../../../extensions/_shared/operator-ui.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "../../../extensions/workflows/catalog-viewer.js";
-import { buildWorkflowActionPrompt, buildWorkflowCatalogModel, buildWorkflowInfoBlock } from "../../../extensions/workflows/workflow-catalog.js";
+import {
+  buildWorkflowActionPrompt,
+  buildWorkflowCatalogModel,
+  buildWorkflowInfoBlock,
+} from "../../../extensions/workflows/workflow-catalog.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -47,10 +42,7 @@ describe("focused workflow catalog", () => {
   it("selects only current rows, opens inert source, then restores catalog cursor", async () => {
     const root = projectWithWorkflows({
       alpha: source("alpha", "Alpha workflow"),
-      beta: [
-        "globalThis.__workflowViewerExecuted = true;",
-        ...source("beta", "Beta workflow").split("\n"),
-      ].join("\n"),
+      beta: ["globalThis.__workflowViewerExecuted = true;", ...source("beta", "Beta workflow").split("\n")].join("\n"),
     });
     writeRun(root, "20260101-000001-alpha", "alpha");
     const harness = createHarness(root);
@@ -213,7 +205,10 @@ describe("focused workflow catalog", () => {
 
   it("keeps catalog and source lines bounded at wide and narrow widths", () => {
     const root = projectWithWorkflows({
-      "a-very-long-workflow-name": source("a-very-long-workflow-name", "A description long enough to overflow narrow terminals"),
+      "a-very-long-workflow-name": source(
+        "a-very-long-workflow-name",
+        "A description long enough to overflow narrow terminals",
+      ),
     });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 8);
@@ -303,19 +298,22 @@ describe("focused workflow catalog", () => {
     expect(viewer.render(80).join("\n")).toContain("[VIEW] [R] [P] alpha");
   });
 
-  it.each([7, 8, 9])("keeps the selected history target visible in the low-height fallback at %i terminal rows", (rows) => {
-    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
-    writeRun(root, "20260101-000001-alpha", "alpha");
-    const model = buildWorkflowCatalogModel(root, root);
-    const { viewer } = createViewer(model, root, rows);
+  it.each([7, 8, 9])(
+    "keeps the selected history target visible in the low-height fallback at %i terminal rows",
+    (rows) => {
+      const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+      writeRun(root, "20260101-000001-alpha", "alpha");
+      const model = buildWorkflowCatalogModel(root, root);
+      const { viewer } = createViewer(model, root, rows);
 
-    for (let index = 0; index < model.current.length; index += 1) viewer.handleInput("down");
+      for (let index = 0; index < model.current.length; index += 1) viewer.handleInput("down");
 
-    const rendered = viewer.render(48).join("\n");
-    expect(rendered).toContain("[R:20260101-000001-alpha] [P] alpha");
-    expect(rendered).not.toContain("Current (");
-    expect(rendered).not.toContain("History [R]");
-  });
+      const rendered = viewer.render(48).join("\n");
+      expect(rendered).toContain("[R:20260101-000001-alpha] [P] alpha");
+      expect(rendered).not.toContain("Current (");
+      expect(rendered).not.toContain("History [R]");
+    },
+  );
 
   it.each([3, 4, 5, 6])("shows a compact no-rows state at %i terminal rows", (rows) => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
@@ -376,7 +374,13 @@ describe("focused workflow catalog", () => {
     viewer.handleInput("enter");
 
     expect(done).toHaveBeenCalledOnce();
-    expect(done).toHaveBeenCalledWith(expect.objectContaining({ action: "start", row: model.current[0], sourceState: expect.objectContaining({ kind: "ready" }) }));
+    expect(done).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "start",
+        row: model.current[0],
+        sourceState: expect.objectContaining({ kind: "ready" }),
+      }),
+    );
   });
 
   it("allows historical Review but never Start or Edit", () => {
@@ -390,7 +394,13 @@ describe("focused workflow catalog", () => {
     expect(viewer.render(80).join("\n")).toContain("Back › [Review]");
     viewer.handleInput("enter");
 
-    expect(done).toHaveBeenCalledWith(expect.objectContaining({ action: "review", row: model.history[0], sourceState: expect.objectContaining({ kind: "ready" }) }));
+    expect(done).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "review",
+        row: model.history[0],
+        sourceState: expect.objectContaining({ kind: "ready" }),
+      }),
+    );
   });
 
   it("reviews an unavailable historical snapshot without current-source substitution", () => {
@@ -410,7 +420,7 @@ describe("focused workflow catalog", () => {
     const intent = done.mock.calls[0]?.[0];
     expect(intent).toMatchObject({ action: "review", sourceState: { kind: "missing" } });
     expect(buildPromptFromIntent(intent)).toContain('snapshot state "missing"');
-    expect(buildPromptFromIntent(intent)).toContain('diagnose why the immutable snapshot is unavailable');
+    expect(buildPromptFromIntent(intent)).toContain("diagnose why the immutable snapshot is unavailable");
     expect(buildPromptFromIntent(intent)).toContain("Skill: $pi-workflow-authoring");
     expect(buildPromptFromIntent(intent)).not.toContain("Snapshot unavailable:");
     expect(buildPromptFromIntent(intent)).toMatch(
@@ -508,13 +518,15 @@ describe("focused workflow catalog", () => {
 
     await harness.commands.get("workflows")!.handler("list", harness.ctx);
 
-    expect(harness.editorText).toBe([
-      `Request: Start the exact current workflow at ${JSON.stringify(path.join(root, ".pi", "workflows", "alpha.workflow.mjs"))}.`,
-      "Skill: $pi-workflow-authoring",
-      "",
-      "Additional instructions:",
-      "",
-    ].join("\n"));
+    expect(harness.editorText).toBe(
+      [
+        `Request: Start the exact current workflow at ${JSON.stringify(path.join(root, ".pi", "workflows", "alpha.workflow.mjs"))}.`,
+        "Skill: $pi-workflow-authoring",
+        "",
+        "Additional instructions:",
+        "",
+      ].join("\n"),
+    );
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
     expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);
@@ -527,13 +539,22 @@ describe("focused workflow catalog", () => {
     let resolveCustom: ((value: unknown) => void) | undefined;
     const editor = vi.fn();
     harness.ctx.ui.setEditorText = editor;
-    harness.ctx.ui.custom = vi.fn(() => new Promise((resolve) => { resolveCustom = resolve; })) as NonNullable<typeof harness.ctx.ui.custom>;
+    harness.ctx.ui.custom = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCustom = resolve;
+        }),
+    ) as NonNullable<typeof harness.ctx.ui.custom>;
     workflows(harness.pi);
 
     const pending = harness.commands.get("workflows")!.handler("list", harness.ctx);
     await Promise.resolve();
     expect(editor).not.toHaveBeenCalled();
-    resolveCustom?.({ action: "review", row, sourceState: { kind: "ready", row, path: row.target.path, source: "source" } });
+    resolveCustom?.({
+      action: "review",
+      row,
+      sourceState: { kind: "ready", row, path: row.target.path, source: "source" },
+    });
     await pending;
 
     expect(editor).toHaveBeenCalledOnce();
@@ -554,7 +575,9 @@ describe("focused workflow catalog", () => {
     const rejected = createHarness(root);
     const rejectedEditor = vi.fn();
     rejected.ctx.ui.setEditorText = rejectedEditor;
-    rejected.ctx.ui.custom = vi.fn(async () => { throw new Error("closed"); });
+    rejected.ctx.ui.custom = vi.fn(async () => {
+      throw new Error("closed");
+    });
     workflows(rejected.pi);
     await rejected.commands.get("workflows")!.handler("list", rejected.ctx);
     expect(rejectedEditor).not.toHaveBeenCalled();
@@ -570,7 +593,9 @@ describe("focused workflow catalog", () => {
 
     const throwingSetter = createHarness(root);
     throwingSetter.customInputQueue.push("enter", "tab", "enter");
-    throwingSetter.ctx.ui.setEditorText = vi.fn(() => { throw new Error("setter failed"); });
+    throwingSetter.ctx.ui.setEditorText = vi.fn(() => {
+      throw new Error("setter failed");
+    });
     workflows(throwingSetter.pi);
     await throwingSetter.commands.get("workflows")!.handler("list", throwingSetter.ctx);
     expect(throwingSetter.widgets.get("workflows")).toContain("setter failed");
@@ -666,7 +691,7 @@ describe("workflow info viewer", () => {
       expect(expected.every((line) => reached.has(line))).toBe(true);
       expect([...reached].join("\n")).not.toContain("hidden)");
       const semantic = block.body?.join("\n") ?? "";
-      for (const label of ["trust:", "history:", "agent models:", "llm models:", "agents:", "DSL:", "resolver:"]) {
+      for (const label of ["trust:", "history:", "agent models:", "agents:", "DSL:", "resolver:"]) {
         expect(semantic).toContain(label);
       }
       if (block.subject.endsWith(": alpha")) {
@@ -730,28 +755,14 @@ function createViewer(
 ) {
   const done = vi.fn();
   const terminal = { rows, columns: 100 };
-  const viewer = new WorkflowCatalogViewer(
-    { requestRender: vi.fn(), terminal },
-    theme,
-    {},
-    model,
-    root,
-    root,
-    done,
-  );
+  const viewer = new WorkflowCatalogViewer({ requestRender: vi.fn(), terminal }, theme, {}, model, root, root, done);
   return { viewer, done, terminal };
 }
 
 function createInfoViewer(block: OperatorBlock, rows = 12) {
   const done = vi.fn();
   const terminal = { rows, columns: 100 };
-  const viewer = new WorkflowInfoViewer(
-    { requestRender: vi.fn(), terminal },
-    {},
-    {},
-    block,
-    done,
-  );
+  const viewer = new WorkflowInfoViewer({ requestRender: vi.fn(), terminal }, {}, {}, block, done);
   return { viewer, done, terminal };
 }
 
@@ -807,26 +818,30 @@ function writeRun(
   const sha256 = createHash("sha256").update(executedSource).digest("hex");
   const snapshotPath = path.join(runDir, `script-${sha256}.workflow.mjs`);
   writeFileSync(snapshotPath, executedSource, "utf8");
-  writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-    runId,
-    ok: true,
-    result: null,
-    target: { kind: "name", ref: name, source: "project" },
-    scriptIdentity: {
-      schemaVersion: 2,
-      identityPolicy: "static-node-only-v1",
-      sourcePath: path.join(root, ".pi", "workflows", `${name}.workflow.mjs`),
-      snapshotPath,
-      scriptSha256: sha256,
-      identityCoverage: "self-contained-static",
-      executionSource: "snapshot",
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      builtinImports: [],
-      unboundDependencies: [],
-    },
-  }), "utf8");
+  writeFileSync(
+    path.join(runDir, "result.json"),
+    JSON.stringify({
+      runId,
+      ok: true,
+      result: null,
+      target: { kind: "name", ref: name, source: "project" },
+      scriptIdentity: {
+        schemaVersion: 2,
+        identityPolicy: "static-node-only-v1",
+        sourcePath: path.join(root, ".pi", "workflows", `${name}.workflow.mjs`),
+        snapshotPath,
+        scriptSha256: sha256,
+        identityCoverage: "self-contained-static",
+        executionSource: "snapshot",
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        builtinImports: [],
+        unboundDependencies: [],
+      },
+    }),
+    "utf8",
+  );
 }
 
 function collectIdentityPages(viewer: WorkflowCatalogViewer, width: number, pages: number): string {
