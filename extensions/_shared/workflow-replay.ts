@@ -225,6 +225,15 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     );
   }
 
+  // TODO(iteration-2026-07-21): value entries have no integrity key. An agent
+  // entry fails closed on a request-hash mismatch; a `clock`/`random` entry is
+  // matched by per-kind array POSITION only, and `readWorkflowReplayLog` skips
+  // malformed lines silently — so one truncated value line shifts every later
+  // `dsl.now()`/`dsl.random()` by one and replays a WRONG value with no
+  // divergence signal. The recorded `seq` is parsed and then never used; keying
+  // or ordinal-checking against it is the obvious fix. Deferred: deterministic
+  // replay is out of scope this iteration (MVP = one working chain of agents).
+  // See `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A5, S3).
   resolveValue(kind: WorkflowReplayValueKind, produce: () => number): number {
     const ordinal = this.#valueCursors.get(kind) ?? 0;
     this.#valueCursors.set(kind, ordinal + 1);

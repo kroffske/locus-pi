@@ -961,6 +961,14 @@ There is no small authoring ceiling such as the former 100-call cap.
 
 ### Opt-in shaped answers — `agent({ schema })`
 
+<!-- TODO(iteration-2026-07-21): this section describes the intent, not the
+     enforcement. The validator checks only `object`/`array`/`string`/`number`/
+     `boolean`; any other `type` (`integer` first of all) and every constraint
+     keyword (`minimum`, `maxLength`, `pattern`, `oneOf`) passes unchecked. Do not
+     rely on a declared shape being enforced. `schema` is declared unused for this
+     iteration and this section is not being rewritten yet; see
+     `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A1). -->
+
 The default above is the contract for every stage that hands work to the next
 stage as prose. `schema` is the explicit exception, for the stages that need a
 decision rather than a paragraph — a yes/no gate, a small fixed field set:

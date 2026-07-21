@@ -158,7 +158,13 @@ export interface WorkflowAgentOptions {
 
 /** `WorkflowAgentOptions` with a declared answer shape. Selects the shaped `agent()` overload:
  *  a plain `WorkflowAgentOptions` value never satisfies the required `schema` property, so every
- *  existing call site keeps resolving to `Promise<string>`. */
+ *  existing call site keeps resolving to `Promise<string>`.
+ *
+ *  TODO(iteration-2026-07-21): the overload pair is type-unsound. `schema` is optional on the base
+ *  `WorkflowAgentOptions`, so a value typed as that interface may carry a schema at runtime, the
+ *  compiler still picks the `Promise<string>` overload, and the caller gets an object typed as a
+ *  string. Parked with the schema feature itself, which is declared unused this iteration.
+ *  See `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A3, S2). */
 export interface WorkflowAgentSchemaOptions extends WorkflowAgentOptions {
   schema: Record<string, unknown>;
 }
@@ -543,6 +549,17 @@ export class SchemaValidationError extends Error {
  * `schema === undefined` is a no-op — callers must guard before calling.
  * No ajv, no fs, no network. Host-agnostic.
  */
+// TODO(iteration-2026-07-21): unsupported schema declarations fail OPEN. Only
+// `object`/`array`/`string`/`number`/`boolean` are checked below; any other
+// `type` — `integer` first of all — falls through every branch with zero errors,
+// so every value validates. `minimum`, `maxLength`, `pattern`, `oneOf` are
+// ignored the same way. The author sees a green run and believes the shape is
+// pinned; it is not. Fix: reject an unsupported declaration BEFORE spending a
+// child attempt. Deferred, not unknown: `agent({ schema })` is declared unused
+// for this iteration (MVP = a chain of agents exchanging text), so this is the
+// first thing to repair when schema comes back into use.
+// See `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A1, S1) and
+// the 2026-07-21 entry in `.locus/soul.md` `## Direction log`.
 function validateAgainstSchema(
   value: unknown,
   schema: Record<string, unknown>,
