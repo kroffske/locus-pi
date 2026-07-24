@@ -147,36 +147,32 @@ Runnable examples to adapt: `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`, with the reader algorithm in
 `examples/review/README.md`.
 
-## Parameterised input
+## Semantic text input
 
-`/workflows run <name> [input]` passes free text. The `workflow` tool passes free
-text **or** a JSON object of named parameters. A workflow that takes parameters
-normalises both at the top, so one script serves both callers:
+Both `/workflows run <name> [input]` and the `workflow` tool pass one optional
+bounded string. It is the operator's semantic request, not a command language or
+serialized parameter object. Let an agent interpret meaning; keep only explicit
+deterministic invariants in JavaScript:
 
 ```js
-/** `{ target, mode }` from the tool, or a bare path/sentence from the command. */
-function readParams(input) {
-  if (typeof input === "string") return { target: input.trim(), mode: "normal" };
-  if (input === null || typeof input !== "object") return { target: "", mode: "normal" };
-  const { target, mode } = input;
-  return {
-    target: typeof target === "string" ? target.trim() : "",
-    mode: mode === "strict" ? "strict" : "normal",
-  };
-}
-
 export default async function run({ agent, phase }, input) {
-  const { target, mode } = readParams(input);
-  if (target === "") return { ok: false, summary: "A target path or module name is required." };
+  if (typeof input !== "string" || input.trim() === "") {
+    return { ok: false, summary: "An audit request is required." };
+  }
 
   phase("audit");
-  return agent(`Audit ${target}. Severity floor: ${mode}.`, { agent: "reviewer", readOnly: true, label: "audit" });
+  return agent(`Interpret and perform this audit request exactly:\n\n${input}`, {
+    agent: "reviewer",
+    readOnly: true,
+    label: "audit",
+  });
 }
 ```
 
-Validate the fields the script branches on — an object from a caller is
-untrusted data exactly like free text. Keep the string branch meaningful: a
-workflow that only accepts an object cannot be started from `/workflows run`.
+Cross-run identity is not embedded in text. The tool may separately attach the
+closed host `continuation` control; the runtime verifies its complete artifact
+refs before workflow code starts, and the script reads the bound copies through
+`dsl.continuationArtifacts()`.
 
 ## Single agent
 

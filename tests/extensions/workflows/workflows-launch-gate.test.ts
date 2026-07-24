@@ -18,6 +18,10 @@ function registerCommandHarness(root: string) {
   return h;
 }
 
+async function waitForBackground(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50 && !predicate(); attempt += 1) await Promise.resolve();
+}
+
 describe("/workflows run launch gate", () => {
   it("warns that native exec approval does not sandbox trusted workflow JavaScript", () => {
     const h = registerHarness();
@@ -55,6 +59,21 @@ describe("/workflows run launch gate", () => {
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       approval.mockRestore();
+      spy.mockRestore();
+    }
+  });
+
+  it("rejects oversized effective command input before creating a workflow run", async () => {
+    const h = registerHarness();
+    const spy = vi.spyOn(runner, "runWorkflowScript");
+    try {
+      await h.commands.get("workflows")!.handler(`run live-smoke   ${"x".repeat(16_001)}   `, h.ctx);
+
+      expect(spy).not.toHaveBeenCalled();
+      const widget = h.widgets.get("workflows") ?? "";
+      expect(widget).toContain("exceeds the 16000-character limit after command trimming");
+      expect(widget).toContain("No workflow execution was started");
+    } finally {
       spy.mockRestore();
     }
   });
@@ -97,6 +116,7 @@ describe("/workflows run launch gate", () => {
     });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
+      await waitForBackground(() => h.sentMessages.length === 1);
 
       expect(h.ctx.isIdle()).toBe(true);
       expect(spy).toHaveBeenCalledTimes(1);
@@ -137,6 +157,7 @@ describe("/workflows run launch gate", () => {
 
       h.setStreaming(false);
       await command;
+      await waitForBackground(() => h.sentMessages.length === 1);
 
       expect(h.sentMessages).toHaveLength(1);
       expect(h.customMessageDeliveries).toEqual(["append"]);
@@ -230,6 +251,43 @@ describe("/workflows run launch gate", () => {
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke" });
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("keeps the programmatic workflow tool awaited until its runner settles", async () => {
+    const h = registerHarness();
+    let resolveRunner!: (result: runner.RunWorkflowScriptResult) => void;
+    const pendingRunner = new Promise<runner.RunWorkflowScriptResult>((resolve) => {
+      resolveRunner = resolve;
+    });
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockReturnValue(pendingRunner);
+    try {
+      let settled = false;
+      const toolResult = Promise.resolve(
+        h.tools
+          .get("workflow")!
+          .execute("tool-awaited", { name: "live-smoke" }, new AbortController().signal, () => void 0, h.ctx),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+
+      resolveRunner({
+        runId: "run-awaited",
+        runDir: "/tmp/run-awaited",
+        ok: true,
+        result: { summary: "awaited complete" },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-awaited/result.json" },
+      });
+      const result = await toolResult;
+      expect(settled).toBe(true);
+      expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("awaited complete") });
     } finally {
       spy.mockRestore();
     }

@@ -260,13 +260,7 @@ describe("workflow operator catalog", () => {
       const currentState = { kind: "ready" as const, row: current, path: current.target.path, source: "source" };
       const historyState = { kind: "ready" as const, row: history, path: history.originPath, source: "source" };
       expect(buildWorkflowActionPrompt({ action: "start", row: current, sourceState: currentState })).toBe(
-        [
-          `Request: Start the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
-          "",
-          "Additional instructions:",
-          "",
-        ].join("\n"),
+        "/workflows run alpha",
       );
       expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe(
         [

@@ -16,6 +16,7 @@ import {
   agentLiveStore,
   createAgentSdkSessionExecutor,
   type AgentSdkSessionExecutorOptions,
+  type AgentLiveExecutionHandle,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type AgentLiveRow,
@@ -136,11 +137,15 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     const root = tempProject();
     const { createHarness } = await import("../../test-harness.js");
     const h = createHarness(root, { sessionId: "wf-parent" });
-    const createExecutor = (opts: { live?: AgentSdkSessionExecutorOptions["live"] }): AgentExecutor =>
+    const createExecutor = (opts: {
+      live?: AgentSdkSessionExecutorOptions["live"];
+      onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
+    }): AgentExecutor =>
       createAgentSdkSessionExecutor({
         createSession: async () => ({ session: fakeSession({ input: 100, output: 40 }) }),
         turnTimeoutMs: 5000,
         ...(opts.live !== undefined ? { live: opts.live } : {}),
+        ...(opts.onLiveExecution !== undefined ? { onLiveExecution: opts.onLiveExecution } : {}),
       });
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
@@ -167,6 +172,73 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     expect(ends.map((line) => line.round)).toEqual([1, 2]);
     expect(ends.every((line) => line.slotKey === workflowSlotKey({ phase: "verify", label: "verify fix" }))).toBe(true);
     expect(ends[1]?.usage).toEqual({ input: 100, output: 40, totalTokens: 140, costTotal: 0 });
+  });
+
+  it("omits usage when a later execution replaces the call's stable slot before boundary mapping", async () => {
+    const root = tempProject();
+    const { createHarness } = await import("../../test-harness.js");
+    const h = createHarness(root, { sessionId: "wf-parent" });
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "usage-overlap",
+      createExecutor: (opts) => ({
+        async run(request) {
+          const live = opts.live;
+          if (live?.rowId === undefined) throw new Error("Expected stable workflow slot row.");
+          const execution = agentLiveStore.beginExecution({
+            id: live.rowId,
+            agentName: request.agent.name,
+            label: live.label ?? request.agent.name,
+            ...(live.slotKey !== undefined ? { slotKey: live.slotKey } : {}),
+            ...(live.round !== undefined ? { round: live.round } : {}),
+          });
+          opts.onLiveExecution?.(execution);
+          agentLiveStore.applyExecutionStats(execution, {
+            sessionId: "stale-a",
+            toolCalls: 1,
+            toolResults: 1,
+            tokens: { input: 11, output: 7 },
+          });
+          const replacement = agentLiveStore.beginExecution({
+            id: live.rowId,
+            agentName: request.agent.name,
+            label: "replacement B",
+            ...(live.slotKey !== undefined ? { slotKey: live.slotKey } : {}),
+            round: (live.round ?? 1) + 1,
+          });
+          agentLiveStore.applyExecutionStats(replacement, {
+            sessionId: "current-b",
+            toolCalls: 2,
+            toolResults: 2,
+            tokens: { input: 900, output: 400 },
+          });
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "A completed after replacement",
+            text: "A completed after replacement",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = await runner({
+      agent: "reviewer",
+      prompt: "verify",
+      label: "verify fix",
+      phase: "verify",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage).toBeUndefined();
+    expect([...agentLiveStore.rows.values()].find((row) => row.id.startsWith("workflow-agent:"))?.tokenCount).toEqual({
+      input: 900,
+      output: 400,
+    });
   });
 });
 

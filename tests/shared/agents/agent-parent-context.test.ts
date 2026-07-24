@@ -7,7 +7,11 @@ import {
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
 } from "../../../extensions/_shared/agent-executor-host.js";
-import { createAgentRunRequest, executeAgentRunBoundary, type AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+import {
+  createAgentRunRequest,
+  executeAgentRunBoundary,
+  type AgentExecutor,
+} from "../../../extensions/_shared/agent-runner.js";
 import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/pi-api.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 
@@ -29,19 +33,28 @@ function pi(): ExtensionAPI {
     appendEntry: vi.fn(async () => {}),
     async sendUserMessage() {},
     setActiveTools() {},
-    getSessionId() { return "parent-session"; },
   };
 }
 
 function ctx(projectRoot: string, getBranch: ReturnType<typeof vi.fn>): ExtensionContext {
   return {
     cwd: projectRoot,
-    isIdle() { return true; },
+    isIdle() {
+      return true;
+    },
     ui: {
-      async select() { return { value: "", cancelled: true }; },
-      async input() { return { value: "", cancelled: true }; },
-      async editor() { return { value: "", cancelled: true }; },
-      async confirm() { return true; },
+      async select() {
+        return { value: "", cancelled: true };
+      },
+      async input() {
+        return { value: "", cancelled: true };
+      },
+      async editor() {
+        return { value: "", cancelled: true };
+      },
+      async confirm() {
+        return true;
+      },
       notify() {},
       setStatus() {},
       setWidget() {},
@@ -50,10 +63,16 @@ function ctx(projectRoot: string, getBranch: ReturnType<typeof vi.fn>): Extensio
     },
     session: { id: "parent-session", projectRoot, workingDirectory: projectRoot },
     sessionManager: {
-      getEntries() { return []; },
+      getEntries() {
+        return [];
+      },
       getBranch,
-      getSessionId() { return "parent-session"; },
-      getSessionFile() { return undefined; },
+      getSessionId() {
+        return "parent-session";
+      },
+      getSessionFile() {
+        return undefined;
+      },
     },
   };
 }

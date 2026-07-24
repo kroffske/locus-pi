@@ -73,6 +73,38 @@ describe("workflow persistent transcript", () => {
     expect(String(failures[0]?.message.content)).toContain("failed");
   });
 
+  it("renders waiting and operator cancellation as distinct terminal outcomes", () => {
+    const awaiting = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    awaiting.start("awaiting-run");
+    const awaitingCompletion = awaiting.finish({
+      runId: "awaiting-run",
+      runDir: "/tmp/awaiting-run",
+      ok: true,
+      disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      result: { mode: "prepared" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/awaiting-run/result.json" },
+    });
+    expect(awaitingCompletion.digest).toContain("◐ workflow review awaiting operator");
+    expect(awaitingCompletion.digest).toContain("review clarification required");
+    expect(awaitingCompletion.digest).not.toContain("finished");
+
+    const cancelled = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    cancelled.start("cancelled-run");
+    const cancelledCompletion = cancelled.finish({
+      runId: "cancelled-run",
+      runDir: "/tmp/cancelled-run",
+      ok: false,
+      disposition: { status: "cancelled", reason: "operator_stop" },
+      result: null,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/cancelled-run/result.json" },
+    });
+    expect(cancelledCompletion.digest).toContain("⊘ workflow review cancelled");
+    expect(cancelledCompletion.digest).toContain("cancelled by operator");
+    expect(cancelledCompletion.digest).not.toContain("completed");
+  });
+
   it("preserves semantic failure summary and unresolved row ids without a technical error", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "semantic-stop", "tool");
@@ -303,5 +335,30 @@ describe("workflow persistent transcript", () => {
       message: "Workflow transcript was not persisted: ctx.waitForIdle is unavailable.",
       level: "warning",
     });
+  });
+
+  it("suppresses a delayed idle continuation after its session lease becomes stale", async () => {
+    const harness = createHarness(process.cwd(), { isStreaming: true });
+    const transcript = createWorkflowTranscript(harness.ctx, "reload-safe", "command");
+    transcript.start("run-reload-safe");
+    const completion = transcript.finish({
+      runId: "run-reload-safe",
+      runDir: "/tmp/run-reload-safe",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-reload-safe/result.json" },
+    });
+    let current = true;
+    const pending = persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion, () => current);
+    for (let attempt = 0; attempt < 20 && harness.waitForIdleCalls === 0; attempt += 1) await Promise.resolve();
+
+    expect(harness.waitForIdleCalls).toBe(1);
+    current = false;
+    harness.setStreaming(false);
+
+    expect(await pending).toBe(false);
+    expect(harness.sentMessages).toEqual([]);
+    expect(harness.notificationEvents).toEqual([]);
   });
 });

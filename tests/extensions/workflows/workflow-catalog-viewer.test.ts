@@ -231,7 +231,7 @@ describe("focused workflow catalog", () => {
     }
     const narrow = viewer.render(48).join("\n");
     expect(narrow).toContain("› [Back] Start Edit Review");
-    expect(narrow).toContain("Prefill editor; nothing runs · Tab Enter i Esc");
+    expect(narrow).toContain("Start: direct command");
     viewer.handleInput("i");
     const identity = viewer.render(48);
     expect(identity).toHaveLength(5);
@@ -518,15 +518,7 @@ describe("focused workflow catalog", () => {
 
     await harness.commands.get("workflows")!.handler("list", harness.ctx);
 
-    expect(harness.editorText).toBe(
-      [
-        `Request: Start the exact current workflow at ${JSON.stringify(path.join(root, ".pi", "workflows", "alpha.workflow.mjs"))}.`,
-        "Skill: $pi-workflow-authoring",
-        "",
-        "Additional instructions:",
-        "",
-      ].join("\n"),
-    );
+    expect(harness.editorText).toBe("/workflows run alpha");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
     expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);

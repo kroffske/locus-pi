@@ -1,294 +1,159 @@
 # Curated review workflow
 
-The package contains two related workflows:
+`review` is a read-only, question-led review chain. The workflow runtime owns
+its durable evidence; no model session writes or republishes reports.
 
-- `review` inspects a target and publishes review evidence;
-- `review-fix` applies the findings a human left in that report, after
-  revalidating each one against live source.
+The workflow receives only a non-empty semantic text string. On a fresh call, a
+read-only clarifier returns the shaped decision `{decision, questions}`. A
+`continue` decision starts the full review. A `needs_operator` decision persists
+the exact intent and readable questions, returns their complete refs, and stops.
 
-The core contract is deliberately small:
+A later call supplies the operator's answers as ordinary text and attaches
+exactly `intent.md` plus `clarification-questions.md` through the workflow
+tool's host-owned `continuation` field. The runtime verifies and copies both
+same-origin refs before workflow code starts. The entry then proves that their
+persisted source target was the Package workflow named `review` in
+`prepare-clarification`, persists the answers, and runs the review.
 
-1. A workflow-specific stage is one neighboring `*.prompt.md` file.
-2. The prompt contains both stable role instructions and dynamic
-   `{{VARIABLE}}` handoffs.
-3. `agent(renderedPrompt, options)` launches a catalog agent. Omitted `agent`
-   uses the catalog `default` role.
-4. Capability policy remains in workflow code. `readOnly`, `tools`,
-   `workspaceMode`, and `maxToolCalls` are not prompt claims.
-5. A successful child returns exact non-empty text. The workflow forwards that
-   text without `JSON.parse`, result schemas, or model-written envelopes.
+Continuation never locates an artifact by run id plus a conventional filename.
+The caller supplies the complete `{ runId, artifactId, name, sha256 }`
+references returned by the paused call. Matching names and a successful source run
+are insufficient: runtime-verified source target, artifact kind, and stage must
+also match the prepare contract. Interactive questioning is deliberately not
+part of this workflow: a preparation run pauses at a real operator boundary.
 
 ## Files
 
 ```text
-extensions/workflows/examples/
-├── review/
-│   ├── README.md
-│   ├── review.workflow.mjs
-│   ├── review-pipeline.diagram.mjs
-│   ├── review-pipeline.excalidraw
-│   ├── review-pipeline.png
-│   └── resources/
-│       ├── scope-resolver.prompt.md
-│       ├── change-inventory.prompt.md
-│       ├── unit-planner.prompt.md
-│       ├── interrogator.prompt.md
-│       ├── verifier.prompt.md
-│       └── publisher.prompt.md
-└── review-fix/
-    ├── review-fix.workflow.mjs
-    ├── review-fix-input.mjs
-    ├── review-fix-pipeline.diagram.mjs
-    ├── review-fix-pipeline.excalidraw
-    ├── review-fix-pipeline.png
-    └── resources/
-        ├── scope-resolver.prompt.md
-        ├── unit-planner.prompt.md
-        ├── implementer.prompt.md
-        ├── verifier.prompt.md
-        └── publisher.prompt.md
+review/
+├── README.md
+├── review.workflow.mjs
+├── review-pipeline.diagram.mjs
+├── review-pipeline.excalidraw
+├── review-pipeline.png
+└── resources/
+    ├── clarifier.prompt.md
+    ├── scope-resolver.prompt.md
+    ├── change-inventory.prompt.md
+    ├── unit-planner.prompt.md
+    ├── interrogator.prompt.md
+    └── verifier.prompt.md
 ```
 
-There are no workflow-local `*.agent.md` files. Catalog agents provide the
-stable execution mechanism; neighboring prompts provide workflow-specific
-behavior.
+There are no workflow-local agent definitions. Catalog agents provide the
+execution mechanism; neighboring prompt files contain the complete
+workflow-specific roles and handoffs.
 
-## How one stage is launched
+## Runtime-owned evidence
 
-```js
-const prompt = await promptFile("./resources/change-inventory.prompt.md", {
-  SCOPE_TEXT: scopeText,
-});
+Every full review retains these exact texts beneath the canonical run root
+`.locus/runtime/workflows/<runId>/artifacts`:
 
-const text = await agent(prompt, {
-  ...REVIEW_READ_OPTIONS,
-  label: "inventory changes",
-});
-```
+- `intent.md` for a fresh full review, or the consumed prior-run intent for continuation;
+- `clarification-answers.md` for continuation;
+- `scope.md`, `inventory.md`, `units.md`, and `questions.md`;
+- `review.md`, byte-for-byte equal to the verifier's returned text.
 
-`promptFile()` resolves the path from the original workflow entry, not from the
-process working directory. Runtime rejects absolute paths, lexical and symlink
-escapes, missing files, wrong suffixes, missing variables, and unused
-variables. It reads each prompt once, stores an immutable run copy, and records
-SHA-256 evidence.
+The five model-authored full-review texts use `agent({ artifact })`, so the
+automatic answer is the named artifact; the workflow does not publish a second
+copy. The runtime index records complete references, digests, stage names,
+media types, and source lineage. Exact transcripts remain separate
+runtime-owned evidence. The workflow returns the verifier's exact review text;
+it does not parse a model-written status, normalize the report, or return a
+publisher summary.
 
-`REVIEW_READ_OPTIONS` and `REVIEW_NAVIGATE_OPTIONS` are declared once near the
-top of `review.workflow.mjs`. The 1,000-call limit is a runaway fuse, not a
-normal budget. `workspaceMode: "project"` keeps inspection in the launch
-checkout. `readOnly: true` causes the SDK host to remove shell, write/edit,
-nested workflow, and unknown tools. Git inspection uses the allowlisted
-`git_read` argv tool.
+### Artifact limits and duplicate names
 
-The three stages that reason about code relationships also get `ast_index`, an
-allowlisted argv tool over the installed `ast-index` binary. Query commands and
-the cache-only `update`/`rebuild` are allowed; `clear`, `watch`, unknown
-commands, and output-file options are rejected. The index database lives in the
-user cache directory, so refreshing it never touches reviewed source. When the
-binary or index is unavailable, the prompts fall back to `grep`/`find` and
-record the gap; a missing AST Index never blocks a review.
+Every artifact name is one ASCII path component of 1–128 characters matching
+`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`. Slashes, traversal, whitespace, and longer
+names fail closed. Every published, consumed, or automatic text artifact is
+limited to 2,097,152 UTF-8 bytes.
 
-## Where `phase()` and `log()` come from
+Logical names are labels, not lookup keys. The index identity is `artifactId`,
+and more than one record may carry the same `name`; callers must retain the
+complete returned reference. The shaped clarifier answer is retained once as
+`clarifier-decision.json`; when it pauses, deterministic workflow code
+separately publishes readable `clarification-questions.md`. Main review stages
+create only their automatic named answers, avoiding duplicate model-text
+publications.
 
-Workflow entry files do not import DSL methods at runtime. Pi passes one `dsl`
-object as the first argument to `runWorkflow`.
-
-- `WorkflowDsl` is defined in
-  `extensions/_shared/workflow-runtime.ts`.
-- `phase(name)` changes the visible stage and appends a `phase` journal line.
-- `log(message)` appends a script-owned message under the current stage.
-- The JSDoc type link above `runWorkflow` lets JavaScript-aware IDEs navigate
-  from destructured DSL methods to `WorkflowDsl` without executing an import.
-
-## Agent map
+## Review chain
 
 ```mermaid
 flowchart LR
-    U["Operator: review request"]
-
-    subgraph R["Workflow: review"]
-        R1["Agent R1: resolve review scope<br/>read-only"]
-        R2A["Agent R2a: inventory changes<br/>read-only"]
-        R2B["Agent R2b: plan review units<br/>read-only + ast_index"]
-        R3["Agent R3: ask falsifiable questions<br/>read-only + ast_index"]
-        R4["Agent R4: verify and write review<br/>read-only + ast_index"]
-        R5["Agent R5: publish review package<br/>write-capable"]
-
-        R1 -->|"exact scopeText"| R2A
-        R2A -->|"exact inventoryText"| R2B
-        R2B -->|"exact unitsText"| R3
-        R3 -->|"exact questionsText"| R4
-        R4 -->|"exact reviewText"| R5
-    end
-
-    U --> R1
-    R5 -->|"review.md + supporting artifacts"| H["Human: edit or delete findings"]
-
-    subgraph F["Workflow: review-fix"]
-        V["Workflow: confine path, require findings"]
-        F1["Agent F1: resolve fix scope<br/>read-only"]
-        F2["Agent F2: revalidate and plan fix units<br/>read-only + ast_index"]
-        F3["Agent F3: apply fix units<br/>write-capable"]
-        F4["Agent F4: verify and write report<br/>shell, no edit"]
-        F5["Agent F5: publish fix package<br/>write-capable"]
-
-        V --> F1
-        F1 -->|"exact scopeText"| F2
-        F2 -->|"exact unitsText"| F3
-        F3 -->|"exact implementationText"| F4
-        F4 -->|"exact reportText"| F5
-    end
-
-    H -->|"explicit review.md path"| V
+    P["fresh exact intent"] --> C["read-only clarifier decision"]
+    C -->|"needs operator"| A["intent.md + clarification-questions.md refs"]
+    C -->|"continue"| R1
+    A --> H["operator answers"]
+    H --> X["host continuation: verify and consume refs"]
+    X --> R1["R1: resolve scope"]
+    R1 --> R2A["R2a: inventory changes"]
+    R2A --> R2B["R2b: plan review units"]
+    R2B --> R3["R3: ask falsifiable questions"]
+    R3 --> R4["R4: verify and write review"]
+    R4 --> O["runtime review.md + exact return text"]
 ```
 
-## `review` algorithm
+All six model roles, including the optional clarification planner, are
+host-enforced read-only. Scope and inventory use `read`, `git_read`, `grep`,
+and `find`. Unit planning, interrogation, and verification also receive the
+allowlisted `ast_index` tool, with direct-read and text-search fallback.
 
-Six sequential stages. No branching, no parallel barrier, no loop, no fan-out.
-Each stage receives the exact previous text; the workflow never parses it.
+The original intent text is inserted unchanged into every full-review prompt.
+Later stages receive both that intent and the exact preceding handoffs. This
+prevents scope resolution from silently replacing the operator's focus.
 
-### 1. R1 resolves the scope
+### R1: resolve scope
 
-The workflow renders `scope-resolver.prompt.md`. R1 inspects Git state and
-repository guidance and turns the free-form request into one explicit
-`# Review Scope` with target, includes, excludes, and focus, or one blocked
-scope with a single rerun instruction. It returns no hashes or snapshot.
+R1 combines the exact intent with any persisted clarification, inspects Git
+state and repository guidance, and returns one explicit target, inclusion,
+exclusion, and focus contract.
 
-Later stages receive `scopeText` instead of the operator conversation, so the
-scope has to stand alone.
+### R2a: inventory changes
 
-### 2. R2a inventories the change
+R2a maps every changed surface in scope, including staged, unstaged, and
+untracked work where applicable. It assigns stable `C<n>` coverage ids and owns
+coverage, not judgment.
 
-R2a owns coverage, not meaning: it maps every changed surface, including
-staged, unstaged, and untracked work, and batches generated or mechanical
-changes instead of dropping them. Its `# Change Inventory` becomes
-`inventoryText`.
+### R2b: plan review units
 
-### 3. R2b plans review units
+R2b groups the inventory by material decision rather than filename. Every
+inventory id belongs to exactly one unit and remains unchanged.
 
-R2b groups the inventory into material decisions. Several files that implement
-one decision form one unit; one file with two unrelated decisions becomes two.
-Each unit carries one or more `Path:` lines, an optional `Anchor:`, and a
-`Change:` sentence. `Anchor:` is a navigation hint — a symbol, heading, config
-key, CLI flag, schema property, test case, or workflow stage — never an
-identifier the runtime parses.
+### R3: ask review questions
 
-### 4. R3 asks falsifiable questions
+R3 receives the original inventory as well as the units, reports any dropped or
+duplicated coverage id, then asks the smallest set of concrete, falsifiable
+questions that could change acceptance. It does not answer them or write
+findings. Its reconciliation uses exactly one `C<n>: U<n>; ...` row per
+inventory id.
 
-R3 asks the smallest set of questions that could change acceptance, as
-`## U<n>-Q<m>` blocks. Several questions per unit are normal. Documentation
-questions are conditional: they appear only when the unit changes a public
-signature, user-visible behavior, a CLI/API/config/schema contract, or a
-workflow already described in the docs, and only about documents that exist.
+### R4: verify and author the report
 
-### 5. R4 verifies and writes the review
+R4 receives the original inventory, units, and questions. It independently
+reopens code, callers, tests, configuration, and applicable documentation,
+accounts for every `C<n>` id with the same exact ledger grammar and assigned
+unit, answers every question, and promotes only
+reachable, root-cause-deduplicated problems to findings. Its exact Markdown
+becomes both the workflow result and `review.md`.
 
-R4 treats units as a work map and questions as hypotheses. It reopens the
-changed code, direct callers, tests, configuration, and existing documentation,
-answers every question exactly once, and promotes only confirmed problems to
-findings. Its `# Code Review` records reviewed scope, verdict, findings,
-question resolutions, and explicit coverage limits.
+## Prompt and capability boundary
 
-### 6. R5 publishes and presents
+`promptFile()` resolves from the original workflow entry. The runtime rejects
+absolute paths, lexical and symlink escapes, missing files, wrong suffixes,
+missing variables, and unused variables. It snapshots each prompt and records
+digest evidence.
 
-R5 is the only write-capable review session. It first proves `.tasks/` is
-ignored, then creates one local review task and publishes the handoffs as
-Markdown: `review-scope.md`, `review-inventory.md`, `review-units.md`,
-`review-questions.md`, and the mandatory `review.md`.
+Capability policy lives in `review.workflow.mjs`, not prompt prose.
+`readOnly: true` removes shell, write/edit, nested workflow, and unknown tools.
+The high tool-call limit is a runaway fuse. `workspaceMode: "project"` means
+review agents inspect the launch checkout.
 
-R5 may repair presentation — headings, broken Markdown, identifier consistency,
-file boundaries — but must not invent, delete, or soften a finding, re-review
-the code, or edit source. Its final text is the executive summary the operator
-reads: verdict, counts, and every created path. The summary is the workflow
-result, not a file.
+`phase()` and `log()` come from the injected `WorkflowDsl`; the entry imports
+no runtime implementation. Plain `agent()` returns exact non-empty text. Only
+the clarifier uses the runtime's fail-closed shaped `agent({schema})` boundary;
+deterministic code adds question count, uniqueness, and text limits. The
+workflow uses no local JSON parser, marker protocol, or interactive ask tool.
 
-## Human approval
-
-The operator reads `review.md` and edits it directly. Deleting a finding
-rejects it; a free-form note under a finding is an instruction to the fix
-workflow. There are no dispositions, hashes, or snapshots to maintain.
-
-Remediation is always a separate, explicitly started workflow. Nothing in
-`review` grants write authority over source.
-
-## `review-fix` algorithm
-
-`review-fix` mirrors the `review` shape: interpret intent, plan, act, verify,
-present. Five sequential agents follow one deterministic gate, and each stage
-receives the exact previous text.
-
-The operator passes the edited `review.md` path, optionally wrapped in ordinary
-words such as `apply only the P1 items in .tasks/T-1/artifacts/review.md`.
-
-### 1. Deterministic input confinement
-
-`review-fix-input.mjs` extracts the one `review.md` token from the request and
-proves what a prompt cannot: the path is project-relative, lives in a task
-`artifacts` directory, resolves without a symlink escape, and its `## Findings`
-section still lists at least one `### <id>` block. A review whose findings the
-operator deleted throws before any agent exists, and two different `review.md`
-paths in one request are rejected rather than guessed.
-
-It validates no hashes, snapshot, disposition, or reviewed commit. `review.md`
-is meant to be edited, and the reviewed work is often uncommitted, so there is
-nothing immutable to bind to.
-
-### 2. F1 resolves the fix scope
-
-The scope resolver reads the request and the edited report and decides which
-remaining findings this run addresses, under which constraints, and which
-repository checks matter. It also records whether the working tree already
-carries unrelated uncommitted work. Later stages receive `scopeText`, not the
-operator conversation.
-
-### 3. F2 revalidates and plans fix units
-
-The unit planner reopens each in-scope finding against the code as it is now.
-The code may have moved, been fixed already, or never had the described defect;
-`Path:` and `Anchor:` are navigation hints, not addresses. Findings that no
-longer hold are listed under `## Stale findings`. The survivors are grouped into
-atomic fix units — one coherent change each, ordered by dependency — with the
-risk and the check that would catch it.
-
-### 4. F3 applies the units
-
-The implementer applies the planned units in order in the operator's launch
-checkout, runs the checks named in the scope, and states which units it skipped
-and why. It fixes nothing the plan did not ask for.
-
-### 5. F4 verifies and writes the report
-
-The verifier treats `implementationText` as a claim, reopens the working-tree
-diff and affected files, reruns the checks, and writes the complete
-`# Fix Report`. It reports any diff hunk no unit asked for. This stage keeps a
-shell so it can run tests, so it is not host-enforced read-only; its no-edit
-rule is a prompt rule plus Pi approval.
-
-### 6. F5 publishes and presents
-
-The publisher writes `fix-scope.md`, `fix-units.md`, and the mandatory
-`fix-report.md` beside the review, repairing presentation only, and returns the
-executive summary as the workflow result.
-
-All fix stages work in the operator's launch checkout, not in a worktree,
-because the review may cover staged, unstaged, or untracked work that exists in
-no commit. Changes stay uncommitted so the operator reviews them as an ordinary
-diff.
-
-## Output and safety boundaries
-
-- Model output is always text. Runtime status, diagnostics, session ids, model
-  data, and artifacts remain runtime-owned evidence.
-- Plain `agent()` parses nothing. A stage that needs validated JSON opts in per
-  call with `agent(prompt, { schema })`; the review family does not, and passes
-  exact text between stages instead.
-- `readOnly: true` is host-enforced capability narrowing. The `review-fix`
-  verifier deliberately does not set it, because running repository checks
-  needs a shell; a shell can write, so its no-edit rule is prompt-level.
-- `permissionMode` is trace intent, and Pi still owns operator approval.
-- `review-fix` edits the launch checkout. Its boundaries are the explicit
-  operator start, the deterministic input gate, revalidation of every finding
-  before a change, prompt prohibitions on commit, push, merge, deploy, and
-  discarding foreign uncommitted work, and the fact that every change stays
-  uncommitted.
-- Prompt restrictions guide write-capable sessions but do not replace host
-  approval or deterministic validation.
+Remediation remains a separate, explicitly started `review-fix` workflow. A
+review run grants no source-write authority.

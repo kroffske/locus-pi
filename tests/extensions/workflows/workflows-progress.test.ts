@@ -14,12 +14,20 @@ import {
 } from "../../../extensions/workflows/progress-widget.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
 import { fleetMenuState } from "../../../extensions/_shared/fleet-menu.js";
-import { workflowAgentLiveRowId } from "../../../extensions/_shared/workflow-journal.js";
+import {
+  applyWorkflowJournalLineToAgentLiveStore,
+  workflowAgentLiveRowId,
+} from "../../../extensions/_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {
   return input as WorkflowJournalLine;
+}
+
+function pushProgress(component: WorkflowProgressComponent, event: WorkflowJournalLine): void {
+  applyWorkflowJournalLineToAgentLiveStore(event);
+  component.push(event);
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 500): Promise<void> {
@@ -56,12 +64,16 @@ function renderHarnessWidget(harness: ReturnType<typeof createHarness>, key = "w
 describe("workflow progress widget", () => {
   it("renders phase, agent transitions, durations, and stays inside the terminal budget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
-    const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1");
+    const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1", {
+      scope: "workflow",
+      declaredPhases: ["smoke", "verify"],
+    });
 
-    component.push(line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
-    component.push(line({ kind: "log", message: "starting", ts: 2, runId: "r1" }));
-    component.push(line({ kind: "agent_start", agent: "explore", label: "note:explore", ts: 3, runId: "r1" }));
-    component.push(
+    pushProgress(component, line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
+    pushProgress(component, line({ kind: "log", message: "starting", ts: 2, runId: "r1" }));
+    pushProgress(component, line({ kind: "agent_start", agent: "explore", label: "note:explore", ts: 3, runId: "r1" }));
+    pushProgress(
+      component,
       line({
         kind: "agent_end",
         agent: "explore",
@@ -72,8 +84,12 @@ describe("workflow progress widget", () => {
         runId: "r1",
       }),
     );
-    component.push(line({ kind: "agent_start", agent: "quick_task", label: "note:quick", ts: 26, runId: "r1" }));
-    component.push(
+    pushProgress(
+      component,
+      line({ kind: "agent_start", agent: "quick_task", label: "note:quick", ts: 26, runId: "r1" }),
+    );
+    pushProgress(
+      component,
       line({
         kind: "agent_end",
         agent: "quick_task",
@@ -89,14 +105,44 @@ describe("workflow progress widget", () => {
     const text = rendered.join("\n");
 
     expect(rendered.length).toBeLessThanOrEqual(Math.max(6, Math.min(30 - 6, 24)));
-    expect(text).toContain("workflow live-smoke (r1) - RUNNING phase=smoke active=0 done=2/2 failed=1");
-    // T-191: the agent name is now the petname; the row's title carries the label
-    // (`explore (note:explore)` → `note:explore`), so assert on titles + durations.
-    expect(text).toContain("note:explore");
+    expect(text).toContain("agents · workflow live-smoke #r1  ● RUNNING  1/2");
+    expect(text).toContain("stages · smoke (current) — verify (declared)");
+    // Passive mode deliberately shows one current/recent leaf through AgentLivePanel.
     expect(text).toContain("note:quick");
-    expect(text).toContain("22s");
     expect(text).toContain("4s");
+    expect(text).not.toContain("note:explore");
+    expect(text).toContain("/ps inspect agents");
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
+
+    fleetMenuState.setFocused(true);
+    const focused = component.render(100).join("\n");
+    expect(focused).not.toContain("note:explore");
+    expect(focused).toContain("note:quick");
+    expect(focused).toContain("/ps inspect agents");
+    fleetMenuState.setFocused(false);
+  });
+
+  it("keeps ordinary agent panels expanded while workflow compaction stays scope-local", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
+    const component = new WorkflowProgressComponent(tui, {}, "task reviewer", "ordinary-r1");
+
+    pushProgress(
+      component,
+      line({ kind: "agent_start", agent: "first", label: "ordinary first", ts: 1, runId: "ordinary-r1" }),
+    );
+    pushProgress(
+      component,
+      line({ kind: "agent_start", agent: "second", label: "ordinary second", ts: 2, runId: "ordinary-r1" }),
+    );
+
+    const text = component.render(120).join("\n");
+    expect(text).toContain("ordinary first");
+    expect(text).toContain("ordinary second");
+    expect(text).not.toContain("/ps inspect agents");
+    component.dispose();
+    agentLiveStore.reset();
   });
 
   // The live panel is the surface an operator watches while the run happens, so
@@ -106,7 +152,7 @@ describe("workflow progress widget", () => {
   it("declares reused recorded evidence with replayed=<n> in the header, and omits it on a fresh run", () => {
     agentLiveStore.reset();
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
-    const component = new WorkflowProgressComponent(tui, {}, "stages", "run-1");
+    const component = new WorkflowProgressComponent(tui, {}, "stages", "run-1", { scope: "workflow" });
 
     const stage = (n: number, replayed: boolean): void => {
       const common = {
@@ -115,21 +161,23 @@ describe("workflow progress widget", () => {
         runId: "run-1",
         ...(replayed ? { replayed: true } : {}),
       };
-      component.push(line({ ...common, kind: "agent_start", ts: n * 2 }));
-      component.push(line({ ...common, kind: "agent_end", status: "completed", durationMs: 0, ts: n * 2 + 1 }));
+      pushProgress(component, line({ ...common, kind: "agent_start", ts: n * 2 }));
+      pushProgress(
+        component,
+        line({ ...common, kind: "agent_end", status: "completed", durationMs: 0, ts: n * 2 + 1 }),
+      );
     };
 
     stage(1, true);
     stage(2, true);
     stage(3, false);
-    expect(component.render(120).join("\n")).toContain(
-      "workflow stages (run-1) - RUNNING phase=not-set active=0 done=3/3 replayed=2",
-    );
+    expect(component.render(120).join("\n")).toContain("agents · workflow stages #run1  ● RUNNING  replayed=2");
 
     agentLiveStore.reset();
-    const fresh = new WorkflowProgressComponent(tui, {}, "stages", "run-2");
-    fresh.push(line({ kind: "agent_start", agent: "default", label: "note:only", ts: 1, runId: "run-2" }));
-    fresh.push(
+    const fresh = new WorkflowProgressComponent(tui, {}, "stages", "run-2", { scope: "workflow" });
+    pushProgress(fresh, line({ kind: "agent_start", agent: "default", label: "note:only", ts: 1, runId: "run-2" }));
+    pushProgress(
+      fresh,
       line({
         kind: "agent_end",
         agent: "default",
@@ -141,7 +189,7 @@ describe("workflow progress widget", () => {
       }),
     );
     const freshText = fresh.render(120).join("\n");
-    expect(freshText).toContain("workflow stages (run-2) - RUNNING phase=not-set active=0 done=1/1");
+    expect(freshText).toContain("agents · workflow stages #run2  ● RUNNING");
     expect(freshText).not.toContain("replayed=");
   });
 
@@ -151,7 +199,7 @@ describe("workflow progress widget", () => {
     fleetMenuState.setVisibleRows([]);
     try {
       const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
-      const component = new WorkflowProgressComponent(tui, {}, "cancel-smoke", "cancel-r1");
+      const component = new WorkflowProgressComponent(tui, {}, "cancel-smoke", "cancel-r1", { scope: "workflow" });
       const start = line({ kind: "agent_start", agent: "reviewer", label: "sleep 60", ts: 1, runId: "cancel-r1" });
       const end = line({
         kind: "agent_end",
@@ -163,14 +211,14 @@ describe("workflow progress widget", () => {
         runId: "cancel-r1",
       });
 
-      component.push(start);
+      pushProgress(component, start);
       component.render(120); // Seeds the exact row selected by the shared fleet menu.
       fleetMenuState.setFocused(true);
-      component.push(end);
+      pushProgress(component, end);
       component.finish({ ok: true, result: { summary: "child status reviewer cancelled" } });
 
       const text = component.render(120).join("\n");
-      expect(text).toContain("workflow cancel-smoke (cancel-r1) - OK phase=not-set active=0 done=1/1 cancelled=1");
+      expect(text).toContain("agents · workflow cancel-smoke #elr1  ✓ OK");
       expect(text).toContain("⊘");
       expect(text).toContain("sleep 60");
       expect(text).toContain("✓ child status reviewer cancelled");
@@ -202,7 +250,7 @@ describe("workflow progress widget", () => {
       });
       const parentRowId = workflowAgentLiveRowId(parentLine);
 
-      component.push(parentLine);
+      pushProgress(component, parentLine);
       const child = agentLiveStore.begin({
         parentRowId,
         agentName: "reviewer",
@@ -266,10 +314,12 @@ describe("workflow progress widget", () => {
 
   it("renders the model+effort badge, token counter, and group summaries in the new grammar", () => {
     agentLiveStore.reset();
+    fleetMenuState.setFocused(true);
     try {
       const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 260 } };
       const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "rich-r1");
-      component.push(
+      pushProgress(
+        component,
         line({
           kind: "group_start",
           groupId: "parallel-1",
@@ -279,7 +329,8 @@ describe("workflow progress widget", () => {
           runId: "rich-r1",
         }),
       );
-      component.push(
+      pushProgress(
+        component,
         line({
           kind: "agent_start",
           agent: "reviewer",
@@ -309,7 +360,8 @@ describe("workflow progress widget", () => {
         turnCount: 1,
         tokenCount: { input: 7, output: 8 },
       });
-      component.push(
+      pushProgress(
+        component,
         line({
           kind: "group_end",
           status: "failed",
@@ -342,6 +394,7 @@ describe("workflow progress widget", () => {
       expect(rendered).not.toContain("flags=");
       component.dispose();
     } finally {
+      fleetMenuState.setFocused(false);
       agentLiveStore.reset();
     }
   });
@@ -351,9 +404,9 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 8, columns: 80 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1");
 
-    component.push(line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
+    pushProgress(component, line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
     for (let i = 0; i < 6; i += 1) {
-      component.push(line({ kind: "agent_start", agent: `agent_${i}`, ts: 2 + i, runId: "r1" }));
+      pushProgress(component, line({ kind: "agent_start", agent: `agent_${i}`, ts: 2 + i, runId: "r1" }));
     }
 
     const rendered = component.render(80);
@@ -368,8 +421,12 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 40 } };
     const component = new WorkflowProgressComponent(tui, {}, "a-very-long-script-reference-name", "run-1234567890");
 
-    component.push(line({ kind: "phase", phase: "a-long-phase-name-that-overflows", ts: 1, runId: "run-1234567890" }));
-    component.push(
+    pushProgress(
+      component,
+      line({ kind: "phase", phase: "a-long-phase-name-that-overflows", ts: 1, runId: "run-1234567890" }),
+    );
+    pushProgress(
+      component,
       line({
         kind: "agent_start",
         agent: "an_agent_with_a_long_name",
@@ -378,7 +435,8 @@ describe("workflow progress widget", () => {
         runId: "run-1234567890",
       }),
     );
-    component.push(
+    pushProgress(
+      component,
       line({
         kind: "log",
         message: "a log line whose message far exceeds forty columns of width",
@@ -386,7 +444,8 @@ describe("workflow progress widget", () => {
         runId: "run-1234567890",
       }),
     );
-    component.push(
+    pushProgress(
+      component,
       line({
         kind: "agent_end",
         agent: "an_agent_with_a_long_name",
@@ -405,16 +464,19 @@ describe("workflow progress widget", () => {
   });
 
   it("renders script, runtime, and legacy journal logs with distinct provenance", () => {
+    fleetMenuState.setFocused(true);
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "provenance-r1");
 
-    component.push(
+    pushProgress(
+      component,
       line({ kind: "log", source: "script", message: "compare candidates", ts: 1, runId: "provenance-r1" }),
     );
-    component.push(
+    pushProgress(
+      component,
       line({ kind: "log", source: "runtime", message: "[workflow:enter]", ts: 2, runId: "provenance-r1" }),
     );
-    component.push(line({ kind: "log", message: "old journal line", ts: 3, runId: "provenance-r1" }));
+    pushProgress(component, line({ kind: "log", message: "old journal line", ts: 3, runId: "provenance-r1" }));
 
     const text = component.render(100).join("\n");
     expect(text).toContain("│ script · compare candidates");
@@ -422,6 +484,93 @@ describe("workflow progress widget", () => {
     expect(text).toContain("│ journal · old journal line");
     expect(text).not.toContain("log:");
     expect(text.match(/│ script ·/g)).toHaveLength(1);
+    component.dispose();
+    fleetMenuState.setFocused(false);
+  });
+
+  it("labels only declared, reached, and current stages without inferring completion", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 160 } };
+    const component = new WorkflowProgressComponent(tui, {}, "review", "stage-r1", {
+      scope: "workflow",
+      declaredPhases: ["clarify", "scope", "questions", "review"],
+    });
+
+    pushProgress(component, line({ kind: "phase", phase: "clarify", ts: 1, runId: "stage-r1" }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_start",
+        agent: "reviewer",
+        label: "metadata only",
+        phase: "review",
+        ts: 1.5,
+        runId: "stage-r1",
+      }),
+    );
+    pushProgress(component, line({ kind: "phase", phase: "questions", ts: 2, runId: "stage-r1" }));
+    pushProgress(component, line({ kind: "phase", phase: "dynamic-check", ts: 3, runId: "stage-r1" }));
+
+    const stageLine = component.render(160).find((renderedLine) => renderedLine.startsWith("stages ·"));
+    expect(stageLine).toBe(
+      "stages · clarify (reached) — scope (declared) — questions (reached) — review (declared) — dynamic-check (current)",
+    );
+    expect(stageLine).not.toMatch(/completed|failed|✓|✗/u);
+    const narrowStageLine = component.render(50).find((renderedLine) => renderedLine.startsWith("stages ·"));
+    expect(narrowStageLine).toContain("current");
+    expect(narrowStageLine).toContain("dynamic-check");
+    component.dispose();
+  });
+
+  it("normalizes declared, reached, and current phases before stable deduplication", () => {
+    agentLiveStore.reset();
+    const component = new WorkflowProgressComponent(
+      { requestRender: vi.fn(), terminal: { rows: 30, columns: 160 } },
+      {},
+      "review",
+      "normalized-r1",
+      { scope: "workflow", declaredPhases: [" review ", "", "review", " verify ", "verify"] },
+    );
+
+    pushProgress(component, line({ kind: "phase", phase: "   ", ts: 1, runId: "normalized-r1" }));
+    pushProgress(component, line({ kind: "phase", phase: " review ", ts: 2, runId: "normalized-r1" }));
+    pushProgress(component, line({ kind: "phase", phase: "review", ts: 3, runId: "normalized-r1" }));
+    pushProgress(component, line({ kind: "phase", phase: " verify ", ts: 4, runId: "normalized-r1" }));
+    pushProgress(component, line({ kind: "phase", phase: "", ts: 5, runId: "normalized-r1" }));
+
+    expect(component.render(160).find((renderedLine) => renderedLine.startsWith("stages ·"))).toBe(
+      "stages · review (reached) — verify (current)",
+    );
+    component.dispose();
+  });
+
+  it("keeps bounded errors and evidence warnings visible in compact passive mode", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 140 } };
+    const component = new WorkflowProgressComponent(tui, {}, "review", "diagnostic-r1", { scope: "workflow" });
+
+    pushProgress(component, line({ kind: "error", message: "older diagnostic", ts: 1, runId: "diagnostic-r1" }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_end",
+        agent: "reviewer",
+        label: "review",
+        status: "completed",
+        evidenceWarnings: ["missing expected runtime evidence"],
+        ts: 2,
+        runId: "diagnostic-r1",
+      }),
+    );
+    pushProgress(component, line({ kind: "error", message: "latest workflow error", ts: 3, runId: "diagnostic-r1" }));
+
+    const text = component.render(140).join("\n");
+    expect(text).toContain("agent_end: reviewer completed");
+    expect(text).toContain("missing expected runtime evidence");
+    expect(text).toContain("error: latest workflow error");
+    expect(text).not.toContain("older diagnostic");
+    expect(text).toContain("/ps inspect agents");
     component.dispose();
   });
 
@@ -433,7 +582,7 @@ describe("workflow progress widget", () => {
       const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
       const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1");
 
-      component.push(line({ kind: "agent_start", agent: "slow", ts: 1, runId: "r1" }));
+      pushProgress(component, line({ kind: "agent_start", agent: "slow", ts: 1, runId: "r1" }));
       const afterStart = tui.requestRender.mock.calls.length;
 
       // No new journal event — only wall-clock advances. The timer must drive renders.
@@ -441,7 +590,8 @@ describe("workflow progress widget", () => {
       expect(tui.requestRender.mock.calls.length).toBeGreaterThan(afterStart);
 
       // Agent ends -> timer retires -> further wall-clock ticks add no more renders.
-      component.push(
+      pushProgress(
+        component,
         line({ kind: "agent_end", agent: "slow", status: "completed", durationMs: 3000, ts: 4, runId: "r1" }),
       );
       const afterEnd = tui.requestRender.mock.calls.length;
@@ -460,7 +610,7 @@ describe("workflow progress widget", () => {
       const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
       const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "invalidate-r1");
 
-      component.push(line({ kind: "agent_start", agent: "slow", ts: 1, runId: "invalidate-r1" }));
+      pushProgress(component, line({ kind: "agent_start", agent: "slow", ts: 1, runId: "invalidate-r1" }));
       tui.requestRender.mockClear();
 
       component.invalidate();
@@ -481,7 +631,7 @@ describe("workflow progress widget", () => {
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r");
 
     for (let i = 0; i < 200; i += 1) {
-      component.push(line({ kind: "log", message: "x", ts: Date.now(), runId: "r" }));
+      pushProgress(component, line({ kind: "log", message: "x", ts: Date.now(), runId: "r" }));
     }
 
     expect(component.render(80).length).toBeLessThanOrEqual(24);
@@ -502,6 +652,42 @@ describe("workflow progress widget", () => {
             renderedLine.includes("failed") || renderedLine.includes("error") || renderedLine.includes("FAIL"),
         ),
     ).toBe(true);
+  });
+
+  it("renders waiting and cancelled outcomes without collapsing either to OK", () => {
+    const awaiting = new WorkflowProgressComponent(
+      { requestRender: vi.fn(), terminal: { rows: 30, columns: 140 } },
+      {},
+      "review",
+      "awaiting-r1",
+      { scope: "workflow" },
+    );
+    awaiting.finish({
+      ok: true,
+      disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      result: { mode: "prepared" },
+    });
+    const awaitingText = awaiting.render(140).join("\n");
+    expect(awaitingText).toContain("◐ AWAITING OPERATOR");
+    expect(awaitingText).toContain("◐ awaiting operator · review clarification required");
+    expect(awaitingText).not.toContain("✓ OK");
+
+    const cancelled = new WorkflowProgressComponent(
+      { requestRender: vi.fn(), terminal: { rows: 30, columns: 140 } },
+      {},
+      "review",
+      "cancelled-r1",
+      { scope: "workflow" },
+    );
+    cancelled.finish({
+      ok: false,
+      disposition: { status: "cancelled", reason: "operator_stop" },
+      result: null,
+    });
+    const cancelledText = cancelled.render(140).join("\n");
+    expect(cancelledText).toContain("⊘ CANCELLED");
+    expect(cancelledText).toContain("⊘ cancelled by operator");
+    expect(cancelledText).not.toContain("✓ OK");
   });
 
   it("renders exact semantic failure rows when no technical error exists", () => {
@@ -670,7 +856,7 @@ describe("workflow progress widget", () => {
       expect(harness.widgetPayloads.has("workflows")).toBe(false);
       // The returned component is still live: push/finish must be harmless no-ops.
       expect(() => {
-        component.push(line({ kind: "agent_start", agent: "a", ts: 1, runId: "r" }));
+        pushProgress(component, line({ kind: "agent_start", agent: "a", ts: 1, runId: "r" }));
         component.finish({ ok: true });
       }).not.toThrow();
     }
@@ -748,6 +934,7 @@ describe("workflow progress widget", () => {
 
       try {
         await harness.commands.get("workflows")!.handler("run project.workflow.mjs", harness.ctx);
+        await waitUntil(() => typeof harness.widgetPayloads.get("workflows") === "function");
 
         const text = renderHarnessWidget(harness);
         expect(text).toContain("[RESULT] Workflow run");
@@ -776,6 +963,7 @@ describe("workflow progress widget", () => {
         workflowsExt(harness.pi);
 
         await harness.commands.get("workflows")!.handler("run silent.workflow.mjs", harness.ctx);
+        await waitUntil(() => harness.sentMessages.length === 1);
 
         let text: string;
         if (surface === "tui") {
@@ -812,7 +1000,7 @@ describe("workflow progress widget", () => {
     try {
       writeFileSync(
         path.join(root, "silent.workflow.mjs"),
-        "export default function() { return { summary: 'tool-ok', rawSecret: { nested: true } }; }\n",
+        "export default function({ publishArtifact }) { publishArtifact('handoff.md', 'reader handoff'); return { summary: 'tool-ok', rawSecret: { nested: true } }; }\n",
         "utf8",
       );
       const harness = createHarness(root);
@@ -823,15 +1011,28 @@ describe("workflow progress widget", () => {
       const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
 
       expect(text).toContain("✓ workflow silent.workflow.mjs finished · tool-ok");
+      expect(text).toContain('"artifactId":"published-0001"');
+      expect(text).toContain('"name":"handoff.md"');
       expect(text).not.toContain("rawSecret");
       expect(result.details).not.toHaveProperty("result");
       expect(result.details).toMatchObject({
         resultPath: expect.stringContaining("result.json"),
         resultPersistence: { ok: true },
+        artifactRefs: [
+          {
+            runId: expect.any(String),
+            artifactId: "published-0001",
+            name: "handoff.md",
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          },
+        ],
       });
       const resultPath = String(result.details?.resultPath ?? "");
-      expect(readFileSync(resultPath, "utf8")).toContain('"rawSecret"');
+      const persisted = readFileSync(resultPath, "utf8");
+      expect(persisted).toContain('"rawSecret"');
+      expect(persisted).toContain('"artifactRefs"');
 
+      delete harness.ctx.ui.custom;
       await harness.commands.get("workflows")!.handler(`status ${String(result.details?.runId ?? "")}`, harness.ctx);
       const payload = harness.widgetPayloads.get("workflows");
       expect(typeof payload).toBe("function");
@@ -866,6 +1067,7 @@ describe("workflow progress widget", () => {
         resultDiagnostic: { code: "WORKFLOW_RESULT_NOT_JSON_SAFE" },
       });
 
+      delete harness.ctx.ui.custom;
       await harness.commands.get("workflows")!.handler(`status ${String(result.details?.runId ?? "")}`, harness.ctx);
       expect(renderHarnessWidget(harness)).toContain("status:failed");
     } finally {
@@ -936,6 +1138,7 @@ describe("workflow progress widget", () => {
     const commandSpy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue(failed);
     try {
       await commandHarness.commands.get("workflows")!.handler("run semantic.workflow.mjs", commandHarness.ctx);
+      await waitUntil(() => typeof commandHarness.widgetPayloads.get("workflows") === "function");
       const text = renderHarnessWidget(commandHarness);
       expect(text).toContain("[ERROR] Workflow run");
       expect(text).toContain("Acceptance remains open");
@@ -975,6 +1178,7 @@ describe("workflow progress widget", () => {
       expect(harness.statuses.get("locus")).toContain("WF");
 
       await runPromise;
+      await waitUntil(() => harness.sentMessages.length === 1);
       expect(harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY)).not.toBeUndefined();
       const payload = harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY);
       const component = (payload as (tui: { requestRender: () => void }, theme: unknown) => WorkflowProgressComponent)(
@@ -1055,6 +1259,7 @@ describe("workflow progress widget", () => {
       workflowsExt(harness.pi);
 
       await harness.commands.get("workflows")!.handler("run done.workflow.mjs", harness.ctx);
+      await waitUntil(() => harness.sentMessages.length === 1);
       const payload = harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY);
       expect(typeof payload).toBe("function");
       const component = (payload as (tui: { requestRender: () => void }, theme: unknown) => WorkflowProgressComponent)(
@@ -1162,6 +1367,7 @@ describe("workflow progress widget", () => {
       );
       const harness = createHarness(root);
       harness.ctx.hasUI = true;
+      delete harness.ctx.ui.custom;
       workflowsExt(harness.pi);
 
       await harness.commands.get("workflows")!.handler(`status ${runId}`, harness.ctx);
@@ -1194,6 +1400,7 @@ describe("workflow progress widget", () => {
   it("keeps agent transport markers out of main status while retaining warnings and errors", async () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;
+    delete harness.ctx.ui.custom;
     workflowsExt(harness.pi);
     const runId = "20260101-000001-marker";
     const journal: WorkflowJournalLine[] = [
@@ -1224,6 +1431,7 @@ describe("workflow progress widget", () => {
     });
     try {
       await harness.commands.get("workflows")!.handler("run live-smoke", harness.ctx);
+      await waitUntil(() => harness.sentMessages.length === 1);
 
       const mainStatuses = [...harness.statuses.values()].join("\n");
       expect(mainStatuses).not.toContain("[agent] ->");
@@ -1361,6 +1569,7 @@ describe("workflow progress widget", () => {
   it("bare dashboard replaces stale status with a typed transient command view", async () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;
+    delete harness.ctx.ui.custom;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
 
@@ -1393,7 +1602,7 @@ describe("workflow progress widget", () => {
     for (const commandText of ["list", "status"]) {
       const harness = createHarness();
       harness.ctx.hasUI = true;
-      if (commandText === "list") delete harness.ctx.ui.custom;
+      delete harness.ctx.ui.custom;
       workflowsExt(harness.pi);
       const handler = harness.commands.get("workflows")!.handler;
 
@@ -1466,6 +1675,7 @@ describe("workflow progress widget", () => {
       }
       const harness = createHarness(root);
       harness.ctx.hasUI = true;
+      delete harness.ctx.ui.custom;
       workflowsExt(harness.pi);
       const handler = harness.commands.get("workflows")!.handler;
 

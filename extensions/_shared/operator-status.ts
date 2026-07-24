@@ -12,6 +12,7 @@ export interface OperatorStatusContribution {
   wide: string;
   compact: string;
   narrow: string;
+  tone?: "accent" | "warning" | "success";
 }
 
 interface OperatorStatusRegistry {
@@ -69,26 +70,40 @@ export function renderOperatorStatus(
   contributions: readonly OperatorStatusContribution[],
   terminalWidth: number,
 ): string | undefined {
+  const parts = statusParts(contributions, terminalWidth);
+  return parts.length === 0 ? undefined : parts.map((part) => part.value).join(STATUS_SEPARATOR);
+}
+
+function statusParts(
+  contributions: readonly OperatorStatusContribution[],
+  terminalWidth: number,
+): Array<{ value: string; tone?: OperatorStatusContribution["tone"] }> {
   const width = normalizedTerminalWidth(terminalWidth);
-  if (width === 0) return undefined;
+  if (width === 0) return [];
 
   const { budget, projection } = projectionForWidth(width);
   const effectiveBudget = Math.min(width, budget);
   const parts = [...contributions]
     .sort(compareContributions)
-    .map((contribution) => stripTerminalControlSequences(contribution[projection]))
-    .filter((value) => visibleWidth(value) > 0);
+    .map((contribution) => ({
+      value: stripTerminalControlSequences(contribution[projection]),
+      tone: contribution.tone,
+    }))
+    .filter((part) => visibleWidth(part.value) > 0);
 
-  if (parts.length === 0) return undefined;
+  if (parts.length === 0) return [];
 
-  while (parts.length > 1 && visibleWidth(parts.join(STATUS_SEPARATOR)) > effectiveBudget) {
+  while (parts.length > 1 && visibleWidth(parts.map((part) => part.value).join(STATUS_SEPARATOR)) > effectiveBudget) {
     parts.pop();
   }
 
-  const status = parts.join(STATUS_SEPARATOR);
-  return visibleWidth(status) <= effectiveBudget
-    ? status
-    : truncatePlainStatus(status, effectiveBudget);
+  if (parts.length === 1 && visibleWidth(parts[0]!.value) > effectiveBudget) {
+    parts[0] = {
+      ...parts[0]!,
+      value: truncatePlainStatus(parts[0]!.value, effectiveBudget),
+    };
+  }
+  return parts;
 }
 
 function truncatePlainStatus(value: string, maxWidth: number): string {
@@ -113,16 +128,21 @@ function publishOperatorStatus(
   contributions: Map<string, OperatorStatusContribution>,
   terminalWidth: number,
 ): void {
-  ctx.ui.setStatus(
-    OPERATOR_STATUS_KEY,
-    renderOperatorStatus([...contributions.values()], terminalWidth),
-  );
+  const parts = statusParts([...contributions.values()], terminalWidth);
+  const rendered =
+    parts.length === 0
+      ? undefined
+      : parts
+          .map((part) =>
+            part.tone !== undefined && ctx.mode === "tui" && ctx.ui.theme !== undefined
+              ? ctx.ui.theme.fg(part.tone, part.value)
+              : part.value,
+          )
+          .join(STATUS_SEPARATOR);
+  ctx.ui.setStatus(OPERATOR_STATUS_KEY, rendered);
 }
 
-function compareContributions(
-  left: OperatorStatusContribution,
-  right: OperatorStatusContribution,
-): number {
+function compareContributions(left: OperatorStatusContribution, right: OperatorStatusContribution): number {
   const laneOrder = LANE_RANK[left.lane] - LANE_RANK[right.lane];
   if (laneOrder !== 0) return laneOrder;
 

@@ -31,11 +31,24 @@ export const meta = {
 };
 
 export default async function runWorkflow(dsl, input) {
-  const { agent, phase, log, promptFile, parallel, pipeline, workflow } = dsl;
+  const {
+    agent,
+    publishArtifact,
+    consumeTextArtifact,
+    continuationArtifacts,
+    captureSourceState,
+    awaitOperator,
+    phase,
+    log,
+    promptFile,
+    parallel,
+    pipeline,
+    workflow,
+  } = dsl;
   // Authoring policy: use `dsl` only. Runtime does not enforce this boundary;
   // imported modules have full host Node.js capabilities. Run reviewed files only.
-  // `input` is the run's task: the free-text [input] from the run command, or a
-  // JSON object of named parameters when the caller used the `workflow` tool.
+  // `input` is absent or the exact bounded semantic text supplied by the caller.
+  // Cross-run refs arrive separately through continuationArtifacts().
   // The returned value is written to result.json as `result`.
 }
 ```
@@ -67,11 +80,18 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   3. personal `~/.pi/workflows/<name>.workflow.mjs`.
   4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES`. Files under
      `extensions/workflows/examples/` are not registered merely because they exist.
+     This repository's `locus-plan` and `test-code` workflows live in ignored
+     `.pi/workflows/` only. They are project-local planning/testing dogfood, not
+     tracked examples, curated Package workflows, or npm package files.
+     Their final planning verifier and test attribution roles use
+     host-enforced `readOnly: true` plus `repository_check`, never unrestricted
+     shell, and their intent, plans, units, predecessor handoffs, results, and
+     final verification inputs have explicit bounds.
 - **Run:** `/workflows run <name|path> [input]` or the
-  `workflow { name | scriptPath, input }` tool. The command passes free text; the
-  tool also accepts a JSON object of named parameters. A parameterised workflow
-  normalises both shapes once at the top and keeps the string branch usable —
-  see "Workflow input" in the canonical doc and the pattern catalog. Arbitrary
+  `workflow { name | scriptPath, input, continuation? }` tool. Both surfaces pass
+  only optional bounded semantic text. The tool can separately attach 1–8
+  complete prior-run artifact refs through its closed `continuation` control;
+  direct slash continuation is not supported. Arbitrary
   inline JS is **not** supported — trusted-file only.
   Project targets are checked lexically and by canonical `realpath`; symlinks may
   point only to files that remain inside the project root when resolved. Do not replace
@@ -85,6 +105,13 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   unproven and refuses to record or replay it. Replay rules, refusal reasons, and
   the replayed-run marking are in the canonical doc.
 - **Read the result:** `.locus/runtime/workflows/<runId>/result.json`. Top-level
+  `disposition` is the operator lifecycle truth: `completed`,
+  `awaiting_operator`, `cancelled`, or `failed`. Use
+  `awaitOperator({ reason })` immediately before a successful handoff return;
+  it records a bounded declaration outside the returned value, so existing
+  payload/continuation shapes stay unchanged. The runner honors the declaration
+  only when the run otherwise succeeds; an abort or failure takes precedence.
+  The last declaration wins. Top-level
   boolean `result.ok` is reserved as the script's run outcome: `false` makes the
   outer run fail even without a technical `error`; missing, nested, or
   non-boolean `ok` keeps legacy execution-success semantics. A top-level
@@ -95,6 +122,43 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   value or failure to persist this mandatory envelope is an infrastructure
   failure and makes the outer run `ok:false`; there is no successful
   result-unavailable or write-warning-only state.
+- **Keep evidence under the run owner:**
+  `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical
+  artifact inventory. Every `agent()` attempt automatically persists its exact
+  answer and, for a fresh child session, its Pi transcript and result envelope.
+  Use `agent(prompt, { artifact: "report.md" })` to give that answer a stable
+  name. Use `publishArtifact(name, text)` for deterministic workflow-authored
+  text. Agent-first cross-run calls attach complete digest-bound
+  `{ runId, artifactId, name, sha256 }` refs through the workflow tool's closed
+  `continuation` control. The host verifies and copies every ref before the
+  workflow module or any child starts; `continuationArtifacts()` exposes readonly
+  `{ sourceRef, consumedArtifact }` pairs. A path, run id, partial reference, or
+  ref encoded inside `input` is not enough. Trusted scripts may still call
+  `consumeTextArtifact(ref)` when the ref is already fixed by reviewed code and
+  appears in the successful source run's terminal `artifactRefs` projection.
+  Being present only in the full artifact index is not a continuation handoff.
+  The consumer verifies projection membership, index identity, digest, media
+  type, size, confinement, and bytes before copying the text into its own run
+  with source lineage and verified source workflow identity. The consumed value
+  also exposes the validated source terminal JSON result and projected refs;
+  use them when the consumer must prove that refs were named by a structured
+  prepare result or that bytes were the run's final string output rather than
+  merely an indexed same-name artifact. The runtime validates the complete
+  physical directory chain from the resolved project root through the run root;
+  a symlinked `.locus`, `runtime`, or deeper ancestor fails closed. Artifact names are
+  one safe component (1-128 ASCII letters, digits, `.`, `_`, or `-`, beginning
+  with a letter or digit); text is limited to 2 MiB. Duplicate names are allowed,
+  because `artifactId` is the identity; duplicate ids or destinations fail closed.
+  The completed run envelope and model-callable workflow tool project the newest
+  20 answer/published refs and an explicit omitted count, so a later call can
+  carry a real ref without guessing the index. The full index remains canonical.
+- **Fingerprint mutable remediation:** `captureSourceState(label)` persists a
+  host-owned Git fingerprint under the current run. Use it around write-capable
+  stages and read-only checks to distinguish expected writer changes from drift
+  outside the declared window. Every initialized gitlink is enumerated
+  independently of its parent modification state and contributes the checked-out
+  submodule HEAD, index, status, and changed/untracked bytes. It records
+  evidence; it does not lock the checkout.
 - **Treat groups as fail-closed full barriers:** `parallel()` / `pipeline()` wait
   for scheduled siblings, then reject `WorkflowGroupFailureError` when an
   ordinary branch or stage throws or directly returns `ok:false` /
@@ -115,8 +179,8 @@ judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog
 subject defaults to the staged text pipeline used by the curated `review` and
 `review-fix` workflows: sequential `agent()` stages with one cognitive job each,
 exact text handoffs the workflow never parses, every `readOnly: true` inspection
-stage before any writing stage, and source mutation kept separate from artifact
-publication. Take the stage count from the requirement — two stages is a
+stage before any writing stage, and runtime-owned artifact persistence rather
+than a publisher child. Take the stage count from the requirement — two stages is a
 complete pipeline. For the full primitive table,
 schema/trust rules, and edge-cases, read the canonical doc linked above.
 

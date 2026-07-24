@@ -7,7 +7,8 @@ import { createSessionStore, type SessionStore } from "./runtime-capabilities.js
 import type { ModelRoleResolution } from "./model-settings.js";
 import { modelRoleResolutionRecord } from "./model-settings.js";
 import type { RuntimeArtifact } from "./artifacts.js";
-import { createRuntimeArtifactStore } from "./artifacts.js";
+import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "./artifacts.js";
+import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
 export type ApprovalTier = "allow" | "prompt" | "deny";
@@ -30,6 +31,8 @@ export interface AgentRunRequest {
   approvalTier: ApprovalTier;
   modelRoleResolution?: ModelRoleResolution;
   parentContext?: AgentParentContext;
+  /** Exact package scripts frozen by a workflow before any writer child runs. */
+  repositoryCheckScripts?: RepositoryCheckScripts;
   metadata?: Record<string, unknown>;
 }
 
@@ -80,6 +83,8 @@ export interface AgentRunBoundaryOptions {
   sessionStore?: SessionStore;
   executor?: AgentExecutor;
   signal?: AbortSignal;
+  /** Explicit workflow-call-local destination for the result envelope. */
+  resultArtifactsDir?: string;
 }
 
 // T-119 PRE-CHECK: getBranch UNREACHABLE
@@ -139,11 +144,12 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
       projectRoot,
       request,
       blockedResult(request, "No agent executor is configured.", lifecycleEntryIds, childSession),
+      options.resultArtifactsDir,
     );
   }
 
   const result = await options.executor.run(request, options.signal ?? new AbortController().signal);
-  return writeAgentRunResultArtifact(projectRoot, request, result);
+  return writeAgentRunResultArtifact(projectRoot, request, result, options.resultArtifactsDir);
 }
 
 export function validateRunPolicy(request: AgentRunRequest): string | undefined {
@@ -172,6 +178,7 @@ export function createAgentRunRequest(
   if (input.metadata !== undefined) request.metadata = input.metadata;
   if (input.modelRoleResolution !== undefined) request.modelRoleResolution = input.modelRoleResolution;
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
+  if (input.repositoryCheckScripts !== undefined) request.repositoryCheckScripts = input.repositoryCheckScripts;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
   return request;
 }
@@ -224,9 +231,13 @@ export function writeAgentRunResultArtifact(
   projectRoot: string,
   request: AgentRunRequest,
   result: AgentRunResult,
+  resultArtifactsDir?: string,
 ): AgentRunResult {
   if (result.resultArtifact !== undefined) return result;
-  const store = createRuntimeArtifactStore(projectRoot);
+  const store =
+    resultArtifactsDir === undefined
+      ? createRuntimeArtifactStore(projectRoot)
+      : new FileRuntimeArtifactStore({ rootDir: resultArtifactsDir });
   const body = {
     version: "locus.agent.run-result.v1",
     status: result.status,

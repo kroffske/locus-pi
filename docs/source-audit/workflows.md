@@ -13,7 +13,22 @@ or borrowed runtime implementation was identified for this source-audit slice.
   progress, transcript and catalog owners without redefining their policies. The
   model-callable tool keeps Pi `approval: "exec"` with full-host/no-sandbox
   warning details; explicit operator `/workflows run` does not pass through that
-  tool approval and adds no second Locus prompt.
+  tool approval and adds no second Locus prompt. Interactive command runs claim
+  one stable session/project background identity and return the editor; the programmatic
+  tool remains awaited/headless but registers non-exclusive control with the
+  same run owner. `/workflows stop [runId|last]` reaches either launch origin,
+  is the sole workflow operator-cancellation path, and reports `stopping` until
+  terminal settlement. Native command completion returns full argument strings
+  for grammar-owned tokens and yields free-text tails.
+- `extensions/workflows/background-run-registry.ts` owns the process-local stable
+  session/project identity, a generation-scoped callback lease, abort controller,
+  and terminal promise for command and tool runs. Tool control is non-exclusive
+  and does not occupy the single interactive slash slot. Reload cannot claim a second run
+  under the same identity until an abort-ignoring predecessor settles.
+  `session_shutdown` revokes callbacks, aborts active work, and the extension
+  immediately disposes its session-owned progress component, including its
+  live-store listener and timer, so a late child cannot repaint or append into a
+  reloaded session.
 - `extensions/workflows/workflow-transcript.ts` owns the explicit command/tool
   transcript boundary. Command and tool runs buffer lifecycle without any
   active-run `sendMessage`. After completion, a command awaits `waitForIdle`,
@@ -57,6 +72,17 @@ or borrowed runtime implementation was identified for this source-audit slice.
   read-only `WorkflowInfoViewer`: it renders one immutable `OperatorBlock`, keeps
   every semantic line reachable with Up/Down, PgUp/PgDn, and Home/End at 146,
   80, and 48 columns, and closes with Esc/q.
+- `extensions/workflows/run-viewer.ts` owns the read-only persisted evidence
+  browser used by `/workflows dashboard` and interactive status commands. It
+  discovers accepted run ids through the journal owner, groups journal and
+  indexed artifacts by phase, and exposes run → stage → evidence → content
+  navigation. It reads no live agent/session state. Before rendering an indexed
+  artifact it reopens the record through the artifact owner and verifies digest,
+  relative path, size, and media type; changed, missing, malformed, oversized,
+  or tampered evidence remains an explicit unavailable state. If custom UI
+  creation throws, command routing immediately returns the bounded static block
+  instead of routing back into the same viewer. RPC, print/no-UI, and TUI hosts
+  without custom UI keep that projection.
 - `extensions/workflows/index.ts` projects static help, catalog, status/detail,
   launch errors and headless settled receipts through the shared typed operator
   block. It also owns the single `/workflows info [name]` block and chooses its
@@ -65,10 +91,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
   with an honest fallback limitation. The info viewer cannot import or run a
   workflow, mutate the editor, or write files. Separately, the TUI list awaits
   the focused catalog component's typed result, then may call `setEditorText()`
-  once after custom UI completion with a compact Request +
-  `$pi-workflow-authoring` skill handoff; the skill owns the action procedure.
+  once after custom UI completion. `Start` prefills the direct
+  `/workflows run <resolved-name>` command, so submitting it reaches the runtime
+  without a model planning/authoring turn. `Edit` and `Review` keep the compact
+  Request + `$pi-workflow-authoring` handoff because those actions require source
+  work; historical rows remain review-only.
   Back/cancel yields no editor mutation; an absent or throwing setter has an
   explicit warning and no send/run fallback.
+  Every custom workflow browser/viewer uses the shared inline interaction
+  contract (`overlay:false`), so it replaces the editor area instead of covering
+  scrollback and restores editor focus on close.
   It bounds status/detail rows and leaves complete evidence in `result.json`.
   The existing live progress, resolver, journal, approval, and execution owners
   are not reimplemented by this presentation layer.
@@ -78,9 +110,18 @@ or borrowed runtime implementation was identified for this source-audit slice.
   delegates row retention to store-owned cleanup: the newest five fully terminal
   workflow run subtrees remain available for `/ps` viewer/last/direct guidance,
   older terminal subtrees are pruned, and active, queued, or zero-row runs are not
-  counted or pruned. No timer or second workflow registry is used.
+  counted or pruned. No timer or duplicate workflow registry is used.
+- `extensions/workflows/progress-widget.ts` owns the workflow-specific compact
+  stage projection: declared/reached/current labels in declaration order, one
+  active shared agent row, non-selectable parallel headings, and round `rN`
+  markers. `/ps` remains the shared fleet/viewer entrypoint rather than a second
+  workflow renderer; the workflow event adapter verifies replay answer artifacts
+  before it projects their text into the generic viewer row.
 - `extensions/_shared/workflow-runtime.ts` owns the DSL primitives:
-  `agent`, `parallel`, `pipeline`, `phase`, `log`, and `workflow`. `agent()` is the
+  `agent`, `publishArtifact`, `consumeTextArtifact`, `captureSourceState`,
+  `awaitOperator`, `promptFile`, `workspace`,
+  `projectRoot`, `parallel`, `pipeline`, `phase`, `log`, `now`, and `random`.
+  `agent()` is the
   single model-calling primitive; the former direct-completion node `llm()` and its
   pi-ai bridge were removed, together with the `llm_start`/`llm_end`/`llm_delta`
   journal kinds and the synthetic `llm` live row.
@@ -94,6 +135,40 @@ or borrowed runtime implementation was identified for this source-audit slice.
   object. It distinguishes valid recovery from exhausted parser/validator
   mismatch, records actual fresh attempts, and mirrors the outcome to terminal
   journal lines; it is protocol accounting, not a domain-quality verdict.
+- `extensions/_shared/workflow-artifacts.ts` owns the canonical per-run artifact
+  store at `.locus/runtime/workflows/<runId>/artifacts/index.json`. Every record
+  binds `{runId, artifactId, name, sha256}` to media type, size, relative path,
+  stage, provenance, and optional source lineage. It assigns confined
+  answer/transcript/result, published, and consumed-input destinations; verifies
+  the single-owner index, safe components, regular-file/symlink confinement,
+  transcript identity, byte limits, and digests; and exposes side-effect-free
+  readers for viewers. `publishArtifact()` appends deterministic text.
+  `consumeTextArtifact()` accepts only a complete reference from a successful
+  prior run's terminal artifact projection, verifies and copies the source
+  bytes, and records the original ref. An index-only record is not consumable.
+  The confinement check starts at the physical project root and rejects a
+  symlink in any `.locus/runtime/workflows/<runId>` ancestor before read, write,
+  or consume. It also returns the verified source workflow target, source
+  artifact kind/stage, structured terminal result, and terminal artifact refs so
+  compositions can bind a handoff to the producer's result rather than mutable
+  index metadata. Self-reference and partial/tampered refs fail closed.
+- `extensions/_shared/workflow-runner.ts` owns final disposition after every
+  evidence owner has settled: controlling abort, failure, declared operator
+  handoff, then completion. It persists closed cancellation reasons and a
+  runtime cancellation journal line, so trusted script catches cannot turn an
+  aborted run green. It also projects the newest 20 answer and
+  workflow-published refs into the persisted run envelope, with an explicit
+  omitted count. `extensions/workflows/index.ts` copies the same bounded list
+  into native workflow tool details and text so the calling model can pass a
+  complete ref to a later run without inventing an artifact id. The canonical
+  full inventory remains the per-run artifact index.
+- `extensions/_shared/workflow-worktree.ts` also owns deterministic source-state
+  capture for mutation-bearing workflows. It hashes Git HEAD, the index, status,
+  and bounded changed/untracked bytes without changing the checkout. It
+  enumerates every initialized gitlink independently of parent modification
+  state, then recursively includes submodule HEAD, index, status, and changed
+  bytes. The runtime stores each labeled snapshot as a run artifact. This is
+  drift evidence, not a repository lock or atomic filesystem snapshot.
 - `extensions/_shared/workflow-journal.ts` owns run discovery/order and
   immutable executed-snapshot reads as well as journal-to-live status mapping.
   Status/catalog consumers see only evidenced directories with a canonical UTC
@@ -103,15 +178,38 @@ or borrowed runtime implementation was identified for this source-audit slice.
   directory chain, regular non-symlink file, direct-child realpath containment,
   valid persisted target, and matching byte hash. `legacy`, `missing`,
   `unreadable`, `invalid`, and `tampered` are explicit and perform no alternative
-  or current-source read. `cancelled` is a distinct terminal live state; terminal
+  or current-source read. Malformed NDJSON rows and structurally invalid journal
+  objects remain explicit diagnostics rather than disappearing from the read
+  model. Per-kind field allowlists and required fields prevent an empty
+  `agent_end` or a cross-kind field from becoming completion evidence.
+  Persisted summaries consume the strict shared disposition projector; only an
+  absent legacy disposition falls back to `ok`, while malformed future values
+  remain `unknown`. `cancelled` is a distinct terminal live state; terminal
   mapping clears active tool state so the progress panel and shared fleet agree.
 - `extensions/_shared/agent-live-panel.ts` owns status markers and short event
   grammar: success only for `done`, distinct cancelled and failed variants.
+- `extensions/_shared/fleet-menu.ts` uses explicit `workflowRunId` provenance
+  to keep workflow rows inspectable while suppressing both the `x stop` hint and
+  handler. Escape is consumed without host abort while workflow work is active;
+  `/workflows stop` remains the only workflow cancellation entrypoint.
 - `extensions/_shared/agent-sdk-host.ts` settles the canonical SDK child row to
   `cancelled` on an abort before returning the child result; the journal mapping
   settles the workflow parent to the same state. `AgentLiveStore.patch` owns the
   shared terminal invariant for `done`/`cancelled`/`error`: remove all three live
-  tool fields and freeze elapsed time once.
+  tool fields and freeze elapsed time once. Turn cancellation waits only a
+  bounded interval for the SDK `abort()` acknowledgement, then continues trace,
+  result, and disposal work even if that promise never settles.
+- `extensions/_shared/agent-read-only-policy.ts` owns the optional
+  `repository_check` capability for read-only children. The workflow bridge
+  freezes the exact package script map before any child can write. The model can
+  name only a baseline script while the entire current map still equals that
+  baseline; additions, removals, changes, and lifecycle hooks all fail closed.
+  The host fixes the package-manager argv,
+  cwd, timeout, output bound, and cleanup, overlays current tracked/untracked
+  source into a disposable external Git worktree, recursively materializes
+  initialized gitlink source without Git administrative metadata, and never
+  executes in the operator checkout. Package scripts remain trusted
+  operator-owned code; this is checkout isolation, not an OS/network sandbox.
 - `extensions/_shared/workflow-script-identity.ts` owns versioned exact-entry
   identity, static source-policy analysis, read-only snapshots and final snapshot
   verification. Default `self-contained-static` permits only direct static
@@ -188,52 +286,56 @@ or borrowed runtime implementation was identified for this source-audit slice.
   fallback expose it instead of collapsing a failed run to a generic workflow
   error. The run-level token/cost budget is summed from `agent_end` `usage`.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
-  review composition, not a new runtime primitive. It accepts an opaque
-  free-form request. Six catalog-agent sessions run strictly in sequence and
-  own scope resolution, change inventory, review-unit planning, question
-  formulation, independent verification, and publication. Complete stage
-  prompts live beside the entry under `resources/`; runtime resolves them from
-  the original workflow source, rejects path escapes, snapshots each loaded
-  file once, and records SHA-256 evidence. Every `agent()` call returns
-  exact non-empty text. The coordinator forwards `scopeText`, `inventoryText`,
-  `unitsText`, `questionsText`, and `reviewText` verbatim and never parses
-  verdicts, statuses, ids, paths, or JSON. The raw operator request stops at
-  the scope resolver. A publisher creates a local review task and writes
-  task-local review Markdown, of which `.tasks/<task>/artifacts/review.md` is
-  the mandatory reader-facing report, only after proving `.tasks/` is ignored;
-  it writes no fix plan, dispositions, or hashes. Repository/forge evidence
-  remains child-session-owned; the workflow performs no direct Git, network,
-  forge-specific, or packet-building work. R1-R4 pass
-  `readOnly: true`; the shared SDK host narrows their sessions to known read
-  tools and removes shell, write/edit, nested workflow, and unknown tools.
-  Their local Git evidence comes through `git_read`, which invokes only
-  allowlisted query subcommands without a shell and rejects mutating or
-  process-spawning options. The unit planner, interrogator, and verifier also
-  receive `ast_index`, an allowlisted argv tool over the installed `ast-index`
-  binary whose database lives in the user cache directory; `clear`, `watch`,
-  unknown commands, and output-file options are rejected, and a missing binary
-  or index degrades to `grep`/`find` instead of blocking the review. The
-  publisher remains the only write-capable review agent.
-- `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the curated,
-  human-gated remediation exception. Deterministic `review-fix-input.mjs`
-  validates path confinement — project-relative, named `review.md`, inside a
-  task `artifacts` directory, no symlink escape — and refuses a review whose
-  `## Findings` section is missing or lists no remaining `### <id>` block, so
-  an operator who deleted every finding never reaches an agent. The single
-  `review.md` token is extracted from an otherwise free-form request; two
-  different candidates are rejected rather than guessed. No hash, snapshot,
-  disposition, or reviewed commit is validated, because `review.md` is
-  deliberately a human-edited document and the review may cover uncommitted
-  work. Five prompt-configured sessions then mirror the review shape: scope
-  resolution, finding revalidation plus atomic fix-unit planning, application,
-  verification, and publication. All run in the launch checkout with
-  `workspaceMode: "project"`. Scope resolution and unit planning pass
-  host-enforced `readOnly`; the verifier deliberately does not, because
-  repository checks need a shell, and it receives implementation text verbatim
-  but reopens the working-tree diff as evidence. Prompts prohibit commit, push, pull-request creation, merge,
-  deployment, remote mutation, and discarding uncommitted work the agent did
-  not create; changes stay uncommitted for operator diff review. These are
-  agent instructions plus Pi approvals, not a new sandbox.
+  review composition, not a new runtime primitive. A fresh semantic string goes
+  first to a shaped read-only clarifier. It either continues or publishes exact
+  intent/question refs and stops. A later call supplies non-empty answers as
+  text while host continuation verifies and copies both refs before entry code;
+  the workflow validates terminal provenance and publishes those answers. Both
+  fresh-continue and continuation paths then run five
+  sequential read-only sessions for scope, inventory, units, questions, and
+  independent verification. Deterministic entry code requires unique inventory
+  `C<n>` headings, exact-once unit assignment, exact ledger grammar with the
+  assigned `U<n>` preserved in questions and final review, and bounded text at
+  every handoff. Runtime `publishArtifact()` owns every durable
+  Markdown handoff and persists the verifier's exact text as `review.md`; there
+  is no publisher child or task-local report. Complete stage prompts live beside
+  the entry under `resources/`; runtime resolves, confines, snapshots, and
+  hashes them. Repository/forge evidence remains child-session-owned. The
+  review entry imports nothing and retains `self-contained-static` identity.
+- `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
+  curated remediation exception. It accepts only semantic text plus host
+  continuation containing one complete immutable `review.md` ref. The artifact owner
+  verifies the successful source run, full reference, and digest before copying
+  bytes into the new run; entry code additionally requires the bytes to equal
+  the source terminal result, the exact ref to be its last projected output, and
+  the final `verify-review` answer to come from the curated Package workflow named `review`.
+  A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units through
+  the shaped-agent boundary. Deterministic entry code then parses complete
+  `### F<n>` blocks inside `## Findings`, rejects invalid ids, notes, edges and
+  cycles, and computes stable topological order before writers. A read-only scope
+  resolver sees only selected blocks. Exactly one sequential writer owns each
+  selected finding in the launch checkout. Host
+  fingerprints bracket remediation and every writer/check boundary, include
+  every initialized submodule HEAD/index/status/bytes, and every remediation input/handoff has a fixed character
+  bound. A separate
+  host-enforced read-only child collects full-diff evidence and runs only
+  baseline package scripts through the isolated `repository_check` tool while
+  the complete pre-writer script map remains unchanged; added/removed/modified
+  commands or lifecycle hooks are rejected before execution. A fresh
+  read-only child reopens every original finding, affected dependency,
+  regression risk, and source-state transition. `agent({artifact})` names
+  the automatic answers `finding-plan.json`, `scope.md`, `worker-F<n>.md`, `check-evidence.md`, and
+  `re-review.md`; the last is also the workflow result. There is no imported
+  input helper, unit planner, publisher, task-local output, or `fix-report.md`,
+  so the entry keeps `self-contained-static` identity. Prompts prohibit commit,
+  push, pull-request creation, merge, deployment, remote mutation, and
+  discarding unrelated uncommitted work. These remain agent instructions plus
+  Pi approvals, not a new sandbox.
+- `.pi/workflows/locus-plan.workflow.mjs` and
+  `.pi/workflows/test-code.workflow.mjs` are ignored project-local dogfood for
+  split-run planning and independent testcase design, implementation/execution,
+  and failure attribution. They are not tracked source, Package registry rows,
+  or public npm files and therefore do not widen this audited package surface.
 - Workflow rows and the `agents` entrypoint share the versioned process-local
   live store required by Pi's per-entrypoint `jiti` loading. This makes active
   workflow children drillable and individually cancellable from the fleet.

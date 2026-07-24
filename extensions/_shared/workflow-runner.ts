@@ -21,8 +21,13 @@ import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
-import type { WorkflowDsl, WorkflowJournalLine, WorkflowRuntime } from "./workflow-runtime.js";
-import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
+import type {
+  WorkflowAwaitOperatorDeclaration,
+  WorkflowDsl,
+  WorkflowJournalLine,
+  WorkflowRuntime,
+} from "./workflow-runtime.js";
+import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import {
@@ -45,8 +50,10 @@ import {
 import {
   prepareWorkflowResult,
   isWorkflowResultExplicitFailure,
+  workflowDispositionForCompletion,
   workflowResultFile,
   writeWorkflowResultJson,
+  type WorkflowDisposition,
   type WorkflowResultDiagnosticSentinel,
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
@@ -65,10 +72,22 @@ import {
   type WorkflowResourceLoader,
 } from "./workflow-resources.js";
 import {
+  createWorkflowSourceStateReader,
   createWorkflowWorkspaceManager,
   type WorkflowWorkspaceEvidence,
   type WorkflowWorkspaceManager,
 } from "./workflow-worktree.js";
+import {
+  assertWorkflowContinuation,
+  consumeWorkflowContinuation,
+  continuationJournalProjection,
+  createWorkflowArtifactStore,
+  type WorkflowArtifactRef,
+  type WorkflowArtifactStore,
+  type WorkflowBoundContinuation,
+  type WorkflowContinuation,
+  type WorkflowContinuationJournal,
+} from "./workflow-artifacts.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 
@@ -77,8 +96,8 @@ export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 // ---------------------------------------------------------------------------
 
 export interface WorkflowScriptModule {
-  default?: (dsl: WorkflowDsl, input?: unknown) => Promise<unknown> | unknown;
-  runWorkflow?: (dsl: WorkflowDsl, input?: unknown) => Promise<unknown> | unknown;
+  default?: (dsl: WorkflowDsl, input?: string) => Promise<unknown> | unknown;
+  runWorkflow?: (dsl: WorkflowDsl, input?: string) => Promise<unknown> | unknown;
   meta?: { name?: string; description?: string; identityCoverage?: "self-contained-static" | "entry-only" };
 }
 
@@ -108,12 +127,20 @@ export interface RunWorkflowScriptOptions {
   name?: string;
   scriptPath?: string;
   script?: string;
-  input?: unknown;
+  /** Optional bounded human semantic request. */
+  input?: string;
+  /** Closed host-owned cross-run artifact binding. */
+  continuation?: WorkflowContinuation;
   resumeFromRunId?: string;
   /** Global per-run cap across all dsl.agent() calls. Defaults to the runtime default
    *  (DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS) when unset. Exceeding it fails the run. */
   maxTotalAgentInvocations?: number;
-  createExecutor?: (o: { model?: unknown }) => AgentExecutor; // pass-through to the bridge (tests)
+  createExecutor?: (o: {
+    model?: unknown;
+    live?: import("./agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
+    maxToolCalls?: number;
+    reportsDir?: string;
+  }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: (selector: string) => unknown; // pass-through to the bridge (tests)
   /** Called once after run identity is allocated and before any journal event. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
@@ -124,6 +151,8 @@ export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
   ok: boolean;
+  /** Runtime-owned terminal meaning. Optional only for legacy/test envelopes. */
+  disposition?: WorkflowDisposition;
   result: unknown; // detached JSON value or explicit diagnostic sentinel
   resultDiagnostic?: WorkflowResultDiagnosticSentinel;
   resultPersistence: WorkflowResultPersistence;
@@ -133,12 +162,19 @@ export interface RunWorkflowScriptResult {
   scriptIdentity?: WorkflowScriptIdentity;
   resourceEvidence?: WorkflowResourceEvidence[];
   workspaceEvidence?: WorkflowWorkspaceEvidence[];
+  /** Bounded reader-facing output refs (answers and workflow-published text),
+   *  newest slice when a run produced more than the projection limit. */
+  artifactRefs?: WorkflowArtifactRef[];
+  artifactRefsOmitted?: number;
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
+  continuation?: WorkflowContinuationJournal;
   /** What this run did about recorded-call replay. Absent only when the run
    *  failed before its script identity was established. */
   replay?: WorkflowReplayEnvelope;
 }
+
+const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 
 // ---------------------------------------------------------------------------
 // Path resolution
@@ -417,6 +453,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let resourceLoader: WorkflowResourceLoader | undefined;
   let workspaceManager: WorkflowWorkspaceManager | undefined;
   let runtime: WorkflowRuntime | undefined;
+  let artifactStore: WorkflowArtifactStore | undefined;
+  let boundContinuation: WorkflowBoundContinuation | undefined;
+  let continuationProjection: WorkflowContinuationJournal | undefined;
+  let awaitOperatorDeclaration: WorkflowAwaitOperatorDeclaration | undefined;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
   const preludeLines: WorkflowJournalLine[] = [];
   const emitPrelude = (line: WorkflowJournalLine): void => {
@@ -424,12 +464,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal.write(line);
     opts.onEvent?.(line);
   };
-  const resultMetadata = ():
-    Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
-    if (!hasResume) return {};
+  const resultMetadata = (): Pick<
+    RunWorkflowScriptResult,
+    "resumeFromRunId" | "resumeSourceRunSummary" | "continuation" | "target"
+  > => {
     return {
-      resumeFromRunId: resumeFromRunId!,
-      resumeSourceRunSummary: resumeSourceRunSummary ?? null,
+      ...(hasResume
+        ? { resumeFromRunId: resumeFromRunId!, resumeSourceRunSummary: resumeSourceRunSummary ?? null }
+        : {}),
+      ...(continuationProjection !== undefined ? { continuation: continuationProjection } : {}),
     };
   };
   const currentJournal = (runtime?: { getJournal(): WorkflowJournalLine[] }): WorkflowJournalLine[] => [
@@ -455,6 +498,66 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         };
       }
     }
+    if (artifactStore !== undefined) {
+      try {
+        const outputRecords = artifactStore
+          .list()
+          .filter((record) => record.kind === "answer" || record.kind === "published");
+        const artifactRefs = outputRecords.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS).map((record) => ({
+          runId: record.runId,
+          artifactId: record.artifactId,
+          name: record.name,
+          sha256: record.sha256,
+        }));
+        enrichedFields = {
+          ...enrichedFields,
+          ...(artifactRefs.length > 0 ? { artifactRefs } : {}),
+          ...(outputRecords.length > artifactRefs.length
+            ? { artifactRefsOmitted: outputRecords.length - artifactRefs.length }
+            : {}),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? message,
+        };
+      }
+    }
+    const disposition = workflowDispositionForCompletion({
+      ok: enrichedFields.ok,
+      aborted: opts.signal.aborted,
+      ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
+      ...(awaitOperatorDeclaration !== undefined ? { awaitOperatorReason: awaitOperatorDeclaration.reason } : {}),
+    });
+    if (disposition.status === "cancelled") {
+      const cancellationMessage = `[workflow:cancelled] reason=${disposition.reason}`;
+      const alreadyRecorded = enrichedFields.journal.some(
+        (line) => line.kind === "log" && line.source === "runtime" && line.message === cancellationMessage,
+      );
+      if (!alreadyRecorded) {
+        const cancellationLine: WorkflowJournalLine = {
+          ts: new Date().toISOString(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: cancellationMessage,
+        };
+        journal.write(cancellationLine);
+        try {
+          opts.onEvent?.(cancellationLine);
+        } catch {
+          // Presentation callbacks cannot change durable cancellation truth.
+        }
+        enrichedFields = { ...enrichedFields, journal: [...enrichedFields.journal, cancellationLine] };
+      }
+    }
+    enrichedFields = {
+      ...enrichedFields,
+      ok: disposition.status === "completed" || disposition.status === "awaiting_operator",
+      disposition,
+    };
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
@@ -480,11 +583,28 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const failedFields: RunResultFields = {
       ...enrichedFields,
       ok: false,
+      disposition: workflowDispositionForCompletion({
+        ok: false,
+        aborted: opts.signal.aborted,
+        ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
+      }),
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
     };
     return { runId, runDir, ...failedFields, resultPersistence };
   };
+
+  try {
+    assertWorkflowInput(opts.input);
+    if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
+    if (hasResume && opts.continuation !== undefined) {
+      throw new Error("Workflow continuation and resumeFromRunId are mutually exclusive.");
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+    return finishRun({ ok: false, result: undefined, journal: currentJournal(), error, ...resultMetadata() });
+  }
 
   if (hasResume) {
     const sourceRunId = resumeFromRunId!;
@@ -571,12 +691,54 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     runId,
   });
+  try {
+    artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const journalLines = currentJournal(runtime);
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
+  if (opts.continuation !== undefined) {
+    try {
+      boundContinuation = consumeWorkflowContinuation(artifactStore, opts.continuation);
+      continuationProjection = continuationJournalProjection(boundContinuation);
+      emitPrelude({
+        ts: new Date().toISOString(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: "[workflow:continuation]",
+        continuation: continuationProjection,
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: currentJournal(runtime),
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
+  }
   const agentRunner = createWorkflowAgentRunner({
     pi: opts.pi,
     ctx: opts.ctx,
     signal: opts.signal,
     workflowRunId: runId,
     workspaceManager,
+    evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
@@ -588,10 +750,17 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     resourceLoader,
     workspaceManager,
+    artifactPorts: artifactStore,
+    sourceState: createWorkflowSourceStateReader(projectRoot),
+    ...(boundContinuation !== undefined ? { continuation: boundContinuation } : {}),
+    ...(hasResume ? { replaySourceRunId: resumeFromRunId! } : {}),
     ...(replayController !== undefined ? { replay: replayController } : {}),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
+    onAwaitOperator: (declaration) => {
+      awaitOperatorDeclaration = declaration;
+    },
   });
 
   let mod: WorkflowScriptModule;

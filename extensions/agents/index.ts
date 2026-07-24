@@ -37,6 +37,7 @@ import {
   FLEET_FOCUS_FALLBACK_SHORTCUT,
   FleetFocusComponent,
   fleetMenuState,
+  isFleetRowStoppable,
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
 } from "../_shared/fleet-menu.js";
@@ -48,24 +49,20 @@ import {
 import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
 import type { ExtensionCommandContext } from "../_shared/pi-api.js";
 import { registerAgentWorkloadProofHooks, writeAgentWorkloadProof } from "../_shared/agent-workload-proof.js";
-import { installWorkflowProgress, renderAgentObserverText } from "../workflows/progress-widget.js";
+import { coerceTheme, installWorkflowProgress, renderAgentObserverText } from "../workflows/progress-widget.js";
 import {
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
   workflowRunIdFromRowId,
 } from "../_shared/workflow-journal.js";
 import { ScrollableTextOverlay, type DrillRoundsConfig } from "./drill-overlay.js";
-import {
-  AGENT_VIEWER_OVERLAY_OPTIONS,
-  AgentSessionViewer,
-  disposeAgentSessionViewers,
-  loadAgentViewerCapability,
-} from "./session-viewer.js";
+import { AgentSessionViewer, disposeAgentSessionViewers, loadAgentViewerCapability } from "./session-viewer.js";
 import { installAgentInterruptGuard } from "./interrupt-guard.js";
-import type { AgentLiveRow } from "../_shared/agent-sdk-host.js";
+import type { AgentLiveExecutionHandle, AgentLiveRow } from "../_shared/agent-sdk-host.js";
 import type { AgentDefinition } from "../_shared/types.js";
 import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator-ui.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
+import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
 
 const AGENT_PARAM_BASE_DESCRIPTION =
   "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.";
@@ -139,21 +136,68 @@ interface UnknownAgentReport {
   artifactPath?: string;
 }
 
+interface AgentSessionAuthority {
+  capture(): number;
+  isCurrent(authority: number): boolean;
+}
+
 /** Registers safe catalog commands and fail-closed agent execution tools. */
 export default function agents(pi: ExtensionAPI): void {
   registerAgentWorkloadProofHooks(pi);
-  const fallbackFocusRegistered = registerFleetShortcut(pi);
+  let agentSessionEpoch = 0;
+  const agentSessionAuthority: AgentSessionAuthority = {
+    capture: () => agentSessionEpoch,
+    isCurrent: (authority) => authority === agentSessionEpoch,
+  };
+  const fleetFocusComponents = new Set<FleetFocusComponent>();
+  let fleetMenuEpoch = 0;
+  let currentFleetMenuOwner: symbol | undefined;
+  const invalidateFleetMenuOwnership = (): void => {
+    fleetMenuEpoch += 1;
+    currentFleetMenuOwner = undefined;
+    for (const component of fleetFocusComponents) component.dispose();
+    fleetFocusComponents.clear();
+    fleetMenuState.setFocused(false);
+    fleetMenuState.setVisibleRows([]);
+  };
+  const openSessionFleetMenu = (ctx: ExtensionContext): Promise<void> => {
+    invalidateFleetMenuOwnership();
+    const owner = Symbol("fleet-menu-owner");
+    const epoch = fleetMenuEpoch;
+    currentFleetMenuOwner = owner;
+    const release = (): boolean => {
+      if (currentFleetMenuOwner !== owner || fleetMenuEpoch !== epoch) return false;
+      currentFleetMenuOwner = undefined;
+      return true;
+    };
+    const finish = (): void => {
+      if (!release()) return;
+      fleetMenuState.setFocused(false);
+      fleetMenuState.setVisibleRows([]);
+    };
+    const ownership = {
+      isCurrent: () => currentFleetMenuOwner === owner && fleetMenuEpoch === epoch,
+      finish,
+    };
+    return openFleetMenu(ctx, fleetFocusComponents, ownership, agentSessionAuthority).finally(finish);
+  };
+  const fallbackFocusRegistered = registerFleetShortcut(pi, openSessionFleetMenu);
   // A fresh/reloaded Pi session used to get a fresh module-local store. Preserve
   // that lifecycle now that the store is process-shared across package entrypoints.
   pi.on("session_start", (_event, ctx) => {
+    agentSessionEpoch += 1;
     disposeAgentSessionViewers();
-    fleetMenuState.setFocused(false);
+    invalidateFleetMenuOwnership();
     agentLiveStore.reset();
     installAgentInterruptGuard(ctx);
     fleetMenuState.setFallbackFocusAvailable(ctx.mode === "tui" && fallbackFocusRegistered);
     // Parent Pi owns bare Up/Down. Fleet entry is explicit via /ps or shift+down.
     fleetMenuState.setEmptyEditorFocusAvailable(false);
     warnOnPsCollision(pi, ctx);
+  });
+  pi.on("session_shutdown", () => {
+    agentSessionEpoch += 1;
+    invalidateFleetMenuOwnership();
   });
   // The catalog the caller reads must be current at the moment it picks a name,
   // not at the moment it calls: refresh before the turn, exactly like the other
@@ -243,8 +287,8 @@ export default function agents(pi: ExtensionAPI): void {
           });
           return;
         }
-        if (target === "") await openFleetMenu(ctx);
-        else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target });
+        if (target === "") await openSessionFleetMenu(ctx);
+        else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target }, agentSessionAuthority);
       },
     },
   );
@@ -266,7 +310,7 @@ export default function agents(pi: ExtensionAPI): void {
         if (text === "list" || text === "") {
           const catalog = [...sharedState.agents.values()];
           const fullBlock = agentCatalogBlock(catalog, discovery.diagnostics);
-          if (await renderAgentBlockOverlay(ctx as ExtensionCommandContext, fullBlock)) return;
+          if (await renderAgentBlockInteraction(ctx as ExtensionCommandContext, fullBlock)) return;
           setOperatorWidget(
             ctx,
             AGENTS_WIDGET_KEY,
@@ -279,7 +323,7 @@ export default function agents(pi: ExtensionAPI): void {
           const agent = sharedState.agents.get(inspectMatch[1]!);
           if (agent !== undefined) {
             const fullBlock = agentInspectBlock(agent);
-            if (await renderAgentBlockOverlay(ctx as ExtensionCommandContext, fullBlock)) return;
+            if (await renderAgentBlockInteraction(ctx as ExtensionCommandContext, fullBlock)) return;
             setOperatorWidget(ctx, AGENTS_WIDGET_KEY, ctx.mode === "tui" ? fullBlock : agentInspectBlock(agent, true));
           } else {
             const report = createUnknownAgentReport(ctx, "agent-inspect", inspectMatch[1]!);
@@ -290,14 +334,15 @@ export default function agents(pi: ExtensionAPI): void {
         const drillCommand = parseAgentDrillCommand(text);
         if (drillCommand !== undefined) {
           clearAgentsTransient(ctx);
-          await executeAgentDrillCommand(ctx as ExtensionCommandContext, drillCommand);
+          await executeAgentDrillCommand(ctx as ExtensionCommandContext, drillCommand, agentSessionAuthority);
           return;
         }
         const psTarget = parseAgentPsCommand(text);
         if (psTarget !== undefined) {
           clearAgentsTransient(ctx);
-          if (psTarget === "") await openFleetMenu(ctx);
-          else await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: psTarget });
+          if (psTarget === "") await openSessionFleetMenu(ctx);
+          else
+            await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: psTarget }, agentSessionAuthority);
           return;
         }
         const observerCommand = parseAgentObserverCommand(text);
@@ -353,7 +398,7 @@ function warnOnPsCollision(pi: ExtensionAPI, ctx: ExtensionContext): void {
   );
 }
 
-function registerFleetShortcut(pi: ExtensionAPI): boolean {
+function registerFleetShortcut(pi: ExtensionAPI, handler: (ctx: ExtensionContext) => Promise<void>): boolean {
   const registerShortcut = pi.registerShortcut;
   if (registerShortcut === undefined) {
     return false;
@@ -361,7 +406,7 @@ function registerFleetShortcut(pi: ExtensionAPI): boolean {
   try {
     registerShortcut.call(pi, FLEET_FOCUS_FALLBACK_SHORTCUT, {
       description: "Focus the agent fleet menu (fallback when the editor is not empty-editor aware)",
-      handler: openFleetMenu,
+      handler,
     });
     return true;
   } catch {
@@ -369,7 +414,12 @@ function registerFleetShortcut(pi: ExtensionAPI): boolean {
   }
 }
 
-async function openFleetMenu(ctx: ExtensionContext): Promise<void> {
+async function openFleetMenu(
+  ctx: ExtensionContext,
+  fleetFocusComponents: Set<FleetFocusComponent>,
+  ownership: { isCurrent(): boolean; finish(): void },
+  agentSessionAuthority: AgentSessionAuthority,
+): Promise<void> {
   if (ctx.mode !== "tui") {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
       type: "WARN",
@@ -390,11 +440,8 @@ async function openFleetMenu(ctx: ExtensionContext): Promise<void> {
     });
     return;
   }
-  const rows = () => {
-    const visible = fleetMenuState.visibleRows();
-    return visible.length > 0 ? visible : selectFleetMenuRows([...agentLiveStore.rows.values()]);
-  };
-  const initialRows = rows();
+  const rows = () => [...agentLiveStore.rows.values()];
+  const initialRows = selectFleetMenuRows(rows());
   if (initialRows.length === 0) {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
       type: "VIEW",
@@ -406,38 +453,60 @@ async function openFleetMenu(ctx: ExtensionContext): Promise<void> {
   }
   fleetMenuState.setVisibleRows(initialRows);
   fleetMenuState.setFocused(true);
+  let component: FleetFocusComponent | undefined;
+  const disposeComponent = (): void => {
+    if (component === undefined) return;
+    component.dispose();
+    fleetFocusComponents.delete(component);
+  };
   let action: { kind: "close" } | { kind: "drill"; rowId: string } | { kind: "stop"; rowId: string };
   try {
-    action = await ctx.ui.custom(
-      (tui, _theme, keybindings, done) => new FleetFocusComponent(rows, keybindings, tui, done),
-    );
+    action = await requestInlineOperatorInteraction(ctx, (tui, theme, keybindings, done) => {
+      if (component !== undefined) {
+        disposeComponent();
+      }
+      component = new FleetFocusComponent(rows, keybindings, tui, done, coerceTheme(theme));
+      fleetFocusComponents.add(component);
+      return component;
+    });
+    disposeComponent();
+    if (!ownership.isCurrent()) return;
     if (action.kind === "stop") {
+      const cancellationAuthority = agentLiveStore.captureCancellationAuthority(action.rowId);
       const row = agentLiveStore.rows.get(action.rowId);
-      if (row?.status !== "working") {
-        ctx.ui.notify(`Agent ${row?.displayName ?? row?.agentName ?? action.rowId} is no longer stoppable.`, "warning");
+      if (!isFleetRowStoppable(row) || cancellationAuthority === undefined) {
+        ctx.ui.notify(`Agent ${action.rowId} is no longer stoppable.`, "warning");
         return;
       }
       const confirmed = await ctx.ui.confirm(
         "Stop agent?",
         `Stop ${row.displayName ?? row.agentName ?? row.id} — ${row.title ?? row.label}?`,
       );
+      if (!ownership.isCurrent()) return;
       if (!confirmed) {
         ctx.ui.notify("Agent continues running.", "info");
         return;
       }
-      if (agentLiveStore.cancel(row.id)) ctx.ui.notify("Agent cancellation requested.", "warning");
-      else ctx.ui.notify(`Agent ${row.displayName ?? row.agentName ?? row.id} is no longer stoppable.`, "warning");
+      const currentRow = agentLiveStore.rows.get(action.rowId);
+      if (!isFleetRowStoppable(currentRow) || !agentLiveStore.isCancellationAuthorityCurrent(cancellationAuthority)) {
+        ctx.ui.notify(`Agent ${action.rowId} is no longer stoppable.`, "warning");
+        return;
+      }
+      if (agentLiveStore.cancelWithAuthority(cancellationAuthority))
+        ctx.ui.notify("Agent cancellation requested.", "warning");
+      else ctx.ui.notify(`Agent ${action.rowId} is no longer stoppable.`, "warning");
       return;
     }
+    if (action.kind === "close") {
+      notifyActiveAgentsContinue(ctx, "Agent menu closed.");
+      return;
+    }
+    if (action.kind === "drill") {
+      ownership.finish();
+      await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: action.rowId }, agentSessionAuthority);
+    }
   } finally {
-    fleetMenuState.setFocused(false);
-  }
-  if (action.kind === "close") {
-    notifyActiveAgentsContinue(ctx, "Agent menu closed.");
-    return;
-  }
-  if (action.kind === "drill") {
-    await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: action.rowId });
+    disposeComponent();
   }
 }
 
@@ -448,22 +517,22 @@ function taskApprovalDetails(args: unknown): string[] {
 }
 
 /**
- * Routes a catalog text surface (list/inspect) through the full-screen
- * scrollable overlay when the host exposes custom UI, so output is never
- * silently clipped to AGENTS_WIDGET_MAX_LINES. Returns true when the overlay
- * was used; false signals the caller to fall back to the bounded text widget,
+ * Routes a catalog text surface (list/inspect) through the inline scrollable
+ * interaction when the host exposes custom UI, so output is never silently
+ * clipped to AGENTS_WIDGET_MAX_LINES. Returns true when the interaction was
+ * used; false signals the caller to fall back to the bounded text widget,
  * exactly as /agent drill does for headless hosts.
  */
-async function renderAgentBlockOverlay(ctx: ExtensionCommandContext, block: OperatorBlock): Promise<boolean> {
+async function renderAgentBlockInteraction(ctx: ExtensionCommandContext, block: OperatorBlock): Promise<boolean> {
   if (ctx.mode !== "tui" || ctx.hasUI !== true || ctx.ui.custom === undefined) return false;
   const [title = `[${block.type}] ${block.subject}`, ...lines] = renderOperatorBlockPlain(
     block,
     AGENTS_WIDGET_FALLBACK_WIDTH,
   );
   clearAgentsTransient(ctx);
-  await ctx.ui.custom<void>(
+  await requestInlineOperatorInteraction<void>(
+    ctx,
     (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
-    { overlay: true },
   );
   return true;
 }
@@ -669,7 +738,12 @@ function parsePsTarget(value: string): string | undefined {
   return target;
 }
 
-async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: ParsedAgentDrillCommand): Promise<void> {
+async function executeAgentDrillCommand(
+  ctx: ExtensionCommandContext,
+  command: ParsedAgentDrillCommand,
+  sessionAuthority: AgentSessionAuthority,
+): Promise<void> {
+  const capturedSessionAuthority = sessionAuthority.capture();
   if (command.target === "") {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
       type: "WARN",
@@ -748,7 +822,13 @@ async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: P
     return;
   }
   const row = resolution.row;
+  const executionAuthority = agentLiveStore.captureExecutionAuthority(row.id);
+  if (executionAuthority === undefined) return;
+  const isCurrent = (): boolean =>
+    sessionAuthority.isCurrent(capturedSessionAuthority) &&
+    agentLiveStore.isExecutionAuthorityCurrent(executionAuthority);
   const capability = await loadAgentViewerCapability();
+  if (!isCurrent()) return;
   if (!capability.ok) {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
       type: "WARN",
@@ -760,18 +840,17 @@ async function executeAgentDrillCommand(ctx: ExtensionCommandContext, command: P
     return;
   }
   const rounds = buildDrillRounds(ctx, row);
+  if (!isCurrent()) return;
   let viewer: AgentSessionViewer | undefined;
   try {
-    await ctx.ui.custom<void>(
-      (tui, _theme, _keybindings, done) => {
-        viewer = new AgentSessionViewer(row.id, tui, done, capability.capability, rounds);
-        return viewer;
-      },
-      { overlay: true, overlayOptions: AGENT_VIEWER_OVERLAY_OPTIONS },
-    );
+    await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, _keybindings, done) => {
+      viewer = new AgentSessionViewer(executionAuthority, tui, done, capability.capability, rounds);
+      return viewer;
+    });
   } finally {
     viewer?.dispose();
   }
+  if (!isCurrent()) return;
   const current = agentLiveStore.rows.get(row.id);
   if (current?.status === "working" || current?.status === "queued") {
     ctx.ui.notify(
@@ -1231,7 +1310,7 @@ async function runAgentLiveTask(
   input: AgentLiveTaskInput,
 ): Promise<Awaited<ReturnType<typeof executeAgentRunBoundary>>> {
   const { ctx, resolvedAgent, rowId, label, title, liveModel } = input;
-  const startedRow = agentLiveStore.begin({
+  const execution = agentLiveStore.beginExecution({
     id: rowId,
     agentName: resolvedAgent,
     label,
@@ -1241,8 +1320,9 @@ async function runAgentLiveTask(
     isolated: false,
     noMcp: false,
   });
+  const startedRow = agentLiveStore.rowForExecution(execution);
   // REQ-011: append-only transcript event line at kickoff.
-  emitAgentEventLine(ctx, formatAgentStartedEventLine(startedRow), "info");
+  if (startedRow !== undefined) emitAgentEventLine(ctx, formatAgentStartedEventLine(startedRow), "info");
   // Child inherits the parent's resolved model (ctx.model) so it runs on the same
   // authenticated/capable model as the caller instead of the host default.
   const executor = createAgentSdkSessionExecutor({
@@ -1254,6 +1334,7 @@ async function runAgentLiveTask(
       ...(liveModel?.model !== undefined ? { model: liveModel.model } : {}),
       ...(liveModel?.thinking !== undefined ? { thinking: liveModel.thinking } : {}),
     },
+    liveExecution: execution,
   });
   const request = createAgentRunRequest(input.agent, input.task, {
     maxTurns: input.maxTurns,
@@ -1262,7 +1343,7 @@ async function runAgentLiveTask(
     ...(input.parentContext !== undefined ? { parentContext: input.parentContext } : {}),
   });
   const boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
-  const finishedRow = agentLiveStore.patch(rowId, {
+  const finishedRow = agentLiveStore.patchExecution(execution, {
     status: boundary.status === "completed" ? "done" : boundary.status === "cancelled" ? "cancelled" : "error",
     ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
     ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),

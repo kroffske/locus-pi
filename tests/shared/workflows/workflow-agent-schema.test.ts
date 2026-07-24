@@ -3,6 +3,7 @@ import {
   SchemaValidationError,
   createWorkflowRuntime,
   type WorkflowAgentRequest,
+  type WorkflowAgentOptions,
   type WorkflowAgentResult,
 } from "../../../extensions/_shared/workflow-runtime.js";
 
@@ -138,5 +139,46 @@ describe("agent({ schema }) structured output", () => {
       (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("shape me", { schema: "not-a-schema" }),
     ).rejects.toThrow(/agent schema must be a JSON-schema object/u);
     expect(calls).toBe(0);
+  });
+
+  it.each([
+    [{ type: "integer" }, /unsupported type "integer"/u],
+    [{ type: "string", maxLength: 12 }, /unsupported keyword "maxLength"/u],
+    [{ type: "object", required: "answer", properties: {} }, /required must be an array/u],
+    [{ type: "object", required: ["answer", "answer"], properties: {} }, /required contains duplicate/u],
+    [{ type: "object", required: ["missing"], properties: {} }, /not declared in properties/u],
+    [{ type: "object", properties: { answer: "string" } }, /properties\.answer must be a schema object/u],
+    [{ type: "array" }, /array schema must declare items/u],
+    [{ type: "array", items: { type: "string", pattern: "x" } }, /unsupported keyword "pattern"/u],
+    [{ type: "string", additionalProperties: false }, /additionalProperties is only valid/u],
+    [{ type: "string", enum: "yes" }, /enum must be a non-empty array/u],
+    [{ enum: [{ answer: "yes" }] }, /enum value at index 0 must be a JSON primitive/u],
+    [{ enum: [Number.NaN] }, /enum value at index 0 must be a JSON primitive/u],
+    [{ type: "string", enum: ["yes", 1] }, /enum value at index 1 does not match declared type string/u],
+    [{ type: "object", enum: [null] }, /enum value at index 0 does not match declared type object/u],
+  ])("rejects an unsupported or malformed declaration before any child runs", async (schema, message) => {
+    let calls = 0;
+    const { dsl } = createWorkflowRuntime({
+      runId: "agent-schema-declaration-invalid",
+      agentRunner: async () => {
+        calls += 1;
+        throw new Error("must not run");
+      },
+    });
+
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("shape me", { schema }),
+    ).rejects.toThrow(message);
+    expect(calls).toBe(0);
+  });
+
+  it("keeps the text options type unable to carry a schema", () => {
+    const textOptions: WorkflowAgentOptions = { label: "text" };
+    expect(textOptions).toEqual({ label: "text" });
+
+    // Compile-time contract: adding schema to text options must remain an error.
+    // @ts-expect-error schema selects WorkflowAgentSchemaOptions, never WorkflowAgentOptions
+    const invalidTextOptions: WorkflowAgentOptions = { schema: { type: "string" } };
+    expect(invalidTextOptions).toBeDefined();
   });
 });

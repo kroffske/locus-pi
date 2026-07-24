@@ -1,7 +1,9 @@
 import { Type } from "@sinclair/typebox";
+import { Text } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui, ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, textResult } from "../_shared/pi-api.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
+import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
 import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
 import { validateParams } from "../_shared/validation.js";
 import { redactForSensitivity } from "../_shared/redaction.js";
@@ -32,17 +34,35 @@ const OmpAskParams = Type.Object({
 
 const LegacyAskUserQuestionParams = Type.Object({
   question: Type.String({ description: "The question to ask the user", maxLength: 500 }),
-  kind: Type.Union([Type.Literal("select"), Type.Literal("multi-select"), Type.Literal("text"), Type.Literal("editor")], { description: "UI control type" }),
-  options: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 20, description: "Choices for select/multi-select" })),
+  kind: Type.Union(
+    [Type.Literal("select"), Type.Literal("multi-select"), Type.Literal("text"), Type.Literal("editor")],
+    { description: "UI control type" },
+  ),
+  options: Type.Optional(
+    Type.Array(Type.String({ maxLength: 200 }), { maxItems: 20, description: "Choices for select/multi-select" }),
+  ),
   allowCustom: Type.Optional(Type.Boolean({ default: false, description: "Allow a custom answer" })),
   default: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())])),
-  timeoutMs: Type.Optional(Type.Number({ default: 30000, minimum: 1000, maximum: 300000, description: "Auto-cancel after this many ms" })),
-  sensitivity: Type.Optional(Type.Union([Type.Literal("public"), Type.Literal("internal"), Type.Literal("secret")], { default: "internal" })),
+  timeoutMs: Type.Optional(
+    Type.Number({ default: 30000, minimum: 1000, maximum: 300000, description: "Auto-cancel after this many ms" }),
+  ),
+  sensitivity: Type.Optional(
+    Type.Union([Type.Literal("public"), Type.Literal("internal"), Type.Literal("secret")], { default: "internal" }),
+  ),
   reason: Type.Optional(Type.String({ description: "Why this question is being asked", maxLength: 500 })),
 });
 
 type LegacyAskKind = "select" | "multi-select" | "text" | "editor";
-interface LegacyAskParams { question: string; kind: LegacyAskKind; options?: string[]; allowCustom?: boolean; default?: string | string[]; timeoutMs?: number; sensitivity?: "public" | "internal" | "secret"; reason?: string }
+interface LegacyAskParams {
+  question: string;
+  kind: LegacyAskKind;
+  options?: string[];
+  allowCustom?: boolean;
+  default?: string | string[];
+  timeoutMs?: number;
+  sensitivity?: "public" | "internal" | "secret";
+  reason?: string;
+}
 
 interface OmpQuestion {
   id: string;
@@ -110,24 +130,34 @@ export default function askUserQuestion(pi: ExtensionAPI): void {
 const MARK_CHOSEN = "(o)";
 const MARK_UNCHOSEN = "( )";
 
-function renderAskResult(result: ToolResult): string[] {
+function renderAskResult(result: ToolResult): Text {
   const details = (result.details ?? {}) as Record<string, unknown>;
   const lines: string[] = [result.isError === true ? "[ERROR] Ask" : "[RESULT] Ask"];
   if (Array.isArray(details.results)) {
-    for (const entry of details.results as QuestionResult[]) lines.push(...renderAnsweredQuestion(entry, result.isError));
-  } else if (typeof details.question === "string" && (Array.isArray(details.options) || typeof details.customInput === "string")) {
-    lines.push(...renderAnsweredQuestion({
-      id: typeof details.questionId === "string" ? details.questionId : "",
-      question: details.question,
-      options: Array.isArray(details.options) ? (details.options as string[]) : [],
-      multi: Boolean(details.multi),
-      selectedOptions: Array.isArray(details.selectedOptions) ? (details.selectedOptions as string[]) : [],
-      ...(typeof details.customInput === "string" ? { customInput: details.customInput } : {}),
-    }, result.isError));
+    for (const entry of details.results as QuestionResult[])
+      lines.push(...renderAnsweredQuestion(entry, result.isError));
+  } else if (
+    typeof details.question === "string" &&
+    (Array.isArray(details.options) || typeof details.customInput === "string")
+  ) {
+    lines.push(
+      ...renderAnsweredQuestion(
+        {
+          id: typeof details.questionId === "string" ? details.questionId : "",
+          question: details.question,
+          options: Array.isArray(details.options) ? (details.options as string[]) : [],
+          multi: Boolean(details.multi),
+          selectedOptions: Array.isArray(details.selectedOptions) ? (details.selectedOptions as string[]) : [],
+          ...(typeof details.customInput === "string" ? { customInput: details.customInput } : {}),
+        },
+        result.isError,
+      ),
+    );
   } else {
-    return [...lines, ...firstResultText(result).split(/\r?\n/)];
+    return new Text([...lines, ...firstResultText(result).split(/\r?\n/)].join("\n"), 0, 0);
   }
-  return lines.length > 1 ? lines : [...lines, ...firstResultText(result).split(/\r?\n/)];
+  const renderedLines = lines.length > 1 ? lines : [...lines, ...firstResultText(result).split(/\r?\n/)];
+  return new Text(renderedLines.join("\n"), 0, 0);
 }
 
 function renderAnsweredQuestion(result: QuestionResult, isError?: boolean): string[] {
@@ -152,7 +182,13 @@ function firstResultText(result: ToolResult): string {
   return "";
 }
 
-async function askOmpCompatible(pi: ExtensionAPI, params: OmpAskParams, ctx: ExtensionContext, signal: AbortSignal, source: string): Promise<ToolResult> {
+async function askOmpCompatible(
+  pi: ExtensionAPI,
+  params: OmpAskParams,
+  ctx: ExtensionContext,
+  signal: AbortSignal,
+  source: string,
+): Promise<ToolResult> {
   if (params.questions.length === 0) return errorResult("Error: questions must not be empty");
   if (ctx.hasUI === false || ctx.mode === "json" || ctx.mode === "print") {
     return errorResult("Ask is unavailable because this host mode cannot prompt the user.", {
@@ -170,11 +206,14 @@ async function askOmpCompatible(pi: ExtensionAPI, params: OmpAskParams, ctx: Ext
   while (questionIndex < questionCount) {
     const question = params.questions[questionIndex]!;
     const labels = question.options.map((option) => option.label);
-    const title = questionCount > 1 ? `${question.question} (${questionIndex + 1}/${questionCount})` : question.question;
-    const navigation = questionCount > 1
-      ? { allowBack: questionIndex > 0, allowForward: true, progressText: `${questionIndex + 1}/${questionCount}` }
-      : undefined;
-    const askOptions: { previous?: Pick<AskSelection, "selectedOptions" | "customInput">; navigation?: AskNavigation } = {};
+    const title =
+      questionCount > 1 ? `${question.question} (${questionIndex + 1}/${questionCount})` : question.question;
+    const navigation =
+      questionCount > 1
+        ? { allowBack: questionIndex > 0, allowForward: true, progressText: `${questionIndex + 1}/${questionCount}` }
+        : undefined;
+    const askOptions: { previous?: Pick<AskSelection, "selectedOptions" | "customInput">; navigation?: AskNavigation } =
+      {};
     const previous = resultsByIndex[questionIndex];
     if (previous !== undefined) askOptions.previous = previous;
     if (navigation !== undefined) askOptions.navigation = navigation;
@@ -237,17 +276,19 @@ async function askOmpCompatible(pi: ExtensionAPI, params: OmpAskParams, ctx: Ext
   emitDevEvent("ask:answered", { questions: questionCount });
   const decisions: unknown[] = [];
   for (const result of results) {
-    decisions.push(await recordDecision(pi, ctx, {
-      decisionId: stableDecisionId(source, result.id),
-      question: result.question,
-      answer: {
-        selectedOptions: result.selectedOptions,
-        ...(result.customInput !== undefined ? { customInput: result.customInput } : {}),
-      },
-      status: "answered",
-      source,
-      metadata: { multi: result.multi },
-    }));
+    decisions.push(
+      await recordDecision(pi, ctx, {
+        decisionId: stableDecisionId(source, result.id),
+        question: result.question,
+        answer: {
+          selectedOptions: result.selectedOptions,
+          ...(result.customInput !== undefined ? { customInput: result.customInput } : {}),
+        },
+        status: "answered",
+        source,
+        metadata: { multi: result.multi },
+      }),
+    );
   }
   if (results.length === 1) {
     const result = results[0]!;
@@ -290,7 +331,11 @@ async function askSingleSelectQuestion(
   const choices = [...shownLabels, OTHER_OPTION];
   const choice = await selectWithTimeout(ctx, selectTitle(question.question), choices, timeoutMs, signal);
   if (choice.timedOut) {
-    return { selectedOptions: getAutoSelectionOnTimeout(optionLabels, question.recommended), cancelled: false, timedOut: true };
+    return {
+      selectedOptions: getAutoSelectionOnTimeout(optionLabels, question.recommended),
+      cancelled: false,
+      timedOut: true,
+    };
   }
   if (choice.cancelled || choice.value === undefined) return { selectedOptions: [], cancelled: true, timedOut: false };
   if (choice.value === OTHER_OPTION) {
@@ -317,7 +362,13 @@ async function askMultiQuestion(
     choices.push(OTHER_OPTION);
 
     const prefix = selected.size > 0 ? `(${selected.size} selected) ` : "";
-    const choice = await selectWithTimeout(ctx, selectTitle(`${prefix}${question.question}`), choices, timeoutMs, signal);
+    const choice = await selectWithTimeout(
+      ctx,
+      selectTitle(`${prefix}${question.question}`),
+      choices,
+      timeoutMs,
+      signal,
+    );
     if (choice.timedOut) {
       return {
         selectedOptions: selected.size ? [...selected] : getAutoSelectionOnTimeout(optionLabels, question.recommended),
@@ -325,7 +376,8 @@ async function askMultiQuestion(
         timedOut: true,
       };
     }
-    if (choice.cancelled || choice.value === undefined) return { selectedOptions: [...selected], cancelled: true, timedOut: false };
+    if (choice.cancelled || choice.value === undefined)
+      return { selectedOptions: [...selected], cancelled: true, timedOut: false };
     if (choice.value === DONE_OPTION) return { selectedOptions: [...selected], cancelled: false, timedOut: false };
     if (choice.value === OTHER_OPTION) {
       const custom = await promptCustomInput(ctx, signal);
@@ -395,7 +447,9 @@ class AskQuestionComponent implements CustomUiComponent {
     this.#customInput = args.previous?.customInput;
 
     if (this.#multi) {
-      this.#selected = new Set((args.previous?.selectedOptions ?? []).filter((label) => this.#optionLabels.includes(label)));
+      this.#selected = new Set(
+        (args.previous?.selectedOptions ?? []).filter((label) => this.#optionLabels.includes(label)),
+      );
     } else {
       this.#selectedValue = (args.previous?.selectedOptions ?? []).find((label) => this.#optionLabels.includes(label));
     }
@@ -414,20 +468,21 @@ class AskQuestionComponent implements CustomUiComponent {
     const choices = this.#choices();
     this.#clampCursor(choices.length);
     const [primary = "Choose an answer", ...questionBody] = splitLines(this.#question.question);
-    return renderOperatorBlock({
-      type: "SELECT",
-      subject: "Ask",
-      primary,
-      badges: [
-        ...(this.#multi ? [{ text: "MULTI", tone: "accent" as const }] : []),
-        ...(this.#navigation?.progressText ? [{ text: this.#navigation.progressText, tone: "muted" as const }] : []),
-      ],
-      body: [
-        ...questionBody,
-        ...choices.map((choice, index) => this.#renderChoice(choice, index)),
-      ],
-      controls: [this.#renderHelp()],
-    }, width, this.#theme);
+    return renderOperatorBlock(
+      {
+        type: "SELECT",
+        subject: "Ask",
+        primary,
+        badges: [
+          ...(this.#multi ? [{ text: "MULTI", tone: "accent" as const }] : []),
+          ...(this.#navigation?.progressText ? [{ text: this.#navigation.progressText, tone: "muted" as const }] : []),
+        ],
+        body: [...questionBody, ...choices.map((choice, index) => this.#renderChoice(choice, index))],
+        controls: [this.#renderHelp()],
+      },
+      width,
+      this.#theme,
+    );
   }
 
   async handleInput(data: string): Promise<void> {
@@ -473,7 +528,11 @@ class AskQuestionComponent implements CustomUiComponent {
 
   #choices(): AskRenderedChoice[] {
     if (this.#multi) {
-      const choices: AskRenderedChoice[] = this.#optionLabels.map((label) => ({ kind: "option" as const, label, value: label }));
+      const choices: AskRenderedChoice[] = this.#optionLabels.map((label) => ({
+        kind: "option" as const,
+        label,
+        value: label,
+      }));
       if (this.#selected.size > 0) choices.push({ kind: "done" as const, label: DONE_OPTION });
       choices.push({ kind: "other" as const, label: OTHER_OPTION });
       return choices;
@@ -510,14 +569,21 @@ class AskQuestionComponent implements CustomUiComponent {
 
   #initialCursorIndex(previous: Pick<AskSelection, "selectedOptions" | "customInput"> | undefined): number {
     if (previous?.customInput !== undefined) {
-      return Math.max(0, this.#choices().findIndex((choice) => choice.kind === "other"));
+      return Math.max(
+        0,
+        this.#choices().findIndex((choice) => choice.kind === "other"),
+      );
     }
     const selectedValue = previous?.selectedOptions.find((label) => this.#optionLabels.includes(label));
     if (selectedValue !== undefined) {
       const index = this.#optionLabels.indexOf(selectedValue);
       if (index >= 0) return index;
     }
-    if (typeof this.#question.recommended === "number" && this.#question.recommended >= 0 && this.#question.recommended < this.#optionLabels.length) {
+    if (
+      typeof this.#question.recommended === "number" &&
+      this.#question.recommended >= 0 &&
+      this.#question.recommended < this.#optionLabels.length
+    ) {
       return this.#question.recommended;
     }
     return 0;
@@ -671,17 +737,20 @@ async function askQuestionWithCustomUi(
 ): Promise<AskSelection> {
   if (signal.aborted) {
     return {
-      ...(options.previous?.selectedOptions !== undefined ? { selectedOptions: [...options.previous.selectedOptions] } : { selectedOptions: [] }),
+      ...(options.previous?.selectedOptions !== undefined
+        ? { selectedOptions: [...options.previous.selectedOptions] }
+        : { selectedOptions: [] }),
       ...(options.previous?.customInput !== undefined ? { customInput: options.previous.customInput } : {}),
       cancelled: true,
       timedOut: false,
     };
   }
-  const custom = ctx.ui.custom;
-  if (custom === undefined) {
-    return multi ? askMultiQuestion(ctx, question, optionLabels, timeoutMs, signal) : askSingleSelectQuestion(ctx, question, optionLabels, timeoutMs, signal);
+  if (ctx.ui.custom === undefined) {
+    return multi
+      ? askMultiQuestion(ctx, question, optionLabels, timeoutMs, signal)
+      : askSingleSelectQuestion(ctx, question, optionLabels, timeoutMs, signal);
   }
-  return await custom<AskSelection>((tui, theme, _keybindings, done) => {
+  return await requestInlineOperatorInteraction<AskSelection>(ctx, (tui, theme, _keybindings, done) => {
     const resolvedTheme = operatorTheme(theme);
     return new AskQuestionComponent({
       tui,
@@ -696,7 +765,7 @@ async function askQuestionWithCustomUi(
       ...(options.previous !== undefined ? { previous: options.previous } : {}),
       ...(options.navigation !== undefined ? { navigation: options.navigation } : {}),
     });
-  }, { overlay: true });
+  });
 }
 
 function splitLines(text: string): string[] {
@@ -743,7 +812,12 @@ function isEnd(data: string): boolean {
   return data === "\x1b[F" || data === "\x1bOF" || data === "G";
 }
 
-async function askLegacy(pi: ExtensionAPI, params: LegacyAskParams, ctx: ExtensionContext, signal: AbortSignal): Promise<ToolResult> {
+async function askLegacy(
+  pi: ExtensionAPI,
+  params: LegacyAskParams,
+  ctx: ExtensionContext,
+  signal: AbortSignal,
+): Promise<ToolResult> {
   if (ctx.hasUI === false || ctx.mode === "json" || ctx.mode === "print") {
     return errorResult("Ask is unavailable because this host mode cannot prompt the user.", {
       status: "unavailable",
@@ -754,13 +828,26 @@ async function askLegacy(pi: ExtensionAPI, params: LegacyAskParams, ctx: Extensi
   try {
     if (params.kind === "text") {
       const defaultValue = asString(params.default);
-      const input = await requestOperatorInput(ctx, defaultValue === ""
-        ? { kind: "input", title: inputTitle(promptWithReason(params)), placeholder: "Type a response" }
-        : { kind: "editor", title: inputTitle(promptWithReason(params)), prefill: defaultValue });
+      const input = await requestOperatorInput(
+        ctx,
+        defaultValue === ""
+          ? { kind: "input", title: inputTitle(promptWithReason(params)), placeholder: "Type a response" }
+          : { kind: "editor", title: inputTitle(promptWithReason(params)), prefill: defaultValue },
+      );
       if (input.status === "unavailable") {
-        return errorResult("Ask is unavailable because this host mode cannot prompt the user.", { status: "unavailable", reason: "no-ui" });
+        return errorResult("Ask is unavailable because this host mode cannot prompt the user.", {
+          status: "unavailable",
+          reason: "no-ui",
+        });
       }
-      return legacyResult(pi, ctx, params, input.status === "submitted" ? input.value : "", input.status === "cancelled", false);
+      return legacyResult(
+        pi,
+        ctx,
+        params,
+        input.status === "submitted" ? input.value : "",
+        input.status === "cancelled",
+        false,
+      );
     }
     if (params.kind === "editor") {
       const input = await requestOperatorInput(ctx, {
@@ -769,9 +856,19 @@ async function askLegacy(pi: ExtensionAPI, params: LegacyAskParams, ctx: Extensi
         prefill: asString(params.default),
       });
       if (input.status === "unavailable") {
-        return errorResult("Ask is unavailable because this host mode cannot prompt the user.", { status: "unavailable", reason: "no-ui" });
+        return errorResult("Ask is unavailable because this host mode cannot prompt the user.", {
+          status: "unavailable",
+          reason: "no-ui",
+        });
       }
-      return legacyResult(pi, ctx, params, input.status === "submitted" ? input.value : "", input.status === "cancelled", false);
+      return legacyResult(
+        pi,
+        ctx,
+        params,
+        input.status === "submitted" ? input.value : "",
+        input.status === "cancelled",
+        false,
+      );
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -794,7 +891,7 @@ async function askLegacy(pi: ExtensionAPI, params: LegacyAskParams, ctx: Extensi
   const result = await askOmpCompatible(pi, converted, ctx, signal, "askUserQuestion");
   if (result.isError) return result;
   const details = result.details ?? {};
-  const value = params.kind === "multi-select" ? details.selectedOptions as string[] : firstLegacyValue(details);
+  const value = params.kind === "multi-select" ? (details.selectedOptions as string[]) : firstLegacyValue(details);
   return legacyResult(pi, ctx, params, value, false, false, details.decision);
 }
 
@@ -815,24 +912,31 @@ async function legacyResult(
     ? value.map((item) => redactForSensitivity(item, params.sensitivity).text)
     : redactForSensitivity(value, params.sensitivity).text;
   emitDevEvent("ask:answered", { kind: params.kind, cancelled, sensitivity: params.sensitivity ?? "internal" });
-  const decision = existingDecision ?? await recordDecision(pi, ctx, {
-    decisionId: stableDecisionId("askUserQuestion", stableQuestionId(params.question)),
-    question: params.question,
-    answer: params.sensitivity === "secret" ? "[REDACTED:secret-answer]" : value,
-    status: cancelled ? "cancelled" : "answered",
-    source: "askUserQuestion",
-    metadata: { kind: params.kind, sensitivity: params.sensitivity ?? "internal", timedOut },
-  });
-  return textResult(cancelled ? "Question cancelled" : `Answer: ${Array.isArray(visibleAnswer) ? visibleAnswer.join(", ") : visibleAnswer}`, {
-    questionId: stableQuestionId(params.question),
-    kind: params.kind,
-    value: params.sensitivity === "secret" ? undefined : value,
-    visibleValue: visibleAnswer,
-    cancelled,
-    timedOut,
-    decision,
-    sensitivity: params.sensitivity ?? "internal",
-  });
+  const decision =
+    existingDecision ??
+    (await recordDecision(pi, ctx, {
+      decisionId: stableDecisionId("askUserQuestion", stableQuestionId(params.question)),
+      question: params.question,
+      answer: params.sensitivity === "secret" ? "[REDACTED:secret-answer]" : value,
+      status: cancelled ? "cancelled" : "answered",
+      source: "askUserQuestion",
+      metadata: { kind: params.kind, sensitivity: params.sensitivity ?? "internal", timedOut },
+    }));
+  return textResult(
+    cancelled
+      ? "Question cancelled"
+      : `Answer: ${Array.isArray(visibleAnswer) ? visibleAnswer.join(", ") : visibleAnswer}`,
+    {
+      questionId: stableQuestionId(params.question),
+      kind: params.kind,
+      value: params.sensitivity === "secret" ? undefined : value,
+      visibleValue: visibleAnswer,
+      cancelled,
+      timedOut,
+      decision,
+      sensitivity: params.sensitivity ?? "internal",
+    },
+  );
 }
 
 async function selectWithTimeout(
@@ -884,16 +988,23 @@ async function raceWithTimeout<T>(
   }
 }
 
-function normalizeSelectReturn(result: Awaited<ReturnType<ExtensionContext["ui"]["select"]>>): { value?: string; cancelled: boolean } {
+function normalizeSelectReturn(result: Awaited<ReturnType<ExtensionContext["ui"]["select"]>>): {
+  value?: string;
+  cancelled: boolean;
+} {
   if (result === undefined) return { cancelled: true };
   if (typeof result === "string") return { value: result, cancelled: false };
   const value = result.value || result.label;
-  return value === undefined ? { cancelled: result.cancelled ?? true } : { value, cancelled: result.cancelled ?? false };
+  return value === undefined
+    ? { cancelled: result.cancelled ?? true }
+    : { value, cancelled: result.cancelled ?? false };
 }
 
 function addRecommendedSuffix(labels: string[], recommendedIndex?: number): string[] {
   if (recommendedIndex === undefined || recommendedIndex < 0 || recommendedIndex >= labels.length) return labels;
-  return labels.map((label, index) => index === recommendedIndex && !label.endsWith(RECOMMENDED_SUFFIX) ? `${label}${RECOMMENDED_SUFFIX}` : label);
+  return labels.map((label, index) =>
+    index === recommendedIndex && !label.endsWith(RECOMMENDED_SUFFIX) ? `${label}${RECOMMENDED_SUFFIX}` : label,
+  );
 }
 
 function stripRecommendedSuffix(label: string): string {
@@ -908,7 +1019,8 @@ function stripCheckboxPrefix(label: string): string | undefined {
 
 function getAutoSelectionOnTimeout(optionLabels: string[], recommended?: number): string[] {
   if (optionLabels.length === 0) return [];
-  if (typeof recommended === "number" && recommended >= 0 && recommended < optionLabels.length) return [optionLabels[recommended]!];
+  if (typeof recommended === "number" && recommended >= 0 && recommended < optionLabels.length)
+    return [optionLabels[recommended]!];
   return [optionLabels[0]!];
 }
 
@@ -916,9 +1028,11 @@ function formatSingleAnswer(result: QuestionResult): string {
   const lines: string[] = [];
   if (result.selectedOptions.length > 0) lines.push(`User selected: ${result.selectedOptions.join(", ")}`);
   if (result.customInput !== undefined) {
-    lines.push(result.customInput.includes("\n")
-      ? `User provided custom input:\n${indentMultiline(result.customInput)}`
-      : `User provided custom input: ${result.customInput}`);
+    lines.push(
+      result.customInput.includes("\n")
+        ? `User provided custom input:\n${indentMultiline(result.customInput)}`
+        : `User provided custom input: ${result.customInput}`,
+    );
   }
   return lines.join("\n") || "User answered with no selection.";
 }
@@ -934,7 +1048,10 @@ function formatQuestionLine(result: QuestionResult): string {
 }
 
 function indentMultiline(text: string): string {
-  return text.split(/\r?\n/).map((line) => `  ${line}`).join("\n");
+  return text
+    .split(/\r?\n/)
+    .map((line) => `  ${line}`)
+    .join("\n");
 }
 
 function recommendedIndex(params: LegacyAskParams): number | undefined {
@@ -951,7 +1068,7 @@ function firstLegacyValue(details: Record<string, unknown>): string {
 }
 
 function asString(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value.join(", ") : value ?? "";
+  return Array.isArray(value) ? value.join(", ") : (value ?? "");
 }
 
 function stableQuestionId(question: string): string {
@@ -972,5 +1089,5 @@ function inputTitle(question: string): string {
 }
 
 function operatorTheme(value: unknown): OperatorThemeLike | undefined {
-  return typeof value === "object" && value !== null ? value as OperatorThemeLike : undefined;
+  return typeof value === "object" && value !== null ? (value as OperatorThemeLike) : undefined;
 }

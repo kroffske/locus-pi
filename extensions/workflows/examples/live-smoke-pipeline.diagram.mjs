@@ -379,13 +379,13 @@ connect("explore-await", exploreAgent, sequentialAwait, "exact explore text", {
   direction: "bottom-up",
   from: { side: "right", slot: 0.35 },
   to: { side: "left", slot: 0.75 },
-  labelOffset: { dx: 0, dy: -8 },
+  labelOffset: { dx: -32, dy: -8 },
 });
 connect("await-quick", sequentialAwait, quickAgent, "prompt + agent=quick_task", {
   direction: "top-down",
   from: { side: "right", slot: 0.75 },
   to: { side: "left", slot: 0.35 },
-  labelOffset: { dx: -4, dy: -8 },
+  labelOffset: { dx: 32, dy: -8 },
 });
 connect("quick-check", quickAgent, resultCheck, "exact quick_task text", {
   direction: "bottom-up",

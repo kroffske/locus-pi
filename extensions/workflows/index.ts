@@ -10,11 +10,17 @@
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
+import type {
+  CommandArgumentCompletion,
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "../_shared/pi-api.js";
 import {
   errorResult,
   getCommandText,
   getProjectRoot,
+  getSessionId,
   getWorkingDirectory,
   setTextWidget,
   textResult,
@@ -36,21 +42,28 @@ import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "../_shared
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   pruneCompletedWorkflowRunLiveRows,
+  resetWorkflowLiveExecutions,
   listWorkflowRunIds,
   readWorkflowRunJournal,
+  readWorkflowRunJournalState,
   readWorkflowRunResult,
   readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
   workflowRunDir,
 } from "../_shared/workflow-journal.js";
+import type { WorkflowRunResultEnvelope, WorkflowRunStatus } from "../_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+import { WORKFLOW_INPUT_MAX_CHARS } from "../_shared/workflow-runtime.js";
+import { WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "../_shared/workflow-artifacts.js";
 import {
-  formatWorkflowFailureSummary,
   formatWorkflowResultDetail,
-  formatWorkflowResultSummary,
+  projectWorkflowDisposition,
+  type WorkflowDispositionProjection,
+  type WorkflowProjectedStatus,
 } from "../_shared/workflow-result.js";
 import type { OperatorBlock, OperatorTone } from "../_shared/operator-ui.js";
 import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator-status.js";
+import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
 import {
   WORKFLOW_LIVE_WIDGET_KEY,
@@ -64,30 +77,46 @@ import {
   buildWorkflowCatalogModel,
   buildWorkflowInfoBlock,
   matchWorkflowPhaseGroups,
+  readWorkflowMeta,
   staticWorkflowMetaPhases,
   WORKFLOW_SOURCE_LEGEND,
   workflowSourceBadge,
   type WorkflowBrowserIntent,
 } from "./workflow-catalog.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
+import { WorkflowRunViewer } from "./run-viewer.js";
 import {
   createWorkflowTranscript,
   persistCommandWorkflowTranscript,
   renderMainWorkflowStatus,
 } from "./workflow-transcript.js";
+import {
+  workflowBackgroundRunRegistry,
+  type WorkflowBackgroundStopResult,
+  type WorkflowSessionLease,
+} from "./background-run-registry.js";
 
 // ---------------------------------------------------------------------------
 // Tool params schema
 // ---------------------------------------------------------------------------
 
-/**
- * One budget for both input shapes. The string form has always been bounded;
- * an object form without an equivalent bound would let a single tool call write
- * an unbounded payload into the run journal, `result.json`, and the replay
- * record. TypeBox has no serialized-size keyword, so the object side is checked
- * explicitly in `execute` before a run is created.
- */
-const WORKFLOW_INPUT_MAX_CHARS = 16000;
+const WorkflowArtifactRefParams = Type.Object(
+  {
+    runId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    artifactId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    name: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  },
+  { additionalProperties: false },
+);
+
+const WorkflowContinuationParams = Type.Object(
+  {
+    originRunId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    artifactRefs: Type.Array(WorkflowArtifactRefParams, { minItems: 1, maxItems: 8 }),
+  },
+  { additionalProperties: false },
+);
 
 const WorkflowParams = Type.Object({
   name: Type.Optional(
@@ -109,14 +138,12 @@ const WorkflowParams = Type.Object({
     }),
   ),
   input: Type.Optional(
-    Type.Union(
-      [Type.String({ maxLength: WORKFLOW_INPUT_MAX_CHARS }), Type.Object({}, { additionalProperties: true })],
-      {
-        description:
-          "Optional input passed to the workflow as the second parameter of runWorkflow(dsl, input). Either free text, or a JSON object of named parameters when the workflow documents field names. Both shapes are journalled under `args`.",
-      },
-    ),
+    Type.String({
+      maxLength: WORKFLOW_INPUT_MAX_CHARS,
+      description: "Optional human semantic request passed unchanged to runWorkflow(dsl, input).",
+    }),
   ),
+  continuation: Type.Optional(WorkflowContinuationParams),
   resumeFromRunId: Type.Optional(
     Type.String({
       description: "Optional prior workflow run id used as persisted retry metadata",
@@ -145,38 +172,44 @@ function workflowApprovalDetails(args: unknown): string[] {
   ];
 }
 
-/**
- * Fail closed on an over-budget or non-serializable structured input, before a
- * run id, run directory, or journal exists. A string is already bounded by the
- * schema, so it passes through untouched.
- */
-export function checkWorkflowInputBudget(input: unknown): { ok: true } | { ok: false; error: string } {
-  if (input === undefined || typeof input === "string") return { ok: true };
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(input) ?? "";
-  } catch (error) {
-    return {
-      ok: false,
-      error: `workflow: input object is not JSON-serializable: ${errorMessage(error)}. No workflow run was created.`,
-    };
-  }
-  if (serialized.length > WORKFLOW_INPUT_MAX_CHARS) {
-    return {
-      ok: false,
-      error: `workflow: input object serializes to ${serialized.length} characters; the limit is ${WORKFLOW_INPUT_MAX_CHARS}. No workflow run was created.`,
-    };
-  }
-  return { ok: true };
-}
-
 // ---------------------------------------------------------------------------
 // Extension factory
 // ---------------------------------------------------------------------------
 
 export default function workflows(pi: ExtensionAPI): void {
   const completedRunIds = new Set<string>();
-  let activeCommandRuns = 0;
+  const backgroundRuns = workflowBackgroundRunRegistry();
+  const sessionPanels = new Set<WorkflowProgressComponent>();
+  let sessionLease: WorkflowSessionLease | undefined;
+  let sessionRevoked = false;
+  let completionProjectRoot = process.cwd();
+  let completionWorkingDirectory = completionProjectRoot;
+  const rememberCompletionContext = (ctx: ExtensionContext): void => {
+    completionProjectRoot = getProjectRoot(ctx);
+    completionWorkingDirectory = getWorkingDirectory(ctx);
+  };
+  const disposePanel = (panel: WorkflowProgressComponent): void => {
+    panel.dispose();
+    sessionPanels.delete(panel);
+  };
+  const disposeSessionPanels = (): void => {
+    for (const panel of sessionPanels) panel.dispose();
+    sessionPanels.clear();
+  };
+  const startSessionLease = (ctx: ExtensionContext): WorkflowSessionLease => {
+    sessionRevoked = false;
+    sessionLease = backgroundRuns.startSession(getProjectRoot(ctx), workflowSessionId(ctx));
+    return sessionLease;
+  };
+  const currentSessionLease = (ctx: ExtensionContext): WorkflowSessionLease | undefined => {
+    if (sessionRevoked) return undefined;
+    if (sessionLease === undefined || !backgroundRuns.isCurrent(sessionLease)) return startSessionLease(ctx);
+    return sessionLease;
+  };
+  const hasActiveCommandRun = (): boolean =>
+    sessionLease !== undefined &&
+    backgroundRuns.isCurrent(sessionLease) &&
+    backgroundRuns.active(sessionLease) !== undefined;
   const cleanupCompletedRuns = (_ctx: ExtensionContext): boolean => {
     if (completedRunIds.size === 0) return false;
     for (const runId of completedRunIds) pruneCompletedWorkflowRunLiveRows(runId);
@@ -184,18 +217,31 @@ export default function workflows(pi: ExtensionAPI): void {
     return true;
   };
   const cleanupCompletedSurface = (ctx: ExtensionContext): void => {
-    if (activeCommandRuns > 0) return;
+    if (hasActiveCommandRun()) return;
     if (cleanupCompletedRuns(ctx)) clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
     clearOperatorStatus(ctx, WORKFLOW_STATUS_ID);
   };
   const cleanupTransientSurface = (ctx: ExtensionContext): void => {
-    if (activeCommandRuns > 0) return;
+    if (hasActiveCommandRun()) return;
     cleanupCompletedRuns(ctx);
     clearOperatorStatus(ctx, WORKFLOW_STATUS_ID);
   };
   registerTransientUiCleanup(pi, "workflows", cleanupTransientSurface);
   registerTransientUiCleanup(pi, WORKFLOW_LIVE_WIDGET_KEY, cleanupTransientSurface);
   pi.on("turn_end", (_event, ctx) => cleanupCompletedSurface(ctx));
+  pi.on("session_start", (_event, ctx) => {
+    resetWorkflowLiveExecutions();
+    disposeSessionPanels();
+    rememberCompletionContext(ctx);
+    startSessionLease(ctx);
+  });
+  pi.on("session_shutdown", (_event, _ctx) => {
+    resetWorkflowLiveExecutions();
+    sessionRevoked = true;
+    disposeSessionPanels();
+    if (sessionLease !== undefined) backgroundRuns.shutdown(sessionLease);
+    unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
+  });
 
   // -------------------------------------------------------------------------
   // `workflow` tool
@@ -203,7 +249,7 @@ export default function workflows(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "workflow",
     description:
-      "Run a reviewed trusted-file workflow script by saved name or project-relative path. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL (agent/parallel/pipeline/phase/log) orchestrates .agents catalog sub-agents through the task/createAgentSession host; agent() is the single model-calling primitive. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to the `workflow-author` agent (it writes to .pi/workflows/); the DSL contract is extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
+      "Run a reviewed trusted-file workflow script by saved name or project-relative path with one optional semantic text request and optional host-verified continuation artifacts. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL (agent/parallel/pipeline/phase/log) orchestrates .agents catalog sub-agents through the task/createAgentSession host; agent() is the single model-calling primitive. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to the `workflow-author` agent (it writes to .pi/workflows/); the DSL contract is extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
     parameters: WorkflowParams,
     approval: "exec",
     formatApprovalDetails: workflowApprovalDetails,
@@ -215,32 +261,52 @@ export default function workflows(pi: ExtensionAPI): void {
       );
       if (targetFields.length !== 1)
         return errorResult("workflow: exactly one of name, scriptPath, or script is required", { owner: "workflows" });
-      const inputBudget = checkWorkflowInputBudget(valid.value.input);
-      if (!inputBudget.ok) return errorResult(inputBudget.error, { owner: "workflows" });
+      if (valid.value.continuation !== undefined && valid.value.resumeFromRunId !== undefined) {
+        return errorResult("workflow: continuation and resumeFromRunId are mutually exclusive", {
+          owner: "workflows",
+        });
+      }
+      const lease = currentSessionLease(ctx);
+      if (lease === undefined) {
+        return errorResult("workflow: this extension session has already shut down", { owner: "workflows" });
+      }
       const transcript = createWorkflowTranscript(ctx, workflowTargetLabel(valid.value), "tool");
-
-      const res = await runWorkflowScript({
-        pi,
-        ctx,
-        signal,
-        ...(valid.value.name !== undefined ? { name: valid.value.name } : {}),
-        ...(valid.value.scriptPath !== undefined ? { scriptPath: valid.value.scriptPath } : {}),
-        ...(valid.value.script !== undefined ? { script: valid.value.script } : {}),
-        input: valid.value.input,
-        ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
-        onRunStart: ({ runId }) => transcript.start(runId),
-        onEvent: (line: WorkflowJournalLine) => {
-          applyWorkflowJournalLineToAgentLiveStore(line);
-          transcript.event(line);
-          // Stream renderable `content`, not just `details`: in the interactive TUI the pi SDK's
-          // ToolExecutionComponent renders streamed updates via getTextOutput(result.content) — a
-          // content-less partial makes it throw `reading 'filter'` on a detached emit tick, which the
-          // workflow host-net then mis-attributes as ok:false on an otherwise-successful run. The live
-          // agent rows double as the progress text the model/user see for this tool call.
-          const liveAgents = renderAgentLiveRowsText();
-          update({ content: [{ type: "text", text: liveAgents }], details: { lastEvent: line, liveAgents } });
-        },
-      });
+      const launched = backgroundRuns.attach<RunWorkflowScriptResult>(lease, signal, async (background) =>
+        runWorkflowScript({
+          pi,
+          ctx,
+          signal: background.signal,
+          ...(valid.value.name !== undefined ? { name: valid.value.name } : {}),
+          ...(valid.value.scriptPath !== undefined ? { scriptPath: valid.value.scriptPath } : {}),
+          ...(valid.value.script !== undefined ? { script: valid.value.script } : {}),
+          ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
+          ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
+          ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
+          onRunStart: ({ runId }) => {
+            background.setRunId(runId);
+            transcript.start(runId);
+          },
+          onEvent: (line: WorkflowJournalLine) => {
+            applyWorkflowJournalLineToAgentLiveStore(line, getProjectRoot(ctx));
+            transcript.event(line);
+            // Stream renderable `content`, not just `details`: in the interactive TUI the pi SDK's
+            // ToolExecutionComponent renders streamed updates via getTextOutput(result.content) — a
+            // content-less partial makes it throw `reading 'filter'` on a detached emit tick, which the
+            // workflow host-net then mis-attributes as ok:false on an otherwise-successful run. The live
+            // agent rows double as the progress text the model/user see for this tool call.
+            const liveAgents = renderAgentLiveRowsText();
+            update({ content: [{ type: "text", text: liveAgents }], details: { lastEvent: line, liveAgents } });
+          },
+        }),
+      );
+      if (!launched.ok) {
+        return errorResult("workflow: this extension session is stale; retry after Pi finishes reloading", {
+          owner: "workflows",
+        });
+      }
+      const settlement = await launched.run.terminal;
+      if (settlement.status === "rejected") throw settlement.error;
+      const res = settlement.value;
       const transcriptCompletion = transcript.finish(res);
       completedRunIds.add(res.runId);
 
@@ -253,14 +319,18 @@ export default function workflows(pi: ExtensionAPI): void {
         eventKind: transcriptCompletion.eventKind,
         lineCount: transcriptCompletion.lineCount,
       };
-      if (res.ok) {
+      const disposition = workflowResultDisposition(res);
+      if (disposition.status === "completed" || disposition.status === "awaiting_operator") {
         return textResult(summary, {
           owner: "workflows",
+          disposition: res.disposition,
           transcript: transcriptDetails,
           runId: res.runId,
           runDir: res.runDir,
           resultPath: res.resultPersistence.path,
           resultPersistence: res.resultPersistence,
+          ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
+          ...(res.artifactRefsOmitted !== undefined ? { artifactRefsOmitted: res.artifactRefsOmitted } : {}),
           ...(res.resultDiagnostic !== undefined ? { resultDiagnostic: res.resultDiagnostic } : {}),
           journal: res.journal,
           target: operatorWorkflowTarget(res.target),
@@ -273,15 +343,19 @@ export default function workflows(pi: ExtensionAPI): void {
                 resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
               }
             : {}),
+          ...(res.continuation !== undefined ? { continuation: res.continuation } : {}),
         });
       }
       return errorResult(summary, {
         owner: "workflows",
+        disposition: res.disposition,
         transcript: transcriptDetails,
         runId: res.runId,
         runDir: res.runDir,
         resultPath: res.resultPersistence.path,
         resultPersistence: res.resultPersistence,
+        ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
+        ...(res.artifactRefsOmitted !== undefined ? { artifactRefsOmitted: res.artifactRefsOmitted } : {}),
         result: res.result,
         ...(res.resultDiagnostic !== undefined ? { resultDiagnostic: res.resultDiagnostic } : {}),
         journal: res.journal,
@@ -296,6 +370,7 @@ export default function workflows(pi: ExtensionAPI): void {
               resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
             }
           : {}),
+        ...(res.continuation !== undefined ? { continuation: res.continuation } : {}),
       });
     },
   });
@@ -313,15 +388,34 @@ export default function workflows(pi: ExtensionAPI): void {
     },
     {
       description:
-        "Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]. Browse, inspect, explain, or deliberately run a workflow.",
+        "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input] | stop [runId|last]. Browse, inspect persisted evidence, explain, deliberately run, or explicitly stop a slash-launched workflow.",
+      getArgumentCompletions: (prefix) =>
+        workflowArgumentCompletions(prefix, completionProjectRoot, completionWorkingDirectory),
       handler: async (args, ctx) => {
         const text = getCommandText(args).trim();
         const projectRoot = getProjectRoot(ctx);
+        rememberCompletionContext(ctx);
 
         // Bare `/workflows` is a static command view; it never starts a run.
-        if (text === "" || text === "dashboard") {
+        if (text === "") {
           clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
           setOperatorWidget(ctx, "workflows", workflowHelpBlock());
+          return;
+        }
+
+        // `/workflows dashboard` — persisted run/stage/evidence browser. RPC and
+        // hosts without custom UI retain the same bounded disk-backed list.
+        if (text === "dashboard") {
+          if (await openWorkflowRunViewer(ctx, projectRoot)) return;
+          setOperatorWidget(
+            ctx,
+            "workflows",
+            buildRunsListBlock(
+              projectRoot,
+              ctx.mode === "tui" ? RUNS_IN_STATUS_LIST : WORKFLOW_RPC_STATUS_ROWS,
+              ctx.mode !== "tui",
+            ),
+          );
           return;
         }
 
@@ -335,7 +429,8 @@ export default function workflows(pi: ExtensionAPI): void {
             clearWorkflowWidget(ctx, "workflows");
             let intent: WorkflowBrowserIntent | undefined;
             try {
-              intent = await ctx.ui.custom<WorkflowBrowserIntent | undefined>(
+              intent = await requestInlineOperatorInteraction<WorkflowBrowserIntent | undefined>(
+                ctx,
                 (tui, theme, keybindings, done) =>
                   new WorkflowCatalogViewer(tui, theme, keybindings, catalog, projectRoot, workingDirectory, done),
               );
@@ -408,7 +503,8 @@ export default function workflows(pi: ExtensionAPI): void {
           );
           if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
             try {
-              await ctx.ui.custom<void>(
+              await requestInlineOperatorInteraction<void>(
+                ctx,
                 (tui, theme, keybindings, done) => new WorkflowInfoViewer(tui, theme, keybindings, infoBlock, done),
               );
             } catch (error) {
@@ -445,6 +541,7 @@ export default function workflows(pi: ExtensionAPI): void {
 
         // `/workflows status` — recent runs; `/workflows status <runId>` — one run's progress.
         if (text === "status") {
+          if (await openWorkflowRunViewer(ctx, projectRoot)) return;
           const compact = ctx.mode !== "tui";
           setOperatorWidget(
             ctx,
@@ -455,11 +552,31 @@ export default function workflows(pi: ExtensionAPI): void {
         }
         const statusMatch = /^status\s+(\S+)$/.exec(text);
         if (statusMatch !== null) {
+          if (await openWorkflowRunViewer(ctx, projectRoot, statusMatch[1] ?? "")) return;
           setOperatorWidget(
             ctx,
             "workflows",
             buildRunDetailBlock(projectRoot, statusMatch[1] ?? "", ctx.mode !== "tui"),
           );
+          return;
+        }
+
+        const stopMatch = /^stop(?:\s+(\S+))?$/.exec(text);
+        if (stopMatch !== null) {
+          const lease = currentSessionLease(ctx);
+          if (lease === undefined) {
+            setOperatorWidget(
+              ctx,
+              "workflows",
+              workflowWarningBlock(
+                "Workflow stop is unavailable because this extension session has already shut down.",
+                "Recovery: wait for Pi to finish reloading, then retry /workflows stop last.",
+              ),
+            );
+            return;
+          }
+          const selector = stopMatch[1] ?? "last";
+          setOperatorWidget(ctx, "workflows", workflowStopBlock(selector, backgroundRuns.stop(lease, selector)));
           return;
         }
 
@@ -473,6 +590,17 @@ export default function workflows(pi: ExtensionAPI): void {
               workflowWarningBlock(
                 "Missing run id after --resume.",
                 "Retry: /workflows run <name|path> --resume <runId> [input]",
+              ),
+            );
+            return;
+          }
+          if (parsedRun.input !== undefined && parsedRun.input.length > WORKFLOW_INPUT_MAX_CHARS) {
+            setOperatorWidget(
+              ctx,
+              "workflows",
+              workflowWarningBlock(
+                `Workflow input exceeds the ${WORKFLOW_INPUT_MAX_CHARS}-character limit after command trimming.`,
+                "Retry with a shorter semantic request.",
               ),
             );
             return;
@@ -491,80 +619,105 @@ export default function workflows(pi: ExtensionAPI): void {
           }
           const scriptRef = parsedRun.scriptRef;
           const workingDirectory = getWorkingDirectory(ctx);
-          let target;
-          try {
-            target = resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory);
-          } catch (err) {
-            if (err instanceof WorkflowNameNotFoundError) {
-              setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
-              return;
-            }
-            const controller = new AbortController();
-            const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
-            const res = await runWorkflowScript({
-              pi,
-              ctx,
-              signal: controller.signal,
-              script: scriptRef,
-              ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
-              ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
-              onRunStart: ({ runId }) => transcript.start(runId),
-              onEvent: (line: WorkflowJournalLine) => {
-                applyWorkflowJournalLineToAgentLiveStore(line);
-                transcript.event(line);
-                setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
-                setWorkflowEventStatus(ctx, line);
-              },
-            });
-            const transcriptCompletion = transcript.finish(res);
-            completedRunIds.add(res.runId);
-            setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
-            await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion);
+          const targetPreflight = preflightWorkflowCommandTarget(scriptRef, projectRoot, workingDirectory);
+          if (targetPreflight.status === "not-found") {
+            setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
             return;
           }
-          clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
-          const controller = new AbortController();
-          const hasUI = ctx.hasUI === true;
-          setWorkflowLaunchStatus(ctx, target.kind, target.ref);
-          let panel: WorkflowProgressComponent | undefined;
-          const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
-          activeCommandRuns += 1;
-          if (hasUI) pinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
-          let res: RunWorkflowScriptResult;
-          try {
-            res = await runWorkflowScript({
-              pi,
+          // Confinement and other resolution failures deliberately continue
+          // through the runner once. That owner creates the canonical failed
+          // run and result.json instead of losing durable operator evidence.
+          const target = targetPreflight.status === "resolved" ? targetPreflight.target : undefined;
+
+          const lease = currentSessionLease(ctx);
+          if (lease === undefined) {
+            setOperatorWidget(
               ctx,
-              signal: controller.signal,
-              script: scriptRef,
-              ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
-              ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
-              onRunStart: ({ runId }) => {
-                transcript.start(runId);
-                if (hasUI && !panel) panel = installWorkflowProgress(ctx, WORKFLOW_LIVE_WIDGET_KEY, scriptRef, runId);
-              },
-              onEvent: (line: WorkflowJournalLine) => {
-                if (hasUI) panel?.push(line);
-                else {
-                  applyWorkflowJournalLineToAgentLiveStore(line);
-                  setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
-                }
-                transcript.event(line);
-                setWorkflowEventStatus(ctx, line);
-              },
-            });
-            completedRunIds.add(res.runId);
-          } finally {
+              "workflows",
+              workflowWarningBlock(
+                "Workflow not started: this extension session has already shut down.",
+                "Recovery: wait for Pi to finish reloading, then retry the same /workflows run command.",
+              ),
+            );
+            return;
+          }
+          const active = backgroundRuns.active(lease);
+          if (active !== undefined) {
+            setOperatorWidget(ctx, "workflows", workflowRunConflictBlock(active.runId ?? active.launchId));
+            return;
+          }
+
+          clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
+          const hasUI = ctx.hasUI === true;
+          setWorkflowLaunchStatus(ctx, target?.kind ?? "script", target?.ref ?? scriptRef);
+          if (hasUI) pinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
+          const declaredPhases =
+            target === undefined ? [] : readWorkflowMeta(target.path).phases.map((phase) => phase.title);
+          const launched = backgroundRuns.launch<RunWorkflowScriptResult>(lease, async (background) => {
+            let panel: WorkflowProgressComponent | undefined;
+            const cleanupPanel = (): void => {
+              if (panel !== undefined) disposePanel(panel);
+            };
+            const transcript = createWorkflowTranscript(ctx, scriptRef, "command");
+            const isCurrent = (): boolean => background.isCurrent();
+            try {
+              const res = await runWorkflowScript({
+                pi,
+                ctx,
+                signal: background.signal,
+                script: scriptRef,
+                ...(parsedRun.input !== undefined ? { input: parsedRun.input } : {}),
+                ...(parsedRun.resumeFromRunId !== undefined ? { resumeFromRunId: parsedRun.resumeFromRunId } : {}),
+                onRunStart: ({ runId }) => {
+                  background.setRunId(runId);
+                  if (!isCurrent()) return;
+                  transcript.start(runId);
+                  if (hasUI && !panel) {
+                    panel = installWorkflowProgress(ctx, WORKFLOW_LIVE_WIDGET_KEY, scriptRef, runId, {
+                      scope: "workflow",
+                      declaredPhases,
+                    });
+                    sessionPanels.add(panel);
+                  }
+                },
+                onEvent: (line: WorkflowJournalLine) => {
+                  if (!isCurrent()) return;
+                  applyWorkflowJournalLineToAgentLiveStore(line, projectRoot);
+                  if (hasUI) {
+                    // The adapter completes live-row projection and any replay
+                    // artifact I/O before the passive component records the
+                    // event and requests its next render.
+                    panel?.push(line);
+                  } else {
+                    setTextWidget(ctx, "workflows", renderAgentLiveRowsText());
+                  }
+                  transcript.event(line);
+                  setWorkflowEventStatus(ctx, line);
+                },
+              });
+              if (!isCurrent()) return res;
+              completedRunIds.add(res.runId);
+              const transcriptCompletion = transcript.finish(res);
+              if (hasUI && panel) {
+                panel.finish(res);
+                cleanupPanel();
+              } else setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
+              await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion, isCurrent);
+              return res;
+            } catch (error) {
+              cleanupPanel();
+              if (isCurrent()) setOperatorWidget(ctx, "workflows", workflowBackgroundFailureBlock(error));
+              throw error;
+            } finally {
+              cleanupPanel();
+              if (hasUI && isCurrent()) unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
+            }
+          });
+          if (!launched.ok) {
             if (hasUI) unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
-            activeCommandRuns = Math.max(0, activeCommandRuns - 1);
+            const owner = launched.active?.runId ?? launched.active?.launchId ?? "current run";
+            setOperatorWidget(ctx, "workflows", workflowRunConflictBlock(owner));
           }
-          const transcriptCompletion = transcript.finish(res);
-          if (hasUI && panel) {
-            panel.finish(res);
-          } else {
-            setOperatorWidget(ctx, "workflows", buildWorkflowResultBlock(res, ctx.mode !== "tui"));
-          }
-          await persistCommandWorkflowTranscript(pi, ctx, transcriptCompletion);
           return;
         }
 
@@ -575,12 +728,40 @@ export default function workflows(pi: ExtensionAPI): void {
           primary: `Unknown workflow command: ${text}`,
           body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
           controls: [
-            "Usage: /workflows | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input]",
+            "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input] | stop [runId|last]",
           ],
         });
       },
     },
   );
+}
+
+async function openWorkflowRunViewer(
+  ctx: ExtensionCommandContext,
+  projectRoot: string,
+  runId?: string,
+): Promise<boolean> {
+  if (ctx.mode !== "tui" || ctx.hasUI === false || ctx.ui.custom === undefined) return false;
+  clearWorkflowWidget(ctx, "workflows");
+  try {
+    await requestInlineOperatorInteraction<void>(
+      ctx,
+      (tui, theme, keybindings, done) => new WorkflowRunViewer(tui, theme, keybindings, projectRoot, done, runId),
+    );
+  } catch (error) {
+    const fallback =
+      runId === undefined
+        ? buildRunsListBlock(projectRoot, RUNS_IN_STATUS_LIST)
+        : buildRunDetailBlock(projectRoot, runId);
+    setOperatorWidget(ctx, "workflows", {
+      ...fallback,
+      metadata: [
+        `Interactive evidence viewer failed: ${errorMessage(error)}. Bounded static evidence is shown instead.`,
+        ...(fallback.metadata ?? []),
+      ],
+    });
+  }
+  return true;
 }
 
 function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefined {
@@ -594,11 +775,37 @@ function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefined {
   }
 }
 
+function workflowSessionId(ctx: ExtensionContext): string {
+  const sessionId = getSessionId(ctx);
+  return sessionId.trim() === "" ? "unknown-session" : sessionId;
+}
+
 interface ParsedRunCommand {
   scriptRef: string;
   input?: string;
   resumeFromRunId?: string;
   missingResumeId?: boolean;
+}
+
+type WorkflowCommandTargetPreflight =
+  | { status: "resolved"; target: ResolvedWorkflowTarget }
+  | { status: "not-found" }
+  | { status: "runner-durable-failure" };
+
+function preflightWorkflowCommandTarget(
+  scriptRef: string,
+  projectRoot: string,
+  workingDirectory: string,
+): WorkflowCommandTargetPreflight {
+  try {
+    return {
+      status: "resolved",
+      target: resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory),
+    };
+  } catch (error) {
+    if (error instanceof WorkflowNameNotFoundError) return { status: "not-found" };
+    return { status: "runner-durable-failure" };
+  }
 }
 
 function parseRunCommand(text: string): ParsedRunCommand | null {
@@ -641,18 +848,148 @@ function listExampleNames(): string[] {
   return [...CURATED_PACKAGE_WORKFLOW_NAMES];
 }
 
+export function workflowArgumentCompletions(
+  rawPrefix: string,
+  projectRoot: string,
+  workingDirectory = projectRoot,
+): CommandArgumentCompletion[] | null {
+  const prefix = rawPrefix.replace(/^\s+/u, "");
+  const rootCommands: CommandArgumentCompletion[] = [
+    { value: "dashboard", label: "dashboard", description: "Open persisted run dashboard" },
+    { value: "list ", label: "list", description: "Browse workflow catalog" },
+    { value: "info ", label: "info", description: "Show one workflow" },
+    { value: "status ", label: "status", description: "Inspect persisted run status" },
+    { value: "run ", label: "run", description: "Start a workflow" },
+    { value: "stop ", label: "stop", description: "Stop a workflow explicitly" },
+  ];
+  if (!prefix.includes(" ")) return matchingCompletions(rootCommands, prefix);
+  if (prefix.startsWith("list ")) return null;
+
+  const runIds = (): string[] => listWorkflowRunIds(projectRoot).slice(0, 20);
+  const workflowNames = (): string[] => {
+    try {
+      return buildWorkflowCatalogModel(projectRoot, workingDirectory).current.map((row) => row.name);
+    } catch {
+      return listExampleNames();
+    }
+  };
+  if (prefix.startsWith("info ")) {
+    return matchingCompletions(
+      workflowNames().map((name) => ({ value: `info ${name}`, label: name })),
+      prefix,
+    );
+  }
+  if (prefix.startsWith("status ")) {
+    return matchingCompletions(
+      runIds().map((runId) => ({ value: `status ${runId}`, label: runId })),
+      prefix,
+    );
+  }
+  if (prefix.startsWith("stop ")) {
+    return matchingCompletions(
+      [
+        { value: "stop last", label: "last", description: "Most recently started run" },
+        ...runIds().map((runId) => ({ value: `stop ${runId}`, label: runId })),
+      ],
+      prefix,
+    );
+  }
+  if (!prefix.startsWith("run ")) return null;
+
+  const runTail = prefix.slice("run ".length);
+  const firstSpace = runTail.search(/\s/u);
+  const targetPrefix = firstSpace < 0 ? runTail : runTail.slice(0, firstSpace);
+  if (targetPrefix.includes("/") || targetPrefix.startsWith(".")) return null;
+  if (firstSpace < 0) {
+    return matchingCompletions(
+      workflowNames().map((name) => ({ value: `run ${name}`, label: name })),
+      prefix,
+    );
+  }
+
+  const afterTarget = runTail.slice(firstSpace);
+  if (" --resume ".startsWith(afterTarget)) {
+    return [{ value: `run ${targetPrefix} --resume `, label: "--resume", description: "Resume from a prior run" }];
+  }
+  if (!afterTarget.startsWith(" --resume ")) return null;
+  const resumePrefix = `run ${targetPrefix} --resume `;
+  const requestedRunId = afterTarget.slice(" --resume ".length);
+  if (/\s/u.test(requestedRunId)) return null;
+  return matchingCompletions(
+    runIds().map((runId) => ({ value: `${resumePrefix}${runId}`, label: runId })),
+    `${resumePrefix}${requestedRunId}`,
+  );
+}
+
+function matchingCompletions(completions: CommandArgumentCompletion[], prefix: string): CommandArgumentCompletion[] {
+  const normalizedPrefix = prefix.toLowerCase();
+  return completions.filter((item) => item.value.toLowerCase().startsWith(normalizedPrefix));
+}
+
 function workflowHelpBlock(): OperatorBlock {
   return {
     type: "VIEW",
     subject: "Workflow commands",
     primary: "Browse saved workflows, inspect run history, or start a trusted-file workflow.",
     body: [
+      "Dashboard: /workflows dashboard",
       "Catalog: /workflows list [query]",
       "Info: /workflows info [exact-name]",
       "History: /workflows status [runId]",
       "Run: /workflows run <name|path> [--resume <runId>] [input]",
+      "Stop: /workflows stop [runId|last]",
     ],
     metadata: ["A command starts execution only when the Pi session is provably idle."],
+  };
+}
+
+function workflowRunConflictBlock(runId: string): OperatorBlock {
+  return {
+    type: "WARN",
+    subject: "Workflow run",
+    primary: `Workflow not started: slash-launched workflow ${runId} is still running or stopping.`,
+    metadata: ["Only one slash-launched workflow may run in this project session at a time."],
+    controls: [`Inspect: /workflows status ${runId}`, `Stop: /workflows stop ${runId}`],
+  };
+}
+
+function workflowStopBlock(selector: string, result: WorkflowBackgroundStopResult): OperatorBlock {
+  if (result.status === "unknown") {
+    return {
+      type: "ERROR",
+      subject: "Workflow stop",
+      primary: `No active or recorded workflow matched ${selector}.`,
+      controls: ["Inspect durable runs: /workflows status", "Stop the current run: /workflows stop last"],
+    };
+  }
+  const runId = result.run.runId ?? result.run.launchId;
+  if (result.status === "settled") {
+    return {
+      type: "WARN",
+      subject: "Workflow stop",
+      primary: `Workflow ${runId} has already settled; no stop signal was sent.`,
+      controls: [`Inspect: /workflows status ${runId}`],
+    };
+  }
+  return {
+    type: "VIEW",
+    subject: "Workflow stop",
+    primary:
+      result.status === "requested"
+        ? `Stop requested for workflow ${runId}. Settlement is still pending.`
+        : `Workflow ${runId} is already stopping. Settlement is still pending.`,
+    metadata: ["A stop request is not a completion claim; durable result evidence remains authoritative."],
+    controls: [`Inspect: /workflows status ${runId}`],
+  };
+}
+
+function workflowBackgroundFailureBlock(error: unknown): OperatorBlock {
+  return {
+    type: "ERROR",
+    subject: "Workflow run",
+    primary: `Workflow background runner rejected: ${errorMessage(error)}.`,
+    metadata: ["The rejection was observed by the workflow run registry."],
+    controls: ["Inspect durable evidence: /workflows status"],
   };
 }
 
@@ -712,13 +1049,15 @@ function buildRunsListBlock(projectRoot: string, limit: number, compact = false)
 
 function formatRunRow(projectRoot: string, runId: string, compact = false): string {
   const s = readWorkflowRunSummary(projectRoot, runId);
+  const journalDiagnostics = readWorkflowRunJournalState(projectRoot, runId).diagnostics.length;
   const source = readWorkflowRunResult(projectRoot, runId)?.target?.source;
   if (compact) {
     // The replayed marker survives compaction: a reader must never see a green
     // row and assume every agent in it actually ran.
     const replayed = s.agentsReplayed > 0 ? ` replayed=${s.agentsReplayed}` : "";
+    const corruption = journalDiagnostics > 0 ? ` journal-corrupt=${journalDiagnostics}` : "";
     return compactWorkflowLine(
-      `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${s.status} ${runId} phase=${s.phase ?? "-"}${replayed}`,
+      `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${s.status} ${runId} phase=${s.phase ?? "-"}${replayed}${corruption}`,
     );
   }
   const parts = [
@@ -731,11 +1070,13 @@ function formatRunRow(projectRoot: string, runId: string, compact = false): stri
   if (s.agentsReplayed > 0) parts.push(`replayed=${s.agentsReplayed}`);
   if (s.usage !== null) parts.push(`tok=${s.usage.totalTokens}`);
   if (s.errors > 0) parts.push(`err=${s.errors}`);
+  if (journalDiagnostics > 0) parts.push(`journal-corrupt=${journalDiagnostics}`);
   return parts.join("  ");
 }
 
 function buildRunDetailBlock(projectRoot: string, runId: string, compact = false): OperatorBlock {
-  const journal = readWorkflowRunJournal(projectRoot, runId);
+  const journalState = readWorkflowRunJournalState(projectRoot, runId);
+  const journal = journalState.lines;
   const summary = readWorkflowRunSummary(projectRoot, runId);
   const persisted = readWorkflowRunResult(projectRoot, runId);
   if (journal.length === 0 && !summary.hasResult) {
@@ -758,6 +1099,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
       : null;
   const phaseLine = declaredPhaseProgressLine(projectRoot, runId, journal);
   const allJournalLines = renderJournalLines(journal);
+  const journalCorruptionLine = journalDiagnosticSummary(journalState.diagnostics);
   const eventLimit = compact ? WORKFLOW_RPC_DETAIL_EVENT_LIMIT : WORKFLOW_DETAIL_EVENT_LIMIT;
   const newestJournalLines = allJournalLines.slice(-eventLimit).reverse();
   const older = Math.max(0, allJournalLines.length - newestJournalLines.length);
@@ -776,7 +1118,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
       ? resultDetail
       : persisted.error !== undefined
         ? `error: ${persisted.error}`
-        : `result: ${formatWorkflowResultSummary(persisted.result)}`;
+        : `result: ${persistedWorkflowDisposition(persisted).summary}`;
   return {
     type: "VIEW",
     subject: "Workflow run",
@@ -798,6 +1140,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
     metadata: compact
       ? [
           WORKFLOW_SOURCE_LEGEND,
+          ...(journalCorruptionLine === null ? [] : [compactWorkflowLine(journalCorruptionLine)]),
           compactWorkflowLine(`runDir: ${workflowRunDir(projectRoot, runId)}`),
           ...(scriptIdentity === undefined
             ? []
@@ -811,6 +1154,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
       : [
           WORKFLOW_SOURCE_LEGEND,
           `Source: [R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`}`,
+          ...(journalCorruptionLine === null ? [] : [journalCorruptionLine]),
           `runDir: ${workflowRunDir(projectRoot, runId)}`,
           ...(scriptIdentity === undefined
             ? []
@@ -823,6 +1167,15 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
         ],
     controls: ["Refresh/list: /workflows status · Full artifact: result.json"],
   };
+}
+
+function journalDiagnosticSummary(
+  diagnostics: ReturnType<typeof readWorkflowRunJournalState>["diagnostics"],
+): string | null {
+  const first = diagnostics[0];
+  if (first === undefined) return null;
+  const location = first.lineNumber === null ? "journal" : `line ${first.lineNumber}`;
+  return `journal corruption: ${diagnostics.length} row(s); first=${location}: ${first.message}`;
 }
 
 /**
@@ -857,16 +1210,15 @@ function declaredPhaseProgressLine(
 
 function buildWorkflowResultBlock(res: RunWorkflowScriptResult, compact = false): OperatorBlock {
   const source = res.target?.source;
-  const status = res.ok ? "completed" : "failed";
-  const primary = `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${
-    res.ok ? formatWorkflowResultSummary(res.result) : formatWorkflowFailureSummary(res.result, res.error)
-  }`;
+  const disposition = workflowResultDisposition(res);
+  const primary = `[R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`} ${disposition.summary}`;
+  const type = disposition.status === "completed" ? "RESULT" : disposition.status === "failed" ? "ERROR" : "WARN";
   return {
-    type: res.ok ? "RESULT" : "ERROR",
+    type,
     subject: "Workflow run",
     primary: compact ? compactWorkflowLine(primary) : primary,
     badges: [
-      { text: `status:${status}`, tone: res.ok ? "success" : "error" },
+      { text: `status:${disposition.status}`, tone: workflowStatusTone(disposition.status) },
       ...(source === undefined ? [] : [{ text: workflowSourceBadge(source).slice(1, -1), tone: "muted" as const }]),
     ],
     metadata: [
@@ -902,11 +1254,22 @@ function compactWorkflowLine(value: string): string {
   return `${sliceByColumn(plain, 0, 71)}…`;
 }
 
-function workflowStatusTone(status: string): OperatorTone {
-  if (status === "completed") return "success";
-  if (status === "failed") return "error";
-  if (status === "running") return "accent";
-  return "muted";
+function workflowStatusTone(status: WorkflowRunStatus | WorkflowProjectedStatus): OperatorTone {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "failed":
+      return "error";
+    case "running":
+      return "accent";
+    case "awaiting_operator":
+    case "cancelled":
+      return "warning";
+    case "unknown":
+      return "muted";
+    default:
+      return assertNever(status);
+  }
 }
 
 /**
@@ -915,13 +1278,44 @@ function workflowStatusTone(status: string): OperatorTone {
  * error text before the final workflow_end line.
  */
 function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string): string {
-  const lines = [`workflow ${res.runId}`, `runDir: ${res.runDir}`];
+  const disposition = workflowResultDisposition(res);
+  const firstLine =
+    disposition.status === "awaiting_operator"
+      ? `workflow ${res.runId} · ${disposition.status} · ${disposition.summary}`
+      : `workflow ${res.runId} · ${disposition.status}`;
+  const lines = [firstLine, `runDir: ${res.runDir}`];
   if (res.scriptIdentity !== undefined) lines.push(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref));
   if (!res.resultPersistence.ok) {
     lines.push(`persistence: ${res.resultPersistence.code}`);
   }
+  if (res.artifactRefs !== undefined && res.artifactRefs.length > 0) {
+    lines.push("artifactRefs:", ...res.artifactRefs.map((ref) => JSON.stringify(ref)));
+    if (res.artifactRefsOmitted !== undefined) lines.push(`artifactRefsOmitted: ${res.artifactRefsOmitted}`);
+  }
   lines.push("", digest);
   return lines.join("\n");
+}
+
+function workflowResultDisposition(res: RunWorkflowScriptResult): WorkflowDispositionProjection {
+  return projectWorkflowDisposition({
+    ok: res.ok,
+    result: res.result,
+    ...(res.error !== undefined ? { error: res.error } : {}),
+    ...(res.disposition !== undefined ? { disposition: res.disposition } : {}),
+  });
+}
+
+function persistedWorkflowDisposition(res: WorkflowRunResultEnvelope): WorkflowDispositionProjection {
+  return projectWorkflowDisposition({
+    ok: res.ok === true,
+    result: res.result,
+    ...(res.error !== undefined ? { error: res.error } : {}),
+    ...(res.disposition !== undefined ? { disposition: res.disposition } : {}),
+  });
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled workflow status: ${String(value)}`);
 }
 
 function formatOperatorScriptIdentity(identity: OperatorScriptIdentityInput, sourceRef?: string): string {

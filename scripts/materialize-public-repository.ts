@@ -29,16 +29,19 @@ const existing = await readdir(destinationRoot).catch((error: unknown) => {
 });
 if (existing.length > 0) throw new Error(`Destination is not empty: ${destinationRoot}`);
 
-const packageJson = JSON.parse(
-  await readFile(path.join(sourceRoot, "package.json"), "utf8"),
-) as PackageJson;
+const packageJson = JSON.parse(await readFile(path.join(sourceRoot, "package.json"), "utf8")) as PackageJson;
 const manifest = JSON.parse(
   await readFile(path.join(sourceRoot, "public-repository.json"), "utf8"),
 ) as PublicRepositoryManifest;
 
 const selected = new Set<string>([...packageJson.files, "package.json"]);
 for (const entry of manifest.repositoryFiles) {
-  await collectEntry(entry, selected);
+  const relativeEntry = normalizeRelative(entry);
+  const entryStat = await lstat(path.join(sourceRoot, relativeEntry));
+  if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
+    throw new Error(`Repository allowlist entry must be an exact regular file: ${relativeEntry}`);
+  }
+  selected.add(relativeEntry);
 }
 for (const excluded of manifest.excludeFiles) selected.delete(normalizeRelative(excluded));
 selected.add(normalizeRelative(manifest.generatedInventory));
@@ -61,21 +64,6 @@ const inventory = [...selected].sort().join("\n") + "\n";
 await writeFile(path.join(destinationRoot, manifest.generatedInventory), inventory, "utf8");
 console.log(`Materialized ${selected.size} files at ${destinationRoot}`);
 
-async function collectEntry(entry: string, selected: Set<string>): Promise<void> {
-  const relativeEntry = normalizeRelative(entry);
-  const absoluteEntry = path.join(sourceRoot, relativeEntry);
-  const entryStat = await lstat(absoluteEntry);
-  if (entryStat.isSymbolicLink()) throw new Error(`Symlink allowlist entry rejected: ${relativeEntry}`);
-  if (entryStat.isFile()) {
-    selected.add(relativeEntry);
-    return;
-  }
-  if (!entryStat.isDirectory()) throw new Error(`Unsupported allowlist entry: ${relativeEntry}`);
-  for (const child of await readdir(absoluteEntry, { withFileTypes: true })) {
-    await collectEntry(path.posix.join(relativeEntry, child.name), selected);
-  }
-}
-
 function normalizeRelative(value: string): string {
   const normalized = value.split(path.sep).join("/").replace(/^\.\//, "");
   if (!normalized || normalized.startsWith("../") || path.isAbsolute(normalized)) {
@@ -85,6 +73,5 @@ function normalizeRelative(value: string): string {
 }
 
 function hasCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error
-    && (error as { code?: string }).code === code;
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === code;
 }

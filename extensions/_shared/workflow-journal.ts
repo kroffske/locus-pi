@@ -9,12 +9,44 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { agentLiveStore, type AgentLiveStatus } from "./agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveStatus } from "./agent-sdk-host.js";
 import { runtimeStateDir } from "./files.js";
 import type { WorkflowJournalLine, WorkflowJournalSink, WorkflowUsage } from "./workflow-runtime.js";
+import {
+  readWorkflowArtifactRecord,
+  WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
+  type WorkflowArtifactRef,
+} from "./workflow-artifacts.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
+import { projectWorkflowDisposition } from "./workflow-result.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
+const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_ARTIFACT_COMPONENT_PATTERN, "u");
+const WORKFLOW_LIVE_EXECUTIONS_KEY = Symbol.for("locus-pi.workflow-live-executions.v1");
+
+function workflowLiveExecutions(): Map<string, AgentLiveExecutionHandle> {
+  const runtimeGlobal = globalThis as unknown as Record<symbol, unknown>;
+  const existing = runtimeGlobal[WORKFLOW_LIVE_EXECUTIONS_KEY];
+  if (existing instanceof Map) return existing as Map<string, AgentLiveExecutionHandle>;
+  const executions = new Map<string, AgentLiveExecutionHandle>();
+  Object.defineProperty(runtimeGlobal, WORKFLOW_LIVE_EXECUTIONS_KEY, {
+    value: executions,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return executions;
+}
+
+/** Active journal writers only; independent from retained live rows. */
+export function workflowLiveExecutionCount(): number {
+  return workflowLiveExecutions().size;
+}
+
+/** Drop process-shared writer authority at a workflow session boundary. */
+export function resetWorkflowLiveExecutions(): void {
+  workflowLiveExecutions().clear();
+}
 
 // ---------------------------------------------------------------------------
 // runId
@@ -75,17 +107,25 @@ export function createWorkflowJournalSink(projectRoot: string, runId: string): W
   };
 }
 
-export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLine): void {
+/**
+ * One synchronous journal-to-live adapter call owns projection, optional replay
+ * hydration, and exact writer finalization. Production callers pass projectRoot;
+ * callers that omit it cannot verify replay evidence and receive an explicit row diagnostic.
+ */
+export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLine, projectRoot?: string): void {
   if (line.kind === "group_start" || line.kind === "group_end") {
     applyGroupLineToAgentLiveStore(line);
     return;
   }
   if (line.agent === undefined) return;
+  if (line.kind === "error" && !hasTerminalCallId(line.callId)) return;
   const id = workflowAgentLiveRowId(line);
+  const executionKey = workflowJournalExecutionKey(line);
   if (line.kind === "agent_start") {
-    agentLiveStore.begin({
+    const execution = agentLiveStore.beginExecution({
       id,
       ...(line.groupId !== undefined ? { parentRowId: workflowGroupLiveRowId(line) } : {}),
+      workflowRunId: line.runId,
       agentName: line.agent,
       label: line.label !== undefined ? `${line.agent} (${line.label})` : line.agent,
       ...(line.model !== undefined ? { model: line.model } : {}),
@@ -94,25 +134,134 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       isolated: false,
       noMcp: false,
     });
-    agentLiveStore.patch(id, { status: "working", startedAt: Date.now() });
+    workflowLiveExecutions().set(executionKey, execution);
+    agentLiveStore.patchExecution(execution, { status: "working", startedAt: Date.now() });
+    return;
   }
-  if (line.status === undefined) return;
-  const status = workflowStatusToAgentLiveStatus(line.status);
-  if (status === undefined) return;
-  const current = agentLiveStore.rows.get(id);
-  if (current === undefined) return;
-  agentLiveStore.patch(id, {
-    status,
-    ...(line.model !== undefined ? { model: line.model } : {}),
-    ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
-    // Slot round on the anchor row (REQ-009): cosmetic while the executor row carries it, but
-    // load-bearing in the degraded fallback where no executor row exists (host unavailable).
-    ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
-    ...(line.round !== undefined ? { round: line.round } : {}),
-    ...(line.worktreePath !== undefined ? { currentPath: line.worktreePath } : {}),
-    ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
-    ...(status !== "working" ? { currentTools: [] } : {}),
+  const execution = workflowLiveExecutions().get(executionKey);
+  const agentEndStatus =
+    line.kind === "agent_end" && line.status !== undefined ? workflowStatusToAgentLiveStatus(line.status) : undefined;
+  const terminal = line.kind === "error" || (agentEndStatus !== undefined && isTerminalStatus(agentEndStatus));
+  try {
+    if (execution === undefined) return;
+    const current = agentLiveStore.rowForExecution(execution);
+    if (current === undefined) return;
+    if (line.kind === "error") {
+      const message = line.message?.trim() || "Workflow agent failed without an error message.";
+      agentLiveStore.patchExecution(execution, {
+        status: "error",
+        finalAnswer: message,
+        errors: current.errors.includes(message) ? current.errors : [...current.errors, message],
+        ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
+        currentTools: [],
+      });
+      return;
+    }
+    if (line.kind !== "agent_end") return;
+    const status = agentEndStatus;
+    if (status === undefined) return;
+    const replayContextError =
+      terminal && line.replayed === true && projectRoot === undefined
+        ? "Replayed answer verification context is unavailable."
+        : undefined;
+    agentLiveStore.patchExecution(execution, {
+      status,
+      ...(line.model !== undefined ? { model: line.model } : {}),
+      ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
+      // Slot round on the anchor row (REQ-009): cosmetic while the executor row carries it, but
+      // load-bearing in the degraded fallback where no executor row exists (host unavailable).
+      ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
+      ...(line.round !== undefined ? { round: line.round } : {}),
+      ...(line.worktreePath !== undefined ? { currentPath: line.worktreePath } : {}),
+      ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
+      ...(status !== "working" ? { currentTools: [] } : {}),
+      ...(replayContextError !== undefined
+        ? {
+            errors: current.errors.includes(replayContextError)
+              ? current.errors
+              : [...current.errors, replayContextError],
+          }
+        : {}),
+    });
+    if (terminal && line.replayed === true && projectRoot !== undefined) {
+      hydrateWorkflowAgentAnswerArtifact(projectRoot, line, execution);
+    }
+  } finally {
+    if (terminal && execution !== undefined && workflowLiveExecutions().get(executionKey) === execution) {
+      workflowLiveExecutions().delete(executionKey);
+    }
+  }
+}
+
+function hasTerminalCallId(callId: string | undefined): callId is string {
+  return callId !== undefined && callId.trim() !== "";
+}
+
+/** Hydrate one replay while its exact writer is still active. */
+function hydrateWorkflowAgentAnswerArtifact(
+  projectRoot: string,
+  line: WorkflowJournalLine,
+  execution: AgentLiveExecutionHandle,
+): void {
+  const row = agentLiveStore.rowForExecution(execution);
+  if (row === undefined) return;
+  const ref = line.answerArtifact;
+  if (ref === undefined) {
+    patchWorkflowArtifactError(execution, row.errors, "Replayed answer artifact is missing from the workflow journal.");
+    return;
+  }
+  if (ref.runId !== line.runId) {
+    patchWorkflowArtifactError(execution, row.errors, "Replayed answer artifact belongs to a different workflow run.");
+    return;
+  }
+  const read = readWorkflowArtifactRecord(projectRoot, ref.runId, ref.artifactId);
+  if (read.status !== "ready") {
+    patchWorkflowArtifactError(execution, row.errors, `Replayed answer artifact is ${read.status}: ${read.message}`);
+    return;
+  }
+  const record = read.record;
+  if (
+    record.kind !== "answer" ||
+    record.provenance !== "replay" ||
+    record.name !== ref.name ||
+    record.sha256 !== ref.sha256 ||
+    (line.callId !== undefined && record.callId !== line.callId)
+  ) {
+    patchWorkflowArtifactError(
+      execution,
+      row.errors,
+      "Replayed answer artifact metadata does not match the workflow journal.",
+    );
+    return;
+  }
+  const finalAnswer = read.bytes.toString("utf8");
+  if (finalAnswer.trim() === "") {
+    patchWorkflowArtifactError(execution, row.errors, "Replayed answer artifact is empty.");
+    return;
+  }
+  agentLiveStore.patchExecution(execution, {
+    finalAnswer,
+    resultArtifact: `workflow-artifact:${ref.runId}/${ref.artifactId}#sha256=${ref.sha256}`,
   });
+}
+
+function patchWorkflowArtifactError(
+  execution: AgentLiveExecutionHandle,
+  existingErrors: string[],
+  message: string,
+): void {
+  if (existingErrors.includes(message)) return;
+  agentLiveStore.patchExecution(execution, { errors: [...existingErrors, message] });
+}
+
+function workflowJournalExecutionKey(
+  line: Pick<WorkflowJournalLine, "runId" | "callId" | "agent" | "label" | "phase">,
+): string {
+  return `${line.runId}\u0000agent:${line.callId ?? workflowAgentLiveRowId(line)}`;
+}
+
+function workflowGroupExecutionKey(line: Pick<WorkflowJournalLine, "runId" | "groupId">): string {
+  return `${line.runId}\u0000group:${line.groupId ?? ""}`;
 }
 
 export function workflowAgentLiveRowId(line: Pick<WorkflowJournalLine, "runId" | "agent" | "label" | "phase">): string {
@@ -162,6 +311,10 @@ export function pruneCompletedWorkflowRunLiveRows(latestCompletedRunId: string):
 
 /** Remove every parent/child/group row owned by one retired workflow run. */
 export function clearWorkflowRunLiveRows(runId: string): number {
+  const prefix = `${runId}\u0000`;
+  for (const key of workflowLiveExecutions().keys()) {
+    if (key.startsWith(prefix)) workflowLiveExecutions().delete(key);
+  }
   return agentLiveStore.removeRows(workflowRunLiveRowIds(runId));
 }
 
@@ -208,9 +361,11 @@ export function workflowGroupLiveRowId(line: Pick<WorkflowJournalLine, "runId" |
 function applyGroupLineToAgentLiveStore(line: WorkflowJournalLine): void {
   if (line.groupId === undefined || line.groupKind === undefined) return;
   const id = workflowGroupLiveRowId(line);
+  const executionKey = workflowGroupExecutionKey(line);
   if (line.kind === "group_start") {
-    agentLiveStore.begin({
+    const execution = agentLiveStore.beginExecution({
       id,
+      workflowRunId: line.runId,
       agentName: "workflow-group",
       label: `${line.groupKind} (${line.groupTotal ?? 0})`,
       groupKind: line.groupKind,
@@ -218,18 +373,31 @@ function applyGroupLineToAgentLiveStore(line: WorkflowJournalLine): void {
       isolated: false,
       noMcp: false,
     });
-    agentLiveStore.patch(id, { status: "working", startedAt: Date.now() });
+    workflowLiveExecutions().set(executionKey, execution);
+    agentLiveStore.patchExecution(execution, { status: "working", startedAt: Date.now() });
     return;
   }
   const status = workflowStatusToAgentLiveStatus(line.status ?? "");
-  if (status === undefined || agentLiveStore.rows.get(id) === undefined) return;
-  agentLiveStore.patch(id, {
-    status,
-    ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
-    ...(line.groupTotal !== undefined ? { groupTotal: line.groupTotal } : {}),
-    ...(line.groupCompleted !== undefined ? { groupCompleted: line.groupCompleted } : {}),
-    ...(line.groupFailed !== undefined ? { groupFailed: line.groupFailed } : {}),
-  });
+  if (status === undefined) return;
+  const execution = workflowLiveExecutions().get(executionKey);
+  try {
+    if (execution === undefined || agentLiveStore.rowForExecution(execution) === undefined) return;
+    agentLiveStore.patchExecution(execution, {
+      status,
+      ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
+      ...(line.groupTotal !== undefined ? { groupTotal: line.groupTotal } : {}),
+      ...(line.groupCompleted !== undefined ? { groupCompleted: line.groupCompleted } : {}),
+      ...(line.groupFailed !== undefined ? { groupFailed: line.groupFailed } : {}),
+    });
+  } finally {
+    if (
+      execution !== undefined &&
+      isTerminalStatus(status) &&
+      workflowLiveExecutions().get(executionKey) === execution
+    ) {
+      workflowLiveExecutions().delete(executionKey);
+    }
+  }
 }
 
 function workflowStatusToAgentLiveStatus(status: string): AgentLiveStatus | undefined {
@@ -254,7 +422,7 @@ function workflowStatusToAgentLiveStatus(status: string): AgentLiveStatus | unde
 // Read side — status / progress views over persisted runs
 // ---------------------------------------------------------------------------
 
-export type WorkflowRunStatus = "running" | "completed" | "failed" | "unknown";
+export type WorkflowRunStatus = "running" | "completed" | "awaiting_operator" | "cancelled" | "failed" | "unknown";
 
 export interface WorkflowRunSummary {
   runId: string;
@@ -273,10 +441,24 @@ export interface WorkflowRunSummary {
   hasResult: boolean; // result.json present (run finished writing a result)
 }
 
+export interface WorkflowJournalDiagnostic {
+  kind: "json" | "structure" | "io";
+  lineNumber: number | null;
+  message: string;
+}
+
+export interface WorkflowJournalRead {
+  lines: WorkflowJournalLine[];
+  diagnostics: WorkflowJournalDiagnostic[];
+}
+
 export interface WorkflowRunResultEnvelope {
   ok?: boolean;
+  disposition?: unknown;
   result?: unknown;
   error?: string;
+  artifactRefs?: WorkflowArtifactRef[];
+  artifactRefsOmitted?: number;
   target?: {
     kind: "name" | "scriptPath";
     ref: string;
@@ -372,25 +554,413 @@ function parseWorkflowTimestamp(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** Parse a run's journal.ndjson, best-effort (skips malformed lines, never throws). */
-export function readWorkflowRunJournal(projectRoot: string, runId: string): WorkflowJournalLine[] {
+/**
+ * Parse a run's journal without letting corrupt rows masquerade as complete evidence.
+ * Valid rows remain available to compatibility callers; diagnostics retain every
+ * JSON, structural, or read failure for status/viewer surfaces.
+ */
+export function readWorkflowRunJournalState(projectRoot: string, runId: string): WorkflowJournalRead {
   let raw: string;
   try {
     raw = readFileSync(path.join(workflowRunDir(projectRoot, runId), "journal.ndjson"), "utf8");
-  } catch {
-    return [];
+  } catch (error) {
+    return {
+      lines: [],
+      diagnostics: isMissingFileError(error)
+        ? []
+        : [{ kind: "io", lineNumber: null, message: `Journal could not be read: ${errorMessage(error)}.` }],
+    };
   }
   const lines: WorkflowJournalLine[] = [];
-  for (const row of raw.split("\n")) {
+  const diagnostics: WorkflowJournalDiagnostic[] = [];
+  for (const [index, row] of raw.split("\n").entries()) {
     const trimmed = row.trim();
     if (trimmed === "") continue;
+    let parsed: unknown;
     try {
-      lines.push(JSON.parse(trimmed) as WorkflowJournalLine);
+      parsed = JSON.parse(trimmed) as unknown;
     } catch {
-      // skip malformed line
+      diagnostics.push({ kind: "json", lineNumber: index + 1, message: "Invalid JSON." });
+      continue;
+    }
+    const problem = workflowJournalLineProblem(parsed, runId);
+    if (problem !== undefined) {
+      diagnostics.push({ kind: "structure", lineNumber: index + 1, message: problem });
+      continue;
+    }
+    lines.push(parsed as WorkflowJournalLine);
+  }
+  return { lines, diagnostics };
+}
+
+/** Compatibility projection for callers that only process valid journal events. */
+export function readWorkflowRunJournal(projectRoot: string, runId: string): WorkflowJournalLine[] {
+  return readWorkflowRunJournalState(projectRoot, runId).lines;
+}
+
+function workflowJournalLineProblem(value: unknown, expectedRunId: string): string | undefined {
+  if (!isRecord(value)) return "Expected a JSON object.";
+  if (typeof value.ts !== "string") return "Field ts must be a string.";
+  if (value.runId !== expectedRunId) return `Field runId must equal ${JSON.stringify(expectedRunId)}.`;
+  if (!isOneOf(value.kind, ["phase", "log", "group_start", "group_end", "agent_start", "agent_end", "error"])) {
+    return "Field kind is not a supported workflow journal event.";
+  }
+
+  const eventKind = value.kind;
+  const allowedFields = new Set(["ts", "runId", "kind", ...WORKFLOW_JOURNAL_FIELDS_BY_KIND[eventKind]]);
+  const unknownField = Object.keys(value).find((field) => !allowedFields.has(field));
+  if (unknownField !== undefined) {
+    return `Field ${unknownField} is not allowed for ${eventKind} events.`;
+  }
+  for (const requiredField of WORKFLOW_JOURNAL_REQUIRED_FIELDS_BY_KIND[eventKind]) {
+    if (value[requiredField] === undefined) {
+      return `Field ${requiredField} is required for ${eventKind} events.`;
     }
   }
-  return lines;
+
+  const stringProblem = optionalFieldsProblem(
+    value,
+    [
+      "phase",
+      "message",
+      "groupId",
+      "groupLabel",
+      "agent",
+      "label",
+      "callId",
+      "slotKey",
+      "status",
+      "childSessionId",
+      "resultArtifact",
+      "worktreePath",
+      "workspaceHandle",
+      "model",
+      "thinking",
+      "resumeFromRunId",
+    ],
+    "string",
+  );
+  if (stringProblem !== undefined) return stringProblem;
+
+  const numberProblem = optionalFieldsProblem(
+    value,
+    ["groupTotal", "groupCompleted", "groupFailed", "round", "durationMs"],
+    "finite number",
+  );
+  if (numberProblem !== undefined) return numberProblem;
+  if (value.round !== undefined) {
+    const round = value.round as number;
+    if (!Number.isSafeInteger(round) || round < 1) return "Field round must be a positive safe integer.";
+  }
+  for (const field of ["groupTotal", "groupCompleted", "groupFailed", "durationMs"] as const) {
+    const fieldValue = value[field];
+    if (fieldValue !== undefined && (fieldValue as number) < 0) return `Field ${field} must not be negative.`;
+  }
+  for (const field of ["groupTotal", "groupCompleted", "groupFailed"] as const) {
+    const fieldValue = value[field];
+    if (fieldValue !== undefined && !Number.isSafeInteger(fieldValue)) {
+      return `Field ${field} must be a non-negative safe integer.`;
+    }
+  }
+
+  const booleanProblem = optionalFieldsProblem(value, ["readOnly", "replayed"], "boolean");
+  if (booleanProblem !== undefined) return booleanProblem;
+  if (value.source !== undefined && !isOneOf(value.source, ["script", "runtime"])) {
+    return "Field source must be script or runtime.";
+  }
+  if (value.groupKind !== undefined && !isOneOf(value.groupKind, ["parallel", "pipeline"])) {
+    return "Field groupKind must be parallel or pipeline.";
+  }
+  if (eventKind === "group_end" && !isOneOf(value.status, ["completed", "failed"])) {
+    return "Field status must be completed or failed for group_end events.";
+  }
+  if (eventKind === "agent_end" && !isOneOf(value.status, ["completed", "failed", "cancelled", "blocked"])) {
+    return "Field status is invalid for agent_end events.";
+  }
+  if (
+    value.permissionMode !== undefined &&
+    !isOneOf(value.permissionMode, ["inherit-parent", "agent-defined", "restricted"])
+  ) {
+    return "Field permissionMode is invalid.";
+  }
+  if (
+    value.workspaceMode !== undefined &&
+    !isOneOf(value.workspaceMode, ["project", "worktree", "temporary-worktree"])
+  ) {
+    return "Field workspaceMode is invalid.";
+  }
+  if (value.evidenceWarnings !== undefined && !isStringArray(value.evidenceWarnings)) {
+    return "Field evidenceWarnings must be an array of strings.";
+  }
+  if (value.answerArtifact !== undefined && !isArtifactRef(value.answerArtifact))
+    return "Field answerArtifact is invalid.";
+  if (value.transcriptArtifact !== undefined && !isArtifactRef(value.transcriptArtifact)) {
+    return "Field transcriptArtifact is invalid.";
+  }
+  if (value.resultEnvelopeArtifact !== undefined && !isArtifactRef(value.resultEnvelopeArtifact)) {
+    return "Field resultEnvelopeArtifact is invalid.";
+  }
+  if (value.childTrace !== undefined && !isChildTrace(value.childTrace)) return "Field childTrace is invalid.";
+  if (value.schemaValidation !== undefined && !isSchemaValidation(value.schemaValidation)) {
+    return "Field schemaValidation is invalid.";
+  }
+  if (value.usage !== undefined && !isWorkflowUsage(value.usage)) return "Field usage is invalid.";
+  if (value.evidence !== undefined && !isEvidenceEvaluation(value.evidence)) return "Field evidence is invalid.";
+  if (
+    value.resumeSourceRunSummary !== undefined &&
+    value.resumeSourceRunSummary !== null &&
+    !isWorkflowRunSummary(value.resumeSourceRunSummary)
+  ) {
+    return "Field resumeSourceRunSummary is invalid.";
+  }
+  if (value.continuation !== undefined) {
+    if (eventKind !== "log" || value.source !== "runtime" || value.message !== "[workflow:continuation]") {
+      return "Field continuation is only valid on the canonical runtime continuation log.";
+    }
+    const continuationProblem = workflowContinuationProblem(value.continuation, expectedRunId);
+    if (continuationProblem !== undefined) return continuationProblem;
+  } else if (eventKind === "log" && value.message === "[workflow:continuation]") {
+    return "Canonical runtime continuation log requires field continuation.";
+  }
+  return undefined;
+}
+
+const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
+  phase: ["phase"],
+  log: ["source", "phase", "message", "resumeFromRunId", "resumeSourceRunSummary", "continuation"],
+  group_start: ["phase", "groupId", "groupKind", "groupLabel", "groupTotal"],
+  group_end: [
+    "phase",
+    "message",
+    "status",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "groupTotal",
+    "groupCompleted",
+    "groupFailed",
+    "durationMs",
+  ],
+  agent_start: [
+    "phase",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "agent",
+    "readOnly",
+    "label",
+    "callId",
+    "slotKey",
+    "workspaceHandle",
+    "permissionMode",
+    "workspaceMode",
+    "model",
+    "thinking",
+    "replayed",
+  ],
+  agent_end: [
+    "phase",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "agent",
+    "readOnly",
+    "label",
+    "callId",
+    "answerArtifact",
+    "transcriptArtifact",
+    "resultEnvelopeArtifact",
+    "slotKey",
+    "round",
+    "status",
+    "evidence",
+    "evidenceWarnings",
+    "childSessionId",
+    "childTrace",
+    "resultArtifact",
+    "schemaValidation",
+    "durationMs",
+    "worktreePath",
+    "workspaceHandle",
+    "permissionMode",
+    "workspaceMode",
+    "usage",
+    "model",
+    "thinking",
+    "replayed",
+  ],
+  error: [
+    "source",
+    "phase",
+    "message",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "agent",
+    "label",
+    "callId",
+    "durationMs",
+    "resumeFromRunId",
+    "resumeSourceRunSummary",
+  ],
+} as const satisfies Record<WorkflowJournalLine["kind"], readonly string[]>;
+
+const WORKFLOW_JOURNAL_REQUIRED_FIELDS_BY_KIND = {
+  phase: ["phase"],
+  log: ["message"],
+  group_start: ["groupId", "groupKind", "groupTotal"],
+  group_end: ["groupId", "groupKind", "groupTotal", "groupCompleted", "groupFailed", "status"],
+  // callId was added after the first persisted journals. Keep those explicit
+  // legacy rows readable, while still requiring an agent identity.
+  agent_start: ["agent"],
+  agent_end: ["agent", "status"],
+  error: ["message"],
+} as const satisfies Record<WorkflowJournalLine["kind"], readonly string[]>;
+
+function optionalFieldsProblem(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+  expected: "string" | "boolean" | "finite number",
+): string | undefined {
+  for (const field of fields) {
+    const fieldValue = value[field];
+    if (fieldValue === undefined) continue;
+    const valid =
+      expected === "string"
+        ? typeof fieldValue === "string"
+        : expected === "boolean"
+          ? typeof fieldValue === "boolean"
+          : typeof fieldValue === "number" && Number.isFinite(fieldValue);
+    if (!valid) return `Field ${field} must be ${expected}.`;
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
+  return typeof value === "string" && values.includes(value as T);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isArtifactRef(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every((key) => ["runId", "artifactId", "name", "sha256"].includes(key)) &&
+    Object.keys(value).length === 4 &&
+    typeof value.runId === "string" &&
+    typeof value.artifactId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.sha256 === "string" &&
+    WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.runId) &&
+    WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.artifactId) &&
+    WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.name) &&
+    /^[a-f0-9]{64}$/u.test(value.sha256)
+  );
+}
+
+function workflowContinuationProblem(value: unknown, currentRunId: string): string | undefined {
+  if (!isRecord(value)) return "Field continuation must be an object.";
+  if (!hasExactFields(value, ["originRunId", "artifacts"])) {
+    return "Field continuation must contain only originRunId and artifacts.";
+  }
+  if (typeof value.originRunId !== "string" || !WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.originRunId)) {
+    return "Field continuation.originRunId is invalid.";
+  }
+  if (!Array.isArray(value.artifacts) || value.artifacts.length < 1 || value.artifacts.length > 8) {
+    return "Field continuation.artifacts must contain 1-8 pairs.";
+  }
+  const identities = new Set<string>();
+  for (const pair of value.artifacts) {
+    if (!isRecord(pair) || !hasExactFields(pair, ["sourceRef", "consumedRef"])) {
+      return "Each continuation artifact must contain only sourceRef and consumedRef.";
+    }
+    if (!isArtifactRef(pair.sourceRef) || !isArtifactRef(pair.consumedRef)) {
+      return "Continuation artifact refs are invalid.";
+    }
+    const sourceRef = pair.sourceRef as WorkflowArtifactRef;
+    const consumedRef = pair.consumedRef as WorkflowArtifactRef;
+    if (sourceRef.runId !== value.originRunId) {
+      return "Continuation sourceRef does not belong to originRunId.";
+    }
+    if (consumedRef.runId !== currentRunId) {
+      return "Continuation consumedRef does not belong to the current run.";
+    }
+    if (consumedRef.name !== sourceRef.name || consumedRef.sha256 !== sourceRef.sha256) {
+      return "Continuation consumedRef must preserve the sourceRef name and sha256.";
+    }
+    const identity = `${sourceRef.runId}\u001f${sourceRef.artifactId}`;
+    if (identities.has(identity)) return "Continuation contains a duplicate source artifact identity.";
+    identities.add(identity);
+  }
+  return undefined;
+}
+
+function hasExactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field));
+}
+
+function isChildTrace(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.path === "string" &&
+    value.format === "pi-session-jsonl" &&
+    typeof value.childSessionId === "string"
+  );
+}
+
+function isSchemaValidation(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isOneOf(value.status, ["valid", "mismatch"]) &&
+    typeof value.attempts === "number" &&
+    Number.isSafeInteger(value.attempts) &&
+    value.attempts >= 0 &&
+    isStringArray(value.errors)
+  );
+}
+
+function isWorkflowUsage(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return [value.input, value.output, value.totalTokens, value.costTotal].every(
+    (item) => typeof item === "number" && Number.isFinite(item) && item >= 0,
+  );
+}
+
+function isEvidenceEvaluation(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isOneOf(value.evidence, [
+      "reasoning_only",
+      "evidence_backed",
+      "missing_expected_evidence",
+      "claims_without_evidence",
+    ]) &&
+    isStringArray(value.warnings) &&
+    isStringArray(value.missingRequiredTools) &&
+    isStringArray(value.observedTools)
+  );
+}
+
+function isWorkflowRunSummary(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.runId === "string" &&
+    isOneOf(value.status, ["running", "completed", "awaiting_operator", "cancelled", "failed", "unknown"]) &&
+    (value.phase === null || typeof value.phase === "string") &&
+    [value.agentsStarted, value.agentsEnded, value.agentsReplayed, value.errors].every(
+      (item) => typeof item === "number" && Number.isSafeInteger(item) && item >= 0,
+    ) &&
+    (value.usage === null || isWorkflowUsage(value.usage)) &&
+    (value.lastKind === null || typeof value.lastKind === "string") &&
+    (value.lastTs === null || typeof value.lastTs === "string") &&
+    typeof value.hasResult === "boolean"
+  );
 }
 
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
@@ -405,14 +975,25 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     const scriptIdentity = parsePersistedWorkflowScriptIdentity(record.scriptIdentity);
     return {
       ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, "disposition") ? { disposition: record.disposition } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "result") ? { result: record.result } : {}),
       ...(typeof record.error === "string" ? { error: record.error } : {}),
+      ...(isArtifactRefArray(record.artifactRefs) ? { artifactRefs: record.artifactRefs } : {}),
+      ...(typeof record.artifactRefsOmitted === "number" &&
+      Number.isSafeInteger(record.artifactRefsOmitted) &&
+      record.artifactRefsOmitted >= 0
+        ? { artifactRefsOmitted: record.artifactRefsOmitted }
+        : {}),
       ...(target !== undefined ? { target } : {}),
       ...(scriptIdentity !== undefined ? { scriptIdentity } : {}),
     };
   } catch {
     return null;
   }
+}
+
+function isArtifactRefArray(value: unknown): value is WorkflowArtifactRef[] {
+  return Array.isArray(value) && value.length <= 20 && value.every(isArtifactRef);
 }
 
 /**
@@ -787,6 +1368,7 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
   let agentsEnded = 0;
   let agentsReplayed = 0;
   let errors = 0;
+  let sawCancellation = false;
   let usageInput = 0;
   let usageOutput = 0;
   let usageTotal = 0;
@@ -810,6 +1392,14 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
         usageCost += line.usage.costTotal;
       }
     } else if (line.kind === "error") errors += 1;
+    else if (
+      line.kind === "log" &&
+      line.source === "runtime" &&
+      typeof line.message === "string" &&
+      line.message.startsWith("[workflow:cancelled]")
+    ) {
+      sawCancellation = true;
+    }
   }
   const usage: WorkflowUsage | null = sawUsage
     ? { input: usageInput, output: usageOutput, totalTokens: usageTotal, costTotal: usageCost }
@@ -818,15 +1408,20 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
 
   let status: WorkflowRunStatus;
   if (hasResult) {
-    let ok = false;
-    try {
-      ok = (JSON.parse(readFileSync(resultPath, "utf8")) as { ok?: boolean }).ok === true;
-    } catch {
-      ok = false;
-    }
-    status = ok ? "completed" : "failed";
+    const persisted = readWorkflowRunResult(projectRoot, runId);
+    status =
+      persisted === null
+        ? "unknown"
+        : projectWorkflowDisposition({
+            ok: persisted.ok === true,
+            result: persisted.result,
+            ...(persisted.error !== undefined ? { error: persisted.error } : {}),
+            ...(persisted.disposition !== undefined ? { disposition: persisted.disposition } : {}),
+          }).status;
   } else if (lines.length === 0) {
     status = "unknown";
+  } else if (sawCancellation) {
+    status = "cancelled";
   } else if (errors > 0) {
     status = "failed";
   } else {

@@ -13,7 +13,15 @@
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import type { WorkflowReplayController } from "./workflow-replay.js";
 import type { WorkflowResourceLoader } from "./workflow-resources.js";
-import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type { WorkflowSourceState, WorkflowSourceStateReader, WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type {
+  WorkflowArtifactPorts,
+  WorkflowArtifactRef,
+  WorkflowBoundContinuation,
+  WorkflowConsumedTextArtifact,
+  WorkflowContinuationArtifact,
+  WorkflowContinuationJournal,
+} from "./workflow-artifacts.js";
 import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
 
@@ -22,6 +30,7 @@ export type { PermissionMode, WorkspaceMode } from "./types.js";
 export type WorkflowAgentRunner = (req: WorkflowAgentRequest) => Promise<WorkflowAgentResult>;
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
+export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
 /** High per-child safety fuse. Ordinary agent work should finish far below this value. */
 export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = 1_000;
 export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
@@ -47,6 +56,8 @@ export interface WorkflowAgentRequest {
   workspaceMode?: WorkspaceMode;
   /** Opaque runtime-owned workspace identity. The bridge resolves it to cwd. */
   workspaceHandle?: string;
+  /** Runtime-owned stable identity allocated before this attempt is scheduled. */
+  callId?: string;
 }
 
 export interface WorkflowAgentResult {
@@ -99,6 +110,10 @@ export interface WorkflowUsage {
   costTotal: number;
 }
 
+export interface WorkflowAwaitOperatorDeclaration {
+  reason: string;
+}
+
 export interface WorkflowDsl {
   /** Run one child agent under a declared answer shape. Success resolves to the
    *  VALIDATED value (not text); exhausting the retry budget throws SchemaValidationError. */
@@ -111,6 +126,14 @@ export interface WorkflowDsl {
   workspace(label: string, ref: string): Promise<string>;
   /** Absolute project root captured by the workflow runner. */
   projectRoot(): string;
+  /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
+  publishArtifact(name: string, text: string): WorkflowArtifactRef;
+  /** Verify and copy one complete prior-run text reference into this run. */
+  consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
+  /** Host-verified continuation artifacts bound before trusted workflow code starts. */
+  continuationArtifacts(): readonly WorkflowContinuationArtifact[];
+  /** Capture and persist one deterministic host-owned source-state fingerprint. */
+  captureSourceState(label: string): WorkflowSourceState;
   /** Run independent branches behind one fail-closed barrier and preserve input order. */
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
   /** Run ordered stages for every item; a failed item stops before its later stages. */
@@ -119,13 +142,16 @@ export interface WorkflowDsl {
   phase(name: string): void;
   /** Append a script-owned journal message tagged with the current phase. */
   log(msg: string): void;
+  /** Declare that a successful run is waiting for bounded operator input.
+   *  This is runtime control state; it never changes the script's returned value. */
+  awaitOperator(input: WorkflowAwaitOperatorDeclaration): void;
   /** Replay-safe wall clock. Records its value on the first run and returns the
    *  recorded one on `--resume`; a direct `Date.now()` is neither banned nor replayable. */
   now(): number;
   /** Replay-safe randomness with the same record/replay contract as `now()`. */
   random(): number;
   /** Run a nested workflow function with the same typed DSL handle. */
-  workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>, input?: unknown): Promise<T>;
+  workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input?: string) => Promise<T>, input?: string): Promise<T>;
 }
 
 export interface WorkflowAgentOptions {
@@ -139,6 +165,8 @@ export interface WorkflowAgentOptions {
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
   label?: string;
+  /** Logical name for the exact returned answer in the run artifact index. */
+  artifact?: string;
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
@@ -148,26 +176,17 @@ export interface WorkflowAgentOptions {
   workspaceMode?: WorkspaceMode;
   /** Reuse a runtime-owned workspace allocated by workspace(). */
   workspaceHandle?: string;
-  /** OPT-IN answer shape. When set, the runtime appends a deterministic shape contract to the
-   *  child prompt, parses the child's final text as JSON, validates it against this JSON-Schema
-   *  subset, and retries up to SCHEMA_MAX_ATTEMPTS with the previous validator errors. The call
-   *  then resolves to the validated value instead of text; exhaustion throws SchemaValidationError.
-   *  Absent (the default) keeps the exact-text contract untouched. */
-  schema?: Record<string, unknown>;
+  /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
+  schema?: never;
 }
 
-/** `WorkflowAgentOptions` with a declared answer shape. Selects the shaped `agent()` overload:
- *  a plain `WorkflowAgentOptions` value never satisfies the required `schema` property, so every
- *  existing call site keeps resolving to `Promise<string>`.
- *
- *  TODO(iteration-2026-07-21): the overload pair is type-unsound. `schema` is optional on the base
- *  `WorkflowAgentOptions`, so a value typed as that interface may carry a schema at runtime, the
- *  compiler still picks the `Promise<string>` overload, and the caller gets an object typed as a
- *  string. Parked with the schema feature itself, which is declared unused this iteration.
- *  See `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A3, S2). */
-export interface WorkflowAgentSchemaOptions extends WorkflowAgentOptions {
+/** Options for the shaped overload. The schema property cannot be smuggled through
+ *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
+export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "schema"> {
   schema: Record<string, unknown>;
 }
+
+type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentSchemaOptions;
 
 export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
 
@@ -308,6 +327,11 @@ export interface WorkflowJournalLine {
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
   label?: string;
+  /** Runtime-owned stable identity for this concrete child attempt. */
+  callId?: string;
+  answerArtifact?: WorkflowArtifactRef;
+  transcriptArtifact?: WorkflowArtifactRef;
+  resultEnvelopeArtifact?: WorkflowArtifactRef;
   /** Workflow loop slot descriptor (phase,label) on agent lines (REQ-009); absent = no-rounds journal. */
   slotKey?: string;
   /** Loop round (≥1) on agent_end lines (REQ-009); the drill reads past rounds by (slotKey,round). */
@@ -340,12 +364,15 @@ export interface WorkflowJournalLine {
   replayed?: boolean;
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
+  continuation?: WorkflowContinuationJournal;
 }
 
 export interface WorkflowRuntimeOptions {
   runId: string;
   agentRunner: WorkflowAgentRunner;
-  args?: unknown;
+  args?: string;
+  /** Already consumed and digest-bound by the runner before workflow code starts. */
+  continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
@@ -358,15 +385,29 @@ export interface WorkflowRuntimeOptions {
   journal?: WorkflowJournalSink; // default: no-op sink
   /** Recorded-call store for `--resume`. Absent means neither record nor replay. */
   replay?: WorkflowReplayController;
+  artifactPorts?: WorkflowArtifactPorts;
+  sourceState?: WorkflowSourceStateReader;
+  replaySourceRunId?: string;
   now?: () => string; // default () => new Date().toISOString()
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
+  /** Runner-owned sink for one out-of-band operator handoff declaration. */
+  onAwaitOperator?: (declaration: WorkflowAwaitOperatorDeclaration) => void;
 }
 
 export interface WorkflowRuntime {
   dsl: WorkflowDsl;
   getJournal(): WorkflowJournalLine[]; // in-memory mirror (for tests / final render)
-  getArgs(): unknown;
+  getArgs(): string | undefined;
   currentPhase(): string | undefined;
+}
+
+export function assertWorkflowInput(value: unknown, field = "workflow input"): asserts value is string | undefined {
+  if (value !== undefined && typeof value !== "string") {
+    throw new Error(`${field} must be a string when provided`);
+  }
+  if (typeof value === "string" && value.length > WORKFLOW_INPUT_MAX_CHARS) {
+    throw new Error(`${field} exceeds ${WORKFLOW_INPUT_MAX_CHARS} characters`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +519,7 @@ function workspaceModeFromSandbox(sandbox: WorkflowAgentOptions["sandbox"]): Wor
   return sandbox === "workspace-write" ? "worktree" : "project";
 }
 
-function defaultWorkflowWorkspaceMode(opts: WorkflowAgentOptions | undefined): WorkspaceMode {
+function defaultWorkflowWorkspaceMode(opts: WorkflowAgentAnyOptions | undefined): WorkspaceMode {
   if (opts?.workspaceMode !== undefined) return opts.workspaceMode;
   if (opts?.sandbox !== undefined) return workspaceModeFromSandbox(opts.sandbox);
   return "project";
@@ -544,22 +585,98 @@ export class SchemaValidationError extends Error {
  *   - `properties`: Record<string, schema>  (recursive)
  *   - `additionalProperties`: false  (for objects — reject keys not in `properties`)
  *   - `items`: schema  (for arrays — validates every element, recursive)
- *   - `enum`: unknown[]  (value must be strictly equal to one listed member)
+ *   - `enum`: JSON primitive[]  (value must be strictly equal to one listed member)
  *
  * `schema === undefined` is a no-op — callers must guard before calling.
  * No ajv, no fs, no network. Host-agnostic.
  */
-// TODO(iteration-2026-07-21): unsupported schema declarations fail OPEN. Only
-// `object`/`array`/`string`/`number`/`boolean` are checked below; any other
-// `type` — `integer` first of all — falls through every branch with zero errors,
-// so every value validates. `minimum`, `maxLength`, `pattern`, `oneOf` are
-// ignored the same way. The author sees a green run and believes the shape is
-// pinned; it is not. Fix: reject an unsupported declaration BEFORE spending a
-// child attempt. Deferred, not unknown: `agent({ schema })` is declared unused
-// for this iteration (MVP = a chain of agents exchanging text), so this is the
-// first thing to repair when schema comes back into use.
-// See `.locus/reviews/2026-07-21-workflow-dsl/reconciliation-1.md` (A1, S1) and
-// the 2026-07-21 entry in `.locus/soul.md` `## Direction log`.
+const SUPPORTED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "boolean"]);
+const SUPPORTED_SCHEMA_KEYWORDS = new Set(["type", "enum", "required", "properties", "additionalProperties", "items"]);
+
+/** Validate the declaration before the first child call. Runtime value validation
+ *  is useful only when authors cannot accidentally declare an ignored contract. */
+function assertSupportedAgentSchema(schema: Record<string, unknown>, path = "schema"): void {
+  for (const keyword of Object.keys(schema)) {
+    if (!SUPPORTED_SCHEMA_KEYWORDS.has(keyword)) {
+      throw new Error(`${path}: unsupported keyword "${keyword}"`);
+    }
+  }
+
+  const type = schema.type;
+  if (type !== undefined && (typeof type !== "string" || !SUPPORTED_SCHEMA_TYPES.has(type))) {
+    throw new Error(`${path}: unsupported type ${JSON.stringify(type)}`);
+  }
+  if (type === undefined && schema.enum === undefined) {
+    throw new Error(`${path}: schema must declare type or enum`);
+  }
+
+  if (schema.enum !== undefined) {
+    if (!Array.isArray(schema.enum) || schema.enum.length === 0) {
+      throw new Error(`${path}: enum must be a non-empty array`);
+    }
+    for (const [index, member] of schema.enum.entries()) {
+      const supportedPrimitive =
+        member === null ||
+        typeof member === "string" ||
+        typeof member === "boolean" ||
+        (typeof member === "number" && Number.isFinite(member));
+      if (!supportedPrimitive) {
+        throw new Error(`${path}: enum value at index ${index} must be a JSON primitive`);
+      }
+      const matchesDeclaredType =
+        type === undefined ||
+        (type === "string" && typeof member === "string") ||
+        (type === "number" && typeof member === "number") ||
+        (type === "boolean" && typeof member === "boolean");
+      if (!matchesDeclaredType) {
+        throw new Error(`${path}: enum value at index ${index} does not match declared type ${String(type)}`);
+      }
+    }
+  }
+
+  const objectKeywords = ["required", "properties", "additionalProperties"].filter(
+    (keyword) => schema[keyword] !== undefined,
+  );
+  if (objectKeywords.length > 0 && type !== "object") {
+    throw new Error(`${path}: ${objectKeywords[0]} is only valid for an object schema`);
+  }
+  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
+    throw new Error(`${path}: additionalProperties supports only false`);
+  }
+
+  let properties: Record<string, unknown> | undefined;
+  if (schema.properties !== undefined) {
+    if (!isRecord(schema.properties)) throw new Error(`${path}: properties must be an object`);
+    properties = schema.properties;
+    for (const [name, child] of Object.entries(properties)) {
+      if (!isRecord(child)) throw new Error(`${path}.properties.${name} must be a schema object`);
+      assertSupportedAgentSchema(child, `${path}.properties.${name}`);
+    }
+  }
+
+  if (schema.required !== undefined) {
+    if (!Array.isArray(schema.required) || !schema.required.every((key) => typeof key === "string")) {
+      throw new Error(`${path}: required must be an array of strings`);
+    }
+    const required = schema.required as string[];
+    if (new Set(required).size !== required.length) {
+      throw new Error(`${path}: required contains duplicate property names`);
+    }
+    for (const key of required) {
+      if (properties === undefined || !(key in properties)) {
+        throw new Error(`${path}: required property "${key}" is not declared in properties`);
+      }
+    }
+  }
+
+  if (type === "array") {
+    if (!isRecord(schema.items)) throw new Error(`${path}: array schema must declare items as a schema object`);
+    assertSupportedAgentSchema(schema.items, `${path}.items`);
+  } else if (schema.items !== undefined) {
+    throw new Error(`${path}: items is only valid for an array schema`);
+  }
+}
+
 function validateAgainstSchema(
   value: unknown,
   schema: Record<string, unknown>,
@@ -752,6 +869,8 @@ function withSchemaContract(
 
 export function createWorkflowRuntime(options: WorkflowRuntimeOptions): WorkflowRuntime {
   const { runId, agentRunner } = options;
+  assertWorkflowInput(options.args);
+  assertBoundContinuation(options.continuation, runId);
   const args = options.args;
   const agentConcurrencyGate = createAgentConcurrencyGate(options.maxConcurrentAgents);
   const defaultMaxToolCalls = normalizeMaxToolCalls(
@@ -788,7 +907,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    *  BEFORE agent_end is emitted so the journal records whether the answer was shape-checked. */
   async function runAgentAttempt(
     prompt: string,
-    opts: WorkflowAgentOptions | undefined,
+    opts: WorkflowAgentAnyOptions | undefined,
     checkSchema?: (text: string) => AgentSchemaCheck,
   ): Promise<AgentAttemptOutcome> {
     // Global per-run cap across all agent() calls (including those nested in
@@ -799,6 +918,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (totalAgentInvocations > maxTotalAgentInvocations) {
       throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
     }
+    const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
     if (prompt.trim() === "") throw new Error("agent prompt must be non-empty");
     if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
       throw new Error("workflow workspace manager is not configured");
@@ -820,6 +940,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
+      callId,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
     // Replay eligibility is decided from the RESOLVED request, so defaults and
@@ -846,6 +967,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
+      callId,
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
       ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
@@ -895,6 +1017,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           runId,
           kind: "error",
           agent: req.agent,
+          callId,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
           message: err instanceof Error ? err.message : String(err),
@@ -929,6 +1052,36 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ? checkSchema(finalResult.text ?? "")
         : undefined;
     const durationMs = Date.now() - start;
+    let artifactEvidence;
+    try {
+      artifactEvidence = options.artifactPorts?.recordAgentEvidence({
+        callId,
+        name: opts?.artifact ?? defaultArtifactName(req.label ?? req.agent, callId),
+        ...(req.phase !== undefined ? { stage: req.phase } : {}),
+        ...(finalResult.text !== undefined ? { text: finalResult.text } : {}),
+        replayed,
+        ...(replayed && options.replaySourceRunId !== undefined
+          ? { replaySourceRunId: options.replaySourceRunId }
+          : {}),
+        ...(finalResult.childSessionId !== undefined ? { childSessionId: finalResult.childSessionId } : {}),
+        ...(finalResult.childTrace?.path !== undefined ? { childTracePath: finalResult.childTrace.path } : {}),
+        ...(finalResult.resultArtifact !== undefined ? { resultArtifactPath: finalResult.resultArtifact } : {}),
+      });
+    } catch (err) {
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "error",
+        source: "runtime",
+        agent: req.agent,
+        callId,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        message: err instanceof Error ? err.message : String(err),
+        durationMs,
+      });
+      throw err;
+    }
     // This run writes its OWN complete record, replayed entries included, so a
     // resume of a resume still has an unbroken prefix to work from.
     options.replay?.recordAgentAttempt(
@@ -942,6 +1095,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "agent_end",
       agent: req.agent,
+      callId,
       ...(replayed ? { replayed: true } : {}),
       ...((finalResult.readOnly ?? req.readOnly) !== undefined
         ? { readOnly: finalResult.readOnly ?? req.readOnly }
@@ -961,6 +1115,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.childSessionId !== undefined ? { childSessionId: finalResult.childSessionId } : {}),
       ...(finalResult.childTrace !== undefined ? { childTrace: finalResult.childTrace } : {}),
       ...(finalResult.resultArtifact !== undefined ? { resultArtifact: finalResult.resultArtifact } : {}),
+      ...(artifactEvidence?.answer !== undefined ? { answerArtifact: artifactEvidence.answer } : {}),
+      ...(artifactEvidence?.transcript !== undefined ? { transcriptArtifact: artifactEvidence.transcript } : {}),
+      ...(artifactEvidence?.result !== undefined ? { resultEnvelopeArtifact: artifactEvidence.result } : {}),
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
@@ -990,10 +1147,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    */
   function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
-  async function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<unknown> {
+  async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
     if (schema === undefined) return (await runAgentAttempt(prompt, opts)).text;
     if (!isRecord(schema)) throw new Error("agent schema must be a JSON-schema object");
+    assertSupportedAgentSchema(schema);
 
     let lastErrors: string[] = [];
     for (let attempt = 1; attempt <= SCHEMA_MAX_ATTEMPTS; attempt++) {
@@ -1102,10 +1260,28 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     });
   }
 
+  function awaitOperator(input: WorkflowAwaitOperatorDeclaration): void {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+      throw new Error("awaitOperator input must be an object");
+    }
+    const keys = Object.keys(input).sort();
+    const reason = typeof input.reason === "string" ? input.reason.replace(/\s+/gu, " ").trim() : "";
+    if (keys.length !== 1 || keys[0] !== "reason") {
+      throw new Error("awaitOperator input must contain exactly reason");
+    }
+    if (reason === "") throw new Error("awaitOperator reason must be non-empty");
+    if (reason.length > 200) throw new Error("awaitOperator reason exceeds 200 characters");
+    if (options.onAwaitOperator === undefined) {
+      throw new Error("awaitOperator is not configured by the workflow runner");
+    }
+    options.onAwaitOperator({ reason });
+  }
+
   async function workflowDsl<T = unknown>(
-    subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>,
-    input?: unknown,
+    subFn: (dsl: WorkflowDsl, input?: string) => Promise<T>,
+    input?: string,
   ): Promise<T> {
+    assertWorkflowInput(input, "nested workflow input");
     emit({
       ts: nowFn(),
       runId,
@@ -1217,6 +1393,35 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.projectRoot;
   }
 
+  function publishArtifact(name: string, text: string): WorkflowArtifactRef {
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    return options.artifactPorts.publishText(name, text, _currentPhase);
+  }
+
+  function consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact {
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    return options.artifactPorts.consumeText(ref, _currentPhase);
+  }
+
+  function continuationArtifacts(): readonly WorkflowContinuationArtifact[] {
+    return options.continuation?.artifacts ?? [];
+  }
+
+  function captureSourceState(label: string): WorkflowSourceState {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(label)) {
+      throw new Error("workflow source-state label must be a safe 1-96 character identifier");
+    }
+    if (options.sourceState === undefined) throw new Error("workflow source-state reader is not configured");
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    const state = options.sourceState.capture();
+    options.artifactPorts.publishText(
+      `source-state-${label}.json`,
+      `${JSON.stringify({ label, ...state }, null, 2)}\n`,
+      _currentPhase,
+    );
+    return state;
+  }
+
   /**
    * The DSL's answer to replay determinism: supply the nondeterministic value
    * instead of banning the call. Without a replay store these are exactly
@@ -1236,10 +1441,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     promptFile,
     workspace,
     projectRoot,
+    publishArtifact,
+    consumeTextArtifact,
+    continuationArtifacts,
+    captureSourceState,
     parallel,
     pipeline,
     phase,
     log,
+    awaitOperator,
     now: nowMs,
     random,
     workflow: workflowDsl,
@@ -1251,6 +1461,33 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     getArgs: () => args,
     currentPhase: () => _currentPhase,
   };
+}
+
+function assertBoundContinuation(binding: WorkflowBoundContinuation | undefined, runId: string): void {
+  if (binding === undefined) return;
+  if (typeof binding.originRunId !== "string" || binding.originRunId.trim() === "") {
+    throw new Error("workflow continuation binding has an invalid originRunId");
+  }
+  if (!Array.isArray(binding.artifacts) || binding.artifacts.length < 1 || binding.artifacts.length > 8) {
+    throw new Error("workflow continuation binding must contain 1-8 artifacts");
+  }
+  const identities = new Set<string>();
+  for (const pair of binding.artifacts) {
+    if (!isRecord(pair) || !isRecord(pair.sourceRef) || !isRecord(pair.consumedArtifact)) {
+      throw new Error("workflow continuation binding has an invalid artifact pair");
+    }
+    const sourceRef = pair.sourceRef as unknown as WorkflowArtifactRef;
+    const consumed = pair.consumedArtifact as unknown as WorkflowConsumedTextArtifact;
+    if (sourceRef.runId !== binding.originRunId || consumed.source?.runId !== binding.originRunId) {
+      throw new Error("workflow continuation binding does not match its origin run");
+    }
+    if (!isRecord(consumed.ref) || consumed.ref.runId !== runId) {
+      throw new Error("workflow continuation consumed artifact does not belong to the current run");
+    }
+    const identity = `${sourceRef.runId}\u001f${sourceRef.artifactId}`;
+    if (identities.has(identity)) throw new Error("workflow continuation binding has a duplicate artifact identity");
+    identities.add(identity);
+  }
 }
 
 /**
@@ -1290,6 +1527,15 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     workspaceMode: req.workspaceMode ?? null,
     workspaceHandle: req.workspaceHandle ?? null,
   });
+}
+
+function defaultArtifactName(label: string, callId: string): string {
+  const safe = label
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 96);
+  return safe === "" ? `${callId}-answer` : safe;
 }
 
 function liveModelFromSelector(selector: string | undefined): { model: string; thinking?: string } | undefined {

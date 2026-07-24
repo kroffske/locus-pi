@@ -13,6 +13,21 @@ export const WORKFLOW_RESULT_NOT_JSON_SAFE = "WORKFLOW_RESULT_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE = "WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_WRITE_FAILED = "WORKFLOW_RESULT_WRITE_FAILED";
 
+export type WorkflowDispositionStatus = "completed" | "awaiting_operator" | "cancelled" | "failed";
+export type WorkflowCancellationReason = "operator_stop" | "session_shutdown" | "aborted";
+export type WorkflowProjectedStatus = WorkflowDispositionStatus | "unknown";
+
+export type WorkflowDisposition =
+  | { status: "completed" }
+  | { status: "awaiting_operator"; detail: string }
+  | { status: "cancelled"; reason: WorkflowCancellationReason }
+  | { status: "failed" };
+
+export interface WorkflowDispositionProjection {
+  status: WorkflowProjectedStatus;
+  summary: string;
+}
+
 export interface WorkflowResultDiagnosticSentinel {
   kind: "workflow_result_diagnostic";
   code: typeof WORKFLOW_RESULT_NOT_JSON_SAFE;
@@ -27,15 +42,13 @@ export interface PreparedWorkflowResult {
 export type WorkflowResultPersistence =
   | { ok: true; path: string }
   | {
-    ok: false;
-    path: string;
-    code: typeof WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE | typeof WORKFLOW_RESULT_WRITE_FAILED;
-    message: string;
-  };
+      ok: false;
+      path: string;
+      code: typeof WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE | typeof WORKFLOW_RESULT_WRITE_FAILED;
+      message: string;
+    };
 
-type JsonSerialization =
-  | { ok: true; json: string }
-  | { ok: false; message: string };
+type JsonSerialization = { ok: true; json: string } | { ok: false; message: string };
 
 export function workflowResultFile(runDir: string): string {
   return path.join(runDir, "result.json");
@@ -66,6 +79,60 @@ export function formatWorkflowResultSummary(value: unknown): string {
   return workflowResultSummaryFromPrepared(prepared) ?? "completed";
 }
 
+/**
+ * Decide one new run's durable terminal disposition. The runner calls this
+ * after every other evidence owner has had a chance to turn `ok` false.
+ */
+export function workflowDispositionForCompletion(input: {
+  ok: boolean;
+  aborted: boolean;
+  abortReason?: unknown;
+  awaitOperatorReason?: string;
+}): WorkflowDisposition {
+  if (input.aborted) return { status: "cancelled", reason: workflowCancellationReason(input.abortReason) };
+  if (!input.ok) return { status: "failed" };
+  const detail = boundedDispositionDetail(input.awaitOperatorReason);
+  if (input.awaitOperatorReason !== undefined && detail === undefined) return { status: "failed" };
+  if (detail !== undefined) return { status: "awaiting_operator", detail };
+  return { status: "completed" };
+}
+
+/**
+ * Read-side lifecycle projection. A missing disposition is a legacy envelope
+ * and retains the old `ok` interpretation. A present but malformed/future
+ * disposition fails closed as `unknown`.
+ */
+export function projectWorkflowDisposition(
+  input: {
+    ok: boolean;
+    result: unknown;
+    error?: string;
+    disposition?: unknown;
+  },
+  fallbackError?: string,
+): WorkflowDispositionProjection {
+  const disposition =
+    input.disposition === undefined ? legacyWorkflowDisposition(input.ok) : parseWorkflowDisposition(input.disposition);
+  if (disposition === undefined || !dispositionMatchesOk(disposition, input.ok)) {
+    return { status: "unknown", summary: "unknown workflow disposition" };
+  }
+  switch (disposition.status) {
+    case "completed":
+      return { status: disposition.status, summary: formatWorkflowResultSummary(input.result) };
+    case "awaiting_operator":
+      return { status: disposition.status, summary: `awaiting operator · ${disposition.detail}` };
+    case "cancelled":
+      return { status: disposition.status, summary: formatWorkflowCancellationSummary(disposition.reason) };
+    case "failed":
+      return {
+        status: disposition.status,
+        summary: formatWorkflowFailureSummary(input.result, input.error, fallbackError),
+      };
+    default:
+      return assertNever(disposition);
+  }
+}
+
 /** Failure-surface projection. Technical transport/runtime error wins; otherwise
  *  preserve the detached script summary and exact unresolved requirement ids. */
 export function formatWorkflowFailureSummary(value: unknown, technicalError?: string, fallbackError?: string): string {
@@ -77,9 +144,7 @@ export function formatWorkflowFailureSummary(value: unknown, technicalError?: st
     : workflowResultSummaryFromPrepared(prepared);
   const summary = semantic ?? nonEmptyString(fallbackError) ?? "Workflow execution failed.";
   const unresolvedRows = unresolvedRequirementIds(prepared);
-  return unresolvedRows.length === 0
-    ? summary
-    : `${summary} · unresolved: ${unresolvedRows.join(", ")}`;
+  return unresolvedRows.length === 0 ? summary : `${summary} · unresolved: ${unresolvedRows.join(", ")}`;
 }
 
 /** A detached script result may explicitly reject or mark partial its domain outcome.
@@ -94,9 +159,7 @@ export function isWorkflowResultExplicitFailure(value: unknown): boolean {
 export function formatWorkflowResultDetail(value: unknown, maxChars = 2000): string {
   const prepared = prepareWorkflowResult(value);
   const serialized = serializeJson(prepared.value);
-  const json = serialized.ok
-    ? serialized.json
-    : JSON.stringify(resultDiagnostic(serialized.message), null, 2);
+  const json = serialized.ok ? serialized.json : JSON.stringify(resultDiagnostic(serialized.message), null, 2);
   const limit = Math.max(1, Math.floor(maxChars));
   if (json.length <= limit) return json;
   const suffix = "… [truncated; full result in result.json]";
@@ -133,15 +196,92 @@ export function writeWorkflowResultJson(runDir: string, payload: unknown): Workf
 export function isWorkflowResultDiagnostic(value: unknown): value is WorkflowResultDiagnosticSentinel {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  return record.kind === "workflow_result_diagnostic"
-    && record.code === WORKFLOW_RESULT_NOT_JSON_SAFE
-    && typeof record.message === "string";
+  return (
+    record.kind === "workflow_result_diagnostic" &&
+    record.code === WORKFLOW_RESULT_NOT_JSON_SAFE &&
+    typeof record.message === "string"
+  );
+}
+
+function parseWorkflowDisposition(value: unknown): WorkflowDisposition | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (record.status === "completed" || record.status === "failed") {
+    return keys.length === 1 && keys[0] === "status" ? { status: record.status } : undefined;
+  }
+  if (record.status === "awaiting_operator") {
+    const detail = boundedDispositionDetail(record.detail);
+    return keys.length === 2 && keys[0] === "detail" && keys[1] === "status" && detail !== undefined
+      ? { status: record.status, detail }
+      : undefined;
+  }
+  if (record.status === "cancelled") {
+    const reason = workflowCancellationReasonFromPersisted(record.reason);
+    return keys.length === 2 && keys[0] === "reason" && keys[1] === "status" && reason !== undefined
+      ? { status: record.status, reason }
+      : undefined;
+  }
+  return undefined;
+}
+
+function legacyWorkflowDisposition(ok: boolean): WorkflowDisposition {
+  return ok ? { status: "completed" } : { status: "failed" };
+}
+
+function dispositionMatchesOk(disposition: WorkflowDisposition, ok: boolean): boolean {
+  switch (disposition.status) {
+    case "completed":
+    case "awaiting_operator":
+      return ok;
+    case "cancelled":
+    case "failed":
+      return !ok;
+    default:
+      return assertNever(disposition);
+  }
+}
+
+function workflowCancellationReason(value: unknown): WorkflowCancellationReason {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const kind = (value as Record<string, unknown>).kind;
+    if (kind === "operator_stop" || kind === "session_shutdown") return kind;
+  }
+  return "aborted";
+}
+
+function workflowCancellationReasonFromPersisted(value: unknown): WorkflowCancellationReason | undefined {
+  return value === "operator_stop" || value === "session_shutdown" || value === "aborted" ? value : undefined;
+}
+
+function formatWorkflowCancellationSummary(reason: WorkflowCancellationReason): string {
+  switch (reason) {
+    case "operator_stop":
+      return "cancelled by operator";
+    case "session_shutdown":
+      return "cancelled (session shutdown)";
+    case "aborted":
+      return "cancelled";
+    default:
+      return assertNever(reason);
+  }
+}
+
+function boundedDispositionDetail(value: unknown): string | undefined {
+  const detail = nonEmptyString(value);
+  if (detail === undefined || detail.length > 200) return undefined;
+  return detail;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled workflow disposition: ${String(value)}`);
 }
 
 function serializeJson(value: unknown): JsonSerialization {
   try {
     const json = JSON.stringify(value, null, 2);
-    if (json === undefined) return { ok: false, message: "top-level value is undefined or otherwise has no JSON representation" };
+    if (json === undefined)
+      return { ok: false, message: "top-level value is undefined or otherwise has no JSON representation" };
     return { ok: true, json };
   } catch (error) {
     return { ok: false, message: safeErrorMessage(error) };
@@ -195,9 +335,12 @@ function unresolvedRequirementIds(value: unknown): string[] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
   const rows = (value as Record<string, unknown>).unresolvedRows;
   if (!Array.isArray(rows)) return [];
-  return [...new Set(rows
-    .filter((row): row is string => typeof row === "string")
-    .map((row) => row.replace(/\s+/gu, " ").trim())
-    .filter((row) => row !== ""))]
-    .sort();
+  return [
+    ...new Set(
+      rows
+        .filter((row): row is string => typeof row === "string")
+        .map((row) => row.replace(/\s+/gu, " ").trim())
+        .filter((row) => row !== ""),
+    ),
+  ].sort();
 }

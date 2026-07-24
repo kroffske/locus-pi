@@ -47,7 +47,18 @@ Use the operator catalog to inspect and run them:
 /workflows list
 /workflows info live-smoke
 /workflows run live-smoke
+/workflows stop last
+/ps
 ```
+
+`/workflows run` starts one interactive run in the background and returns the
+editor immediately. The compact widget below the editor shows the current
+workflow stage and one active child; `/ps` expands the same shared agent fleet
+for leaf selection and readable drill-down. A second interactive run in the
+same session/project is rejected until the first run settles. `/workflows stop [runId|last]`
+requests cancellation and remains honest about the run being
+`stopping` until its terminal result is persisted. The programmatic `workflow`
+tool remains awaited and headless.
 
 Project and user workflow directories remain scan-based. A pi-native
 `<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,

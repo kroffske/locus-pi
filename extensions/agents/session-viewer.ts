@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
-import { agentLiveStore, type AgentLiveRow } from "../_shared/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveRow } from "../_shared/agent-sdk-host.js";
 import type {
   AgentLiveTranscriptSnapshot,
   AgentTranscriptBlock,
@@ -9,13 +9,6 @@ import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
 import { formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
-const VIEWER_OVERLAY_OPTIONS = {
-  width: "100%",
-  maxHeight: "100%",
-  row: 0,
-  col: 0,
-  margin: 0,
-} as const;
 const DEFAULT_TERMINAL_ROWS = 24;
 
 interface ViewerTui extends CustomUiTui {
@@ -23,7 +16,13 @@ interface ViewerTui extends CustomUiTui {
 }
 
 interface NativeComponentModule {
-  AssistantMessageComponent: new (message?: unknown, hideThinkingBlock?: boolean, markdownTheme?: unknown, hiddenThinkingLabel?: string, outputPad?: number) => Component & {
+  AssistantMessageComponent: new (
+    message?: unknown,
+    hideThinkingBlock?: boolean,
+    markdownTheme?: unknown,
+    hiddenThinkingLabel?: string,
+    outputPad?: number,
+  ) => Component & {
     updateContent(message: unknown): void;
   };
   ToolExecutionComponent: new (
@@ -64,8 +63,7 @@ type NativeComponentEntry =
     };
 
 export type AgentViewerCapabilityResult =
-  | { ok: true; capability: AgentViewerCapability }
-  | { ok: false; reason: string };
+  { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
 
 /** One guarded Pi-version boundary for both public native components. */
 export class AgentViewerCapability {
@@ -136,29 +134,45 @@ export async function loadAgentViewerCapability(): Promise<AgentViewerCapability
 
 export function createAgentViewerCapability(module: unknown): AgentViewerCapabilityResult {
   if (!isNativeComponentModule(module)) {
-    return { ok: false, reason: "Installed Pi host does not export AssistantMessageComponent and ToolExecutionComponent." };
+    return {
+      ok: false,
+      reason: "Installed Pi host does not export AssistantMessageComponent and ToolExecutionComponent.",
+    };
   }
   return { ok: true, capability: new AgentViewerCapability(module) };
 }
 
 export class AgentSessionViewer implements CustomUiComponent {
   #disposed = false;
+  #closed = false;
   #followTail = true;
   #scroll = 0;
   #expandedTools = false;
   #selection: number;
+  readonly #title: string;
   readonly #unsubscribe: () => void;
+  #storeAttached = true;
   #unregisterGlobal = () => {};
 
   constructor(
-    private readonly rowId: string,
+    private readonly execution: AgentLiveExecutionHandle,
     private readonly tui: ViewerTui,
     private readonly done: () => void,
     private readonly capability: AgentViewerCapability,
     private readonly rounds?: DrillRoundsConfig,
   ) {
+    const row = agentLiveStore.rowForExecution(execution);
+    this.#title = row === undefined ? "Agent execution unavailable" : formatAgentDrillTitle(row);
     this.#selection = rounds?.active ?? 1;
-    const requestRender = () => this.tui.requestRender();
+    const requestRender = () => {
+      if (this.#disposed) return;
+      if (agentLiveStore.rowForExecution(this.execution) === undefined) {
+        if (this.#isHistoricalRound()) this.#detachStore();
+        else this.#close();
+        return;
+      }
+      this.tui.requestRender();
+    };
     agentLiveStore.emitter.on("change", requestRender);
     this.#unsubscribe = () => agentLiveStore.emitter.off("change", requestRender);
     const dispose = () => this.dispose();
@@ -167,15 +181,19 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   render(width: number): string[] {
+    if (this.#disposed) return [];
     const safeWidth = Math.max(1, Math.floor(width));
     const height = terminalRows(this.tui);
-    const row = agentLiveStore.rows.get(this.rowId);
-    const title = row === undefined ? `Agent: ${this.rowId}` : formatAgentDrillTitle(row);
+    const row = agentLiveStore.rowForExecution(this.execution);
+    if (!this.#isHistoricalRound() && row === undefined) {
+      this.#close();
+      return [];
+    }
     const rounds = this.roundsLabel();
-    const header = fitLine(`${title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth);
+    const header = fitLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth);
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
-      ? this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`]
+      ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
       : this.#nativeLines(row, snapshot, safeWidth);
     const bodyHeight = Math.max(0, height - 2);
     const maxScroll = Math.max(0, content.length - bodyHeight);
@@ -191,13 +209,17 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   handleInput(data: string): void {
+    if (this.#disposed) return;
     if (isClose(data)) {
-      this.dispose();
-      this.done();
+      this.#close();
       return;
     }
     const selectedRound = this.#selectRound(data);
     if (selectedRound !== undefined) {
+      if (selectedRound === this.rounds?.active && agentLiveStore.rowForExecution(this.execution) === undefined) {
+        this.#close();
+        return;
+      }
       this.#selection = selectedRound;
       this.#followTail = selectedRound === this.rounds?.active;
       this.#scroll = 0;
@@ -231,21 +253,43 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   invalidate(): void {
+    if (this.#disposed) return;
     this.capability.invalidate();
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#unsubscribe();
+    this.#detachStore();
     this.#unregisterGlobal();
   }
 
-  get followTail(): boolean { return this.#followTail; }
-  get expandedTools(): boolean { return this.#expandedTools; }
+  #detachStore(): void {
+    if (!this.#storeAttached) return;
+    this.#storeAttached = false;
+    this.#unsubscribe();
+  }
 
-  #nativeLines(row: AgentLiveRow | undefined, snapshot: AgentLiveTranscriptSnapshot | undefined, width: number): string[] {
-    if (snapshot === undefined || snapshot.blocks.length === 0) return [emptyTranscriptMessage(row)];
+  #close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.dispose();
+    this.done();
+  }
+
+  get followTail(): boolean {
+    return this.#followTail;
+  }
+  get expandedTools(): boolean {
+    return this.#expandedTools;
+  }
+
+  #nativeLines(
+    row: AgentLiveRow | undefined,
+    snapshot: AgentLiveTranscriptSnapshot | undefined,
+    width: number,
+  ): string[] {
+    if (snapshot === undefined || snapshot.blocks.length === 0) return noTranscriptLines(row);
     const omitted = snapshot.omittedBlockCount > 0 ? [`… ${snapshot.omittedBlockCount} earlier block(s) omitted`] : [];
     return [...omitted, ...this.capability.render(snapshot.blocks, this.tui, width, this.#expandedTools)];
   }
@@ -258,7 +302,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     if (this.rounds === undefined || this.rounds.list.length <= 1) return undefined;
     const index = this.rounds.list.indexOf(this.#selection);
     if (data === "left" || data === "\u001b[D") return this.rounds.list[Math.max(0, index - 1)];
-    if (data === "right" || data === "\u001b[C") return this.rounds.list[Math.min(this.rounds.list.length - 1, Math.max(0, index + 1))];
+    if (data === "right" || data === "\u001b[C")
+      return this.rounds.list[Math.min(this.rounds.list.length - 1, Math.max(0, index + 1))];
     if (/^[1-9]$/u.test(data)) {
       const round = Number(data);
       return this.rounds.list.includes(round) ? round : undefined;
@@ -268,22 +313,46 @@ export class AgentSessionViewer implements CustomUiComponent {
 
   private roundsLabel(): string {
     if (this.rounds === undefined || this.rounds.list.length <= 1) return "";
-    return `rounds: ${this.rounds.list.map((round) => round === this.#selection ? `[${round}]` : String(round)).join(" ")}`;
+    return `rounds: ${this.rounds.list.map((round) => (round === this.#selection ? `[${round}]` : String(round))).join(" ")}`;
   }
 }
 
-function emptyTranscriptMessage(row: AgentLiveRow | undefined): string {
-  if (row === undefined) return "Agent row is no longer available.";
+function noTranscriptLines(row: AgentLiveRow | undefined): string[] {
+  if (row === undefined) return ["Agent row is no longer available."];
+  const finalAnswer = row.finalAnswer?.trim();
+  if (finalAnswer !== undefined && finalAnswer !== "") {
+    const recordedText =
+      row.status === "cancelled"
+        ? "recorded cancellation text"
+        : row.status === "error"
+          ? "recorded failure text"
+          : row.status === "done"
+            ? "recorded terminal text"
+            : "recorded row text";
+    return [
+      `No child transcript is available; showing ${recordedText}.`,
+      ...(row.resultArtifact === undefined ? [] : [`source: ${row.resultArtifact}`]),
+      "",
+      ...finalAnswer.split(/\r?\n/u),
+      ...row.errors.map((error) => `error: ${error}`),
+    ];
+  }
+  if (row.errors.length > 0) {
+    return ["No child transcript or readable answer is available.", ...row.errors.map((error) => `error: ${error}`)];
+  }
   switch (row.status) {
-    case "queued": return "Agent is queued; no assistant output yet.";
-    case "working": return "Agent is working; waiting for assistant output…";
-    case "done": return "Agent completed without assistant output.";
-    case "cancelled": return "Agent was cancelled before assistant output.";
-    case "error": return "Agent failed before assistant output.";
+    case "queued":
+      return ["Agent is queued; no assistant output yet."];
+    case "working":
+      return ["Agent is working; waiting for assistant output…"];
+    case "done":
+      return ["Agent completed without assistant output."];
+    case "cancelled":
+      return ["Agent was cancelled before assistant output."];
+    case "error":
+      return ["Agent failed before assistant output."];
   }
 }
-
-export const AGENT_VIEWER_OVERLAY_OPTIONS = VIEWER_OVERLAY_OPTIONS;
 
 const ACTIVE_SESSION_VIEWERS_KEY = Symbol.for("locus-pi.active-agent-session-viewers.v1");
 
@@ -340,7 +409,11 @@ function applyToolTransition(
 }
 
 function isNativeComponentModule(value: unknown): value is NativeComponentModule {
-  return isRecord(value) && typeof value.AssistantMessageComponent === "function" && typeof value.ToolExecutionComponent === "function";
+  return (
+    isRecord(value) &&
+    typeof value.AssistantMessageComponent === "function" &&
+    typeof value.ToolExecutionComponent === "function"
+  );
 }
 
 function terminalRows(tui: ViewerTui): number {
@@ -353,15 +426,37 @@ function fitLine(value: string, width: number): string {
   return `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
 }
 
-function isClose(data: string): boolean { return data === "q" || data === "escape" || data === "\u001b"; }
-function isUp(data: string): boolean { return data === "up" || data === "k" || data === "\u001b[A"; }
-function isDown(data: string): boolean { return data === "down" || data === "j" || data === "\u001b[B"; }
-function isPageUp(data: string): boolean { return data === "pageUp" || data === "pageup" || data === "\u001b[5~"; }
-function isPageDown(data: string): boolean { return data === "pageDown" || data === "pagedown" || data === "\u001b[6~"; }
-function isEnd(data: string): boolean { return data === "end" || data === "\u001b[F" || data === "\u001b[4~"; }
-function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-function isRecord(value: unknown): value is Record<PropertyKey, unknown> { return typeof value === "object" && value !== null; }
+function isClose(data: string): boolean {
+  return data === "q" || data === "escape" || data === "\u001b";
+}
+function isUp(data: string): boolean {
+  return data === "up" || data === "k" || data === "\u001b[A";
+}
+function isDown(data: string): boolean {
+  return data === "down" || data === "j" || data === "\u001b[B";
+}
+function isPageUp(data: string): boolean {
+  return data === "pageUp" || data === "pageup" || data === "\u001b[5~";
+}
+function isPageDown(data: string): boolean {
+  return data === "pageDown" || data === "pagedown" || data === "\u001b[6~";
+}
+function isEnd(data: string): boolean {
+  return data === "end" || data === "\u001b[F" || data === "\u001b[4~";
+}
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null;
+}
 function fingerprint(value: unknown): string {
-  try { return JSON.stringify(value); } catch { return String(value); }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

@@ -4,6 +4,48 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Changed
+
+- Workflow lifecycle is now explicit instead of inferred from `ok`. Runs persist
+  `completed`, `awaiting_operator`, `cancelled`, or `failed`; the review
+  clarification handoff keeps its existing payload but renders as waiting.
+  `/workflows stop [runId|last]` now reaches both slash- and tool-launched runs,
+  while workflow rows remain inspectable without `x` or Escape cancellation.
+  The Escape guard also covers the interval before a tool-launched workflow
+  creates its first live child row.
+  Tab completion exposes the supported command grammar, workflow names, run ids,
+  `last`, and resume ids while leaving query/path/input tails as free text.
+- Cross-run text consumption now requires the exact reference in the successful
+  source run's terminal handoff projection; index-only artifacts fail closed.
+  Read-only repository checks materialize initialized submodule source in their
+  disposable worktree, and remediation fingerprints distinguish dirty
+  same-HEAD submodule byte changes even while the submodule remains at its
+  recorded gitlink. Corrupt persisted result envelopes now project as
+  `unknown`, not as an evidenced failure.
+- Blocking custom UI now follows one inline interaction contract: selectors,
+  catalogs, and viewers replace the editor area instead of overlaying scrollback,
+  then restore editor focus when the interaction closes. Ask result cards now
+  return a real TUI component, so selecting with Enter no longer crashes Pi.
+  Plan mode is
+  session-explicit: startup clears stale/persisted activation, bare `/mode` only
+  shows state, Shift+Tab no longer changes mode, and the active badge/border use
+  the warning accent. Workflow catalog `Start` now prefills direct
+  `/workflows run <name>` execution; only Edit/Review route through
+  `$pi-workflow-authoring`.
+- **Breaking, before release:** narrowed workflow semantic `input` to one
+  optional string of at most 16,000 characters. The removed generic object form
+  has no compatibility adapter. Cross-run state now uses a separate closed
+  `continuation` tool control with one origin and 1–8 complete digest-bound
+  artifact refs; the runtime verifies and copies them before workflow code or a
+  child starts, records the exact source/current binding as the first journal
+  event, and rejects combination with replay-only `resumeFromRunId`.
+- Structured agent decisions now validate their schema declarations recursively
+  before a child starts. Unsupported types/keywords and malformed declarations
+  fail with zero child calls, and text-agent options cannot carry a schema under
+  a `Promise<string>` type. `review` uses this boundary for its clarifier;
+  `review-fix` uses it for an agent-selected remediation DAG whose ids, notes,
+  edges, cycles and stable topological order are checked before writers.
+
 ### Added
 
 - Added `excalidraw-pipeline` as a repository-local workflow example that turns a
@@ -25,6 +67,18 @@ This file records user-visible changes to the public package.
   generation package or renderer stops the run before the first child session
   exists. The generation package resolves globally and is deliberately not a
   dependency.
+- Added a compact interactive workflow inspector. `/workflows run` now starts
+  one background run per session/project and returns the editor immediately;
+  `/workflows stop [runId|last]` requests cancellation without claiming a
+  terminal result early. The passive below-editor widget shows the declared,
+  reached, and current stage frontier plus one active child through the shared
+  agent row renderer. `/ps` opens the full shared fleet: parallel groups remain
+  context-only, leaf `Enter` opens readable child output, and `Esc` returns
+  without aborting. Workflow children stop only through `/workflows stop`;
+  standalone agent children retain confirmed `x`. Replayed
+  children show only digest-verified answer artifacts when no transcript exists;
+  stale UI and transcript callbacks are revoked on `session_shutdown`. The
+  programmatic `workflow` tool remains awaited.
 - `/workflows run <name> --resume <runId>` is now a real replay instead of a
   metadata link. Every `agent()` call whose ordinal position and fully resolved
   request match the recorded run returns the recorded child text without
@@ -43,17 +97,18 @@ This file records user-visible changes to the public package.
   replayed call reports no token usage, so a green rerun can never be mistaken
   for fresh evidence.
 - Added the curated `review` Package workflow as a question-led agent pipeline.
-  Six sequential agents resolve the review scope from the operator's free-form
-  request, inventory every changed surface, group the inventory into material
-  review units, ask falsifiable questions about them, independently reopen the
-  evidence to answer those questions, and publish a readable review package
-  whose primary report is `.tasks/<task>/artifacts/review.md`. The workflow
-  result is an executive summary. Only confirmed problems become findings, and
-  a human edits the report directly instead of maintaining dispositions,
-  commit hashes, or snapshots. Workflow-local prompts are ordinary neighboring
-  Markdown files containing both stable role instructions and dynamic handoffs;
-  exact child text is passed between stages without a model-written JSON
-  protocol.
+  A shaped read-only clarifier decides whether semantic text can continue or
+  needs an operator pause. A pause persists exact intent/questions; a later text
+  answer call attaches both complete refs through host continuation. Five sequential
+  read-only agents resolve scope, inventory every changed surface, group material
+  review units, ask falsifiable questions, and independently verify them. The
+  runtime, not a publisher agent, persists the exact final answer as `review.md`
+  under the workflow run. Deterministic `C<n>` reconciliation rejects inventory
+  ids dropped by later agents, and fixed context limits fail closed on oversized
+  intent, clarification, handoffs, or reports. Continuation also requires the
+  successful paused run's terminal result to name the same complete intent and
+  question refs; index kind/stage metadata alone cannot
+  manufacture a prepare handoff. Only confirmed problems become findings.
 - Added the read-only `ast_index` agent tool. Read-only child sessions that ask
   for it get allowlisted `ast-index` navigation commands executed with argv and
   no shell; `clear`, `watch`, unknown commands, and output-file options are
@@ -61,17 +116,55 @@ This file records user-visible changes to the public package.
   review stages that trace code relationships prefer it and fall back to
   `grep`/`find` when the binary or index is unavailable.
 - Added the curated `review-fix` workflow as the remediation half of the same
-  question-led shape. It takes the human-edited `review.md` path, optionally
-  wrapped in ordinary words such as "apply only the P1 items in <path>";
-  deterministic code extracts and confines that path and refuses a review whose
-  findings the operator deleted. Five sequential agents then resolve the fix
-  scope, revalidate every finding against live source and group the survivors
-  into atomic fix units, apply those units, verify the working-tree diff by
-  rerunning the project's checks, and publish `fix-scope.md`, `fix-units.md`,
-  and the mandatory `fix-report.md`. All stages work in the operator's launch
-  checkout, because a review often covers uncommitted work, and leave every
-  change uncommitted without commit, push, merge, or deployment. There is no fix
-  plan, no disposition field, and no hash or snapshot binding.
+  question-led shape. Semantic text supplies the request while host continuation
+  supplies one immutable `{runId, artifactId, name, sha256}` `review.md` ref. A
+  no-tool read-only agent selects 1–20 finding units and dependencies through a
+  shaped answer; deterministic code rejects invalid ids, notes, edges, cycles,
+  and ordering before writers. One sequential writer owns each selected
+  finding. Host-owned Git fingerprints bracket each writer and later check, so
+  source drift is explicit. A separate host-enforced read-only checker can run
+  only package script commands frozen before the first writer in disposable
+  external worktrees; the complete script map is frozen and rechecked, so
+  writer-added, removed, or modified commands and `pre`/`post` lifecycle hooks
+  are refused. Source
+  fingerprints include dirty submodule HEAD, index, status, and changed bytes. The review input must equal the
+  source run's terminal result and be its exact terminal projected ref, so
+  changing artifact-index stage metadata cannot promote another file. A fresh
+  read-only agent re-reviews every original finding, affected dependency, and
+  regression risk. Runtime-owned `agent({ artifact })` answers replace the old
+  helper and publisher stages. Changes remain uncommitted in the launch checkout.
+- Added a canonical per-run artifact index at
+  `.locus/runtime/workflows/<runId>/artifacts/index.json`. Every `agent()` attempt
+  persists its exact answer and, for fresh child sessions, its transcript and
+  result envelope. `publishArtifact()` writes deterministic workflow-authored
+  text; `consumeTextArtifact()` verifies and copies a complete prior-run text
+  reference; `agent({ artifact: "name.md" })` gives an automatic answer a stable
+  reader-facing name. `/workflows dashboard` and interactive status commands now
+  browse persisted run, stage, artifact, transcript, result, and log evidence with
+  digest verification before content is shown.
+  Completed runs and the model-callable workflow tool also expose a bounded list
+  of complete answer/published refs, with an explicit omitted count, so the next
+  workflow can consume an actual ref instead of guessing an artifact id.
+  Consumed text also carries the validated source terminal result/ref projection
+  for consumers that must prove a report was the run's actual final output.
+  The store validates the complete physical directory chain from the project
+  root through `.locus/runtime/workflows/<runId>` before reads and writes, so a
+  symlinked `.locus`, `runtime`, or deeper ancestor cannot redirect evidence.
+- Made persisted journal evidence discriminated by event kind: required and
+  allowed fields are checked before projection, so malformed rows such as an
+  empty `agent_end` remain diagnostics. Child cancellation now bounds its wait
+  for a non-settling SDK `abort()` acknowledgement and continues evidence
+  persistence afterward.
+- Made `public-repository.json#repositoryFiles` an exact-file allowlist.
+  Directory entries are rejected, so future files under public folders require
+  an explicit manifest and inventory change.
+- Documented the project-local ignored planning and testing workflow boundary.
+  Local dogfood exercises split-run plan consumption and independent testcase
+  design, implementation/execution, and failure attribution without entering
+  Git, the curated Package registry, or the public npm package. Its independent
+  planning verifier and test attribution stages are host-enforced read-only,
+  use `repository_check` instead of shell, and fail closed on bounded context or
+  work-unit limits.
 - Added workflow-local `promptFile()` resources with strict variable rendering,
   source-relative confinement, immutable run copies, and SHA-256 evidence.
 - Added per-call `readOnly: true` policy for workflow agents so prompt-only
@@ -86,8 +179,8 @@ This file records user-visible changes to the public package.
 - Recorded the strict curated-workflow selection criteria and candidate boundary
   in `docs/adr/curated-workflow-portfolio.md`.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
-  Package workflow, with explicit operator, workflow, agent, direct-LLM, decision,
-  and persisted-artifact ownership.
+  Package workflow, with explicit operator, workflow, agent, decision, and
+  persisted-artifact ownership.
 - Added opt-in session todo auto-continuation: a persisted queue context,
   `/todo run` and `/todo pause`, and one hidden Pi continuation turn after each
   successful queue transition.
@@ -145,14 +238,14 @@ This file records user-visible changes to the public package.
   instead of repeating small per-stage budgets. Workflow entrypoints also carry
   IDE-only `WorkflowDsl` type links so JavaScript-aware editors can navigate
   `agent()`, `promptFile()`, `phase()`, and `log()` to their definitions.
-- Expanded the supported curated Package registry from three workflows to five.
-  Generic implementation, release, deploy, and incident workflows remain
-  project-local; the narrow review remediation family is human-gated, gated by
-  deterministic input validation, and never commits.
-- Kept review and fixing as two workflows instead of adding a separate
-  `review-plan` run. The review report is itself the approval surface: the
-  operator edits `review.md` in place, and remediation stays a separate,
-  explicitly started workflow with no write authority carried over.
+- Kept the supported curated Package registry at four workflows. Generic
+  planning, testing, implementation, release, deploy, and incident workflows
+  remain project-local; the narrow review remediation family is human-gated by
+  an immutable review reference plus an agent-selected, deterministically
+  validated finding graph and never commits.
+- Kept review and fixing as separate workflows. Clarification may pause one run
+  and continue through host-verified artifacts in a later call, but remediation
+  still starts independently and receives no write authority from the review run.
 - Added an executable diagram contract so future curated workflows cannot ship
   without a reproducible generator, editable source, preview, ownership legend,
   and actual runtime persistence surfaces.

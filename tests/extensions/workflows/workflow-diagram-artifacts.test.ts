@@ -60,13 +60,9 @@ describe("curated workflow diagram contract", () => {
   it("makes ownership, source, persistence, and the visual legend readable without opening workflow code", () => {
     for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
       const text = diagramText(name);
-      // "Direct LLM:" is gone from the legend contract: T-108 deleted the
-      // primitive, and the generators no longer emit it (asserted above).
-      // The checked-in .excalidraw/.png renders still carry the stale row —
-      // regenerating them needs @kroffske/excalidraw-diagrams, which is not a
-      // dependency of this repo, and hand-editing a render would desynchronise
-      // it from its generator. So this asserts only what the render is still
-      // required to say; the generator assertion above is the live gate.
+      // T-108 deleted `llm()` from the DSL, so neither the source generator nor
+      // the checked-in reader-facing render may advertise that primitive.
+      expect(text, name).not.toMatch(/llm/iu);
       for (const prefix of ["Operator:", "Workflow:", "Agent:", "Artifact:"]) {
         expect(text, name).toContain(prefix);
       }
@@ -77,25 +73,28 @@ describe("curated workflow diagram contract", () => {
     }
   });
 
-  it("labels the six sequential review agents, their exact-text handoffs, and the single write-capable stage", () => {
+  it("labels split-run clarification, five read-only review agents, and runtime-owned artifacts", () => {
     const text = diagramText("review");
 
+    expect(text).toMatch(/Agent: shaped clarification decider.*CLARIFIER_SCHEMA \{decision, questions\[\]\}/su);
+    expect(text).toMatch(/Workflow: check clarifier output\.decision.*needs_operator publishes questions and stops/su);
+    expect(text).toContain("input:string + optional continuation");
+    expect(text).toContain("continued intent + questions + answers");
     expect(text).toMatch(/Agent: R1.*scope resolver.*catalog default.*resolve review scope/su);
     expect(text).toMatch(/Agent: R2a.*change inventory.*catalog default.*inventory changes/su);
     expect(text).toMatch(/Agent: R2b.*review-unit planner.*catalog default.*plan review units/su);
     expect(text).toMatch(/Agent: R3.*interrogator.*catalog default.*ask review questions/su);
     expect(text).toMatch(/Agent: R4.*verifier and review author.*catalog default.*verify and write review/su);
-    expect(text).toMatch(/Agent: R5.*publisher and presenter.*catalog default.*publish review package/su);
-    expect(text).toMatch(/Workflow: forward each stage's exact text.*No JSON parse/su);
-    expect(text).toMatch(/Workflow: return Agent R5 exact text.*executive summary is the result/su);
+    expect(text).toMatch(/Workflow: return Agent R4 exact text.*review\.md contains the same exact bytes/su);
 
     for (const phase of [
+      "prepare-clarification",
+      "consume-clarification",
       "phase resolve-scope",
       "phase inventory-changes",
       "phase plan-units",
       "phase ask-questions",
       "phase verify-review",
-      "phase publish-review",
     ]) {
       expect(text).toContain(phase);
     }
@@ -103,110 +102,99 @@ describe("curated workflow diagram contract", () => {
     expect(text).toContain("resources/*.prompt.md");
     expect(text).not.toContain(".agent.md");
 
-    expect(text).toContain("scopeText verbatim");
     expect(text).toContain("exact scopeText");
     expect(text).toContain("exact inventoryText");
     expect(text).toContain("exact unitsText");
     expect(text).toContain("exact questionsText");
     expect(text).toContain("exact reviewText");
-    expect(text).toContain("exact executive summary text");
 
-    // R1–R4 are host-enforced read-only; R2b/R3/R4 also get the allowlisted
-    // argv tool, and only R5 may write.
+    // Every review child is host-enforced read-only; the runtime, not a model
+    // publisher, owns the named Markdown artifacts.
     expect(text).toContain("Host-enforced read-only");
     expect(text).toContain("ast_index");
-    expect(text).toMatch(/Write-capable: read, write, bash, grep, find/u);
-    expect(text).toMatch(/Agent: R5.*only write-capable review stage/su);
-
-    // The pipeline is strictly linear: no lanes, no barrier, no adjudicator.
-    expect(text).toContain("no parallel lane and no adjudicator");
-    expect(text).not.toContain("in parallel");
-    expect(text).not.toContain("wait for both");
+    expect(text).toContain("runtime indexes every named answer");
+    expect(text).toContain("runtime persists exact review.md");
 
     expect(text).not.toContain("TARGET_SCHEMA");
     expect(text).not.toContain("LANE_SCHEMA");
     expect(text).not.toContain("REPORT_SCHEMA");
     expect(text).not.toContain("PUBLISH_SCHEMA");
 
-    expect(text).toContain(".tasks/<task>/artifacts/review.md");
-    expect(text).toMatch(/review\.md.*Primary reader-facing report/su);
-    for (const supporting of ["review-scope.md", "review-inventory.md", "review-units.md", "review-questions.md"]) {
+    expect(text).toContain("<runId>/artifacts/.../review.md");
+    expect(text).toMatch(/review\.md.*Primary reader-facing runtime artifact/su);
+    for (const supporting of ["scope.md", "inventory.md", "units.md", "questions.md"]) {
       expect(text).toContain(supporting);
     }
     expect(text).not.toContain("fix-plan.md");
     expect(text).not.toMatch(/disposition/iu);
-    expect(text).toMatch(/Operator: edit review\.md.*Deleting a finding rejects it/su);
+    expect(text).toMatch(/Operator: inspect review\.md.*complete reference to remediation/su);
   });
 
-  it("shows the review-fix gate, its five sequential agents, and the launch-checkout boundary", () => {
+  it("shows immutable review input, one writer per finding, checks, re-review, and launch-checkout mutation", () => {
     const reviewFix = diagramText("review-fix");
 
-    // One deterministic gate owns path confinement and the findings check; it
-    // runs before any agent exists.
-    expect(reviewFix).toMatch(/Workflow: resolve-review.*deterministic, no agent yet/su);
-    expect(reviewFix).toMatch(/Extracts the one review\.md token from free text/u);
-    expect(reviewFix).toMatch(/Confines it inside a project artifacts directory/u);
-    expect(reviewFix).toMatch(/Rejects absolute paths and symlink escapes/u);
-    expect(reviewFix).toMatch(/Workflow: require a non-empty finding list.*throw before any agent/su);
+    expect(reviewFix).toMatch(
+      /Workflow: consume immutable review.*verify full ref \+ digest \+ terminal result projection/su,
+    );
+    expect(reviewFix).toMatch(/Workflow: parse complete finding blocks.*malformed review fails before selector/su);
+    expect(reviewFix).toContain("Full {runId, artifactId, name, sha256}");
+    expect(reviewFix).toMatch(/Agent: finding graph selector.*Chooses 1–20 ids, notes, and dependsOn edges/su);
+    expect(reviewFix).toMatch(
+      /Workflow: validate and order finding DAG.*Reject unknown\/duplicate\/self edges.*Stable Kahn order/su,
+    );
 
     for (const phase of [
-      "phase resolve-review",
       "phase resolve-fix-scope",
-      "phase plan-fix-units",
-      "phase apply-fix-units",
-      "phase verify-fixes",
-      "phase publish-fix-report",
+      "phase apply-kept-findings",
+      "phase collect-check-evidence",
+      "phase re-review-fixes",
     ]) {
       expect(reviewFix, phase).toContain(phase);
     }
 
-    // Five agent stages, each named with its prompt, phase, and capability policy.
-    expect(reviewFix).toMatch(/Agent: F1 — fix-scope resolver.*resolve fix scope/su);
-    expect(reviewFix).toMatch(/Agent: F2 — fix-unit planner.*plan fix units/su);
-    expect(reviewFix).toMatch(/Agent: F3 — implementer.*apply fix units/su);
-    expect(reviewFix).toMatch(/Agent: F4 — verifier and report author.*verify fixes and write report/su);
-    expect(reviewFix).toMatch(/Agent: F5 — publisher and presenter.*publish fix package/su);
+    expect(reviewFix).toMatch(/Agent: scope resolver.*artifact: scope\.md.*Host-enforced read-only/su);
+    expect(reviewFix).toMatch(
+      /Agent: one writer for current F<n>.*Receives one full block \+ note \+ direct dependencies/su,
+    );
+    expect(reviewFix).toMatch(
+      /Failure skips transitive dependents; independent writers continue.*Any failure skips checks and fresh re-review/su,
+    );
+    expect(reviewFix).not.toContain("Failure stops later writers and all downstream stages");
+    expect(reviewFix).toMatch(
+      /Workflow: launch independent checker.*baseline-frozen repository_check.*Agent: check-evidence collector.*Reads full diff; checks in disposable worktrees/su,
+    );
+    expect(reviewFix).toContain("source-state-*.json fingerprints");
+    expect(reviewFix).toContain("Package review · verify-review answer only");
+    expect(reviewFix).toMatch(
+      /Agent: fresh read-only re-reviewer.*Rechecks every original finding and dependency surface/su,
+    );
     expect(reviewFix).toContain("resources/*.prompt.md");
     expect(reviewFix).not.toContain(".agent.md");
 
-    // Exact-text handoffs, never a parsed protocol.
     expect(reviewFix).toContain("exact scopeText");
-    expect(reviewFix).toContain("exact unitsText");
-    expect(reviewFix).toContain("exact implementationText");
-    expect(reviewFix).toContain("exact reportText");
-    expect(reviewFix).toContain("exact executive summary text");
-    expect(reviewFix).toMatch(/Workflow: forward each stage's exact text.*No JSON parse/su);
-    expect(reviewFix).toMatch(/Workflow: return Agent F5 exact text.*executive summary is the result/su);
+    expect(reviewFix).toContain("one block + direct dependency results");
+    expect(reviewFix).toContain("all exact worker results");
+    expect(reviewFix).toContain("exact check evidence");
+    expect(reviewFix).toContain("exact re-review text");
+    expect(reviewFix).toMatch(
+      /Workflow: validate and order finding DAG.*No writer starts until the whole graph is valid/su,
+    );
+    expect(reviewFix).toMatch(/Workflow: return exact re-review text.*Runtime already stored it as re-review\.md/su);
+    expect(reviewFix).toContain("runtime indexes all named answers");
 
-    // No finding is edited before it is revalidated against live source.
-    expect(reviewFix).toContain("Host-enforced read-only");
-    expect(reviewFix).toMatch(/Agent: F2.*Revalidates every finding against live source/su);
-
-    // Two distinct write privileges: F3 mutates source, F5 writes artifacts.
-    expect(reviewFix).toContain("Write-capable: read, write, edit, bash, grep, find");
-    expect(reviewFix).toContain("Write-capable: read, write, bash, grep, find");
-    expect(reviewFix).toMatch(/Agent: F3.*Edits the operator's launch checkout in place/su);
-    expect(reviewFix).toMatch(/Agent: F5.*only stage that writes task artifacts/su);
-
-    // F4 is deliberately not host-enforced read-only: repository checks need a shell.
-    expect(reviewFix).toContain("Shell exception: read, ast_index, bash, grep, find");
-    expect(reviewFix).toMatch(/Agent: F4.*Not host-enforced read-only: checks need a shell/su);
-
-    // The launch checkout is the whole workspace, and nothing is committed.
-    expect(reviewFix).toMatch(/workspaceMode: project.*nothing is isolated/su);
+    // Writers mutate the launch checkout; checks execute separately in disposable worktrees.
+    expect(reviewFix).toMatch(/workspaceMode: project.*Each writer sees the whole launch workspace/su);
+    expect(reviewFix).toContain("checks in disposable worktrees");
     expect(reviewFix).toMatch(/Never committed, pushed, or stashed/u);
-    expect(reviewFix).not.toMatch(/worktree/iu);
     expect(reviewFix).not.toContain("workspaceHandle");
 
-    // The human gate is review.md itself; no plan, disposition, or hash survives.
-    expect(reviewFix).toMatch(/Artifact: human-edited review\.md.*A deleted finding is a rejected finding/su);
-    expect(reviewFix).toContain(".tasks/<task>/artifacts/fix-report.md");
-    expect(reviewFix).toMatch(/fix-report\.md.*Primary reader-facing report/su);
-    expect(reviewFix).toContain("fix-scope.md and fix-units.md");
-    expect(reviewFix).not.toContain("_SCHEMA");
+    expect(reviewFix).toMatch(/Artifact: immutable review\.md reference.*Host-consumed before workflow module/su);
+    expect(reviewFix).toMatch(/Artifact: re-review\.md.*Primary reader-facing remediation verdict/su);
+    expect(reviewFix).toContain("scope.md + worker-F<n>.md");
+    expect(reviewFix).toContain("check-evidence.md + re-review.md");
+    expect(reviewFix).toContain("FINDING_SELECTOR_SCHEMA");
     expect(reviewFix).not.toContain("fix-plan.md");
     expect(reviewFix).not.toMatch(/disposition/iu);
-    expect(reviewFix).not.toMatch(/SHA-?256/iu);
   });
 
   it("does not disguise workflow-owned repository search as agents", () => {

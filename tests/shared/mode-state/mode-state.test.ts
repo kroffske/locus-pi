@@ -16,7 +16,6 @@ import {
   modeStatePath,
   modeStateForCycle,
   modeStatusLabel,
-  nextCycleMode,
   normalizeRemote,
   planArtifactPath,
   planModeInjectionText,
@@ -394,15 +393,6 @@ describe("mode cycle", () => {
       currentCycleMode({ version: 1, mode: null, slug: "", activeArtifactPath: "", enteredAt: "", status: "draft" }),
     ).toBe("default");
     expect(currentCycleMode(sampleState({ mode: "plan" }))).toBe("plan");
-  });
-
-  it("nextCycleMode advances and wraps around", () => {
-    expect(nextCycleMode("default")).toBe("plan");
-    expect(nextCycleMode("plan")).toBe("default");
-  });
-
-  it("nextCycleMode falls back to the first mode for an unknown position", () => {
-    expect(nextCycleMode("workflow" as never)).toBe("default");
   });
 
   it("modeStateForCycle('plan') arms plan mode with an empty slug and active status", () => {

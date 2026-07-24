@@ -1,7 +1,14 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type {
+  WorkflowArtifactPorts,
+  WorkflowArtifactRef,
+  WorkflowBoundContinuation,
+  WorkflowConsumedTextArtifact,
+} from "../../../extensions/_shared/workflow-artifacts.js";
 import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
 import {
   createWorkflowRuntime,
@@ -13,6 +20,7 @@ import {
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review/review.workflow.mjs");
 
 const READ_ONLY_PROMPTS = [
+  "clarifier.prompt.md",
   "scope-resolver.prompt.md",
   "change-inventory.prompt.md",
   "unit-planner.prompt.md",
@@ -20,6 +28,12 @@ const READ_ONLY_PROMPTS = [
   "verifier.prompt.md",
 ];
 const NAVIGATING_PROMPTS = ["unit-planner.prompt.md", "interrogator.prompt.md", "verifier.prompt.md"];
+
+interface PublishedArtifact {
+  ref: WorkflowArtifactRef;
+  text: string;
+  stage?: string;
+}
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
   const module = (await import(workflowPath)) as {
@@ -41,20 +55,100 @@ function completed(request: WorkflowAgentRequest, text: string): WorkflowAgentRe
   };
 }
 
-function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>) {
+function digest(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function priorRef(runId: string, artifactId: string, name: string, text: string): WorkflowArtifactRef {
+  return { runId, artifactId, name, sha256: digest(text) };
+}
+
+function prepareTerminal(intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) {
+  return {
+    result: { mode: "prepared", intentRef, questionsRef },
+    artifactRefs: [intentRef, questionsRef],
+  };
+}
+
+function prepareArtifact(
+  ref: WorkflowArtifactRef,
+  text: string,
+  intentRef: WorkflowArtifactRef,
+  questionsRef: WorkflowArtifactRef,
+): WorkflowConsumedTextArtifact {
+  return {
+    ref,
+    text,
+    source: {
+      runId: ref.runId,
+      target: { kind: "name", ref: "review", source: "package" },
+      artifact: { kind: "published", stage: "prepare-clarification" },
+      terminal: prepareTerminal(intentRef, questionsRef),
+    },
+  };
+}
+
+function runtimeWith(
+  runner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
+  options: { runId?: string; consumed?: Map<string, WorkflowConsumedTextArtifact> } = {},
+) {
+  const runId = options.runId ?? "review-test";
   const runDir = mkdtempSync(path.join(tmpdir(), "locus-review-workflow-"));
   const resourceLoader = createWorkflowResourceLoader({
     workflowSourcePath: workflowPath,
     runDir,
   });
+  const published: PublishedArtifact[] = [];
+  const answers: PublishedArtifact[] = [];
+  const consumed: WorkflowArtifactRef[] = [];
+  const awaiting: Array<{ reason: string }> = [];
+  let continuation: WorkflowBoundContinuation | undefined;
+  if (options.consumed !== undefined && options.consumed.size > 0) {
+    const pairs = [...options.consumed.values()].map((item, index) => {
+      consumed.push(item.ref);
+      return {
+        sourceRef: item.ref,
+        consumedArtifact: {
+          ...item,
+          ref: priorRef(runId, `input-${index + 1}`, item.ref.name, item.text),
+        },
+      };
+    });
+    continuation = { originRunId: pairs[0]!.sourceRef.runId, artifacts: pairs };
+  }
+  const artifactPorts: WorkflowArtifactPorts = {
+    recordAgentEvidence(input) {
+      if (input.text === undefined) return {};
+      const ref = priorRef(runId, `answer-${answers.length + 1}`, input.name, input.text);
+      answers.push({ ref, text: input.text, ...(input.stage === undefined ? {} : { stage: input.stage }) });
+      return { answer: ref };
+    },
+    publishText(name, text, stage) {
+      const ref = priorRef(runId, `published-${published.length + 1}`, name, text);
+      published.push({ ref, text, ...(stage === undefined ? {} : { stage }) });
+      return ref;
+    },
+    consumeText(ref) {
+      throw new Error(`unexpected workflow-local artifact consume: ${ref.name}`);
+    },
+  };
   return {
     ...createWorkflowRuntime({
-      runId: "review-test",
+      runId,
       agentRunner: runner,
       resourceLoader,
+      artifactPorts,
+      onAwaitOperator(declaration) {
+        awaiting.push(declaration);
+      },
+      ...(continuation === undefined ? {} : { continuation }),
       projectRoot: process.cwd(),
     }),
     resourceLoader,
+    published,
+    answers,
+    consumed,
+    awaiting,
   };
 }
 
@@ -63,28 +157,33 @@ function promptSource(name: string): string {
 }
 
 describe("workflow example: review.workflow.mjs", () => {
-  it("uses six neighboring prompts and no workflow-local agent or JSON/YAML protocol", () => {
+  it("keeps every model stage read-only and removes the model publisher", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain('promptFile("./resources/');
+    expect(source).toContain("publishArtifact");
+    expect(source).toContain("continuationArtifacts");
+    expect(source).toContain("CLARIFIER_SCHEMA");
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
     expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
     expect(source.match(/readOnly: true/gu)).toHaveLength(2);
     expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
     expect(source).toContain('tools: ["read", "git_read", "ast_index", "grep", "find"]');
-    expect(source).toContain('@param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl');
-    expect(source).not.toContain("agentFile");
-    expect(source).not.toContain(".agent.md");
-    expect(source).not.toContain("agents.yaml");
-    expect(source).not.toContain("review-config");
-    expect(source).not.toContain("schema:");
+    expect(source).not.toContain("REVIEW_PUBLISH_OPTIONS");
+    expect(source).not.toContain("publish review package");
+    expect(source).not.toContain('phase("publish-review")');
+    expect(existsSync(path.join(path.dirname(workflowPath), "resources", "publisher.prompt.md"))).toBe(false);
     expect(source).not.toContain("JSON.parse");
     expect(source).not.toContain("parallel");
+    for (const name of ["scope.md", "inventory.md", "units.md", "questions.md", "review.md"]) {
+      expect(source, name).toContain(`artifact: "${name}"`);
+      expect(source, name).not.toContain(`publishArtifact("${name}"`);
+    }
     for (const name of READ_ONLY_PROMPTS) {
       const prompt = promptSource(name);
       expect(prompt, name).toContain("This stage is host-enforced read-only.");
-      expect(prompt, name).toMatch(/publisher is the only review\s+stage allowed to write/iu);
+      expect(prompt, name).toContain("workflow runtime owns");
       expect(prompt, name).toContain("You have no shell");
       expect(prompt, name).toContain("git_read");
     }
@@ -97,7 +196,7 @@ describe("workflow example: review.workflow.mjs", () => {
       expect(prompt, name).toMatch(/A missing AST Index never blocks a\s+review\./u);
       expect(prompt, name).toMatch(/continue with\s+`grep`, `find`, and direct reads/u);
     }
-    for (const name of ["scope-resolver.prompt.md", "change-inventory.prompt.md"]) {
+    for (const name of ["clarifier.prompt.md", "scope-resolver.prompt.md", "change-inventory.prompt.md"]) {
       expect(promptSource(name), name).not.toContain("ast_index");
     }
   });
@@ -112,77 +211,465 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(verifier).toMatch(/never `Rejected` for a question whose answer produced a finding/u);
   });
 
-  it("keeps hashes, snapshots, fix plans, and dispositions out of the review contract", () => {
-    for (const name of READ_ONLY_PROMPTS) {
-      const prompt = promptSource(name);
-      expect(prompt, name).not.toContain("SHA-256");
-      expect(prompt, name).not.toContain("Snapshot:");
-      expect(prompt, name).not.toMatch(/base=<commit>/u);
-      expect(prompt, name).not.toContain("fix-plan.md");
-    }
-    const publisher = promptSource("publisher.prompt.md");
-    expect(publisher).toContain("artifacts/review.md");
-    expect(publisher).toContain("executive summary");
-    expect(publisher).toMatch(/Do not write a fix plan, dispositions, commit hashes, snapshots, or SHA-256\s+values/u);
-    expect(publisher).toMatch(/Only `review\.md` is mandatory/u);
+  it("carries stable inventory coverage ids through interrogation and final verification", () => {
+    const inventory = promptSource("change-inventory.prompt.md");
+    const planner = promptSource("unit-planner.prompt.md");
+    const interrogator = promptSource("interrogator.prompt.md");
+    const verifier = promptSource("verifier.prompt.md");
+
+    expect(inventory).toContain("stable coverage ids");
+    expect(planner).toContain("Coverage: C1, C2");
+    expect(planner).toMatch(/Every inventory id\s+must appear in exactly one unit/u);
+    expect(interrogator).toContain("{{INVENTORY_TEXT}}");
+    expect(interrogator).toContain("## Coverage gaps");
+    expect(interrogator).toContain("## Coverage reconciliation");
+    expect(verifier).toContain("{{INVENTORY_TEXT}}");
+    expect(verifier).toContain("original inventory is the coverage source of truth");
+    expect(verifier).toContain("never return `Ready for\nhuman acceptance`");
   });
 
-  it("passes every agent result verbatim and returns the publisher summary exactly", async () => {
+  it("documents exact artifact limits and single runtime-owned model answers", () => {
+    const readme = readFileSync(path.join(path.dirname(workflowPath), "README.md"), "utf8");
+
+    expect(readme).toContain("1–128 characters");
+    expect(readme).toContain("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+    expect(readme).toContain("2,097,152 UTF-8 bytes");
+    expect(readme).toContain("Logical names are labels, not lookup keys");
+    expect(readme).toContain("clarifier-decision.json");
+    expect(readme).toContain("clarification-questions.md");
+    expect(readme).toMatch(/avoiding duplicate model-text\s+publications/u);
+  });
+
+  it("uses a clarifier decision, forwards exact string intent, and returns verifier text", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
     const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
       "resolve review scope": "  # Review Scope\nTarget: `origin/main...HEAD`\n",
-      "inventory changes": '{"lane":"inventory","status":"failed-looking"}',
-      "plan review units": "# Review Units\n## U1\nPath: `src/a.ts`",
-      "ask review questions": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
-      "verify and write review": "# Code Review\n\n## Verdict\nNeeds changes.",
-      "publish review package": "  Review published.\nPrimary report: .tasks/T-201/artifacts/review.md\n",
+      "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
+      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+      "ask review questions": [
+        "# Review Questions",
+        "## U1-Q1",
+        "Question: Does it hold?",
+        "## Coverage reconciliation",
+        "C1: U1-Q1",
+      ].join("\n"),
+      "verify and write review": [
+        "# Code Review",
+        "## Verdict",
+        "Needs changes.",
+        "## Coverage and limits",
+        "C1: inspected through U1-Q1.",
+      ].join("\n"),
     };
-    const { dsl, resourceLoader } = runtimeWith(async (request) => {
+    const { dsl, resourceLoader, published, answers } = runtimeWith(async (request) => {
       calls.push(request);
       return completed(request, outputs[request.label!]!);
     });
+    const intent = "  review current branch; focus exactly on API drift  \n";
 
-    const result = await runWorkflow(dsl, "review current branch");
+    const result = await runWorkflow(dsl, intent);
 
-    expect(result).toBe(outputs["publish review package"]);
+    expect(result).toBe(outputs["verify and write review"]);
     expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
       "resolve review scope",
       "inventory changes",
       "plan review units",
       "ask review questions",
       "verify and write review",
-      "publish review package",
     ]);
-    expect(calls.map((call) => call.agent)).toEqual(["default", "default", "default", "default", "default", "default"]);
-    expect(calls.map((call) => call.readOnly)).toEqual([true, true, true, true, true, undefined]);
-    expect(calls.slice(0, 2).map((call) => call.tools?.join(","))).toEqual([
-      "read,git_read,grep,find",
-      "read,git_read,grep,find",
-    ]);
-    expect(calls.slice(2, 5).every((call) => call.tools?.join(",") === "read,git_read,ast_index,grep,find")).toBe(true);
-    expect(calls[5]?.tools).toEqual(["read", "write", "bash", "grep", "find"]);
-    expect(calls.every((call) => call.maxToolCalls === 1_000)).toBe(true);
-    expect(calls.every((call) => call.workspaceMode === "project")).toBe(true);
+    expect(calls.every((call) => call.readOnly === true)).toBe(true);
+    expect(calls.every((call) => call.prompt.includes(intent))).toBe(true);
     expect(calls.map((call) => call.phase)).toEqual([
+      "prepare-clarification",
       "resolve-scope",
       "inventory-changes",
       "plan-units",
       "ask-questions",
       "verify-review",
-      "publish-review",
     ]);
-    expect(calls[1]?.prompt).toContain(outputs["resolve review scope"]);
-    expect(calls[1]?.prompt).not.toContain("review current branch");
-    expect(calls[2]?.prompt).toContain(outputs["inventory changes"]);
-    expect(calls[3]?.prompt).toContain(outputs["plan review units"]);
-    expect(calls[3]?.prompt).not.toContain(outputs["inventory changes"]);
-    expect(calls[4]?.prompt).toContain(outputs["ask review questions"]);
-    expect(calls[5]?.prompt).toContain(outputs["verify and write review"]);
+    expect(calls[2]?.prompt).toContain(outputs["resolve review scope"]);
+    expect(calls[3]?.prompt).toContain(outputs["inventory changes"]);
+    expect(calls[4]?.prompt).toContain(outputs["plan review units"]);
     expect(calls[5]?.prompt).toContain(outputs["ask review questions"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["intent.md"]);
+    expect(answers.map((item) => item.ref.name)).toEqual([
+      "clarifier-decision.json",
+      "scope.md",
+      "inventory.md",
+      "units.md",
+      "questions.md",
+      "review.md",
+    ]);
+    expect(published[0]?.text).toBe(intent);
+    expect(published[0]?.stage).toBe("resolve-scope");
+    expect(answers.at(-1)?.text).toBe(result);
     expect(resourceLoader.evidence()).toHaveLength(6);
-    expect(resourceLoader.evidence().every((item) => item.kind === "prompt")).toBe(true);
-    expect(resourceLoader.evidence().every((item) => /^[0-9a-f]{64}$/.test(item.sha256))).toBe(true);
+  });
+
+  it("prepares clarification with exact persisted intent and complete artifact references", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published, answers, awaiting } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, '{"decision":"needs_operator","questions":["Which base?"]}');
+      },
+      { runId: "prepare-run" },
+    );
+    const intent = "  review this, but preserve my spacing  \n";
+
+    const result = await runWorkflow(dsl, intent);
+
+    expect(result).toEqual({
+      mode: "prepared",
+      intentRef: published[0]?.ref,
+      questionsRef: published[1]?.ref,
+    });
+    expect(published.map((item) => [item.ref.name, item.text])).toEqual([
+      ["intent.md", intent],
+      ["clarification-questions.md", "# Clarification Questions\n\n1. Which base?"],
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.label).toBe("decide clarification");
+    expect(calls[0]?.readOnly).toBe(true);
+    expect(calls[0]?.prompt).toContain(intent);
+    expect(answers.map((item) => item.ref.name)).toEqual(["clarifier-decision.json"]);
+    expect(awaiting).toEqual([{ reason: "review clarification required" }]);
+  });
+
+  it.each([
+    [{ decision: "continue", questions: ["Unexpected question"] }, "continue decision requires no questions"],
+    [{ decision: "needs_operator", questions: [] }, "requires 1-8 questions"],
+    [{ decision: "needs_operator", questions: ["Same?", "Same?"] }, "must be unique"],
+    [{ decision: "needs_operator", questions: ["x".repeat(1_001)] }, "exceeds 1000 characters"],
+    [
+      { decision: "needs_operator", questions: Array.from({ length: 5 }, (_, index) => `${index}${"x".repeat(899)}`) },
+      "exceed 4000 combined characters",
+    ],
+  ])("rejects invalid clarifier domain output before review stages", async (decision, message) => {
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, JSON.stringify(decision));
+    });
+
+    await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(message);
+    expect(calls.map((call) => call.label)).toEqual(["decide clarification"]);
+    expect(published).toHaveLength(0);
+  });
+
+  it("executes from verified same-run references, persists answers, and forwards the original intent", async () => {
+    const runWorkflow = await loadWorkflow();
+    const intentText = "review range A...B; focus on compatibility";
+    const questionsText = "# Clarification Questions\n1. Include generated files?";
+    const intentRef = priorRef("prepare-run", "published-1", "intent.md", intentText);
+    const questionsRef = priorRef("prepare-run", "published-2", "clarification-questions.md", questionsText);
+    const prior = new Map([
+      [`${intentRef.runId}:${intentRef.artifactId}`, prepareArtifact(intentRef, intentText, intentRef, questionsRef)],
+      [
+        `${questionsRef.runId}:${questionsRef.artifactId}`,
+        prepareArtifact(questionsRef, questionsText, intentRef, questionsRef),
+      ],
+    ]);
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, consumed, published, answers } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        const outputs: Record<string, string> = {
+          "resolve review scope": "# Review Scope\nTarget: A...B",
+          "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
+          "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+          "ask review questions":
+            "# Review Questions\n## Coverage reconciliation\nC1: U1; No question needed: trivial change",
+          "verify and write review": "# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected",
+        };
+        return completed(request, outputs[request.label!]!);
+      },
+      { runId: "execute-run", consumed: prior },
+    );
+
+    const result = await runWorkflow(dsl, "Include generated files only when tracked.");
+
+    expect(result).toBe("# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected");
+    expect(consumed).toEqual([intentRef, questionsRef]);
+    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md"]);
+    expect(answers.map((item) => item.ref.name)).toEqual([
+      "scope.md",
+      "inventory.md",
+      "units.md",
+      "questions.md",
+      "review.md",
+    ]);
+    expect(calls.every((call) => call.prompt.includes(intentText))).toBe(true);
+    expect(calls[0]?.prompt).toContain(questionsText);
+    expect(calls[0]?.prompt).toContain("Include generated files only when tracked.");
+  });
+
+  it.each([
+    [
+      "arbitrary successful workflow",
+      {
+        target: { kind: "scriptPath" as const, ref: "arbitrary.workflow.mjs", source: "project" as const },
+        artifact: { kind: "published" as const, stage: "prepare-clarification" },
+      },
+    ],
+    [
+      "wrong review phase",
+      {
+        target: { kind: "name" as const, ref: "review", source: "package" as const },
+        artifact: { kind: "published" as const, stage: "verify-review" },
+      },
+    ],
+    [
+      "automatic answer instead of prepare publication",
+      {
+        target: { kind: "name" as const, ref: "review", source: "package" as const },
+        artifact: { kind: "answer" as const, stage: "prepare-clarification" },
+      },
+    ],
+  ])("rejects same-name artifacts from %s", async (_caseName, sourceMetadata) => {
+    const runWorkflow = await loadWorkflow();
+    const intentText = "review range A...B";
+    const questionsText = "# Clarification Questions\n1. Which base?";
+    const intentRef = priorRef("arbitrary-run", "published-1", "intent.md", intentText);
+    const questionsRef = priorRef("arbitrary-run", "published-2", "clarification-questions.md", questionsText);
+    const arbitrary = (ref: WorkflowArtifactRef, text: string): WorkflowConsumedTextArtifact => ({
+      ...prepareArtifact(ref, text, intentRef, questionsRef),
+      source: {
+        runId: ref.runId,
+        ...sourceMetadata,
+        terminal: prepareTerminal(intentRef, questionsRef),
+      },
+    });
+    const prior = new Map([
+      [`${intentRef.runId}:${intentRef.artifactId}`, arbitrary(intentRef, intentText)],
+      [`${questionsRef.runId}:${questionsRef.artifactId}`, arbitrary(questionsRef, questionsText)],
+    ]);
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, "unused");
+      },
+      { runId: "execute-run", consumed: prior },
+    );
+
+    await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow("Package review prepare-clarification run");
+    expect(calls).toHaveLength(0);
+    expect(published).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      "missing structured result",
+      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
+        artifact.source.terminal = { artifactRefs: [intentRef, questionsRef] };
+      },
+    ],
+    [
+      "mismatched intent reference",
+      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
+        artifact.source.terminal = {
+          result: { mode: "prepared", intentRef: { ...intentRef, sha256: "0".repeat(64) }, questionsRef },
+          artifactRefs: [intentRef, questionsRef],
+        };
+      },
+    ],
+    [
+      "wrong prepare mode",
+      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
+        artifact.source.terminal = {
+          result: { mode: "executed", intentRef, questionsRef },
+          artifactRefs: [intentRef, questionsRef],
+        };
+      },
+    ],
+    [
+      "missing projected reference",
+      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
+        artifact.source.terminal = {
+          ...prepareTerminal(intentRef, questionsRef),
+          artifactRefs: [questionsRef],
+        };
+      },
+    ],
+    [
+      "unexpected result field",
+      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
+        artifact.source.terminal = {
+          result: { ...prepareTerminal(intentRef, questionsRef).result, accepted: true },
+          artifactRefs: [intentRef, questionsRef],
+        };
+      },
+    ],
+  ])("rejects prepare provenance with %s", async (_caseName, corrupt) => {
+    const runWorkflow = await loadWorkflow();
+    const intentText = "review range A...B";
+    const questionsText = "# Clarification Questions\n1. Which base?";
+    const intentRef = priorRef("prepare-run", "published-1", "intent.md", intentText);
+    const questionsRef = priorRef("prepare-run", "published-2", "clarification-questions.md", questionsText);
+    const intentArtifact = prepareArtifact(intentRef, intentText, intentRef, questionsRef);
+    corrupt(intentArtifact, intentRef, questionsRef);
+    const prior = new Map([
+      [`${intentRef.runId}:${intentRef.artifactId}`, intentArtifact],
+      [
+        `${questionsRef.runId}:${questionsRef.artifactId}`,
+        prepareArtifact(questionsRef, questionsText, intentRef, questionsRef),
+      ],
+    ]);
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, "unused");
+      },
+      { runId: "execute-run", consumed: prior },
+    );
+
+    await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow("verified terminal result");
+    expect(calls).toHaveLength(0);
+    expect(published).toHaveLength(0);
+  });
+
+  it("fails closed before interrogation when unit planning drops inventory coverage", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": [
+        "# Change Inventory",
+        "## C1",
+        "Path: `src/kept.ts`",
+        "Change: Kept item.",
+        "## C2",
+        "Path: `src/dropped.ts`",
+        "Change: Deliberately dropped by the unit handoff.",
+      ].join("\n"),
+      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/kept.ts`",
+      "ask review questions": "# Review Questions\n## Coverage gaps\nC2 is missing.",
+      "verify and write review": "# Code Review\n## Verdict\nBlocked",
+    };
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
+      "units dropped inventory coverage id C2",
+    );
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+      "plan review units",
+    ]);
+  });
+
+  it("rejects a final report that drops an inventory id even when its verdict claims readiness", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": [
+        "# Change Inventory",
+        "## C1",
+        "Path: `src/a.ts`",
+        "Change: first",
+        "## C2",
+        "Path: `src/b.ts`",
+        "Change: second",
+      ].join("\n"),
+      "plan review units": "# Review Units\n## U1\nCoverage: C1, C2\nPath: `src/a.ts`",
+      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U1\nC2: U1",
+      "verify and write review":
+        "# Code Review\n## Verdict\nReady for human acceptance\n## Coverage and limits\nC1: U1; inspected",
+    };
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
+      "final review dropped inventory coverage id C2",
+    );
+    expect(calls).toHaveLength(6);
+  });
+
+  it("rejects a coverage ledger that assigns an inventory id to the wrong unit", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: first",
+      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U2; U2-Q1",
+    };
+    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+
+    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
+      "questions handoff assigns coverage id C1 to the wrong unit",
+    );
+  });
+
+  it("does not count a prose mention as a final coverage-ledger entry", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": [
+        "# Change Inventory",
+        "## C1",
+        "Path: `src/a.ts`",
+        "Change: first",
+        "## C2",
+        "Path: `src/b.ts`",
+        "Change: second",
+      ].join("\n"),
+      "plan review units": "# Review Units\n## U1\nCoverage: C1, C2\nPath: `src/a.ts`",
+      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U1; U1-Q1\nC2: U1; U1-Q1",
+      "verify and write review": [
+        "# Code Review",
+        "## Verdict",
+        "Ready for human acceptance",
+        "## Coverage and limits",
+        "C1: U1; inspected",
+        "A prose mention says C2 was inspected.",
+      ].join("\n"),
+    };
+    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+
+    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
+      "final review has malformed coverage ledger line",
+    );
+  });
+
+  it("bounds direct intent and model handoffs before forwarding them", async () => {
+    const runWorkflow = await loadWorkflow();
+    let agentCalls = 0;
+    const { dsl } = runtimeWith(async (request) => {
+      agentCalls += 1;
+      return completed(
+        request,
+        request.label === "decide clarification" ? '{"decision":"continue","questions":[]}' : "x".repeat(64_001),
+      );
+    });
+
+    await expect(runWorkflow(dsl, "x".repeat(16_001))).rejects.toThrow("16000-character context limit");
+    expect(agentCalls).toBe(0);
+    await expect(runWorkflow(dsl, "review current branch")).rejects.toThrow("scope handoff exceeds the 64000");
+    expect(agentCalls).toBe(2);
+  });
+
+  it("refuses empty or object-valued semantic input", async () => {
+    const runWorkflow = await loadWorkflow();
+    const { dsl } = runtimeWith(async (request) => completed(request, "unused"));
+    await expect(runWorkflow(dsl, "   ")).rejects.toThrow("intent must be a non-empty string");
+    await expect(runWorkflow(dsl, { mode: "unknown" })).rejects.toThrow("intent must be a non-empty string");
   });
 
   it("stops the pipeline at the first failing stage", async () => {
@@ -190,6 +677,9 @@ describe("workflow example: review.workflow.mjs", () => {
     const calls: WorkflowAgentRequest[] = [];
     const { dsl } = runtimeWith(async (request) => {
       calls.push(request);
+      if (request.label === "decide clarification") {
+        return completed(request, '{"decision":"continue","questions":[]}');
+      }
       if (request.label === "plan review units") {
         return {
           ok: false,
@@ -200,10 +690,20 @@ describe("workflow example: review.workflow.mjs", () => {
           label: request.label,
         };
       }
-      return completed(request, `${request.label} text`);
+      return completed(
+        request,
+        request.label === "inventory changes"
+          ? "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed"
+          : `${request.label} text`,
+      );
     });
 
     await expect(runWorkflow(dsl, "review current branch")).rejects.toBeInstanceOf(WorkflowAgentExecutionError);
-    expect(calls.map((call) => call.label)).toEqual(["resolve review scope", "inventory changes", "plan review units"]);
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+      "plan review units",
+    ]);
   });
 });

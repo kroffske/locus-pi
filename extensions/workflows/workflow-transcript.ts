@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Extension
 import { formatDuration } from "../_shared/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { formatWorkflowFailureSummary, formatWorkflowResultSummary } from "../_shared/workflow-result.js";
+import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "../_shared/workflow-result.js";
 
 export const WORKFLOW_EVENT_CUSTOM_TYPE = "locus-workflow-event";
 const TRANSCRIPT_AGENT_EVENT_LIMIT = 20;
@@ -85,18 +85,23 @@ export function createWorkflowTranscript(
       // and a model reading only the last line must not have to infer it from
       // the per-agent markers above — which the 20-event cap can drop.
       const replayedPart = replayedCount > 0 ? [`${replayedCount} replayed from a recorded run`] : [];
-      const parts = res.ok
-        ? [
-            `✓ workflow ${safeTarget} finished`,
-            compactTranscriptText(formatWorkflowResultSummary(res.result)),
-            ...(agentCount > 0 ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`] : []),
-            ...replayedPart,
-          ]
-        : [
-            `✗ workflow ${safeTarget} failed`,
-            compactTranscriptText(formatWorkflowFailureSummary(res.result, res.error, lastJournalError)),
-            ...replayedPart,
-          ];
+      const disposition = projectWorkflowDisposition(
+        {
+          ok: res.ok,
+          result: res.result,
+          ...(res.error !== undefined ? { error: res.error } : {}),
+          ...(res.disposition !== undefined ? { disposition: res.disposition } : {}),
+        },
+        lastJournalError,
+      );
+      const parts = [
+        formatWorkflowTerminalLifecycle(safeTarget, disposition),
+        compactTranscriptText(disposition.summary),
+        ...((disposition.status === "completed" || disposition.status === "awaiting_operator") && agentCount > 0
+          ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`]
+          : []),
+        ...replayedPart,
+      ];
       recordLifecycle([...parts, ...(elapsed !== "" ? [elapsed] : [])].join(" · "));
       completion = {
         eventKind: "workflow_end",
@@ -107,6 +112,27 @@ export function createWorkflowTranscript(
       return completion;
     },
   };
+}
+
+function formatWorkflowTerminalLifecycle(target: string, disposition: WorkflowDispositionProjection): string {
+  switch (disposition.status) {
+    case "completed":
+      return `✓ workflow ${target} finished`;
+    case "awaiting_operator":
+      return `◐ workflow ${target} awaiting operator`;
+    case "cancelled":
+      return `⊘ workflow ${target} cancelled`;
+    case "failed":
+      return `✗ workflow ${target} failed`;
+    case "unknown":
+      return `■ workflow ${target} ended (unknown disposition)`;
+    default:
+      return assertNever(disposition.status);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled workflow disposition status: ${String(value)}`);
 }
 
 /**
@@ -144,23 +170,26 @@ export async function persistCommandWorkflowTranscript(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   completion: WorkflowTranscriptCompletion,
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> {
+  if (!isCurrent()) return false;
   if (typeof ctx.waitForIdle !== "function") {
-    notifyFallback(ctx, "Workflow transcript was not persisted: ctx.waitForIdle is unavailable.", "warning");
+    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: ctx.waitForIdle is unavailable.");
     return false;
   }
   try {
     await ctx.waitForIdle();
   } catch {
-    notifyFallback(ctx, "Workflow transcript was not persisted: waiting for Pi idle state failed.", "warning");
+    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: waiting for Pi idle state failed.");
     return false;
   }
+  if (!isCurrent()) return false;
   if (typeof ctx.isIdle !== "function" || !ctx.isIdle()) {
-    notifyFallback(ctx, "Workflow transcript was not persisted: Pi did not settle to idle.", "warning");
+    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: Pi did not settle to idle.");
     return false;
   }
   if (typeof pi.sendMessage !== "function") {
-    notifyFallback(ctx, "Workflow transcript was not persisted: pi.sendMessage is unavailable.", "warning");
+    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage is unavailable.");
     return false;
   }
   const message: ExtensionMessage = {
@@ -170,15 +199,20 @@ export async function persistCommandWorkflowTranscript(
     details: { eventKind: completion.eventKind, runId: completion.runId, lineCount: completion.lineCount },
   };
   try {
+    if (!isCurrent()) return false;
     // No await between the final idle check and this call. Pi 0.80.3 chooses
     // append-vs-steer synchronously inside sendCustomMessage.
     const pending = pi.sendMessage(message, { triggerTurn: false });
     if (pending !== undefined) await pending;
     return true;
   } catch {
-    notifyFallback(ctx, "Workflow transcript was not persisted: pi.sendMessage failed.", "warning");
+    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage failed.");
     return false;
   }
+}
+
+function notifyWhenCurrent(ctx: ExtensionContext, isCurrent: () => boolean, message: string): void {
+  if (isCurrent()) notifyFallback(ctx, message, "warning");
 }
 
 /** Main status omits agent transport markers already represented by the fleet. */

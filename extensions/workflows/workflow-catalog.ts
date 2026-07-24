@@ -235,12 +235,24 @@ export function readSelectedWorkflowSource(
   }
 }
 
-/** Deterministic editor handoff. The returned text is editable but never submitted here. */
+/**
+ * Deterministic editor handoff. Start uses the direct slash-command runtime
+ * path; edit/review keep the authoring skill because they require source work.
+ * The returned text is editable but never submitted here.
+ */
 export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string {
   if (intent.row.kind === "history" && intent.action !== "review") {
     throw new Error(`Historical workflow actions are review-only; received ${JSON.stringify(intent.action)}.`);
   }
   const row = intent.row;
+  if (row.kind === "current" && intent.action === "start") {
+    if (intent.sourceState.kind !== "ready") {
+      throw new Error(
+        `Current workflow start requires a ready source; received ${JSON.stringify(intent.sourceState.kind)}.`,
+      );
+    }
+    return `/workflows run ${row.target.ref}`;
+  }
   let request: string;
   if (row.kind === "current") {
     const action = intent.action[0]!.toUpperCase() + intent.action.slice(1);

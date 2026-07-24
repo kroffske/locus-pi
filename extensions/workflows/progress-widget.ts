@@ -10,15 +10,12 @@ import {
   selectAgentLiveRowsForParents,
   truncate,
 } from "../_shared/agent-live-panel.js";
-import { fleetMenuState, renderFleetMenuRows, selectFleetMenuRows } from "../_shared/fleet-menu.js";
+import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
+import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../_shared/workflow-journal.js";
 import {
-  applyWorkflowJournalLineToAgentLiveStore,
-  workflowAgentLiveRowId,
-  workflowGroupLiveRowId,
-} from "../_shared/workflow-journal.js";
-import {
-  formatWorkflowFailureSummary,
-  formatWorkflowResultSummary,
+  projectWorkflowDisposition,
+  type WorkflowDisposition,
+  type WorkflowProjectedStatus,
   type WorkflowResultPersistence,
 } from "../_shared/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../_shared/widget-render.js";
@@ -59,12 +56,16 @@ const OBSERVER_STATUS_ORDER: Record<AgentLiveStatus, number> = {
   error: 4,
 };
 
+export interface WorkflowProgressOptions {
+  scope?: "fleet" | "workflow";
+  declaredPhases?: readonly string[];
+}
+
 export class WorkflowProgressComponent implements CustomUiComponent {
   journal: WorkflowJournalLine[] = [];
   done?: {
-    ok: boolean;
-    failureSummary?: string;
-    resultSummary?: string;
+    status: WorkflowProjectedStatus;
+    summary: string;
     runDir?: string;
     resultPersistence?: WorkflowResultPersistence;
   };
@@ -76,16 +77,15 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     this.#syncLiveTimer();
     this.tui.requestRender();
   };
-  readonly #onFleetStateChange = () => this.tui.requestRender();
 
   constructor(
     public tui: WidgetFactoryTui,
     public theme: ThemeLike,
     readonly scriptRef: string,
     readonly runId: string,
+    readonly options: WorkflowProgressOptions = {},
   ) {
     agentLiveStore.emitter.on("change", this.#onStoreChange);
-    fleetMenuState.emitter.on("change", this.#onFleetStateChange);
     this.#syncLiveTimer();
   }
 
@@ -102,7 +102,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#onStoreChange);
-    fleetMenuState.emitter.off("change", this.#onFleetStateChange);
     this.#stopLiveTimer();
   }
 
@@ -112,7 +111,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     else if (line.kind === "group_start" || line.kind === "group_end") {
       this.#knownRowIds.add(workflowGroupLiveRowId(line));
     }
-    applyWorkflowJournalLineToAgentLiveStore(line);
     this.#syncLiveTimer();
     this.tui.requestRender();
   }
@@ -121,13 +119,19 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     ok: boolean;
     error?: string;
     result?: unknown;
+    disposition?: WorkflowDisposition;
     runDir?: string;
     resultPersistence?: WorkflowResultPersistence;
   }): void {
-    this.done = {
+    const disposition = projectWorkflowDisposition({
       ok: res.ok,
-      ...(!res.ok ? { failureSummary: formatWorkflowFailureSummary(res.result, res.error) } : {}),
-      ...(res.ok ? { resultSummary: formatWorkflowResultSummary(res.result) } : {}),
+      result: res.result,
+      ...(res.error !== undefined ? { error: res.error } : {}),
+      ...(res.disposition !== undefined ? { disposition: res.disposition } : {}),
+    });
+    this.done = {
+      status: disposition.status,
+      summary: disposition.summary,
       ...(res.runDir !== undefined ? { runDir: res.runDir } : {}),
       ...(res.resultPersistence !== undefined ? { resultPersistence: res.resultPersistence } : {}),
     };
@@ -139,23 +143,40 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const rows = this.tui.terminal?.rows ?? 24;
     const budget = Math.max(1, Math.min(rows - 6, 24));
     const liveRows = this.visibleRows();
-    const fleetRows = selectFleetMenuRows(liveRows);
-    fleetMenuState.setVisibleRows(fleetRows);
     const doneLines = this.doneLines(width);
-    const fleetLines = renderFleetMenuRows(liveRows, width, {
-      spinnerIndex: this.#spinnerIndex,
-      theme: this.theme,
-      focused: fleetMenuState.focused,
-      ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
-      emptyEditorFocusAvailable: fleetMenuState.emptyEditorFocusAvailable,
-      fallbackFocusAvailable: fleetMenuState.fallbackFocusAvailable,
-    });
-    // Fleet render always keeps its hint/control footer last. Protect that
-    // ordering even when workflow tail diagnostics consume the line budget.
-    const fleetFooter = fleetLines.at(-1);
-    const fleetBody = fleetFooter === undefined ? [] : fleetLines.slice(0, -1);
-    const fixedLines = [this.renderHeader(width, liveRows), ...fleetBody, ...doneLines];
-    const tailLines = this.journal
+    const header = this.renderHeader(width, liveRows);
+    if (this.options.scope !== "workflow") {
+      const fleetLines = renderFleetMenuRows(liveRows, width, {
+        spinnerIndex: this.#spinnerIndex,
+        theme: this.theme,
+        emptyEditorFocusAvailable: fleetMenuState.emptyEditorFocusAvailable,
+        fallbackFocusAvailable: fleetMenuState.fallbackFocusAvailable,
+      });
+      const fleetFooter = fleetLines.at(-1);
+      const fleetBody = fleetFooter === undefined ? [] : fleetLines.slice(0, -1);
+      const fixedLines = [header, ...fleetBody, ...doneLines];
+      const tailLines = this.progressTailLines(width);
+      if (fleetFooter === undefined) return fitLines(fixedLines, tailLines, budget, width, doneLines.length);
+      return [...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length), fleetFooter];
+    }
+
+    const stageLine = [this.renderStageFrontier(width)];
+    const passiveDiagnostics = this.journal
+      .filter(
+        (line) =>
+          line.kind === "error" ||
+          (line.kind === "agent_end" && line.evidenceWarnings !== undefined && line.evidenceWarnings.length > 0),
+      )
+      .slice(-2)
+      .map((line) => truncate(formatProgressTailLine(line), width));
+    const rowLines = this.renderCurrentRow(liveRows, width);
+    const hint = truncate("  /ps inspect agents", width);
+    const body = [header, ...stageLine, ...rowLines, ...doneLines];
+    return [...fitLines(body, passiveDiagnostics, Math.max(0, budget - 1), width, doneLines.length), hint];
+  }
+
+  private progressTailLines(width: number): string[] {
+    return this.journal
       .filter(
         (line) =>
           line.kind === "log" ||
@@ -164,8 +185,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       )
       .slice(-3)
       .map((line) => truncate(formatProgressTailLine(line), width));
-    if (fleetFooter === undefined) return fitLines(fixedLines, tailLines, budget, width, doneLines.length);
-    return [...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length), fleetFooter];
   }
 
   private visibleRows(): AgentLiveRow[] {
@@ -173,36 +192,72 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     if (this.#knownRowIds.size > 0) {
       return compactWorkflowParentRows(selectAgentLiveRowsForParents(all, this.#knownRowIds));
     }
+    if (this.options.scope !== "workflow") return compactWorkflowParentRows(all);
     const prefix = `workflow:${this.runId}:`;
     const scopedParentIds = new Set(all.filter((row) => row.id.startsWith(prefix)).map((row) => row.id));
     const scoped = all.filter(
       (row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
     );
-    return compactWorkflowParentRows(scoped.length > 0 ? scoped : all);
+    return compactWorkflowParentRows(scoped);
   }
 
   private renderHeader(width: number, rows: AgentLiveRow[]): string {
-    const headerStatus = this.done === undefined ? "running" : this.done.ok ? "ok" : "failed";
-    const counts = countAgentLiveStatuses(rows);
-    const phase = currentWorkflowPhase(this.journal);
-    const terminalCount = counts.done + counts.cancelled + counts.error;
-    const cancelledText = counts.cancelled > 0 ? ` cancelled=${counts.cancelled}` : "";
-    const failedText = counts.error > 0 ? ` failed=${counts.error}` : "";
-    // Replay is a property of the EVIDENCE, so it belongs in the header beside
-    // the status word rather than in the scrolling tail a reader may miss.
+    const headerStatus: WorkflowProjectedStatus | "running" = this.done?.status ?? "running";
+    const headerLabel = workflowProgressStatusLabel(headerStatus);
+    if (this.options.scope !== "workflow") {
+      const counts = countAgentLiveStatuses(rows);
+      const phase = currentWorkflowPhase(this.journal);
+      const terminalCount = counts.done + counts.cancelled + counts.error;
+      const cancelledText = counts.cancelled > 0 ? ` cancelled=${counts.cancelled}` : "";
+      const failedText = counts.error > 0 ? ` failed=${counts.error}` : "";
+      const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
+      const replayedText = replayedCount > 0 ? ` replayed=${replayedCount}` : "";
+      const text = `workflow ${this.scriptRef} (${this.runId}) - ${headerLabel} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}${replayedText}`;
+      return this.#bold(truncate(text, width));
+    }
+    const statusMark = workflowProgressStatusMark(headerStatus);
+    const frontier = workflowStageFrontier(this.options.declaredPhases ?? [], this.journal);
+    const progress =
+      this.options.scope === "workflow" && frontier.length > 0
+        ? `  ${frontier.filter((stage) => stage.state !== "declared").length}/${frontier.length}`
+        : "";
     const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
-    const replayedText = replayedCount > 0 ? ` replayed=${replayedCount}` : "";
-    const text = `workflow ${this.scriptRef} (${this.runId}) - ${headerStatus.toUpperCase()} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}${replayedText}`;
+    const replayedText = replayedCount > 0 ? `  replayed=${replayedCount}` : "";
+    const runSuffix = shortWorkflowRunId(this.runId);
+    const owner = `workflow ${this.scriptRef} #${runSuffix}`;
+    const text = `agents · ${owner}  ${statusMark} ${headerLabel}${progress}${replayedText}`;
     return this.#bold(truncate(text, width));
+  }
+
+  private renderStageFrontier(width: number): string {
+    const stages = workflowStageFrontier(this.options.declaredPhases ?? [], this.journal);
+    if (stages.length === 0) return this.#fg("dim", truncate("stages · none declared", width));
+    const full = `stages · ${stages.map((stage) => `${stage.title} (${stage.state})`).join(" — ")}`;
+    if (full.length <= width) return full;
+    const current = stages.find((stage) => stage.state === "current");
+    const reached = stages.filter((stage) => stage.state === "reached").length;
+    const declared = stages.filter((stage) => stage.state === "declared").length;
+    if (current === undefined) return truncate(`stages · reached ${reached} · declared ${declared}`, width);
+    const suffix = ` · reached ${reached} · declared ${declared}`;
+    const currentLine = `stages · current ${current.title}`;
+    return currentLine.length + suffix.length <= width ? `${currentLine}${suffix}` : truncate(currentLine, width);
+  }
+
+  private renderCurrentRow(rows: AgentLiveRow[], width: number): string[] {
+    const leaves = selectFleetMenuLeafRows(orderAgentLiveRows(rows));
+    const current =
+      leaves.find((row) => row.status === "working") ?? leaves.find((row) => row.status === "queued") ?? leaves.at(-1);
+    if (current === undefined) return [this.#fg("dim", truncate("  waiting for workflow agents…", width))];
+    return new AgentLivePanel({ spinnerIndex: this.#spinnerIndex, theme: this.theme })
+      .renderRows([current], Math.max(1, width - 2))
+      .map((line) => truncate(`  ${line}`, width));
   }
 
   private doneLines(width: number): string[] {
     if (this.done === undefined) return [];
     const lines: string[] = [];
-    if (this.done.failureSummary !== undefined)
-      lines.push(this.#fg("error", truncate(`✗ ${this.done.failureSummary}`, width)));
-    else if (this.done.resultSummary !== undefined)
-      lines.push(this.#fg("success", truncate(`✓ ${this.done.resultSummary}`, width)));
+    const presentation = workflowProgressDonePresentation(this.done.status);
+    lines.push(this.#fg(presentation.color, truncate(`${presentation.marker} ${this.done.summary}`, width)));
     if (this.done.resultPersistence?.ok === false) {
       lines.push(this.#fg("warning", truncate(`persistence: ${this.done.resultPersistence.code}`, width)));
     }
@@ -247,6 +302,68 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   #bold(text: string): string {
     return this.theme.bold ? this.theme.bold(text) : text;
   }
+}
+
+function workflowProgressStatusMark(status: WorkflowProjectedStatus | "running"): string {
+  switch (status) {
+    case "running":
+      return "●";
+    case "completed":
+      return "✓";
+    case "awaiting_operator":
+      return "◐";
+    case "cancelled":
+      return "⊘";
+    case "failed":
+      return "✗";
+    case "unknown":
+      return "■";
+    default:
+      return assertNever(status);
+  }
+}
+
+function workflowProgressStatusLabel(status: WorkflowProjectedStatus | "running"): string {
+  switch (status) {
+    case "running":
+      return "RUNNING";
+    case "completed":
+      return "OK";
+    case "awaiting_operator":
+      return "AWAITING OPERATOR";
+    case "cancelled":
+      return "CANCELLED";
+    case "failed":
+      return "FAILED";
+    case "unknown":
+      return "UNKNOWN";
+    default:
+      return assertNever(status);
+  }
+}
+
+function workflowProgressDonePresentation(status: WorkflowProjectedStatus): {
+  marker: string;
+  color: "success" | "warning" | "error";
+} {
+  switch (status) {
+    case "completed":
+      return { marker: "✓", color: "success" };
+    case "awaiting_operator":
+      return { marker: "◐", color: "warning" };
+    case "cancelled":
+      return { marker: "⊘", color: "warning" };
+    case "failed":
+      return { marker: "✗", color: "error" };
+    case "unknown":
+      return { marker: "■", color: "warning" };
+    default:
+      return assertNever(status);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled workflow progress status: ${String(value)}`);
 }
 
 function formatProgressTailLine(line: WorkflowJournalLine): string {
@@ -317,8 +434,15 @@ export function installWorkflowProgress(
   key: string,
   scriptRef: string,
   runIdPlaceholder: string,
+  options: WorkflowProgressOptions = {},
 ): WorkflowProgressComponent {
-  const component = new WorkflowProgressComponent(NOOP_TUI, coerceTheme(undefined), scriptRef, runIdPlaceholder);
+  const component = new WorkflowProgressComponent(
+    NOOP_TUI,
+    coerceTheme(undefined),
+    scriptRef,
+    runIdPlaceholder,
+    options,
+  );
   if (ctx.hasUI === true) {
     if (ctx.mode !== "tui") {
       const requestRender = () => {
@@ -405,14 +529,61 @@ function countAgentLiveStatuses(rows: AgentLiveRow[]): Record<AgentLiveStatus, n
   return counts;
 }
 
-function currentWorkflowPhase(journal: WorkflowJournalLine[]): string | undefined {
+function currentWorkflowPhase(journal: readonly WorkflowJournalLine[]): string | undefined {
   for (let i = journal.length - 1; i >= 0; i -= 1) {
     const line = journal[i];
     if (line === undefined) continue;
-    if (line.kind === "phase" && line.phase !== undefined) return line.phase;
-    if ("phase" in line && typeof line.phase === "string" && line.phase.trim() !== "") return line.phase;
+    if (line.kind !== "phase") continue;
+    const phase = normalizeWorkflowPhase(line.phase);
+    if (phase !== undefined) return phase;
   }
   return undefined;
+}
+
+function normalizeWorkflowPhase(phase: string | undefined): string | undefined {
+  const normalized = phase?.trim();
+  return normalized === undefined || normalized === "" ? undefined : normalized;
+}
+
+type WorkflowStageState = "declared" | "reached" | "current";
+
+interface WorkflowStageFrontierItem {
+  title: string;
+  state: WorkflowStageState;
+}
+
+function workflowStageFrontier(
+  declaredPhases: readonly string[],
+  journal: readonly WorkflowJournalLine[],
+): WorkflowStageFrontierItem[] {
+  const titles: string[] = [];
+  const seen = new Set<string>();
+  const append = (title: string | undefined): void => {
+    const normalized = normalizeWorkflowPhase(title);
+    if (normalized === undefined || seen.has(normalized)) return;
+    seen.add(normalized);
+    titles.push(normalized);
+  };
+  for (const title of declaredPhases) append(title);
+  const reached = new Set<string>();
+  for (const line of journal) {
+    if (line.kind !== "phase") continue;
+    const phase = normalizeWorkflowPhase(line.phase);
+    if (phase === undefined) continue;
+    append(phase);
+    reached.add(phase);
+  }
+  const current = currentWorkflowPhase(journal);
+  return titles.map((title) => ({
+    title,
+    state: title === current ? "current" : reached.has(title) ? "reached" : "declared",
+  }));
+}
+
+function shortWorkflowRunId(runId: string): string {
+  const compact = runId.replace(/[^a-zA-Z0-9]/gu, "");
+  if (compact === "") return runId;
+  return compact.slice(-4);
 }
 
 function selectAgentObserverRows(rows: AgentLiveRow[], limit: number): AgentLiveRow[] {

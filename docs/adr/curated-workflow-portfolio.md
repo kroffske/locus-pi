@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22
 
 ## Decision
 
@@ -13,64 +13,90 @@ a permission posture that the package can support as a public promise.
 
 The accepted Package portfolio is:
 
-| Workflow             | Product role                | Why it belongs                                                                                                                     |
-| -------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                          |
-| `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                               |
-| `review`             | Evidence-backed code review | It covers a recurring merge gate and publishes a readable, question-resolved report a human can edit directly.                     |
-| `review-fix`         | Human-directed fixes        | It applies the findings a human left in that report, revalidating each against live source, and verifies the result independently. |
+| Workflow             | Product role                | Why it belongs                                                                                                                                                                    |
+| -------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                                                                         |
+| `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
+| `review`             | Evidence-backed code review | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
+| `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
 evidence adapter. Each workflow owns ordinary `resources/*.prompt.md` step
 prompts beside its entry file. Each prompt contains the stable stage role plus
-the dynamic per-run handoffs. Six sequential child sessions resolve the review
-scope from free-form operator intent, inventory the changed surface, group it
-into material review units, ask falsifiable questions, independently reopen the
-evidence to answer them, and publish the package. Questions are hypotheses:
-only what the verifier confirms from re-read evidence becomes a finding. This
-design keeps private-forge authentication and
-repository operations inside the existing agent/tool environment instead of
-creating a second provider-specific integration in the package.
+dynamic per-run handoffs. A non-empty string remains a one-shot review. The
+workflow persists that exact intent, then five sequential read-only children
+resolve scope, inventory the changed surface, group material review units, ask
+falsifiable questions, and independently reopen evidence to answer them.
+Questions are hypotheses: only what the verifier confirms becomes a finding.
+The runtime entry reconciles unique inventory `C<n>` headings against an
+exact-once unit ledger and mandatory question/final coverage sections. It also
+bounds intent, clarification, every intermediate handoff, and the final review;
+model wording cannot hide a dropped coverage id or expand context without limit.
 
-The five inspection calls set `readOnly: true` in workflow code. The SDK host
-turns that per-call policy into a capability allowlist: shell, write/edit,
-nested workflow, and unknown tools are unavailable. Git inspection uses the package-owned
-`git_read` tool, which executes only allowlisted query subcommands without a
-shell, pager, external diff, textconv, hooks, fsmonitor, or optional locks. The
-three stages that trace code relationships also receive `ast_index`, an
-allowlisted argv tool over the installed `ast-index` binary whose database lives
-outside the reviewed project; it degrades to `grep`/`find` instead of blocking a
-review. `permissionMode: "agent-defined"` remains trace intent and Pi still owns
-operator approval, but the publisher-only write rule no longer depends on
-prompt compliance. The verifier returns reader-facing Markdown; a separate
-publisher agent publishes the review package to `.tasks/<task>/artifacts/` after
-proving `.tasks/` is ignored, with `review.md` as the mandatory primary report
-and the stage handoffs as supporting artifacts. The publisher may repair
-presentation but may not invent, delete, or soften a finding. Mandatory
-`result.json` remains technical runtime evidence rather than the primary
-report; the workflow result itself is the publisher's executive summary.
+The shaped clarifier adds an explicit two-run clarification without replacing
+the one-shot path. A fresh run publishes exact `intent.md`, asks one read-only
+child whether operator input is required, and returns both complete artifact
+references only when it pauses. A continuation run receives those refs through
+the host-owned continuation field plus the operator's non-empty text answers; it
+verifies/copies both and persists the answers before starting the same five-stage
+review. The source run's terminal result must name both complete refs, and both
+must appear in its validated artifact projection; mutable index stage metadata
+alone is insufficient. The workflow runtime publishes every
+durable handoff and the verifier's exact final answer as `review.md`. There is no
+publisher agent, task-local report, model-written status envelope, or inferred
+lossy intent.
 
-Externalizing prompts is an explicit readability trade-off. The workflow uses
-catalog agents and does not define neighboring workflow-local agents. `review`
-imports nothing and keeps the default `self-contained-static` identity, so the
-runner executes its retained snapshot; only `review-fix` declares
-`identityCoverage: "entry-only"`, because it imports a deterministic local input
-validator whose bytes its entry hash cannot bind. Identity coverage never
-covered prompts either way: runtime snapshots each loaded prompt once and
-records its SHA-256 instead of pretending the entry hash covers it.
+The five inspection calls set `readOnly: true`. The SDK host turns that per-call
+policy into a capability allowlist: shell, write/edit, nested workflow, and
+unknown tools are unavailable. Git inspection uses package-owned `git_read`;
+code-relationship stages may also use allowlisted `ast_index`, degrading to
+`grep`/`find` when unavailable. Private-forge authentication and repository
+operations therefore stay inside the existing agent/tool environment rather
+than creating a provider-specific integration.
 
-The human gate is `review.md` itself, edited in place. Deleting a finding
-rejects it, rewording one changes the request, and a note under a finding
-instructs the fix agents. This replaces the earlier `fix-plan.md` disposition
-manifest and its hash, snapshot, and reviewed-commit binding, which could not
-express a review of uncommitted work — the common case for "review what I have
-right now". `review-fix` therefore validates only what a prompt cannot: path
-confinement and a non-empty finding list, before any write-capable child exists.
-Its five agents mirror the review shape — scope, units, apply, verify,
-publish — run in the launch checkout for the same reason, revalidate each
-finding against live source before changing anything, and leave every change
-uncommitted; they do not commit, push, create a pull request, merge, deploy, or
-discard uncommitted work they did not create.
+`review-fix` separates operator meaning from host state. `input` is only the
+exact semantic request; closed host continuation supplies one complete immutable
+`{runId, artifactId, name, sha256}` reference to `review.md`. Runtime consumption verifies
+the successful source run, full reference, digest, confinement, media type, and
+bytes, then copies the review into the new run with source lineage. Deterministic
+entry code additionally requires the referenced bytes to equal the successful
+source run's terminal string result and the exact ref to be its last projected
+output. A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units.
+Deterministic code bounds every handoff, selects complete `### F<n>` blocks,
+rejects invalid ids, edges and cycles, and computes stable topological order
+before any writer starts.
+
+One read-only resolver narrows the selected fix scope. Exactly one sequential
+writer then owns each selected finding in the launch checkout, which makes mutation
+order and accountability explicit. Host-owned Git fingerprints bracket every
+writer, check, and re-review boundary so later source drift is visible. A
+separate host-enforced read-only child collects full-diff evidence and can run
+only declared package scripts through `repository_check`; the host executes each
+script in a disposable external worktree, never the operator checkout. The exact
+complete script-name-to-command map is frozen before the first writer and checked
+again before and inside the snapshot; additions, removals, changes, and newly
+introduced `pre`/`post` lifecycle hooks are refused. Source fingerprints also include a dirty
+submodule's checked-out HEAD. A fresh
+read-only child re-reviews every original finding, affected dependency, and
+regression risk.
+The runtime automatically persists the named answers `scope.md`,
+`worker-F<n>.md`, `check-evidence.md`, and `re-review.md`; the last is also the
+workflow result. There is no imported input helper, unit planner, verifier/
+publisher pair, `fix-report.md`, or task-local publication. Both review entries
+therefore keep default `self-contained-static` identity. Runtime snapshots every
+loaded prompt separately and records its SHA-256.
+
+The canonical evidence owner is
+`.locus/runtime/workflows/<runId>/artifacts/index.json`. Automatic answers and
+fresh child transcripts/result envelopes share the same digest-bound index with
+workflow-published and consumed text. This makes the report inspectable through
+the persisted run viewer and makes cross-run approval immutable without requiring
+the reviewed working tree itself to be committed. Writers still leave source
+changes uncommitted and do not commit, push, create a pull request, merge,
+deploy, or discard unrelated work.
+The artifact owner validates every physical directory from the resolved project
+root through `.locus/runtime/workflows/<runId>` before artifact I/O; symlinked
+ancestors cannot relocate the canonical evidence root outside the project.
 
 ## Amendment 2026-07-21 — the portfolio drops to four with `llm-smoke`
 
@@ -116,9 +142,13 @@ The following shapes are not curated now:
 
 - Generic plan/build/fix orchestration remains project-local. The curated
   exception is the narrow review family: it has one readable source report, an
-  explicit human edit as the approval signal, a deterministic input gate before
-  any write-capable child, per-finding revalidation against live source, and no
-  commit or remote action.
+  immutable digest-bound review reference, explicit human-selected finding ids,
+  a deterministic input gate before any write-capable child, one writer per
+  finding, independent check/re-review evidence, and no commit or remote action.
+- Planning and testing lifecycle examples remain ignored under `.pi/workflows/`.
+  They prove split-run planning and independent testcase design,
+  implementation/execution, and attribution locally; they are not tracked
+  examples, registry entries, or public package files.
 - Release and deploy workflows remain project-local because providers,
   credentials, rollback, and blast radius are not package-neutral.
 - Incident-response workflows remain project-local because infrastructure access
@@ -130,7 +160,9 @@ The following shapes are not curated now:
 Repository or user workflow files remain the proving ground for new shapes.
 Existence under an examples directory does not promote a workflow; registry,
 tests, package allowlist, manuals, support boundary, and changelog must change
-together.
+together. `public-repository.json` lists exact regular files rather than
+directories, so a future file below an already public folder is not selected
+implicitly.
 
 ## Consequences
 
@@ -138,14 +170,13 @@ The Package surface grew from three to five names, and then back to four when
 `llm-smoke` retired with the primitive it proved (2026-07-21 amendment). It is
 not a general automation catalog. The two review-family names expose one
 deliberate sequence—question-led evidence, then a human-directed fix—while
-keeping deployment and publication outside the workflow boundary.
+keeping source mutation uncommitted and deployment outside the workflow boundary.
 
-Dropping the hash-bound approval manifest is a real trade. The package no
-longer proves that the fixed code is byte-identical to the reviewed code; it
-proves instead that a human chose which findings survived and that an agent
-rechecked each one against the code as it is now. That fits a review of
-uncommitted work, which the previous contract could not address at all, and it
-removes a bookkeeping layer that weak models handled badly. The remaining
-guardrails are deliberate and small: deterministic path confinement, a
-non-empty finding list before any write-capable child, and changes that stay
-uncommitted for ordinary diff review.
+The remediation binding now covers the review artifact, not an editable path or a
+working-tree snapshot. A complete digest-bound reference proves exactly which
+review bytes remediation consumed; the selector's shaped result plus the exact
+operator request prove which findings the workflow planned to address. It
+deliberately does not claim that the current
+working tree is byte-identical to the tree reviewed, because uncommitted work is
+the common case. One writer per finding, independent check evidence, and a fresh
+dependency-aware re-review make that drift visible before any completion claim.

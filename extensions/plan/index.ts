@@ -12,7 +12,6 @@ import { SETTINGS_HELP_PLACEMENT, setOperatorWidget } from "../_shared/widget-re
 import {
   type CycleMode,
   type ModeState,
-  agentKeybindingsPath,
   clearModeState,
   currentCycleMode,
   isInPlanMode,
@@ -23,15 +22,12 @@ import {
   MODE_CYCLE,
   modeStateForCycle,
   modeStatusLabel,
-  nextCycleMode,
   planArtifactPath,
   planModeInjectionText,
   PLAN_MODE_COLOR,
   planSlug,
   slugify,
-  THINKING_CYCLE_DISABLE_LINE,
   userPlansDir,
-  withThinkingCycleDisabled,
   writeModeState,
 } from "../_shared/mode-state.js";
 import {
@@ -188,6 +184,7 @@ function setModeStatus(ctx: ExtensionContext, state: ModeState | null): void {
     wide: `MODE ${label}`,
     compact: "MODE plan",
     narrow: "PLAN",
+    tone: PLAN_MODE_COLOR,
   });
 }
 
@@ -237,13 +234,16 @@ const COMMAND_HELP = [
 ].join("\n");
 
 const GoalToolParams = Type.Object({
-  op: Type.Union([
-    Type.Literal("create"),
-    Type.Literal("get"),
-    Type.Literal("complete"),
-    Type.Literal("resume"),
-    Type.Literal("drop"),
-  ], { description: "Goal tool operation" }),
+  op: Type.Union(
+    [
+      Type.Literal("create"),
+      Type.Literal("get"),
+      Type.Literal("complete"),
+      Type.Literal("resume"),
+      Type.Literal("drop"),
+    ],
+    { description: "Goal tool operation" },
+  ),
   objective: Type.Optional(Type.String({ description: "Goal objective for op=create", minLength: 1, maxLength: 8000 })),
   token_budget: Type.Optional(Type.Integer({ description: "Token budget for op=create", minimum: 1 })),
 });
@@ -255,90 +255,100 @@ const GoalContinueParams = Type.Object({
 });
 
 function goalToolApproval(args: unknown) {
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   return record.op === "get" ? "read" : "write";
 }
 
 export default function plan(pi: ExtensionAPI): void {
   for (const command of COMMANDS) {
-    registerCommandWithUiLifecycle(pi, {
-      command: command.kind,
-      group: command.kind,
-      surfaces: ["transient-widget", "artifact-write"],
-      transientWidgets: [command.kind],
-    }, {
-      description: command.description,
+    registerCommandWithUiLifecycle(
+      pi,
+      {
+        command: command.kind,
+        group: command.kind,
+        surfaces: ["transient-widget", "artifact-write"],
+        transientWidgets: [command.kind],
+      },
+      {
+        description: command.description,
+        handler: async (args, ctx) => {
+          await handlePromptCommand(command.kind, args, ctx);
+        },
+      },
+    );
+  }
+
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "plan",
+      group: "plan",
+      surfaces: ["persistent-state", "status", "transient-widget", "blocking-prompt", "artifact-write"],
+      transientWidgets: ["plan"],
+      persistentStatuses: ["locus"],
+    },
+    {
+      description:
+        "Usage: /plan [<request>|exit|list|open <slug>|help]. Enter plan mode (prompts for a request if none given), list, exit, or help.",
       handler: async (args, ctx) => {
-        await handlePromptCommand(command.kind, args, ctx);
+        await handlePlanCommand(args, ctx, pi);
       },
-    });
-  }
-
-  registerCommandWithUiLifecycle(pi, {
-    command: "plan",
-    group: "plan",
-    surfaces: ["persistent-state", "status", "transient-widget", "blocking-prompt", "artifact-write"],
-    transientWidgets: ["plan"],
-    persistentStatuses: ["locus"],
-  }, {
-    description: "Usage: /plan [<request>|exit|list|open <slug>|help]. Enter plan mode (prompts for a request if none given), list, exit, or help.",
-    handler: async (args, ctx) => {
-      await handlePlanCommand(args, ctx, pi);
     },
-  });
+  );
 
-  registerCommandWithUiLifecycle(pi, {
-    command: "mode",
-    group: "plan",
-    surfaces: ["persistent-state", "status", "transient-widget", "blocking-prompt"],
-    transientWidgets: ["plan"],
-    persistentStatuses: ["locus"],
-  }, {
-    description: "Usage: /mode [<name>|show|bind-shift-tab]. Cycle behavioral modes (default ⇄ plan).",
-    handler: async (args, ctx) => {
-      await handleModeCommand(args, ctx, pi);
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "mode",
+      group: "plan",
+      surfaces: ["persistent-state", "status", "transient-widget", "blocking-prompt"],
+      transientWidgets: ["plan"],
+      persistentStatuses: ["locus"],
     },
-  });
-
-  // Shift+Tab is opt-in. Pi reserves the chord for app.thinking.cycle, so do not
-  // claim it at default startup; register only after `/mode bind-shift-tab` has
-  // explicitly persisted the user's choice and Pi has been restarted.
-  if (isShiftTabFreed()) {
-    pi.registerShortcut?.("shift+tab", {
-      description: "Cycle mode (default ⇄ plan)",
-      handler: (ctx) => {
-        cycleModeAndLabel(ctx, pi);
+    {
+      description: "Usage: /mode [plan|default|show]. Change behavioral mode only when a name is explicit.",
+      handler: async (args, ctx) => {
+        await handleModeCommand(args, ctx, pi);
       },
-    });
-  }
-
-  registerCommandWithUiLifecycle(pi, {
-    command: "goal",
-    group: "goal",
-    surfaces: ["persistent-state", "transient-widget", "artifact-write"],
-    transientWidgets: ["goal"],
-  }, {
-    description: "Usage: /goal <objective|set|show|pause|resume|drop|complete|continue|budget|prompt>.",
-    handler: async (args, ctx) => {
-      try {
-        await handleGoalCommand(args, ctx, pi);
-      } catch (error) {
-        setGoalOperatorBlock(ctx, goalErrorBlock(error));
-      }
     },
-  });
+  );
 
-  registerCommandWithUiLifecycle(pi, {
-    command: "goal-ai",
-    group: "goal",
-    surfaces: ["transient-widget", "blocking-prompt", "artifact-write"],
-    transientWidgets: ["goal"],
-  }, {
-    description: "Usage: /goal-ai [--task <task-id>] <request>. Ask an LLM to draft a Locus Prompt Draft and save it as a goal prompt.",
-    handler: async (args, ctx) => {
-      await handleGoalAiCommand(args, ctx);
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "goal",
+      group: "goal",
+      surfaces: ["persistent-state", "transient-widget", "artifact-write"],
+      transientWidgets: ["goal"],
     },
-  });
+    {
+      description: "Usage: /goal <objective|set|show|pause|resume|drop|complete|continue|budget|prompt>.",
+      handler: async (args, ctx) => {
+        try {
+          await handleGoalCommand(args, ctx, pi);
+        } catch (error) {
+          setGoalOperatorBlock(ctx, goalErrorBlock(error));
+        }
+      },
+    },
+  );
+
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "goal-ai",
+      group: "goal",
+      surfaces: ["transient-widget", "blocking-prompt", "artifact-write"],
+      transientWidgets: ["goal"],
+    },
+    {
+      description:
+        "Usage: /goal-ai [--task <task-id>] <request>. Ask an LLM to draft a Locus Prompt Draft and save it as a goal prompt.",
+      handler: async (args, ctx) => {
+        await handleGoalAiCommand(args, ctx);
+      },
+    },
+  );
 
   pi.registerTool({
     name: "goal",
@@ -353,7 +363,10 @@ export default function plan(pi: ExtensionAPI): void {
       if (valid.value.op === "get") {
         const state = await loadGoalState(projectRoot);
         if (!state) return errorResult("No active goal state.");
-        return textResult(JSON.stringify(state, null, 2), { goalStateSource: "local-file", path: goalStatePath(projectRoot) });
+        return textResult(JSON.stringify(state, null, 2), {
+          goalStateSource: "local-file",
+          path: goalStatePath(projectRoot),
+        });
       }
 
       if (valid.value.op === "create") {
@@ -386,10 +399,11 @@ export default function plan(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // Install the mode-aware input editor and restore the badge/border from any
-    // persisted plan state, so a resumed session shows the right mode cues.
+    // Plan mode is session-explicit. A previous crash/restart/reload must not
+    // silently arm planning for the next workflow or ordinary user turn.
+    clearModeState(getProjectRoot(ctx));
     await ensureModeAwareEditor(ctx);
-    setModeStatus(ctx, loadActiveModeState(getProjectRoot(ctx)));
+    setModeStatus(ctx, null);
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
@@ -418,12 +432,18 @@ function appendSystemBlock(systemPrompt: string, block: string): string {
 }
 
 async function runGoalToolTransition(projectRoot: string, result: GoalOperationResult) {
-  if (result.error) return errorResult(result.error, { goal: result.state?.goal ?? null, path: result.state ? goalStatePath(projectRoot) : undefined });
+  if (result.error)
+    return errorResult(result.error, {
+      goal: result.state?.goal ?? null,
+      path: result.state ? goalStatePath(projectRoot) : undefined,
+    });
   if (!result.state) return errorResult("No active goal state.", { path: goalStatePath(projectRoot) });
   return textResult(result.message, {
     goal: result.state.goal,
     path: goalStatePath(projectRoot),
-    ...(result.completionAudit !== undefined ? { completionAudit: result.completionAudit, completionAuditPath: goalCompletionAuditPath(projectRoot) } : {}),
+    ...(result.completionAudit !== undefined
+      ? { completionAudit: result.completionAudit, completionAuditPath: goalCompletionAuditPath(projectRoot) }
+      : {}),
   });
 }
 
@@ -597,7 +617,10 @@ async function enterPlanModeWithRequest(
 ): Promise<void> {
   const existing = loadModeState(projectRoot);
   if (existing !== null && isInPlanMode(existing)) {
-    const confirmed = await ctx.ui.confirm(`Replace active plan '${existing.slug}'?`, "Entering a new plan will replace the active plan-mode reference.");
+    const confirmed = await ctx.ui.confirm(
+      `Replace active plan '${existing.slug}'?`,
+      "Entering a new plan will replace the active plan-mode reference.",
+    );
     if (!confirmed) {
       setPlanOperatorBlock(ctx, {
         type: "RESULT",
@@ -637,12 +660,8 @@ async function enterPlanModeWithRequest(
 
   const draft = result.draft;
   const completed = result.status === "completed" && draft !== undefined;
-  const artifactContent = draft ?? [
-      "# Draft plan unavailable",
-      "",
-      `Plan draft session ${result.status}.`,
-      result.reason,
-    ].join("\n");
+  const artifactContent =
+    draft ?? ["# Draft plan unavailable", "", `Plan draft session ${result.status}.`, result.reason].join("\n");
   mkdirSync(dirname(artifactPath), { recursive: true });
   writeFileSync(artifactPath, `${artifactContent.trimEnd()}\n`, "utf8");
 
@@ -655,35 +674,38 @@ async function enterPlanModeWithRequest(
     status: completed ? "active" : "draft",
   });
   setModeStatus(renderCtx, loadModeState(projectRoot));
-  setPlanOperatorBlock(renderCtx, completed
-    ? {
-      type: "RESULT",
-      subject: "Plan draft",
-      primary: "Plan saved; behavioral plan mode is active.",
-      badges: [{ text: "PLAN", tone: "accent" }],
-      metadata: [
-        `slug: ${slug}`,
-        `path: ${artifactPath}`,
-        ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
-      ],
-      controls: ["Exit or execute: /plan exit"],
-    }
-    : {
-      type: "WARN",
-      subject: "Plan draft",
-      primary: `Draft session ${result.status}: ${result.reason}`,
-      metadata: [
-        `stub path: ${artifactPath}`,
-        `slug: ${slug}`,
-        ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
-      ],
-      hint: ["A diagnostic stub was saved; it is not a completed plan."],
-      controls: ["Retry: /plan <request>"],
-    });
+  setPlanOperatorBlock(
+    renderCtx,
+    completed
+      ? {
+          type: "RESULT",
+          subject: "Plan draft",
+          primary: "Plan saved; behavioral plan mode is active.",
+          badges: [{ text: "PLAN", tone: "accent" }],
+          metadata: [
+            `slug: ${slug}`,
+            `path: ${artifactPath}`,
+            ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
+          ],
+          controls: ["Exit or execute: /plan exit"],
+        }
+      : {
+          type: "WARN",
+          subject: "Plan draft",
+          primary: `Draft session ${result.status}: ${result.reason}`,
+          metadata: [
+            `stub path: ${artifactPath}`,
+            `slug: ${slug}`,
+            ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
+          ],
+          hint: ["A diagnostic stub was saved; it is not a completed plan."],
+          controls: ["Retry: /plan <request>"],
+        },
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Mode cycle (optional Shift+Tab / /mode)
+// Explicit /mode changes
 // ---------------------------------------------------------------------------
 
 /** Set the active mode, persist it, and update the status badge + input border. */
@@ -692,43 +714,6 @@ function applyMode(ctx: ExtensionContext, mode: CycleMode): CycleMode {
   writeModeState(getProjectRoot(ctx), state);
   setModeStatus(ctx, state);
   return mode;
-}
-
-/** Advance to the next mode in the cycle and update the label. Returns the new mode. */
-function cycleModeAndLabel(ctx: ExtensionContext, pi: ExtensionAPI): CycleMode {
-  // Shortcut handlers are synchronous; install lazily (idempotent) in case
-  // session_start did not run (e.g. after /reload). session_start covers the
-  // normal path, so the editor is already in place by the time Shift+Tab fires.
-  void ensureModeAwareEditor(ctx);
-  const projectRoot = getProjectRoot(ctx);
-  const current = currentCycleMode(loadActiveModeState(projectRoot));
-  if (current === "plan") {
-    // Leaving plan mode: offer the plan -> execution handoff (T-D). The shortcut
-    // handler is sync, so fire the async decision flow without awaiting; the
-    // selector and status update land on the next tick. With no composed plan or
-    // no UI, runPlanExitDecision degrades synchronously to a plain exit. Render
-    // the same outcome widget the /plan exit and /mode paths show once the
-    // deferred decision settles, so all three entry points report consistently.
-    void runPlanExitDecision(ctx as ExtensionCommandContext, pi, projectRoot)
-      .then((action) => setPlanOperatorBlock(ctx, planExitBlock(action)));
-    return "default";
-  }
-  const next = applyMode(ctx, nextCycleMode(current));
-  setPlanOperatorBlock(ctx, modeChangeBlock(current, next));
-  return next;
-}
-
-/** Return true only when the operator explicitly freed Pi's reserved chord. */
-function isShiftTabFreed(): boolean {
-  const keybindingsPath = agentKeybindingsPath();
-  if (!existsSync(keybindingsPath)) return false;
-  try {
-    const existing = readFileSync(keybindingsPath, "utf8");
-    return withThinkingCycleDisabled(existing).alreadyDisabled;
-  } catch {
-    // A stale or unreadable opt-in file must not turn into an extension startup error.
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -869,14 +854,9 @@ async function handleModeCommand(args: CommandArgs, ctx: ExtensionCommandContext
   const projectRoot = getProjectRoot(ctx);
   const [verb] = splitFirstWord(getCommandText(args));
 
-  if (verb === "show") {
+  if (verb === "" || verb === "show") {
     const current = currentCycleMode(loadActiveModeState(projectRoot));
     setPlanOperatorBlock(ctx, modeViewBlock(current), SETTINGS_HELP_PLACEMENT);
-    return;
-  }
-
-  if (verb === "bind-shift-tab") {
-    await handleBindShiftTab(ctx);
     return;
   }
 
@@ -898,20 +878,10 @@ async function handleModeCommand(args: CommandArgs, ctx: ExtensionCommandContext
       subject: "Behavioral mode",
       primary: `Unknown mode '${verb}'.`,
       metadata: [`Supported: ${MODE_CYCLE.join(", ")}`],
-      controls: ["Show current mode: /mode show", "Help: /mode [plan|default|show|bind-shift-tab]"],
+      controls: ["Show current mode: /mode show", "Help: /mode [plan|default|show]"],
     });
     return;
   }
-
-  const current = currentCycleMode(loadActiveModeState(projectRoot));
-  if (current === "plan") {
-    // Leaving plan via /mode (async) — run the handoff decision and report it.
-    const action = await runPlanExitDecision(ctx, pi, projectRoot);
-    setPlanOperatorBlock(ctx, planExitBlock(action));
-    return;
-  }
-  const next = applyMode(ctx, nextCycleMode(current));
-  setPlanOperatorBlock(ctx, modeChangeBlock(current, next));
 }
 
 function modeViewBlock(mode: CycleMode): OperatorBlock {
@@ -919,8 +889,8 @@ function modeViewBlock(mode: CycleMode): OperatorBlock {
     type: "VIEW",
     subject: "Behavioral mode",
     primary: modeLine(mode),
-    metadata: [`cycle: ${MODE_CYCLE.join(" -> ")} (wraps)`],
-    controls: ["Change: /mode [plan|default]", "Optional cycle: /mode bind-shift-tab, then restart Pi"],
+    metadata: [`available: ${MODE_CYCLE.join(", ")}`],
+    controls: ["Change explicitly: /mode plan | /mode default"],
   };
 }
 
@@ -940,55 +910,6 @@ function modeChangeBlock(from: CycleMode, to: CycleMode): OperatorBlock {
   };
 }
 
-async function handleBindShiftTab(ctx: ExtensionCommandContext): Promise<void> {
-  const keybindingsPath = agentKeybindingsPath();
-  const existing = existsSync(keybindingsPath) ? readFileSync(keybindingsPath, "utf8") : "";
-  const result = withThinkingCycleDisabled(existing);
-
-  if (result.parseError) {
-    setPlanOperatorBlock(ctx, {
-      type: "ERROR",
-      subject: "Shift+Tab binding",
-      primary: `Could not parse ${keybindingsPath}; it was left untouched.`,
-      controls: [`Add ${THINKING_CYCLE_DISABLE_LINE} by hand, then restart Pi.`],
-    });
-    return;
-  }
-
-  if (result.alreadyDisabled) {
-    setPlanOperatorBlock(ctx, {
-      type: "VIEW",
-      subject: "Shift+Tab binding",
-      primary: "Shift+Tab is already freed for mode cycling.",
-      metadata: [`path: ${keybindingsPath}`, `binding: ${THINKING_CYCLE_DISABLE_LINE}`],
-      hint: ["Restart Pi if Shift+Tab still cycles thinking level."],
-    }, SETTINGS_HELP_PLACEMENT);
-    return;
-  }
-
-  const confirmed = await ctx.ui.confirm(
-    "Free Shift+Tab for mode cycling?",
-    `This adds '${THINKING_CYCLE_DISABLE_LINE}' to ${keybindingsPath}, disabling Pi's Shift+Tab `
-      + "thinking-level cycling so the mode cycle can use it. Use /effort to change thinking level "
-      + "afterward. Revert by removing that line.",
-  );
-  if (!confirmed) {
-    setPlanOperatorBlock(ctx, cancelledInputBlock("Shift+Tab binding", "/mode bind-shift-tab"));
-    return;
-  }
-
-  mkdirSync(dirname(keybindingsPath), { recursive: true });
-  writeFileSync(keybindingsPath, result.content, "utf8");
-  setPlanOperatorBlock(ctx, {
-    type: "CHANGE",
-    subject: "Shift+Tab binding",
-    primary: "Shift+Tab is now assigned to behavioral mode cycling.",
-    metadata: [`path: ${keybindingsPath}`, `added: ${THINKING_CYCLE_DISABLE_LINE}`],
-    hint: ["Restart Pi or reload keybindings for it to take effect."],
-    controls: ["Revert: remove that line", "Thinking effort: /effort"],
-  });
-}
-
 async function handleGoalCommand(args: CommandArgs, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
   const projectRoot = getProjectRoot(ctx);
   const raw = getCommandText(args).trim();
@@ -1003,7 +924,11 @@ async function handleGoalCommand(args: CommandArgs, ctx: ExtensionCommandContext
     return;
   }
   if (verb === "help" || verb === "?") {
-    setGoalOperatorBlock(ctx, goalHelpBlock(COMMAND_HELP.split(/\r?\n/u), { compact: ctx.mode !== "tui" }), SETTINGS_HELP_PLACEMENT);
+    setGoalOperatorBlock(
+      ctx,
+      goalHelpBlock(COMMAND_HELP.split(/\r?\n/u), { compact: ctx.mode !== "tui" }),
+      SETTINGS_HELP_PLACEMENT,
+    );
     return;
   }
   if (verb === "set") {
@@ -1066,9 +991,19 @@ async function handleGoalCommand(args: CommandArgs, ctx: ExtensionCommandContext
   await handleCreateGoal(raw, ctx, projectRoot, pi);
 }
 
-async function handleCreateGoal(text: string, ctx: ExtensionContext, projectRoot: string, pi: ExtensionAPI): Promise<void> {
+async function handleCreateGoal(
+  text: string,
+  ctx: ExtensionContext,
+  projectRoot: string,
+  pi: ExtensionAPI,
+): Promise<void> {
   const saved = await createOrReplaceGoalState(projectRoot, pi, text, undefined);
-  if (saved.state && saved.state.goal.status !== "active" && saved.state.goal.tokenBudget !== undefined && isBudgetLimited(saved.state, saved.state.goal)) {
+  if (
+    saved.state &&
+    saved.state.goal.status !== "active" &&
+    saved.state.goal.tokenBudget !== undefined &&
+    isBudgetLimited(saved.state, saved.state.goal)
+  ) {
     saved.state.goal.status = "budget-limited";
     await writeGoalState(projectRoot, pi, saved.state);
   }
@@ -1086,7 +1021,27 @@ async function handleGoalContinue(projectRoot: string, raw: string, pi: Extensio
   return { state, changed: false, message: "Goal continuation saved.", continuation: saved };
 }
 
-function buildGoalContinuation(objective: string, raw: string, goalId: string, projectRoot: string): { prompt: string; nextStep: string; continuation: { version: 1; goalId: string; objective: string; path: string; prompt: string; autoDispatch: false; status: "manual"; stopReason: string; createdAt: string; maxSteps: 1 } } {
+function buildGoalContinuation(
+  objective: string,
+  raw: string,
+  goalId: string,
+  projectRoot: string,
+): {
+  prompt: string;
+  nextStep: string;
+  continuation: {
+    version: 1;
+    goalId: string;
+    objective: string;
+    path: string;
+    prompt: string;
+    autoDispatch: false;
+    status: "manual";
+    stopReason: string;
+    createdAt: string;
+    maxSteps: 1;
+  };
+} {
   const parsed = parseContinuationInput(raw);
   const nextStep = parsed.nextStep ?? "Choose one bounded next action and stop.";
   const lines = [
@@ -1137,7 +1092,10 @@ function buildGoalContinuation(objective: string, raw: string, goalId: string, p
 function parseContinuationInput(raw: string): { summary?: string; nextStep?: string; remainingRisks: string[] } {
   const trimmed = raw.trim();
   if (trimmed === "") return { remainingRisks: [] };
-  const parts = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  const parts = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const summary = parts[0];
   const nextStep = parts[1];
   const remainingRisks = parts.slice(2);
@@ -1159,7 +1117,11 @@ function parseBudget(input: string): { valid: boolean; value: string } {
   return { valid: true, value: trimmed };
 }
 
-async function handlePromptCommand(kind: Exclude<PromptShelfKind, "goal">, args: CommandArgs, ctx: ExtensionContext): Promise<void> {
+async function handlePromptCommand(
+  kind: Exclude<PromptShelfKind, "goal">,
+  args: CommandArgs,
+  ctx: ExtensionContext,
+): Promise<void> {
   const projectRoot = getProjectRoot(ctx);
   await handlePromptShelf(kind, getCommandText(args), projectRoot, ctx);
 }
@@ -1172,12 +1134,14 @@ async function handlePromptShelf(
 ): Promise<void> {
   const parsed = parsePromptShelfCommand(raw);
   if (parsed.action.kind === "invalid") {
-    setPromptShelfOperatorBlock(ctx, kind, promptShelfWarningBlock(
+    setPromptShelfOperatorBlock(
+      ctx,
       kind,
-      `Invalid prompt shelf command: ${parsed.action.message}.`,
-      parsed.targetLabel,
-      ["No artifact was read or written."],
-    ), "aboveEditor");
+      promptShelfWarningBlock(kind, `Invalid prompt shelf command: ${parsed.action.message}.`, parsed.targetLabel, [
+        "No artifact was read or written.",
+      ]),
+      "aboveEditor",
+    );
     return;
   }
 
@@ -1186,12 +1150,16 @@ async function handlePromptShelf(
     target = resolvePromptCommandTarget(projectRoot, kind, parsed.target) as PromptShelfTarget;
   } catch (error) {
     if (error instanceof PromptCommandTargetError) {
-      setPromptShelfOperatorBlock(ctx, kind, promptShelfWarningBlock(
+      setPromptShelfOperatorBlock(
+        ctx,
         kind,
-        `${kind} prompt not saved.`,
-        parsed.targetLabel,
-        ["The explicit prompt shelf target could not be resolved.", error.message, "No project-local fallback was used."],
-      ), "aboveEditor");
+        promptShelfWarningBlock(kind, `${kind} prompt not saved.`, parsed.targetLabel, [
+          "The explicit prompt shelf target could not be resolved.",
+          error.message,
+          "No project-local fallback was used.",
+        ]),
+        "aboveEditor",
+      );
       return;
     }
     setPromptShelfOperatorBlock(ctx, kind, promptShelfErrorBlock(kind, error, parsed.targetLabel), "aboveEditor");
@@ -1200,11 +1168,7 @@ async function handlePromptShelf(
 
   try {
     if (parsed.action.kind === "summary") {
-      setPromptShelfOperatorBlock(
-        ctx,
-        kind,
-        promptShelfSummaryBlock(kind, target, readPromptCommand(target)),
-      );
+      setPromptShelfOperatorBlock(ctx, kind, promptShelfSummaryBlock(kind, target, readPromptCommand(target)));
       return;
     }
     if (parsed.action.kind === "show") {
@@ -1233,16 +1197,23 @@ async function handleGoalAiCommand(args: CommandArgs, ctx: ExtensionContext): Pr
         prefill: "",
       });
     } catch (error) {
-      setOperatorWidget(ctx, "goal", dialogFailureBlock("Goal AI request", "/goal-ai", error), { placement: "aboveEditor" });
+      setOperatorWidget(ctx, "goal", dialogFailureBlock("Goal AI request", "/goal-ai", error), {
+        placement: "aboveEditor",
+      });
       return;
     }
     if (input.status === "unavailable") {
-      setOperatorWidget(ctx, "goal", {
-        type: "WARN",
-        subject: "Goal AI request",
-        primary: "Interactive input is unavailable in this host mode.",
-        hint: ["Provide the request directly: /goal-ai [--task <task-id>] <request>"],
-      }, { placement: "aboveEditor" });
+      setOperatorWidget(
+        ctx,
+        "goal",
+        {
+          type: "WARN",
+          subject: "Goal AI request",
+          primary: "Interactive input is unavailable in this host mode.",
+          hint: ["Provide the request directly: /goal-ai [--task <task-id>] <request>"],
+        },
+        { placement: "aboveEditor" },
+      );
       return;
     }
     if (input.status === "cancelled") {
@@ -1251,12 +1222,17 @@ async function handleGoalAiCommand(args: CommandArgs, ctx: ExtensionContext): Pr
     }
     const request = input.value.trim();
     if (request === "") {
-      setOperatorWidget(ctx, "goal", {
-        type: "WARN",
-        subject: "Goal AI request",
-        primary: "The request cannot be empty.",
-        controls: ["Reopen: /goal-ai"],
-      }, { placement: "aboveEditor" });
+      setOperatorWidget(
+        ctx,
+        "goal",
+        {
+          type: "WARN",
+          subject: "Goal AI request",
+          primary: "The request cannot be empty.",
+          controls: ["Reopen: /goal-ai"],
+        },
+        { placement: "aboveEditor" },
+      );
       return;
     }
     parsed = { ...parsed, prompt: request };
@@ -1266,51 +1242,70 @@ async function handleGoalAiCommand(args: CommandArgs, ctx: ExtensionContext): Pr
   const target = resolveGoalAiTargetOrRenderError(projectRoot, parsed.target, ctx);
   if (target === undefined) return;
 
-  setOperatorWidget(ctx, "goal", {
-    type: "RUN",
-    subject: "Goal AI draft",
-    primary: "Drafting one Locus Prompt Draft in a replacement session.",
-    metadata: [`target: ${target.target}`],
-  }, { placement: "aboveEditor" });
+  setOperatorWidget(
+    ctx,
+    "goal",
+    {
+      type: "RUN",
+      subject: "Goal AI draft",
+      primary: "Drafting one Locus Prompt Draft in a replacement session.",
+      metadata: [`target: ${target.target}`],
+    },
+    { placement: "aboveEditor" },
+  );
   const result = await runGoalAiDraftSession(ctx as ExtensionCommandContext, parsed.prompt);
   const renderCtx = result.renderContext ?? ctx;
   if (result.status !== "completed" || result.draft === undefined) {
-    setOperatorWidget(renderCtx, "goal", {
-      type: result.status === "cancelled" ? "WARN" : "ERROR",
-      subject: "Goal AI draft",
-      primary: `Draft ${result.status}: ${result.reason}`,
-      metadata: [
-        `target: ${target.target}`,
-        "artifact: not written",
-        ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
-      ],
-      controls: ["Retry: /goal-ai <request>"],
-    }, { placement: "aboveEditor" });
+    setOperatorWidget(
+      renderCtx,
+      "goal",
+      {
+        type: result.status === "cancelled" ? "WARN" : "ERROR",
+        subject: "Goal AI draft",
+        primary: `Draft ${result.status}: ${result.reason}`,
+        metadata: [
+          `target: ${target.target}`,
+          "artifact: not written",
+          ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
+        ],
+        controls: ["Retry: /goal-ai <request>"],
+      },
+      { placement: "aboveEditor" },
+    );
     return;
   }
 
   writePromptCommand(target, result.draft);
-  setOperatorWidget(renderCtx, "goal", {
-    type: "RESULT",
-    subject: "Goal AI draft",
-    primary: "Draft saved as a goal prompt; it was not executed.",
-    metadata: [
-      `target: ${target.target}`,
-      `kind: ${target.kind}`,
-      promptCommandPathLine(target),
-      ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
-    ],
-    controls: ["Continue explicitly: /goal continue"],
-  }, { placement: "aboveEditor" });
+  setOperatorWidget(
+    renderCtx,
+    "goal",
+    {
+      type: "RESULT",
+      subject: "Goal AI draft",
+      primary: "Draft saved as a goal prompt; it was not executed.",
+      metadata: [
+        `target: ${target.target}`,
+        `kind: ${target.kind}`,
+        promptCommandPathLine(target),
+        ...(result.childSessionId === undefined ? [] : [`childSessionId: ${result.childSessionId}`]),
+      ],
+      controls: ["Continue explicitly: /goal continue"],
+    },
+    { placement: "aboveEditor" },
+  );
 }
 
-function parsePromptCommandInput(text: string): { target: { type: "project" } | { type: "task"; taskId: string }; prompt: string } {
+function parsePromptCommandInput(text: string): {
+  target: { type: "project" } | { type: "task"; taskId: string };
+  prompt: string;
+} {
   const trimmed = text.trim();
   const taskEquals = /^--task=([^\s]+)\s*([\s\S]*)$/u.exec(trimmed);
   if (taskEquals !== null) return { target: { type: "task", taskId: taskEquals[1]! }, prompt: taskEquals[2]!.trim() };
 
   const taskSeparated = /^--task\s+([^\s]+)\s*([\s\S]*)$/u.exec(trimmed);
-  if (taskSeparated !== null) return { target: { type: "task", taskId: taskSeparated[1]! }, prompt: taskSeparated[2]!.trim() };
+  if (taskSeparated !== null)
+    return { target: { type: "task", taskId: taskSeparated[1]! }, prompt: taskSeparated[2]!.trim() };
 
   return { target: { type: "project" }, prompt: trimmed };
 }

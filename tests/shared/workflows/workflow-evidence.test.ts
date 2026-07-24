@@ -179,6 +179,39 @@ describe("workflow evidence threading", () => {
     assert.equal(attemptedBroadening.readOnly, true);
   });
 
+  it("freezes repository_check package scripts when the workflow runner is created", async () => {
+    const root = tempProject();
+    writeFileSync(path.join(root, "package.json"), `${JSON.stringify({ scripts: { verify: "node verify.mjs" } })}\n`);
+    const h = createHarness(root, { sessionId: "wf-parent-frozen-checks" });
+    let observed: AgentRunRequest | undefined;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: () => ({
+        async run(request: AgentRunRequest) {
+          observed = request;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "read",
+            text: "read",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    writeFileSync(
+      path.join(root, "package.json"),
+      `${JSON.stringify({ scripts: { verify: "node changed.mjs", injected: "node injected.mjs" } })}\n`,
+    );
+    await runner({ prompt: "inspect", agent: "default", readOnly: true, tools: ["repository_check"] });
+
+    assert.deepEqual(observed?.repositoryCheckScripts, { verify: "node verify.mjs" });
+  });
+
   it("writes evidence onto agent_end journal lines from WorkflowAgentResult", async () => {
     const result: WorkflowAgentResult = {
       ok: true,

@@ -790,6 +790,290 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     }
   });
 
+  it("keeps execution and cancellation authority exact across patch, replacement, remove, and reset", () => {
+    agentLiveStore.reset();
+    const first = agentLiveStore.begin({ id: "authority-row", agentName: "reviewer", label: "first execution" });
+    const firstExecution = agentLiveStore.captureExecutionAuthority(first.id)!;
+    agentLiveStore.patch(first.id, { status: "working" });
+    expect(agentLiveStore.isExecutionAuthorityCurrent(firstExecution)).toBe(true);
+
+    const firstCancel = vi.fn();
+    const cleanupFirstCancel = agentLiveStore.registerCancel(first.id, firstCancel);
+    const firstCancellation = agentLiveStore.captureCancellationAuthority(first.id)!;
+    const replacementCancel = vi.fn();
+    const cleanupReplacementCancel = agentLiveStore.registerCancel(first.id, replacementCancel);
+    const replacementCancellation = agentLiveStore.captureCancellationAuthority(first.id)!;
+    cleanupFirstCancel();
+    expect(agentLiveStore.isCancellationAuthorityCurrent(firstCancellation)).toBe(false);
+    expect(agentLiveStore.cancelWithAuthority(firstCancellation)).toBe(false);
+    expect(agentLiveStore.isCancellationAuthorityCurrent(replacementCancellation)).toBe(true);
+    expect(agentLiveStore.cancelWithAuthority(replacementCancellation)).toBe(true);
+    expect(firstCancel).not.toHaveBeenCalled();
+    expect(replacementCancel).toHaveBeenCalledOnce();
+
+    const second = agentLiveStore.begin({ id: first.id, agentName: "reviewer", label: "second execution" });
+    const secondExecution = agentLiveStore.captureExecutionAuthority(second.id)!;
+    expect(agentLiveStore.isExecutionAuthorityCurrent(firstExecution)).toBe(false);
+    expect(agentLiveStore.isExecutionAuthorityCurrent(secondExecution)).toBe(true);
+    expect(agentLiveStore.isCancellationAuthorityCurrent(replacementCancellation)).toBe(false);
+    expect(agentLiveStore.cancelWithAuthority(replacementCancellation)).toBe(false);
+    cleanupReplacementCancel();
+
+    expect(agentLiveStore.removeRows([second.id])).toBe(1);
+    expect(agentLiveStore.isExecutionAuthorityCurrent(secondExecution)).toBe(false);
+    const third = agentLiveStore.begin({ id: second.id, agentName: "reviewer", label: "third execution" });
+    const thirdExecution = agentLiveStore.captureExecutionAuthority(third.id)!;
+    agentLiveStore.reset();
+    expect(agentLiveStore.isExecutionAuthorityCurrent(thirdExecution)).toBe(false);
+  });
+
+  it("starts a replacement execution with clean run state while preserving stable row identity", () => {
+    agentLiveStore.reset();
+    const first = agentLiveStore.beginExecution({
+      id: "fresh-execution",
+      agentName: "reviewer",
+      label: "execution A",
+      model: "test/a",
+    });
+    agentLiveStore.patchExecution(first, {
+      status: "error",
+      startedAt: 100,
+      elapsedMs: 50,
+      tokenCount: { input: 10, output: 5 },
+      childSessionId: "child-a",
+      finalAnswer: "answer A",
+      errors: ["failure A"],
+    });
+    agentLiveStore.feedExecutionEvent(first, {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "transcript A" }], stopReason: "stop" },
+    });
+    const displayName = agentLiveStore.rowForExecution(first)?.displayName;
+
+    const second = agentLiveStore.beginExecution({
+      id: "fresh-execution",
+      agentName: "reviewer",
+      label: "execution B",
+      model: "test/b",
+    });
+
+    expect(agentLiveStore.rowForExecution(first)).toBeUndefined();
+    expect(agentLiveStore.rowForExecution(second)).toMatchObject({
+      id: "fresh-execution",
+      displayName,
+      label: "execution B",
+      model: "test/b",
+      status: "queued",
+      currentTools: [],
+      stepCount: 0,
+      errors: [],
+      eventLines: [],
+    });
+    const row = agentLiveStore.rowForExecution(second)!;
+    for (const key of [
+      "startedAt",
+      "elapsedMs",
+      "tokenCount",
+      "childSessionId",
+      "finalAnswer",
+      "transcript",
+      "latestMessage",
+    ]) {
+      expect(key in row).toBe(false);
+    }
+  });
+
+  it("returns the execution it created even when a synchronous change listener replaces the row", () => {
+    agentLiveStore.reset();
+    let replacement: ReturnType<typeof agentLiveStore.captureExecutionAuthority>;
+    let replaced = false;
+    const replaceOnChange = () => {
+      if (replaced) return;
+      replaced = true;
+      replacement = agentLiveStore.beginExecution({
+        id: "reentrant-authority",
+        agentName: "reviewer",
+        label: "execution B",
+      });
+    };
+    agentLiveStore.emitter.on("change", replaceOnChange);
+    try {
+      const first = agentLiveStore.beginExecution({
+        id: "reentrant-authority",
+        agentName: "reviewer",
+        label: "execution A",
+      });
+      expect(agentLiveStore.isExecutionAuthorityCurrent(first)).toBe(false);
+      expect(replacement).toBeDefined();
+      expect(replacement === undefined ? false : agentLiveStore.isExecutionAuthorityCurrent(replacement)).toBe(true);
+    } finally {
+      agentLiveStore.emitter.off("change", replaceOnChange);
+    }
+  });
+
+  it("drops every late SDK projection after the execution's stable row is replaced", async () => {
+    agentLiveStore.reset();
+    let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+    let releasePrompt = () => {};
+    const promptGate = new Promise<void>((resolve) => {
+      releasePrompt = resolve;
+    });
+    const reportsDir = tmpReportsDir();
+    const session: SdkAgentSessionLike = {
+      sessionId: "sdk-a",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "late transcript A" }], stopReason: "stop" }],
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        await promptGate;
+      },
+      getSessionStats() {
+        return {
+          sessionId: "sdk-a",
+          toolCalls: 3,
+          toolResults: 2,
+          tokens: { input: 300, output: 120 },
+        };
+      },
+      getLastAssistantText() {
+        return "late final A";
+      },
+      exportToJsonl(outputPath) {
+        const target = outputPath ?? path.join(reportsDir, "sdk-a.jsonl");
+        writeFileSync(target, `${JSON.stringify({ type: "session", id: "sdk-a" })}\n`, "utf8");
+        return target;
+      },
+      dispose: vi.fn(),
+      abort: vi.fn(async () => {}),
+    };
+    const observedExecutions: unknown[] = [];
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir,
+      now: () => "fixed",
+      turnTimeoutMs: 60_000,
+      live: { rowId: "sdk-overlap", label: "execution A", slotKey: "verify", round: 1 },
+      onLiveExecution: (execution) => observedExecutions.push(execution),
+    });
+
+    const running = executor.run(request(), new AbortController().signal);
+    await vi.waitFor(() => expect(listener).toBeDefined());
+    expect(observedExecutions).toHaveLength(1);
+    const staleExecution = observedExecutions[0] as ReturnType<typeof agentLiveStore.captureExecutionAuthority>;
+    expect(staleExecution).toBe(agentLiveStore.captureExecutionAuthority("sdk-overlap"));
+
+    const replacement = agentLiveStore.beginExecution({
+      id: "sdk-overlap",
+      agentName: "reviewer",
+      label: "execution B",
+      slotKey: "verify",
+      round: 2,
+    });
+    agentLiveStore.patchExecution(replacement, {
+      status: "working",
+      finalAnswer: "B owns this row",
+      errors: ["B sentinel"],
+      tokenCount: { input: 900, output: 400 },
+    });
+    agentLiveStore.feedExecutionEvent(replacement, {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "current transcript B" }], stopReason: "stop" },
+    });
+
+    listener?.({ type: "tool_execution_start", toolCallId: "late-a", toolName: "read", args: {} });
+    listener?.({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "late event A" }], stopReason: "stop" },
+    });
+    listener?.({ type: "agent_end", willRetry: false });
+    releasePrompt();
+    const result = await running;
+
+    expect(result).toMatchObject({ status: "completed", text: "late final A" });
+    expect(staleExecution === undefined ? undefined : agentLiveStore.rowForExecution(staleExecution)).toBeUndefined();
+    expect(agentLiveStore.rowForExecution(replacement)).toMatchObject({
+      status: "working",
+      finalAnswer: "B owns this row",
+      errors: ["B sentinel"],
+      tokenCount: { input: 900, output: 400 },
+      latestMessage: "current transcript B",
+      currentTools: [],
+    });
+    expect(JSON.stringify(agentLiveStore.rowForExecution(replacement))).not.toContain("late event A");
+    expect(JSON.stringify(agentLiveStore.rowForExecution(replacement))).not.toContain("late transcript A");
+  });
+
+  it("cleans caller abort and row cancellation listeners when onLiveExecution throws", async () => {
+    agentLiveStore.reset();
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const signal = {
+      aborted: false,
+      addEventListener,
+      removeEventListener,
+    } as unknown as AbortSignal;
+    const createSession = vi.fn<CreateAgentSessionFactory>();
+    const executor = createAgentSdkSessionExecutor({
+      createSession: createSession as unknown as CreateAgentSessionFactory,
+      live: { rowId: "callback-throws", label: "callback throws" },
+      onLiveExecution: () => {
+        throw new Error("observer failed");
+      },
+    });
+
+    await expect(executor.run(request(), signal)).rejects.toThrow("observer failed");
+
+    expect(addEventListener).toHaveBeenCalledWith("abort", expect.any(Function), { once: true });
+    expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    expect(createSession).not.toHaveBeenCalled();
+    expect(agentLiveStore.captureCancellationAuthority("callback-throws")).toBeUndefined();
+    expect(agentLiveStore.cancel("callback-throws")).toBe(false);
+    expect(agentLiveStore.rows.get("callback-throws")).toMatchObject({
+      status: "error",
+      finalAnswer: "observer failed",
+      errors: ["observer failed"],
+    });
+  });
+
+  it("leaves a synchronous same-id replacement byte-for-byte unchanged when onLiveExecution throws", async () => {
+    agentLiveStore.reset();
+    let replacement: ReturnType<typeof agentLiveStore.captureExecutionAuthority>;
+    let replacementBytes = "";
+    const executor = createAgentSdkSessionExecutor({
+      createSession: vi.fn() as unknown as CreateAgentSessionFactory,
+      live: { rowId: "observer-replacement", label: "execution A" },
+      onLiveExecution: () => {
+        replacement = agentLiveStore.beginExecution({
+          id: "observer-replacement",
+          agentName: "reviewer",
+          label: "execution B",
+          model: "test/b",
+        });
+        agentLiveStore.patchExecution(replacement, {
+          status: "working",
+          finalAnswer: "B sentinel",
+          errors: ["B error sentinel"],
+          tokenCount: { input: 9, output: 4 },
+        });
+        replacementBytes = JSON.stringify(agentLiveStore.rowForExecution(replacement));
+        throw new Error("observer replaced then failed");
+      },
+    });
+
+    await expect(executor.run(request(), new AbortController().signal)).rejects.toThrow(
+      "observer replaced then failed",
+    );
+
+    expect(replacement).toBeDefined();
+    expect(JSON.stringify(replacement === undefined ? undefined : agentLiveStore.rowForExecution(replacement))).toBe(
+      replacementBytes,
+    );
+  });
+
   it("runs a child session through the SDK host and returns exact text", async () => {
     const { session, disposeSpy } = fakeSession({
       toolCalls: 2,
@@ -1100,20 +1384,35 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const createSession: CreateAgentSessionFactory = async () => {
       throw new AgentSdkUnavailableError("Installed Pi host does not export createAgentSession (host too old).");
     };
-    const executor = createAgentSdkSessionExecutor({ createSession, reportsDir: tmpReportsDir(), now: () => "fixed" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession,
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "unavailable-row", label: "unavailable" },
+    });
 
     const result = await executor.run(request(), new AbortController().signal);
 
     expect(result.status).toBe("blocked");
     expect(result.diagnostics).toContain(AGENT_SDK_UNAVAILABLE_DIAGNOSTIC);
     expect(result.reason).toContain("host too old");
+    expect(agentLiveStore.rows.get("unavailable-row")).toMatchObject({
+      status: "error",
+      finalAnswer: expect.stringContaining("host too old"),
+      errors: [expect.stringContaining("host too old")],
+    });
   });
 
   it("fails honestly when child session creation throws a non-substrate error", async () => {
     const createSession: CreateAgentSessionFactory = async () => {
       throw new Error("boom");
     };
-    const executor = createAgentSdkSessionExecutor({ createSession, reportsDir: tmpReportsDir(), now: () => "fixed" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession,
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "create-failure-row", label: "create failure" },
+    });
 
     const result = await executor.run(request(), new AbortController().signal);
 
@@ -1125,6 +1424,11 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     // path (guarded by disposeQuietly) is never reached — the throw is the result.
     expect(result.childSession).toBeUndefined();
     expect(result.childOutputStats).toBeUndefined();
+    expect(agentLiveStore.rows.get("create-failure-row")).toMatchObject({
+      status: "error",
+      finalAnswer: "boom",
+      errors: ["boom"],
+    });
   });
 
   it("cancels before creating a child session when the signal is already aborted", async () => {

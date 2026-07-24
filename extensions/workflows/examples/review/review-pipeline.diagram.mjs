@@ -193,7 +193,7 @@ const lane = (title, subtitle, y, height, color, fill) => {
   });
 };
 
-scene.text(LANE_X, 20, "Curated review workflow — six sequential agent stages and one write-capable publisher", {
+scene.text(LANE_X, 20, "Curated review workflow — agent-decided clarification and five read-only review stages", {
   size: 29,
   width: LANE_WIDTH,
   align: "center",
@@ -201,7 +201,7 @@ scene.text(LANE_X, 20, "Curated review workflow — six sequential agent stages 
 scene.text(
   LANE_X,
   61,
-  "Strictly linear: R1 → R2a → R2b → R3 → R4 → R5. The workflow renders prompts, enforces capabilities, forwards each exact text, and returns the executive summary.",
+  "One semantic string enters the workflow. A shaped read-only clarifier either continues immediately or pauses with intent.md + clarification-questions.md; a later host-verified continuation supplies those two refs and text answers before the same coverage-reconciled review chain.",
   {
     size: 15,
     color: COLORS.muted,
@@ -280,10 +280,17 @@ scene.text(1549, 96, "Artifact file\n(gray document)", {
   color: COLORS.artifact,
   width: 160,
 });
-lane("OPERATOR", "Owns the review request and edits the published review.", 170, 190, COLORS.operator, "#f0fdf4");
+lane(
+  "OPERATOR",
+  "Owns the semantic request, any clarification answers, and the published review.",
+  170,
+  190,
+  COLORS.operator,
+  "#f0fdf4",
+);
 lane(
   "WORKFLOW-OWNED",
-  "Prompt rendering, phase names, and capability policy; no review judgment.",
+  "Host continuation binding, prompt rendering, schema/coverage checks, phase names, and capability policy.",
   390,
   330,
   COLORS.workflow,
@@ -291,7 +298,7 @@ lane(
 );
 lane(
   "FULL AGENT SESSIONS",
-  "One linear chain: no parallel lane and no adjudicator.",
+  "One shaped clarifier on fresh input, then one linear review chain; every agent is read-only.",
   750,
   340,
   COLORS.agent,
@@ -299,7 +306,7 @@ lane(
 );
 lane(
   "ARTIFACTS",
-  "Workflow source, stage prompts, task-local Markdown, runtime evidence.",
+  "Workflow source, stage prompts, and runtime-owned Markdown below the run root.",
   1120,
   270,
   COLORS.artifact,
@@ -309,7 +316,7 @@ lane(
 const request = operatorNode(
   "operator-request",
   "Operator: request",
-  "Free-form intent\nBranch, working tree, commit, or range",
+  "Semantic input string + optional\nhost continuation metadata",
   "chat_message",
   85,
   240,
@@ -319,8 +326,12 @@ const request = operatorNode(
 
 const launchScope = workflowNode(
   "launch-agent-r1",
-  "Workflow: launch Agent R1",
-  ["phase resolve-scope", "Renders resources/scope-resolver.prompt.md", "readOnly: read, git_read, grep, find"],
+  "Workflow: bind request / launch clarifier",
+  [
+    "Fresh: persist intent.md; phase prepare-clarification",
+    "Continued: consume exactly two verified refs",
+    "Continuation source must be a successful Package review",
+  ],
   "multi_agent_orchestrator",
   480,
   470,
@@ -330,12 +341,12 @@ const launchScope = workflowNode(
 
 const scopeAgent = agentNode(
   "agent-r1",
-  "Agent: R1 — scope resolver",
+  "Agent: shaped clarification decider",
   [
-    "catalog default · label: resolve review scope",
-    "Host-enforced read-only; no shell, write, or edit",
-    "Reads Git state and repository guidance",
-    "Returns exact scopeText — one explicit scope",
+    "catalog default · label: decide clarification",
+    "Host-enforced read-only; no tools",
+    "CLARIFIER_SCHEMA {decision, questions[]}",
+    "continue requires []; needs_operator requires 1–8",
   ],
   "signal_quality_magnifier",
   570,
@@ -346,8 +357,8 @@ const scopeAgent = agentNode(
 
 const forwardCheck = workflowCheck(
   "forward-exact-text",
-  "Workflow: forward each stage's exact text",
-  "No JSON parse · no verdict or status branch\nAn empty or failed child throws\nEach text becomes the next prompt input",
+  "Workflow: check clarifier output.decision",
+  "CLARIFIER_SCHEMA + domain bounds\nneeds_operator publishes questions and stops\ncontinue or verified continuation starts scope",
   1040,
   450,
   360,
@@ -356,8 +367,8 @@ const forwardCheck = workflowCheck(
 
 const launchInventory = workflowNode(
   "launch-agent-r2a",
-  "Workflow: launch Agent R2a",
-  ["phase inventory-changes", "Renders resources/change-inventory.prompt.md", "readOnly: read, git_read, grep, find"],
+  "Workflow: launch Agent R1",
+  ["phase resolve-scope", "Renders resources/scope-resolver.prompt.md", "readOnly: read, git_read, grep, find"],
   "multi_agent_orchestrator",
   1600,
   470,
@@ -367,12 +378,12 @@ const launchInventory = workflowNode(
 
 const inventoryAgent = agentNode(
   "agent-r2a",
-  "Agent: R2a — change inventory",
+  "Agent: R1 — scope resolver",
   [
-    "catalog default · label: inventory changes",
-    "Host-enforced read-only; coverage, not meaning",
-    "Covers staged, unstaged, and untracked paths",
-    "Returns exact inventoryText — full coverage",
+    "catalog default · label: resolve review scope",
+    "Receives exact intent + clarification",
+    "Resolves one explicit review scope",
+    "Returns exact scopeText",
   ],
   "change_data_capture",
   1590,
@@ -383,8 +394,8 @@ const inventoryAgent = agentNode(
 
 const launchUnits = workflowNode(
   "launch-agent-r2b",
-  "Workflow: launch Agent R2b",
-  ["phase plan-units", "Renders resources/unit-planner.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "Workflow: launch Agent R2a",
+  ["phase inventory-changes", "Renders resources/change-inventory.prompt.md", "readOnly: read, git_read, grep, find"],
   "multi_agent_orchestrator",
   2160,
   470,
@@ -394,12 +405,12 @@ const launchUnits = workflowNode(
 
 const unitsAgent = agentNode(
   "agent-r2b",
-  "Agent: R2b — review-unit planner",
+  "Agent: R2a — change inventory",
   [
-    "catalog default · label: plan review units",
-    "Host-enforced read-only; ast_index for symbols",
-    "Groups the inventory into material decisions",
-    "Returns exact unitsText — boundaries only",
+    "catalog default · label: inventory changes",
+    "Covers staged, unstaged, and untracked paths",
+    "Coverage inventory, not review judgment",
+    "Returns exact inventoryText with stable C ids",
   ],
   "agent_planner",
   2150,
@@ -410,8 +421,8 @@ const unitsAgent = agentNode(
 
 const launchQuestions = workflowNode(
   "launch-agent-r3",
-  "Workflow: launch Agent R3",
-  ["phase ask-questions", "Renders resources/interrogator.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "Workflow: launch Agent R2b",
+  ["phase plan-units", "Renders resources/unit-planner.prompt.md", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
   2720,
   470,
@@ -421,12 +432,12 @@ const launchQuestions = workflowNode(
 
 const questionsAgent = agentNode(
   "agent-r3",
-  "Agent: R3 — interrogator",
+  "Agent: R2b — review-unit planner",
   [
-    "catalog default · label: ask review questions",
-    "Host-enforced read-only; ast_index for symbols",
-    "Asks falsifiable questions; answers none",
-    "Returns exact questionsText — ids mirror units",
+    "catalog default · label: plan review units",
+    "Groups material decisions; owns every C id once",
+    "Workflow validates exact-once C<n> ledger",
+    "Returns exact unitsText",
   ],
   "agent_debate",
   2710,
@@ -437,8 +448,8 @@ const questionsAgent = agentNode(
 
 const launchVerify = workflowNode(
   "launch-agent-r4",
-  "Workflow: launch Agent R4",
-  ["phase verify-review", "Renders resources/verifier.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  "Workflow: launch Agent R3",
+  ["phase ask-questions", "Renders resources/interrogator.prompt.md", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
   3280,
   470,
@@ -448,13 +459,12 @@ const launchVerify = workflowNode(
 
 const verifyAgent = agentNode(
   "agent-r4",
-  "Agent: R4 — verifier and review author",
+  "Agent: R3 — interrogator",
   [
-    "catalog default · label: verify and write review",
-    "Host-enforced read-only; reopens the evidence",
-    "Answers every question from what it read",
-    "Only confirmed problems become findings",
-    "Returns exact reviewText — Markdown verdict",
+    "catalog default · label: ask review questions",
+    "Reconciles inventory C ids against units",
+    "Asks falsifiable questions; answers none",
+    "Workflow validates coverage section",
   ],
   "model_validation",
   3270,
@@ -465,8 +475,8 @@ const verifyAgent = agentNode(
 
 const launchPublish = workflowNode(
   "launch-agent-r5",
-  "Workflow: launch Agent R5",
-  ["phase publish-review", "Renders resources/publisher.prompt.md", "Write-capable: read, write, bash, grep, find"],
+  "Workflow: launch Agent R4",
+  ["phase verify-review", "Renders resources/verifier.prompt.md", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
   3840,
   470,
@@ -476,25 +486,24 @@ const launchPublish = workflowNode(
 
 const publishAgent = agentNode(
   "agent-r5",
-  "Agent: R5 — publisher and presenter",
+  "Agent: R4 — verifier and review author",
   [
-    "catalog default · label: publish review package",
-    "The only write-capable review stage",
-    "Proves .tasks/ is ignored; creates one task",
-    "Writes review.md plus supporting Markdown",
-    "Returns the executive summary as final text",
+    "catalog default · label: verify and write review",
+    "Reopens evidence; accounts for every C id/question",
+    "Only confirmed problems become findings",
+    "Runtime persists exact answer as review.md",
   ],
   "prompt_template",
   3830,
   815,
   410,
-  195,
+  215,
 );
 
 const mapFinalResult = workflowNode(
   "map-final-result",
-  "Workflow: return Agent R5 exact text",
-  ["No JSON parse", "The executive summary is the result", "No report file is returned as the result"],
+  "Workflow: return Agent R4 exact text",
+  ["No JSON/status parse", "review.md contains the same exact bytes", "Reference remains in artifact index"],
   "function_router",
   4400,
   470,
@@ -504,8 +513,8 @@ const mapFinalResult = workflowNode(
 
 const humanEdit = operatorNode(
   "operator-edit-review",
-  "Operator: edit review.md",
-  "Deleting a finding rejects it\nA note under a finding instructs the fix workflow",
+  "Operator: inspect review.md",
+  "Use the run viewer, then pass its\ncomplete reference to remediation",
   "human_review",
   4880,
   240,
@@ -516,7 +525,11 @@ const humanEdit = operatorNode(
 const sourceFile = artifactNode(
   "source-file",
   "Artifact: review.workflow.mjs\n+ resources/*.prompt.md",
-  ["Routing and capability policy in the entry", "R1–R5 complete stage prompts", "phase() and log() name every stage"],
+  [
+    "String + continuation routing in the entry",
+    "Clarifier + R1–R4 complete prompts",
+    "phase() and log() name every stage",
+  ],
   "prompt_template",
   85,
   1200,
@@ -527,7 +540,11 @@ const sourceFile = artifactNode(
 const journalFile = artifactNode(
   "journal-file",
   "Artifact: journal.ndjson",
-  ["Runtime execution journal", "phase, log, and child-session evidence", "Six phases, one per stage"],
+  [
+    "Runtime execution journal",
+    "phase, log, and child-session evidence",
+    "prepare-clarification, consume-clarification, or review stages",
+  ],
   "audit_log",
   1040,
   1200,
@@ -537,12 +554,12 @@ const journalFile = artifactNode(
 
 const supportingFiles = artifactNode(
   "supporting-files",
-  "Artifact: supporting review Markdown",
+  "Artifact: runtime-owned named stage answers",
   [
-    "review-scope.md, review-inventory.md,",
-    "review-units.md, review-questions.md",
-    "Written under .tasks/<task>/artifacts/",
-    "Optional: skipped when empty or duplicated",
+    "intent.md, clarifier-decision.json, scope.md,",
+    "inventory.md, units.md, questions.md, answers",
+    "Runtime-owned below <runId>/artifacts/",
+    "Indexed with digest and provenance",
   ],
   "aggregation_puzzle",
   3300,
@@ -551,13 +568,24 @@ const supportingFiles = artifactNode(
   175,
 );
 
+const answerClarification = operatorNode(
+  "operator-answer-clarification",
+  "Operator: answer clarification",
+  "Later run: text answers + exact\nintent/questions continuation refs",
+  "human_review",
+  1030,
+  240,
+  420,
+  110,
+);
+
 const reportFile = artifactNode(
   "report-file",
-  "Artifact: .tasks/<task>/artifacts/review.md",
+  "Artifact: <runId>/artifacts/.../review.md",
   [
-    "Mandatory. Primary reader-facing report",
+    "Primary reader-facing runtime artifact",
     "Verdict, findings, and question resolutions",
-    "Live working tree; no snapshot, hash, or SHA",
+    "Exact R4 text; digest stored in the index",
   ],
   "news_document",
   4880,
@@ -571,7 +599,7 @@ const resultFile = artifactNode(
   "Artifact: result.json",
   [
     "Mandatory machine-readable run envelope",
-    "result is the Agent R5 executive summary",
+    "result is the Agent R4 exact review text",
     "Child metadata stays separate",
   ],
   "data_catalog",
@@ -583,6 +611,7 @@ const resultFile = artifactNode(
 
 const nodes = [
   request,
+  answerClarification,
   launchScope,
   scopeAgent,
   forwardCheck,
@@ -654,7 +683,7 @@ const handoffEdge = (id, agent, nextNode, label) => {
 };
 
 connect("operator-to-launch", request, launchScope, {
-  label: "free-form request",
+  label: "input:string + optional continuation",
   from: { side: "right", slot: 0.5 },
   to: { side: "left", slot: 0.5 },
 });
@@ -668,16 +697,38 @@ connect("source-to-workflow", sourceFile, launchScope, {
   labelOffset: { dx: -80, dy: 0 },
 });
 
-launchEdge("launch-to-agent-r1", launchScope, scopeAgent, "agent(scopePrompt)");
+launchEdge("launch-to-agent-r1", launchScope, scopeAgent, "fresh: agent(clarifier, CLARIFIER_SCHEMA)");
 connect("agent-r1-to-forward", scopeAgent, forwardCheck, {
   direction: "bottom-up",
-  label: "exact scopeText",
+  label: "{ decision, questions[] }",
   labelWidth: 130,
   from: { side: "top", slot: 0.9 },
   to: { side: "left", slot: 0.5 },
 });
+connect("continued-to-forward", launchScope, forwardCheck, {
+  label: "continued intent + questions + answers",
+  dashed: true,
+  labelWidth: 165,
+  from: { side: "right", slot: 0.5 },
+  to: { side: "left", slot: 0.5 },
+});
+connect("forward-to-operator-answers", forwardCheck, answerClarification, {
+  direction: "bottom-up",
+  label: "decision=needs_operator",
+  color: COLORS.operator,
+  from: { side: "top", slot: 0.35 },
+  to: { side: "bottom", slot: 0.5 },
+});
+connect("operator-answers-to-request", answerClarification, request, {
+  direction: "right-to-left",
+  dashed: true,
+  label: "later workflow call",
+  color: COLORS.operator,
+  from: { side: "left", slot: 0.5 },
+  to: { side: "right", slot: 0.15 },
+});
 connect("forward-to-launch-r2a", forwardCheck, launchInventory, {
-  label: "scopeText verbatim",
+  label: "continue or verified continuation",
   labelWidth: 130,
   from: { side: "right", slot: 0.5 },
   to: { side: "left", slot: 0.5 },
@@ -692,26 +743,32 @@ connect("forward-to-journal", forwardCheck, journalFile, {
   labelOffset: { dx: 96, dy: 0 },
 });
 
-launchEdge("launch-to-agent-r2a", launchInventory, inventoryAgent, "scopeText");
-handoffEdge("agent-r2a-to-launch-r2b", inventoryAgent, launchUnits, "exact inventoryText");
+launchEdge("launch-to-agent-r2a", launchInventory, inventoryAgent, "intent + clarification");
+handoffEdge("agent-r2a-to-launch-r2b", inventoryAgent, launchUnits, "exact scopeText");
 
-launchEdge("launch-to-agent-r2b", launchUnits, unitsAgent, "scopeText + inventoryText");
-handoffEdge("agent-r2b-to-launch-r3", unitsAgent, launchQuestions, "exact unitsText");
+launchEdge("launch-to-agent-r2b", launchUnits, unitsAgent, "scopeText");
+handoffEdge("agent-r2b-to-launch-r3", unitsAgent, launchQuestions, "exact inventoryText");
 
-launchEdge("launch-to-agent-r3", launchQuestions, questionsAgent, "scopeText + unitsText");
-handoffEdge("agent-r3-to-launch-r4", questionsAgent, launchVerify, "exact questionsText");
+launchEdge("launch-to-agent-r3", launchQuestions, questionsAgent, "scopeText + inventoryText");
+handoffEdge("agent-r3-to-launch-r4", questionsAgent, launchVerify, "exact unitsText");
 
-launchEdge("launch-to-agent-r4", launchVerify, verifyAgent, "scopeText + unitsText\n+ questionsText");
-handoffEdge("agent-r4-to-launch-r5", verifyAgent, launchPublish, "exact reviewText");
+launchEdge("launch-to-agent-r4", launchVerify, verifyAgent, "scopeText + inventoryText\n+ unitsText");
+handoffEdge("agent-r4-to-launch-r5", verifyAgent, launchPublish, "exact questionsText");
 
-launchEdge("launch-to-agent-r5", launchPublish, publishAgent, "all five handoffs verbatim");
-handoffEdge("agent-r5-to-map", publishAgent, mapFinalResult, "exact executive summary text");
+connect("launch-to-agent-r5", launchPublish, publishAgent, {
+  direction: "top-down",
+  label: "all handoffs + exact questionsText",
+  labelWidth: 180,
+  from: { side: "bottom", slot: 0.3 },
+  to: { side: "top", slot: 0.3 },
+});
+handoffEdge("agent-r5-to-map", publishAgent, mapFinalResult, "exact reviewText");
 
 connect("agent-r5-to-supporting", publishAgent, supportingFiles, {
   direction: "top-down",
   dashed: true,
   color: COLORS.artifact,
-  label: "writes supporting Markdown",
+  label: "runtime indexes every named answer",
   labelWidth: 160,
   from: { side: "bottom", slot: 0.15 },
   to: { side: "top", slot: 0.5 },
@@ -720,7 +777,7 @@ connect("agent-r5-to-report", publishAgent, reportFile, {
   direction: "top-down",
   dashed: true,
   color: COLORS.artifact,
-  label: "writes + re-reads review.md",
+  label: "runtime persists exact review.md",
   labelWidth: 165,
   from: { side: "bottom", slot: 0.85 },
   to: { side: "top", slot: 0.3 },
@@ -729,7 +786,7 @@ connect("report-to-operator", reportFile, humanEdit, {
   direction: "bottom-up",
   dashed: true,
   color: COLORS.operator,
-  label: "human edits the report",
+  label: "human reads the report",
   labelWidth: 150,
   from: { side: "top", slot: 0.5 },
   to: { side: "bottom", slot: 0.5 },

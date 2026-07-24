@@ -130,6 +130,15 @@ export default async function runWorkflow(dsl, input) {
 `;
 
 describe("workflow --resume replays recorded agent calls", () => {
+  it("projects an unreadable persisted result envelope as unknown", () => {
+    const root = temporaryProject();
+    const runDir = path.join(root, ".locus", "runtime", "workflows", "corrupt-result");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(path.join(runDir, "result.json"), "{not-json", "utf8");
+
+    expect(readWorkflowRunSummary(root, "corrupt-result").status).toBe("unknown");
+  });
+
   it("reuses every recorded result when script, input and call order are unchanged", async () => {
     const root = temporaryProject();
     writeWorkflow(root, "stages", THREE_STAGE_WORKFLOW);
@@ -334,6 +343,7 @@ export default async function runWorkflow(dsl) {
 
     const harness = createHarness(root, { sessionId: "replay-status" });
     harness.ctx.hasUI = true;
+    delete harness.ctx.ui.custom;
     workflowsExt(harness.pi);
     await harness.commands.get("workflows")!.handler(`status ${resumed.runId}`, harness.ctx);
     const payload = harness.widgetPayloads.get("workflows");

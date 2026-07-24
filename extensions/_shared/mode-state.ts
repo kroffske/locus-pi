@@ -214,7 +214,9 @@ export function projectSlug(projectRoot: string): string {
  * Two calls with the same request on the same day differ via the time36 suffix.
  */
 export function planSlug(request: string, now = new Date()): string {
-  const body = slugify(request.split(/\r?\n/)[0] ?? "").slice(0, 48).replace(/-+$/, "");
+  const body = slugify(request.split(/\r?\n/)[0] ?? "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");
   const suffix = now.getTime().toString(36).slice(-4);
   return `${body}-${date}-${suffix}`;
@@ -272,14 +274,12 @@ export function listPlanSlugs(projectRoot: string, env: NodeJS.ProcessEnv = proc
 }
 
 // ---------------------------------------------------------------------------
-// Mode cycle (default ⇄ plan, extensible)
+// Named behavioral modes
 // ---------------------------------------------------------------------------
 
 /**
- * Ordered, cyclable list of behavioral modes. "default" is the normal harness
- * behavior (no overlay); "plan" overlays a planning framing. Append future modes
- * here (e.g. "workflow") to extend the Shift+Tab / `/mode` cycle — the cycle
- * logic is data-driven off this list, so adding a mode is mechanical.
+ * Named behavioral modes accepted by explicit `/mode <name>` commands.
+ * "default" is normal execution; "plan" adds planning framing.
  */
 export const MODE_CYCLE = ["default", "plan"] as const;
 export type CycleMode = (typeof MODE_CYCLE)[number];
@@ -289,17 +289,10 @@ export function currentCycleMode(state: ModeState | null): CycleMode {
   return isInPlanMode(state) ? "plan" : "default";
 }
 
-/** The next mode after `mode` in the cycle, wrapping around the end. */
-export function nextCycleMode(mode: CycleMode, cycle: readonly CycleMode[] = MODE_CYCLE): CycleMode {
-  const idx = cycle.indexOf(mode);
-  if (idx < 0) return cycle[0] ?? "default";
-  return cycle[(idx + 1) % cycle.length] ?? "default";
-}
-
 /**
- * Pure: the ModeState to persist when entering a cycle mode via Shift+Tab or
- * `/mode`. "default" yields the cleared sentinel; "plan" arms plan mode with an
- * empty slug — a cycle-armed plan carries no authored artifact (that comes from
+ * Pure: the ModeState to persist for an explicit `/mode <name>` command.
+ * "default" yields the cleared sentinel; "plan" arms plan mode with an
+ * empty slug — a command-armed plan carries no authored artifact (that comes from
  * `/plan <request>`).
  */
 export function modeStateForCycle(mode: CycleMode, now: Date = new Date()): ModeState {
@@ -323,7 +316,7 @@ export function modeStatusLabel(state: ModeState | null): string | undefined {
 }
 
 /** The theme color key used for the plan-mode badge and editor border. */
-export const PLAN_MODE_COLOR = "accent";
+export const PLAN_MODE_COLOR = "warning";
 
 /** Minimal theme slice needed to style the status badge. */
 interface BadgeTheme {
@@ -376,55 +369,6 @@ export function makeModeAwareEditorClass(
       });
     }
   };
-}
-
-// ---------------------------------------------------------------------------
-// Shift+Tab un-reserve helper (frees the chord for the mode cycle)
-// ---------------------------------------------------------------------------
-
-/** The keybindings.json action that, set to `[]`, frees `shift+tab`. */
-export const THINKING_CYCLE_ACTION = "app.thinking.cycle";
-/** Human-readable description of the disable entry (for command/widget text). */
-export const THINKING_CYCLE_DISABLE_LINE = `"${THINKING_CYCLE_ACTION}": []`;
-
-/**
- * Path to the real Pi agent keybindings file. Pi 0.80.x reads
- * `<agentDir>/keybindings.json` (JSON), where agentDir defaults to `~/.pi/agent`
- * and is overridden by PI_CODING_AGENT_DIR. This is the live Pi agent dir, NOT
- * the locus-pi plan home (LOCUS_PI_HOME).
- */
-export function agentKeybindingsPath(env: NodeJS.ProcessEnv = process.env): string {
-  const agentDir = env["PI_CODING_AGENT_DIR"] ?? path.join(homedir(), ".pi", "agent");
-  return path.join(agentDir, "keybindings.json");
-}
-
-/**
- * Pure transform that frees Shift+Tab by disabling `app.thinking.cycle` in a Pi
- * keybindings.json (a JSON `action -> chord(s)` map; `[]` means disabled).
- * Idempotent: reports `alreadyDisabled` without changing content. Preserves any
- * other bindings. Reports `parseError` rather than clobbering unparseable JSON.
- */
-export function withThinkingCycleDisabled(existing: string): { content: string; changed: boolean; alreadyDisabled: boolean; parseError?: true } {
-  const trimmed = existing.trim();
-  let parsed: Record<string, unknown> = {};
-  if (trimmed !== "") {
-    let json: unknown;
-    try {
-      json = JSON.parse(trimmed);
-    } catch {
-      return { content: existing, changed: false, alreadyDisabled: false, parseError: true };
-    }
-    if (typeof json !== "object" || json === null || Array.isArray(json)) {
-      return { content: existing, changed: false, alreadyDisabled: false, parseError: true };
-    }
-    parsed = json as Record<string, unknown>;
-  }
-  const current = parsed[THINKING_CYCLE_ACTION];
-  if (Array.isArray(current) && current.length === 0) {
-    return { content: existing, changed: false, alreadyDisabled: true };
-  }
-  parsed[THINKING_CYCLE_ACTION] = [];
-  return { content: `${JSON.stringify(parsed, null, 2)}\n`, changed: true, alreadyDisabled: false };
 }
 
 // ---------------------------------------------------------------------------

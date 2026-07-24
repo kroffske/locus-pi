@@ -1,4 +1,20 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import type { Stats } from "node:fs";
 
 export interface ReadOnlyAgentToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -24,7 +40,17 @@ export interface ReadOnlyAgentSessionCapabilities {
   customTools?: ReadOnlyAgentCustomTool[];
 }
 
-const SAFE_TOOLS = new Set(["read", "grep", "find", "ls", "git_read", "ast_index", "yield"]);
+export type RepositoryCheckScripts = Readonly<Record<string, string>>;
+
+export interface ReadOnlyAgentSessionCapabilityOptions {
+  /**
+   * Exact package script commands captured before any workflow writer runs.
+   * Undefined preserves direct-call compatibility by capturing at capability creation.
+   */
+  repositoryCheckScripts?: RepositoryCheckScripts;
+}
+
+const SAFE_TOOLS = new Set(["read", "grep", "find", "ls", "git_read", "ast_index", "repository_check", "yield"]);
 // `ast-index` keeps its database in the user cache directory, outside the
 // reviewed project. Query commands read it; `update`/`rebuild` refresh only
 // that external cache. `clear` and `watch` are destructive or long-lived, so
@@ -53,6 +79,7 @@ const AST_INDEX_COMMANDS = new Set([
   "usages",
 ]);
 const MAX_AST_INDEX_MILLISECONDS = 120_000;
+const MAX_REPOSITORY_CHECK_MILLISECONDS = 5 * 60_000;
 const GIT_QUERY_SUBCOMMANDS = new Set([
   "branch",
   "describe",
@@ -77,6 +104,7 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 export function createReadOnlyAgentSessionCapabilities(
   cwd: string,
   requestedTools: readonly string[],
+  options: ReadOnlyAgentSessionCapabilityOptions = {},
 ): ReadOnlyAgentSessionCapabilities {
   const tools = requestedTools.includes("*")
     ? [...SAFE_TOOLS]
@@ -93,12 +121,23 @@ export function createReadOnlyAgentSessionCapabilities(
   const customTools = [
     ...(tools.includes("git_read") ? [createGitReadTool(cwd)] : []),
     ...(tools.includes("ast_index") ? [createAstIndexTool(cwd)] : []),
+    ...(tools.includes("repository_check")
+      ? [createRepositoryCheckTool(cwd, options.repositoryCheckScripts ?? captureRepositoryCheckScripts(cwd))]
+      : []),
   ];
   return {
     tools,
     excludeTools,
     ...(customTools.length > 0 ? { customTools } : {}),
   };
+}
+
+/** Capture the only package scripts a later repository_check may execute. */
+export function captureRepositoryCheckScripts(cwd: string): RepositoryCheckScripts {
+  const packageJson = readPackageJson(cwd);
+  if (!packageJson.ok) return Object.freeze({});
+  const scripts = packageScriptMap(packageJson.value);
+  return Object.freeze(scripts.ok ? scripts.value : {});
 }
 
 function createAstIndexTool(cwd: string): ReadOnlyAgentCustomTool {
@@ -161,6 +200,281 @@ function parseArgvInput(input: unknown, toolName: string): ArgvValidation {
     };
   }
   return { ok: true, args: [...(input.args as string[])] };
+}
+
+function createRepositoryCheckTool(cwd: string, frozenScripts: RepositoryCheckScripts): ReadOnlyAgentCustomTool {
+  return {
+    name: "repository_check",
+    label: "Repository Check",
+    description:
+      'Run one existing package.json script in a host-created disposable Git worktree containing the current tracked and untracked source bytes. Pass only the script name, for example {"script":"test"}. The host supplies the package manager, argv, cwd, timeout, output bound, snapshot, and cleanup; arbitrary shell text and arguments are impossible. The operator checkout is never the command cwd.',
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["script"],
+      properties: {
+        script: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9:._-]*$" },
+      },
+    },
+    async execute(_toolCallId, input, signal) {
+      const validation = validateRepositoryCheckInput(cwd, input, frozenScripts);
+      if (!validation.ok) return blocked(validation.reason);
+      let snapshot: RepositoryCheckSnapshot | undefined;
+      try {
+        snapshot = materializeRepositoryCheckSnapshot(cwd);
+        const snapshotValidation = validateRepositoryCheckInput(snapshot.cwd, input, frozenScripts);
+        if (!snapshotValidation.ok) return blocked(snapshotValidation.reason);
+        const packageManager = resolvePackageManager(snapshot.cwd);
+        const result = await executeArgv(
+          packageManager,
+          snapshot.cwd,
+          ["run", validation.script],
+          ["run", validation.script],
+          signal,
+          MAX_REPOSITORY_CHECK_MILLISECONDS,
+          {
+            CI: "1",
+            GIT_OPTIONAL_LOCKS: "0",
+            GIT_PAGER: "",
+            NODE_PATH: path.join(cwd, "node_modules"),
+            PAGER: "",
+            PATH: `${path.join(cwd, "node_modules", ".bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        );
+        return {
+          ...result,
+          details: {
+            ...result.details,
+            script: validation.script,
+            packageManager,
+            isolatedSnapshot: true,
+          },
+        };
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+          details: { script: validation.script, isolatedSnapshot: snapshot !== undefined },
+          isError: true,
+        };
+      } finally {
+        if (snapshot !== undefined) removeRepositoryCheckSnapshot(snapshot);
+      }
+    },
+  };
+}
+
+type RepositoryCheckValidation = { ok: true; script: string } | { ok: false; reason: string };
+
+function validateRepositoryCheckInput(
+  cwd: string,
+  input: unknown,
+  frozenScripts: RepositoryCheckScripts,
+): RepositoryCheckValidation {
+  if (!isRecord(input) || Object.keys(input).some((key) => key !== "script") || typeof input.script !== "string") {
+    return { ok: false, reason: "repository_check requires exactly one `script` string." };
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(input.script)) {
+    return { ok: false, reason: "repository_check script name is invalid." };
+  }
+  if (!Object.hasOwn(frozenScripts, input.script) || typeof frozenScripts[input.script] !== "string") {
+    return { ok: false, reason: `repository_check script was not present in the frozen baseline: ${input.script}` };
+  }
+  const packageJson = readPackageJson(cwd);
+  if (!packageJson.ok) {
+    return {
+      ok: false,
+      reason: `repository_check cannot read package.json: ${packageJson.reason}`,
+    };
+  }
+  const currentScripts = packageScriptMap(packageJson.value);
+  if (!currentScripts.ok) {
+    return {
+      ok: false,
+      reason: `repository_check cannot validate package.json scripts: ${currentScripts.reason}`,
+    };
+  }
+  if (!sameScriptMap(currentScripts.value, frozenScripts)) {
+    return { ok: false, reason: "repository_check package.json scripts changed after the frozen baseline." };
+  }
+  return { ok: true, script: input.script };
+}
+
+type PackageScriptMapRead = { ok: true; value: Record<string, string> } | { ok: false; reason: string };
+
+function packageScriptMap(packageJson: Record<string, unknown>): PackageScriptMapRead {
+  if (packageJson.scripts === undefined) return { ok: true, value: {} };
+  if (!isRecord(packageJson.scripts)) return { ok: false, reason: "scripts is not an object" };
+  const entries = Object.entries(packageJson.scripts);
+  const invalid = entries.find((entry) => typeof entry[1] !== "string");
+  if (invalid !== undefined) return { ok: false, reason: `script command is not a string: ${invalid[0]}` };
+  return { ok: true, value: Object.fromEntries(entries) as Record<string, string> };
+}
+
+function sameScriptMap(current: RepositoryCheckScripts, frozen: RepositoryCheckScripts): boolean {
+  const currentNames = Object.keys(current).sort();
+  const frozenNames = Object.keys(frozen).sort();
+  return (
+    currentNames.length === frozenNames.length &&
+    currentNames.every((name, index) => name === frozenNames[index] && current[name] === frozen[name])
+  );
+}
+
+type PackageJsonRead = { ok: true; value: Record<string, unknown> } | { ok: false; reason: string };
+
+function readPackageJson(cwd: string): PackageJsonRead {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf8"));
+    return isRecord(parsed) ? { ok: true, value: parsed } : { ok: false, reason: "package.json is not an object" };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+interface RepositoryCheckSnapshot {
+  repoRoot: string;
+  path: string;
+  cwd: string;
+}
+
+function materializeRepositoryCheckSnapshot(cwd: string): RepositoryCheckSnapshot {
+  const repoRoot = gitText(cwd, ["rev-parse", "--show-toplevel"]);
+  const checksRoot = path.join(tmpdir(), "locus-repository-checks");
+  mkdirSync(checksRoot, { recursive: true });
+  const target = path.join(checksRoot, `check-${randomUUID()}`);
+  execFileSync("git", ["-C", repoRoot, "worktree", "add", "--detach", target, "HEAD"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    overlayCurrentSource(repoRoot, target);
+    const relativeCwd = path.relative(repoRoot, realpathSync(cwd));
+    if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+      throw new Error("repository_check cwd escapes its Git repository.");
+    }
+    const snapshotCwd = path.join(target, relativeCwd);
+    if (!existsSync(path.join(snapshotCwd, "package.json"))) {
+      throw new Error("repository_check snapshot has no package.json at the project cwd.");
+    }
+    return { repoRoot, path: target, cwd: snapshotCwd };
+  } catch (error) {
+    removeRepositoryCheckSnapshot({ repoRoot, path: target, cwd: target });
+    throw error;
+  }
+}
+
+function overlayCurrentSource(repoRoot: string, target: string): void {
+  overlayGitSource(repoRoot, target);
+}
+
+function overlayGitSource(sourceRoot: string, target: string): void {
+  const paths = nulSeparated(
+    execFileSync("git", ["-C", sourceRoot, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+      encoding: "buffer",
+      maxBuffer: MAX_OUTPUT_BYTES,
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+  for (const relativePath of paths) {
+    assertSnapshotPath(relativePath);
+    const source = path.join(sourceRoot, relativePath);
+    const destination = path.join(target, relativePath);
+    const sourceStat = lstatIfPresent(source);
+    if (sourceStat === undefined) {
+      rmSync(destination, { force: true, recursive: true });
+      continue;
+    }
+    mkdirSync(path.dirname(destination), { recursive: true });
+    if (sourceStat.isSymbolicLink()) {
+      const link = readlinkSync(source);
+      const resolved = path.resolve(path.dirname(source), link);
+      if (resolved !== sourceRoot && !resolved.startsWith(`${sourceRoot}${path.sep}`)) {
+        throw new Error(`repository_check refuses a source symlink outside the repository: ${relativePath}`);
+      }
+      rmSync(destination, { force: true, recursive: true });
+      symlinkSync(link, destination);
+      continue;
+    }
+    if (sourceStat.isDirectory() && isGitlinkPath(sourceRoot, relativePath)) {
+      rmSync(destination, { force: true, recursive: true });
+      mkdirSync(destination, { recursive: true });
+      overlayGitSource(source, destination);
+      continue;
+    }
+    if (!sourceStat.isFile()) {
+      throw new Error(`repository_check cannot snapshot non-file source: ${relativePath}`);
+    }
+    rmSync(destination, { force: true, recursive: true });
+    copyFileSync(source, destination);
+    chmodSync(destination, sourceStat.mode);
+  }
+}
+
+function isGitlinkPath(repoRoot: string, relativePath: string): boolean {
+  const staged = execFileSync("git", ["-C", repoRoot, "ls-files", "--stage", "-z", "--", relativePath], {
+    encoding: "buffer",
+    maxBuffer: MAX_OUTPUT_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).toString("utf8");
+  return staged.startsWith("160000 ");
+}
+
+function removeRepositoryCheckSnapshot(snapshot: RepositoryCheckSnapshot): void {
+  try {
+    execFileSync("git", ["-C", snapshot.repoRoot, "worktree", "remove", "--force", snapshot.path], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    rmSync(snapshot.path, { force: true, recursive: true });
+    try {
+      execFileSync("git", ["-C", snapshot.repoRoot, "worktree", "prune"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      // The check result remains valid; a future Git prune can remove stale administrative metadata.
+    }
+  }
+}
+
+function resolvePackageManager(cwd: string): string {
+  const packageJson = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf8")) as unknown;
+  if (isRecord(packageJson) && typeof packageJson.packageManager === "string") {
+    const name = /^([a-z]+)@/u.exec(packageJson.packageManager)?.[1];
+    if (name === "npm" || name === "pnpm" || name === "yarn" || name === "bun") return name;
+  }
+  if (existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
+  if (existsSync(path.join(cwd, "bun.lock")) || existsSync(path.join(cwd, "bun.lockb"))) return "bun";
+  return "npm";
+}
+
+function gitText(cwd: string, args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+function nulSeparated(bytes: Buffer): string[] {
+  const values = bytes.toString("utf8").split("\0");
+  if (values.at(-1) === "") values.pop();
+  return values;
+}
+
+function assertSnapshotPath(relativePath: string): void {
+  if (relativePath === "" || path.isAbsolute(relativePath) || relativePath.split(path.sep).includes("..")) {
+    throw new Error(`repository_check received an unsafe Git path: ${relativePath}`);
+  }
+}
+
+function lstatIfPresent(filePath: string): Stats | undefined {
+  try {
+    return lstatSync(filePath);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function createGitReadTool(cwd: string): ReadOnlyAgentCustomTool {

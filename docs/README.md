@@ -66,3 +66,6 @@ explicit local import closure, the four curated Package workflows
 bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.
+`public-repository.json#repositoryFiles` is also file-exact: directory entries
+are rejected, so adding a file under an existing public folder does not publish
+it without an explicit manifest and inventory change.

@@ -14,11 +14,8 @@ import {
 } from "../_shared/model-settings.js";
 import { getCommandText, getProjectRoot, getSessionId, getWorkingDirectory } from "../_shared/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import {
-  clearOperatorStatus,
-  setOperatorStatus,
-  type OperatorStatusContribution,
-} from "../_shared/operator-status.js";
+import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import { clearOperatorStatus, setOperatorStatus, type OperatorStatusContribution } from "../_shared/operator-status.js";
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import { createSessionStore, getRuntimeCapabilityReport } from "../_shared/runtime-capabilities.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
@@ -73,7 +70,12 @@ interface ModelRoleRuntimeEvent {
 export type EffortCommandOutcome =
   | { kind: "unknown"; requested: string; supported: readonly ThinkingLevel[] }
   | { kind: "unsupported"; requested: ThinkingLevel; model: string; supported: readonly ThinkingLevel[] }
-  | { kind: "selector-unavailable"; mode: string; current: ThinkingLevel | undefined; supported: readonly ThinkingLevel[] }
+  | {
+      kind: "selector-unavailable";
+      mode: string;
+      current: ThinkingLevel | undefined;
+      supported: readonly ThinkingLevel[];
+    }
   | { kind: "unavailable"; operation: "control" | "verification"; supported: readonly ThinkingLevel[] }
   | { kind: "clamped"; requested: ThinkingLevel; actual: ThinkingLevel; supported: readonly ThinkingLevel[] }
   | {
@@ -116,20 +118,17 @@ export function buildEffortOperatorBlock(outcome: EffortCommandOutcome): Operato
         type: "WARN",
         subject: "Thinking effort",
         primary: `Interactive effort selection is unavailable in ${outcome.mode} mode.`,
-        metadata: [
-          `Current: ${outcome.current ?? "unknown"}`,
-          `Supported: ${supported}`,
-          "Scope: current Pi session",
-        ],
+        metadata: [`Current: ${outcome.current ?? "unknown"}`, `Supported: ${supported}`, "Scope: current Pi session"],
         controls: ["Use an explicit level: /effort <level>"],
       };
     case "unavailable":
       return {
         type: "ERROR",
         subject: "Thinking effort",
-        primary: outcome.operation === "control"
-          ? "Pi host does not expose thinking-level control."
-          : "Pi host does not expose thinking-level verification.",
+        primary:
+          outcome.operation === "control"
+            ? "Pi host does not expose thinking-level control."
+            : "Pi host does not expose thinking-level verification.",
         body: ["Effort was not changed because the result could not be verified."],
         metadata: [`Supported: ${supported}`],
         controls: ["Update or reconfigure the Pi host, then retry /effort."],
@@ -152,11 +151,7 @@ export function buildEffortOperatorBlock(outcome: EffortCommandOutcome): Operato
         type: "VIEW",
         subject: "Thinking effort",
         primary: `Current session effort remains ${outcome.level}.`,
-        metadata: [
-          `Supported: ${supported}`,
-          `Capability: ${outcome.capability}`,
-          "Scope: current Pi session",
-        ],
+        metadata: [`Supported: ${supported}`, `Capability: ${outcome.capability}`, "Scope: current Pi session"],
         controls: ["Choose another level: /effort"],
       };
     case "changed":
@@ -164,40 +159,44 @@ export function buildEffortOperatorBlock(outcome: EffortCommandOutcome): Operato
         type: "CHANGE",
         subject: "Thinking effort",
         primary: `Current session effort is now ${outcome.level}.`,
-        metadata: [
-          `Supported: ${supported}`,
-          `Capability: ${outcome.capability}`,
-          "Scope: current Pi session",
-        ],
+        metadata: [`Supported: ${supported}`, `Capability: ${outcome.capability}`, "Scope: current Pi session"],
         controls: ["Choose another level: /effort"],
       };
   }
 }
 
 export default function model(pi: ExtensionAPI): void {
-  registerCommandWithUiLifecycle(pi, {
-    command: "model-roles",
-    group: "model-roles",
-    surfaces: ["overlay-selector", "transient-widget", "persistent-state", "status"],
-    transientWidgets: ["model-roles"],
-  }, {
-    description: "Select the current model and save Locus model role assignments.",
-    async handler(_args, ctx) {
-      await runModelUi(pi, ctx);
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "model-roles",
+      group: "model-roles",
+      surfaces: ["overlay-selector", "transient-widget", "persistent-state", "status"],
+      transientWidgets: ["model-roles"],
     },
-  });
+    {
+      description: "Select the current model and save Locus model role assignments.",
+      async handler(_args, ctx) {
+        await runModelUi(pi, ctx);
+      },
+    },
+  );
 
-  registerCommandWithUiLifecycle(pi, {
-    command: "effort",
-    group: "effort",
-    surfaces: ["overlay-selector", "transient-widget"],
-    transientWidgets: ["effort"],
-  }, {
-    description: "Usage: /effort [off|minimal|low|medium|high|xhigh]. Set the current model's thinking effort.",
-    async handler(args, ctx) {
-      await runEffortCommand(pi, ctx, getCommandText(args));
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "effort",
+      group: "effort",
+      surfaces: ["overlay-selector", "transient-widget"],
+      transientWidgets: ["effort"],
     },
-  });
+    {
+      description: "Usage: /effort [off|minimal|low|medium|high|xhigh]. Set the current model's thinking effort.",
+      async handler(args, ctx) {
+        await runEffortCommand(pi, ctx, getCommandText(args));
+      },
+    },
+  );
 
   pi.on("session_start", async (_event, ctx) => {
     await updateModelRoleStatus(ctx, undefined, pi);
@@ -236,9 +235,10 @@ async function runEffortCommand(pi: ExtensionAPI, ctx: ExtensionContext, raw: st
       });
       return;
     }
-    const selectorLevels = current !== undefined && levels.includes(current)
-      ? [current, ...levels.filter((level) => level !== current)]
-      : levels;
+    const selectorLevels =
+      current !== undefined && levels.includes(current)
+        ? [current, ...levels.filter((level) => level !== current)]
+        : levels;
     const choice = await ctx.ui.select(
       `[SELECT] Thinking effort · current ${current ?? "unknown"} · ${ctx.model ? modelSelector(ctx.model) : "model unset"}`,
       selectorLevels,
@@ -293,23 +293,26 @@ async function runModelUi(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void
     const state = await loadModelRolesState(ctx);
     const summaries = roleSummaries(state);
     publishModelRoleStatus(ctx, summaries);
-    setOperatorWidget(ctx, "model-roles", modelRoleFallbackBlock(
-      pi,
+    setOperatorWidget(
       ctx,
-      summaries,
-      "No configured models are available; the selector was not opened.",
-    ));
+      "model-roles",
+      modelRoleFallbackBlock(pi, ctx, summaries, "No configured models are available; the selector was not opened."),
+    );
     return;
   }
 
   await showModelRoleSelector(pi, ctx, models);
 }
 
-async function applyModelRole(pi: ExtensionAPI, ctx: ExtensionContext, selection: ModelRoleSelection): Promise<AppliedModelRoleState> {
+async function applyModelRole(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  selection: ModelRoleSelection,
+): Promise<AppliedModelRoleState> {
   const assignment = assignmentFromModel(selection.model, selection.thinking);
   if (!assignment) {
     return {
-      ...await currentModelRoleState(pi, ctx, undefined),
+      ...(await currentModelRoleState(pi, ctx, undefined)),
       receipt: { kind: "error", text: "Selected model has no canonical provider/model selector." },
     };
   }
@@ -318,7 +321,7 @@ async function applyModelRole(pi: ExtensionAPI, ctx: ExtensionContext, selection
   if (!supportedEfforts.includes(selection.thinking)) {
     const message = `${selection.thinking} is not supported by ${assignment.model}; route was not saved.`;
     return {
-      ...await currentModelRoleState(pi, ctx, undefined),
+      ...(await currentModelRoleState(pi, ctx, undefined)),
       receipt: { kind: "error", text: message },
     };
   }
@@ -374,9 +377,25 @@ async function applyModelRole(pi: ExtensionAPI, ctx: ExtensionContext, selection
       rolePersistenceError = error instanceof Error ? error.message : String(error);
       rolePersisted = false;
     }
-    customEntryAppended = await appendModelRoleEntry(pi, selection.action.role, assignment, beforeSelector, currentSelector, modelApplied, rolePersisted);
+    customEntryAppended = await appendModelRoleEntry(
+      pi,
+      selection.action.role,
+      assignment,
+      beforeSelector,
+      currentSelector,
+      modelApplied,
+      rolePersisted,
+    );
   } else {
-    customEntryAppended = await appendModelRoleEntry(pi, selection.action.role, assignment, beforeSelector, currentSelector, modelApplied, false);
+    customEntryAppended = await appendModelRoleEntry(
+      pi,
+      selection.action.role,
+      assignment,
+      beforeSelector,
+      currentSelector,
+      modelApplied,
+      false,
+    );
   }
 
   const runtimeEventRecorded = recordModelRoleRuntimeEvent(ctx, {
@@ -511,27 +530,33 @@ async function showModelRoleSelector(pi: ExtensionAPI, ctx: ExtensionContext, mo
   const summaries = roleSummaries(state);
   if (ctx.mode !== "tui" || ctx.hasUI === false || !ctx.ui.custom) {
     publishModelRoleStatus(ctx, summaries);
-    setOperatorWidget(ctx, "model-roles", modelRoleFallbackBlock(
-      pi,
+    setOperatorWidget(
       ctx,
-      summaries,
-      "Interactive model-role selection requires Pi custom UI; no route was changed.",
-    ));
+      "model-roles",
+      modelRoleFallbackBlock(
+        pi,
+        ctx,
+        summaries,
+        "Interactive model-role selection requires Pi custom UI; no route was changed.",
+      ),
+    );
     return;
   }
   const currentSelector = ctx.model ? modelSelector(ctx.model) : undefined;
   const rows = buildModelRows(models, state, currentSelector);
   if (rows.length === 0) return;
   publishModelRoleStatus(ctx, summaries);
-  await ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) => new ModelRoleSelectorComponent(tui, createModelRoleSelectorTheme(theme), {
-      rows,
-      roleSummaries: summaries,
-      currentSelector,
-      currentThinking: pi.getThinkingLevel?.(),
-      applySelection: (selection) => applyModelRole(pi, ctx, selection),
-      done,
-    }),
+  await requestInlineOperatorInteraction<void>(
+    ctx,
+    (tui, theme, _keybindings, done) =>
+      new ModelRoleSelectorComponent(tui, createModelRoleSelectorTheme(theme), {
+        rows,
+        roleSummaries: summaries,
+        currentSelector,
+        currentThinking: pi.getThinkingLevel?.(),
+        applySelection: (selection) => applyModelRole(pi, ctx, selection),
+        done,
+      }),
   );
 }
 
@@ -593,16 +618,16 @@ function publishModelRoleStatus(ctx: ExtensionContext, summaries: readonly RoleS
   else setOperatorStatus(ctx, contribution);
 }
 
-export function modelRoleStatusContribution(
-  summaries: readonly RoleSummary[],
-): OperatorStatusContribution | undefined {
+export function modelRoleStatusContribution(summaries: readonly RoleSummary[]): OperatorStatusContribution | undefined {
   const assigned = summaries.filter((summary) => summary.assignment !== undefined);
   if (assigned.length === 0) return undefined;
   const first = assigned.slice(0, 2);
   const overflow = assigned.length - first.length;
   const suffix = overflow > 0 ? ` +${overflow}` : "";
   const wide = first.map((summary) => `${summary.tag}=${shortModelName(summary.assignment!.model)}`).join(" ");
-  const compact = first.map((summary) => `${statusRoleAbbreviation(summary.tag)}:${shortModelName(summary.assignment!.model)}`).join(" ");
+  const compact = first
+    .map((summary) => `${statusRoleAbbreviation(summary.tag)}:${shortModelName(summary.assignment!.model)}`)
+    .join(" ");
   return {
     id: "model.roles",
     lane: "route",
@@ -619,7 +644,10 @@ function shortModelName(selector: string): string {
 }
 
 function statusRoleAbbreviation(tag: string): string {
-  return ({ DEFAULT: "D", AGENT: "A", TASK: "T", PLAN: "P", SUMMARY: "S", SMOL: "M" } as Record<string, string>)[tag] ?? tag.slice(0, 1);
+  return (
+    ({ DEFAULT: "D", AGENT: "A", TASK: "T", PLAN: "P", SUMMARY: "S", SMOL: "M" } as Record<string, string>)[tag] ??
+    tag.slice(0, 1)
+  );
 }
 
 function assignmentFromModel(model: ModelLike, thinking: ThinkingLevel): ModelRoleAssignment | undefined {

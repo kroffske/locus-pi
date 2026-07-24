@@ -31,11 +31,13 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\r");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Deploy?",
-        options: [{ label: "ship" }, { label: "hold" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Deploy?",
+          options: [{ label: "ship" }, { label: "hold" }],
+        },
+      ],
     });
 
     expect(result.details?.decision).toMatchObject({
@@ -43,7 +45,7 @@ describe("ask-user-question decision journal", () => {
       decisionId: "ask-deploy",
     });
     expect(h.customComponents).toHaveLength(1);
-    expect(h.customOptions[0]).toMatchObject({ overlay: true });
+    expect(h.customOptions[0]).toEqual({ overlay: false });
     for (const width of [146, 80, 48]) {
       const frame = h.customComponents[0]!.render(width);
       expect(frame.join("\n")).toContain("[SELECT]");
@@ -70,12 +72,14 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push(" ", "\x1b[B", " ", "\x1b[B", "\x1b[B", "\r");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "multi",
-        question: "Pick many",
-        options: [{ label: "one" }, { label: "two" }, { label: "three" }],
-        multi: true,
-      }],
+      questions: [
+        {
+          id: "multi",
+          question: "Pick many",
+          options: [{ label: "one" }, { label: "two" }, { label: "three" }],
+          multi: true,
+        },
+      ],
     });
 
     expect(result.content[0]).toMatchObject({ type: "text", text: "User selected: one, two" });
@@ -116,11 +120,13 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\r");
 
     await runTool(h, "ask", {
-      questions: [{
-        id: "confirm",
-        question: "Proceed?",
-        options: [{ label: "yes" }, { label: "no" }],
-      }],
+      questions: [
+        {
+          id: "confirm",
+          question: "Proceed?",
+          options: [{ label: "yes" }, { label: "no" }],
+        },
+      ],
     });
 
     const store = new JsonlSessionStore({ filePath: sessionJsonlPath(root) });
@@ -141,12 +147,14 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\r");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Deploy?",
-        options: [{ label: "ship" }, { label: "hold" }],
-        recommended: 0,
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Deploy?",
+          options: [{ label: "ship" }, { label: "hold" }],
+          recommended: 0,
+        },
+      ],
     });
 
     expect(result.isError).not.toBe(true);
@@ -169,11 +177,13 @@ describe("ask-user-question decision journal", () => {
     h.ctx.ui.editor = editor as never;
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy-note",
-        question: "Any extra deploy note?",
-        options: [{ label: "No note" }, { label: "Hold release" }],
-      }],
+      questions: [
+        {
+          id: "deploy-note",
+          question: "Any extra deploy note?",
+          options: [{ label: "No note" }, { label: "Hold release" }],
+        },
+      ],
     });
 
     expect(result.isError).not.toBe(true);
@@ -198,11 +208,13 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\x1b");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Deploy?",
-        options: [{ label: "ship" }, { label: "hold" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Deploy?",
+          options: [{ label: "ship" }, { label: "hold" }],
+        },
+      ],
     });
 
     expect(result.isError).toBe(true);
@@ -230,11 +242,13 @@ describe("ask-user-question decision journal", () => {
     h.selectQueue.push("ship");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Deploy?",
-        options: [{ label: "ship" }, { label: "hold" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Deploy?",
+          options: [{ label: "ship" }, { label: "hold" }],
+        },
+      ],
     });
 
     expect(result.isError).not.toBe(true);
@@ -251,11 +265,13 @@ describe("ask-user-question decision journal", () => {
     h.selectQueue.push("not-an-option");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Deploy?",
-        options: [{ label: "ship" }, { label: "hold" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Deploy?",
+          options: [{ label: "ship" }, { label: "hold" }],
+        },
+      ],
     });
 
     expect(result.isError).toBe(true);
@@ -289,17 +305,21 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\r");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Ship now?",
-        options: [{ label: "ship" }, { label: "wait" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Ship now?",
+          options: [{ label: "ship" }, { label: "wait" }],
+        },
+      ],
     });
 
     const tool = h.tools.get("ask");
     expect(tool?.renderResult).toBeTypeOf("function");
     const rendered = tool!.renderResult!(result, h.ctx);
-    const text = Array.isArray(rendered) ? rendered.join("\n") : rendered.render(80).join("\n");
+    expect(Array.isArray(rendered)).toBe(false);
+    expect(rendered.render).toBeTypeOf("function");
+    const text = rendered.render(80).join("\n");
 
     // Not just a one-line verb phrase: the question text and every option survive.
     expect(text).toContain("[RESULT] Ask");
@@ -324,7 +344,7 @@ describe("ask-user-question decision journal", () => {
     });
 
     const rendered = h.tools.get("ask")!.renderResult!(result, h.ctx);
-    const text = (Array.isArray(rendered) ? rendered : rendered.render(80)).join("\n");
+    const text = rendered.render(80).join("\n");
 
     expect(text).toContain("First?");
     expect(text).toContain("(o) one");
@@ -340,15 +360,17 @@ describe("ask-user-question decision journal", () => {
     h.customInputQueue.push("\x1b");
 
     const result = await runTool(h, "ask", {
-      questions: [{
-        id: "deploy",
-        question: "Ship now?",
-        options: [{ label: "ship" }, { label: "wait" }],
-      }],
+      questions: [
+        {
+          id: "deploy",
+          question: "Ship now?",
+          options: [{ label: "ship" }, { label: "wait" }],
+        },
+      ],
     });
 
     const rendered = h.tools.get("ask")!.renderResult!(result, h.ctx);
-    const text = (Array.isArray(rendered) ? rendered : rendered.render(80)).join("\n");
+    const text = rendered.render(80).join("\n");
     // Cancelled OMP results carry no option set, so the card falls back to the
     // plain status string rather than fabricating an empty question.
     expect(text).toContain("[ERROR] Ask");

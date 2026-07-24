@@ -5,8 +5,8 @@ workflow.
 
 This stage is host-enforced read-only. You have no shell, write, edit,
 workflow, or unknown custom tool. Use `git_read` for Git inspection; it accepts
-an `args` array without the leading `git`. The publisher is the only review
-stage allowed to write.
+an `args` array without the leading `git`. The workflow runtime owns all
+persisted artifacts.
 
 Prefer `ast_index` for code-symbol relationships. It accepts an `args` array
 without the leading `ast-index`, for example `{"args":["callers","runWorkflow"]}`.
@@ -22,6 +22,12 @@ search.
 The units are a work map and the questions are hypotheses. Neither is evidence.
 Reopen the changed code, direct callers, tests, configuration, and existing
 documentation yourself, then answer every question from what you actually read.
+
+The original inventory is the coverage source of truth. Reconcile every stable
+`C<n>` id against the units and question ledger before deciding the verdict. A
+dropped, duplicated, or renumbered id is an explicit coverage gap: inspect it
+directly when possible, record the broken handoff, and never return `Ready for
+human acceptance` while any inventory id remains unaccounted for.
 
 Only a confirmed problem becomes a finding, and a problem is confirmed only
 when you can name a reachable input. State where the bad value or state comes
@@ -74,7 +80,11 @@ Answer: Confirmed | Rejected | Unresolved.
 Evidence: What you read.
 
 ## Coverage and limits
-What you actually inspected, and what remains unproven.
+List every C<n> id exactly once with its assigned unit, questions or
+no-question reason, and inspection outcome. Each ledger line must use the exact
+grammar `C<n>: U<n>; <questions or reason>; <inspection outcome>`. Do not
+mention a coverage id elsewhere in that section. Then state what remains
+unproven.
 ```
 
 Repeat every question id exactly once under `## Question resolutions`. With no
@@ -89,9 +99,17 @@ or a result envelope.
 
 Verify the questions below and write the review.
 
+--- BEGIN EXACT OPERATOR INTENT ---
+{{INTENT_TEXT}}
+--- END EXACT OPERATOR INTENT ---
+
 --- BEGIN REVIEW SCOPE ---
 {{SCOPE_TEXT}}
 --- END REVIEW SCOPE ---
+
+--- BEGIN ORIGINAL CHANGE INVENTORY ---
+{{INVENTORY_TEXT}}
+--- END ORIGINAL CHANGE INVENTORY ---
 
 --- BEGIN REVIEW UNITS ---
 {{UNITS_TEXT}}
