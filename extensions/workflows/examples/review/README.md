@@ -6,11 +6,15 @@ its durable evidence; no model session writes or republishes reports.
 The workflow receives only a non-empty semantic text string. On a fresh call, a
 read-only clarifier returns the shaped decision `{decision, questions}`. A
 `continue` decision starts the full review. A `needs_operator` decision persists
-the exact intent and readable questions, returns their complete refs, and stops.
+the exact intent and readable questions, returns their complete refs, declares a
+generic actionable handoff, and stops. After Pi is idle, the oldest question
+opens directly in the primary editor. Arrow/Enter selection or inline custom
+text starts one host-owned continuation; bare `/workflows` reopens a question
+that was dismissed with Escape.
 
-A later call supplies the operator's answers as ordinary text and attaches
+A continuation supplies the operator's answers as ordinary text and attaches
 exactly `intent.md` plus `clarification-questions.md` through the workflow
-tool's host-owned `continuation` field. The runtime verifies and copies both
+host's closed `continuation` field. The runtime verifies and copies both
 same-origin refs before workflow code starts. The entry then proves that their
 persisted source target was the Package workflow named `review` in
 `prepare-clarification`, persists the answers, and runs the review.
@@ -19,8 +23,9 @@ Continuation never locates an artifact by run id plus a conventional filename.
 The caller supplies the complete `{ runId, artifactId, name, sha256 }`
 references returned by the paused call. Matching names and a successful source run
 are insufficient: runtime-verified source target, artifact kind, and stage must
-also match the prepare contract. Interactive questioning is deliberately not
-part of this workflow: a preparation run pauses at a real operator boundary.
+also match the prepare contract. The workflow declares question content, while
+the generic host owns UI, FIFO ordering, claim state, and continuation launch;
+there is no review-specific UI or result protocol.
 
 ## Files
 
@@ -84,8 +89,8 @@ flowchart LR
     P["fresh exact intent"] --> C["read-only clarifier decision"]
     C -->|"needs operator"| A["intent.md + clarification-questions.md refs"]
     C -->|"continue"| R1
-    A --> H["operator answers"]
-    H --> X["host continuation: verify and consume refs"]
+    A --> H["host inline operator question"]
+    H --> X["atomic continuation: verify and consume refs"]
     X --> R1["R1: resolve scope"]
     R1 --> R2A["R2a: inventory changes"]
     R2A --> R2B["R2b: plan review units"]

@@ -9,8 +9,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
 ## Local source truth
 
 - `extensions/workflows/index.ts` registers the `workflow` tool and `/workflows`
-  command. It composes target resolution, execution, status/detail rendering,
-  progress, transcript and catalog owners without redefining their policies. The
+  command. It wires lifecycle scheduling, rendering, command routing, target
+  resolution, transcript, launcher, handoff, and catalog owners without
+  redefining their policies. The
   model-callable tool keeps Pi `approval: "exec"` with full-host/no-sandbox
   warning details; explicit operator `/workflows run` does not pass through that
   tool approval and adds no second Locus prompt. Interactive command runs claim
@@ -20,6 +21,12 @@ or borrowed runtime implementation was identified for this source-audit slice.
   is the sole workflow operator-cancellation path, and reports `stopping` until
   terminal settlement. Native command completion returns full argument strings
   for grammar-owned tokens and yields free-text tails.
+- `extensions/workflows/workflow-command-launcher.ts` is the single command
+  execution policy used by flat and compatibility command routes. It owns the
+  current session lease, exclusive background launch, non-exclusive tool
+  attachment, runner `onRunStart` binding, terminal observation, stop/shutdown,
+  and the shared started/busy/stale result. `index.ts` supplies a rendering
+  observer; the launcher does not define operator copy or widget layout.
 - `extensions/workflows/background-run-registry.ts` owns the process-local stable
   session/project identity, a generation-scoped callback lease, abort controller,
   and terminal promise for command and tool runs. Tool control is non-exclusive
@@ -29,6 +36,12 @@ or borrowed runtime implementation was identified for this source-audit slice.
   immediately disposes its session-owned progress component, including its
   live-store listener and timer, so a late child cannot repaint or append into a
   reloaded session.
+- `extensions/workflows/operator-handoff-service.ts` owns persisted handoff
+  classification as actionable, nonactionable, or invalid. It revalidates the
+  current target and script identity, atomically claims the source handoff,
+  delegates continuation to `workflow-command-launcher.ts`, and releases the
+  claim when launch is busy or stale. The adjacent controller owns only
+  session-local FIFO, snooze, question collection, and mount/launch guards.
 - `extensions/workflows/workflow-transcript.ts` owns the explicit command/tool
   transcript boundary. Command and tool runs buffer lifecycle without any
   active-run `sendMessage`. After completion, a command awaits `waitForIdle`,
@@ -288,8 +301,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/examples/review/review.workflow.mjs` is a curated
   review composition, not a new runtime primitive. A fresh semantic string goes
   first to a shaped read-only clarifier. It either continues or publishes exact
-  intent/question refs and stops. A later call supplies non-empty answers as
-  text while host continuation verifies and copies both refs before entry code;
+  intent/question refs, declares a generic structured operator handoff, and
+  stops. The workflow host then projects those questions directly and supplies
+  the deterministic non-empty answer text while continuation verifies and
+  copies both refs before entry code;
   the workflow validates terminal provenance and publishes those answers. Both
   fresh-continue and continuation paths then run five
   sequential read-only sessions for scope, inventory, units, questions, and
@@ -343,26 +358,32 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `docs/extensions/active/workflows.md` is the canonical workflow DSL and
   authoring contract.
 
-## Pi 0.80.3 command and custom-UI contracts
+## Pi 0.82.0 command, lifecycle, and custom-UI contracts
 
-The installed `@earendil-works/pi-coding-agent` package is version `0.80.3`.
+The installed `@earendil-works/pi-coding-agent` package is version `0.82.0`.
 Its local source establishes the launch guard:
 
-- `dist/core/agent-session.js:723-750` executes registered extension commands
+- `dist/core/agent-session.js:785-932` executes registered extension commands
   immediately, including while the parent agent is streaming.
-- `dist/core/agent-session.js:1001-1026` routes a streaming custom message with
+- `dist/core/agent-session.js:1058-1090` routes a streaming custom message with
   no `deliverAs` to `agent.steer()`; `triggerTurn:false` only appends without a
   turn when the session is already idle.
-- `dist/core/extensions/types.d.ts:208-250` exposes `ctx.isIdle()` on every
+- `dist/core/extensions/types.d.ts:214-252` exposes `ctx.isIdle()` on every
   extension context and `waitForIdle()` on command contexts. The workflow
   command uses the synchronous idle check to fail a busy launch closed, then
   uses `waitForIdle()` after completion because the parent may start streaming
   while a long workflow is still active.
-- `dist/core/agent-session.js:1813-1815` binds `ctx.isIdle()` to
-  `!this.isStreaming` in the real host.
-- `dist/modes/interactive/interactive-mode.js:1151-1159` binds command
+- `dist/core/agent-session.js:587-594` binds `ctx.isIdle()` to the complete
+  agent-run state, including post-turn continuation.
+- `dist/modes/interactive/interactive-mode.js:1212-1220` binds command
   `waitForIdle()` to `session.agent.waitForIdle()` in the TUI; the RPC and
   print/JSON modes bind the same primitive in their mode adapters.
+- `dist/core/agent-session.js:305-322` and
+  `dist/core/extensions/types.d.ts:540,866` expose `agent_settled` only after
+  the full agent run is inactive. Workflow questions
+  triggered by a tool run use that terminal event rather than `turn_end`, which
+  can occur before a retry, compaction retry, or queued continuation has
+  finished.
 - `examples/extensions/send-user-message.ts:17-35` demonstrates the same
   fail-closed command pattern: check `ctx.isIdle()`, warn, and return before a
   message send when the agent is busy.
@@ -382,6 +403,21 @@ test proves zero workflow execution, zero `sendMessage`, and a warning. A TOCTOU
 test launches idle, switches the parent to streaming before workflow completion,
 proves no message is sent while busy, settles the parent, then observes exactly
 one append delivery with no steer, follow-up, model turn, or raw result detail.
+
+Actionable workflow handoffs add a strict runtime-owned envelope and a
+source-adjacent atomic claim while leaving `result.json` immutable. The direct
+question queue reads only validated self-contained-static handoffs, rechecks
+artifact digests and target/script identity before continuation, and serializes
+all Locus-owned custom UI through the shared operator-interaction owner. TUI
+uses inline select/text editing; RPC uses native bidirectional UI requests;
+print/JSON accepts only explicit `--answer` input. Pi provides no global lock for
+third-party extensions, so bare `/workflows` is the documented recovery path.
+
+First-class `/workflow-run`, `/workflow-stop`, `/workflow-list`,
+`/workflow-info`, `/workflow-status`, and `/workflow-continue` registrations
+exist for native slash filtering and Tab selection. They route through the same
+handlers as compatibility `/workflows <subcommand>` forms; no duplicate launcher
+or cancellation owner exists.
 
 ## Workflow-author boundary
 
@@ -406,7 +442,12 @@ surface. The active default package surface remains the `workflows` extension at
   entrypoints.
 - `tests/shared/workflows/workflow-script-identity.test.ts`,
   `tests/shared/workflows/workflow-run-snapshot.test.ts`,
+  `tests/shared/workflows/workflow-handoff.test.ts`,
+  `tests/extensions/workflows/workflow-handoff-integration.test.ts`,
   `tests/extensions/workflows/workflow-identity-projection.test.ts`,
+  `tests/extensions/workflows/workflow-operator-handoff-controller.test.ts`,
+  `tests/extensions/workflows/workflow-operator-handoff-service.test.ts`,
+  `tests/extensions/workflows/workflow-command-launcher.test.ts`,
   `tests/shared/workflows/workflow-group-failure.test.ts`,
   `tests/extensions/workflows/workflow-catalog.test.ts`,
   `tests/extensions/workflows/workflow-catalog-viewer.test.ts`,

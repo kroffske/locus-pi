@@ -24,7 +24,7 @@ contains exactly these ten entrypoints:
 | `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
-| `workflows`           | Provides `/workflows` and the `workflow` tool for reviewed trusted JavaScript workflows, agent orchestration, and direct model-call nodes.                                                                                                             |
+| `workflows`           | Provides `/workflows`, first-class `/workflow-*` commands, and the `workflow` tool for reviewed trusted JavaScript workflows, child-agent orchestration, and actionable operator handoffs.                                                             |
 
 Each retained extension also has a manifest and a manual under
 [`docs/extensions/active/`](docs/extensions/active/). Maintainer source-audit
@@ -44,21 +44,27 @@ Only these names are registered as Package workflows:
 Use the operator catalog to inspect and run them:
 
 ```text
-/workflows list
-/workflows info live-smoke
-/workflows run live-smoke
-/workflows stop last
+/workflow-list
+/workflow-info live-smoke
+/workflow-run live-smoke
+/workflow-stop last
 /ps
 ```
 
-`/workflows run` starts one interactive run in the background and returns the
+`/workflow-run` starts one interactive run in the background and returns the
 editor immediately. The compact widget below the editor shows the current
 workflow stage and one active child; `/ps` expands the same shared agent fleet
 for leaf selection and readable drill-down. A second interactive run in the
-same session/project is rejected until the first run settles. `/workflows stop [runId|last]`
+same session/project is rejected until the first run settles. `/workflow-stop [runId|last]`
 requests cancellation and remains honest about the run being
 `stopping` until its terminal result is persisted. The programmatic `workflow`
-tool remains awaited and headless.
+tool remains awaited and headless. Compatibility `/workflows <subcommand>`
+forms remain available.
+
+When a workflow declares an actionable operator handoff, its oldest pending
+question opens directly in the primary editor after Pi is idle. Escape snoozes
+without cancelling; bare `/workflows` reopens it. `/workflow-continue` answers
+the source run through verified artifacts and one atomic continuation claim.
 
 Project and user workflow directories remain scan-based. A pi-native
 `<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,
@@ -85,7 +91,7 @@ package behavior.
 ## Requirements
 
 - Node.js `>=22.19.0`.
-- Pi `0.80.x`; the package peer floor is `0.80.3`.
+- Pi `0.82.x`; the package peer floor is `0.82.0`.
 - Ripgrep (`rg`) on `PATH`; the curated `requirements-grill` workflow uses it
   for its bounded read-only repository search.
 - A trusted project and reviewed local workflow sources.

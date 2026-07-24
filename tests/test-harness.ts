@@ -30,7 +30,7 @@ export interface Harness {
   notifications: string[];
   notificationEvents: Array<{ message: string; level?: "info" | "warning" | "error" }>;
   sentMessages: Array<{ message: ExtensionMessage; options?: SendMessageOptions }>;
-  /** Pi 0.80.3 sendCustomMessage routing: streaming defaults to steer; idle/no-trigger appends. */
+  /** Pi 0.82.0 sendCustomMessage routing: streaming defaults to steer; idle/no-trigger appends. */
   customMessageDeliveries: Array<"steer" | "followUp" | "nextTurn" | "turn" | "append">;
   isStreaming: boolean;
   waitForIdleCalls: number;

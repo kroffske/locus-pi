@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import workflows, { workflowArgumentCompletions } from "../../../extensions/workflows/index.js";
+import workflows, {
+  workflowArgumentCompletions,
+  workflowFlatCommandCompletions,
+} from "../../../extensions/workflows/index.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -76,5 +79,48 @@ describe("workflow command argument completion", () => {
     expect(workflowArgumentCompletions("run a", root, root)).toContainEqual(
       expect.objectContaining({ value: "run alpha" }),
     );
+  });
+
+  it("registers flat commands as thin routes with native argument completions", async () => {
+    const root = project();
+    const harness = createHarness(root);
+    workflows(harness.pi);
+    await emit(harness, "session_start");
+
+    expect([...harness.commands.keys()]).toEqual(
+      expect.arrayContaining([
+        "workflows",
+        "workflow-run",
+        "workflow-stop",
+        "workflow-list",
+        "workflow-info",
+        "workflow-status",
+        "workflow-continue",
+      ]),
+    );
+    expect(harness.commands.get("workflow-run")?.getArgumentCompletions?.("a")).toContainEqual(
+      expect.objectContaining({ value: "alpha", label: "alpha" }),
+    );
+    expect(harness.commands.get("workflow-status")?.getArgumentCompletions?.("20260724-13")).toContainEqual(
+      expect.objectContaining({ value: "20260724-130000-new" }),
+    );
+    expect(harness.commands.get("workflow-stop")?.getArgumentCompletions?.("")).toContainEqual(
+      expect.objectContaining({ value: "last", label: "last" }),
+    );
+    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260724-130000-new ")).toEqual([]);
+    expect(harness.commands.get("workflow-list")?.getArgumentCompletions?.("auth")).toBeNull();
+  });
+
+  it("keeps flat completion values scoped to the command argument buffer", () => {
+    const root = project();
+    expect(workflowFlatCommandCompletions("run", "a", root, root)).toContainEqual(
+      expect.objectContaining({ value: "alpha", label: "alpha" }),
+    );
+    expect(workflowFlatCommandCompletions("info", "a", root, root)).toContainEqual(
+      expect.objectContaining({ value: "alpha", label: "alpha" }),
+    );
+    expect(workflowFlatCommandCompletions("continue", "20260724-130000-new ", root, root)).toEqual([
+      expect.objectContaining({ value: "20260724-130000-new --answer ", label: "--answer" }),
+    ]);
   });
 });

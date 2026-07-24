@@ -136,6 +136,23 @@ suite. This is a `live-host-proof` gap, recorded rather than closed: closing it 
 a live-smoke concern to decide on its own merits, not a side effect of deleting a
 primitive.
 
+## Amendment 2026-07-25 — actionable review clarification
+
+The `review` portfolio shape now declares its clarification as a generic
+versioned operator handoff after persisting `intent.md` and
+`clarification-questions.md`. This does not add a fifth curated workflow or a
+review-specific host protocol. The shared workflow runtime projects the oldest
+question directly in Pi, verifies the two declared artifacts and unchanged
+self-contained-static script identity, atomically claims one continuation, and
+reuses the ordinary workflow launcher.
+
+Escape snoozes the question without cancelling the source run; bare
+`/workflows` reopens it, and `/workflow-stop` remains the only cancellation
+path. `/workflow-continue` is distinct from replay-only `--resume`. Pi 0.82.0 is
+the minimum host because tool-origin projection relies on the terminal
+`agent_settled` lifecycle event. TUI is inline-interactive, RPC uses native
+bidirectional UI requests, and JSON/print requires an explicit answer.
+
 ## Selection boundary
 
 The following shapes are not curated now:

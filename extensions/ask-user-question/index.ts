@@ -1,9 +1,10 @@
 import { Type } from "@sinclair/typebox";
-import { Text } from "@earendil-works/pi-tui";
+import { Input, Text } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui, ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, textResult } from "../_shared/pi-api.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
 import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import { requestOperatorQuestion } from "../_shared/operator-question.js";
 import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
 import { validateParams } from "../_shared/validation.js";
 import { redactForSensitivity } from "../_shared/redaction.js";
@@ -313,6 +314,55 @@ async function askSingleQuestion(
   signal: AbortSignal,
   options: { previous?: Pick<AskSelection, "selectedOptions" | "customInput">; navigation?: AskNavigation } = {},
 ): Promise<AskSelection> {
+  const sharedSingleQuestionAvailable =
+    ctx.mode === "rpc" || (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined);
+  if (!multi && timeoutMs === undefined && sharedSingleQuestionAvailable) {
+    const shared = await requestOperatorQuestion(
+      ctx,
+      {
+        question: question.question,
+        subject: "Ask",
+        options: optionLabels.map((label, index) => ({
+          label,
+          value: label,
+          ...(question.recommended === index ? { recommended: true } : {}),
+        })),
+        allowCustom: true,
+        customLabel: OTHER_OPTION,
+        customPlaceholder: "Type a custom response",
+        ...(options.navigation?.progressText ? { progressText: options.navigation.progressText } : {}),
+        ...(options.navigation === undefined
+          ? {}
+          : {
+              navigation: {
+                allowBack: options.navigation.allowBack,
+                allowForward: options.navigation.allowForward,
+              },
+            }),
+        ...(options.previous?.customInput !== undefined
+          ? { initialAnswer: { kind: "custom" as const, answer: options.previous.customInput } }
+          : options.previous?.selectedOptions[0] !== undefined
+            ? { initialAnswer: { kind: "option" as const, answer: options.previous.selectedOptions[0] } }
+            : {}),
+      },
+      { signal },
+    );
+    if (shared.status === "answered") {
+      return shared.kind === "custom"
+        ? { selectedOptions: [], customInput: shared.answer, cancelled: false, timedOut: false }
+        : { selectedOptions: [shared.answer], cancelled: false, timedOut: false };
+    }
+    if (shared.status === "navigate") {
+      return {
+        selectedOptions: shared.answer?.kind === "option" ? [shared.answer.answer] : [],
+        ...(shared.answer?.kind === "custom" ? { customInput: shared.answer.answer } : {}),
+        cancelled: false,
+        timedOut: false,
+        navigation: shared.direction,
+      };
+    }
+    return { selectedOptions: [], cancelled: true, timedOut: false };
+  }
   if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
     return askQuestionWithCustomUi(ctx, question, optionLabels, multi, timeoutMs, signal, options);
   }
@@ -395,7 +445,6 @@ async function askMultiQuestion(
 
 interface AskQuestionComponentArgs {
   tui: CustomUiTui;
-  ctx: ExtensionContext;
   question: OmpQuestion;
   optionLabels: string[];
   multi: boolean;
@@ -415,7 +464,6 @@ interface AskRenderedChoice {
 
 class AskQuestionComponent implements CustomUiComponent {
   #tui: CustomUiTui;
-  #ctx: ExtensionContext;
   #question: OmpQuestion;
   #optionLabels: string[];
   #multi: boolean;
@@ -427,15 +475,16 @@ class AskQuestionComponent implements CustomUiComponent {
   #selected = new Set<string>();
   #selectedValue: string | undefined;
   #customInput: string | undefined;
+  #customEditor = new Input();
+  #mode: "select" | "custom" = "select";
+  #validationMessage: string | undefined;
   #cursorIndex = 0;
   #finished = false;
-  #busy = false;
   #timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   #abortHandler: (() => void) | undefined;
 
   constructor(args: AskQuestionComponentArgs) {
     this.#tui = args.tui;
-    this.#ctx = args.ctx;
     this.#question = args.question;
     this.#optionLabels = args.optionLabels;
     this.#multi = args.multi;
@@ -445,6 +494,10 @@ class AskQuestionComponent implements CustomUiComponent {
     this.#navigation = args.navigation;
     this.#theme = args.theme;
     this.#customInput = args.previous?.customInput;
+    this.#customEditor.focused = true;
+    if (this.#customInput !== undefined) this.#customEditor.setValue(this.#customInput);
+    this.#customEditor.onSubmit = (value) => this.#submitCustomInput(value);
+    this.#customEditor.onEscape = () => this.#cancel();
 
     if (this.#multi) {
       this.#selected = new Set(
@@ -468,16 +521,25 @@ class AskQuestionComponent implements CustomUiComponent {
     const choices = this.#choices();
     this.#clampCursor(choices.length);
     const [primary = "Choose an answer", ...questionBody] = splitLines(this.#question.question);
+    const body =
+      this.#mode === "custom"
+        ? [
+            ...questionBody,
+            "Type a custom response, then press Enter.",
+            ...this.#customEditor.render(Math.max(1, width - 6)).map((line) => `> ${line}`),
+            ...(this.#validationMessage === undefined ? [] : [this.#validationMessage]),
+          ]
+        : [...questionBody, ...choices.map((choice, index) => this.#renderChoice(choice, index))];
     return renderOperatorBlock(
       {
-        type: "SELECT",
+        type: this.#mode === "custom" ? "INPUT" : "SELECT",
         subject: "Ask",
         primary,
         badges: [
           ...(this.#multi ? [{ text: "MULTI", tone: "accent" as const }] : []),
           ...(this.#navigation?.progressText ? [{ text: this.#navigation.progressText, tone: "muted" as const }] : []),
         ],
-        body: [...questionBody, ...choices.map((choice, index) => this.#renderChoice(choice, index))],
+        body,
         controls: [this.#renderHelp()],
       },
       width,
@@ -486,7 +548,13 @@ class AskQuestionComponent implements CustomUiComponent {
   }
 
   async handleInput(data: string): Promise<void> {
-    if (this.#finished || this.#busy) return;
+    if (this.#finished) return;
+    if (this.#mode === "custom") {
+      this.#validationMessage = undefined;
+      this.#customEditor.handleInput(data);
+      this.#requestRender();
+      return;
+    }
     if (isEscape(data) || isCtrlC(data)) {
       this.#cancel();
       return;
@@ -523,7 +591,7 @@ class AskQuestionComponent implements CustomUiComponent {
   }
 
   invalidate(): void {
-    // No cached render state.
+    this.#customEditor.invalidate();
   }
 
   #choices(): AskRenderedChoice[] {
@@ -557,6 +625,7 @@ class AskQuestionComponent implements CustomUiComponent {
   }
 
   #renderHelp(): string {
+    if (this.#mode === "custom") return "enter submit | esc cancel";
     if (this.#navigation !== undefined) {
       return this.#multi
         ? "up/down move | space toggle | enter Done | left/right prev-next | esc cancel"
@@ -631,7 +700,7 @@ class AskQuestionComponent implements CustomUiComponent {
       return;
     }
     if (choice.kind === "other") {
-      await this.#openCustomInput();
+      this.#openCustomInput();
       return;
     }
     if (this.#multi) {
@@ -647,26 +716,26 @@ class AskQuestionComponent implements CustomUiComponent {
     this.#finishCurrentState();
   }
 
-  async #openCustomInput(): Promise<void> {
-    this.#busy = true;
+  #openCustomInput(): void {
     this.#clearTimeout();
-    try {
-      const custom = await promptCustomInput(this.#ctx, this.#signal);
-      if (this.#finished) return;
-      if (custom === undefined) {
-        this.#finish({ ...this.#currentResultBase(), cancelled: true, timedOut: false });
-        return;
-      }
-      if (this.#multi) {
-        this.#selected.clear();
-      } else {
-        this.#selectedValue = undefined;
-      }
-      this.#customInput = custom;
-      this.#finishCurrentState();
-    } finally {
-      this.#busy = false;
+    this.#mode = "custom";
+    this.#validationMessage = undefined;
+    if (this.#customInput !== undefined) {
+      this.#customEditor.setValue(this.#customInput);
     }
+  }
+
+  #submitCustomInput(value: string): void {
+    const custom = value.trim();
+    if (custom === "") {
+      this.#validationMessage = "Response must not be empty.";
+      this.#requestRender();
+      return;
+    }
+    if (this.#multi) this.#selected.clear();
+    else this.#selectedValue = undefined;
+    this.#customInput = custom;
+    this.#finishCurrentState();
   }
 
   #finishCurrentState(navigation?: "back" | "forward", timedOut = false): void {
@@ -754,7 +823,6 @@ async function askQuestionWithCustomUi(
     const resolvedTheme = operatorTheme(theme);
     return new AskQuestionComponent({
       tui,
-      ctx,
       question,
       optionLabels,
       multi,
@@ -957,6 +1025,17 @@ async function selectWithTimeout(
 
 async function promptCustomInput(ctx: ExtensionContext, signal: AbortSignal): Promise<string | undefined> {
   if (signal.aborted) return undefined;
+  if (ctx.mode === "rpc") {
+    const raw = await (
+      ctx.ui.input as unknown as (
+        title: string,
+        placeholder?: string,
+        opts?: { signal?: AbortSignal },
+      ) => Promise<string | undefined | { value: string; cancelled?: boolean }>
+    )("[INPUT] Ask custom response", "Type a custom response", { signal });
+    if (raw === undefined || typeof raw === "string") return raw;
+    return raw.cancelled === true ? undefined : raw.value;
+  }
   const result = await requestOperatorInput(ctx, {
     kind: "editor",
     title: "[INPUT] Ask custom response",

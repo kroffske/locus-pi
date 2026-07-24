@@ -87,7 +87,8 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      host-enforced `readOnly: true` plus `repository_check`, never unrestricted
      shell, and their intent, plans, units, predecessor handoffs, results, and
      final verification inputs have explicit bounds.
-- **Run:** `/workflows run <name|path> [input]` or the
+- **Run:** `/workflow-run <name|path> [input]` (compatibility:
+  `/workflows run <name|path> [input]`) or the
   `workflow { name | scriptPath, input, continuation? }` tool. Both surfaces pass
   only optional bounded semantic text. The tool can separately attach 1–8
   complete prior-run artifact refs through its closed `continuation` control;
@@ -107,11 +108,18 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
 - **Read the result:** `.locus/runtime/workflows/<runId>/result.json`. Top-level
   `disposition` is the operator lifecycle truth: `completed`,
   `awaiting_operator`, `cancelled`, or `failed`. Use
-  `awaitOperator({ reason })` immediately before a successful handoff return;
-  it records a bounded declaration outside the returned value, so existing
-  payload/continuation shapes stay unchanged. The runner honors the declaration
-  only when the run otherwise succeeds; an abort or failure takes precedence.
-  The last declaration wins. Top-level
+  `awaitOperator({ reason, operatorHandoff? })` immediately before a successful
+  handoff return. The optional handoff declares bounded select/text questions
+  plus exact current-run continuation artifact refs; the runner supplies its
+  version, origin, stable id, and verified target/script identity. It records
+  outside the returned value, so existing payload/continuation shapes stay
+  unchanged. A reason-only declaration remains valid but is not directly
+  actionable. The runner honors the declaration only when the run otherwise
+  succeeds; an abort or failure takes precedence. The last declaration wins.
+  The host can reopen the oldest actionable question through `/workflows` or
+  `/workflow-continue <runId>`, verifies artifacts and identity again, atomically
+  claims one continuation, and never rewrites source `result.json`. Escape
+  snoozes; `/workflow-stop` is the explicit cancellation path. Top-level
   boolean `result.ok` is reserved as the script's run outcome: `false` makes the
   outer run fail even without a technical `error`; missing, nested, or
   non-boolean `ok` keeps legacy execution-success semantics. A top-level

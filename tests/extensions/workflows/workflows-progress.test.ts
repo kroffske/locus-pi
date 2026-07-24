@@ -1582,8 +1582,10 @@ describe("workflow progress widget", () => {
     const widget = harness.widgets.get("workflows") ?? "";
     expect(widget).toContain("[VIEW]");
     expect(widget).toContain("Workflow commands");
-    expect(widget).toContain("Catalog: /workflows list [query]");
-    expect(widget).toContain("Run: /workflows run <name|path>");
+    expect(widget).toContain("Catalog: /workflow-list [query]");
+    expect(widget).toContain("Run: /workflow-run <name|path>");
+    expect(widget).toContain("Continue: /workflow-continue <runId>");
+    expect(widget).toContain("Existing /workflows <subcommand> forms remain supported.");
     expect(harness.notifications).toEqual([]);
   });
 

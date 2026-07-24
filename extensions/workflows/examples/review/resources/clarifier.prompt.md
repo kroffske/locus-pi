@@ -16,7 +16,18 @@ question tool, or infer that a model-written status means approval.
 Return one JSON value only. When operator input is required:
 
 ```json
-{ "decision": "needs_operator", "questions": ["<question with the missing decision and why it matters>"] }
+{
+  "decision": "needs_operator",
+  "questions": [
+    {
+      "id": "review-scope",
+      "prompt": "<question with the missing decision and why it matters>",
+      "options": ["<concise choice>", "<concise choice>"],
+      "recommended": "<one exact option when evidence supports a default>",
+      "allowCustom": true
+    }
+  ]
+}
 ```
 
 When the intent is already executable, return:
@@ -26,8 +37,12 @@ When the intent is already executable, return:
 ```
 
 Use `continue` only when no operator choice materially changes the review
-scope. Use 1-8 unique, non-blank questions otherwise. Each question must fit in
-1,000 characters; all questions together must fit in 4,000 characters. Do not
+scope. Use 1-8 unique questions otherwise. Every id must match
+`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. Each prompt must fit in 500 characters;
+all prompts together must fit in 4,000 characters. Use 1-8 concise unique
+options when the decision has known choices. Use an empty options array only
+for a genuinely free-text answer and set `allowCustom: true`. When a
+recommended choice is justified, it must exactly equal one option. Do not
 return Markdown, prose, or a result envelope around the JSON.
 
 ## Exact operator intent

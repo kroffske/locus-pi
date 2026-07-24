@@ -62,7 +62,10 @@ import type { AgentLiveExecutionHandle, AgentLiveRow } from "../_shared/agent-sd
 import type { AgentDefinition } from "../_shared/types.js";
 import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator-ui.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
-import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import {
+  isStaleInlineOperatorInteractionError,
+  requestInlineOperatorInteraction,
+} from "../_shared/operator-interaction.js";
 
 const AGENT_PARAM_BASE_DESCRIPTION =
   "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.";
@@ -461,14 +464,19 @@ async function openFleetMenu(
   };
   let action: { kind: "close" } | { kind: "drill"; rowId: string } | { kind: "stop"; rowId: string };
   try {
-    action = await requestInlineOperatorInteraction(ctx, (tui, theme, keybindings, done) => {
-      if (component !== undefined) {
-        disposeComponent();
-      }
-      component = new FleetFocusComponent(rows, keybindings, tui, done, coerceTheme(theme));
-      fleetFocusComponents.add(component);
-      return component;
-    });
+    try {
+      action = await requestInlineOperatorInteraction(ctx, (tui, theme, keybindings, done) => {
+        if (component !== undefined) {
+          disposeComponent();
+        }
+        component = new FleetFocusComponent(rows, keybindings, tui, done, coerceTheme(theme));
+        fleetFocusComponents.add(component);
+        return component;
+      });
+    } catch (error) {
+      if (isStaleInlineOperatorInteractionError(error)) return;
+      throw error;
+    }
     disposeComponent();
     if (!ownership.isCurrent()) return;
     if (action.kind === "stop") {
@@ -530,10 +538,15 @@ async function renderAgentBlockInteraction(ctx: ExtensionCommandContext, block: 
     AGENTS_WIDGET_FALLBACK_WIDTH,
   );
   clearAgentsTransient(ctx);
-  await requestInlineOperatorInteraction<void>(
-    ctx,
-    (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
-  );
+  try {
+    await requestInlineOperatorInteraction<void>(
+      ctx,
+      (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
+    );
+  } catch (error) {
+    if (isStaleInlineOperatorInteractionError(error)) return true;
+    throw error;
+  }
   return true;
 }
 
@@ -843,10 +856,15 @@ async function executeAgentDrillCommand(
   if (!isCurrent()) return;
   let viewer: AgentSessionViewer | undefined;
   try {
-    await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, _keybindings, done) => {
-      viewer = new AgentSessionViewer(executionAuthority, tui, done, capability.capability, rounds);
-      return viewer;
-    });
+    try {
+      await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, _keybindings, done) => {
+        viewer = new AgentSessionViewer(executionAuthority, tui, done, capability.capability, rounds);
+        return viewer;
+      });
+    } catch (error) {
+      if (isStaleInlineOperatorInteractionError(error)) return;
+      throw error;
+    }
   } finally {
     viewer?.dispose();
   }

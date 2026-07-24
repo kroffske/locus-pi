@@ -88,6 +88,15 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
+import {
+  assertWorkflowHandoffClaimEligibility,
+  assertWorkflowHandoffClaimForContinuation,
+  bindWorkflowHandoffClaim,
+  createWorkflowOperatorHandoffEnvelope,
+  releaseWorkflowHandoffClaim,
+  type WorkflowHandoffClaimLease,
+  type WorkflowOperatorHandoffEnvelope,
+} from "./workflow-handoff.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 
@@ -131,6 +140,9 @@ export interface RunWorkflowScriptOptions {
   input?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
+  /** Atomic source-handoff claim. The runner binds it to this run before
+   * trusted workflow code starts; presentation callbacks are not authoritative. */
+  operatorHandoffClaim?: WorkflowHandoffClaimLease;
   resumeFromRunId?: string;
   /** Global per-run cap across all dsl.agent() calls. Defaults to the runtime default
    *  (DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS) when unset. Exceeding it fails the run. */
@@ -169,6 +181,7 @@ export interface RunWorkflowScriptResult {
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
   continuation?: WorkflowContinuationJournal;
+  operatorHandoff?: WorkflowOperatorHandoffEnvelope;
   /** What this run did about recorded-call replay. Absent only when the run
    *  failed before its script identity was established. */
   replay?: WorkflowReplayEnvelope;
@@ -457,6 +470,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let boundContinuation: WorkflowBoundContinuation | undefined;
   let continuationProjection: WorkflowContinuationJournal | undefined;
   let awaitOperatorDeclaration: WorkflowAwaitOperatorDeclaration | undefined;
+  let handoffClaimBound = false;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
   const preludeLines: WorkflowJournalLine[] = [];
   const emitPrelude = (line: WorkflowJournalLine): void => {
@@ -525,6 +539,29 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         };
       }
     }
+    if (awaitOperatorDeclaration?.operatorHandoff !== undefined && enrichedFields.ok) {
+      try {
+        if (enrichedFields.target === undefined || enrichedFields.scriptIdentity === undefined) {
+          throw new Error("Workflow operator handoff requires persisted target and script identity.");
+        }
+        enrichedFields = {
+          ...enrichedFields,
+          operatorHandoff: createWorkflowOperatorHandoffEnvelope({
+            declaration: awaitOperatorDeclaration.operatorHandoff,
+            runId,
+            target: enrichedFields.target,
+            scriptIdentity: enrichedFields.scriptIdentity,
+            terminalArtifactRefs: enrichedFields.artifactRefs ?? [],
+          }),
+        };
+      } catch (error) {
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? (error instanceof Error ? error.message : String(error)),
+        };
+      }
+    }
     const disposition = workflowDispositionForCompletion({
       ok: enrichedFields.ok,
       aborted: opts.signal.aborted,
@@ -558,6 +595,18 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ok: disposition.status === "completed" || disposition.status === "awaiting_operator",
       disposition,
     };
+    if (opts.operatorHandoffClaim !== undefined && !handoffClaimBound) {
+      try {
+        releaseWorkflowHandoffClaim(opts.operatorHandoffClaim);
+      } catch (error) {
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          disposition: { status: "failed" },
+          error: enrichedFields.error ?? `Workflow handoff claim release failed: ${String(error)}`,
+        };
+      }
+    }
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
@@ -599,6 +648,12 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
     if (hasResume && opts.continuation !== undefined) {
       throw new Error("Workflow continuation and resumeFromRunId are mutually exclusive.");
+    }
+    if (opts.operatorHandoffClaim !== undefined) {
+      if (opts.continuation === undefined) {
+        throw new Error("Workflow operator handoff claim requires a continuation.");
+      }
+      assertWorkflowHandoffClaimForContinuation(opts.operatorHandoffClaim, opts.continuation, projectRoot);
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -655,6 +710,23 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
+  }
+  if (opts.operatorHandoffClaim !== undefined) {
+    try {
+      assertWorkflowHandoffClaimEligibility(opts.operatorHandoffClaim, { target, scriptIdentity });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      const journalLines = currentJournal(runtime);
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: journalLines,
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
   }
 
   replayPlan = planWorkflowReplay({
@@ -732,6 +804,24 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       });
     }
   }
+  if (opts.operatorHandoffClaim !== undefined) {
+    try {
+      bindWorkflowHandoffClaim(opts.operatorHandoffClaim, runId);
+      handoffClaimBound = true;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: currentJournal(runtime),
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
+  }
   const agentRunner = createWorkflowAgentRunner({
     pi: opts.pi,
     ctx: opts.ctx,
@@ -759,6 +849,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
     onAwaitOperator: (declaration) => {
+      if (awaitOperatorDeclaration !== undefined) {
+        throw new Error("awaitOperator may be declared only once per workflow run");
+      }
       awaitOperatorDeclaration = declaration;
     },
   });

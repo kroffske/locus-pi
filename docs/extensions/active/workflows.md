@@ -290,7 +290,7 @@ JavaScript is not supported.
 ### `/workflows` command
 
 ```
-/workflows                        typed command view; clears stale workflow widget
+/workflows                        reopen the oldest pending operator question, or show the workflow home
 /workflows run live-smoke         start one background workflow (returns editor)
 /workflows stop [runId|last]      request cancellation; terminal state follows settlement
 /workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
@@ -303,10 +303,51 @@ JavaScript is not supported.
 /workflows status <runId>         interactive stage evidence; bounded detail without custom UI
 ```
 
-Pressing Tab completes the command-owned grammar using full argument strings:
-the six subcommands, known workflow names, persisted run ids, `stop last`, and
-`run <name> --resume <runId>`. Catalog queries, paths, and semantic input are
-free text and deliberately return control to the editor completion system.
+The same owners are available as first-class commands:
+
+```
+/workflow-run <name|path> [input]
+/workflow-stop [runId|last]
+/workflow-list [query]
+/workflow-info [name]
+/workflow-status [runId]
+/workflow-continue <runId> [--answer <text>]
+```
+
+Pi's native slash-command filtering exposes these complete names and Tab selects
+them without first entering `/workflows`. The compatibility
+`/workflows <subcommand>` forms remain supported and keep their argument
+completion for workflow names, persisted run ids, `last`, and replay ids.
+Catalog queries, paths, and semantic input remain free text.
+
+An actionable `awaiting_operator` handoff opens directly in the primary editor
+after Pi becomes idle. There is no workflow/run picker. Multiple handoffs are
+oldest-first and show `Question 1 of N`; answering launches one
+integrity-checked continuation before the next item opens. Escape only closes
+and snoozes the question for the current session. The source run stays waiting,
+and bare `/workflows` reopens it. Only `/workflow-stop` (or its compatibility
+form) cancels a workflow.
+
+`/workflow-continue <runId>` collects answers interactively in TUI and RPC.
+`--answer` is the explicit non-interactive path and accepts exactly one
+question: closed selections require an exact label, while custom-enabled
+questions accept other non-empty text. Multi-question handoffs fail closed
+instead of guessing how one string should be distributed.
+
+Mode behavior stays explicit:
+
+| Pi mode            | Question projection                            | Answer collection                          |
+| ------------------ | ---------------------------------------------- | ------------------------------------------ |
+| TUI                | Automatic primary-editor select/text component | Arrows, Enter, or inline custom text       |
+| RPC                | Command/static projection                      | Native bidirectional extension UI requests |
+| JSON/print         | Readable one-way lifecycle output              | `/workflow-continue … --answer …` only     |
+| Embedded child SDK | Existing `session.subscribe(...)` observation  | Not applicable                             |
+
+Pi 0.82.0 is the minimum supported host for automatic questions. Locus
+serializes its own inline components and rechecks the current idle session before
+mounting. Pi exposes no global custom-UI lock for unrelated third-party
+extensions, so `/workflows` is the recovery path if another extension displaces
+the question.
 
 Every run is persisted to `.locus/runtime/workflows/<runId>/` (`journal.ndjson`
 while running, `result.json` when finished), so `status` works across sessions and
@@ -424,7 +465,7 @@ and no sandbox. Approval records consent but does not constrain the module.
 `/workflows run` is an explicit operator command and does not pass through the
 tool-approval path; `locus-pi` adds no second launch prompt or `decision` entry.
 
-Pi 0.80.3 can invoke an extension command immediately while the parent agent is still streaming. Therefore `/workflows run` first checks the real command context `ctx.isIdle()` before target resolution, transcript creation, or workflow execution. A busy session fails closed with `Workflow not started: Pi is busy streaming…`; it sends no custom message and starts no workflow. The operator retries after the current response finishes. Read-only `/workflows list` and `/workflows status` do not create transcript messages and remain available. This guard is required because `sendMessage({ triggerTurn:false })` routes to `agent.steer()` when Pi is streaming, despite `triggerTurn:false`.
+Pi 0.82.0 can invoke an extension command immediately while the parent agent is still streaming. Therefore `/workflows run` first checks the real command context `ctx.isIdle()` before target resolution, transcript creation, or workflow execution. A busy session fails closed with `Workflow not started: Pi is busy streaming…`; it sends no custom message and starts no workflow. The operator retries after the current response finishes. Read-only `/workflows list` and `/workflows status` do not create transcript messages and remain available. This guard is required because `sendMessage({ triggerTurn:false })` routes to `agent.steer()` when Pi is streaming, despite `triggerTurn:false`.
 
 After the idle check, `/workflows run` claims one process-local background lease for the current session/project, launches `runWorkflowScript` without awaiting it, and returns control to the editor. A second interactive run in that stable session/project identity is rejected with the existing run id even across an extension reload, until the predecessor settles. The programmatic `workflow` tool remains awaited and headless, but registers a non-exclusive run controller with the same owner; it does not occupy the slash-command slot. `/workflows stop [runId|last]` is the sole operator cancellation command for either launch origin. Stop is idempotent and the UI says `stopping` until settlement. Once the controlling signal is observed as aborted, the runner persists `disposition.status:"cancelled"` even if trusted script code catches a child abort. `operator_stop`, `session_shutdown`, and unknown host aborts remain distinguishable reasons.
 
@@ -479,13 +520,26 @@ diagnostic.
 
 The outer envelope also persists a runtime-owned `disposition`. Its terminal
 states are `completed`, `awaiting_operator`, `cancelled`, and `failed`; `ok`
-remains the compatibility/script-result boolean. `dsl.awaitOperator({ reason })`
-records one bounded run-local declaration and does not modify the script's
-returned `result`; the last declaration wins. At finalization, controlling
+remains the compatibility/script-result boolean. `dsl.awaitOperator({ reason,
+operatorHandoff? })` records one bounded run-local declaration and does not
+modify the script's returned `result`; the last declaration wins. A reason-only
+declaration remains readable but is not directly actionable.
+`operatorHandoff` declares a title, one or more bounded select/text questions,
+and exact continuation artifact refs owned by the current run. The runner
+supplies the version, stable handoff id, origin, and verified
+self-contained-static target/script identity. At finalization, controlling
 signal cancellation wins over failure, failure wins over a handoff declaration,
 and a successful undeclared run is completed. Readers preserve the old
 `ok -> completed|failed` behavior only when `disposition` is absent. A present
 malformed or future disposition is `unknown`, never green.
+
+Direct continuation re-reads the source envelope, verifies every declared
+artifact and the unchanged target/script identity, then atomically claims the
+handoff before using the ordinary background workflow launcher. The claim is
+bound to the child run and contains no raw answer. Launch failure releases it;
+a failed/cancelled child makes the source retryable, while a completed or newly
+waiting child resolves the source item. `result.json` is never rewritten.
+`--resume` remains recorded-call replay and is not a continuation alias.
 
 The progress panel is allocated at run start, so a workflow that emits no journal
 events still uses the same semantic completion grammar in TUI, RPC, and no-UI modes.
@@ -617,8 +671,9 @@ scrolling is unavailable. Neither projection imports or runs a workflow,
 invents an execution graph, mutates the editor, or writes a file. This focused
 view is not a generic fix for `Ctrl-O`, `cat`, or terminal scrollback.
 
-Bare `/workflows` clears stale workflow chrome and installs a typed `VIEW` with
-catalog, information, history, and run commands. Passive `/workflows list`,
+Bare `/workflows` first reopens the oldest actionable handoff. When no such
+handoff is pending, it clears stale workflow chrome and installs a typed `VIEW`
+with catalog, information, history, and run commands. Passive `/workflows list`,
 `/workflows status`, settled run receipts, and non-interactive `/workflows info`
 reuse the shared operator frame. Interactive list and info views are separate
 workflow-owned custom components; info still renders the same semantic block as
@@ -641,6 +696,9 @@ delivery.
 Static passive workflow `VIEW` closes with `Esc` from the ordinary editor. This
 removes only the last passive help/status/fallback view; active workflow `LIVE`
 stays pinned until terminal state, and persistent/shared status is not cleared.
+Escape inside an operator question similarly dismisses only that question: it
+does not abort an agent, cancel a workflow, mutate source evidence, or consume
+the queue item.
 The focused catalog owns the source-to-catalog and catalog-to-close lifecycle
 described above. The shared TUI adapter requests a full host redraw for passive
 open/close, so stale border or bracket glyphs do not remain after

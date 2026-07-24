@@ -200,7 +200,7 @@ export async function persistCommandWorkflowTranscript(
   };
   try {
     if (!isCurrent()) return false;
-    // No await between the final idle check and this call. Pi 0.80.3 chooses
+    // No await between the final idle check and this call. Pi 0.82.0 chooses
     // append-vs-steer synchronously inside sendCustomMessage.
     const pending = pi.sendMessage(message, { triggerTurn: false });
     if (pending !== undefined) await pending;

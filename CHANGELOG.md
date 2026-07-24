@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- Pi 0.82.0 is now the minimum workflow host. All four Pi peer ranges start at
+  0.82.0 and local development packages are pinned to that exact version, so
+  tool-origin workflow questions can wait for the terminal `agent_settled`
+  lifecycle event instead of opening during an intermediate turn.
+- Actionable workflow pauses now appear directly in the primary Pi editor and
+  continue the exact source run through verified artifacts, unchanged
+  target/script identity, and one atomic claim. Multiple questions serialize
+  oldest-first with `Question 1 of N`; Escape snoozes without cancelling, bare
+  `/workflows` reopens the pending question, and source `result.json` remains
+  immutable. TUI supports inline selection/custom text, RPC uses native
+  bidirectional UI requests, and JSON/print requires an explicit answer.
 - Workflow lifecycle is now explicit instead of inferred from `ok`. Runs persist
   `completed`, `awaiting_operator`, `cancelled`, or `failed`; the review
   clarification handoff keeps its existing payload but renders as waiting.
@@ -67,6 +78,10 @@ This file records user-visible changes to the public package.
   generation package or renderer stops the run before the first child session
   exists. The generation package resolves globally and is deliberately not a
   dependency.
+- Added first-class `/workflow-run`, `/workflow-stop`, `/workflow-list`,
+  `/workflow-info`, `/workflow-status`, and `/workflow-continue` commands for
+  Pi-native filtering and Tab selection. Existing `/workflows <subcommand>`
+  forms remain compatible; continuation and replay keep separate semantics.
 - Added a compact interactive workflow inspector. `/workflows run` now starts
   one background run per session/project and returns the editor immediately;
   `/workflows stop [runId|last]` requests cancellation without claiming a

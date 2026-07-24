@@ -86,6 +86,7 @@ extensions/_shared/mode-state.ts
 extensions/_shared/model-settings.ts
 extensions/_shared/operator-input.ts
 extensions/_shared/operator-interaction.ts
+extensions/_shared/operator-question.ts
 extensions/_shared/operator-status.ts
 extensions/_shared/operator-ui.ts
 extensions/_shared/permissions.ts
@@ -104,6 +105,7 @@ extensions/_shared/validation.ts
 extensions/_shared/widget-render.ts
 extensions/_shared/workflow-agent-bridge.ts
 extensions/_shared/workflow-artifacts.ts
+extensions/_shared/workflow-handoff.ts
 extensions/_shared/workflow-journal.ts
 extensions/_shared/workflow-model-resolve.ts
 extensions/_shared/workflow-replay.ts
@@ -180,10 +182,13 @@ extensions/workflows/examples/review/review-pipeline.png
 extensions/workflows/examples/review/review.workflow.mjs
 extensions/workflows/index.ts
 extensions/workflows/manifest.json
+extensions/workflows/operator-handoff-controller.ts
+extensions/workflows/operator-handoff-service.ts
 extensions/workflows/progress-widget.ts
 extensions/workflows/references/patterns.md
 extensions/workflows/run-viewer.ts
 extensions/workflows/workflow-catalog.ts
+extensions/workflows/workflow-command-launcher.ts
 extensions/workflows/workflow-transcript.ts
 package-lock.json
 package.json
@@ -221,10 +226,14 @@ tests/extensions/workflows/workflow-background-runs.test.ts
 tests/extensions/workflows/workflow-catalog-viewer.test.ts
 tests/extensions/workflows/workflow-catalog.test.ts
 tests/extensions/workflows/workflow-command-completions.test.ts
+tests/extensions/workflows/workflow-command-launcher.test.ts
 tests/extensions/workflows/workflow-diagram-artifacts.test.ts
+tests/extensions/workflows/workflow-handoff-integration.test.ts
 tests/extensions/workflows/workflow-identity-projection.test.ts
 tests/extensions/workflows/workflow-live-row-retention.test.ts
 tests/extensions/workflows/workflow-meta-phases.test.ts
+tests/extensions/workflows/workflow-operator-handoff-controller.test.ts
+tests/extensions/workflows/workflow-operator-handoff-service.test.ts
 tests/extensions/workflows/workflow-replay-live-row.test.ts
 tests/extensions/workflows/workflow-run-viewer.test.ts
 tests/extensions/workflows/workflow-transcript.test.ts
@@ -256,6 +265,8 @@ tests/shared/agents/agent-tool-activity.test.ts
 tests/shared/mode-state/mode-state.test.ts
 tests/shared/operator-ui/goal-operator-ui.test.ts
 tests/shared/operator-ui/operator-input.test.ts
+tests/shared/operator-ui/operator-interaction.test.ts
+tests/shared/operator-ui/operator-question.test.ts
 tests/shared/operator-ui/operator-ui.test.ts
 tests/shared/operator-ui/prompt-shelf-ui.test.ts
 tests/shared/security/security.test.ts
@@ -267,6 +278,7 @@ tests/shared/workflows/workflow-artifacts.test.ts
 tests/shared/workflows/workflow-continuation.test.ts
 tests/shared/workflows/workflow-evidence.test.ts
 tests/shared/workflows/workflow-group-failure.test.ts
+tests/shared/workflows/workflow-handoff.test.ts
 tests/shared/workflows/workflow-input.test.ts
 tests/shared/workflows/workflow-replay.test.ts
 tests/shared/workflows/workflow-result.test.ts

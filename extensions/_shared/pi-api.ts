@@ -326,7 +326,7 @@ export interface ExtensionContext {
   mode?: "tui" | "rpc" | "json" | "print";
   model?: ModelLike;
   modelRegistry?: ModelRegistryLike;
-  /** Real Pi 0.80.3 ctx.isIdle(): false while the parent agent is streaming. */
+  /** Real Pi 0.82.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
   /** Abort the active parent agent turn (real Pi: ctx.abort()). */
   abort?(): void;

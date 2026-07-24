@@ -8,6 +8,7 @@
   "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "Pi interactive UI for select/input/editor/custom prompts",
+    "single-question TUI calls share the Locus session-generation inline interaction queue and keep Other/text editing inside the same non-overlay component; RPC uses native select/input requests, while multi-select/default/timeout orchestration remains ask-owned",
     "Custom and fallback selectors are presented as typed SELECT surfaces; free-text follow-ups are typed INPUT surfaces",
     "Official Pi dialog results use string or undefined; a known legacy object result is normalized by the local adapter",
     "Interactive cancellation records a cancelled decision, while no-UI modes fail unavailable without recording a fake user decision",
@@ -51,6 +52,8 @@
   "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/ask-user-question.md",
   "tests": [
     "tests/extensions/ask-user-question/ask-user-question.test.ts",
+    "tests/shared/operator-ui/operator-interaction.test.ts",
+    "tests/shared/operator-ui/operator-question.test.ts",
     "tests/integration/public-registration.test.ts"
   ],
   "review": {

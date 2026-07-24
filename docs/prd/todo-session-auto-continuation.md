@@ -107,7 +107,7 @@ compatible.
 
 ## Further Notes
 
-Pi 0.80.x exposes a settled-agent lifecycle event and triggered hidden custom
+Pi 0.82.0 exposes a settled-agent lifecycle event and triggered hidden custom
 messages, so the feature can be implemented as an extension without patching Pi
 core. The official extension API remains the external behavior source:
 https://pi.dev/docs/latest/extensions

@@ -14,7 +14,7 @@ import {
 } from "./workflow-catalog.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
-// Pi 0.80.5 keeps two footer rows plus an optional extension-status row.
+// Pi 0.82.0 keeps two footer rows plus an optional extension-status row.
 const PI_HOST_FOOTER_ROWS = 3;
 const COMPACT_FOOTER_ROWS = 2;
 const SOURCE_FRAME_ROWS = 2;

@@ -80,7 +80,7 @@ projection.
 
 ## Capability-backed effort
 
-The Pi `0.80.3` model registry reports capability through `reasoning` and
+The Pi `0.82.0` model registry reports capability through `reasoning` and
 `thinkingLevelMap`. The selector uses the same semantics as Pi:
 
 - a non-reasoning model supports only `off`;

@@ -172,7 +172,7 @@ describe("ask-user-question decision journal", () => {
   it("records custom ask input through the automatic Other option", async () => {
     const h = createHarness();
     askUserQuestion(h.pi);
-    h.customInputQueue.push("\x1b[B", "\x1b[B", "\r");
+    h.customInputQueue.push("\x1b[B", "\x1b[B", "\r", "Use the release checklist.", "\r");
     const editor = vi.fn(async () => "Use the release checklist.");
     h.ctx.ui.editor = editor as never;
 
@@ -191,7 +191,9 @@ describe("ask-user-question decision journal", () => {
       selectedOptions: [],
       customInput: "Use the release checklist.",
     });
-    expect(editor).toHaveBeenCalledWith("[INPUT] Ask custom response", "");
+    expect(editor).not.toHaveBeenCalled();
+    expect(h.customComponents).toHaveLength(1);
+    expect(h.customRenderFrames.some((frame) => frame.join("\n").includes("[INPUT] Ask"))).toBe(true);
     expect(h.entries[0]).toMatchObject({
       type: "decision",
       data: {
@@ -199,6 +201,65 @@ describe("ask-user-question decision journal", () => {
         answer: { selectedOptions: [], customInput: "Use the release checklist." },
         status: "answered",
       },
+    });
+  });
+
+  it("uses native RPC select and input requests for a custom answer", async () => {
+    const h = createHarness(process.cwd(), { mode: "rpc" });
+    h.ctx.hasUI = true;
+    h.selectQueue.push("Other (type your own)");
+    const input = vi.fn(async () => "RPC release note");
+    h.ctx.ui.input = input as never;
+    askUserQuestion(h.pi);
+
+    const result = await runTool(h, "ask", {
+      questions: [
+        {
+          id: "deploy-note",
+          question: "Any extra deploy note?",
+          options: [{ label: "No note" }, { label: "Hold release" }],
+        },
+      ],
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.details).toMatchObject({
+      selectedOptions: [],
+      customInput: "RPC release note",
+    });
+    expect(h.selectCalls[0]?.title).toBe("[SELECT] Ask — Any extra deploy note?");
+    expect(input).toHaveBeenCalledWith("[INPUT] Ask custom response", "Type a custom response", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(h.customComponents).toEqual([]);
+  });
+
+  it("uses native RPC input after multi-select chooses a custom answer", async () => {
+    const h = createHarness(process.cwd(), { mode: "rpc" });
+    h.ctx.hasUI = true;
+    h.selectQueue.push("Other (type your own)");
+    const input = vi.fn(async () => "RPC multi answer");
+    h.ctx.ui.input = input as never;
+    askUserQuestion(h.pi);
+
+    const result = await runTool(h, "ask", {
+      questions: [
+        {
+          id: "multi",
+          question: "Pick many",
+          options: [{ label: "one" }, { label: "two" }],
+          multi: true,
+        },
+      ],
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.details).toMatchObject({
+      selectedOptions: [],
+      customInput: "RPC multi answer",
+    });
+    expect(input).toHaveBeenCalledWith("[INPUT] Ask custom response", "Type a custom response", {
+      signal: expect.any(AbortSignal),
     });
   });
 

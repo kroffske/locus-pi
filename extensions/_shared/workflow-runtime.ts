@@ -22,8 +22,19 @@ import type {
   WorkflowContinuationArtifact,
   WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
+import {
+  normalizeWorkflowAwaitOperatorDeclaration,
+  type WorkflowAwaitOperatorDeclaration,
+  type WorkflowOperatorHandoffDeclaration,
+  type WorkflowOperatorQuestion,
+} from "./workflow-handoff.js";
 import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
+export type {
+  WorkflowAwaitOperatorDeclaration,
+  WorkflowOperatorHandoffDeclaration,
+  WorkflowOperatorQuestion,
+} from "./workflow-handoff.js";
 
 /** The single agent-execution callback the runtime depends on. The bridge supplies
  *  the real implementation; tests supply a fake. The runtime never imports the SDK. */
@@ -108,10 +119,6 @@ export interface WorkflowUsage {
   output: number;
   totalTokens: number;
   costTotal: number;
-}
-
-export interface WorkflowAwaitOperatorDeclaration {
-  reason: string;
 }
 
 export interface WorkflowDsl {
@@ -1261,20 +1268,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   }
 
   function awaitOperator(input: WorkflowAwaitOperatorDeclaration): void {
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      throw new Error("awaitOperator input must be an object");
-    }
-    const keys = Object.keys(input).sort();
-    const reason = typeof input.reason === "string" ? input.reason.replace(/\s+/gu, " ").trim() : "";
-    if (keys.length !== 1 || keys[0] !== "reason") {
-      throw new Error("awaitOperator input must contain exactly reason");
-    }
-    if (reason === "") throw new Error("awaitOperator reason must be non-empty");
-    if (reason.length > 200) throw new Error("awaitOperator reason exceeds 200 characters");
+    const declaration = normalizeWorkflowAwaitOperatorDeclaration(input);
     if (options.onAwaitOperator === undefined) {
       throw new Error("awaitOperator is not configured by the workflow runner");
     }
-    options.onAwaitOperator({ reason });
+    options.onAwaitOperator(declaration);
   }
 
   async function workflowDsl<T = unknown>(

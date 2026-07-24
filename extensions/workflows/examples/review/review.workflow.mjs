@@ -11,6 +11,7 @@ const REVIEW_AGENT_DEFAULTS = Object.freeze({
 });
 
 const MAX_INTENT_CHARS = 16_000;
+const MAX_CLARIFIER_PROMPT_CHARS = 500;
 const MAX_CLARIFICATION_QUESTIONS_CHARS = 32_000;
 const MAX_CLARIFICATION_ANSWERS_CHARS = 16_000;
 const MAX_CLARIFICATION_CONTEXT_CHARS = 64_000;
@@ -26,7 +27,21 @@ const CLARIFIER_SCHEMA = freezeSchema({
   required: ["decision", "questions"],
   properties: {
     decision: { type: "string", enum: ["continue", "needs_operator"] },
-    questions: { type: "array", items: { type: "string" } },
+    questions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "prompt", "options", "allowCustom"],
+        properties: {
+          id: { type: "string" },
+          prompt: { type: "string" },
+          options: { type: "array", items: { type: "string" } },
+          recommended: { type: "string" },
+          allowCustom: { type: "boolean" },
+        },
+      },
+    },
   },
 });
 
@@ -212,18 +227,60 @@ function requireClarifierDecision(value) {
     throw new Error("review clarifier needs_operator decision requires 1-8 questions");
   }
   const normalized = questions.map((question, index) => {
-    if (typeof question !== "string" || question.trim() === "") {
-      throw new Error(`review clarification question ${index + 1} must be non-blank`);
+    if (typeof question !== "object" || question === null || Array.isArray(question)) {
+      throw new Error(`review clarification question ${index + 1} must be an object`);
     }
-    if (question.length > 1_000) {
-      throw new Error(`review clarification question ${index + 1} exceeds 1000 characters`);
+    const id = typeof question.id === "string" ? question.id.trim() : "";
+    const prompt = typeof question.prompt === "string" ? question.prompt.trim() : "";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(id)) {
+      throw new Error(`review clarification question ${index + 1} id is invalid`);
     }
-    return question;
+    if (prompt === "") throw new Error(`review clarification question ${index + 1} must be non-blank`);
+    if (prompt.length > MAX_CLARIFIER_PROMPT_CHARS) {
+      throw new Error(`review clarification question ${index + 1} exceeds ${MAX_CLARIFIER_PROMPT_CHARS} characters`);
+    }
+    if (!Array.isArray(question.options) || question.options.length > 8) {
+      throw new Error(`review clarification question ${index + 1} options must contain 0-8 labels`);
+    }
+    const options = question.options.map((option, optionIndex) => {
+      if (typeof option !== "string" || option.trim() === "" || option.length > 200) {
+        throw new Error(`review clarification question ${index + 1} option ${optionIndex + 1} is invalid`);
+      }
+      return option.trim();
+    });
+    if (new Set(options).size !== options.length) {
+      throw new Error(`review clarification question ${index + 1} options must be unique`);
+    }
+    if (typeof question.allowCustom !== "boolean") {
+      throw new Error(`review clarification question ${index + 1} allowCustom must be boolean`);
+    }
+    if (options.length === 0 && !question.allowCustom) {
+      throw new Error(`review clarification question ${index + 1} needs an option or custom input`);
+    }
+    const recommended =
+      question.recommended === undefined
+        ? undefined
+        : typeof question.recommended === "string"
+          ? question.recommended.trim()
+          : "";
+    if (recommended !== undefined && !options.includes(recommended)) {
+      throw new Error(`review clarification question ${index + 1} recommended option is invalid`);
+    }
+    return options.length === 0
+      ? { kind: "text", id, prompt }
+      : {
+          kind: "select",
+          id,
+          prompt,
+          options: options.map((label) => ({ label })),
+          ...(recommended === undefined ? {} : { recommended }),
+          ...(question.allowCustom ? { allowCustom: true } : {}),
+        };
   });
-  if (new Set(normalized.map((question) => question.trim())).size !== normalized.length) {
+  if (new Set(normalized.map((question) => question.id)).size !== normalized.length) {
     throw new Error("review clarification questions must be unique");
   }
-  if (normalized.reduce((total, question) => total + question.length, 0) > 4_000) {
+  if (normalized.reduce((total, question) => total + question.prompt.length, 0) > 4_000) {
     throw new Error("review clarification questions exceed 4000 combined characters");
   }
   return { decision: "needs_operator", questions: normalized };
@@ -251,10 +308,20 @@ async function decideClarification(dsl, intentText) {
   const questionsText = [
     "# Clarification Questions",
     "",
-    ...decision.questions.map((question, index) => `${index + 1}. ${question}`),
+    ...decision.questions.flatMap((question, index) => [
+      `${index + 1}. ${question.prompt}`,
+      ...(question.kind === "select" ? question.options.map((option) => `   - ${option.label}`) : []),
+    ]),
   ].join("\n");
   const questionsRef = publishArtifact("clarification-questions.md", questionsText);
-  awaitOperator({ reason: "review clarification required" });
+  awaitOperator({
+    reason: "review clarification required",
+    operatorHandoff: {
+      title: "Review clarification",
+      questions: decision.questions,
+      continuationArtifactRefs: [intentRef, questionsRef],
+    },
+  });
   return { decision: "needs_operator", result: { mode: "prepared", intentRef, questionsRef } };
 }
 

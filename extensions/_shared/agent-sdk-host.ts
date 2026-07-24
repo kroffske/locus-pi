@@ -66,7 +66,7 @@ export interface SdkAgentSessionEventLike {
 }
 export interface SdkAgentSessionLike {
   readonly sessionId: string;
-  /** Pi 0.80.3 conversation history; optional for older hosts and structural mocks. */
+  /** Pi 0.82.0 conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
   prompt(text: string, options?: { source?: string }): Promise<void>;

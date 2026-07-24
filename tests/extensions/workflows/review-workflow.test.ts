@@ -170,6 +170,8 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source.match(/readOnly: true/gu)).toHaveLength(2);
     expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
     expect(source).toContain('tools: ["read", "git_read", "ast_index", "grep", "find"]');
+    expect(source).toContain("const MAX_CLARIFIER_PROMPT_CHARS = 500");
+    expect(promptSource("clarifier.prompt.md")).toContain("Each prompt must fit in 500 characters");
     expect(source).not.toContain("REVIEW_PUBLISH_OPTIONS");
     expect(source).not.toContain("publish review package");
     expect(source).not.toContain('phase("publish-review")');
@@ -315,7 +317,21 @@ describe("workflow example: review.workflow.mjs", () => {
     const { dsl, published, answers, awaiting } = runtimeWith(
       async (request) => {
         calls.push(request);
-        return completed(request, '{"decision":"needs_operator","questions":["Which base?"]}');
+        return completed(
+          request,
+          JSON.stringify({
+            decision: "needs_operator",
+            questions: [
+              {
+                id: "review-scope",
+                prompt: "Which base?",
+                options: ["Current changes", "Last commit"],
+                recommended: "Current changes",
+                allowCustom: true,
+              },
+            ],
+          }),
+        );
       },
       { runId: "prepare-run" },
     );
@@ -330,28 +346,66 @@ describe("workflow example: review.workflow.mjs", () => {
     });
     expect(published.map((item) => [item.ref.name, item.text])).toEqual([
       ["intent.md", intent],
-      ["clarification-questions.md", "# Clarification Questions\n\n1. Which base?"],
+      [
+        "clarification-questions.md",
+        "# Clarification Questions\n\n1. Which base?\n   - Current changes\n   - Last commit",
+      ],
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.label).toBe("decide clarification");
     expect(calls[0]?.readOnly).toBe(true);
     expect(calls[0]?.prompt).toContain(intent);
     expect(answers.map((item) => item.ref.name)).toEqual(["clarifier-decision.json"]);
-    expect(awaiting).toEqual([{ reason: "review clarification required" }]);
+    expect(awaiting).toEqual([
+      {
+        reason: "review clarification required",
+        operatorHandoff: {
+          title: "Review clarification",
+          questions: [
+            {
+              kind: "select",
+              id: "review-scope",
+              prompt: "Which base?",
+              options: [{ label: "Current changes" }, { label: "Last commit" }],
+              recommended: "Current changes",
+              allowCustom: true,
+            },
+          ],
+          continuationArtifactRefs: [published[0]?.ref, published[1]?.ref],
+        },
+      },
+    ]);
   });
 
   it.each([
-    [{ decision: "continue", questions: ["Unexpected question"] }, "continue decision requires no questions"],
-    [{ decision: "needs_operator", questions: [] }, "requires 1-8 questions"],
-    [{ decision: "needs_operator", questions: ["Same?", "Same?"] }, "must be unique"],
-    [{ decision: "needs_operator", questions: ["x".repeat(1_001)] }, "exceeds 1000 characters"],
     [
-      { decision: "needs_operator", questions: Array.from({ length: 5 }, (_, index) => `${index}${"x".repeat(899)}`) },
-      "exceed 4000 combined characters",
+      {
+        decision: "continue",
+        questions: [{ id: "unexpected", prompt: "Unexpected question", options: [], allowCustom: true }],
+      },
+      "continue decision requires no questions",
+    ],
+    [{ decision: "needs_operator", questions: [] }, "requires 1-8 questions"],
+    [
+      {
+        decision: "needs_operator",
+        questions: [
+          { id: "same", prompt: "First?", options: [], allowCustom: true },
+          { id: "same", prompt: "Second?", options: [], allowCustom: true },
+        ],
+      },
+      "must be unique",
+    ],
+    [
+      {
+        decision: "needs_operator",
+        questions: [{ id: "long", prompt: "x".repeat(501), options: [], allowCustom: true }],
+      },
+      "exceeds 500 characters",
     ],
   ])("rejects invalid clarifier domain output before review stages", async (decision, message) => {
     const calls: WorkflowAgentRequest[] = [];
-    const { dsl, published } = runtimeWith(async (request) => {
+    const { dsl, published, awaiting } = runtimeWith(async (request) => {
       calls.push(request);
       return completed(request, JSON.stringify(decision));
     });
@@ -359,6 +413,7 @@ describe("workflow example: review.workflow.mjs", () => {
     await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(message);
     expect(calls.map((call) => call.label)).toEqual(["decide clarification"]);
     expect(published).toHaveLength(0);
+    expect(awaiting).toHaveLength(0);
   });
 
   it("executes from verified same-run references, persists answers, and forwards the original intent", async () => {
