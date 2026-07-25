@@ -640,42 +640,41 @@ describe("workflow example: review.workflow.mjs", () => {
     });
   });
 
-  it("names the stage and prompt when the inventory declares neither coverage nor emptiness", async () => {
+  // Handoffs pass forward as exact text: the entry orchestrates and bounds, and
+  // does not grade Markdown grammar. Coverage ids stay prompt discipline the
+  // interrogator and verifier reconcile, so imperfect prose reaches the next stage
+  // instead of ending a run that already spent several model calls.
+  it("passes an inventory with no coverage ids forward instead of ending the run", async () => {
     const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
     const outputs: Record<string, string> = {
       "decide clarification": '{"decision":"continue","questions":[]}',
       "resolve review scope": "# Review Scope\nTarget: working tree",
       "inventory changes": "# Change Inventory\n\nI looked around and found some stuff.",
+      "plan review units": "# Review Units\n## U1\nPath: `src/a.ts`",
+      "ask review questions": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "verify and write review": "# Code Review\n## Verdict\nNeeds changes.",
     };
-    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
 
-    await expect(runWorkflow(dsl, "review the worktree")).rejects.toThrow(
-      "the inventory-changes stage answer does not follow resources/change-inventory.prompt.md",
-    );
+    expect(await runWorkflow(dsl, "review the worktree")).toBe(outputs["verify and write review"]);
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+      "plan review units",
+      "ask review questions",
+      "verify and write review",
+    ]);
+    // Every stage still receives the exact preceding handoff.
+    expect(calls[3]?.prompt).toContain(outputs["inventory changes"]);
+    expect(calls[5]?.prompt).toContain(outputs["ask review questions"]);
   });
 
-  it("refuses an inventory that claims emptiness and coverage at the same time", async () => {
-    const runWorkflow = await loadWorkflow();
-    const outputs: Record<string, string> = {
-      "decide clarification": '{"decision":"continue","questions":[]}',
-      "resolve review scope": "# Review Scope\nTarget: working tree",
-      "inventory changes": [
-        "# Change Inventory",
-        "## No changes",
-        "Reason: nothing changed.",
-        "## C1",
-        "Path: `src/a.ts`",
-        "Change: except this.",
-      ].join("\n"),
-    };
-    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
-
-    await expect(runWorkflow(dsl, "review the worktree")).rejects.toThrow(
-      'declared "## No changes" together with C<n> coverage entries',
-    );
-  });
-
-  it("fails closed before interrogation when unit planning drops inventory coverage", async () => {
+  it("keeps reviewing when a stage drops or misassigns a coverage id", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
     const outputs: Record<string, string> = {
@@ -688,105 +687,58 @@ describe("workflow example: review.workflow.mjs", () => {
         "Change: Kept item.",
         "## C2",
         "Path: `src/dropped.ts`",
-        "Change: Deliberately dropped by the unit handoff.",
+        "Change: Dropped by the unit handoff.",
       ].join("\n"),
       "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/kept.ts`",
-      "ask review questions": "# Review Questions\n## Coverage gaps\nC2 is missing.",
-      "verify and write review": "# Code Review\n## Verdict\nBlocked",
-    };
-    const { dsl } = runtimeWith(async (request) => {
-      calls.push(request);
-      return completed(request, outputs[request.label!]!);
-    });
-
-    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
-      "units dropped inventory coverage id C2",
-    );
-    expect(calls.map((call) => call.label)).toEqual([
-      "decide clarification",
-      "resolve review scope",
-      "inventory changes",
-      "plan review units",
-    ]);
-  });
-
-  it("rejects a final report that drops an inventory id even when its verdict claims readiness", async () => {
-    const runWorkflow = await loadWorkflow();
-    const calls: WorkflowAgentRequest[] = [];
-    const outputs: Record<string, string> = {
-      "decide clarification": '{"decision":"continue","questions":[]}',
-      "resolve review scope": "# Review Scope\nTarget: working tree",
-      "inventory changes": [
-        "# Change Inventory",
-        "## C1",
-        "Path: `src/a.ts`",
-        "Change: first",
-        "## C2",
-        "Path: `src/b.ts`",
-        "Change: second",
-      ].join("\n"),
-      "plan review units": "# Review Units\n## U1\nCoverage: C1, C2\nPath: `src/a.ts`",
-      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U1\nC2: U1",
-      "verify and write review":
-        "# Code Review\n## Verdict\nReady for human acceptance\n## Coverage and limits\nC1: U1; inspected",
-    };
-    const { dsl } = runtimeWith(async (request) => {
-      calls.push(request);
-      return completed(request, outputs[request.label!]!);
-    });
-
-    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
-      "final review dropped inventory coverage id C2",
-    );
-    expect(calls).toHaveLength(6);
-  });
-
-  it("rejects a coverage ledger that assigns an inventory id to the wrong unit", async () => {
-    const runWorkflow = await loadWorkflow();
-    const outputs: Record<string, string> = {
-      "decide clarification": '{"decision":"continue","questions":[]}',
-      "resolve review scope": "# Review Scope\nTarget: working tree",
-      "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: first",
-      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
       "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U2; U2-Q1",
-    };
-    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
-
-    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
-      "questions handoff assigns coverage id C1 to the wrong unit",
-    );
-  });
-
-  it("does not count a prose mention as a final coverage-ledger entry", async () => {
-    const runWorkflow = await loadWorkflow();
-    const outputs: Record<string, string> = {
-      "decide clarification": '{"decision":"continue","questions":[]}',
-      "resolve review scope": "# Review Scope\nTarget: working tree",
-      "inventory changes": [
-        "# Change Inventory",
-        "## C1",
-        "Path: `src/a.ts`",
-        "Change: first",
-        "## C2",
-        "Path: `src/b.ts`",
-        "Change: second",
-      ].join("\n"),
-      "plan review units": "# Review Units\n## U1\nCoverage: C1, C2\nPath: `src/a.ts`",
-      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U1; U1-Q1\nC2: U1; U1-Q1",
       "verify and write review": [
         "# Code Review",
         "## Verdict",
-        "Ready for human acceptance",
+        "Needs changes.",
         "## Coverage and limits",
         "C1: U1; inspected",
         "A prose mention says C2 was inspected.",
       ].join("\n"),
     };
+    const { dsl, answers } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    expect(await runWorkflow(dsl, "review the dirty worktree")).toBe(outputs["verify and write review"]);
+    expect(calls).toHaveLength(6);
+    // The dropped id remains visible as evidence in the retained handoffs.
+    expect(answers.map((item) => item.ref.name)).toEqual([
+      "clarifier-decision.json",
+      "scope.md",
+      "inventory.md",
+      "units.md",
+      "questions.md",
+      "review.md",
+    ]);
+  });
+
+  it("keeps reviewing when the inventory declares emptiness together with a coverage id", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": [
+        "# Change Inventory",
+        "## No changes",
+        "Reason: nothing changed.",
+        "## C1",
+        "Path: `src/a.ts`",
+        "Change: except this.",
+      ].join("\n"),
+      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+      "ask review questions": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "verify and write review": "# Code Review\n## Verdict\nNeeds changes.",
+    };
     const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
 
-    await expect(runWorkflow(dsl, "review the dirty worktree")).rejects.toThrow(
-      "final review has malformed coverage ledger line",
-    );
+    // A contradictory inventory is not an empty scope: the review continues.
+    expect(await runWorkflow(dsl, "review the worktree")).toBe(outputs["verify and write review"]);
   });
 
   it("bounds direct intent and model handoffs before forwarding them", async () => {

@@ -88,103 +88,23 @@ function requireNonEmptyText(value, field, maxChars = MAX_INTENT_CHARS) {
 }
 
 /**
- * The inventory is the coverage authority, and "nothing changed" is a legitimate
- * answer it must be able to state — a clean worktree is not a broken review. The
- * stage therefore returns exactly one of two shapes: `## C<n>` coverage entries,
- * or the explicit `## No changes` declaration. Anything else is a real contract
- * violation and says which stage and prompt own the repair.
+ * Cheap early exit, not a gate: when the inventory itself declares `## No changes`
+ * and lists no `C<n>` entry, the later stages have nothing to group, interrogate,
+ * or verify, so the run finishes instead of spending three more model calls.
+ *
+ * Everything else about a handoff stays the model's business. The prompts ask for
+ * stable `C<n>` ids and coverage reconciliation because it makes the review better,
+ * and the verifier reports its own coverage — the script does not grade Markdown
+ * grammar and does not end a run over it.
  */
-function inventoryCoverage(inventoryText) {
+function declaredNoChanges(inventoryText) {
   const empty = /^##[ \t]+No changes[ \t]*$/mu.exec(inventoryText);
-  const ids = [...inventoryText.matchAll(/^##[ \t]+(C[1-9][0-9]*)[ \t]*$/gmu)].map((match) => match[1]);
-  if (empty !== null) {
-    if (ids.length > 0) {
-      throw new Error(
-        'review inventory declared "## No changes" together with C<n> coverage entries; the inventory-changes stage must return exactly one of them (see resources/change-inventory.prompt.md)',
-      );
-    }
-    return { kind: "empty", reason: emptyInventoryReason(inventoryText.slice(empty.index + empty[0].length)) };
-  }
-  if (ids.length === 0) {
-    throw new Error(
-      'review inventory returned neither a "## C<n>" entry nor "## No changes"; the inventory-changes stage answer does not follow resources/change-inventory.prompt.md',
-    );
-  }
-  const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
-  if (duplicate !== undefined) throw new Error(`review inventory repeats coverage id ${duplicate}`);
-  return { kind: "covered", ids };
-}
-
-/** The inventory's own sentence for an empty scope; a missing one is not fatal. */
-function emptyInventoryReason(section) {
-  const match = /^Reason:[ \t]*(.+)$/mu.exec(section);
-  const reason = match?.[1]?.trim();
+  if (empty === null) return undefined;
+  if (/^##[ \t]+C[1-9][0-9]*[ \t]*$/mu.test(inventoryText)) return undefined;
+  const reason = /^Reason:[ \t]*(.+)$/mu.exec(inventoryText.slice(empty.index + empty[0].length))?.[1]?.trim();
   return reason === undefined || reason === ""
     ? "the change inventory reported no changed surface in the resolved scope"
     : reason;
-}
-
-function requireExactUnitCoverage(unitsText, expectedIds) {
-  const assignments = new Map();
-  const headings = [...unitsText.matchAll(/^##[ \t]+(U[1-9][0-9]*)[ \t]*$/gmu)];
-  for (const [index, heading] of headings.entries()) {
-    const sectionStart = heading.index + heading[0].length;
-    const sectionEnd = headings[index + 1]?.index ?? unitsText.length;
-    const section = unitsText.slice(sectionStart, sectionEnd);
-    for (const match of section.matchAll(/^Coverage:[ \t]*([^\n]+)$/gmu)) {
-      for (const token of match[1].split(",").map((value) => value.trim())) {
-        if (!/^C[1-9][0-9]*$/u.test(token)) {
-          throw new Error(`review units contain invalid coverage token ${JSON.stringify(token)}`);
-        }
-        if (assignments.has(token)) {
-          throw new Error(`review units assign coverage id ${token} more than once`);
-        }
-        assignments.set(token, heading[1]);
-      }
-    }
-  }
-  if (assignments.size === 0) throw new Error("review units have no Coverage: C<n> ledger");
-  const expected = new Set(expectedIds);
-  for (const [id] of assignments) {
-    if (!expected.has(id)) throw new Error(`review units contain unknown coverage id ${id}`);
-  }
-  const missing = expectedIds.find((id) => !assignments.has(id));
-  if (missing !== undefined) throw new Error(`review units dropped inventory coverage id ${missing}`);
-  return assignments;
-}
-
-function requireCoverageSection(text, heading, assignments, field) {
-  const sectionMatch = new RegExp(`^##[ \\t]+${heading.replaceAll(" ", "[ \\t]+")}[ \\t]*$`, "mu").exec(text);
-  if (sectionMatch === null) throw new Error(`review ${field} has no ${heading} section`);
-  const sectionStart = sectionMatch.index + sectionMatch[0].length;
-  const nextHeading = /^##[ \t]+/gmu;
-  nextHeading.lastIndex = sectionStart;
-  const nextMatch = nextHeading.exec(text);
-  const section = text.slice(sectionStart, nextMatch?.index ?? text.length);
-  const ledger = new Map();
-  for (const line of section
-    .split(/\r?\n/u)
-    .map((value) => value.trim())
-    .filter(Boolean)) {
-    const match = /^(C[1-9][0-9]*):[ \t]+(.+)$/u.exec(line);
-    if (match === null) {
-      if (/\bC[1-9][0-9]*\b/u.test(line)) {
-        throw new Error(`review ${field} has malformed coverage ledger line ${JSON.stringify(line)}`);
-      }
-      continue;
-    }
-    const [, id, detail] = match;
-    if (!assignments.has(id)) throw new Error(`review ${field} contains unknown coverage id ${id}`);
-    if (ledger.has(id)) throw new Error(`review ${field} repeats coverage id ${id}`);
-    const expectedUnit = assignments.get(id);
-    const units = [...detail.matchAll(/\bU[1-9][0-9]*\b/gu)].map((unit) => unit[0]);
-    if (!units.includes(expectedUnit)) {
-      throw new Error(`review ${field} assigns coverage id ${id} to the wrong unit`);
-    }
-    ledger.set(id, detail);
-  }
-  const missing = [...assignments.keys()].find((id) => !ledger.has(id));
-  if (missing !== undefined) throw new Error(`review ${field} dropped inventory coverage id ${missing}`);
 }
 
 function sameArtifactRef(left, right) {
@@ -435,18 +355,15 @@ async function runFullReview(dsl, intentText, clarificationText, persistIntent =
     "inventory handoff",
     MAX_INVENTORY_CHARS,
   );
-  const coverage = inventoryCoverage(inventoryText);
-  if (coverage.kind === "empty") {
-    // An empty scope is a finished review, not a failed one: the later stages have
-    // nothing to group, interrogate, or verify, so the run stops here and says so.
+  const noChanges = declaredNoChanges(inventoryText);
+  if (noChanges !== undefined) {
     log("The resolved scope contains no changed surface; the review stops before unit planning.");
     return {
       mode: "no-changes",
-      summary: `review found no changed surface in the resolved scope — ${coverage.reason}`,
+      summary: `review found no changed surface in the resolved scope — ${noChanges}`,
       reviewedUnits: 0,
     };
   }
-  const coverageIds = coverage.ids;
 
   phase("plan-units");
   log("Grouping the inventory into material review units.");
@@ -464,7 +381,6 @@ async function runFullReview(dsl, intentText, clarificationText, persistIntent =
     "units handoff",
     MAX_UNITS_CHARS,
   );
-  const unitAssignments = requireExactUnitCoverage(unitsText, coverageIds);
 
   phase("ask-questions");
   log("Formulating falsifiable questions for every review unit.");
@@ -483,7 +399,6 @@ async function runFullReview(dsl, intentText, clarificationText, persistIntent =
     "questions handoff",
     MAX_QUESTIONS_CHARS,
   );
-  requireCoverageSection(questionsText, "Coverage reconciliation", unitAssignments, "questions handoff");
 
   phase("verify-review");
   log("Independently verifying the questions and writing the review.");
@@ -503,7 +418,6 @@ async function runFullReview(dsl, intentText, clarificationText, persistIntent =
     "final review",
     MAX_REVIEW_CHARS,
   );
-  requireCoverageSection(reviewText, "Coverage and limits", unitAssignments, "final review");
   return reviewText;
 }
 

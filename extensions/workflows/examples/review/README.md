@@ -123,9 +123,11 @@ coverage, not judgment.
 An empty scope is a legitimate inventory answer, not a defect: when nothing
 changed — a clean worktree under an unstaged-changes scope, for example — R2a
 returns the explicit `## No changes` declaration with its reason, and the run
-completes there with a `no-changes` result instead of failing. The two shapes are
-mutually exclusive, and an answer with neither stops the review with a message
-naming this stage and its prompt.
+completes there with a `no-changes` result instead of spending the later stages on
+nothing. That declaration is the one inventory shape the entry reads; every other
+handoff passes to the next stage as exact text. Coverage ids and reconciliation
+ledgers are prompt discipline that keeps a review honest, not a host gate: the
+entry bounds size and emptiness, and the verifier reports its own coverage.
 
 ### R2b: plan review units
 

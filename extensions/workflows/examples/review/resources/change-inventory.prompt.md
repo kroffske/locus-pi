@@ -54,9 +54,9 @@ of returning an empty document:
 Reason: What you inspected and why it is empty, in one sentence.
 ```
 
-`## No changes` is the only accepted way to report an empty scope, and it must
-never appear together with a `C<n>` entry. An inventory with neither shape is a
-contract violation and stops the review.
+`## No changes` is how you report an empty scope, and it must never appear
+together with a `C<n>` entry. An inventory that declares it alone ends the review
+there, because the later stages have nothing to work with.
 
 ## Current task
 

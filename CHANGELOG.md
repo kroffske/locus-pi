@@ -6,12 +6,18 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- `review` handoffs now pass forward as exact text. The entry orchestrates and
+  bounds — non-empty text and per-stage character caps — and no longer grades
+  Markdown grammar: coverage ids, unit ledgers, and reconciliation sections are
+  prompt discipline the interrogator and verifier reconcile and report, not host
+  gates that end a run after several model calls. Shaped answers that must be
+  machine-read keep using `agent({ schema })`, where the runtime re-asks the child
+  with the validator errors before failing closed.
 - An empty review scope now completes instead of failing. The `review` change
   inventory declares `## No changes` with its reason when nothing changed — a
-  clean worktree under an unstaged-changes scope, for example — and the run ends
-  with a `no-changes` result before unit planning. An inventory that returns
-  neither coverage entries nor that declaration still stops the run, now naming
-  the stage and the prompt that owns the contract.
+  clean worktree under an unstaged-changes scope, for example — and that
+  declaration alone ends the run with a `no-changes` result instead of spending
+  unit planning, interrogation, and verification on nothing.
 - A failed workflow run now says where it broke and what to hand a repairing
   agent: the failing stage, the owning script path, the failing stage's answer
   artifact, and the run journal. `result.json`, `/workflows status <runId>`, the
