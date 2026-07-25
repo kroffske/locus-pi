@@ -22,8 +22,9 @@ This file records user-visible changes to the public package.
   and a violation could only throw — ending the run over an answer the child
   could have fixed. Expressed as schema keywords the same bound is handed back
   through the existing retry, so an over-long summary becomes correctable rather
-  than fatal. Violations report the actual value (`tags: expected at most 2
-item(s), got 3`). A bound on the wrong type, a negative or fractional bound, an
+  than fatal. Violations report the actual value, not just the limit, because the
+  child has to decide what to cut.
+  A bound on the wrong type, a negative or fractional bound, an
   unsatisfiable `min > max` pair, and a `pattern` that does not compile are all
   refused before the first child call. `pattern` follows the JSON Schema spec:
   unanchored, no flags.
