@@ -11,6 +11,7 @@ import {
   truncate,
 } from "../_shared/agent-live-panel.js";
 import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
+import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "../_shared/workflow-failure.js";
 import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../_shared/workflow-journal.js";
 import {
   projectWorkflowDisposition,
@@ -58,7 +59,14 @@ const OBSERVER_STATUS_ORDER: Record<AgentLiveStatus, number> = {
 
 export interface WorkflowProgressOptions {
   scope?: "fleet" | "workflow";
-  declaredPhases?: readonly string[];
+  /** Statically declared stages (`meta.phases`): titles plus their planned detail. */
+  declaredStages?: readonly WorkflowDeclaredStage[];
+}
+
+/** One stage a workflow declared before the run started. */
+export interface WorkflowDeclaredStage {
+  title: string;
+  detail?: string;
 }
 
 export class WorkflowProgressComponent implements CustomUiComponent {
@@ -68,6 +76,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     summary: string;
     runDir?: string;
     resultPersistence?: WorkflowResultPersistence;
+    failureDiagnostic?: WorkflowFailureDiagnostic;
   };
   #tickTimer: ReturnType<typeof setInterval> | undefined;
   #spinnerIndex = 0;
@@ -122,6 +131,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     disposition?: WorkflowDisposition;
     runDir?: string;
     resultPersistence?: WorkflowResultPersistence;
+    failureDiagnostic?: WorkflowFailureDiagnostic;
   }): void {
     const disposition = projectWorkflowDisposition({
       ok: res.ok,
@@ -134,6 +144,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       summary: disposition.summary,
       ...(res.runDir !== undefined ? { runDir: res.runDir } : {}),
       ...(res.resultPersistence !== undefined ? { resultPersistence: res.resultPersistence } : {}),
+      ...(res.failureDiagnostic !== undefined ? { failureDiagnostic: res.failureDiagnostic } : {}),
     };
     this.dispose();
     this.tui.requestRender();
@@ -169,8 +180,12 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       )
       .slice(-2)
       .map((line) => truncate(formatProgressTailLine(line), width));
-    const rowLines = this.renderCurrentRow(liveRows, width);
     const hint = truncate("  /ps inspect agents", width);
+    // The roster owns the variable-height middle: fixed lines (header, stages,
+    // verdict, diagnostics, hint) are reserved first, so the roster clamps itself
+    // instead of pushing the verdict off a short terminal.
+    const fixedCount = 1 + stageLine.length + doneLines.length + passiveDiagnostics.length + 1;
+    const rowLines = this.renderRoster(liveRows, width, Math.max(1, budget - fixedCount));
     const body = [header, ...stageLine, ...rowLines, ...doneLines];
     return [...fitLines(body, passiveDiagnostics, Math.max(0, budget - 1), width, doneLines.length), hint];
   }
@@ -216,7 +231,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       return this.#bold(truncate(text, width));
     }
     const statusMark = workflowProgressStatusMark(headerStatus);
-    const frontier = workflowStageFrontier(this.options.declaredPhases ?? [], this.journal);
+    const frontier = workflowStageFrontier(this.options.declaredStages ?? [], this.journal);
     const progress =
       this.options.scope === "workflow" && frontier.length > 0
         ? `  ${frontier.filter((stage) => stage.state !== "declared").length}/${frontier.length}`
@@ -230,7 +245,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   }
 
   private renderStageFrontier(width: number): string {
-    const stages = workflowStageFrontier(this.options.declaredPhases ?? [], this.journal);
+    const stages = workflowStageFrontier(this.options.declaredStages ?? [], this.journal);
     if (stages.length === 0) return this.#fg("dim", truncate("stages · none declared", width));
     const full = `stages · ${stages.map((stage) => `${stage.title} (${stage.state})`).join(" — ")}`;
     if (full.length <= width) return full;
@@ -243,14 +258,57 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     return currentLine.length + suffix.length <= width ? `${currentLine}${suffix}` : truncate(currentLine, width);
   }
 
-  private renderCurrentRow(rows: AgentLiveRow[], width: number): string[] {
+  /**
+   * The full agent roster for this run, in the order the run produced it:
+   * finished agents (`✓`, green), the agent working right now (its spinner, in
+   * `warning` so it reads apart from settled rows), then every declared stage the
+   * run has not reached yet (`○`, dim) with the detail `meta.phases` planned for
+   * it. A re-entered slot keeps ONE row and carries its `r<N>` round badge, so a
+   * loop updates a row instead of appending a duplicate.
+   */
+  private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
     const leaves = selectFleetMenuLeafRows(orderAgentLiveRows(rows));
     const current =
       leaves.find((row) => row.status === "working") ?? leaves.find((row) => row.status === "queued") ?? leaves.at(-1);
-    if (current === undefined) return [this.#fg("dim", truncate("  waiting for workflow agents…", width))];
-    return new AgentLivePanel({ spinnerIndex: this.#spinnerIndex, theme: this.theme })
-      .renderRows([current], Math.max(1, width - 2))
-      .map((line) => truncate(`  ${line}`, width));
+    const rowWidth = Math.max(1, width - 2);
+    const panel = new AgentLivePanel({
+      spinnerIndex: this.#spinnerIndex,
+      theme: this.theme,
+      statusColors: { working: "warning" },
+    });
+    // Only the current row keeps its sub-lines (latest message / live tool action);
+    // settled rows stay one line each so the roster fits a short terminal.
+    const agentLines = leaves.map((row) => ({
+      settled: row !== current,
+      lines: (row === current ? panel.renderRows([row], rowWidth) : [panel.renderRow(row, rowWidth)]).map(
+        (line) => `  ${line}`,
+      ),
+    }));
+    const pendingLines = this.pendingStageLines(width).map((line) => ({ settled: false, lines: [line] }));
+    const roster = [...agentLines, ...pendingLines];
+    if (roster.length === 0) return [this.#fg("dim", truncate("  waiting for workflow agents…", width))];
+    return clampRosterLines(roster, budget, width);
+  }
+
+  /**
+   * Declared stages the run has not reached yet — the work still ahead. Titles
+   * come from `meta.phases`, so an undeclared dynamic stage never appears here
+   * before it actually runs.
+   */
+  private pendingStageLines(width: number): string[] {
+    const declared = new Map(
+      (this.options.declaredStages ?? []).flatMap((stage) => {
+        const title = normalizeWorkflowPhase(stage.title);
+        return title === undefined ? [] : [[title, stage.detail] as const];
+      }),
+    );
+    return workflowStageFrontier(this.options.declaredStages ?? [], this.journal)
+      .filter((stage) => stage.state === "declared")
+      .map((stage) => {
+        const detail = normalizeWorkflowPhase(declared.get(stage.title));
+        const text = `  ○ ${stage.title}  ·  planned${detail === undefined ? "" : `  ·  ${detail}`}`;
+        return this.#fg("dim", truncate(text, width));
+      });
   }
 
   private doneLines(width: number): string[] {
@@ -260,6 +318,13 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     lines.push(this.#fg(presentation.color, truncate(`${presentation.marker} ${this.done.summary}`, width)));
     if (this.done.resultPersistence?.ok === false) {
       lines.push(this.#fg("warning", truncate(`persistence: ${this.done.resultPersistence.code}`, width)));
+    }
+    // A failed run says WHERE it broke and WHAT to hand a repairing agent; the
+    // `copy:` line is one selectable line, never wrapped or abbreviated.
+    if (this.done.failureDiagnostic !== undefined) {
+      for (const line of formatWorkflowFailureDiagnosticLines(this.done.failureDiagnostic)) {
+        lines.push(this.#fg("dim", truncate(line, width)));
+      }
     }
     // Honest pointer to the saved run on disk (T-188 W5, fix-candidate #8).
     if (this.done.runDir !== undefined) lines.push(this.#fg("dim", truncate(`saved: ${this.done.runDir}`, width)));
@@ -553,7 +618,7 @@ interface WorkflowStageFrontierItem {
 }
 
 function workflowStageFrontier(
-  declaredPhases: readonly string[],
+  declaredStages: readonly WorkflowDeclaredStage[],
   journal: readonly WorkflowJournalLine[],
 ): WorkflowStageFrontierItem[] {
   const titles: string[] = [];
@@ -564,7 +629,7 @@ function workflowStageFrontier(
     seen.add(normalized);
     titles.push(normalized);
   };
-  for (const title of declaredPhases) append(title);
+  for (const stage of declaredStages) append(stage.title);
   const reached = new Set<string>();
   for (const line of journal) {
     if (line.kind !== "phase") continue;
@@ -666,6 +731,31 @@ function collapseConsecutiveDuplicateLines(lines: string[]): string[] {
   }
   flush();
   return collapsed;
+}
+
+/**
+ * Keep the roster inside its budget by collapsing the OLDEST settled agents
+ * first: the current agent, the pending stages, and the most recent finished work
+ * are what an operator steers on. The collapse is announced, never silent.
+ */
+function clampRosterLines(
+  entries: readonly { settled: boolean; lines: string[] }[],
+  budget: number,
+  width: number,
+): string[] {
+  const all = entries.flatMap((entry) => entry.lines);
+  if (all.length <= budget) return all;
+  let dropped = 0;
+  const kept = [...entries];
+  while (kept.flatMap((entry) => entry.lines).length + 1 > budget) {
+    const index = kept.findIndex((entry) => entry.settled);
+    if (index < 0) break;
+    kept.splice(index, 1);
+    dropped += 1;
+  }
+  const lines = kept.flatMap((entry) => entry.lines);
+  if (dropped === 0) return lines.slice(0, budget);
+  return [truncate(`  (+${dropped} earlier agents)`, width), ...lines].slice(0, budget);
 }
 
 function fitLines(

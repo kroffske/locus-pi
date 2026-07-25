@@ -66,7 +66,7 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1", {
       scope: "workflow",
-      declaredPhases: ["smoke", "verify"],
+      declaredStages: [{ title: "smoke" }, { title: "verify" }],
     });
 
     pushProgress(component, line({ kind: "phase", phase: "smoke", ts: 1, runId: "r1" }));
@@ -107,19 +107,117 @@ describe("workflow progress widget", () => {
     expect(rendered.length).toBeLessThanOrEqual(Math.max(6, Math.min(30 - 6, 24)));
     expect(text).toContain("agents · workflow live-smoke #r1  ● RUNNING  1/2");
     expect(text).toContain("stages · smoke (current) — verify (declared)");
-    // Passive mode deliberately shows one current/recent leaf through AgentLivePanel.
+    // The roster shows the whole run: settled agents keep their outcome marker and
+    // duration, and a declared stage the run has not reached yet stays visible as
+    // planned work instead of being hidden until it starts.
     expect(text).toContain("note:quick");
     expect(text).toContain("4s");
-    expect(text).not.toContain("note:explore");
+    expect(text).toContain("✗ ");
+    expect(text).toContain("note:explore");
+    expect(text).toContain("22s");
+    expect(text).toContain("○ verify  ·  planned");
     expect(text).toContain("/ps inspect agents");
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
 
     fleetMenuState.setFocused(true);
     const focused = component.render(100).join("\n");
-    expect(focused).not.toContain("note:explore");
+    expect(focused).toContain("note:explore");
     expect(focused).toContain("note:quick");
     expect(focused).toContain("/ps inspect agents");
     fleetMenuState.setFocused(false);
+  });
+
+  it("rosters finished, running, and still-planned work, and keeps one row per re-entered slot", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 140 } };
+    const component = new WorkflowProgressComponent(tui, {}, "review", "roster-r1", {
+      scope: "workflow",
+      declaredStages: [
+        { title: "resolve-scope", detail: "Turn the intent into one review scope." },
+        { title: "inventory-changes", detail: "Prove complete coverage of the changed surface." },
+        { title: "verify-review", detail: "Reopen the evidence and author review.md." },
+      ],
+    });
+    const slot = (phase: string, label: string, round?: number) => ({
+      agent: "default",
+      label,
+      phase,
+      runId: "roster-r1",
+      slotKey: `${phase}${label}`,
+      ...(round === undefined ? {} : { round }),
+    });
+
+    pushProgress(component, line({ kind: "phase", phase: "resolve-scope", ts: 1, runId: "roster-r1" }));
+    pushProgress(component, line({ ...slot("resolve-scope", "resolve review scope"), kind: "agent_start", ts: 2 }));
+    pushProgress(
+      component,
+      line({
+        ...slot("resolve-scope", "resolve review scope"),
+        kind: "agent_end",
+        status: "completed",
+        durationMs: 19_000,
+        ts: 3,
+      }),
+    );
+    pushProgress(component, line({ kind: "phase", phase: "inventory-changes", ts: 4, runId: "roster-r1" }));
+    pushProgress(component, line({ ...slot("inventory-changes", "inventory changes"), kind: "agent_start", ts: 5 }));
+
+    const running = component.render(140).join("\n");
+    expect(running).toContain("✓ ");
+    expect(running).toContain("resolve review scope");
+    expect(running).toContain("19s");
+    expect(running).toContain("inventory changes");
+    // Stages the run has not reached yet stay visible with what they plan to do.
+    expect(running).toContain("○ verify-review  ·  planned  ·  Reopen the evidence and author review.md.");
+    // A reached stage is not advertised as planned any more.
+    expect(running).not.toContain("○ resolve-scope");
+    expect(running).not.toContain("○ inventory-changes");
+
+    // A loop re-enters the same slot: the row is updated and carries `r2`, so the
+    // roster never grows a second row for the same work.
+    pushProgress(
+      component,
+      line({
+        ...slot("inventory-changes", "inventory changes", 2),
+        kind: "agent_end",
+        status: "completed",
+        durationMs: 9_000,
+        ts: 6,
+      }),
+    );
+    const looped = component.render(140);
+    expect(looped.filter((renderedLine) => renderedLine.includes("inventory changes"))).toHaveLength(1);
+    expect(looped.join("\n")).toContain("r2");
+    component.dispose();
+    agentLiveStore.reset();
+  });
+
+  it("collapses the oldest settled roster rows first and says how many it hid", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    // rows-6 leaves 8 lines total for header, stages, roster, and the hint.
+    const tui = { requestRender: vi.fn(), terminal: { rows: 14, columns: 140 } };
+    const component = new WorkflowProgressComponent(tui, {}, "review", "clamp-r1", { scope: "workflow" });
+
+    for (let index = 1; index <= 8; index += 1) {
+      const slot = { agent: "default", label: `stage ${index}`, phase: `p${index}`, runId: "clamp-r1" };
+      pushProgress(component, line({ ...slot, kind: "agent_start", ts: index * 2 }));
+      pushProgress(
+        component,
+        line({ ...slot, kind: "agent_end", status: "completed", durationMs: 1000, ts: index * 2 + 1 }),
+      );
+    }
+
+    const rendered = component.render(140);
+    const text = rendered.join("\n");
+    expect(rendered.length).toBeLessThanOrEqual(8);
+    expect(text).toMatch(/\(\+\d+ earlier agents\)/u);
+    // The newest work survives the clamp; the oldest is the part that collapses.
+    expect(text).toContain("stage 8");
+    expect(text).not.toContain("stage 1 ");
+    component.dispose();
+    agentLiveStore.reset();
   });
 
   it("keeps ordinary agent panels expanded while workflow compaction stays scope-local", () => {
@@ -493,7 +591,7 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 160 } };
     const component = new WorkflowProgressComponent(tui, {}, "review", "stage-r1", {
       scope: "workflow",
-      declaredPhases: ["clarify", "scope", "questions", "review"],
+      declaredStages: [{ title: "clarify" }, { title: "scope" }, { title: "questions" }, { title: "review" }],
     });
 
     pushProgress(component, line({ kind: "phase", phase: "clarify", ts: 1, runId: "stage-r1" }));
@@ -529,7 +627,16 @@ describe("workflow progress widget", () => {
       {},
       "review",
       "normalized-r1",
-      { scope: "workflow", declaredPhases: [" review ", "", "review", " verify ", "verify"] },
+      {
+        scope: "workflow",
+        declaredStages: [
+          { title: " review " },
+          { title: "" },
+          { title: "review" },
+          { title: " verify " },
+          { title: "verify" },
+        ],
+      },
     );
 
     pushProgress(component, line({ kind: "phase", phase: "   ", ts: 1, runId: "normalized-r1" }));

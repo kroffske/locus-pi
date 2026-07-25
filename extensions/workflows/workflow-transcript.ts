@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Extension
 import { formatDuration } from "../_shared/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
 import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "../_shared/workflow-result.js";
 
 export const WORKFLOW_EVENT_CUSTOM_TYPE = "locus-workflow-event";
@@ -103,6 +104,15 @@ export function createWorkflowTranscript(
         ...replayedPart,
       ];
       recordLifecycle([...parts, ...(elapsed !== "" ? [elapsed] : [])].join(" · "));
+      // A failed run leaves the transcript with the actionable diagnostic: where
+      // it broke, which evidence proves it, and one copyable repair request. These
+      // lines skip the 160-char compaction — a truncated path or repair request
+      // would be unusable, and the diagnostic is already bounded at its source.
+      if (res.failureDiagnostic !== undefined) {
+        for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {
+          digestLines.push(firstTranscriptLine(line));
+        }
+      }
       completion = {
         eventKind: "workflow_end",
         runId: res.runId,
@@ -248,8 +258,10 @@ function safeTranscriptTarget(value: string): string {
 }
 
 function compactTranscriptText(value: string): string {
-  const firstLine = (value.split(/\r?\n/u, 1)[0] ?? "").trim();
-  return firstLine.length <= TRANSCRIPT_LINE_MAX_CHARS
-    ? firstLine
-    : `${firstLine.slice(0, TRANSCRIPT_LINE_MAX_CHARS - 3)}...`;
+  const line = firstTranscriptLine(value);
+  return line.length <= TRANSCRIPT_LINE_MAX_CHARS ? line : `${line.slice(0, TRANSCRIPT_LINE_MAX_CHARS - 3)}...`;
+}
+
+function firstTranscriptLine(value: string): string {
+  return (value.split(/\r?\n/u, 1)[0] ?? "").trim();
 }

@@ -589,6 +589,92 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(published).toHaveLength(0);
   });
 
+  // A clean worktree is an answer, not a defect: the run that produced
+  // `20260725-000629-269d` failed with "review inventory has no C<n> coverage
+  // headings" only because the scope was legitimately empty.
+  it("completes with a no-changes result when the inventory declares an empty scope", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: `working tree vs index (git diff)`",
+      "inventory changes": [
+        "# Change Inventory",
+        "## No changes",
+        "Reason: git diff reports no unstaged tracked changes.",
+      ].join("\n"),
+    };
+    const { dsl, answers } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    const result = await runWorkflow(dsl, "unstaged");
+
+    expect(result).toEqual({
+      mode: "no-changes",
+      summary: "review found no changed surface in the resolved scope — git diff reports no unstaged tracked changes.",
+      reviewedUnits: 0,
+    });
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+    ]);
+    expect(answers.map((item) => item.ref.name)).toEqual(["clarifier-decision.json", "scope.md", "inventory.md"]);
+  });
+
+  it("keeps a no-changes summary when the empty inventory omits its reason line", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": "# Change Inventory\n## No changes",
+    };
+    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+
+    expect(await runWorkflow(dsl, "unstaged")).toMatchObject({
+      mode: "no-changes",
+      summary:
+        "review found no changed surface in the resolved scope — the change inventory reported no changed surface in the resolved scope",
+    });
+  });
+
+  it("names the stage and prompt when the inventory declares neither coverage nor emptiness", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": "# Change Inventory\n\nI looked around and found some stuff.",
+    };
+    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+
+    await expect(runWorkflow(dsl, "review the worktree")).rejects.toThrow(
+      "the inventory-changes stage answer does not follow resources/change-inventory.prompt.md",
+    );
+  });
+
+  it("refuses an inventory that claims emptiness and coverage at the same time", async () => {
+    const runWorkflow = await loadWorkflow();
+    const outputs: Record<string, string> = {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": [
+        "# Change Inventory",
+        "## No changes",
+        "Reason: nothing changed.",
+        "## C1",
+        "Path: `src/a.ts`",
+        "Change: except this.",
+      ].join("\n"),
+    };
+    const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
+
+    await expect(runWorkflow(dsl, "review the worktree")).rejects.toThrow(
+      'declared "## No changes" together with C<n> coverage entries',
+    );
+  });
+
   it("fails closed before interrogation when unit planning drops inventory coverage", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];

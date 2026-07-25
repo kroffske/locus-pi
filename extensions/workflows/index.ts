@@ -51,6 +51,7 @@ import {
   readWorkflowRunSummary,
   workflowRunDir,
 } from "../_shared/workflow-journal.js";
+import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
 import type { WorkflowRunResultEnvelope, WorkflowRunStatus } from "../_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "../_shared/workflow-runtime.js";
@@ -227,7 +228,7 @@ export default function workflows(pi: ExtensionAPI): void {
           if (preparation.hasUI && !panel) {
             panel = installWorkflowProgress(request.ctx, WORKFLOW_LIVE_WIDGET_KEY, request.scriptRef, runId, {
               scope: "workflow",
-              declaredPhases: preparation.declaredPhases,
+              declaredStages: preparation.declaredStages,
             });
             sessionPanels.add(panel);
           }
@@ -1359,6 +1360,12 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
         : `result: ${formatWorkflowResultDetail(persisted.result)}`;
   const source = persisted?.target?.source;
   const scriptIdentity = persisted?.scriptIdentity;
+  // Same actionable failure evidence a live run showed, recovered from the
+  // persisted envelope so a later `/workflows status <runId>` reads identically.
+  const failureLines =
+    persisted?.failureDiagnostic === undefined
+      ? []
+      : formatWorkflowFailureDiagnosticLines(persisted.failureDiagnostic, { repairRequest: true });
   const compactResult =
     persisted === null
       ? resultDetail
@@ -1395,6 +1402,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
           ...(replayLine === null ? [] : [compactWorkflowLine(replayLine)]),
           ...(budgetLine === null ? [] : [compactWorkflowLine(budgetLine)]),
           compactWorkflowLine(compactResult),
+          ...failureLines,
           ...(older > 0 ? [`+${older} older journal row(s) hidden`] : []),
         ]
       : [
@@ -1409,6 +1417,7 @@ function buildRunDetailBlock(projectRoot: string, runId: string, compact = false
           ...(replayLine === null ? [] : [replayLine]),
           ...(budgetLine === null ? [] : [budgetLine]),
           resultDetail,
+          ...failureLines,
           ...(older > 0 ? [`+${older} older journal row(s) hidden`] : []),
         ],
     controls: ["Refresh/list: /workflows status · Full artifact: result.json"],
@@ -1489,6 +1498,11 @@ function buildWorkflowResultBlock(res: RunWorkflowScriptResult, compact = false)
               ? compactWorkflowLine(`persistence: ${res.resultPersistence.code}`)
               : `persistence: ${res.resultPersistence.code}`,
           ]),
+      // Actionable failure evidence, including the copyable repair request. Kept
+      // whole even in compact mode: a clipped path or request cannot be acted on.
+      ...(res.failureDiagnostic === undefined
+        ? []
+        : formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })),
     ],
     controls: [compactWorkflowLine(`Detail: /workflows status ${res.runId}`)],
   };
@@ -1533,6 +1547,9 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
   if (res.scriptIdentity !== undefined) lines.push(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref));
   if (!res.resultPersistence.ok) {
     lines.push(`persistence: ${res.resultPersistence.code}`);
+  }
+  if (res.failureDiagnostic !== undefined) {
+    lines.push(...formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true }));
   }
   if (res.artifactRefs !== undefined && res.artifactRefs.length > 0) {
     lines.push("artifactRefs:", ...res.artifactRefs.map((ref) => JSON.stringify(ref)));

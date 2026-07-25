@@ -31,7 +31,13 @@ import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelop
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import {
+  buildWorkflowFailureDiagnostic,
+  type WorkflowFailureDiagnostic,
+  type WorkflowFailureOrigin,
+} from "./workflow-failure.js";
+import {
   newWorkflowRunId,
+  workflowJournalFile,
   workflowRunDir,
   createWorkflowJournalSink,
   readWorkflowRunResult,
@@ -170,6 +176,10 @@ export interface RunWorkflowScriptResult {
   resultPersistence: WorkflowResultPersistence;
   journal: WorkflowJournalLine[];
   error?: string;
+  /** Who failed, when the run failed. Presentation-only; wording, not truth. */
+  failureOrigin?: WorkflowFailureOrigin;
+  /** Actionable projection of a failed run: stage, script, evidence, repair request. */
+  failureDiagnostic?: WorkflowFailureDiagnostic;
   target?: ResolvedWorkflowTarget;
   scriptIdentity?: WorkflowScriptIdentity;
   resourceEvidence?: WorkflowResourceEvidence[];
@@ -607,6 +617,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         };
       }
     }
+    // One choke point for actionable failure text: every terminal route above
+    // funnels here, so the operator gets the same stage/script/evidence pointer
+    // whether the trusted script threw or the runtime around it did.
+    enrichedFields = withFailureDiagnostic(enrichedFields);
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
@@ -629,7 +643,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       // Presentation callbacks cannot recover durable evidence and must not hide
       // the typed persistence failure returned below.
     }
-    const failedFields: RunResultFields = {
+    const failedFields: RunResultFields = withFailureDiagnostic({
       ...enrichedFields,
       ok: false,
       disposition: workflowDispositionForCompletion({
@@ -639,9 +653,37 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       }),
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
-    };
+    });
     return { runId, runDir, ...failedFields, resultPersistence };
   };
+
+  /** Attach the actionable diagnostic to a failed envelope; other outcomes pass through. */
+  function withFailureDiagnostic(fields: RunResultFields): RunResultFields {
+    // A script that deliberately returns `{ ok: false }` reported a domain
+    // verdict, not a defect: it already owns its own summary and needs no repair
+    // request. Only a thrown/transport failure earns a diagnostic.
+    if (fields.disposition?.status !== "failed" || fields.error === undefined) return fields;
+    let artifacts: readonly { kind: string; stage?: string; relativePath: string }[] = [];
+    try {
+      artifacts = artifactStore?.list() ?? [];
+    } catch {
+      // An unreadable artifact index costs the evidence pointer, never the verdict.
+    }
+    return {
+      ...fields,
+      failureDiagnostic: buildWorkflowFailureDiagnostic({
+        projectRoot,
+        runDir,
+        journalPath: workflowJournalFile(runDir),
+        journal: fields.journal,
+        ...(fields.failureOrigin === undefined ? {} : { origin: fields.failureOrigin }),
+        ...(fields.error === undefined ? {} : { error: fields.error }),
+        ...(fields.target === undefined ? {} : { target: fields.target }),
+        ...(fields.scriptIdentity === undefined ? {} : { scriptIdentity: fields.scriptIdentity }),
+        artifacts,
+      }),
+    };
+  }
 
   try {
     assertWorkflowInput(opts.input);
@@ -896,6 +938,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       result: undefined,
       journal: journalLines,
       error,
+      failureOrigin: "script",
       target,
       scriptIdentity,
       ...resultMetadata(),
@@ -919,6 +962,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       result: groupFailure,
       journal: journalLines,
       error,
+      // The trusted script itself rejected the run: the repair belongs in the
+      // script or its prompts, not in the host.
+      failureOrigin: "script",
       target,
       scriptIdentity,
       ...resultMetadata(),
@@ -949,7 +995,11 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ok: semanticOk,
     result: prepared.value,
     ...(prepared.diagnostic !== undefined
-      ? { resultDiagnostic: prepared.diagnostic, error: prepared.diagnostic.message }
+      ? {
+          resultDiagnostic: prepared.diagnostic,
+          error: prepared.diagnostic.message,
+          failureOrigin: "script" as const,
+        }
       : {}),
     journal: journalLines,
     target,

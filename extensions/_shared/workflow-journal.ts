@@ -17,6 +17,7 @@ import {
   WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
   type WorkflowArtifactRef,
 } from "./workflow-artifacts.js";
+import { parseWorkflowFailureDiagnostic, type WorkflowFailureDiagnostic } from "./workflow-failure.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
 import { projectWorkflowDisposition } from "./workflow-result.js";
 
@@ -76,13 +77,18 @@ export function workflowRunDir(projectRoot: string, runId: string): string {
   return path.join(workflowsRootDir(projectRoot), runId);
 }
 
+/** The run's append-only journal file — one name, one owner. */
+export function workflowJournalFile(runDir: string): string {
+  return path.join(runDir, "journal.ndjson");
+}
+
 // ---------------------------------------------------------------------------
 // File-backed journal sink
 // ---------------------------------------------------------------------------
 
 export function createWorkflowJournalSink(projectRoot: string, runId: string): WorkflowJournalSink {
   const runDir = workflowRunDir(projectRoot, runId);
-  const journalPath = path.join(runDir, "journal.ndjson");
+  const journalPath = workflowJournalFile(runDir);
   let dirEnsured = false;
 
   function ensureDir(): void {
@@ -457,6 +463,7 @@ export interface WorkflowRunResultEnvelope {
   disposition?: unknown;
   result?: unknown;
   error?: string;
+  failureDiagnostic?: WorkflowFailureDiagnostic;
   artifactRefs?: WorkflowArtifactRef[];
   artifactRefsOmitted?: number;
   target?: {
@@ -516,7 +523,7 @@ export function listWorkflowRunIds(projectRoot: string): string[] {
 
 function workflowRunStartedAt(projectRoot: string, runId: string): number | undefined {
   const runDir = workflowRunDir(projectRoot, runId);
-  const journalPath = path.join(runDir, "journal.ndjson");
+  const journalPath = workflowJournalFile(runDir);
   const resultPath = path.join(runDir, "result.json");
   if (!existsSync(journalPath) && !existsSync(resultPath)) return undefined;
 
@@ -562,7 +569,7 @@ function parseWorkflowTimestamp(value: unknown): number | undefined {
 export function readWorkflowRunJournalState(projectRoot: string, runId: string): WorkflowJournalRead {
   let raw: string;
   try {
-    raw = readFileSync(path.join(workflowRunDir(projectRoot, runId), "journal.ndjson"), "utf8");
+    raw = readFileSync(workflowJournalFile(workflowRunDir(projectRoot, runId)), "utf8");
   } catch (error) {
     return {
       lines: [],
@@ -973,11 +980,13 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     const record = parsed as Record<string, unknown>;
     const target = parsePersistedWorkflowTarget(record.target);
     const scriptIdentity = parsePersistedWorkflowScriptIdentity(record.scriptIdentity);
+    const failureDiagnostic = parseWorkflowFailureDiagnostic(record.failureDiagnostic);
     return {
       ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "disposition") ? { disposition: record.disposition } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "result") ? { result: record.result } : {}),
       ...(typeof record.error === "string" ? { error: record.error } : {}),
+      ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
       ...(isArtifactRefArray(record.artifactRefs) ? { artifactRefs: record.artifactRefs } : {}),
       ...(typeof record.artifactRefsOmitted === "number" &&
       Number.isSafeInteger(record.artifactRefsOmitted) &&

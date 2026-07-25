@@ -120,6 +120,13 @@ R2a maps every changed surface in scope, including staged, unstaged, and
 untracked work where applicable. It assigns stable `C<n>` coverage ids and owns
 coverage, not judgment.
 
+An empty scope is a legitimate inventory answer, not a defect: when nothing
+changed — a clean worktree under an unstaged-changes scope, for example — R2a
+returns the explicit `## No changes` declaration with its reason, and the run
+completes there with a `no-changes` result instead of failing. The two shapes are
+mutually exclusive, and an answer with neither stops the review with a message
+naming this stage and its prompt.
+
 ### R2b: plan review units
 
 R2b groups the inventory by material decision rather than filename. Every

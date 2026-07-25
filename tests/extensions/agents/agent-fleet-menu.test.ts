@@ -151,7 +151,7 @@ describe("agent fleet menu", () => {
     const ordinary = row("ordinary-agent-row", "ordinary agent work");
     const workflowPanel = installWorkflowProgress(h.ctx, "workflow-coexistence", "review", "coexist-run", {
       scope: "workflow",
-      declaredPhases: ["review"],
+      declaredStages: [{ title: "review" }],
     });
     const workflowLine: WorkflowJournalLine = {
       ts: "2026-07-22T00:00:00.000Z",

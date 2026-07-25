@@ -87,12 +87,41 @@ function requireNonEmptyText(value, field, maxChars = MAX_INTENT_CHARS) {
   return value;
 }
 
-function inventoryCoverageIds(inventoryText) {
+/**
+ * The inventory is the coverage authority, and "nothing changed" is a legitimate
+ * answer it must be able to state — a clean worktree is not a broken review. The
+ * stage therefore returns exactly one of two shapes: `## C<n>` coverage entries,
+ * or the explicit `## No changes` declaration. Anything else is a real contract
+ * violation and says which stage and prompt own the repair.
+ */
+function inventoryCoverage(inventoryText) {
+  const empty = /^##[ \t]+No changes[ \t]*$/mu.exec(inventoryText);
   const ids = [...inventoryText.matchAll(/^##[ \t]+(C[1-9][0-9]*)[ \t]*$/gmu)].map((match) => match[1]);
-  if (ids.length === 0) throw new Error("review inventory has no C<n> coverage headings");
+  if (empty !== null) {
+    if (ids.length > 0) {
+      throw new Error(
+        'review inventory declared "## No changes" together with C<n> coverage entries; the inventory-changes stage must return exactly one of them (see resources/change-inventory.prompt.md)',
+      );
+    }
+    return { kind: "empty", reason: emptyInventoryReason(inventoryText.slice(empty.index + empty[0].length)) };
+  }
+  if (ids.length === 0) {
+    throw new Error(
+      'review inventory returned neither a "## C<n>" entry nor "## No changes"; the inventory-changes stage answer does not follow resources/change-inventory.prompt.md',
+    );
+  }
   const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
   if (duplicate !== undefined) throw new Error(`review inventory repeats coverage id ${duplicate}`);
-  return ids;
+  return { kind: "covered", ids };
+}
+
+/** The inventory's own sentence for an empty scope; a missing one is not fatal. */
+function emptyInventoryReason(section) {
+  const match = /^Reason:[ \t]*(.+)$/mu.exec(section);
+  const reason = match?.[1]?.trim();
+  return reason === undefined || reason === ""
+    ? "the change inventory reported no changed surface in the resolved scope"
+    : reason;
 }
 
 function requireExactUnitCoverage(unitsText, expectedIds) {
@@ -406,7 +435,18 @@ async function runFullReview(dsl, intentText, clarificationText, persistIntent =
     "inventory handoff",
     MAX_INVENTORY_CHARS,
   );
-  const coverageIds = inventoryCoverageIds(inventoryText);
+  const coverage = inventoryCoverage(inventoryText);
+  if (coverage.kind === "empty") {
+    // An empty scope is a finished review, not a failed one: the later stages have
+    // nothing to group, interrogate, or verify, so the run stops here and says so.
+    log("The resolved scope contains no changed surface; the review stops before unit planning.");
+    return {
+      mode: "no-changes",
+      summary: `review found no changed surface in the resolved scope — ${coverage.reason}`,
+      reviewedUnits: 0,
+    };
+  }
+  const coverageIds = coverage.ids;
 
   phase("plan-units");
   log("Grouping the inventory into material review units.");

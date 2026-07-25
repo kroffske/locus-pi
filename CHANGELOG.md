@@ -6,6 +6,25 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- An empty review scope now completes instead of failing. The `review` change
+  inventory declares `## No changes` with its reason when nothing changed — a
+  clean worktree under an unstaged-changes scope, for example — and the run ends
+  with a `no-changes` result before unit planning. An inventory that returns
+  neither coverage entries nor that declaration still stops the run, now naming
+  the stage and the prompt that owns the contract.
+- A failed workflow run now says where it broke and what to hand a repairing
+  agent: the failing stage, the owning script path, the failing stage's answer
+  artifact, and the run journal. `result.json`, `/workflows status <runId>`, the
+  tool result, and the persisted run message also carry one copyable repair
+  request; the width-clamped live widget shows the pointers. A deliberate
+  `{ ok: false }` verdict stays a domain result and gets no repair request.
+- The live workflow panel now shows the whole agent roster instead of a single
+  current row: settled agents keep their outcome marker and duration, the running
+  agent is highlighted, and declared stages the run has not reached yet stay
+  visible as planned work with the detail from `meta.phases`. A loop that
+  re-enters a stage updates that agent's row and marks its round instead of
+  appending a duplicate; on a short terminal the oldest settled rows collapse
+  behind an announced `(+N earlier agents)` line.
 - Pi 0.82.0 is now the minimum workflow host. All four Pi peer ranges start at
   0.82.0 and local development packages are pinned to that exact version, so
   tool-origin workflow questions can wait for the terminal `agent_settled`

@@ -16,6 +16,12 @@ export interface AgentLiveThemeLike {
 export interface AgentLivePanelOptions {
   spinnerIndex?: number;
   theme?: AgentLiveThemeLike;
+  /**
+   * Per-status color override for one panel instance. The workflow roster paints
+   * the row that is working right now in `warning` so it separates from settled
+   * rows in a long list; the status icon still carries the state.
+   */
+  statusColors?: Partial<Record<AgentLiveStatus, string>>;
 }
 
 export class AgentLivePanel {
@@ -34,7 +40,7 @@ export class AgentLivePanel {
 
   renderRow(row: AgentLiveRow, width: number): string {
     const meta = statusMeta(row.status, this.options.spinnerIndex ?? 0);
-    return this.#fg(meta.color, formatAgentLiveRowLine(row, meta, width));
+    return this.#fg(this.options.statusColors?.[row.status] ?? meta.color, formatAgentLiveRowLine(row, meta, width));
   }
 
   /** Indented, dimmed `└ <verb> · <gist>[ · <t-elapsed>]`, or nothing when idle. */

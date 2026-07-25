@@ -17,7 +17,7 @@ import {
   type WorkflowBackgroundStopResult,
   type WorkflowSessionLease,
 } from "./background-run-registry.js";
-import { readWorkflowMeta } from "./workflow-catalog.js";
+import { readWorkflowMeta, type WorkflowMetaPhase } from "./workflow-catalog.js";
 
 export interface WorkflowCommandLaunchRequest {
   ctx: ExtensionContext;
@@ -34,7 +34,8 @@ export type WorkflowCommandLaunchResult =
   { status: "started" } | { status: "busy"; owner: string } | { status: "stale" };
 
 export interface WorkflowCommandLaunchPreparation {
-  declaredPhases: string[];
+  /** Stage titles plus their planned detail, read statically from `meta.phases`. */
+  declaredStages: WorkflowMetaPhase[];
   hasUI: boolean;
 }
 
@@ -105,8 +106,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
 
       const observer = options.createObserver(request, {
         hasUI: request.ctx.hasUI === true,
-        declaredPhases:
-          request.target === undefined ? [] : readWorkflowMeta(request.target.path).phases.map((phase) => phase.title),
+        declaredStages: request.target === undefined ? [] : readWorkflowMeta(request.target.path).phases,
       });
       const launched = backgroundRuns.launch<RunWorkflowScriptResult>(lease, async (background) => {
         const isCurrent = (): boolean => background.isCurrent();

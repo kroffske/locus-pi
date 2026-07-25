@@ -44,6 +44,20 @@ Repeat `Path:` when one entry batches several files. Add a final
 `## Not inspected` section only when something could not be read. Do not return
 findings, verdicts, severities, JSON, or a result envelope.
 
+When the resolved scope genuinely contains nothing changed — for example a clean
+worktree when the scope is unstaged tracked changes — say so explicitly instead
+of returning an empty document:
+
+```text
+# Change Inventory
+## No changes
+Reason: What you inspected and why it is empty, in one sentence.
+```
+
+`## No changes` is the only accepted way to report an empty scope, and it must
+never appear together with a `C<n>` entry. An inventory with neither shape is a
+contract violation and stops the review.
+
 ## Current task
 
 Inventory the complete changed surface for the scope below.
