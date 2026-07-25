@@ -654,8 +654,12 @@ editor, and only then calls `setEditorText()` once. `Start` prefills the direct
 `/workflows run <resolved-name>` command; submitting it reaches the runtime
 without a model planning or authoring turn, and optional semantic input can be
 appended on the same command line. `Edit` and `Review` still prefill the compact
-`Request: ...`, `Skill: $pi-workflow-authoring`, and
+`Request: ...`, `Agent: workflow-author`, and
 `Additional instructions:` handoff because those actions require source work.
+The named agent is the bundled `.agents/agents/workflow-author.md` catalog agent
+shipped with this package, so the handoff points at a surface that exists after
+`pi install`; it is reachable as `/agent run workflow-author` or
+`task { agent: "workflow-author" }`.
 Historical review keeps the exact run/snapshot identity. The browser itself does
 not submit editor text, import a module, write a file, mutate history, send a
 message, or claim success if the editor setter is missing or fails.

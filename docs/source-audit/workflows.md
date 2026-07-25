@@ -107,8 +107,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   once after custom UI completion. `Start` prefills the direct
   `/workflows run <resolved-name>` command, so submitting it reaches the runtime
   without a model planning/authoring turn. `Edit` and `Review` keep the compact
-  Request + `$pi-workflow-authoring` handoff because those actions require source
-  work; historical rows remain review-only.
+  Request + `Agent: workflow-author` handoff because those actions require source
+  work; that agent is bundled in `.agents/agents/` and installs with the package,
+  so the pointer resolves through normal agent discovery. Historical rows remain
+  review-only.
   Back/cancel yields no editor mutation; an absent or throwing setter has an
   explicit warning and no send/run fallback.
   Every custom workflow browser/viewer uses the shared inline interaction

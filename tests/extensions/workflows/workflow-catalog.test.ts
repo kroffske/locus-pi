@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
 import { renderOperatorBlock } from "../../../extensions/_shared/operator-ui.js";
 import {
   buildWorkflowActionPrompt,
@@ -265,7 +266,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe(
         [
           `Request: Edit the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -274,7 +275,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: current, sourceState: currentState })).toBe(
         [
           `Request: Review the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -283,7 +284,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: history, sourceState: historyState })).toBe(
         [
           `Request: Review the immutable workflow snapshot for run ${JSON.stringify(history.runId)}, target "name:alpha", at ${JSON.stringify(history.originPath)}, SHA-256 ${JSON.stringify(history.snapshot.sha256)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -296,6 +297,35 @@ describe("workflow operator catalog", () => {
           sourceState: historyState,
         } as unknown as WorkflowBrowserIntent),
       ).toThrow("Historical workflow actions are review-only");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hands off to an authoring agent that ships with the installed package", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-handoff-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = path.join(root, "home");
+      const workflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(workflowDir, { recursive: true });
+      writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), 'export const meta = { description: "Alpha" };\n');
+      const model = buildWorkflowCatalogModel(root, root);
+      const current = model.current.find((row) => row.name === "alpha")!;
+
+      const prompt = buildWorkflowActionPrompt({
+        action: "edit",
+        row: current,
+        sourceState: { kind: "ready", row: current, path: current.target.path, source: "source" },
+      });
+      const handoff = prompt.split("\n").find((line) => line.startsWith("Agent: "));
+      expect(handoff).toBeDefined();
+
+      // The handoff must name a real bundled catalog agent, not a phantom surface.
+      const bundled = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
+      expect(bundled.definitions.map((definition) => definition.name)).toContain(handoff!.slice("Agent: ".length));
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;

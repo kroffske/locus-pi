@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- The `/workflows` Edit/Review editor handoff now names `workflow-author`, the
+  catalog agent bundled in `.agents/agents/` and installed with this package,
+  instead of the skill `$pi-workflow-authoring`, which no installation ever
+  provided. The prefill therefore points at a surface that exists after
+  `pi install` and is reachable as `/agent run workflow-author`; a test asserts
+  the named agent resolves in the bundled catalog so the pointer cannot rot.
 - `review` handoffs now pass forward as exact text. The entry orchestrates and
   bounds — non-empty text and per-stage character caps — and no longer grades
   Markdown grammar: coverage ids, unit ledgers, and reconciliation sections are

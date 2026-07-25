@@ -237,7 +237,10 @@ export function readSelectedWorkflowSource(
 
 /**
  * Deterministic editor handoff. Start uses the direct slash-command runtime
- * path; edit/review keep the authoring skill because they require source work.
+ * path; edit/review name the bundled `workflow-author` catalog agent because
+ * they require source work. The pointer must stay something an installed
+ * package actually provides: the agent ships in .agents/agents/ with this
+ * package, so it resolves through normal agent discovery.
  * The returned text is editable but never submitted here.
  */
 export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string {
@@ -273,7 +276,7 @@ export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string
       request = `Review the recorded workflow identity for ${identity.join(", ")}; diagnose why the immutable snapshot is unavailable.`;
     }
   }
-  return [`Request: ${request}`, "Skill: $pi-workflow-authoring", "", "Additional instructions:", ""].join("\n");
+  return [`Request: ${request}`, "Agent: workflow-author", "", "Additional instructions:", ""].join("\n");
 }
 
 /** Passive source-backed explanation. It reads static metadata but never imports workflow code. */
