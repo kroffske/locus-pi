@@ -222,9 +222,14 @@ or borrowed runtime implementation was identified for this source-audit slice.
   The host fixes the package-manager argv,
   cwd, timeout, output bound, and cleanup, overlays current tracked/untracked
   source into a disposable external Git worktree, recursively materializes
-  initialized gitlink source without Git administrative metadata, and never
+  initialized gitlink source without Git administrative metadata, borrows the
+  Git-ignored `node_modules`/`.venv` roots by symlink so a declared check can
+  resolve its own toolchain, unlinks those borrowed roots before removing the
+  snapshot, and never
   executes in the operator checkout. Package scripts remain trusted
-  operator-owned code; this is checkout isolation, not an OS/network sandbox.
+  operator-owned code; this is checkout isolation, not an OS/network sandbox,
+  and a script that writes inside a borrowed dependency root reaches the
+  project's real install tree.
 - `extensions/_shared/workflow-script-identity.ts` owns versioned exact-entry
   identity, static source-policy analysis, read-only snapshots and final snapshot
   verification. Default `self-contained-static` permits only direct static

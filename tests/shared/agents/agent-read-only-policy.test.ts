@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,6 +54,40 @@ describe("read-only repository checks", () => {
       new AbortController().signal,
     );
     expect(shellText).toMatchObject({ isError: true, details: { blocked: true } });
+  });
+
+  it("borrows the installed dependency root so a declared check can start, and leaves it intact", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-read-only-deps-"));
+    git(root, "init", "--quiet");
+    git(root, "config", "user.email", "repository-check@example.test");
+    git(root, "config", "user.name", "Repository Check Test");
+    writeFileSync(path.join(root, ".gitignore"), "node_modules/\n", "utf8");
+    writeFileSync(
+      path.join(root, "package.json"),
+      `${JSON.stringify({
+        scripts: { verify: 'node -e "console.log(require(\\"installed-fixture\\").marker)"' },
+      })}\n`,
+      "utf8",
+    );
+    git(root, "add", ".gitignore", "package.json");
+    git(root, "commit", "--quiet", "-m", "fixture");
+
+    // Git-ignored, so the snapshot never contains it: without the borrowed link
+    // the check dies at startup and a verifier reads that as "could not run".
+    const installed = path.join(root, "node_modules", "installed-fixture");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(path.join(installed, "package.json"), `${JSON.stringify({ name: "installed-fixture" })}\n`, "utf8");
+    writeFileSync(path.join(installed, "index.js"), 'module.exports = { marker: "DEPENDENCY_RESOLVED" };\n', "utf8");
+
+    const capabilities = createReadOnlyAgentSessionCapabilities(root, ["read", "repository_check"]);
+    const check = capabilities.customTools?.find((tool) => tool.name === "repository_check");
+    const result = await check!.execute("verify", { script: "verify" }, new AbortController().signal);
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]?.text).toContain("DEPENDENCY_RESOLVED");
+    // Cleanup unlinks the borrowed directory; it never deletes through it.
+    expect(existsSync(path.join(installed, "index.js"))).toBe(true);
+    expect(git(root, "status", "--short")).toBe("");
   });
 
   it("materializes initialized submodule source bytes in the disposable worktree", async () => {

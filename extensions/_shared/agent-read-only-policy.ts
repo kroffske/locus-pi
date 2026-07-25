@@ -11,6 +11,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -207,7 +208,7 @@ function createRepositoryCheckTool(cwd: string, frozenScripts: RepositoryCheckSc
     name: "repository_check",
     label: "Repository Check",
     description:
-      'Run one existing package.json script in a host-created disposable Git worktree containing the current tracked and untracked source bytes. Pass only the script name, for example {"script":"test"}. The host supplies the package manager, argv, cwd, timeout, output bound, snapshot, and cleanup; arbitrary shell text and arguments are impossible. The operator checkout is never the command cwd.',
+      'Run one existing package.json script in a host-created disposable Git worktree containing the current tracked and untracked source bytes. Pass only the script name, for example {"script":"test"}. The host supplies the package manager, argv, cwd, timeout, output bound, snapshot, and cleanup; arbitrary shell text and arguments are impossible. The operator checkout is never the command cwd. Installed dependency roots (node_modules, .venv) are borrowed from the checkout by symlink so a declared check actually starts; everything the check writes lands in the disposable copy, except writes made inside a dependency root itself.',
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -334,7 +335,25 @@ interface RepositoryCheckSnapshot {
   repoRoot: string;
   path: string;
   cwd: string;
+  /** Absolute paths of the dependency symlinks this snapshot created, newest last. */
+  dependencyLinks: string[];
 }
+
+/**
+ * Installed dependencies are git-ignored, so the snapshot never contains them and
+ * a declared check dies at startup — `sh: vitest: command not found` — which reads
+ * to a verifier as "the suite could not run", not as evidence. The snapshot
+ * borrows these roots by symlink instead of copying them: resolution then behaves
+ * exactly as it does in the operator's checkout, while the command's cwd stays the
+ * disposable copy, so build output, coverage, and updated snapshot files land
+ * there and are discarded with it.
+ *
+ * The residual write path is narrow and deliberate: a check that writes *inside* a
+ * dependency root (a bundler cache under `node_modules/`, a byte-compiled module
+ * under `.venv/`) touches the operator's real directory. That is the price of
+ * running the check at all, and it is documented on the tool.
+ */
+const REPOSITORY_CHECK_DEPENDENCY_ROOTS = ["node_modules", ".venv"] as const;
 
 function materializeRepositoryCheckSnapshot(cwd: string): RepositoryCheckSnapshot {
   const repoRoot = gitText(cwd, ["rev-parse", "--show-toplevel"]);
@@ -345,6 +364,7 @@ function materializeRepositoryCheckSnapshot(cwd: string): RepositoryCheckSnapsho
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const dependencyLinks: string[] = [];
   try {
     overlayCurrentSource(repoRoot, target);
     const relativeCwd = path.relative(repoRoot, realpathSync(cwd));
@@ -355,11 +375,31 @@ function materializeRepositoryCheckSnapshot(cwd: string): RepositoryCheckSnapsho
     if (!existsSync(path.join(snapshotCwd, "package.json"))) {
       throw new Error("repository_check snapshot has no package.json at the project cwd.");
     }
-    return { repoRoot, path: target, cwd: snapshotCwd };
+    dependencyLinks.push(...linkDependencyRoots(repoRoot, target), ...linkDependencyRoots(cwd, snapshotCwd));
+    return { repoRoot, path: target, cwd: snapshotCwd, dependencyLinks };
   } catch (error) {
-    removeRepositoryCheckSnapshot({ repoRoot, path: target, cwd: target });
+    removeRepositoryCheckSnapshot({ repoRoot, path: target, cwd: target, dependencyLinks });
     throw error;
   }
+}
+
+/**
+ * Symlink each installed dependency root that exists in `sourceDir` and is absent
+ * from `targetDir`. Absent roots are skipped silently: a project without one is
+ * not an error, and a snapshot that somehow already carries one is left alone
+ * rather than replaced.
+ */
+function linkDependencyRoots(sourceDir: string, targetDir: string): string[] {
+  const created: string[] = [];
+  for (const name of REPOSITORY_CHECK_DEPENDENCY_ROOTS) {
+    const source = path.join(sourceDir, name);
+    const destination = path.join(targetDir, name);
+    if (lstatIfPresent(source)?.isDirectory() !== true) continue;
+    if (lstatIfPresent(destination) !== undefined) continue;
+    symlinkSync(realpathSync(source), destination);
+    created.push(destination);
+  }
+  return created;
 }
 
 function overlayCurrentSource(repoRoot: string, target: string): void {
@@ -419,6 +459,16 @@ function isGitlinkPath(repoRoot: string, relativePath: string): boolean {
 }
 
 function removeRepositoryCheckSnapshot(snapshot: RepositoryCheckSnapshot): void {
+  // Drop the borrowed dependency links FIRST. Both removal paths below unlink a
+  // symlink rather than following it, but this snapshot points at the operator's
+  // real `node_modules`, and that is not a place to rely on a subtlety.
+  for (const link of snapshot.dependencyLinks) {
+    try {
+      unlinkSync(link);
+    } catch {
+      // Already gone, or never created: the removal below still owns the directory.
+    }
+  }
   try {
     execFileSync("git", ["-C", snapshot.repoRoot, "worktree", "remove", "--force", snapshot.path], {
       encoding: "utf8",
