@@ -1,15 +1,6 @@
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
-export type OperatorSurfaceType =
-  | "VIEW"
-  | "CHANGE"
-  | "RUN"
-  | "INPUT"
-  | "SELECT"
-  | "RESULT"
-  | "LIVE"
-  | "WARN"
-  | "ERROR";
+export type OperatorSurfaceType = "VIEW" | "CHANGE" | "RUN" | "INPUT" | "SELECT" | "RESULT" | "LIVE" | "WARN" | "ERROR";
 
 export type OperatorTone = "accent" | "text" | "success" | "warning" | "error" | "muted" | "dim";
 
@@ -69,28 +60,20 @@ export function renderOperatorBlock(
     : boundOperatorBlock(block, safeWidth, theme, maxLines, lines.length);
 }
 
-function renderOperatorBlockUnbounded(
-  block: OperatorBlock,
-  safeWidth: number,
-  theme?: OperatorThemeLike,
-): string[] {
+function renderOperatorBlockUnbounded(block: OperatorBlock, safeWidth: number, theme?: OperatorThemeLike): string[] {
   if (safeWidth < MIN_FRAMED_WIDTH) return renderOperatorBlockPlain(block, safeWidth);
 
   const innerWidth = safeWidth - FRAME_SIDE_WIDTH;
   const borderTone = block.type === "INPUT" || block.type === "SELECT" ? "borderAccent" : "borderMuted";
   const heading = truncateToWidth(renderHeading(block, safeWidth, theme), innerWidth);
   const topFill = "─".repeat(Math.max(0, safeWidth - 4 - visibleWidth(heading)));
-  const lines = [
-    `${style(theme, borderTone, "╭─ ")}${heading}${style(theme, borderTone, `${topFill}╮`)}`,
-  ];
+  const lines = [`${style(theme, borderTone, "╭─ ")}${heading}${style(theme, borderTone, `${topFill}╮`)}`];
 
   for (const content of contentLines(block)) {
     const styled = styleContentLine(content, theme);
     for (const wrapped of wrapTextWithAnsi(styled, innerWidth)) {
       const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(wrapped)));
-      lines.push(
-        `${style(theme, borderTone, "│ ")}${wrapped}${padding}${style(theme, borderTone, " │")}`,
-      );
+      lines.push(`${style(theme, borderTone, "│ ")}${wrapped}${padding}${style(theme, borderTone, " │")}`);
     }
   }
 
@@ -99,8 +82,27 @@ function renderOperatorBlockUnbounded(
 }
 
 /** Render the same semantic hierarchy without ANSI or decorative framing. */
-export function renderOperatorBlockPlain(block: OperatorBlock, width: number): string[] {
+export function renderOperatorBlockPlain(
+  block: OperatorBlock,
+  width: number,
+  options: OperatorRenderOptions = {},
+): string[] {
   const safeWidth = normalizeWidth(width);
+  const lines = renderPlainUnbounded(block, safeWidth);
+  const maxLines = normalizeMaxLines(options.maxLines);
+  if (maxLines === undefined || lines.length <= maxLines) return lines;
+  if (maxLines <= 2) return compactPlainOperatorBlock(block, safeWidth, maxLines);
+
+  // Without this the caller hands an over-budget array to a host that clamps it
+  // by slicing the tail, which silently drops the controls — the one part that
+  // tells the operator how to recover. Degrading here keeps them.
+  return (
+    degradeToBudget(block, maxLines, (candidate) => renderPlainUnbounded(candidate, safeWidth)) ??
+    compactPlainOperatorBlock(block, safeWidth, maxLines)
+  );
+}
+
+function renderPlainUnbounded(block: OperatorBlock, safeWidth: number): string[] {
   const source = [renderHeading(block, safeWidth), ...contentLines(block).map((line) => line.text)];
 
   return source.flatMap((line) => wrapTextWithAnsi(line, safeWidth)).map((line) => truncateToWidth(line, safeWidth));
@@ -178,78 +180,79 @@ function boundOperatorBlock(
     return compactPlainOperatorBlock(block, width, maxLines);
   }
 
+  const ladder = degradeToBudget(block, maxLines, (candidate) => renderOperatorBlockUnbounded(candidate, width, theme));
+  if (ladder !== undefined) return ladder;
+
+  const exhausted = lastLadderState(block);
+  return renderCompactFramedBlock(
+    block,
+    width,
+    theme,
+    maxLines,
+    Math.max(1, exhausted.hidden, originalLineCount - maxLines),
+    exhausted.metadata,
+    exhausted.hint,
+    exhausted.controls,
+  );
+}
+
+/**
+ * Shed content in the order the operator can most afford to lose it: body rows
+ * first, then supporting metadata and hints, and controls only last. Returns
+ * `undefined` when even the most degraded candidate still overflows, leaving the
+ * final projection to the caller's own shape.
+ */
+function degradeToBudget(
+  block: OperatorBlock,
+  maxLines: number,
+  render: (candidate: OperatorBlock) => string[],
+): string[] | undefined {
   const body = [...(block.body ?? [])];
   const metadata = [...(block.metadata ?? [])];
   const hint = [...(block.hint ?? [])];
   const controls = [...(block.controls ?? [])];
   let hidden = 0;
 
-  while (body.length > 0) {
-    body.pop();
-    hidden += 1;
-    const candidate = renderOperatorBlockUnbounded(compactCandidate(
-      block,
-      body,
-      metadata,
-      hint,
-      controls,
-      hidden,
-    ), width, theme);
-    if (candidate.length <= maxLines) return candidate;
+  const attempt = (): string[] | undefined => {
+    const candidate = render(compactCandidate(block, body, metadata, hint, controls, hidden));
+    return candidate.length <= maxLines ? candidate : undefined;
+  };
+
+  for (const shed of [
+    () => (body.length > 0 ? (body.pop(), true) : false),
+    () => (metadata.length > 1 ? (metadata.pop(), true) : false),
+    () => (hint.length > 1 ? (hint.pop(), true) : false),
+    () => (controls.length > 1 ? (controls.pop(), true) : false),
+  ]) {
+    while (shed()) {
+      hidden += 1;
+      const fitted = attempt();
+      if (fitted !== undefined) return fitted;
+    }
   }
 
-  while (metadata.length > 1) {
-    metadata.pop();
-    hidden += 1;
-    const candidate = renderOperatorBlockUnbounded(compactCandidate(
-      block,
-      body,
-      metadata,
-      hint,
-      controls,
-      hidden,
-    ), width, theme);
-    if (candidate.length <= maxLines) return candidate;
-  }
+  return undefined;
+}
 
-  while (hint.length > 1) {
-    hint.pop();
-    hidden += 1;
-    const candidate = renderOperatorBlockUnbounded(compactCandidate(
-      block,
-      body,
-      metadata,
-      hint,
-      controls,
-      hidden,
-    ), width, theme);
-    if (candidate.length <= maxLines) return candidate;
-  }
+function lastLadderState(block: OperatorBlock): {
+  hidden: number;
+  metadata: readonly string[];
+  hint: readonly string[];
+  controls: readonly string[];
+} {
+  const body = block.body ?? [];
+  const metadata = block.metadata ?? [];
+  const hint = block.hint ?? [];
+  const controls = block.controls ?? [];
+  const dropped =
+    body.length + Math.max(0, metadata.length - 1) + Math.max(0, hint.length - 1) + Math.max(0, controls.length - 1);
 
-  while (controls.length > 1) {
-    controls.pop();
-    hidden += 1;
-    const candidate = renderOperatorBlockUnbounded(compactCandidate(
-      block,
-      body,
-      metadata,
-      hint,
-      controls,
-      hidden,
-    ), width, theme);
-    if (candidate.length <= maxLines) return candidate;
-  }
-
-  return renderCompactFramedBlock(
-    block,
-    width,
-    theme,
-    maxLines,
-    Math.max(1, hidden, originalLineCount - maxLines),
-    metadata,
-    hint,
-    controls,
-  );
+  return {
+    hidden: dropped,
+    metadata: metadata.slice(0, 1),
+    hint: hint.slice(0, 1),
+    controls: controls.slice(0, 1),
+  };
 }
 
 function compactCandidate(
@@ -281,23 +284,21 @@ function renderCompactFramedBlock(
 ): string[] {
   const innerWidth = Math.max(1, width - FRAME_SIDE_WIDTH);
   const tailSlots = Math.max(0, maxLines - 4);
-  const compactMetadata = tailSlots >= 2 && metadata[0] !== undefined
-    ? [truncateToWidth(metadata[0], innerWidth)]
-    : [];
-  const compactHint = tailSlots >= 3 && hint[0] !== undefined
-    ? [truncateToWidth(hint[0], innerWidth)]
-    : [];
-  const compactControls = tailSlots >= 1 && controls[0] !== undefined
-    ? [truncateToWidth(controls[0], innerWidth)]
-    : [];
-  const compact = renderOperatorBlockUnbounded({
-    ...block,
-    primary: truncateToWidth(block.primary, innerWidth),
-    body: maxLines >= 4 ? [`(+${hidden} hidden)`] : [],
-    metadata: compactMetadata,
-    hint: compactHint,
-    controls: compactControls,
-  }, width, theme);
+  const compactMetadata = tailSlots >= 2 && metadata[0] !== undefined ? [truncateToWidth(metadata[0], innerWidth)] : [];
+  const compactHint = tailSlots >= 3 && hint[0] !== undefined ? [truncateToWidth(hint[0], innerWidth)] : [];
+  const compactControls = tailSlots >= 1 && controls[0] !== undefined ? [truncateToWidth(controls[0], innerWidth)] : [];
+  const compact = renderOperatorBlockUnbounded(
+    {
+      ...block,
+      primary: truncateToWidth(block.primary, innerWidth),
+      body: maxLines >= 4 ? [`(+${hidden} hidden)`] : [],
+      metadata: compactMetadata,
+      hint: compactHint,
+      controls: compactControls,
+    },
+    width,
+    theme,
+  );
 
   if (compact.length <= maxLines) return compact;
   return compactPlainOperatorBlock(block, width, maxLines);
@@ -306,10 +307,7 @@ function renderCompactFramedBlock(
 function compactPlainOperatorBlock(block: OperatorBlock, width: number, maxLines: number): string[] {
   const heading = `[${block.type}] ${block.subject}`;
   if (maxLines === 1) return [truncatePlainText(`[${block.type}] ${block.primary}`, width)];
-  return [
-    truncatePlainText(heading, width),
-    truncatePlainText(block.primary, width),
-  ].slice(0, maxLines);
+  return [truncatePlainText(heading, width), truncatePlainText(block.primary, width)].slice(0, maxLines);
 }
 
 function truncatePlainText(text: string, width: number): string {

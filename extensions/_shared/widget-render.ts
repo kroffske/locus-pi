@@ -29,9 +29,15 @@ export const LIVE_WORK_PLACEMENT = "aboveEditor" as const;
 export const FLEET_MENU_PLACEMENT = "belowEditor" as const;
 export const SETTINGS_HELP_PLACEMENT = "belowEditor" as const;
 
-export function operatorBlockPlacement(
-  block: Pick<OperatorBlock, "type">,
-): "aboveEditor" | "belowEditor" {
+/**
+ * The host clamps a string[] widget to this many lines by slicing the tail, so a
+ * block rendered past it loses its controls with no notice to the operator. Our
+ * own budget must match it exactly: over-rendering hands the decision of what to
+ * drop to a host that has no idea which lines carry recovery instructions.
+ */
+export const HOST_STRING_ARRAY_WIDGET_LINES = 10;
+
+export function operatorBlockPlacement(block: Pick<OperatorBlock, "type">): "aboveEditor" | "belowEditor" {
   return block.type === "VIEW" ? SETTINGS_HELP_PLACEMENT : LIVE_WORK_PLACEMENT;
 }
 
@@ -95,11 +101,7 @@ export function setOperatorWidget(
   if (ctx.mode === "tui") {
     ctx.ui.setWidget(
       key,
-      (tui, theme) => new OperatorBlockWidget(
-        tui as WidgetFactoryTui,
-        block,
-        operatorTheme(theme) ?? ctx.ui.theme,
-      ),
+      (tui, theme) => new OperatorBlockWidget(tui as WidgetFactoryTui, block, operatorTheme(theme) ?? ctx.ui.theme),
       placement,
     );
     setDismissibleView(ctx, key, block.type === "VIEW");
@@ -108,14 +110,16 @@ export function setOperatorWidget(
 
   ctx.ui.setWidget(
     key,
-    renderOperatorBlockPlain(block, options.fallbackWidth ?? 80),
+    renderOperatorBlockPlain(block, options.fallbackWidth ?? 80, {
+      maxLines: HOST_STRING_ARRAY_WIDGET_LINES,
+    }),
     placement,
   );
   setDismissibleView(ctx, key, false);
 }
 
 function operatorTheme(value: unknown): OperatorThemeLike | undefined {
-  return typeof value === "object" && value !== null ? value as OperatorThemeLike : undefined;
+  return typeof value === "object" && value !== null ? (value as OperatorThemeLike) : undefined;
 }
 
 /**
