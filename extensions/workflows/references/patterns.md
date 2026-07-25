@@ -42,7 +42,25 @@ the curated `review` and `review-fix` workflows use. Every stage is one
 `agent()` with one coherent cognitive job; each handoff is the previous stage's
 exact text; the workflow never parses that text.
 
+Write the prompts inline, in the script, next to the call they belong to. One
+file is the whole workflow: the contract every stage shares, the per-stage task,
+the capability options, and the routing between them are read in one pass, and
+the retained script snapshot covers the prompt bytes too.
+
 ```js
+// The contract every stage shares. One constant, prepended to each stage prompt,
+// so a rule changes in one place and no stage can quietly disagree with another.
+const COMMON = `Work only inside the current repository.
+
+Read first: AGENTS.md, then the entry point named in the task below.
+
+Hard rules:
+- Do not commit, push, stage, or switch branches.
+- Every factual claim carries a repo-resolvable \`path:line\` citation.
+- A claim you could not verify is a finding to report, not a detail to hide.
+
+Your final text is the handoff the next stage receives, not a message to a human.`;
+
 // `maxToolCalls: 1_000` restates the runtime default so the runaway fuse is
 // visible in the source. Drop it, or lower it, when a stage should be cheaper.
 const STAGE_DEFAULTS = Object.freeze({
@@ -61,29 +79,79 @@ const PUBLISH_OPTIONS = Object.freeze({
 });
 
 phase("resolve-scope");
-const scopeText = await agent(await promptFile("./resources/scope-resolver.prompt.md", { ORIGINAL_REQUEST: input }), {
-  ...READ_OPTIONS,
-  label: "resolve scope",
-});
+const scopeText = await agent(
+  `${COMMON}
+
+TASK — turn the operator's request into one explicit, self-contained scope.
+Do not start the work itself; a later stage does that.
+
+--- BEGIN OPERATOR REQUEST ---
+${input}
+--- END OPERATOR REQUEST ---
+
+Return Markdown with \`## In scope\`, \`## Out of scope\`, and \`## Unknowns\`.
+Write \`- none\` under a heading that has nothing to list.`,
+  { ...READ_OPTIONS, label: "resolve scope" },
+);
 
 phase("plan-units");
-const unitsText = await agent(await promptFile("./resources/unit-planner.prompt.md", { SCOPE_TEXT: scopeText }), {
-  ...READ_OPTIONS,
-  label: "plan units",
-});
+const unitsText = await agent(
+  `${COMMON}
+
+TASK — group the scope into atomic units of meaning. Do not judge them and do
+not propose fixes.
+
+--- BEGIN SCOPE ---
+${scopeText}
+--- END SCOPE ---
+
+Return one \`## U<n>\` section per unit, each naming the files it covers.
+Return \`## No units\` with a one-line reason when the scope is empty.`,
+  { ...READ_OPTIONS, label: "plan units" },
+);
 
 phase("verify");
 const reportText = await agent(
-  await promptFile("./resources/verifier.prompt.md", { SCOPE_TEXT: scopeText, UNITS_TEXT: unitsText }),
+  `${COMMON}
+
+TASK — reopen the evidence yourself and write the report. The units are a work
+map, not evidence: read the source before you assert anything about it.
+
+--- BEGIN SCOPE ---
+${scopeText}
+--- END SCOPE ---
+
+--- BEGIN UNITS ---
+${unitsText}
+--- END UNITS ---
+
+Return the reader-facing report: \`## Verdict\`, \`## Findings\` (\`None.\` when
+there are none), \`## Coverage and limits\`.`,
   { ...READ_OPTIONS, label: "verify and write report" },
 );
 
 phase("publish");
-return agent(await promptFile("./resources/publisher.prompt.md", { UNITS_TEXT: unitsText, REPORT_TEXT: reportText }), {
-  ...PUBLISH_OPTIONS,
-  label: "publish package",
-});
+return agent(
+  `${COMMON}
+
+TASK — write the report to its artifact path and return a short executive
+summary. Do not invent, re-judge, or delete substance.
+
+--- BEGIN REPORT ---
+${reportText}
+--- END REPORT ---`,
+  { ...PUBLISH_OPTIONS, label: "publish package" },
+);
 ```
+
+Reach for a neighboring `./resources/<stage>.prompt.md` through `promptFile()`
+in the two cases where a file earns its indirection: a role charter long enough
+that inlining it buries the routing (roughly 80 lines and up — the curated
+`review` verifier is one), or a prompt genuinely shared by more than one
+workflow. Everything else — including every stage of a two- or three-stage
+pipeline — belongs in the script. A `promptFile` reference must resolve to a
+packaged `*.prompt.md`; a boundary test enforces that, so the escape hatch stays
+a real file rather than a guess.
 
 Stage roles, in the order they usually appear:
 
@@ -149,7 +217,7 @@ Runnable examples to adapt: `extensions/workflows/examples/review/` and
 
 ## Writing one stage task
 
-A stage is one `agent()` call plus one neighboring `*.prompt.md`. Writing it is
+A stage is one `agent()` call plus the prompt written next to it. Writing it is
 four decisions and nothing else:
 
 1. **The one question it answers.** Name it in a sentence. If the sentence needs
@@ -159,20 +227,22 @@ four decisions and nothing else:
    only for a stage that must run something, `write`/`edit` only for the stage
    that must change something. The `agent()` options are the boundary; the prompt
    paragraph only explains it.
-3. **What it receives.** The previous stage's exact text, wrapped in
-   `--- BEGIN <NAME> ---` / `--- END <NAME> ---` under `## Current task`, plus the
-   original operator intent when later stages must not lose the focus. Nothing
-   else: not the operator conversation, not runtime logs, not a sibling's scratch
-   reasoning.
+3. **What it receives.** The shared `COMMON` contract, then the previous stage's
+   exact text interpolated between `--- BEGIN <NAME> ---` / `--- END <NAME> ---`
+   markers, plus the original operator intent when later stages must not lose the
+   focus. Nothing else: not the operator conversation, not runtime logs, not a
+   sibling's scratch reasoning.
 4. **What it leaves behind.** `label` is the human-readable verb phrase in the
    live panel and the journal; `artifact: "<name>.md"` names the answer in the run
    store. The runtime persists it — no publisher child is needed to save text.
 
-The stage's _task_ lives in the prompt, not in the script: the question, the
-explicit list of what this stage must NOT do, and an output template in a `text`
-fence with a stated rule for the empty case (`None.`, `- none`, an explicit
-`## No changes` declaration). A stage that has no way to say "nothing here" will
-invent something.
+The stage's _task_ lives in its prompt, not in control flow: the question, the
+explicit list of what this stage must NOT do, and an output template with a
+stated rule for the empty case (`None.`, `- none`, an explicit `## No changes`
+declaration). A stage that has no way to say "nothing here" will invent
+something. Write that prompt inline in the script — the default above — and move
+it to a `*.prompt.md` only for a long role charter or a prompt two workflows
+share.
 
 ### What the script may check
 

@@ -4,8 +4,73 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Added
+
+- Two per-call bounds on `agent()`, so a workflow script no longer re-implements
+  them. `timeoutMs` is a wall-clock fuse that **aborts the child** on expiry and
+  fails the call closed — `maxToolCalls` bounds tool usage and cannot end a
+  stalled child, and a fuse that merely stopped waiting would leave a child
+  burning tokens with nobody to read its answer. `maxAnswerChars` rejects an
+  oversized answer at the call that produced it instead of letting it break the
+  next stage's prompt. Replay: `timeoutMs` joins the canonical request (changing
+  it is a different call, like `maxToolCalls`); `maxAnswerChars` stays a runtime
+  gate applied to fresh and replayed answers alike, so old recordings remain
+  replayable.
+- `agent({ schema })` now supports `type: "integer"` — the most common JSON
+  Schema type after `string`, previously rejected outright. A fractional answer
+  is reported by value (`count: expected integer, got 2.5`) so the schema retry
+  hands the child something it can act on, and an `integer` `enum` accepts only
+  whole numbers. The declaration precheck still runs before the first child
+  attempt and before any replay lookup, so widening the supported subset leaves
+  every existing recording replayable.
+
+### Fixed
+
+- `repository_check` can now actually run a declared check. It executes in a
+  disposable worktree holding only tracked and untracked repository files, so the
+  Git-ignored install tree was missing and every real check died at startup with
+  `sh: vitest: command not found` — which a verifying agent reads as "the suite
+  could not run", the one answer that makes the tool worthless. The snapshot now
+  borrows the project's `node_modules` and `.venv` directories as symlinks when
+  they exist, and unlinks them before removal so cleanup never deletes through
+  them. Repository files are still isolated: a check that writes source touches
+  only the disposable copy. The exception is a write inside a borrowed dependency
+  root, which reaches the project's real install tree — package scripts remain
+  trusted operator-owned code, and this is checkout isolation, not a sandbox.
+- An operator widget on the string-array path no longer loses its controls to
+  silent host truncation. That path rendered with no line budget while the host
+  clamps it to ten lines by slicing the tail, so any block that wrapped past the
+  cap — a workflow catalog in a deeply nested checkout, where absolute paths wrap
+  across rows — reached the operator without the line naming the command to run,
+  and without any sign that something had been dropped. The plain projection now
+  applies the same degradation ladder the TUI path already used: body rows are
+  shed first, then supporting metadata and hints, controls last, with a
+  `(+N hidden)` marker for what went.
+- A workflow run directory with no `result.json` now reads as an absent operator
+  handoff instead of invalid evidence. A run that is still executing, or one that
+  was interrupted, has no terminal result to carry a handoff, so the operator
+  surfaces that scan run history no longer report it as corrupt. A `result.json`
+  that exists but is a symlink stays invalid.
+- `/workflow-run` now works in the one-shot output modes. Under `pi -p` (and
+  `--mode json`) the command launched the run detached and returned; the host
+  then disposed the session at the end of the turn, and the run died at its first
+  child agent with "This extension ctx is stale after session replacement or
+  reload". Those modes now hold the turn open until the run settles and its
+  result is persisted, so a scripted `pi -p "/workflow-run <name>"` completes.
+  `tui` and `rpc` sessions outlive their turn and keep the previous detached
+  behavior — immediate return, live panel, cancellable through `/workflow-stop`.
+
 ### Changed
 
+- Workflow authoring now defaults to inline stage prompts. A workflow is one
+  file: a shared contract constant, each stage's task written next to the
+  `agent()` call it belongs to, its capability options, and the routing between
+  them — read in one pass, with the retained script snapshot covering the prompt
+  bytes. A neighboring `*.prompt.md` through `promptFile()` becomes the escape
+  hatch for a long role charter or a prompt shared by more than one workflow;
+  the curated `review` family predates the default and keeps its files. The
+  pattern catalog's staged-pipeline skeleton, the authoring pointer, and the
+  canonical DSL notes now teach the same shape.
 - The `/workflows` Edit/Review editor handoff now names `workflow-author`, the
   catalog agent bundled in `.agents/agents/` and installed with this package,
   instead of the skill `$pi-workflow-authoring`, which no installation ever

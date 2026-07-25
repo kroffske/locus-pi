@@ -188,6 +188,16 @@ host-owned lineage, and never grades model prose. Branch on a declared shape wit
 `agent({ schema })`, whose runtime retry re-asks the child with the previous
 validator errors before failing closed.
 
+**Write stage prompts inline, in the script.** One file carries the shared
+contract, each stage's task, its capability options, and the routing between
+them, so the whole workflow is read in one pass and the retained script snapshot
+covers the prompt bytes. Use a neighboring `./resources/<stage>.prompt.md`
+through `promptFile()` only for a role charter long enough to bury the routing
+(roughly 80 lines and up) or a prompt shared by more than one workflow; the
+curated `review` family predates this default and keeps its files. Capability
+limits (`readOnly`, `tools`, `workspaceMode`, `maxToolCalls`) stay DSL options
+either way — never prompt claims.
+
 For _which shape to pick_ (single-agent, shaped `agent({ schema })` gate, staged text pipeline,
 loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
 judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog

@@ -90,6 +90,38 @@ the DSL, and it was removed in favour of one model-calling primitive (T-108,
 The subset validator, the JSON extractor, the shared `SCHEMA_MAX_ATTEMPTS` budget,
 and `SchemaValidationError` survived the removal and now belong to `agent()` alone.
 
+## Amendment 2026-07-25 — inline stage prompts are the default
+
+The rule above — "workflow-specific behavior lives in one neighboring
+`*.prompt.md` per stage" — is narrowed to a fallback. A stage's prompt is now
+written inline in the workflow script by default: one shared contract constant
+prepended to each stage, and a per-stage template literal that interpolates the
+previous stage's exact text between `--- BEGIN <NAME> ---` / `--- END <NAME> ---`
+markers.
+
+`promptFile(path, variables)` and every guarantee it carries — source-relative
+resolution, rejection of absolute paths and lexical or symlink escapes, the
+read-only run copy, and the recorded SHA-256 — are unchanged and remain the
+supported path for a role charter long enough to bury the routing (roughly 80
+lines and up) or a prompt shared by more than one workflow. The curated `review`
+family predates this amendment and keeps its files.
+
+Reasons, in order of weight:
+
+- **Identity coverage.** A prompt file is read at run time and is not part of the
+  retained script snapshot, so editing it changes behavior while the script hash
+  stays the same. An inline prompt is covered by the snapshot the runner already
+  verifies.
+- **One-pass reading.** The contract, the per-stage task, the capability options,
+  and the routing are read together instead of across a directory. This is what
+  makes a decomposition auditable against the weak-model bar.
+- **One contract, one place.** A shared `COMMON` constant cannot drift between
+  stages the way a rule duplicated across seven prompt files does.
+
+Unchanged by this amendment: runtime policy stays code, never prompt prose;
+handoffs stay exact text the workflow does not parse; and the per-call
+capability options remain the boundary.
+
 ## Consequences
 
 Workflow source and resources become shorter: every stage has one prompt, while
