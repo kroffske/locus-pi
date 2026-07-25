@@ -141,9 +141,26 @@ describe("agent({ schema }) structured output", () => {
     expect(calls).toBe(0);
   });
 
+  it("accepts an integer answer and rejects a fractional one with a value-bearing error", async () => {
+    const { dsl, requests } = scriptedRuntime("agent-schema-integer", ['{"count":2.5}', '{"count":3}']);
+
+    const value = await dsl.agent("How many blocking findings?", {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["count"],
+        properties: { count: { type: "integer" } },
+      },
+    });
+
+    expect(value).toEqual({ count: 3 });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.prompt).toContain("count: expected integer, got 2.5");
+  });
+
   it.each([
-    [{ type: "integer" }, /unsupported type "integer"/u],
     [{ type: "string", maxLength: 12 }, /unsupported keyword "maxLength"/u],
+    [{ type: "integer", enum: [1, 1.5] }, /enum value at index 1 does not match declared type integer/u],
     [{ type: "object", required: "answer", properties: {} }, /required must be an array/u],
     [{ type: "object", required: ["answer", "answer"], properties: {} }, /required contains duplicate/u],
     [{ type: "object", required: ["missing"], properties: {} }, /not declared in properties/u],

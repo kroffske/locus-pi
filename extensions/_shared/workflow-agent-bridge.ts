@@ -334,15 +334,54 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(evidenceDestinations !== undefined ? { reportsDir: evidenceDestinations.transcriptDir } : {}),
     });
 
-    // 6. Execute through the boundary (same as task tool)
-    const boundary = await executeAgentRunBoundary({
-      pi,
-      ctx,
-      request,
-      executor,
-      signal,
-      ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
-    });
+    // 6. Execute through the boundary (same as task tool).
+    // A per-call fuse aborts the child itself rather than abandoning it: a timeout
+    // that only stops waiting would leave a child burning tokens with nothing left
+    // to read its answer. The run-level signal still aborts everything.
+    const callAbort = new AbortController();
+    const abortFromRun = (): void => callAbort.abort(signal.reason);
+    if (signal.aborted) abortFromRun();
+    else signal.addEventListener("abort", abortFromRun, { once: true });
+    let timedOut = false;
+    const timer =
+      req.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
+          }, req.timeoutMs);
+    let boundary;
+    try {
+      boundary = await executeAgentRunBoundary({
+        pi,
+        ctx,
+        request,
+        executor,
+        signal: callAbort.signal,
+        ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
+      });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", abortFromRun);
+    }
+    if (timedOut) {
+      // Name the fuse. Without this the operator reads only the host's generic
+      // abort reason and cannot tell a timeout from an operator cancellation.
+      const message = `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`;
+      return {
+        ok: false,
+        status: "failed",
+        summary: message,
+        diagnostics: [...boundary.diagnostics, message],
+        agent: agent.name,
+        permissionMode,
+        workspaceMode,
+        readOnly: agent.readOnly,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
+        ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
+      };
+    }
     if (req.workspaceHandle !== undefined) {
       options.workspaceManager?.resolve(req.workspaceHandle);
     }

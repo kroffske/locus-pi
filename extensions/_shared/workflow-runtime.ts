@@ -57,6 +57,8 @@ export interface WorkflowAgentRequest {
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
+  /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
+  timeoutMs?: number;
   label?: string;
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
@@ -171,6 +173,18 @@ export interface WorkflowAgentOptions {
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
+  /**
+   * Wall-clock fuse for one child attempt, in milliseconds. `maxToolCalls` bounds
+   * tool usage and cannot end a stalled child. On expiry the child is aborted and
+   * the call fails closed; it never resolves to a partial answer.
+   */
+  timeoutMs?: number;
+  /**
+   * Upper bound on the child's answer, in characters. An oversized handoff breaks
+   * the next stage's prompt, so the runtime fails the call here instead of letting
+   * a script re-implement the check. Enforced on replayed answers too.
+   */
+  maxAnswerChars?: number;
   label?: string;
   /** Logical name for the exact returned answer in the run artifact index. */
   artifact?: string;
@@ -516,6 +530,21 @@ function normalizeMaxToolCalls(maxToolCalls: number, field: string): number {
   return maxToolCalls;
 }
 
+/** A fuse of zero would abort before the child starts; that is a bug, not a bound. */
+function normalizeTimeoutMs(timeoutMs: number): number {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("agent timeoutMs must be a positive safe integer");
+  }
+  return timeoutMs;
+}
+
+function normalizeMaxAnswerChars(maxAnswerChars: number): number {
+  if (!Number.isSafeInteger(maxAnswerChars) || maxAnswerChars <= 0) {
+    throw new Error("agent maxAnswerChars must be a positive safe integer");
+  }
+  return maxAnswerChars;
+}
+
 function defaultWorkflowPermissionMode(agentName: string, requestedMode: PermissionMode | undefined): PermissionMode {
   if (agentName === DEFAULT_WORKFLOW_AGENT && requestedMode === "restricted") return "inherit-parent";
   if (requestedMode !== undefined) return requestedMode;
@@ -587,7 +616,7 @@ export class SchemaValidationError extends Error {
  * Minimal dependency-free JSON-schema subset validator.
  *
  * Supported keywords:
- *   - `type`: "object" | "array" | "string" | "number" | "boolean"
+ *   - `type`: "object" | "array" | "string" | "number" | "integer" | "boolean"
  *   - `required`: string[]  (for objects — lists required property names)
  *   - `properties`: Record<string, schema>  (recursive)
  *   - `additionalProperties`: false  (for objects — reject keys not in `properties`)
@@ -597,7 +626,7 @@ export class SchemaValidationError extends Error {
  * `schema === undefined` is a no-op — callers must guard before calling.
  * No ajv, no fs, no network. Host-agnostic.
  */
-const SUPPORTED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "boolean"]);
+const SUPPORTED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean"]);
 const SUPPORTED_SCHEMA_KEYWORDS = new Set(["type", "enum", "required", "properties", "additionalProperties", "items"]);
 
 /** Validate the declaration before the first child call. Runtime value validation
@@ -634,6 +663,7 @@ function assertSupportedAgentSchema(schema: Record<string, unknown>, path = "sch
         type === undefined ||
         (type === "string" && typeof member === "string") ||
         (type === "number" && typeof member === "number") ||
+        (type === "integer" && typeof member === "number" && Number.isInteger(member)) ||
         (type === "boolean" && typeof member === "boolean");
       if (!matchesDeclaredType) {
         throw new Error(`${path}: enum value at index ${index} does not match declared type ${String(type)}`);
@@ -753,6 +783,14 @@ function validateAgainstSchema(
     } else if (type === "number") {
       if (typeof value !== "number") {
         errors.push(`${path || "root"}: expected number, got ${typeof value}`);
+      }
+    } else if (type === "integer") {
+      // A fractional number is the failure the child must be told about by value:
+      // "got number" would read as a type mismatch it cannot act on.
+      if (typeof value !== "number") {
+        errors.push(`${path || "root"}: expected integer, got ${typeof value}`);
+      } else if (!Number.isInteger(value)) {
+        errors.push(`${path || "root"}: expected integer, got ${JSON.stringify(value)}`);
       }
     } else if (type === "boolean") {
       if (typeof value !== "boolean") {
@@ -945,6 +983,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
+      ...(opts?.timeoutMs !== undefined ? { timeoutMs: normalizeTimeoutMs(opts.timeoutMs) } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
       callId,
@@ -1051,6 +1090,24 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         summary: "Agent result text is empty.",
         diagnostics: [...finalResult.diagnostics, "Agent result text is empty."],
       };
+    }
+    // The answer bound is a runtime gate, not part of the request: it is checked
+    // here so a replayed answer is held to the caller's CURRENT bound. Tightening
+    // it therefore fails an old recording loudly instead of passing text the next
+    // stage's prompt cannot hold.
+    if (opts?.maxAnswerChars !== undefined && finalResult.ok && finalResult.status === "completed") {
+      const maxAnswerChars = normalizeMaxAnswerChars(opts.maxAnswerChars);
+      const length = finalResult.text?.length ?? 0;
+      if (length > maxAnswerChars) {
+        const message = `Agent answer is ${length} characters; the call allows ${maxAnswerChars}.`;
+        finalResult = {
+          ...finalResult,
+          ok: false,
+          status: "failed",
+          summary: message,
+          diagnostics: [...finalResult.diagnostics, message],
+        };
+      }
     }
     // Shape check runs before agent_end so the run journal carries the verdict for THIS attempt.
     // A child that failed or returned no text has nothing to validate; that stays a run failure.
@@ -1518,6 +1575,9 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     tools: req.tools ?? null,
     maxToolCalls: req.maxToolCalls ?? null,
     model: req.model ?? null,
+    // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
+    // is a different call and must not reuse the earlier record.
+    timeoutMs: req.timeoutMs ?? null,
     label: req.label ?? null,
     phase: req.phase ?? null,
     sandbox: req.sandbox ?? null,

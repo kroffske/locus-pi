@@ -129,6 +129,31 @@ export default async function runWorkflow(dsl, input) {
 }
 `;
 
+/**
+ * The scripted child echoes its prompt, so the JSON it must return is fenced
+ * inside the prompt — the runtime reads the first fence, ahead of the schema
+ * block it appends.
+ */
+const SHAPED_WORKFLOW = `export const meta = { name: "shaped", description: "one shaped stage" };
+const FENCE = "\\u0060\\u0060\\u0060";
+const COUNT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["count"],
+  properties: { count: { type: "integer" } },
+};
+export default async function runWorkflow(dsl) {
+  const prompt = ["answer with:", FENCE + "json", '{"count":3}', FENCE].join("\\n");
+  return await dsl.agent(prompt, { schema: COUNT_SCHEMA });
+}
+`;
+
+const UNSUPPORTED_SCHEMA_WORKFLOW = `export const meta = { name: "unsupported", description: "declares an ignored keyword" };
+export default async function runWorkflow(dsl) {
+  return await dsl.agent("shape me", { schema: { type: "string", pattern: "^x" } });
+}
+`;
+
 describe("workflow --resume replays recorded agent calls", () => {
   it("projects an unreadable persisted result envelope as unknown", () => {
     const root = temporaryProject();
@@ -166,6 +191,33 @@ describe("workflow --resume replays recorded agent calls", () => {
     // The resumed run writes its own complete record, so resuming a resume works.
     const chained = readWorkflowReplayLog(root, resumed.runId).filter((entry) => entry.kind === "agent");
     expect(chained).toHaveLength(3);
+  });
+
+  it("replays a schema-bearing call, and refuses an unsupported declaration before touching the record", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "shaped", SHAPED_WORKFLOW);
+
+    const first = await runWorkflow(root, "shaped");
+    expect(first.ok).toBe(true);
+    expect(first.result).toEqual({ count: 3 });
+    expect(first.executedPrompts).toHaveLength(1);
+
+    // The declaration precheck runs before the replay lookup and the canonical key
+    // is built from the resolved request, so widening the supported schema subset
+    // never invalidates a recording made under the narrower one.
+    const resumed = await runWorkflow(root, "shaped", { resumeFromRunId: first.runId });
+    expect(resumed.executedPrompts).toEqual([]);
+    expect(resumed.result).toEqual({ count: 3 });
+    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 1, freshCalls: 0 });
+
+    // An unsupported declaration fails ahead of both the child and the record:
+    // the resumed run consumes no entry and spends no attempt.
+    writeWorkflow(root, "unsupported", UNSUPPORTED_SCHEMA_WORKFLOW);
+    const rejected = await runWorkflow(root, "unsupported");
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toMatch(/unsupported keyword "pattern"/u);
+    expect(rejected.executedPrompts).toEqual([]);
+    expect(readWorkflowReplayLog(root, rejected.runId).filter((entry) => entry.kind === "agent")).toHaveLength(0);
   });
 
   it("invalidates an edited call AND every later call, even when the later prompts are unchanged", async () => {
