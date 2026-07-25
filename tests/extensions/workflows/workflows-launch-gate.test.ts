@@ -131,6 +131,73 @@ describe("/workflows run launch gate", () => {
     }
   });
 
+  it("holds a one-shot slash run open until the workflow settles", async () => {
+    const h = createHarness(process.cwd(), { isStreaming: false, mode: "print" });
+    workflows(h.pi);
+    let releaseRun: (() => void) | undefined;
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
+      request.onRunStart?.({ runId: "run-headless", runDir: "/tmp/run-headless" });
+      await new Promise<void>((resolve) => {
+        releaseRun = resolve;
+      });
+      return {
+        runId: "run-headless",
+        runDir: "/tmp/run-headless",
+        ok: true,
+        result: { summary: "headless complete" },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-headless/result.json" },
+      };
+    });
+    try {
+      // `pi -p` disposes the session when the turn ends, so a detached run would
+      // lose its ctx before the first child session. The command must not resolve
+      // while the run is still in flight.
+      let settled = false;
+      const headless = Promise.resolve(h.commands.get("workflows")!.handler("run live-smoke", h.ctx)).then(() => {
+        settled = true;
+      });
+      await waitForBackground(() => releaseRun !== undefined);
+      expect(settled).toBe(false);
+      releaseRun!();
+      await headless;
+      expect(settled).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns immediately in a session that outlives the turn", async () => {
+    const h = createHarness(process.cwd(), { isStreaming: false });
+    workflows(h.pi);
+    let releaseRun: (() => void) | undefined;
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
+      request.onRunStart?.({ runId: "run-ui", runDir: "/tmp/run-ui" });
+      await new Promise<void>((resolve) => {
+        releaseRun = resolve;
+      });
+      return {
+        runId: "run-ui",
+        runDir: "/tmp/run-ui",
+        ok: true,
+        result: { summary: "ui complete" },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-ui/result.json" },
+      };
+    });
+    try {
+      await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
+      // A `tui` session (and a long-lived `rpc` one) outlives the turn, so the run
+      // stays detached and the operator keeps the prompt while the panel streams.
+      await waitForBackground(() => releaseRun !== undefined);
+      expect(releaseRun).toBeDefined();
+      releaseRun!();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("buffers an idle-launched command through a later streaming interval and appends only after settled", async () => {
     const h = createHarness(process.cwd(), { isStreaming: false });
     workflows(h.pi);

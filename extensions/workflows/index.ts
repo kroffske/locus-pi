@@ -749,7 +749,15 @@ export default function workflows(pi: ExtensionAPI): void {
         ...(parsedRun.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsedRun.resumeFromRunId }),
         ...(ctx.waitForIdle === undefined ? {} : { waitForIdle: () => ctx.waitForIdle!() }),
       });
-      if (launched.status === "busy") {
+      if (launched.status === "started") {
+        // A `tui` session and a long-lived `rpc` session both outlive the turn, so
+        // the run stays detached and the operator keeps the prompt. The one-shot
+        // output modes do not: the host disposes the session when the turn ends,
+        // and the detached run's captured ctx goes stale before its first child
+        // session ("This extension ctx is stale after session replacement or
+        // reload"). There the command holds the turn open until the run settles.
+        if (isOneShotCommandMode(ctx)) await commandLauncher.awaitActive();
+      } else if (launched.status === "busy") {
         setOperatorWidget(ctx, "workflows", workflowRunConflictBlock(launched.owner));
       } else if (launched.status === "stale") {
         setOperatorWidget(
@@ -858,6 +866,16 @@ function flatWorkflowCommandDescription(command: FlatWorkflowCommand): string {
     default:
       return assertNever(command);
   }
+}
+
+/**
+ * True for the one-shot output modes, whose session is disposed when the turn
+ * ends. `tui` and `rpc` sessions outlive their turn, so a run launched there
+ * stays detached; in `print`/`json` a detached run loses the ctx its child
+ * sessions need, so the command has to hold the turn open instead.
+ */
+function isOneShotCommandMode(ctx: ExtensionCommandContext): boolean {
+  return ctx.mode === "print" || ctx.mode === "json";
 }
 
 async function openWorkflowRunViewer(

@@ -65,6 +65,14 @@ export interface WorkflowCommandLauncher {
   isCurrent(lease: WorkflowSessionLease): boolean;
   hasActiveCommandRun(): boolean;
   launch(request: WorkflowCommandLaunchRequest): WorkflowCommandLaunchResult;
+  /**
+   * Resolve once the most recently launched command run has settled AND its
+   * observer/terminal callbacks have run. A caller with no live surface to watch
+   * the run must await this before returning: the host disposes the session at
+   * the end of the turn, and a detached run loses the ctx its child sessions
+   * need. Resolves immediately when nothing was launched.
+   */
+  awaitActive(): Promise<void>;
   attach<T>(
     ctx: ExtensionContext,
     hostSignal: AbortSignal,
@@ -78,6 +86,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
   const backgroundRuns = options.backgroundRuns ?? workflowBackgroundRunRegistry();
   let sessionLease: WorkflowSessionLease | undefined;
   let sessionRevoked = false;
+  let activeTerminal: Promise<void> | undefined;
 
   const startSession = (ctx: ExtensionContext): WorkflowSessionLease => {
     sessionRevoked = false;
@@ -145,10 +154,16 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
           ? { status: "stale" }
           : { status: "busy", owner: launched.active?.runId ?? launched.active?.launchId ?? "current run" };
       }
-      void launched.run.terminal.then(() => {
+      activeTerminal = launched.run.terminal.then(() => {
         options.onTerminal(request, () => backgroundRuns.isCurrent(lease));
       });
+      void activeTerminal;
       return { status: "started" };
+    },
+    async awaitActive() {
+      // The settlement promise never rejects; `onTerminal` is host code, and a
+      // throw there must not turn an observed run into an unhandled rejection.
+      await activeTerminal?.catch(() => undefined);
     },
     attach<T>(
       ctx: ExtensionContext,
