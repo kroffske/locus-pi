@@ -158,15 +158,52 @@ describe("agent({ schema }) structured output", () => {
     expect(requests[1]?.prompt).toContain("count: expected integer, got 2.5");
   });
 
+  it("re-asks the child when a size or pattern bound is broken, instead of killing the run", async () => {
+    // The whole point of moving bounds into the schema: a script that checked
+    // these by hand after validation could only throw, ending the run on an
+    // answer the child could have corrected on its own.
+    const { dsl, requests } = scriptedRuntime("agent-schema-bounds", [
+      '{"id":"w1","tags":["a","b","c"],"summary":""}',
+      '{"id":"W1","tags":["a","b"],"summary":"ok"}',
+    ]);
+
+    const value = await dsl.agent("Name the unit.", {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "tags", "summary"],
+        properties: {
+          id: { type: "string", pattern: "^W[1-9][0-9]*$" },
+          tags: { type: "array", items: { type: "string" }, maxItems: 2 },
+          summary: { type: "string", minLength: 1 },
+        },
+      },
+    });
+
+    expect(value).toEqual({ id: "W1", tags: ["a", "b"], summary: "ok" });
+    expect(requests).toHaveLength(2);
+    const retry = requests[1]?.prompt ?? "";
+    expect(retry).toContain('id: value "w1" does not match pattern ^W[1-9][0-9]*$');
+    expect(retry).toContain("tags: expected at most 2 item(s), got 3");
+    expect(retry).toContain("summary: expected at least 1 character(s), got 0");
+  });
+
   it.each([
-    [{ type: "string", maxLength: 12 }, /unsupported keyword "maxLength"/u],
+    [{ type: "string", maxLength: 12.5 }, /maxLength must be a non-negative safe integer/u],
+    [{ type: "string", maxLength: -1 }, /maxLength must be a non-negative safe integer/u],
+    [{ type: "string", minLength: 9, maxLength: 4 }, /minLength 9 exceeds maxLength 4/u],
+    [{ type: "array", items: { type: "string" }, minItems: 3, maxItems: 2 }, /minItems 3 exceeds maxItems 2/u],
+    [{ type: "object", properties: {}, maxLength: 4 }, /maxLength is only valid for a string schema/u],
+    [{ type: "string", maxItems: 4 }, /maxItems is only valid for an array schema/u],
+    [{ type: "string", pattern: "(" }, /pattern is not a valid regular expression/u],
+    [{ type: "string", pattern: 7 }, /pattern must be a string/u],
     [{ type: "integer", enum: [1, 1.5] }, /enum value at index 1 does not match declared type integer/u],
     [{ type: "object", required: "answer", properties: {} }, /required must be an array/u],
     [{ type: "object", required: ["answer", "answer"], properties: {} }, /required contains duplicate/u],
     [{ type: "object", required: ["missing"], properties: {} }, /not declared in properties/u],
     [{ type: "object", properties: { answer: "string" } }, /properties\.answer must be a schema object/u],
     [{ type: "array" }, /array schema must declare items/u],
-    [{ type: "array", items: { type: "string", pattern: "x" } }, /unsupported keyword "pattern"/u],
+    [{ type: "array", items: { type: "string", minItems: 1 } }, /schema\.items: minItems is only valid for an array/u],
     [{ type: "string", additionalProperties: false }, /additionalProperties is only valid/u],
     [{ type: "string", enum: "yes" }, /enum must be a non-empty array/u],
     [{ enum: [{ answer: "yes" }] }, /enum value at index 0 must be a JSON primitive/u],

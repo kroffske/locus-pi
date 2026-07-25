@@ -150,7 +150,7 @@ export default async function runWorkflow(dsl) {
 
 const UNSUPPORTED_SCHEMA_WORKFLOW = `export const meta = { name: "unsupported", description: "declares an ignored keyword" };
 export default async function runWorkflow(dsl) {
-  return await dsl.agent("shape me", { schema: { type: "string", pattern: "^x" } });
+  return await dsl.agent("shape me", { schema: { type: "number", minimum: 3 } });
 }
 `;
 
@@ -215,7 +215,7 @@ describe("workflow --resume replays recorded agent calls", () => {
     writeWorkflow(root, "unsupported", UNSUPPORTED_SCHEMA_WORKFLOW);
     const rejected = await runWorkflow(root, "unsupported");
     expect(rejected.ok).toBe(false);
-    expect(rejected.error).toMatch(/unsupported keyword "pattern"/u);
+    expect(rejected.error).toMatch(/unsupported keyword "minimum"/u);
     expect(rejected.executedPrompts).toEqual([]);
     expect(readWorkflowReplayLog(root, rejected.runId).filter((entry) => entry.kind === "agent")).toHaveLength(0);
   });

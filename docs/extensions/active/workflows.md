@@ -1244,10 +1244,16 @@ What the runtime does, in order:
 
 1. Recursively validates the declaration before any child starts. The only
    supported keywords are `type`, `enum`, `required`, `properties`,
-   `additionalProperties:false`, and `items`, and the only supported types are
-   `object`, `array`, `string`, `number`, `integer`, and `boolean`; unsupported
-   types/keywords and malformed or misplaced declarations fail with zero child
-   calls.
+   `additionalProperties:false`, `items`, the string bounds `minLength`,
+   `maxLength`, and `pattern`, and the array bounds `minItems` and `maxItems`;
+   the only supported types are `object`, `array`, `string`, `number`,
+   `integer`, and `boolean`. Unsupported types/keywords and malformed or
+   misplaced declarations fail with zero child calls, as do a bound on the wrong
+   type, a negative or non-integer bound, an unsatisfiable `min > max` pair, and
+   a `pattern` that does not compile — an impossible contract must not burn every
+   retry and then surface as an unexplained exhaustion. `pattern` follows the
+   JSON Schema spec: an unanchored ECMA-262 search with no flags, so a schema
+   that means the whole value writes `^`/`$` itself.
 2. Appends a deterministic shape block (the JSON Schema plus "one JSON value,
    no prose") to the prompt the child receives.
 3. Runs the child exactly as an ordinary `agent()` call — same catalog agent,
@@ -1255,7 +1261,9 @@ What the runtime does, in order:
 4. Parses the child's final text as JSON (a `json` code fence is tolerated) and
    validates it with the DSL's JSON-Schema subset validator:
    `type` (object/array/string/number/integer/boolean), `required`, `properties`,
-   `additionalProperties:false`, `items`, `enum`.
+   `additionalProperties:false`, `items`, `enum`, and the size/pattern bounds.
+   Bound violations are reported by value (`tags: expected at most 2 item(s),
+got 3`) because the child has to decide what to cut.
 5. On mismatch, retries with a fresh child whose prompt carries the previous
    attempt's validator errors, up to `SCHEMA_MAX_ATTEMPTS` (2) child runs total.
 6. Resolves to the validated value, or throws `SchemaValidationError` carrying

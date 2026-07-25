@@ -627,7 +627,27 @@ export class SchemaValidationError extends Error {
  * No ajv, no fs, no network. Host-agnostic.
  */
 const SUPPORTED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean"]);
-const SUPPORTED_SCHEMA_KEYWORDS = new Set(["type", "enum", "required", "properties", "additionalProperties", "items"]);
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+  "type",
+  "enum",
+  "required",
+  "properties",
+  "additionalProperties",
+  "items",
+  // Size and shape bounds. Without these a script must re-check every string and
+  // array by hand after validation succeeds, and a violation then throws and
+  // kills the run — whereas a bound expressed here is fed back to the child by
+  // the existing retry, which is the difference between a fatal answer and a
+  // correctable one.
+  "minLength",
+  "maxLength",
+  "pattern",
+  "minItems",
+  "maxItems",
+]);
+
+const STRING_ONLY_KEYWORDS = ["minLength", "maxLength", "pattern"] as const;
+const ARRAY_ONLY_KEYWORDS = ["minItems", "maxItems"] as const;
 
 /** Validate the declaration before the first child call. Runtime value validation
  *  is useful only when authors cannot accidentally declare an ignored contract. */
@@ -712,6 +732,69 @@ function assertSupportedAgentSchema(schema: Record<string, unknown>, path = "sch
   } else if (schema.items !== undefined) {
     throw new Error(`${path}: items is only valid for an array schema`);
   }
+
+  assertBoundKeywords(schema, path, type);
+}
+
+/**
+ * A bound that can never be satisfied would burn every schema retry before
+ * failing, so an impossible or misplaced declaration is refused here — before
+ * the first child call — rather than discovered as an unexplained exhaustion.
+ */
+function assertBoundKeywords(schema: Record<string, unknown>, path: string, type: unknown): void {
+  for (const keyword of STRING_ONLY_KEYWORDS) {
+    if (schema[keyword] !== undefined && type !== "string") {
+      throw new Error(`${path}: ${keyword} is only valid for a string schema`);
+    }
+  }
+  for (const keyword of ARRAY_ONLY_KEYWORDS) {
+    if (schema[keyword] !== undefined && type !== "array") {
+      throw new Error(`${path}: ${keyword} is only valid for an array schema`);
+    }
+  }
+
+  for (const keyword of ["minLength", "maxLength", "minItems", "maxItems"] as const) {
+    const bound = schema[keyword];
+    if (bound === undefined) continue;
+    if (typeof bound !== "number" || !Number.isSafeInteger(bound) || bound < 0) {
+      throw new Error(`${path}: ${keyword} must be a non-negative safe integer`);
+    }
+  }
+
+  const impossible = (min: unknown, max: unknown): boolean =>
+    typeof min === "number" && typeof max === "number" && min > max;
+  if (impossible(schema.minLength, schema.maxLength)) {
+    throw new Error(`${path}: minLength ${String(schema.minLength)} exceeds maxLength ${String(schema.maxLength)}`);
+  }
+  if (impossible(schema.minItems, schema.maxItems)) {
+    throw new Error(`${path}: minItems ${String(schema.minItems)} exceeds maxItems ${String(schema.maxItems)}`);
+  }
+
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== "string") throw new Error(`${path}: pattern must be a string`);
+    try {
+      compilePattern(schema.pattern);
+    } catch (error) {
+      throw new Error(
+        `${path}: pattern is not a valid regular expression (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  }
+}
+
+/**
+ * JSON Schema `pattern` is an unanchored ECMA-262 search with no flags, so an
+ * author who means "the whole value" writes the anchors themselves. Compiled
+ * results are cached because validation re-runs on every retry.
+ */
+const patternCache = new Map<string, RegExp>();
+
+function compilePattern(pattern: string): RegExp {
+  const cached = patternCache.get(pattern);
+  if (cached !== undefined) return cached;
+  const compiled = new RegExp(pattern);
+  patternCache.set(pattern, compiled);
+  return compiled;
 }
 
 function validateAgainstSchema(
@@ -768,10 +851,21 @@ function validateAgainstSchema(
       if (!Array.isArray(value)) {
         errors.push(`${path || "root"}: expected array, got ${typeof value}`);
       } else {
+        const loc2 = path || "root";
+        const minItems = schema["minItems"];
+        const maxItems = schema["maxItems"];
+        // Counts are reported by value: "at most 6" alone does not tell the child
+        // how far over it went, and it has to decide what to drop.
+        if (typeof minItems === "number" && value.length < minItems) {
+          errors.push(`${loc2}: expected at least ${minItems} item(s), got ${value.length}`);
+        }
+        if (typeof maxItems === "number" && value.length > maxItems) {
+          errors.push(`${loc2}: expected at most ${maxItems} item(s), got ${value.length}`);
+        }
         const items = schema["items"];
         if (items !== null && typeof items === "object" && !Array.isArray(items)) {
           value.forEach((el, i) => {
-            const sub = validateAgainstSchema(el, items as Record<string, unknown>, `${path || "root"}[${i}]`);
+            const sub = validateAgainstSchema(el, items as Record<string, unknown>, `${loc2}[${i}]`);
             if (!sub.ok) errors.push(...sub.errors);
           });
         }
@@ -779,6 +873,8 @@ function validateAgainstSchema(
     } else if (type === "string") {
       if (typeof value !== "string") {
         errors.push(`${path || "root"}: expected string, got ${typeof value}`);
+      } else {
+        errors.push(...stringBoundErrors(value, schema, path || "root"));
       }
     } else if (type === "number") {
       if (typeof value !== "number") {
@@ -806,6 +902,25 @@ function validateAgainstSchema(
   }
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+function stringBoundErrors(value: string, schema: Record<string, unknown>, loc: string): string[] {
+  const errors: string[] = [];
+  const minLength = schema["minLength"];
+  const maxLength = schema["maxLength"];
+  // Lengths are reported by value so the child knows how much to cut, and the
+  // pattern is echoed because "invalid id" gives it nothing to correct toward.
+  if (typeof minLength === "number" && value.length < minLength) {
+    errors.push(`${loc}: expected at least ${minLength} character(s), got ${value.length}`);
+  }
+  if (typeof maxLength === "number" && value.length > maxLength) {
+    errors.push(`${loc}: expected at most ${maxLength} character(s), got ${value.length}`);
+  }
+  const pattern = schema["pattern"];
+  if (typeof pattern === "string" && !compilePattern(pattern).test(value)) {
+    errors.push(`${loc}: value ${JSON.stringify(value)} does not match pattern ${pattern}`);
+  }
+  return errors;
 }
 
 /** Strip a ```json … ``` (or bare ``` … ```) fence if the model wrapped its JSON. */

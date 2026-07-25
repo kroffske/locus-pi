@@ -16,6 +16,17 @@ This file records user-visible changes to the public package.
   it is a different call, like `maxToolCalls`); `maxAnswerChars` stays a runtime
   gate applied to fresh and replayed answers alike, so old recordings remain
   replayable.
+- `agent({ schema })` now supports the size and pattern bounds `minLength`,
+  `maxLength`, `pattern`, `minItems`, and `maxItems`. Without them a workflow had
+  to re-check every string and array by hand after validation already succeeded,
+  and a violation could only throw — ending the run over an answer the child
+  could have fixed. Expressed as schema keywords the same bound is handed back
+  through the existing retry, so an over-long summary becomes correctable rather
+  than fatal. Violations report the actual value (`tags: expected at most 2
+item(s), got 3`). A bound on the wrong type, a negative or fractional bound, an
+  unsatisfiable `min > max` pair, and a `pattern` that does not compile are all
+  refused before the first child call. `pattern` follows the JSON Schema spec:
+  unanchored, no flags.
 - `agent({ schema })` now supports `type: "integer"` — the most common JSON
   Schema type after `string`, previously rejected outright. A fractional answer
   is reported by value (`count: expected integer, got 2.5`) so the schema retry
