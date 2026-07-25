@@ -295,6 +295,14 @@ export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId:
     assertSafeComponent(runId, "workflow runId");
     const runDir = assertCanonicalRunDirectory(projectRoot, runId);
     const resultPath = path.join(runDir, "result.json");
+    // A run directory with no result.json has not published a terminal result
+    // yet — it is still executing, or it was interrupted. Such a run cannot
+    // carry an operator handoff, so absence is the honest answer; calling it
+    // invalid would surface every live or abandoned run as a corrupt-evidence
+    // warning on the operator surfaces that scan run history.
+    // lstat, not existsSync: a dangling symlink must stay an invalid file
+    // rather than masquerade as an absent one.
+    if (lstatSync(resultPath, { throwIfNoEntry: false }) === undefined) return { status: "absent" };
     assertRegularConfinedFile(runDir, resultPath, "Workflow result");
     return readWorkflowOperatorHandoff(JSON.parse(readFileSync(resultPath, "utf8")) as unknown);
   } catch (error) {

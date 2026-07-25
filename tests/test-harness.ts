@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import type {
   CommandOptions,
   CustomEntry,
@@ -19,6 +22,31 @@ import type {
 } from "../extensions/_shared/pi-api.js";
 
 const MAX_WIDGET_LINES = 10;
+
+/**
+ * Parent directory for every default harness project root, removed when the
+ * worker exits.
+ */
+let harnessRootParent: string | undefined;
+
+/**
+ * Default project root for a harness: a fresh empty temp directory, never the
+ * repository checkout.
+ *
+ * `process.cwd()` used to be the default, which let repository-local state —
+ * an interrupted `.locus/runtime/workflows/<runId>/` left behind by a real
+ * local run, a developer's `.pi/workflows/` scripts — leak into assertions and
+ * fail tests that never wrote that state. A test that wants the repository
+ * root must now ask for it explicitly by passing `process.cwd()`.
+ */
+function defaultProjectRoot(): string {
+  if (harnessRootParent === undefined) {
+    harnessRootParent = mkdtempSync(path.join(tmpdir(), "pi-harness-roots-"));
+    const parent = harnessRootParent;
+    process.on("exit", () => rmSync(parent, { recursive: true, force: true }));
+  }
+  return mkdtempSync(path.join(harnessRootParent, "root-"));
+}
 
 export interface Harness {
   pi: ExtensionAPI;
@@ -61,7 +89,7 @@ export interface Harness {
 }
 
 export function createHarness(
-  projectRoot = process.cwd(),
+  projectRoot = defaultProjectRoot(),
   opts: {
     models?: ModelLike[];
     sessionId?: string;

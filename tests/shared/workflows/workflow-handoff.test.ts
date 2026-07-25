@@ -133,6 +133,29 @@ describe("workflow operator handoff", () => {
     });
   });
 
+  it("reads a run with no result.json as absent, and a symlinked one as invalid", () => {
+    const root = project();
+    const incompleteDir = workflowRunDir(root, "20260725-135526-6710");
+    mkdirSync(incompleteDir, { recursive: true });
+    writeFileSync(
+      path.join(incompleteDir, "journal.ndjson"),
+      `${JSON.stringify({ ts: "2026-07-25T13:55:26.000Z", runId: "20260725-135526-6710", kind: "phase", phase: "scout" })}\n`,
+      "utf8",
+    );
+
+    // An interrupted or still-running run has a journal and no result yet. It
+    // carries no handoff, so it must read as absent — never as corrupt evidence.
+    expect(readPersistedWorkflowOperatorHandoff(root, "20260725-135526-6710")).toEqual({ status: "absent" });
+
+    const danglingDir = workflowRunDir(root, "20260725-140000-aaaa");
+    mkdirSync(danglingDir, { recursive: true });
+    symlinkSync(path.join(root, "outside-result.json"), path.join(danglingDir, "result.json"));
+    expect(readPersistedWorkflowOperatorHandoff(root, "20260725-140000-aaaa")).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("regular non-symlink file"),
+    });
+  });
+
   it("requires the exact canonical awaiting-operator disposition", async () => {
     const root = project();
     const source = await sourceRun(root);
