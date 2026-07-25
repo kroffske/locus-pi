@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const {
   AssetRegistry,
   BLUE,
+  Bounds,
   GRAY,
   PURPLE,
   RED,
@@ -24,7 +25,20 @@ const scene = new Scene({
   background: "#ffffff",
 });
 
-const canvasWidth = 5040;
+// The pipeline is authored as one long strip and then WRAPPED into two bands.
+// Unwrapped it renders about 5000x1500 — a ~3.3:1 sliver whose text is
+// illegible at fit-to-window — so every card whose authored x is at or past
+// BAND_BREAK drops into a second band below, and each swim lane is drawn once
+// per band. Authored coordinates never change; only bandX/bandY move them.
+const BAND_BREAK = 2450;
+const BAND_DX = -2410;
+const BAND_DY = 1260;
+const inBand2 = (x) => x >= BAND_BREAK;
+const bandX = (x) => (inBand2(x) ? x + BAND_DX : x);
+const bandY = (x, y) => (inBand2(x) ? y + BAND_DY : y);
+
+const canvasWidth = 2540;
+const LEGEND_Y = 1340 + BAND_DY;
 
 scene.text(40, 24, "Requirements grill — explicit evidence handoff", {
   size: 30,
@@ -43,26 +57,29 @@ scene.text(
   },
 );
 
-const lane = (title, y) => {
-  scene.text(40, y, title, {
-    size: 18,
-    color: GRAY,
-    width: 520,
-  });
-  scene.line(
-    [
-      [40, y + 34],
-      [canvasWidth - 40, y + 34],
-    ],
-    { color: "#cbd5e1", strokeWidth: 1 },
-  );
+const lane = (title, y, bands = [0, BAND_DY]) => {
+  for (const dy of bands) {
+    scene.text(40, y + dy, title, {
+      size: 18,
+      color: GRAY,
+      width: 520,
+    });
+    scene.line(
+      [
+        [40, y + dy + 34],
+        [canvasWidth - 40, y + dy + 34],
+      ],
+      { color: "#cbd5e1", strokeWidth: 1 },
+    );
+  }
 };
 
 lane("Operator", 150);
 lane("Workflow-owned execution and checks", 370);
 lane("Full agent sessions and fail-closed exits", 680);
 lane("Artifacts and exact text handoffs", 1010);
-lane("Legend", 1340);
+// The legend belongs to the whole diagram, so it is drawn once, below band 2.
+lane("Legend", 1340, [BAND_DY]);
 
 const cards = [];
 const card = ({
@@ -70,8 +87,8 @@ const card = ({
   title,
   iconId,
   bullets,
-  x,
-  y,
+  x: authoredX,
+  y: authoredY,
   width = 340,
   color = "default",
   bulletSize = 13,
@@ -82,8 +99,8 @@ const card = ({
     title,
     iconId,
     bullets,
-    x,
-    y,
+    x: bandX(authoredX),
+    y: bandY(authoredX, authoredY),
     width,
     color,
     strict: true,
@@ -291,7 +308,7 @@ const reconFailure = card({
   title: "Workflow: fail closed — recon",
   iconId: "kill_switch",
   bullets: ["Owner: agent runtime", "Child failed or returned empty text", "Later agents do not start"],
-  x: 2050,
+  x: 2015,
   y: 730,
   width: 340,
   color: "removed",
@@ -474,13 +491,18 @@ connect("recon-to-check", recon, reconCheck, {
   label: "exact reconText",
   labelOffset: { dx: -80, dy: 20 },
 });
+// The wrap edge: band 1 ends after the recon gate and band 2 continues below.
 connect("recon-pass", reconCheck, challenge, {
   direction: "top-down",
-  from: "bottom",
+  from: "right",
   to: "top",
-  path: "straight",
-  label: "request + reconText",
-  labelOffset: { dx: 100, dy: 20 },
+  path: "outer",
+  routeBounds: new Bounds(40, 400, 2400, 890),
+  outerSide: "bottom",
+  outerGap: 22,
+  label: "request + reconText — continues in the band below",
+  labelWidth: 240,
+  labelOffset: { dx: 0, dy: 26 },
 });
 connect("recon-fail", reconCheck, reconFailure, {
   direction: "top-down",
@@ -595,63 +617,63 @@ connect("runtime-to-journal", runtime, journalNdjson, {
   dashed: true,
 });
 
-scene.ellipse(60, 1405, 64, 42, { color: BLUE, strokeWidth: 2 });
-scene.text(140, 1408, "Operator input", { size: 15, width: 420 });
+scene.ellipse(60, LEGEND_Y + 65, 64, 42, { color: BLUE, strokeWidth: 2 });
+scene.text(140, LEGEND_Y + 68, "Operator input", { size: 15, width: 420 });
 
-scene.rect(650, 1405, 64, 42, {
+scene.rect(700, LEGEND_Y + 65, 64, 42, {
   color: BLUE,
   strokeWidth: 2,
   roundness: { type: 3 },
 });
-scene.text(730, 1408, "Workflow-owned code or check", { size: 15, width: 560 });
+scene.text(780, LEGEND_Y + 68, "Workflow-owned code or check", { size: 15, width: 560 });
 
-scene.rect(1380, 1405, 64, 42, {
+scene.rect(1620, LEGEND_Y + 65, 64, 42, {
   color: PURPLE,
   strokeWidth: 2,
   roundness: { type: 3 },
 });
-scene.text(1460, 1408, "Full agent() child session", { size: 15, width: 520 });
+scene.text(1700, LEGEND_Y + 68, "Full agent() child session", { size: 15, width: 520 });
 
-scene.rect(2900, 1405, 64, 42, {
+scene.rect(60, LEGEND_Y + 135, 64, 42, {
   color: GRAY,
   strokeWidth: 2,
   roundness: { type: 3 },
 });
-scene.text(2980, 1408, "Artifact, file, or exact text handoff", { size: 15, width: 660 });
+scene.text(140, LEGEND_Y + 138, "Artifact, file, or exact text handoff", { size: 15, width: 660 });
 
-scene.rect(3790, 1405, 64, 42, {
+scene.rect(1620, LEGEND_Y + 135, 64, 42, {
   color: RED,
   strokeWidth: 2,
   roundness: { type: 3 },
 });
-scene.text(3870, 1408, "Fail-closed terminal branch", { size: 15, width: 520 });
+scene.text(1700, LEGEND_Y + 138, "Fail-closed terminal branch", { size: 15, width: 520 });
 
 scene.arrow(
   [
-    [60, 1485],
-    [210, 1485],
+    [60, LEGEND_Y + 215],
+    [210, LEGEND_Y + 215],
   ],
   { color: BLUE, strokeWidth: 2 },
 );
-scene.text(230, 1474, "Required handoff", { size: 15, width: 330 });
+scene.text(230, LEGEND_Y + 204, "Required handoff", { size: 15, width: 330 });
 
 scene.arrow(
   [
-    [650, 1485],
-    [800, 1485],
+    [700, LEGEND_Y + 215],
+    [850, LEGEND_Y + 215],
   ],
   { color: GRAY, strokeWidth: 2, dashed: true },
 );
-scene.text(820, 1474, "Provenance or persistence", { size: 15, width: 460 });
+scene.text(870, LEGEND_Y + 204, "Provenance or persistence", { size: 15, width: 460 });
 
 scene.arrow(
   [
-    [1380, 1485],
-    [1530, 1485],
+    [1620, LEGEND_Y + 215],
+    [1770, LEGEND_Y + 215],
   ],
   { color: RED, strokeWidth: 2 },
 );
-scene.text(1550, 1474, "Failed check", { size: 15, width: 300 });
+scene.text(1790, LEGEND_Y + 204, "Failed check", { size: 15, width: 300 });
 
 assertDiagramHealthy({
   cards,

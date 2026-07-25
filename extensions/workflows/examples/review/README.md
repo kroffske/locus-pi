@@ -37,17 +37,28 @@ review/
 ├── review-pipeline.excalidraw
 ├── review-pipeline.png
 └── resources/
-    ├── clarifier.prompt.md
-    ├── scope-resolver.prompt.md
-    ├── change-inventory.prompt.md
-    ├── unit-planner.prompt.md
     ├── interrogator.prompt.md
     └── verifier.prompt.md
 ```
 
 There are no workflow-local agent definitions. Catalog agents provide the
-execution mechanism; neighboring prompt files contain the complete
-workflow-specific roles and handoffs.
+execution mechanism; the workflow supplies the complete workflow-specific roles
+and handoffs.
+
+Prompt placement follows the authoring rule in
+[`AUTHORING.md`](../../AUTHORING.md). The clarifier, scope-resolver,
+change-inventory, and unit-planner tasks are written inline in
+`review.workflow.mjs` under one `COMMON` contract, so the retained script
+snapshot covers their bytes and the routing between stages is readable in one
+pass. The interrogator (92 lines) and verifier (123 lines) role charters are
+long enough to bury that routing, so they stay in `resources/*.prompt.md` and
+are rendered through `promptFile()` — which keeps its source-relative
+resolution, escape rejection, read-only run copy, and recorded SHA-256.
+
+Known cost of that split: those two charters restate the read-only capability
+paragraph and the AST Index paragraph that `COMMON` and `AST_INDEX_NOTE` own in
+the script, so the two copies can drift. `review-workflow.test.ts` pins the
+shared sentences on both sides.
 
 ## Runtime-owned evidence
 

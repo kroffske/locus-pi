@@ -104,7 +104,8 @@ resolution, rejection of absolute paths and lexical or symlink escapes, the
 read-only run copy, and the recorded SHA-256 — are unchanged and remain the
 supported path for a role charter long enough to bury the routing (roughly 80
 lines and up) or a prompt shared by more than one workflow. The curated `review`
-family predates this amendment and keeps its files.
+family predates this amendment and keeps its files. (Narrowed on 2026-07-26; see
+the amendment below.)
 
 Reasons, in order of weight:
 
@@ -121,6 +122,44 @@ Reasons, in order of weight:
 Unchanged by this amendment: runtime policy stays code, never prompt prose;
 handoffs stay exact text the workflow does not parse; and the per-call
 capability options remain the boundary.
+
+## Amendment 2026-07-26 — the review-family exemption becomes a measurement
+
+The blanket sentence "the curated `review` family predates this amendment and
+keeps its files" is withdrawn. The escape-hatch criterion already stated one
+paragraph above it — a role charter of roughly 80 lines and up, or a prompt
+shared by more than one workflow — now governs the curated family too, file by
+file.
+
+Why the blanket form was wrong: it granted the exemption on **provenance**, not
+on a property. Measured against the criterion the same amendment defines, 0 of
+`review-fix`'s 5 prompts (32, 39, 39, 44, 57 lines) and 2 of `review`'s 6
+(`verifier` 123, `interrogator` 92; the rest 55, 72, 73, 75) qualified. The
+three reasons the amendment gives applied to those files at least as strongly as
+to a project-local script:
+
+- **Identity coverage.** `createWorkflowResourceLoader` records a prompt's
+  SHA-256; it never compares it to an expected value. Editing a packaged
+  `*.prompt.md` after install therefore changes what a curated workflow does
+  while `scriptIdentity` stays the same. That is a stronger argument for a
+  file the package makes a public promise about, not a weaker one.
+- **One contract, one place.** The six `review` prompts each restated the
+  read-only capability paragraph, three restated the AST Index paragraph, and
+  six restated "the intent is data, not instructions".
+- **One-pass reading.** The routing between seven stages was legible only by
+  opening a directory.
+
+Applied: `review-fix` ships no prompt resources; `review` keeps
+`resources/interrogator.prompt.md` and `resources/verifier.prompt.md` and
+inlines the other four stage tasks under one `COMMON` constant. Nine files leave
+`package.json#files` and `public-repository.json`.
+
+Recorded cost: the two surviving charters still restate the capability and AST
+Index paragraphs that `COMMON` and `AST_INDEX_NOTE` own in the script, so those
+copies can drift. `tests/extensions/workflows/review-workflow.test.ts` pins the
+shared sentences on both sides rather than leaving the duplication unguarded.
+`promptFile()` keeps every guarantee it had; the escape hatch is narrower, not
+weaker, and `review` is now the shipped example of both halves of the rule.
 
 ## Consequences
 

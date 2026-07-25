@@ -278,6 +278,140 @@ cost of dropping them is real — a stage can now under-cover its subject quietl
 and the way to buy it back is a schema or a bounded re-ask loop, never a fatal
 throw.
 
+### Bounds belong in the schema, invariants belong in the script
+
+Every count, length, id pattern, and enum goes in `agent({ schema })`, because
+the runtime hands a violation back to the child with the validator's own message
+and lets it try again. The same rule written as a `throw` ends the run instead.
+What stays in script code is what no declared keyword can say.
+
+`review-fix` is the shipped worked example. Its selector schema
+([`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs)):
+
+```js
+const FINDING_SELECTOR_SCHEMA = freezeSchema({
+  type: "object",
+  additionalProperties: false,
+  required: ["findings"],
+  properties: {
+    findings: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_SELECTED_FINDINGS,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "note", "dependsOn"],
+        properties: {
+          id: { type: "string", pattern: FINDING_ID_PATTERN },
+          note: { type: "string", maxLength: MAX_NOTE_CHARS },
+          dependsOn: {
+            type: "array",
+            maxItems: MAX_SELECTED_FINDINGS,
+            items: { type: "string", pattern: FINDING_ID_PATTERN },
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+Until 2026-07-26 each of those bounds was a hand-rolled check. Eleven of them
+disappeared into the eight keywords above; seven more (`isRecord`,
+`Array.isArray`, `typeof … !== "string"`) were pure restatements of `type:` that
+the runtime had already rejected before the validator ever ran.
+
+What survives in `validateAndOrderFindingPlan` is the honest residue — every
+line of it needs a fact the schema does not have:
+
+```js
+if (!byId.has(id)) throw new Error(`review-fix selector finding id is unknown: ${id}`);
+if (selectedIds.has(id)) throw new Error(`review-fix selector repeats finding id: ${id}`);
+// …
+if (dependency === unit.id) throw new Error(`review-fix selector finding ${unit.id} depends on itself`);
+if (!selectedIds.has(dependency)) {
+  throw new Error(`review-fix selector dependency ${dependency} is not selected`);
+}
+// …then a Kahn sort, and:
+if (ordered.length !== selected.length) throw new Error("review-fix selector dependency graph contains a cycle");
+```
+
+Referential integrity against the immutable review, uniqueness, self-edges, and
+acyclicity: none of these is expressible as a keyword, and each one ends the run
+because no re-ask can fix a plan that contradicts its own source.
+
+A **cross-field invariant** is the same idea inside one answer. `review`'s
+clarifier declares `decision` and `questions` separately, and no schema can say
+that one constrains the other
+([`review.workflow.mjs`](../examples/review/review.workflow.mjs)):
+
+```js
+if (decision === "continue") {
+  if (questions.length !== 0) throw new Error("review clarifier continue decision requires no questions");
+  return { decision: "continue", questions: [] };
+}
+// The upper bound is `maxItems`; this lower bound applies only to this branch.
+if (questions.length < 1) {
+  throw new Error(`review clarifier needs_operator decision requires 1-${MAX_CLARIFIER_QUESTIONS} questions`);
+}
+```
+
+The same function also keeps `recommended` honest — it must equal one of the
+options in its own question — and enforces a 4,000-character budget summed across
+prompts, which is a sum no keyword computes.
+
+Bounds on **free text** are per-call, not per-script: `maxAnswerChars` on the
+`agent()` call that produces the answer, so an oversized handoff names the stage
+that produced it instead of the stage that tried to forward it. Keep hand-written
+bounds only for text the workflow itself owns — operator input, consumed
+artifacts, and strings the script composes.
+
+### Declare the fact, do not scan the prose
+
+The named anti-pattern is a regex over model-authored text that decides
+something. It fails in both directions: it misses every paraphrase, and it fires
+on innocent sentences that happen to contain the word.
+
+```js
+// Anti-pattern: the gate is defeated by wording the model never intended to hide.
+const needsOperatorProof = /\b(TUI|manual|manually|operator|by hand)\b/iu.test(planText);
+```
+
+"Someone will need to eyeball the dashboard" never matches. Replace the scan with
+a declared field, and have a _fresh_ reader check the declaration against the
+original request:
+
+```js
+// The plan declares the fact; a separate reviewer stage checks the declaration.
+schema: {
+  type: "object",
+  additionalProperties: false,
+  required: ["externalEvidenceRequired", "rationale"],
+  properties: {
+    externalEvidenceRequired: { type: "boolean" },
+    rationale: { type: "string", minLength: 1, maxLength: 500 },
+  },
+}
+// …later, deterministically:
+if (plan.externalEvidenceRequired && receipts.length === 0) {
+  throw new Error("plan requires external evidence that no receipt provides");
+}
+```
+
+Record what this costs, because it is not free: a regex over the request could
+not be lied to, and a declared boolean can. The guarantee moves from one brittle
+host check to two independent model readings — weaker against a planner and a
+reviewer who err the same way, stronger against everything else. Do not make this
+trade silently.
+
+The one regex the shipped examples still run over model text is
+`declaredNoChanges()` in `review.workflow.mjs`, and its own comment says why it
+is allowed: it is a **cheap early exit, not a gate**. When the inventory declares
+`## No changes` and lists no `C<n>`, three later stages have nothing to work
+with, so the run finishes instead of paying for them. It cannot fail the run, and
+nothing downstream depends on it being right.
+
 ## Semantic text input
 
 Both `/workflows run <name> [input]` and the `workflow` tool pass one optional
@@ -399,6 +533,15 @@ Keep shaped stages small and closed. `enum`, `additionalProperties: false`, and
 a short `required` list are what make the answer machine-checkable; a wide schema
 with free-form prose fields is where a weak model spends both attempts and the
 stage fails closed. Everything narrative stays a plain `agent()` call.
+
+Add `minLength` / `maxLength` / `pattern` on strings and `minItems` / `maxItems`
+on arrays rather than re-checking them afterwards — see "Bounds belong in the
+schema, invariants belong in the script" above, and
+[`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs) for
+the shipped version. An impossible declaration (`minItems` above `maxItems`, a
+bound on the wrong type, a `pattern` that does not compile) is refused before the
+first child call, so it cannot burn the retry budget and surface as an
+unexplained exhaustion.
 
 ## Bounded loop plus judge
 

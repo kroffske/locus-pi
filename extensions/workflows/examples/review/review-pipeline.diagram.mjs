@@ -16,8 +16,21 @@ const scene = new Scene({
 
 // One left-to-right column per stage. Lane titles own the left margin, so the
 // first node of every lane starts right of LANE_LABEL_WIDTH.
+//
+// The pipeline is authored as one long strip and then WRAPPED into two bands.
+// Unwrapped it renders about 5400x1400 — a ~3.9:1 sliver whose text is
+// illegible at fit-to-window — so every node whose authored x is at or past
+// BAND_BREAK drops into a second band below, and the four swim lanes are drawn
+// once per band. Authored coordinates never change; only bandX/bandY move them.
+const BAND_BREAK = 2700;
+const BAND_DX = -2615;
+const BAND_DY = 1360;
+const inBand2 = (x) => x >= BAND_BREAK;
+const bandX = (x) => (inBand2(x) ? x + BAND_DX : x);
+const bandY = (x, y) => (inBand2(x) ? y + BAND_DY : y);
+
 const LANE_X = 40;
-const LANE_WIDTH = 5360;
+const LANE_WIDTH = 2720;
 const LANE_LABEL_WIDTH = 400;
 
 const COLORS = {
@@ -56,7 +69,9 @@ const nodeRecord = (id, block) => ({
   texts: block.elements.filter((element) => element.type === "text"),
 });
 
-const operatorNode = (id, title, body, iconId, x, y, width, height) => {
+const operatorNode = (id, title, body, iconId, authoredX, authoredY, width, height) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const frame = scene.ellipse(x, y, width, height, {
     color: COLORS.operator,
     strokeWidth: 2,
@@ -78,11 +93,11 @@ const operatorNode = (id, title, body, iconId, x, y, width, height) => {
   return nodeRecord(id, scene.group([frame, icon, titleText, bodyText]));
 };
 
-const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
+const workflowNode = (id, title, bullets, iconId, authoredX, authoredY, width, height) =>
   nodeRecord(
     id,
     tintBlock(
-      layout.iconPanel(scene, x, y, width, height, {
+      layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
         title,
         iconId,
         bullets,
@@ -96,11 +111,11 @@ const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
     ),
   );
 
-const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
+const agentNode = (id, title, bullets, iconId, authoredX, authoredY, width, height) =>
   nodeRecord(
     id,
     tintBlock(
-      layout.iconPanel(scene, x, y, width, height, {
+      layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
         title,
         iconId,
         bullets,
@@ -114,7 +129,9 @@ const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
     ),
   );
 
-const workflowCheck = (id, title, body, x, y, width, height) => {
+const workflowCheck = (id, title, body, authoredX, authoredY, width, height) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const frame = scene.line(
     [
       [x + width / 2, y],
@@ -141,7 +158,9 @@ const workflowCheck = (id, title, body, x, y, width, height) => {
   return nodeRecord(id, scene.group([frame, titleText, bodyText]));
 };
 
-const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
+const artifactNode = (id, title, lines, iconId, authoredX, authoredY, width, height) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const frame = scene.rect(x, y, width, height, {
     color: COLORS.artifact,
     strokeWidth: 2,
@@ -174,23 +193,25 @@ const artifactNode = (id, title, lines, iconId, x, y, width, height) => {
 };
 
 const lane = (title, subtitle, y, height, color, fill) => {
-  const frame = scene.rect(LANE_X, y, LANE_WIDTH, height, {
-    color,
-    strokeWidth: 1,
-    dashed: true,
-  });
-  setFrameFill(frame, fill, 45);
-  frame.roughness = 0;
-  scene.text(LANE_X + 22, y + 14, title, {
-    size: 19,
-    color,
-    width: LANE_LABEL_WIDTH,
-  });
-  scene.text(LANE_X + 22, y + 44, subtitle, {
-    size: 11,
-    color: COLORS.muted,
-    width: LANE_LABEL_WIDTH,
-  });
+  for (const dy of [0, BAND_DY]) {
+    const frame = scene.rect(LANE_X, y + dy, LANE_WIDTH, height, {
+      color,
+      strokeWidth: 1,
+      dashed: true,
+    });
+    setFrameFill(frame, fill, 45);
+    frame.roughness = 0;
+    scene.text(LANE_X + 22, y + dy + 14, title, {
+      size: 19,
+      color,
+      width: LANE_LABEL_WIDTH,
+    });
+    scene.text(LANE_X + 22, y + dy + 44, subtitle, {
+      size: 11,
+      color: COLORS.muted,
+      width: LANE_LABEL_WIDTH,
+    });
+  }
 };
 
 scene.text(LANE_X, 20, "Curated review workflow — agent-decided clarification and five read-only review stages", {
@@ -368,7 +389,7 @@ const forwardCheck = workflowCheck(
 const launchInventory = workflowNode(
   "launch-agent-r2a",
   "Workflow: launch Agent R1",
-  ["phase resolve-scope", "Renders resources/scope-resolver.prompt.md", "readOnly: read, git_read, grep, find"],
+  ["phase resolve-scope", "Inline task under COMMON", "readOnly: read, git_read, grep, find"],
   "multi_agent_orchestrator",
   1600,
   470,
@@ -395,7 +416,7 @@ const inventoryAgent = agentNode(
 const launchUnits = workflowNode(
   "launch-agent-r2b",
   "Workflow: launch Agent R2a",
-  ["phase inventory-changes", "Renders resources/change-inventory.prompt.md", "readOnly: read, git_read, grep, find"],
+  ["phase inventory-changes", "Inline task under COMMON", "readOnly: read, git_read, grep, find"],
   "multi_agent_orchestrator",
   2160,
   470,
@@ -422,7 +443,7 @@ const unitsAgent = agentNode(
 const launchQuestions = workflowNode(
   "launch-agent-r3",
   "Workflow: launch Agent R2b",
-  ["phase plan-units", "Renders resources/unit-planner.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  ["phase plan-units", "Inline task under COMMON + AST_INDEX_NOTE", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
   2720,
   470,
@@ -449,7 +470,11 @@ const questionsAgent = agentNode(
 const launchVerify = workflowNode(
   "launch-agent-r4",
   "Workflow: launch Agent R3",
-  ["phase ask-questions", "Renders resources/interrogator.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  [
+    "phase ask-questions",
+    "Renders resources/interrogator.prompt.md charter",
+    "readOnly + ast_index, grep/find fallback",
+  ],
   "multi_agent_orchestrator",
   3280,
   470,
@@ -476,7 +501,7 @@ const verifyAgent = agentNode(
 const launchPublish = workflowNode(
   "launch-agent-r5",
   "Workflow: launch Agent R4",
-  ["phase verify-review", "Renders resources/verifier.prompt.md", "readOnly + ast_index, grep/find fallback"],
+  ["phase verify-review", "Renders resources/verifier.prompt.md charter", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
   3840,
   470,
@@ -524,10 +549,10 @@ const humanEdit = operatorNode(
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs\n+ resources/*.prompt.md",
+  "Artifact: review.workflow.mjs\n(inline COMMON + 4 stage tasks)\n+ 2 resources/*.prompt.md charters",
   [
     "String + continuation routing in the entry",
-    "Clarifier + R1–R4 complete prompts",
+    "Inline COMMON contract + 4 stage tasks;\nR3/R4 charters are prompt files",
     "phase() and log() name every stage",
   ],
   "prompt_template",
@@ -747,7 +772,19 @@ launchEdge("launch-to-agent-r2a", launchInventory, inventoryAgent, "intent + cla
 handoffEdge("agent-r2a-to-launch-r2b", inventoryAgent, launchUnits, "exact scopeText");
 
 launchEdge("launch-to-agent-r2b", launchUnits, unitsAgent, "scopeText");
-handoffEdge("agent-r2b-to-launch-r3", unitsAgent, launchQuestions, "exact inventoryText");
+// The wrap edge: band 1 ends after the unit planner and band 2 continues below.
+connect("agent-r2b-to-launch-r3", unitsAgent, launchQuestions, {
+  direction: "top-down",
+  label: "exact unitsText — continues in the band below",
+  labelWidth: 230,
+  from: { side: "right", slot: 0.5 },
+  to: { side: "top", slot: 0.35 },
+  path: "outer",
+  routeBounds: new Bounds(40, 800, 2560, 590),
+  outerSide: "bottom",
+  outerGap: 26,
+  labelOffset: { dx: 0, dy: 30 },
+});
 
 launchEdge("launch-to-agent-r3", launchQuestions, questionsAgent, "scopeText + inventoryText");
 handoffEdge("agent-r3-to-launch-r4", questionsAgent, launchVerify, "exact unitsText");
@@ -807,7 +844,7 @@ const health = assertDiagramHealthy({
   })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 5480, 1450),
+  renderBounds: new Bounds(0, 0, 2820, 2810),
   sceneBounds: scene.bounds(),
 });
 

@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26
 
 ## Decision
 
@@ -21,9 +21,13 @@ The accepted Package portfolio is:
 | `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
-evidence adapter. Each workflow owns ordinary `resources/*.prompt.md` step
-prompts beside its entry file. Each prompt contains the stable stage role plus
-dynamic per-run handoffs. A non-empty string remains a one-shot review. The
+evidence adapter. Since the 2026-07-26 amendment to
+[the prompt-resource ADR](./text-agent-results-and-prompt-resources.md), each
+stage's prompt is written inline in the entry file under one shared `COMMON`
+contract, and a neighboring `resources/*.prompt.md` survives only for a role
+charter too long to inline — `review` keeps two, `review-fix` keeps none. Every
+prompt, inline or not, still contains the stable stage role plus the dynamic
+per-run handoff. A non-empty string remains a one-shot review. The
 workflow persists that exact intent, then five sequential read-only children
 resolve scope, inventory the changed surface, group material review units, ask
 falsifiable questions, and independently reopen evidence to answer them.
@@ -83,8 +87,20 @@ The runtime automatically persists the named answers `scope.md`,
 `worker-F<n>.md`, `check-evidence.md`, and `re-review.md`; the last is also the
 workflow result. There is no imported input helper, unit planner, verifier/
 publisher pair, `fix-report.md`, or task-local publication. Both review entries
-therefore keep default `self-contained-static` identity. Runtime snapshots every
-loaded prompt separately and records its SHA-256.
+therefore keep default `self-contained-static` identity, which now covers every
+`review-fix` prompt byte and all but the two `review` charters. Runtime still
+snapshots each separately loaded prompt and records its SHA-256; it does not
+compare that digest to an expected value, which is why an inlined prompt is the
+default and a charter file is the exception.
+
+Both entries declare answer shape in `agent({ schema })` rather than re-checking
+it after the fact: `review`'s clarifier declares the question id pattern, the
+1–8 count, and the prompt/option lengths, and `review-fix`'s selector declares
+the `F<n>` id pattern, the 1–20 count, and the note length. A violation is
+re-asked by the runtime's schema retry instead of ending the run. What stays in
+deterministic entry code is what a declared keyword cannot express: agreement
+between fields, referential integrity against the immutable review, uniqueness,
+budgets summed across items, and graph acyclicity.
 
 The canonical evidence owner is
 `.locus/runtime/workflows/<runId>/artifacts/index.json`. Automatic answers and

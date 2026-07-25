@@ -119,11 +119,14 @@ review.
 The two review workflows have independent package directories:
 `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`. The reader algorithm lives in
-`review/README.md`. Each `resources/*.prompt.md` file contains both the stable
-role instructions and the dynamic handoffs for one concrete stage.
-`promptFile()` resolves paths relative to the original workflow source, rejects
-lexical or symlink escapes, copies bytes once into the run directory, and
-records SHA-256 evidence.
+`review/README.md`, and `extensions/workflows/examples/README.md` inventories
+every shipped example. Both entries write their stage prompts inline under one
+`COMMON` contract; `review` additionally keeps the two role charters
+`resources/interrogator.prompt.md` and `resources/verifier.prompt.md`, and
+`review-fix` keeps none. A charter file carries the stable role instructions and
+the dynamic handoffs for its one stage. `promptFile()` resolves paths relative to
+the original workflow source, rejects lexical or symlink escapes, copies bytes
+once into the run directory, and records SHA-256 evidence.
 
 The remediation call keeps operator meaning and host state separate:
 

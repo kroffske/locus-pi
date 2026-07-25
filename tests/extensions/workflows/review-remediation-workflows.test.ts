@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -9,30 +9,18 @@ import {
 import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
 import {
   createWorkflowRuntime,
+  SchemaValidationError,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../extensions/_shared/workflow-runtime.js";
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review-fix/review-fix.workflow.mjs");
-const workflowDirectory = path.dirname(workflowPath);
-const resourceDirectory = path.join(workflowDirectory, "resources");
-const PROMPTS = [
-  "selector-planner.prompt.md",
-  "scope-resolver.prompt.md",
-  "implementer.prompt.md",
-  "check-evidence.prompt.md",
-  "re-review.prompt.md",
-];
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
   const module = (await import(workflowPath)) as { default?: (dsl: unknown, input?: unknown) => Promise<unknown> };
   expect(typeof module.default).toBe("function");
   return module.default!;
-}
-
-function promptSource(name: string): string {
-  return readFileSync(path.join(resourceDirectory, name), "utf8");
 }
 
 const FINDING_F1 = [
@@ -204,24 +192,46 @@ describe("curated review remediation workflow", () => {
     expect(source).toContain("captureSourceState");
     expect(source).toContain("MAX_SELECTED_FINDINGS");
     expect(source).toContain("MAX_PREDECESSOR_CONTEXT_CHARS");
-    for (const name of PROMPTS) expect(source, name).toContain(`promptFile("./resources/${name}"`);
     expect(source).not.toContain("publisher.prompt.md");
     expect(source).not.toContain("unit-planner.prompt.md");
     expect(source).not.toContain("JSON.parse");
     expect(source).toContain("schema: FINDING_SELECTOR_SCHEMA");
     expect(source).not.toMatch(/\bask\s*\(/u);
     expect(source).not.toContain("workspaceHandle");
+  });
 
-    expect(promptSource("scope-resolver.prompt.md")).toContain("This stage is host-enforced read-only.");
-    expect(promptSource("re-review.prompt.md")).toContain("This stage is host-enforced read-only.");
-    expect(promptSource("implementer.prompt.md")).toContain("exactly the one");
-    expect(promptSource("check-evidence.prompt.md")).toContain("host-enforced read-only");
-    expect(promptSource("check-evidence.prompt.md")).toContain("`repository_check`");
-    expect(promptSource("check-evidence.prompt.md")).not.toMatch(/have a shell/iu);
-    expect(promptSource("re-review.prompt.md")).toMatch(/callers, dependents, tests, configuration/iu);
-    for (const name of PROMPTS) {
-      expect(promptSource(name), name).not.toMatch(/\$locus|installed skill/iu);
+  it("carries every stage prompt inline under one COMMON contract", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    // The prompts moved out of ./resources/*.prompt.md on 2026-07-25 so the
+    // retained script snapshot covers the prompt bytes. Nothing may reintroduce
+    // a run-time-resolved prompt file here.
+    expect(source).not.toContain("promptFile");
+    expect(existsSync(path.join(path.dirname(workflowPath), "resources"))).toBe(false);
+
+    expect(source).toContain("const COMMON = ");
+    expect(source).toContain("const READ_ONLY_NOTE = ");
+    expect(source).toContain("Never commit, push, stage, create a pull request, merge, deploy");
+    expect(source).toContain("host-enforced read-only");
+    expect(source).toMatch(/repository_check/u);
+    expect(source).toMatch(/apply exactly the one finding block/iu);
+    expect(source).toMatch(/callers, dependents, tests, configuration/iu);
+    expect(source).not.toMatch(/\$locus|installed skill/iu);
+
+    // Bounds live in the schema and in per-call maxAnswerChars, not in hand-rolled
+    // throws that would end the run instead of re-asking the child.
+    expect(source).toContain(`pattern: FINDING_ID_PATTERN`);
+    expect(source).toContain("maxItems: MAX_SELECTED_FINDINGS");
+    expect(source).toContain("maxLength: MAX_NOTE_CHARS");
+    for (const bound of [
+      "maxAnswerChars: MAX_SCOPE_CHARS",
+      "maxAnswerChars: MAX_WORKER_RESULT_CHARS",
+      "maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS",
+      "maxAnswerChars: MAX_RE_REVIEW_CHARS",
+    ]) {
+      expect(source, bound).toContain(bound);
     }
+    expect(source).not.toContain("function isRecord");
   });
 
   it("refuses a same-name report that did not come from the Package review verifier", async () => {
@@ -375,16 +385,51 @@ describe("curated review remediation workflow", () => {
     expect(fixture.sourceStore.read(fixture.reviewRef).toString("utf8")).toBe(fixture.reviewText);
   });
 
+  it("forwards a permitted empty planner note unchanged instead of substituting a placeholder", async () => {
+    // The schema allows `note: ""` and the selector prompt recommends it, so the
+    // worker handoff must use a nullish fallback, not a truthiness one.
+    const fixture = createReviewFixture();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+      calls.push(request);
+      return completed(request, request.label === "plan finding graph" ? plan([{ id: "F1", note: "" }]) : "done");
+    });
+
+    await (
+      await loadWorkflow()
+    )(dsl, DEFAULT_INTENT);
+
+    const writerPrompt = calls.find((call) => call.label === "apply finding F1")?.prompt ?? "";
+    expect(writerPrompt).toContain(
+      "--- BEGIN VALIDATED PLANNER NOTE FOR THIS FINDING ---\n\n--- END VALIDATED PLANNER NOTE FOR THIS FINDING ---",
+    );
+    expect(writerPrompt).not.toContain("(no operator note)");
+  });
+
+  it("states capability and audience per stage rather than in the shared contract", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    // A no-tool selector cannot obey "reopen the live checkout", and the terminal
+    // re-reviewer does write for a human, so neither claim belongs in COMMON.
+    const common = /const COMMON = `([\s\S]*?)`;/u.exec(source)?.[1] ?? "";
+    expect(common).not.toContain("Reopen the live checkout");
+    expect(common).not.toContain("not a message to a human");
+    expect(source).toContain("const READ_ONLY_NOTE = ");
+    expect(source).toContain("const HANDOFF_NOTE = ");
+    // scope, writer, and checker hand off; the re-reviewer is terminal.
+    expect(source.match(/\$\{HANDOFF_NOTE\}/gu)).toHaveLength(3);
+  });
+
   it("rejects invalid selector graphs before scope resolution or any writer runs", async () => {
     const fixture = createReviewFixture();
     const workflow = await loadWorkflow();
 
+    // These are the invariants a declared schema cannot express: agreement with
+    // the immutable review, and the shape of the dependency graph. They stay in
+    // the script, so they still end the run on the first attempt.
     for (const [selectorOutput, message] of [
-      [plan([]), "must choose 1-20 findings"],
-      [plan(Array.from({ length: 21 }, (_, index) => ({ id: `F${String(index + 1)}` }))), "must choose 1-20"],
       [plan([{ id: "F1" }, { id: "F1" }]), "repeats finding id: F1"],
       [plan([{ id: "F9" }]), "finding id is unknown: F9"],
-      [plan([{ id: "F1", note: "x".repeat(8_001) }]), "note for F1 exceeds 8000"],
       [plan([{ id: "F1", dependsOn: ["F1"] }]), "F1 depends on itself"],
       [plan([{ id: "F1" }, { id: "F2", dependsOn: ["F1", "F1"] }]), "repeats dependency F1"],
       [plan([{ id: "F1", dependsOn: ["F9"] }]), "dependency is unknown: F9"],
@@ -406,6 +451,79 @@ describe("curated review remediation workflow", () => {
       await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow(message);
       expect(calls.map((call) => call.label)).toEqual(["plan finding graph"]);
     }
+  });
+
+  it("keeps the cross-finding note budget in the script because no schema keyword sums lengths", async () => {
+    const findings = Array.from({ length: 5 }, (_, index) =>
+      [
+        `### F${String(index + 1)} — [P2] Generated finding`,
+        "",
+        "Path: `src/generated.ts`",
+        "Evidence: generated.",
+        "Recommended change: none.",
+      ].join("\n"),
+    );
+    const fixture = createReviewFixture(findings);
+    // Five notes of 8,000 characters each are individually legal under
+    // maxLength but exceed the 32,000-character combined budget.
+    const selectorOutput = plan(
+      Array.from({ length: 5 }, (_, index) => ({ id: `F${String(index + 1)}`, note: "x".repeat(8_000) })),
+    );
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+      calls.push(request);
+      if (request.label !== "plan finding graph") throw new Error("scope/writer must not run");
+      return completed(request, selectorOutput);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow("exceed 32000 combined characters");
+    expect(calls.map((call) => call.label)).toEqual(["plan finding graph"]);
+  });
+
+  it("re-asks the selector for a bound the schema declares instead of ending the run on the first answer", async () => {
+    const fixture = createReviewFixture();
+    const workflow = await loadWorkflow();
+
+    // Counts, the id pattern, and the per-note length used to be hand-rolled
+    // throws. Declared in FINDING_SELECTOR_SCHEMA they are handed back to the
+    // child by the runtime retry, so the child sees the violation twice before
+    // the call fails closed.
+    for (const [selectorOutput, message] of [
+      [plan([]), "findings: expected at least 1 item(s), got 0"],
+      [
+        plan(Array.from({ length: 21 }, (_, index) => ({ id: `F${String(index + 1)}` }))),
+        "findings: expected at most 20 item(s), got 21",
+      ],
+      [plan([{ id: "F1", note: "x".repeat(8_001) }]), "expected at most 8000 character(s), got 8001"],
+      [plan([{ id: "not-a-finding-id" }]), "does not match pattern ^F[1-9][0-9]*$"],
+      [plan([{ id: "F1", dependsOn: ["nope"] }]), "does not match pattern ^F[1-9][0-9]*$"],
+    ] as const) {
+      const calls: WorkflowAgentRequest[] = [];
+      const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+        calls.push(request);
+        if (request.label !== "plan finding graph") throw new Error("scope/writer must not run");
+        return completed(request, selectorOutput);
+      });
+      const rejection = workflow(dsl, DEFAULT_INTENT);
+      await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+      await expect(rejection).rejects.toThrow(message);
+      expect(calls.map((call) => call.label)).toEqual(["plan finding graph", "plan finding graph"]);
+    }
+  });
+
+  it("names the violated bound to the child on the retry", async () => {
+    const fixture = createReviewFixture();
+    const prompts: string[] = [];
+    const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+      prompts.push(request.prompt);
+      return completed(request, plan([{ id: "F1", note: "x".repeat(8_001) }]));
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
+      /expected at most 8000 character\(s\), got 8001/u,
+    );
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("expected at most 8000 character(s), got 8001");
   });
 
   it("bounds direct-dependency handoffs while preserving every dependency id", async () => {

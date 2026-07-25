@@ -74,14 +74,68 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The curated `review` and `review-fix` examples now demonstrate the shape the
+  documentation teaches.** The review family was previously exempt from the
+  inline-prompt default because it predated it — provenance, not a property.
+  Measured against the criterion that same rule already states (a role charter of
+  roughly 80 lines and up), 0 of `review-fix`'s 5 prompt files and 2 of
+  `review`'s 6 qualified. The exemption is replaced by that measurement:
+  `review-fix` ships no prompt resources, and `review` inlines four stage tasks
+  under one `COMMON` contract while keeping `resources/interrogator.prompt.md`
+  and `resources/verifier.prompt.md`. Nine `*.prompt.md` files leave the package.
+  This matters beyond tidiness: the runtime records a prompt's SHA-256 but never
+  compares it to an expected value, so editing a packaged prompt file changed
+  what a curated workflow did while its script identity stayed the same. Inline
+  prompt bytes are covered by the snapshot the runner already verifies. Recorded
+  cost: the two surviving charters still restate the capability and AST Index
+  paragraphs the script now owns, so those copies can drift; the review test
+  pins the shared sentences on both sides.
+- **Both review entries moved their answer bounds into `agent({ schema })`.**
+  `review`'s clarifier declares the question id pattern, the 1–8 question count,
+  the 500-character prompt limit, and the option count and length; `review-fix`'s
+  selector declares the `F<n>` id pattern, the 1–20 finding count, and the
+  8,000-character note limit. A violation is now handed back to the child by the
+  schema retry instead of ending a run that had already paid for earlier stages.
+  Free-text handoffs use each call's `maxAnswerChars`, so an oversized answer
+  names the stage that produced it. Nothing was dropped: seven checks that merely
+  restated `type:` were deleted as unreachable, eleven became schema keywords,
+  and every cross-field, referential, uniqueness, budget, and graph invariant
+  stays in deterministic script code — those still end the run, because no re-ask
+  can fix a plan that contradicts its own source.
+- **The four curated pipeline diagrams are readable.** Each was one horizontal
+  lane roughly 5,400–5,900 units wide, rendering as a 3:1–4:1 strip whose text
+  was illegible at fit-to-window. Every generator now wraps that authored strip
+  into two stacked bands; authored coordinates are unchanged, and only a
+  `bandX`/`bandY` transform moves them, so the sources stay diffable. New
+  dimensions: `live-smoke` 2680×2231, `requirements-grill` 2559×2818, `review`
+  2740×2750, `review-fix` 3240×2750. Regenerated from source, and the review pair
+  no longer labels prompt resources it no longer ships.
+- `extensions/workflows/examples/README.md` is new: one place that says what
+  ships, what each example is for, which authoring shape it demonstrates, and
+  whether it is curated, in the npm package, in the public repository, or —
+  like `excalidraw-pipeline` — tracked only.
+
+### Fixed
+
+- `review-fix`'s shared prompt contract no longer hands two stages an
+  instruction they cannot obey. It told every stage to reopen the live checkout
+  — impossible for the no-tool selector — and described every answer as a
+  next-stage handoff, contradicting the terminal re-reviewer's own task of
+  writing the reader-facing `re-review.md`. Capability and audience are now
+  stated by the stages where they are true. Found by running the migrated
+  `review` workflow against the migrated `review-fix` source on a live host.
+- `review-fix` again forwards a permitted empty planner note to its writer
+  unchanged. The selector schema allows `note: ""` and the selector prompt
+  recommends it; a truthiness fallback introduced during the inline migration
+  replaced that empty note with a placeholder.
+
 - Workflow authoring now defaults to inline stage prompts. A workflow is one
   file: a shared contract constant, each stage's task written next to the
   `agent()` call it belongs to, its capability options, and the routing between
   them — read in one pass, with the retained script snapshot covering the prompt
   bytes. A neighboring `*.prompt.md` through `promptFile()` becomes the escape
-  hatch for a long role charter or a prompt shared by more than one workflow;
-  the curated `review` family predates the default and keeps its files. The
-  pattern catalog's staged-pipeline skeleton, the authoring pointer, and the
+  hatch for a long role charter or a prompt shared by more than one workflow.
+  The pattern catalog's staged-pipeline skeleton, the authoring pointer, and the
   canonical DSL notes now teach the same shape.
 - The `/workflows` Edit/Review editor handoff now names `workflow-author`, the
   catalog agent bundled in `.agents/agents/` and installed with this package,

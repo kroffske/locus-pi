@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,15 +19,20 @@ import {
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review/review.workflow.mjs");
 
-const READ_ONLY_PROMPTS = [
+/**
+ * What survives as a `promptFile()` charter after the 2026-07-25 threshold
+ * migration. The four short stage tasks moved inline; these two are the role
+ * charters long enough to bury the routing, which is what the escape hatch is
+ * for. Both are navigating stages, so both must carry the AST Index guidance.
+ */
+const CHARTER_PROMPTS = ["interrogator.prompt.md", "verifier.prompt.md"];
+/** Stage tasks that moved into the script and must not reappear as files. */
+const INLINED_PROMPTS = [
   "clarifier.prompt.md",
   "scope-resolver.prompt.md",
   "change-inventory.prompt.md",
   "unit-planner.prompt.md",
-  "interrogator.prompt.md",
-  "verifier.prompt.md",
 ];
-const NAVIGATING_PROMPTS = ["unit-planner.prompt.md", "interrogator.prompt.md", "verifier.prompt.md"];
 
 interface PublishedArtifact {
   ref: WorkflowArtifactRef;
@@ -171,7 +176,7 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
     expect(source).toContain('tools: ["read", "git_read", "ast_index", "grep", "find"]');
     expect(source).toContain("const MAX_CLARIFIER_PROMPT_CHARS = 500");
-    expect(promptSource("clarifier.prompt.md")).toContain("Each prompt must fit in 500 characters");
+    expect(source).toContain("Each prompt must fit in ${MAX_CLARIFIER_PROMPT_CHARS} characters");
     expect(source).not.toContain("REVIEW_PUBLISH_OPTIONS");
     expect(source).not.toContain("publish review package");
     expect(source).not.toContain('phase("publish-review")');
@@ -182,7 +187,7 @@ describe("workflow example: review.workflow.mjs", () => {
       expect(source, name).toContain(`artifact: "${name}"`);
       expect(source, name).not.toContain(`publishArtifact("${name}"`);
     }
-    for (const name of READ_ONLY_PROMPTS) {
+    for (const name of CHARTER_PROMPTS) {
       const prompt = promptSource(name);
       expect(prompt, name).toContain("This stage is host-enforced read-only.");
       expect(prompt, name).toContain("workflow runtime owns");
@@ -191,16 +196,51 @@ describe("workflow example: review.workflow.mjs", () => {
     }
   });
 
+  it("keeps the four short stage tasks inline under one COMMON contract", () => {
+    const source = readFileSync(workflowPath, "utf8");
+    const resources = path.join(path.dirname(workflowPath), "resources");
+
+    for (const name of INLINED_PROMPTS) {
+      expect(existsSync(path.join(resources, name)), name).toBe(false);
+      expect(source, name).not.toContain(name);
+    }
+    // Exactly the two charters above the ≳80-line bar remain external.
+    expect(readdirSync(resources).sort()).toEqual(CHARTER_PROMPTS);
+    expect(source.match(/promptFile\("\.\/resources\//gu)).toHaveLength(2);
+
+    expect(source).toContain("const COMMON = ");
+    // One shared contract, prepended by each of the four inline stages.
+    expect(source.match(/^\s*`\$\{COMMON\}$/gmu)).toHaveLength(4);
+    expect(source).toContain("This stage is host-enforced read-only.");
+    expect(source).toContain("You have no shell");
+
+    // Bounds on free text are per-call runtime gates, not hand-rolled throws.
+    for (const bound of [
+      "maxAnswerChars: MAX_SCOPE_CHARS",
+      "maxAnswerChars: MAX_INVENTORY_CHARS",
+      "maxAnswerChars: MAX_UNITS_CHARS",
+      "maxAnswerChars: MAX_QUESTIONS_CHARS",
+      "maxAnswerChars: MAX_REVIEW_CHARS",
+    ]) {
+      expect(source, bound).toContain(bound);
+    }
+  });
+
   it("keeps the AST Index preference bounded by a grep fallback and only where symbols matter", () => {
-    for (const name of NAVIGATING_PROMPTS) {
+    const source = readFileSync(workflowPath, "utf8");
+
+    for (const name of CHARTER_PROMPTS) {
       const prompt = promptSource(name);
       expect(prompt, name).toContain("ast_index");
       expect(prompt, name).toMatch(/A missing AST Index never blocks a\s+review\./u);
       expect(prompt, name).toMatch(/continue with\s+`grep`, `find`, and direct reads/u);
     }
-    for (const name of ["clarifier.prompt.md", "scope-resolver.prompt.md", "change-inventory.prompt.md"]) {
-      expect(promptSource(name), name).not.toContain("ast_index");
-    }
+    // Inline, the same guidance is one constant used by the one navigating stage
+    // that moved into the script; the clarifier, scope, and inventory stages
+    // must not receive it.
+    expect(source).toContain("const AST_INDEX_NOTE = ");
+    expect(source).toMatch(/A missing AST Index never blocks a\s+review\./u);
+    expect(source.match(/\$\{AST_INDEX_NOTE\}/gu)).toHaveLength(1);
   });
 
   it("requires a reachable path, root-cause dedup, and concern-relative answers from the verifier", () => {
@@ -214,14 +254,15 @@ describe("workflow example: review.workflow.mjs", () => {
   });
 
   it("carries stable inventory coverage ids through interrogation and final verification", () => {
-    const inventory = promptSource("change-inventory.prompt.md");
-    const planner = promptSource("unit-planner.prompt.md");
+    // The inventory and unit-planner stages are inline now; the ledger discipline
+    // they impose has to survive the move, so it is asserted against the script.
+    const source = readFileSync(workflowPath, "utf8");
     const interrogator = promptSource("interrogator.prompt.md");
     const verifier = promptSource("verifier.prompt.md");
 
-    expect(inventory).toContain("stable coverage ids");
-    expect(planner).toContain("Coverage: C1, C2");
-    expect(planner).toMatch(/Every inventory id\s+must appear in exactly one unit/u);
+    expect(source).toContain("stable coverage ids");
+    expect(source).toContain("Coverage: C1, C2");
+    expect(source).toMatch(/Every inventory id\s+must appear in exactly one unit/u);
     expect(interrogator).toContain("{{INVENTORY_TEXT}}");
     expect(interrogator).toContain("## Coverage gaps");
     expect(interrogator).toContain("## Coverage reconciliation");
@@ -308,7 +349,8 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(published[0]?.text).toBe(intent);
     expect(published[0]?.stage).toBe("resolve-scope");
     expect(answers.at(-1)?.text).toBe(result);
-    expect(resourceLoader.evidence()).toHaveLength(6);
+    // Two prompt files remain: the interrogator and verifier charters.
+    expect(resourceLoader.evidence()).toHaveLength(2);
   });
 
   it("prepares clarification with exact persisted intent and complete artifact references", async () => {
@@ -396,13 +438,6 @@ describe("workflow example: review.workflow.mjs", () => {
       },
       "must be unique",
     ],
-    [
-      {
-        decision: "needs_operator",
-        questions: [{ id: "long", prompt: "x".repeat(501), options: [], allowCustom: true }],
-      },
-      "exceeds 500 characters",
-    ],
   ])("rejects invalid clarifier domain output before review stages", async (decision, message) => {
     const calls: WorkflowAgentRequest[] = [];
     const { dsl, published, awaiting } = runtimeWith(async (request) => {
@@ -412,6 +447,32 @@ describe("workflow example: review.workflow.mjs", () => {
 
     await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(message);
     expect(calls.map((call) => call.label)).toEqual(["decide clarification"]);
+    expect(published).toHaveLength(0);
+    expect(awaiting).toHaveLength(0);
+  });
+
+  it("re-asks the clarifier for a declared bound instead of ending the run on the first answer", async () => {
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published, awaiting } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(
+        request,
+        JSON.stringify({
+          decision: "needs_operator",
+          questions: [{ id: "long", prompt: "x".repeat(501), options: [], allowCustom: true }],
+        }),
+      );
+    });
+
+    // The 500-character prompt bound used to be a script `throw`, which ended
+    // the run on the first answer. Declared as `maxLength` it is handed back to
+    // the child by the schema retry, so the child gets a second chance and the
+    // failure still closes.
+    await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(
+      "questions[0].prompt: expected at most 500 character(s), got 501",
+    );
+    expect(calls.map((call) => call.label)).toEqual(["decide clarification", "decide clarification"]);
+    expect(calls[1]?.prompt).toContain("expected at most 500 character(s), got 501");
     expect(published).toHaveLength(0);
     expect(awaiting).toHaveLength(0);
   });
@@ -754,7 +815,9 @@ describe("workflow example: review.workflow.mjs", () => {
 
     await expect(runWorkflow(dsl, "x".repeat(16_001))).rejects.toThrow("16000-character context limit");
     expect(agentCalls).toBe(0);
-    await expect(runWorkflow(dsl, "review current branch")).rejects.toThrow("scope handoff exceeds the 64000");
+    await expect(runWorkflow(dsl, "review current branch")).rejects.toThrow(
+      "Agent answer is 64001 characters; the call allows 64000.",
+    );
     expect(agentCalls).toBe(2);
   });
 

@@ -99,7 +99,15 @@ describe("curated workflow diagram contract", () => {
       expect(text).toContain(phase);
     }
 
+    // review keeps exactly the two role charters above the inline-prompt bar and
+    // writes its four short stage tasks inline.
     expect(text).toContain("resources/*.prompt.md");
+    expect(text).toContain("interrogator.prompt.md");
+    expect(text).toContain("verifier.prompt.md");
+    expect(text).toContain("Inline COMMON contract + 4 stage tasks");
+    expect(text).not.toContain("scope-resolver.prompt.md");
+    expect(text).not.toContain("change-inventory.prompt.md");
+    expect(text).not.toContain("unit-planner.prompt.md");
     expect(text).not.toContain(".agent.md");
 
     expect(text).toContain("exact scopeText");
@@ -168,7 +176,11 @@ describe("curated workflow diagram contract", () => {
     expect(reviewFix).toMatch(
       /Agent: fresh read-only re-reviewer.*Rechecks every original finding and dependency surface/su,
     );
-    expect(reviewFix).toContain("resources/*.prompt.md");
+    // review-fix carries every stage prompt inline since 2026-07-25, so the
+    // render must not advertise prompt resources it no longer ships.
+    expect(reviewFix).not.toContain("resources/*.prompt.md");
+    expect(reviewFix).toContain("no prompt resources");
+    expect(reviewFix).toContain("COMMON");
     expect(reviewFix).not.toContain(".agent.md");
 
     expect(reviewFix).toContain("exact scopeText");

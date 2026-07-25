@@ -17,8 +17,21 @@ const scene = new Scene({
 // One left-to-right column per stage, exactly like the sibling `review`
 // diagram. Lane titles own the left margin, so the first node of every lane
 // starts right of LANE_LABEL_WIDTH.
+//
+// The pipeline is authored as one long strip and then WRAPPED into two bands.
+// Unwrapped it renders about 5900x1400 — a ~4.3:1 sliver whose text is
+// illegible at fit-to-window — so every node whose authored x is at or past
+// BAND_BREAK drops into a second band below, and the four swim lanes are drawn
+// once per band. Authored coordinates never change; only bandX/bandY move them.
+const BAND_BREAK = 3200;
+const BAND_DX = -3115;
+const BAND_DY = 1360;
+const inBand2 = (x) => x >= BAND_BREAK;
+const bandX = (x) => (inBand2(x) ? x + BAND_DX : x);
+const bandY = (x, y) => (inBand2(x) ? y + BAND_DY : y);
+
 const LANE_X = 40;
-const LANE_WIDTH = 5920;
+const LANE_WIDTH = 3220;
 const LANE_LABEL_WIDTH = 400;
 
 const COLORS = {
@@ -60,7 +73,9 @@ const nodeRecord = (id, block) => ({
   texts: block.elements.filter((element) => element.type === "text"),
 });
 
-const operatorNode = (id, title, body, iconId, x, y, width, height) => {
+const operatorNode = (id, title, body, iconId, authoredX, authoredY, width, height) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const frame = scene.ellipse(x, y, width, height, {
     color: COLORS.operator,
     strokeWidth: 2,
@@ -82,11 +97,11 @@ const operatorNode = (id, title, body, iconId, x, y, width, height) => {
   return nodeRecord(id, scene.group([frame, icon, titleText, bodyText]));
 };
 
-const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
+const workflowNode = (id, title, bullets, iconId, authoredX, authoredY, width, height) =>
   nodeRecord(
     id,
     tintBlock(
-      layout.iconPanel(scene, x, y, width, height, {
+      layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
         title,
         iconId,
         bullets,
@@ -100,11 +115,11 @@ const workflowNode = (id, title, bullets, iconId, x, y, width, height) =>
     ),
   );
 
-const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
+const agentNode = (id, title, bullets, iconId, authoredX, authoredY, width, height) =>
   nodeRecord(
     id,
     tintBlock(
-      layout.iconPanel(scene, x, y, width, height, {
+      layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
         title,
         iconId,
         bullets,
@@ -118,7 +133,9 @@ const agentNode = (id, title, bullets, iconId, x, y, width, height) =>
     ),
   );
 
-const workflowCheck = (id, title, body, x, y, width, height) => {
+const workflowCheck = (id, title, body, authoredX, authoredY, width, height) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const frame = scene.line(
     [
       [x + width / 2, y],
@@ -145,7 +162,9 @@ const workflowCheck = (id, title, body, x, y, width, height) => {
   return nodeRecord(id, scene.group([frame, titleText, bodyText]));
 };
 
-const artifactNode = (id, title, lines, iconId, x, y, width, height, write = false) => {
+const artifactNode = (id, title, lines, iconId, authoredX, authoredY, width, height, write = false) => {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const color = write ? COLORS.write : COLORS.artifact;
   const frame = scene.rect(x, y, width, height, {
     color,
@@ -179,23 +198,25 @@ const artifactNode = (id, title, lines, iconId, x, y, width, height, write = fal
 };
 
 const lane = (title, subtitle, y, height, color, fill) => {
-  const frame = scene.rect(LANE_X, y, LANE_WIDTH, height, {
-    color,
-    strokeWidth: 1,
-    dashed: true,
-  });
-  setFrameFill(frame, fill, 45);
-  frame.roughness = 0;
-  scene.text(LANE_X + 22, y + 14, title, {
-    size: 19,
-    color,
-    width: LANE_LABEL_WIDTH,
-  });
-  scene.text(LANE_X + 22, y + 44, subtitle, {
-    size: 11,
-    color: COLORS.muted,
-    width: LANE_LABEL_WIDTH,
-  });
+  for (const dy of [0, BAND_DY]) {
+    const frame = scene.rect(LANE_X, y + dy, LANE_WIDTH, height, {
+      color,
+      strokeWidth: 1,
+      dashed: true,
+    });
+    setFrameFill(frame, fill, 45);
+    frame.roughness = 0;
+    scene.text(LANE_X + 22, y + dy + 14, title, {
+      size: 19,
+      color,
+      width: LANE_LABEL_WIDTH,
+    });
+    scene.text(LANE_X + 22, y + dy + 44, subtitle, {
+      size: 11,
+      color: COLORS.muted,
+      width: LANE_LABEL_WIDTH,
+    });
+  }
 };
 
 scene.text(
@@ -383,11 +404,7 @@ const findingsGate = workflowCheck(
 const launchScope = workflowNode(
   "launch-agent-f1",
   "Workflow: launch shaped selector",
-  [
-    "phase resolve-fix-scope",
-    "Renders resources/selector-planner.prompt.md",
-    "readOnly + no tools · FINDING_SELECTOR_SCHEMA",
-  ],
+  ["phase resolve-fix-scope", "Inline selector task under COMMON", "readOnly + no tools · FINDING_SELECTOR_SCHEMA"],
   "multi_agent_orchestrator",
   1600,
   470,
@@ -425,7 +442,7 @@ const launchUnits = workflowNode(
   "launch-agent-f2",
   "Workflow: launch scope resolver",
   [
-    "Renders resources/scope-resolver.prompt.md",
+    "Inline task under COMMON + READ_ONLY_NOTE",
     "Receives validated ordered findings",
     "readOnly: read, git_read, ast_index, grep, find",
   ],
@@ -457,7 +474,7 @@ const launchImplement = workflowNode(
   "Workflow: iterate selected findings",
   [
     "phase apply-kept-findings",
-    "Renders resources/implementer.prompt.md",
+    "Inline writer task under COMMON",
     "Sequential topological order; fingerprint each window",
   ],
   "multi_agent_orchestrator",
@@ -489,7 +506,7 @@ const launchVerify = workflowNode(
   "Workflow: launch independent checker",
   [
     "phase collect-check-evidence",
-    "Renders resources/check-evidence.prompt.md",
+    "Inline task under COMMON + READ_ONLY_NOTE",
     "readOnly + baseline-frozen repository_check",
   ],
   "multi_agent_orchestrator",
@@ -518,7 +535,11 @@ const verifyAgent = agentNode(
 const launchPublish = workflowNode(
   "launch-agent-f5",
   "Workflow: launch fresh re-review",
-  ["phase re-review-fixes", "Renders resources/re-review.prompt.md", "Host-enforced read-only; no shell/write/edit"],
+  [
+    "phase re-review-fixes",
+    "Inline task under COMMON + READ_ONLY_NOTE",
+    "Host-enforced read-only; no shell/write/edit",
+  ],
   "multi_agent_orchestrator",
   4400,
   470,
@@ -566,7 +587,7 @@ const operatorDiff = operatorNode(
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review-fix.workflow.mjs\n+ resources/*.prompt.md",
+  "Artifact: review-fix.workflow.mjs\n(inline COMMON + every stage task;\nno prompt resources)",
   ["Self-contained static workflow identity", "Inline complete-block parser", "phase() and log() name every stage"],
   "prompt_template",
   85,
@@ -887,7 +908,7 @@ const health = assertDiagramHealthy({
   })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 6040, 1450),
+  renderBounds: new Bounds(0, 0, 3320, 2810),
   sceneBounds: scene.bounds(),
 });
 
