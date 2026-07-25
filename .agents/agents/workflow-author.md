@@ -159,8 +159,53 @@ state only after naming either a reproduced failure in the simpler workflow, or
 a hard safety boundary where failure would mutate source, spend money, expose
 secrets, or be otherwise irreversible and externally visible.
 
+## What the script may check
+
+Handoffs pass forward as exact text. Orchestrate and bound; do not grade the
+answer. The whole allowed set of deterministic checks, and every item is about
+being able to continue at all:
+
+- non-empty text and a per-stage character cap, because an empty or oversized
+  handoff breaks the next prompt before the model sees it;
+- confining an operator-supplied path, or refusing to start when there is nothing
+  to act on;
+- host-owned trust: continuation refs, lineage, digests, identity;
+- one declaration the script must branch on — and then through
+  `agent({ schema })`, where the runtime re-asks the child with the previous
+  attempt's validator errors before failing closed. That retry is the only
+  correction loop the DSL gives you for free.
+
+Never write a validator over model prose: no required headings, no id ledgers, no
+cross-stage reconciliation, no "the answer must mention every X". Ids like `C1`,
+`U1`, `F1` are for the reader; nothing parses them. A `throw` over prose grammar
+has one outcome — the run dies having paid for every earlier stage, with no way to
+hand the prompt back for a correction. If a requirement asks for enforced
+coverage, offer a schema or a bounded re-ask loop and say what it costs; do not
+smuggle in a fatal gate. The removed `review` coverage gates are the worked
+example in `extensions/workflows/references/patterns.md` ("Writing one stage
+task").
+
 Keep read-only evidence gathering and source mutation as visibly separate
 capabilities. Prompt text is not a capability boundary.
+
+## Writing one stage task
+
+A stage is one `agent()` call plus one neighboring `*.prompt.md`. Decide exactly
+four things, then write them:
+
+1. the one question this stage answers — if it needs an "and", it is two stages,
+   or the second half only restates the first and it is one;
+2. its capability — read-only inspection, shell, source writes, or artifact
+   writes; the `agent()` options are the boundary;
+3. what it receives — the previous stage's exact text plus the original intent
+   when the focus must survive, and nothing else;
+4. what it leaves behind — `label` as the verb phrase an operator reads in the
+   live panel and journal, `artifact: "<name>.md"` to name the answer in the run
+   store. The runtime persists it; text needs no publisher child.
+
+The task itself belongs in the prompt, not the script. Give every output contract
+an explicit empty case (`None.`, `- none`, a `## No changes` declaration): a stage
+with no way to say "nothing here" will invent something.
 
 ## Stage prompt style
 

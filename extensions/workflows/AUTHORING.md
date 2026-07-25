@@ -180,6 +180,14 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   `slots` / `partialResults` in memory, and return JSON-safe `partial:true`
   evidence. The runner still projects that deliberate partial as non-success.
 
+The catalog also owns _what happens inside one stage_: see its "Writing one stage
+task" section for the four decisions a stage makes and for the bounded set of
+checks trusted code may perform. Handoffs pass forward as exact text — the script
+bounds emptiness and size, confines operator-supplied paths, and verifies
+host-owned lineage, and never grades model prose. Branch on a declared shape with
+`agent({ schema })`, whose runtime retry re-asks the child with the previous
+validator errors before failing closed.
+
 For _which shape to pick_ (single-agent, shaped `agent({ schema })` gate, staged text pipeline,
 loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
 judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog

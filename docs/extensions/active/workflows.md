@@ -243,7 +243,13 @@ public package support promises.
 For _which shape to pick_ (single-agent, shaped-answer gate, loop+judge, plan→build→review,
 pipeline, fan-out+merge, judge-panel, loop-until-dry), see the pattern catalog
 `extensions/workflows/references/patterns.md` — it maps each requirement to a minimal
-skeleton to adapt. Only the four workflows in the curated table
+skeleton to adapt. Its "Writing one stage task" section also owns the division of
+labour inside a stage: the four decisions a stage makes, and the bounded set of
+checks trusted script code may perform. Handoffs pass forward as exact text; the
+script bounds emptiness and size, confines operator paths, and verifies host-owned
+lineage, but never grades model prose. A shape the script must branch on is
+declared with `agent({ schema })`, which re-asks the child with the previous
+attempt's validator errors before failing closed. Only the four workflows in the curated table
 above are registered Package workflows. (Single source: that file is the catalog of
 _forms_; this doc remains the DSL _contract_.)
 

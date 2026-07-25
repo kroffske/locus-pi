@@ -147,6 +147,67 @@ Runnable examples to adapt: `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`, with the reader algorithm in
 `examples/review/README.md`.
 
+## Writing one stage task
+
+A stage is one `agent()` call plus one neighboring `*.prompt.md`. Writing it is
+four decisions and nothing else:
+
+1. **The one question it answers.** Name it in a sentence. If the sentence needs
+   an "and", it is two stages — or the second half only restates the first, and
+   then it is one.
+2. **Its capability.** `readOnly: true` with read tools for inspection, `bash`
+   only for a stage that must run something, `write`/`edit` only for the stage
+   that must change something. The `agent()` options are the boundary; the prompt
+   paragraph only explains it.
+3. **What it receives.** The previous stage's exact text, wrapped in
+   `--- BEGIN <NAME> ---` / `--- END <NAME> ---` under `## Current task`, plus the
+   original operator intent when later stages must not lose the focus. Nothing
+   else: not the operator conversation, not runtime logs, not a sibling's scratch
+   reasoning.
+4. **What it leaves behind.** `label` is the human-readable verb phrase in the
+   live panel and the journal; `artifact: "<name>.md"` names the answer in the run
+   store. The runtime persists it — no publisher child is needed to save text.
+
+The stage's _task_ lives in the prompt, not in the script: the question, the
+explicit list of what this stage must NOT do, and an output template in a `text`
+fence with a stated rule for the empty case (`None.`, `- none`, an explicit
+`## No changes` declaration). A stage that has no way to say "nothing here" will
+invent something.
+
+### What the script may check
+
+The script orchestrates and bounds; it does not grade the answer. The whole
+allowed set, and every item is about being able to continue at all:
+
+- non-empty text and a per-stage character cap — an empty or oversized handoff
+  breaks the next prompt before the model ever sees it;
+- confining an operator-supplied path, or refusing to start when there is nothing
+  to act on;
+- host-owned trust: continuation refs, lineage, digests, identity;
+- one declaration the script must branch on — and then through
+  `agent({ schema })`, where the runtime re-asks the child with the previous
+  attempt's validator errors before failing closed. That retry is the only
+  correction loop the DSL gives you for free.
+
+Do not write a validator over model prose: no required headings, no id ledgers,
+no cross-stage reconciliation, no "the answer must mention every X". Ids like
+`C1`, `U1`, `F1` exist so a reader can follow one unit through the artifacts;
+nothing parses them. A `throw` over prose grammar has exactly one outcome — the
+run dies having paid for every earlier stage, with no way to hand the prompt back
+for a correction.
+
+Reference, so the trade-off is known and not rediscovered: until 2026-07 the
+curated `review` entry enforced its own Markdown — unique `## C<n>` ids, a
+`Coverage:` ledger per unit, `## Coverage reconciliation` and
+`## Coverage and limits` sections with the exact unit assignment preserved. On a
+clean worktree the inventory honestly answered "no unstaged tracked changes", the
+id gate threw, and a legitimately empty scope surfaced as a failed run after
+three model calls. Those gates are gone. The prompts still ask for the ids
+because they make a review better, and the verifier reports its own coverage. The
+cost of dropping them is real — a stage can now under-cover its subject quietly —
+and the way to buy it back is a schema or a bounded re-ask loop, never a fatal
+throw.
+
 ## Semantic text input
 
 Both `/workflows run <name> [input]` and the `workflow` tool pass one optional
