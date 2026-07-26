@@ -98,9 +98,60 @@ it after the fact: `review`'s clarifier declares the question id pattern, the
 1–8 count, and the prompt/option lengths, and `review-fix`'s selector declares
 the `F<n>` id pattern, the 1–20 count, and the note length. A violation is
 re-asked by the runtime's schema retry instead of ending the run. What stays in
-deterministic entry code is what a declared keyword cannot express: agreement
+deterministic entry code is what a declared keyword cannot express: ~~agreement
 between fields, referential integrity against the immutable review, uniqueness,
-budgets summed across items, and graph acyclicity.
+budgets summed across items, and graph acyclicity.~~
+
+**Amendment, 2026-07-26 (Status stays `accepted`).** Uniqueness is struck from
+that list because the runtime now expresses it. `uniqueItems`,
+`uniqueTrimmedItems`, `uniqueBy`, and `nonBlank` joined the supported schema
+subset, and both curated entries declare them — `uniqueBy: "id"` plus
+`uniqueTrimmedItems`/`nonBlank` on `review`'s clarifier, `uniqueBy: "id"` plus
+`uniqueItems` on `review-fix`'s selector — so a repeated question id, a repeated
+dependency, two option labels that differ only by whitespace, and a
+whitespace-only prompt are all re-asked rather than fatal. The rest of the list
+is unchanged and still fatal. The amendment narrows the claim on the merits: the
+original justification (a re-ask cannot fix a plan that contradicts its own
+source) never applied to uniqueness, which involves no source.
+
+**Second amendment, 2026-07-26 (Status stays `accepted`).** Migrating the two
+curated entries is W6-class work and was gated on an explicit owner decision,
+because a curated workflow's observable failure behaviour changes: a cross-field
+violation that used to end the run on the child's first answer now costs up to
+three child runs before failing closed. **The owner approved that migration on
+2026-07-26**, after reading the independent review that priced it — the schema
+keywords absorb six of the seventeen candidate checks, leaving twelve, and the
+prior decision recorded below had to be narrowed rather than repealed. This
+paragraph is the approval record; there is no separate artifact. The remainder of that
+list is struck too, and for the same reason applied one level up: the original
+sentence conflated "the script owns this rule" with "this rule ends the run", and
+those are now separable. `agent({ schema, validate })` lets a script hand the
+runtime a `(value) => string[]` callback that joins the existing retry loop, so
+**agreement between fields, referential integrity against the immutable review,
+budgets summed across items, and graph acyclicity now stay out of the schema but
+inside the retry loop.** Both curated entries migrated: `review`'s clarifier
+passes `clarifierDecisionErrors` and `review-fix`'s selector passes a closure over
+`findingPlanErrors`, and each of the eleven checks those two functions used to
+throw now reaches the child as a bullet before the call can fail closed.
+
+What genuinely stays fatal is narrower than the struck list and is defined by a
+different test — not "the script computes it" but "can a bullet handed back to the
+model offer it a second way to satisfy the check":
+
+- **self-reported status**, where the check accepts the model's word about
+  something the host did not verify;
+- **verdict coherence**, where a model's verdict is graded against its own
+  findings list and both "fabricate a finding" and "flip the verdict" satisfy it;
+- **host-owned continuation, provenance and identity evidence**, and text a
+  _prior_ run's agent wrote — neither is this child's to repair.
+
+A deterministic membership, uniqueness, sum or graph re-check over data the model
+does not control is explicitly NOT in that class: it runs identically on every
+attempt, so the only move it offers is compliance. The barrier keeping the unsafe
+cases out is documentation plus a pinning test in
+`tests/extensions/workflows/review-workflow.test.ts` and
+`review-remediation-workflows.test.ts`; the mechanism itself cannot tell the two
+apart, and this ADR says so rather than claiming a guarantee it does not have.
 
 The canonical evidence owner is
 `.locus/runtime/workflows/<runId>/artifacts/index.json`. Automatic answers and

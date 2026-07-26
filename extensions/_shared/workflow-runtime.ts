@@ -109,10 +109,15 @@ export interface WorkflowAgentChildTrace {
 
 export interface WorkflowSchemaValidation {
   status: "valid" | "mismatch";
-  /** Number of fresh child/model completions actually executed for this DSL call. */
+  /** 1-based loop position of the attempt this verdict describes. A replayed attempt
+   *  occupies an ordinal and increments it, and contributes no `usage`. */
   attempts: number;
   /** Final validator/parser errors on mismatch; empty after a valid attempt. */
   errors: string[];
+  /** Which authority rejected the answer. Present only on a mismatch, and only on a
+   *  call that declared `validate` — a schema-only call has one possible authority,
+   *  so naming it would change every existing journal line for no added information. */
+  source?: "schema" | "script";
 }
 
 /** Token + cost projection for one model-backed child run, summed per run for the budget view. */
@@ -199,12 +204,29 @@ export interface WorkflowAgentOptions {
   workspaceHandle?: string;
   /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
   schema?: never;
+  /** validate needs a parsed value, which only the shaped overload has. */
+  validate?: never;
 }
+
+/**
+ * Script-supplied cross-field validation for one shaped answer.
+ *
+ * Receives the parsed, schema-valid value; returns the violations it found, empty
+ * for a pass. It must be pure, synchronous and deterministic, must not throw to
+ * signal a violation, must not transform the value, and must not call back into
+ * the DSL. Its strings are spliced into the retry prompt and therefore enter the
+ * canonical replay key, so an unstable message is a replay defect.
+ */
+export type WorkflowAgentValidate = (value: unknown) => readonly string[];
 
 /** Options for the shaped overload. The schema property cannot be smuggled through
  *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
-export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "schema"> {
+export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "schema" | "validate"> {
   schema: Record<string, unknown>;
+  /** Cross-field rules the schema subset cannot declare. Runs only after schema
+   *  validation succeeds; a non-empty return re-asks the child in its own labelled
+   *  repair block instead of ending the run. */
+  validate?: WorkflowAgentValidate;
 }
 
 type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentSchemaOptions;
@@ -569,6 +591,39 @@ function defaultWorkflowWorkspaceMode(opts: WorkflowAgentAnyOptions | undefined)
  *  budget for the DSL. */
 const SCHEMA_MAX_ATTEMPTS = 2;
 
+/** Upper bounds on what a script validator may hand back. Its strings reach the next
+ *  child's prompt, the journal verdict and — through the prompt — the replay key, and
+ *  nothing else caps them. A breach is a run error, never a truncation: truncating
+ *  would silently rewrite the replay key. */
+const MAX_SCRIPT_VALIDATION_ERRORS = 32;
+const MAX_SCRIPT_VALIDATION_ERROR_CHARS = 500;
+
+/** A validate() return is author data crossing into runtime-owned surfaces, so it is
+ *  checked like any other untrusted value. Every breach fails the run closed and
+ *  consumes no retry — a bug in author code must not be laundered into a repair loop
+ *  that blames the model for it. */
+function assertScriptValidationErrors(returned: unknown): readonly string[] {
+  if (isRecord(returned) && typeof returned.then === "function") {
+    throw new Error("agent validate must return an array of strings, not a Promise");
+  }
+  if (!Array.isArray(returned)) throw new Error("agent validate must return an array of strings");
+  if (returned.length > MAX_SCRIPT_VALIDATION_ERRORS) {
+    throw new Error(
+      `agent validate returned ${returned.length} error(s); at most ${MAX_SCRIPT_VALIDATION_ERRORS} are allowed`,
+    );
+  }
+  for (const [index, error] of returned.entries()) {
+    if (typeof error !== "string") throw new Error("agent validate must return an array of strings");
+    if (error === "") throw new Error(`agent validate error at index ${index} must be a non-empty string`);
+    if (error.length > MAX_SCRIPT_VALIDATION_ERROR_CHARS) {
+      throw new Error(
+        `agent validate error at index ${index} is ${error.length} character(s); at most ${MAX_SCRIPT_VALIDATION_ERROR_CHARS} are allowed`,
+      );
+    }
+  }
+  return returned as readonly string[];
+}
+
 /** Default global per-run cap on total dsl.agent() invocations. Cyclic workflows are
  *  allowed up to this cap; exceeding it throws WorkflowInvocationCapError and exits the run. */
 export const DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS = 1000;
@@ -622,6 +677,15 @@ export class SchemaValidationError extends Error {
  *   - `additionalProperties`: false  (for objects — reject keys not in `properties`)
  *   - `items`: schema  (for arrays — validates every element, recursive)
  *   - `enum`: JSON primitive[]  (value must be strictly equal to one listed member)
+ *   - `minLength` / `maxLength` / `pattern`  (for strings)
+ *   - `minItems` / `maxItems`  (for arrays)
+ *   - `nonBlank: true`  (for strings — reject a value that is empty after trimming)
+ *   - `uniqueItems: true`  (for arrays of string/number/integer/boolean items)
+ *   - `uniqueTrimmedItems: true`  (for arrays of string items — unique after trimming)
+ *   - `uniqueBy: "<property>"`  (for arrays of objects — that property is unique)
+ *
+ * Trimming is `String.prototype.trim`, the same canonicalization a consumer's
+ * normalizer applies, so a value this validator accepts cannot collapse later.
  *
  * `schema === undefined` is a no-op — callers must guard before calling.
  * No ajv, no fs, no network. Host-agnostic.
@@ -644,10 +708,24 @@ const SUPPORTED_SCHEMA_KEYWORDS = new Set([
   "pattern",
   "minItems",
   "maxItems",
+  // Uniqueness and blankness, for the same reason. A repeated id or a
+  // whitespace-only label is something the child can correct once told, but a
+  // hand-written check after validation can only throw and end the run.
+  // `uniqueItems` covers arrays of primitives, `uniqueBy` arrays of objects
+  // keyed on one named property, `uniqueTrimmedItems` string arrays a consumer
+  // trims anyway, and `nonBlank` a string that satisfies minLength 1 while
+  // being nothing but whitespace.
+  "nonBlank",
+  "uniqueItems",
+  "uniqueTrimmedItems",
+  "uniqueBy",
 ]);
 
-const STRING_ONLY_KEYWORDS = ["minLength", "maxLength", "pattern"] as const;
-const ARRAY_ONLY_KEYWORDS = ["minItems", "maxItems"] as const;
+const STRING_ONLY_KEYWORDS = ["minLength", "maxLength", "pattern", "nonBlank"] as const;
+const ARRAY_ONLY_KEYWORDS = ["minItems", "maxItems", "uniqueItems", "uniqueTrimmedItems", "uniqueBy"] as const;
+
+/** Item types `uniqueItems` and `uniqueBy` can compare without inventing an equality. */
+const PRIMITIVE_SCHEMA_TYPES = ["string", "number", "integer", "boolean"] as const;
 
 /** Validate the declaration before the first child call. Runtime value validation
  *  is useful only when authors cannot accidentally declare an ignored contract. */
@@ -780,6 +858,73 @@ function assertBoundKeywords(schema: Record<string, unknown>, path: string, type
       );
     }
   }
+
+  assertUniquenessKeywords(schema, path);
+}
+
+/**
+ * The uniqueness and blankness keywords carry no numeric domain, so the ways to
+ * get them wrong are all declarative: a value other than `true`, an item type
+ * whose equality the runtime refuses to invent, or a `uniqueBy` property the
+ * items do not actually promise. Each is refused before the first child call —
+ * an ignored contract is worse than an absent one.
+ */
+function assertUniquenessKeywords(schema: Record<string, unknown>, path: string): void {
+  for (const keyword of ["nonBlank", "uniqueItems", "uniqueTrimmedItems"] as const) {
+    if (schema[keyword] !== undefined && schema[keyword] !== true) {
+      throw new Error(`${path}: ${keyword} supports only true`);
+    }
+  }
+
+  if (schema.uniqueItems === true && schema.uniqueTrimmedItems === true) {
+    throw new Error(
+      `${path}: uniqueItems and uniqueTrimmedItems cannot both be declared; uniqueTrimmedItems already rejects raw duplicates`,
+    );
+  }
+
+  // Reached only for an array schema (ARRAY_ONLY_KEYWORDS above), whose `items`
+  // is already proven to be a schema object by the caller.
+  const items = isRecord(schema.items) ? schema.items : undefined;
+  const itemType = items?.type;
+
+  if (schema.uniqueItems === true && !isPrimitiveSchemaType(itemType)) {
+    throw new Error(
+      `${path}: uniqueItems requires items to declare a string, number, integer, or boolean type; use uniqueBy for objects`,
+    );
+  }
+  if (schema.uniqueTrimmedItems === true && itemType !== "string") {
+    throw new Error(`${path}: uniqueTrimmedItems requires items to declare a string type`);
+  }
+
+  if (schema.uniqueBy === undefined) return;
+  if (typeof schema.uniqueBy !== "string" || schema.uniqueBy === "") {
+    throw new Error(`${path}: uniqueBy must be a non-empty string`);
+  }
+  const property = schema.uniqueBy;
+  if (itemType !== "object") {
+    throw new Error(`${path}: uniqueBy requires items to declare an object type`);
+  }
+  const properties = isRecord(items?.properties) ? items.properties : undefined;
+  if (properties === undefined || !(property in properties)) {
+    throw new Error(`${path}: uniqueBy property ${JSON.stringify(property)} is not declared in items.properties`);
+  }
+  // Without `required`, an element missing the property is neither unique nor a
+  // duplicate, and the runtime would have to invent that semantic. Requiring it
+  // instead means the child gets `missing required property` — a better error.
+  const required = Array.isArray(items?.required) ? items.required : [];
+  if (!required.includes(property)) {
+    throw new Error(`${path}: uniqueBy property ${JSON.stringify(property)} is not listed in items.required`);
+  }
+  const propertySchema = properties[property];
+  if (!isRecord(propertySchema) || !isPrimitiveSchemaType(propertySchema.type)) {
+    throw new Error(
+      `${path}: uniqueBy property ${JSON.stringify(property)} must declare a string, number, integer, or boolean type`,
+    );
+  }
+}
+
+function isPrimitiveSchemaType(type: unknown): type is (typeof PRIMITIVE_SCHEMA_TYPES)[number] {
+  return typeof type === "string" && (PRIMITIVE_SCHEMA_TYPES as readonly string[]).includes(type);
 }
 
 /**
@@ -868,6 +1013,7 @@ function validateAgainstSchema(
             const sub = validateAgainstSchema(el, items as Record<string, unknown>, `${loc2}[${i}]`);
             if (!sub.ok) errors.push(...sub.errors);
           });
+          errors.push(...arrayUniquenessErrors(value, schema, items as Record<string, unknown>, loc2));
         }
       }
     } else if (type === "string") {
@@ -920,7 +1066,75 @@ function stringBoundErrors(value: string, schema: Record<string, unknown>, loc: 
   if (typeof pattern === "string" && !compilePattern(pattern).test(value)) {
     errors.push(`${loc}: value ${JSON.stringify(value)} does not match pattern ${pattern}`);
   }
+  // The count, not the value: a blank string can be hundreds of whitespace
+  // characters, and echoing them would splice junk into the retry prompt — and
+  // therefore into the replay key.
+  if (schema["nonBlank"] === true && value.trim() === "") {
+    errors.push(`${loc}: expected a non-blank string, got ${value.length} whitespace character(s)`);
+  }
   return errors;
+}
+
+/**
+ * Uniqueness runs after the per-element `items` pass and only over elements
+ * whose runtime type matches the declared one, so a wrong-typed element reports
+ * its type error and nothing else — the error set stays a pure function of the
+ * value, which matters because these strings enter the retry prompt and the
+ * replay key. Every later duplicate is reported at its own index and names the
+ * first occurrence, which is the only form that says which one to edit.
+ */
+function arrayUniquenessErrors(
+  value: readonly unknown[],
+  schema: Record<string, unknown>,
+  items: Record<string, unknown>,
+  loc: string,
+): string[] {
+  const errors: string[] = [];
+  const itemType = items["type"];
+
+  const trimmed = schema["uniqueTrimmedItems"] === true;
+  if (schema["uniqueItems"] === true || trimmed) {
+    const firstIndex = new Map<unknown, number>();
+    value.forEach((element, index) => {
+      if (!matchesPrimitiveType(element, itemType)) return;
+      const key = trimmed ? (element as string).trim() : element;
+      const seen = firstIndex.get(key);
+      if (seen === undefined) {
+        firstIndex.set(key, index);
+        return;
+      }
+      errors.push(
+        trimmed
+          ? `${loc}[${index}]: trimmed value ${JSON.stringify(key)} duplicates item ${seen}`
+          : `${loc}[${index}]: value ${JSON.stringify(element)} duplicates item ${seen}`,
+      );
+    });
+  }
+
+  const uniqueBy = schema["uniqueBy"];
+  if (typeof uniqueBy === "string" && uniqueBy !== "") {
+    const firstIndex = new Map<unknown, number>();
+    value.forEach((element, index) => {
+      if (!isRecord(element) || !(uniqueBy in element)) return;
+      const key = element[uniqueBy];
+      const seen = firstIndex.get(key);
+      if (seen === undefined) {
+        firstIndex.set(key, index);
+        return;
+      }
+      errors.push(`${loc}[${index}].${uniqueBy}: value ${JSON.stringify(key)} duplicates item ${seen}`);
+    });
+  }
+
+  return errors;
+}
+
+function matchesPrimitiveType(value: unknown, type: unknown): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number";
+  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
+  if (type === "boolean") return typeof value === "boolean";
+  return false;
 }
 
 /** Strip a ```json … ``` (or bare ``` … ```) fence if the model wrapped its JSON. */
@@ -967,18 +1181,40 @@ interface AgentAttemptOutcome {
 
 /**
  * Validate one child answer against a declared schema with the DSL's single JSON extractor and
- * subset validator. `attempt` is the 1-based child run this verdict describes.
+ * subset validator, then — only on a value that already validated — against the script's own
+ * `validate` callback. `attempt` is the 1-based child run this verdict describes.
+ *
+ * The order is the contract: a cross-field rule presupposes the shape holds, so an off-shape
+ * answer never reaches author code. `source` names the rejecting authority, and is recorded only
+ * when two authorities could have rejected — a schema-only call has exactly one.
  */
-function checkAgentSchema(text: string, schema: Record<string, unknown>, attempt: number): AgentSchemaCheck {
+function checkAgentSchema(
+  text: string,
+  schema: Record<string, unknown>,
+  attempt: number,
+  validate?: WorkflowAgentValidate,
+): AgentSchemaCheck {
+  const authority = validate === undefined ? {} : { source: "schema" as const };
   const parsed = parseJsonFromText(text);
   if (!parsed.ok) {
     return {
-      validation: { status: "mismatch", attempts: attempt, errors: [`response is not valid JSON: ${parsed.error}`] },
+      validation: {
+        status: "mismatch",
+        attempts: attempt,
+        errors: [`response is not valid JSON: ${parsed.error}`],
+        ...authority,
+      },
     };
   }
   const validation = validateAgainstSchema(parsed.value, schema);
   if (!validation.ok) {
-    return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors] } };
+    return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors], ...authority } };
+  }
+  if (validate !== undefined) {
+    const scriptErrors = assertScriptValidationErrors(validate(parsed.value));
+    if (scriptErrors.length > 0) {
+      return { validation: { status: "mismatch", attempts: attempt, errors: [...scriptErrors], source: "script" } };
+    }
   }
   return { validation: { status: "valid", attempts: attempt, errors: [] }, value: parsed.value };
 }
@@ -996,12 +1232,21 @@ function withSchemaContract(
   schema: Record<string, unknown>,
   attempt: number,
   previousErrors: readonly string[],
+  previousSource: "schema" | "script",
+  maxAttempts: number,
 ): string {
+  // Exactly one repair block can appear, because the script validator only ever sees a
+  // schema-valid value: an attempt has one rejecting authority. Script errors are never
+  // merged into the schema list — schema errors carry 0-indexed JSON paths and observed
+  // values, and one merged list would hand the child two index bases and frame a
+  // cross-field violation as a shape violation.
   const repair =
     attempt > 1 && previousErrors.length > 0
       ? [
           "",
-          `The previous answer (attempt ${attempt - 1} of ${SCHEMA_MAX_ATTEMPTS}) was REJECTED for:`,
+          previousSource === "script"
+            ? `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) matched the required shape but was REJECTED by the workflow script for:`
+            : `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) was REJECTED for:`,
           ...previousErrors.map((error) => `- ${error}`),
           "Return the corrected JSON value only.",
         ].join("\n")
@@ -1045,6 +1290,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   const journalMirror: WorkflowJournalLine[] = [];
   let _currentPhase: string | undefined;
+  /** Set while a script `validate` callback is running. The callback sits between the
+   *  child answer and agent_end, before artifact recording and replay journaling, so a
+   *  nested child call there has no defined position in either sequence. */
+  let insideValidate = false;
   let groupCounter = 0;
   const groupStack: Array<{ id: string; kind: "parallel" | "pipeline"; label: string }> = [];
 
@@ -1070,6 +1319,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     opts: WorkflowAgentAnyOptions | undefined,
     checkSchema?: (text: string) => AgentSchemaCheck,
   ): Promise<AgentAttemptOutcome> {
+    if (insideValidate) throw new Error("agent() must not be called from inside a validate callback");
     // Global per-run cap across all agent() calls (including those nested in
     // parallel()/pipeline()). Count BEFORE doing any work so the call that breaches
     // the cap is itself counted, and throw a typed error that bubbles past grouped
@@ -1226,10 +1476,45 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
     // Shape check runs before agent_end so the run journal carries the verdict for THIS attempt.
     // A child that failed or returned no text has nothing to validate; that stays a run failure.
-    const schemaCheck =
-      checkSchema !== undefined && finalResult.ok && finalResult.status === "completed"
-        ? checkSchema(finalResult.text ?? "")
-        : undefined;
+    let schemaCheck: AgentSchemaCheck | undefined;
+    if (checkSchema !== undefined && finalResult.ok && finalResult.status === "completed") {
+      try {
+        schemaCheck = checkSchema(finalResult.text ?? "");
+      } catch (err) {
+        // A script validator that throws — or hands back something that is not an error
+        // list — ends the run unchanged and spends no retry. The line is emitted because
+        // this attempt really ran: without it the journal holds an agent_start with no
+        // agent_end and no record of why the run stopped.
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "error",
+          source: "script",
+          agent: req.agent,
+          callId,
+          ...(req.label !== undefined ? { label: req.label } : {}),
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - start,
+        });
+        throw err;
+      }
+    }
+    // A replayed answer the CURRENT validator rejects fails the run closed, exactly as an
+    // over-long replayed answer does above. Re-asking would form an attempt-2 prompt whose
+    // key misses at that ordinal, trip the one-way divergence latch and silently turn the
+    // operator's resume into a full live run. A SCHEMA mismatch on a replayed answer keeps
+    // re-asking as before — that path predates this rule and is unchanged.
+    if (replayed && schemaCheck?.validation.status === "mismatch" && schemaCheck.validation.source === "script") {
+      const message = `Replayed agent answer was rejected by the workflow script: ${schemaCheck.validation.errors.join("; ")}`;
+      finalResult = {
+        ...finalResult,
+        ok: false,
+        status: "failed",
+        summary: message,
+        diagnostics: [...finalResult.diagnostics, message],
+      };
+    }
     const durationMs = Date.now() - start;
     let artifactEvidence;
     try {
@@ -1323,24 +1608,58 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * and validates its text, retries up to SCHEMA_MAX_ATTEMPTS with the previous validator errors
    * fed back, and resolves to the validated value. Every attempt is a real child run and is
    * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
+   *
+   * `validate` extends that loop to the rules a declared schema cannot say — referential
+   * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
+   * validation succeeds, its errors reach the child in their own labelled repair block, and a
+   * call that declares it gets one dedicated extra attempt.
    */
   function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
+    const declaredValidate = opts?.validate;
+    // Refused before the text overload returns: the text path runs one attempt and has no
+    // parsed value, so a validator there would silently never run and report success.
+    if (declaredValidate !== undefined) {
+      if (schema === undefined) throw new Error("agent validate requires a schema");
+      if (typeof declaredValidate !== "function") throw new Error("agent validate must be a function");
+    }
     if (schema === undefined) return (await runAgentAttempt(prompt, opts)).text;
     if (!isRecord(schema)) throw new Error("agent schema must be a JSON-schema object");
     assertSupportedAgentSchema(schema);
 
+    const validate: WorkflowAgentValidate | undefined =
+      declaredValidate === undefined
+        ? undefined
+        : (value) => {
+            insideValidate = true;
+            try {
+              return declaredValidate(value);
+            } finally {
+              insideValidate = false;
+            }
+          };
+    // A dedicated, unconditional extra attempt when a validator is declared. It is not
+    // conditioned on which authority rejected which attempt, because the repair block must
+    // state a TRUE budget ("attempt 1 of M") in text that enters the replay key, and at
+    // render time nobody knows who will reject the next answer. A schema-only call keeps
+    // the old constant, so every existing recording's attempt-2 prompt is byte-identical.
+    const maxAttempts = validate === undefined ? SCHEMA_MAX_ATTEMPTS : SCHEMA_MAX_ATTEMPTS + 1;
+
     let lastErrors: string[] = [];
-    for (let attempt = 1; attempt <= SCHEMA_MAX_ATTEMPTS; attempt++) {
-      const attemptPrompt = withSchemaContract(prompt, schema, attempt, lastErrors);
-      const outcome = await runAgentAttempt(attemptPrompt, opts, (text) => checkAgentSchema(text, schema, attempt));
+    let lastSource: "schema" | "script" = "schema";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const attemptPrompt = withSchemaContract(prompt, schema, attempt, lastErrors, lastSource, maxAttempts);
+      const outcome = await runAgentAttempt(attemptPrompt, opts, (text) =>
+        checkAgentSchema(text, schema, attempt, validate),
+      );
       const check = outcome.schemaCheck;
       if (check?.validation.status === "valid") return check.value;
       lastErrors = check?.validation.errors ?? ["agent returned no text to validate"];
+      lastSource = check?.validation.source === "script" ? "script" : "schema";
     }
-    throw new SchemaValidationError(lastErrors, SCHEMA_MAX_ATTEMPTS);
+    throw new SchemaValidationError(lastErrors, maxAttempts);
   }
 
   async function parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {

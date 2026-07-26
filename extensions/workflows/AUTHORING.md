@@ -229,11 +229,17 @@ ${selectedText}
 ```
 
 **The runtime owns shape; the script owns meaning.** Declare lengths, counts, id
-patterns, and enums in `agent({ schema })`, where a violation is re-asked by the
-runtime's retry, and bound an agent's free text with that call's
-`maxAnswerChars`. Keep in script code only what no keyword can express:
-cross-field agreement, referential integrity, uniqueness, budgets summed across
-items, graph shape, and any check binding a model claim to host-owned evidence.
+patterns, enums, uniqueness (`uniqueItems`, `uniqueBy`, `uniqueTrimmedItems`) and
+non-blankness (`nonBlank`) in `agent({ schema })`, where a violation is re-asked
+by the runtime's retry, and bound an agent's free text with that call's
+`maxAnswerChars`. What no keyword can express — cross-field agreement,
+referential integrity, budgets summed across items, graph shape — goes in
+`validate` on the same call: a `(value) => string[]` callback the runtime runs
+after schema validation succeeds and whose non-empty return re-asks the child in
+its own repair block. Script code is no longer the same thing as a fatal throw.
+Reserve the throw for the two classes a retry loop can be talked past —
+self-reported status, and a model's verdict graded against its own findings — and
+for host-owned evidence this child did not produce and cannot repair.
 Never run a regex over model prose to make a decision — have the model declare
 the fact and let a fresh reader check the declaration. Worked before/after
 examples, with the costs recorded, are in

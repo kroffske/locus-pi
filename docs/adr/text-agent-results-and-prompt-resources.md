@@ -82,7 +82,12 @@ resolves to the child's exact final text and parses nothing.
 - Structure remains an author decision, never an implicit protocol. Runtime
   status is still not model-controlled: the schema shapes the answer only, and
   `status`, `summary`, ids, artifacts, and diagnostics stay runtime-owned.
-- Validation is journaled per attempt as `schemaValidation` on `agent_end`.
+- Validation is journaled per attempt as `schemaValidation` on `agent_end`. Since
+  2026-07-26 that object also carries `source: "schema" | "script"` on a mismatch
+  when the call declared the optional `validate` callback, so a cross-field
+  rejection by the workflow script is distinguishable from a weak model failing
+  the shape contract. It is absent on every schema-only call, so existing journal
+  lines are unchanged.
 
 Reason for the amendment: `llm({ schema })` was the only schema-validated path in
 the DSL, and it was removed in favour of one model-calling primitive (T-108,

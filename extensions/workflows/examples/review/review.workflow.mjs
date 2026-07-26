@@ -62,12 +62,17 @@ const CLARIFIER_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 
 /**
  * Shape is the runtime's job. The id pattern, the question and option counts,
- * and the prompt/option lengths were hand-rolled `throw` sites until
- * 2026-07-25; declared here they are re-asked by the schema retry instead of
- * ending the run. What `requireClarifierDecision` still owns is everything a
- * declared keyword cannot say: a count that depends on the sibling `decision`
- * field, uniqueness, a `recommended` value that must name a real option, and a
- * budget summed across questions.
+ * the prompt/option lengths, question-id uniqueness, option uniqueness after
+ * trimming, and non-blankness were hand-rolled `throw` sites until 2026-07-26;
+ * declared here they are re-asked by the schema retry instead of ending the
+ * run. `uniqueTrimmedItems` and `nonBlank` trim with `String.prototype.trim`,
+ * the same call `normalizeClarifierDecision` normalizes with, so a value the
+ * runtime accepts can never collapse into a duplicate or a blank below.
+ * What a declared keyword cannot say — a count that depends on the sibling
+ * `decision` field, a `recommended` value that must name a real option, and a
+ * budget summed across questions — is `clarifierDecisionErrors`, passed as this
+ * call's `validate`. It joins the same retry loop, so nothing about this answer
+ * ends the run on the first attempt any more.
  */
 const CLARIFIER_SCHEMA = freezeSchema({
   type: "object",
@@ -78,17 +83,19 @@ const CLARIFIER_SCHEMA = freezeSchema({
     questions: {
       type: "array",
       maxItems: MAX_CLARIFIER_QUESTIONS,
+      uniqueBy: "id",
       items: {
         type: "object",
         additionalProperties: false,
         required: ["id", "prompt", "options", "allowCustom"],
         properties: {
           id: { type: "string", pattern: CLARIFIER_ID_PATTERN },
-          prompt: { type: "string", minLength: 1, maxLength: MAX_CLARIFIER_PROMPT_CHARS },
+          prompt: { type: "string", nonBlank: true, maxLength: MAX_CLARIFIER_PROMPT_CHARS },
           options: {
             type: "array",
             maxItems: MAX_CLARIFIER_OPTIONS,
-            items: { type: "string", minLength: 1, maxLength: MAX_CLARIFIER_OPTION_CHARS },
+            uniqueTrimmedItems: true,
+            items: { type: "string", nonBlank: true, maxLength: MAX_CLARIFIER_OPTION_CHARS },
           },
           recommended: { type: "string", minLength: 1, maxLength: MAX_CLARIFIER_OPTION_CHARS },
           allowCustom: { type: "boolean" },
@@ -224,61 +231,82 @@ function requirePrepareArtifact(consumed, sourceRef, expectedName, intentRef, qu
 }
 
 /**
- * Everything left here is a cross-field or cross-item rule. `decision` and
- * `questions` must agree with each other; ids and option labels must be unique;
- * `recommended` must name an option that exists in the same question; the
- * combined prompt budget is a sum no keyword can express. A blank-after-trim
- * value survives `minLength: 1`, so emptiness is checked after trimming.
+ * The cross-field rules the schema cannot declare, as a `validate` callback the
+ * runtime runs inside the same retry loop it uses for a broken `maxLength`.
+ * `decision` and `questions` must agree with each other; `recommended` must name
+ * an option that exists in the same question; the combined prompt budget is a sum
+ * no keyword can express. Until 2026-07-26 each of these was a `throw` after the
+ * await, which ended the run on an answer the child could have corrected.
+ *
+ * It accumulates rather than failing fast: with one retry, reporting only the
+ * first violation turns a repairable answer into a fatal one. It never throws —
+ * a throw here is an author bug and ends the run — and it never transforms, so
+ * the call still resolves to the validated value.
  */
-function requireClarifierDecision(value) {
+function clarifierDecisionErrors(value) {
   const { decision, questions } = value;
+  const errors = [];
   if (decision === "continue") {
-    if (questions.length !== 0) throw new Error("review clarifier continue decision requires no questions");
-    return { decision: "continue", questions: [] };
+    if (questions.length !== 0) {
+      errors.push(`questions: expected 0 item(s) when decision is "continue", got ${questions.length}`);
+    }
+    return errors;
   }
   // The upper bound is `maxItems`; this lower bound applies only to this branch.
   if (questions.length < 1) {
-    throw new Error(`review clarifier needs_operator decision requires 1-${MAX_CLARIFIER_QUESTIONS} questions`);
+    errors.push('questions: expected at least 1 item(s) when decision is "needs_operator", got 0');
   }
-  const normalized = questions.map((question, index) => {
-    const position = index + 1;
-    const prompt = question.prompt.trim();
-    if (prompt === "") throw new Error(`review clarification question ${position} must be non-blank`);
-    const options = question.options.map((option, optionIndex) => {
-      const label = option.trim();
-      if (label === "") {
-        throw new Error(`review clarification question ${position} option ${optionIndex + 1} is blank`);
-      }
-      return label;
-    });
-    if (new Set(options).size !== options.length) {
-      throw new Error(`review clarification question ${position} options must be unique`);
-    }
+  let allPromptChars = 0;
+  for (const [index, question] of questions.entries()) {
+    // The same `String.prototype.trim` the normalizer below applies, and the same
+    // one `nonBlank`/`uniqueTrimmedItems` apply in the schema: one canonicalization
+    // across all three, so a value one of them accepts cannot collapse in another.
+    allPromptChars += question.prompt.trim().length;
+    const options = question.options.map((option) => option.trim());
     if (options.length === 0 && !question.allowCustom) {
-      throw new Error(`review clarification question ${position} needs an option or custom input`);
+      errors.push(`questions[${index}]: expected an option or allowCustom true, got 0 option(s) and allowCustom false`);
     }
     const recommended = question.recommended === undefined ? undefined : question.recommended.trim();
     if (recommended !== undefined && !options.includes(recommended)) {
-      throw new Error(`review clarification question ${position} recommended option is invalid`);
+      errors.push(
+        `questions[${index}].recommended: value ${JSON.stringify(question.recommended)} is not one of questions[${index}].options`,
+      );
     }
-    return options.length === 0
-      ? { kind: "text", id: question.id, prompt }
-      : {
-          kind: "select",
-          id: question.id,
-          prompt,
-          options: options.map((label) => ({ label })),
-          ...(recommended === undefined ? {} : { recommended }),
-          ...(question.allowCustom ? { allowCustom: true } : {}),
-        };
-  });
-  if (new Set(normalized.map((question) => question.id)).size !== normalized.length) {
-    throw new Error("review clarification questions must be unique");
   }
-  if (normalized.reduce((total, question) => total + question.prompt.length, 0) > MAX_ALL_CLARIFIER_PROMPTS_CHARS) {
-    throw new Error(`review clarification questions exceed ${MAX_ALL_CLARIFIER_PROMPTS_CHARS} combined characters`);
+  if (allPromptChars > MAX_ALL_CLARIFIER_PROMPTS_CHARS) {
+    errors.push(
+      `questions: expected at most ${MAX_ALL_CLARIFIER_PROMPTS_CHARS} combined prompt character(s), got ${allPromptChars}`,
+    );
   }
-  return { decision: "needs_operator", questions: normalized };
+  return errors;
+}
+
+/**
+ * The other half of the old `requireClarifierDecision`: pure normalization of a
+ * value the schema and `clarifierDecisionErrors` have both already accepted. It
+ * rejects nothing, so it can never end a run on something the child was never told.
+ */
+function normalizeClarifierDecision(value) {
+  const { decision, questions } = value;
+  if (decision === "continue") return { decision: "continue", questions: [] };
+  return {
+    decision: "needs_operator",
+    questions: questions.map((question) => {
+      const prompt = question.prompt.trim();
+      const options = question.options.map((option) => option.trim());
+      const recommended = question.recommended === undefined ? undefined : question.recommended.trim();
+      return options.length === 0
+        ? { kind: "text", id: question.id, prompt }
+        : {
+            kind: "select",
+            id: question.id,
+            prompt,
+            options: options.map((label) => ({ label })),
+            ...(recommended === undefined ? {} : { recommended }),
+            ...(question.allowCustom ? { allowCustom: true } : {}),
+          };
+    }),
+  };
 }
 
 async function decideClarification(dsl, intentText) {
@@ -286,7 +314,7 @@ async function decideClarification(dsl, intentText) {
 
   phase("prepare-clarification");
   log("Asking a read-only clarifier whether the exact operator intent is executable.");
-  const decision = requireClarifierDecision(
+  const decision = normalizeClarifierDecision(
     await agent(
       `${COMMON}
 
@@ -339,6 +367,7 @@ ${intentText}
         label: "decide clarification",
         artifact: "clarifier-decision.json",
         schema: CLARIFIER_SCHEMA,
+        validate: clarifierDecisionErrors,
       },
     ),
   );

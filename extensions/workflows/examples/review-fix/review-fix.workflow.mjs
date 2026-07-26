@@ -64,10 +64,12 @@ const FINDING_ID_PATTERN = "^F[1-9][0-9]*$";
 
 /**
  * Shape is the runtime's job. Every count, length, and id pattern below was a
- * hand-rolled `throw` in this script until 2026-07-25; declared here instead,
- * a violation is handed back to the child by the schema retry rather than
- * ending the run. What remains in `validateAndOrderFindingPlan` is the part a
- * schema cannot express: agreement with the immutable review, and graph shape.
+ * hand-rolled `throw` in this script until 2026-07-25, and a repeated finding
+ * id or a repeated dependency until 2026-07-26; declared here instead, a
+ * violation is handed back to the child by the schema retry rather than ending
+ * the run. The part a schema cannot express — agreement with the immutable
+ * review, and graph shape — is `findingPlanErrors`, passed as this call's
+ * `validate`, which joins that same retry loop.
  */
 const FINDING_SELECTOR_SCHEMA = freezeSchema({
   type: "object",
@@ -78,6 +80,7 @@ const FINDING_SELECTOR_SCHEMA = freezeSchema({
       type: "array",
       minItems: 1,
       maxItems: MAX_SELECTED_FINDINGS,
+      uniqueBy: "id",
       items: {
         type: "object",
         additionalProperties: false,
@@ -88,6 +91,7 @@ const FINDING_SELECTOR_SCHEMA = freezeSchema({
           dependsOn: {
             type: "array",
             maxItems: MAX_SELECTED_FINDINGS,
+            uniqueItems: true,
             items: { type: "string", pattern: FINDING_ID_PATTERN },
           },
         },
@@ -189,9 +193,12 @@ ${reviewText}
       artifact: "finding-plan.json",
       label: "plan finding graph",
       schema: FINDING_SELECTOR_SCHEMA,
+      // A per-call-site closure over the findings this host parsed from the
+      // immutable review before the call; a shared constant could not see them.
+      validate: (value) => findingPlanErrors(findings, value),
     },
   );
-  const selected = validateAndOrderFindingPlan(findings, selection);
+  const selected = orderFindingPlan(findings, selection);
   const selectedText = requireBoundedText(
     selected.map(({ block, note, dependsOn }) => renderFindingInput(block, note, dependsOn)).join("\n\n"),
     "selected finding handoff",
@@ -488,45 +495,89 @@ function parseFindingBlocks(reviewText) {
 
 /**
  * Everything the schema can express — object/array/string types, the 1-20 count,
- * the `F<n>` id pattern, the 8,000-character note bound — is declared in
- * FINDING_SELECTOR_SCHEMA and re-asked by the runtime retry. What is left here
- * cannot be declared: agreement between the plan and the immutable review, and
- * the shape of the dependency graph.
+ * the `F<n>` id pattern, the 8,000-character note bound, one entry per finding
+ * id, one entry per dependency — is declared in FINDING_SELECTOR_SCHEMA. What it
+ * cannot declare is here: agreement between the plan and the immutable review,
+ * and the shape of the dependency graph. Both were `throw` sites until
+ * 2026-07-26; passed as this call's `validate` they join the same retry loop, so
+ * the selector is told what it got wrong and gets another attempt.
+ *
+ * Every rule below re-checks the plan against `findings`, parsed once by the host
+ * from the immutable review and embedded verbatim in the selector's own prompt.
+ * The map is identical on every attempt, so a retry cannot be negotiated with —
+ * the only way to satisfy it is to name a real id. That is what separates it from
+ * a check a model could talk its way past.
+ *
+ * It accumulates and never throws: with one retry, reporting only the first
+ * violation turns a repairable answer into a fatal one.
  */
-function validateAndOrderFindingPlan(findings, value) {
+function findingPlanErrors(findings, value) {
   const byId = new Map(findings.map((finding) => [finding.id, finding]));
   const originalOrder = new Map(findings.map((finding, index) => [finding.id, index]));
+  const errors = [];
   const selectedIds = new Set();
   let allNotesChars = 0;
-  const selected = value.findings.map(({ id, note, dependsOn }) => {
-    if (!byId.has(id)) throw new Error(`review-fix selector finding id is unknown: ${id}`);
-    if (selectedIds.has(id)) throw new Error(`review-fix selector repeats finding id: ${id}`);
-    selectedIds.add(id);
+  for (const [index, { id, note }] of value.findings.entries()) {
+    if (byId.has(id)) selectedIds.add(id);
+    else errors.push(`findings[${index}].id: value ${JSON.stringify(id)} is not a finding id in the review`);
     allNotesChars += note.length;
-    return { ...byId.get(id), id, note, dependsOn: [...dependsOn] };
-  });
+  }
   // Per-note length is a schema bound; the combined budget is a cross-item sum
-  // no declared keyword can express, so it stays here.
+  // no declared keyword can express.
   if (allNotesChars > MAX_ALL_NOTES_CHARS) {
-    throw new Error(`review-fix selector notes exceed ${MAX_ALL_NOTES_CHARS} combined characters`);
+    errors.push(`findings: expected at most ${MAX_ALL_NOTES_CHARS} combined note character(s), got ${allNotesChars}`);
   }
 
-  for (const unit of selected) {
-    const edgeIds = new Set();
-    for (const dependency of unit.dependsOn) {
-      if (dependency === unit.id) throw new Error(`review-fix selector finding ${unit.id} depends on itself`);
-      if (edgeIds.has(dependency)) {
-        throw new Error(`review-fix selector repeats dependency ${dependency} for ${unit.id}`);
-      }
-      edgeIds.add(dependency);
-      if (!byId.has(dependency)) {
-        throw new Error(`review-fix selector dependency is unknown: ${dependency}`);
-      }
-      if (!selectedIds.has(dependency)) {
-        throw new Error(`review-fix selector dependency ${dependency} is not selected`);
-      }
+  // Only edges that survive every membership rule enter the graph: an edge already
+  // reported as invalid would otherwise also surface as a cycle, and one defect
+  // must not produce two bullets pointing the child in different directions.
+  const edges = new Map(value.findings.map(({ id }) => [id, []]));
+  for (const [index, { id, dependsOn }] of value.findings.entries()) {
+    for (const [edge, dependency] of dependsOn.entries()) {
+      const at = `findings[${index}].dependsOn[${edge}]: value ${JSON.stringify(dependency)}`;
+      if (dependency === id) errors.push(`${at} is the finding's own id`);
+      else if (!byId.has(dependency)) errors.push(`${at} is not a finding id in the review`);
+      else if (!selectedIds.has(dependency)) errors.push(`${at} is not one of the selected findings`);
+      else edges.get(id).push(dependency);
     }
   }
+
+  const resolved = new Set();
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const [id, dependencies] of edges) {
+      if (resolved.has(id) || !dependencies.every((dependency) => resolved.has(dependency))) continue;
+      resolved.add(id);
+      progressed = true;
+    }
+  }
+  const unresolved = [...edges.keys()]
+    .filter((id) => !resolved.has(id))
+    // Sorted by position in the immutable review, not by iteration order, so the
+    // message is a pure function of the answer — it enters the retry prompt and
+    // therefore the replay key.
+    .sort((left, right) => originalOrder.get(left) - originalOrder.get(right));
+  if (unresolved.length > 0) {
+    errors.push(`findings: the dependency graph contains a cycle among ${unresolved.join(", ")}`);
+  }
+  return errors;
+}
+
+/**
+ * The other half of the old `validateAndOrderFindingPlan`: merge the selector's
+ * plan with the host-parsed finding blocks and order it. It runs only on a value
+ * the schema and `findingPlanErrors` have both accepted, so it rejects nothing.
+ */
+function orderFindingPlan(findings, value) {
+  const byId = new Map(findings.map((finding) => [finding.id, finding]));
+  const originalOrder = new Map(findings.map((finding, index) => [finding.id, index]));
+  const selected = value.findings.map(({ id, note, dependsOn }) => ({
+    ...byId.get(id),
+    id,
+    note,
+    dependsOn: [...dependsOn],
+  }));
 
   const bySelectedId = new Map(selected.map((unit) => [unit.id, unit]));
   const indegree = new Map(selected.map((unit) => [unit.id, unit.dependsOn.length]));
@@ -552,7 +603,13 @@ function validateAndOrderFindingPlan(findings, value) {
       }
     }
   }
-  if (ordered.length !== selected.length) throw new Error("review-fix selector dependency graph contains a cycle");
+  // Not a gate on the model: acyclicity is `findingPlanErrors`' rule and the child
+  // is re-asked for it. This is the internal invariant that a validated plan orders
+  // completely — the alternative to failing here is silently dropping findings that
+  // never get a writer while the run still reports success.
+  if (ordered.length !== selected.length) {
+    throw new Error("review-fix internal invariant: a validated finding plan did not order completely");
+  }
   return ordered;
 }
 

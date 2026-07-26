@@ -12,6 +12,7 @@ import type {
 import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
 import {
   createWorkflowRuntime,
+  SchemaValidationError,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
@@ -169,6 +170,11 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain("publishArtifact");
     expect(source).toContain("continuationArtifacts");
     expect(source).toContain("CLARIFIER_SCHEMA");
+    // Split on 2026-07-26: one half decides and never throws, the other normalizes
+    // and never rejects. Both names are pinned so neither can absorb the other's job.
+    expect(source).toContain("function clarifierDecisionErrors");
+    expect(source).toContain("function normalizeClarifierDecision");
+    expect(source).toContain("validate: clarifierDecisionErrors");
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
     expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
@@ -425,29 +431,152 @@ describe("workflow example: review.workflow.mjs", () => {
         decision: "continue",
         questions: [{ id: "unexpected", prompt: "Unexpected question", options: [], allowCustom: true }],
       },
-      "continue decision requires no questions",
+      'questions: expected 0 item(s) when decision is "continue", got 1',
     ],
-    [{ decision: "needs_operator", questions: [] }, "requires 1-8 questions"],
+    [
+      { decision: "needs_operator", questions: [] },
+      'questions: expected at least 1 item(s) when decision is "needs_operator", got 0',
+    ],
     [
       {
         decision: "needs_operator",
-        questions: [
-          { id: "same", prompt: "First?", options: [], allowCustom: true },
-          { id: "same", prompt: "Second?", options: [], allowCustom: true },
-        ],
+        questions: [{ id: "scope", prompt: "Which base?", options: [], allowCustom: false }],
       },
-      "must be unique",
+      "questions[0]: expected an option or allowCustom true, got 0 option(s) and allowCustom false",
     ],
-  ])("rejects invalid clarifier domain output before review stages", async (decision, message) => {
+    [
+      {
+        decision: "needs_operator",
+        questions: [{ id: "scope", prompt: "Which base?", options: ["Keep"], recommended: "Drop", allowCustom: true }],
+      },
+      'questions[0].recommended: value "Drop" is not one of questions[0].options',
+    ],
+  ])(
+    "re-asks the clarifier for a cross-field violation, then fails closed before review stages",
+    async (decision, message) => {
+      // Each of these ended the run on the first answer until 2026-07-26: a count that
+      // depends on the sibling `decision` field, and a `recommended` that must name a
+      // real option of the same question. Passed to the runtime as `validate` they are
+      // handed back to the child in their own repair block, and only exhaustion is fatal.
+      const calls: WorkflowAgentRequest[] = [];
+      const { dsl, published, awaiting } = runtimeWith(async (request) => {
+        calls.push(request);
+        return completed(request, JSON.stringify(decision));
+      });
+
+      const rejection = (await loadWorkflow())(dsl, "review current branch");
+      await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+      await expect(rejection).rejects.toThrow(message);
+      // Three, not two: a call that declares `validate` gets one dedicated extra attempt.
+      expect(calls.map((call) => call.label)).toEqual([
+        "decide clarification",
+        "decide clarification",
+        "decide clarification",
+      ]);
+      expect(calls[1]?.prompt).toContain("matched the required shape but was REJECTED by the workflow script for:");
+      expect(calls[1]?.prompt).toContain(message);
+      expect(published).toHaveLength(0);
+      expect(awaiting).toHaveLength(0);
+    },
+  );
+
+  it("cannot reach the combined prompt budget through the declared bounds", () => {
+    // Reported, not silently migrated: `maxItems: 8` and `maxLength: 500` cap the
+    // combined trimmed prompt length at exactly 4,000, and the budget rejects only
+    // ABOVE 4,000 — so no schema-valid answer can trip it. It moved into `validate`
+    // with the other cross-item rules and is exercised at the runtime level in
+    // workflow-agent-validate.test.ts; here it is pinned as arithmetic, which is the
+    // only honest end-to-end assertion available.
+    const source = readFileSync(workflowPath, "utf8");
+    const bound = (name: string) =>
+      Number(new RegExp(`const ${name} = ([0-9_]+);`, "u").exec(source)?.[1]?.replace(/_/gu, "") ?? Number.NaN);
+
+    expect(bound("MAX_CLARIFIER_QUESTIONS") * bound("MAX_CLARIFIER_PROMPT_CHARS")).toBeLessThanOrEqual(
+      bound("MAX_ALL_CLARIFIER_PROMPTS_CHARS"),
+    );
+  });
+
+  it("re-asks the clarifier for a repeated question id instead of ending the run on the first answer", async () => {
+    // Question-id uniqueness was a script `throw` until 2026-07-26, so this
+    // exact input used to end the run on the first answer. Declared as
+    // `uniqueBy: "id"` it is handed back to the child, which is why the call
+    // count is two and the retry prompt has to carry the message.
     const calls: WorkflowAgentRequest[] = [];
     const { dsl, published, awaiting } = runtimeWith(async (request) => {
       calls.push(request);
-      return completed(request, JSON.stringify(decision));
+      return completed(
+        request,
+        JSON.stringify({
+          decision: "needs_operator",
+          questions: [
+            { id: "same", prompt: "First?", options: [], allowCustom: true },
+            { id: "same", prompt: "Second?", options: [], allowCustom: true },
+          ],
+        }),
+      );
     });
 
-    await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(message);
-    expect(calls.map((call) => call.label)).toEqual(["decide clarification"]);
+    const rejection = (await loadWorkflow())(dsl, "review current branch");
+    await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+    await expect(rejection).rejects.toThrow('questions[1].id: value "same" duplicates item 0');
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "decide clarification",
+      "decide clarification",
+    ]);
+    expect(calls[1]?.prompt).toContain('questions[1].id: value "same" duplicates item 0');
     expect(published).toHaveLength(0);
+    expect(awaiting).toHaveLength(0);
+  });
+
+  it("rejects options that differ only by surrounding whitespace in the schema, not the normalizer", async () => {
+    // The canonicalization pin: `normalizeClarifierDecision` trims every label, so
+    // two labels the validator accepted must never collapse into one afterwards.
+    // `uniqueTrimmedItems` trims with the same `String.prototype.trim`.
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, awaiting } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(
+        request,
+        JSON.stringify({
+          decision: "needs_operator",
+          questions: [{ id: "scope", prompt: "Which base?", options: ["Keep", " Keep "], allowCustom: false }],
+        }),
+      );
+    });
+
+    const rejection = (await loadWorkflow())(dsl, "review current branch");
+    await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+    await expect(rejection).rejects.toThrow('questions[0].options[1]: trimmed value "Keep" duplicates item 0');
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "decide clarification",
+      "decide clarification",
+    ]);
+    expect(awaiting).toHaveLength(0);
+  });
+
+  it("re-asks the clarifier for a whitespace-only prompt the length bound cannot see", async () => {
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, awaiting } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(
+        request,
+        JSON.stringify({
+          decision: "needs_operator",
+          questions: [{ id: "scope", prompt: "   ", options: [], allowCustom: true }],
+        }),
+      );
+    });
+
+    await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(
+      "questions[0].prompt: expected a non-blank string, got 3 whitespace character(s)",
+    );
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "decide clarification",
+      "decide clarification",
+    ]);
     expect(awaiting).toHaveLength(0);
   });
 
@@ -471,7 +600,11 @@ describe("workflow example: review.workflow.mjs", () => {
     await expect((await loadWorkflow())(dsl, "review current branch")).rejects.toThrow(
       "questions[0].prompt: expected at most 500 character(s), got 501",
     );
-    expect(calls.map((call) => call.label)).toEqual(["decide clarification", "decide clarification"]);
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "decide clarification",
+      "decide clarification",
+    ]);
     expect(calls[1]?.prompt).toContain("expected at most 500 character(s), got 501");
     expect(published).toHaveLength(0);
     expect(awaiting).toHaveLength(0);
@@ -646,6 +779,44 @@ describe("workflow example: review.workflow.mjs", () => {
     );
 
     await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow("verified terminal result");
+    expect(calls).toHaveLength(0);
+    expect(published).toHaveLength(0);
+  });
+
+  it("keeps host-owned continuation identity and provenance out of the retry loop entirely", async () => {
+    // The safety boundary. A re-ask can only be offered where the model has exactly
+    // one satisfying move: comply. Continuation identity and prepare-artifact
+    // provenance are the HOST's evidence about which run produced what, and no
+    // child can repair them — handing them back as bullets would coach a model
+    // toward fabricating the provenance the host is supposed to own. This pins that
+    // they still end the run, with no child asked and none re-asked.
+    const runWorkflow = await loadWorkflow();
+    const intentText = "review range A...B";
+    const questionsText = "# Clarification Questions\n1. Which base?";
+    const intentRef = priorRef("prepare-run", "published-1", "intent.md", intentText);
+    const questionsRef = priorRef("prepare-run", "published-2", "clarification-questions.md", questionsText);
+    const calls: WorkflowAgentRequest[] = [];
+    // Exactly one continuation artifact where the workflow requires two: the
+    // continuation-identity gate, upstream of every provenance check.
+    const { dsl, published } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, "unused");
+      },
+      {
+        runId: "execute-run",
+        consumed: new Map([
+          [
+            `${intentRef.runId}:${intentRef.artifactId}`,
+            prepareArtifact(intentRef, intentText, intentRef, questionsRef),
+          ],
+        ]),
+      },
+    );
+
+    await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow(
+      "review continuation requires exactly intent.md and clarification-questions.md",
+    );
     expect(calls).toHaveLength(0);
     expect(published).toHaveLength(0);
   });

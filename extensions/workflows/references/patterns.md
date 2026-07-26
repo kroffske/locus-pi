@@ -259,6 +259,34 @@ allowed set, and every item is about being able to continue at all:
   attempt's validator errors before failing closed. That retry is the only
   correction loop the DSL gives you for free.
 
+**Three tiers, in this order.** Reach for the cheapest one that can express the
+rule; drop a tier only when the one above genuinely cannot say it.
+
+1. **A schema keyword.** Anything about one node: type, count, length, pattern,
+   enum, uniqueness, blankness.
+2. **`validate`** — the script callback on the same `agent({ schema })` call. Any
+   rule over the whole answer: referential integrity against data the host owns,
+   agreement between two fields, a budget summed across items, graph shape. It
+   returns `string[]`, and the runtime feeds a non-empty return back to the child
+   in its own repair block. This is script code that no longer ends the run.
+3. **A fatal `throw`** — only for the two classes a retry loop can be talked
+   past, plus evidence this child did not produce and cannot repair:
+   - **self-reported status** — the check accepts the model's word about
+     something the host did not verify. The repair bullet explains _why_ the
+     success claim was refused, which coaches the model toward a claim the host
+     accepts;
+   - **verdict coherence** — a model's verdict graded against its own findings
+     list. "A `revise` verdict requires at least one finding" has two satisfying
+     moves, fabricate a finding or flip the verdict, and both destroy the signal;
+   - **host-owned continuation, lineage, digests and identity**, and text a
+     _prior_ run's agent wrote.
+
+   The test for tier 2 versus tier 3 is not "does it touch host evidence" — a
+   deterministic membership re-check against a host-parsed map runs identically
+   on every attempt and cannot be negotiated with, only complied with. The test
+   is whether a bullet handed to the model offers it a second way to satisfy the
+   check.
+
 Do not write a validator over model prose: no required headings, no id ledgers,
 no cross-stage reconciliation, no "the answer must mention every X". Ids like
 `C1`, `U1`, `F1` exist so a reader can follow one unit through the artifacts;
@@ -298,6 +326,7 @@ const FINDING_SELECTOR_SCHEMA = freezeSchema({
       type: "array",
       minItems: 1,
       maxItems: MAX_SELECTED_FINDINGS,
+      uniqueBy: "id",
       items: {
         type: "object",
         additionalProperties: false,
@@ -308,6 +337,7 @@ const FINDING_SELECTOR_SCHEMA = freezeSchema({
           dependsOn: {
             type: "array",
             maxItems: MAX_SELECTED_FINDINGS,
+            uniqueItems: true,
             items: { type: "string", pattern: FINDING_ID_PATTERN },
           },
         },
@@ -317,29 +347,50 @@ const FINDING_SELECTOR_SCHEMA = freezeSchema({
 });
 ```
 
-Until 2026-07-26 each of those bounds was a hand-rolled check. Eleven of them
-disappeared into the eight keywords above; seven more (`isRecord`,
+Until 2026-07-26 each of those bounds was a hand-rolled check. Thirteen of them
+disappeared into the declared keywords above; seven more (`isRecord`,
 `Array.isArray`, `typeof … !== "string"`) were pure restatements of `type:` that
 the runtime had already rejected before the validator ever ran.
 
-What survives in `validateAndOrderFindingPlan` is the honest residue — every
-line of it needs a fact the schema does not have:
+**Uniqueness is a keyword now, not an invariant.** `uniqueBy: "id"` owns "one
+entry per finding" and `uniqueItems` owns "no dependency listed twice"; on a
+string array a consumer will trim, `uniqueTrimmedItems` owns it, and `nonBlank`
+owns a string that satisfies `minLength: 1` while being pure whitespace. All
+four canonicalize with `String.prototype.trim`, the same call a normalizer uses,
+so a value the runtime accepted cannot collapse afterwards. Reach for a keyword
+before you reach for a `throw`: a repeat the child is told about is usually
+repaired on the retry, and a repeat it is not told about ends the run.
+
+What survives is the honest residue — every line of it needs a fact the schema
+does not have. It is tier 2, not tier 3: the same rules, now returned as strings
+from `findingPlanErrors` and passed as the call's `validate`:
 
 ```js
-if (!byId.has(id)) throw new Error(`review-fix selector finding id is unknown: ${id}`);
-if (selectedIds.has(id)) throw new Error(`review-fix selector repeats finding id: ${id}`);
-// …
-if (dependency === unit.id) throw new Error(`review-fix selector finding ${unit.id} depends on itself`);
-if (!selectedIds.has(dependency)) {
-  throw new Error(`review-fix selector dependency ${dependency} is not selected`);
-}
-// …then a Kahn sort, and:
-if (ordered.length !== selected.length) throw new Error("review-fix selector dependency graph contains a cycle");
+const selection = await agent(prompt, {
+  schema: FINDING_SELECTOR_SCHEMA,
+  // A per-call-site closure: `findings` was parsed once, before the call.
+  validate: (value) => findingPlanErrors(findings, value),
+});
+const selected = orderFindingPlan(findings, selection);
 ```
 
-Referential integrity against the immutable review, uniqueness, self-edges, and
-acyclicity: none of these is expressible as a keyword, and each one ends the run
-because no re-ask can fix a plan that contradicts its own source.
+```js
+// inside findingPlanErrors — it accumulates and never throws
+if (!byId.has(id)) errors.push(`findings[${index}].id: value ${JSON.stringify(id)} is not a finding id in the review`);
+// …
+if (dependency === id) errors.push(`${at} is the finding's own id`);
+else if (!selectedIds.has(dependency)) errors.push(`${at} is not one of the selected findings`);
+// …then a fixpoint over the edges, and:
+errors.push(`findings: the dependency graph contains a cycle among ${unresolved.join(", ")}`);
+```
+
+Referential integrity against the immutable review, self-edges and acyclicity are
+still inexpressible as keywords — but that is an argument for tier 2, not for
+tier 3. The review text these ids are checked against is embedded verbatim in the
+selector's own prompt, so the map is identical on every attempt and the only way
+to pass is to name a real id. Splitting the old function in two is what makes it
+safe: `findingPlanErrors` decides, `orderFindingPlan` only merges and sorts, and
+neither one can quietly do the other's job.
 
 A **cross-field invariant** is the same idea inside one answer. `review`'s
 clarifier declares `decision` and `questions` separately, and no schema can say
@@ -347,19 +398,32 @@ that one constrains the other
 ([`review.workflow.mjs`](../examples/review/review.workflow.mjs)):
 
 ```js
+// inside clarifierDecisionErrors, this call's `validate`
 if (decision === "continue") {
-  if (questions.length !== 0) throw new Error("review clarifier continue decision requires no questions");
-  return { decision: "continue", questions: [] };
+  if (questions.length !== 0) {
+    errors.push(`questions: expected 0 item(s) when decision is "continue", got ${questions.length}`);
+  }
+  return errors;
 }
 // The upper bound is `maxItems`; this lower bound applies only to this branch.
 if (questions.length < 1) {
-  throw new Error(`review clarifier needs_operator decision requires 1-${MAX_CLARIFIER_QUESTIONS} questions`);
+  errors.push('questions: expected at least 1 item(s) when decision is "needs_operator", got 0');
 }
 ```
 
-The same function also keeps `recommended` honest — it must equal one of the
-options in its own question — and enforces a 4,000-character budget summed across
-prompts, which is a sum no keyword computes.
+The same callback keeps `recommended` honest — it must equal one of the options
+in its own question — and enforces a budget summed across prompts, which is a sum
+no keyword computes. What it no longer does is check uniqueness or blankness:
+`uniqueBy: "id"` on `questions`, `uniqueTrimmedItems` on `options`, and
+`nonBlank` on both string fields moved those into the schema on 2026-07-26, so
+the trimming that remains only canonicalizes. What it no longer does either is
+`throw`: `normalizeClarifierDecision` runs afterwards and rejects nothing, so
+every one of these rules reaches the child before the call can fail closed.
+
+Write the messages the way the runtime writes its own — 0-indexed JSON path,
+observed value, what would satisfy it. `review clarification questions must be
+unique` was the old wording for a check that compared `question.id`; a child
+re-asked with that string would reword its prompts and reproduce the collision.
 
 Bounds on **free text** are per-call, not per-script: `maxAnswerChars` on the
 `agent()` call that produces the answer, so an oversized handoff names the stage

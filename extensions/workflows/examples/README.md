@@ -13,8 +13,8 @@ Measured 2026-07-26 against the files in this directory.
 | ---------------------------------------------------------------------------------------------------------------- | ----: | ------------: | --------: | ------: | ----------------------------------------- |
 | [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                                           |    51 |             0 |         0 |       0 | curated · npm package · public repository |
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                           |   309 |             0 |         0 |       0 | curated · npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                     |   674 |             3 |         1 |      14 | curated · npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                     |   630 |             0 |         1 |      18 | curated · npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                     |   703 |             3 |         1 |       5 | curated · npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                     |   696 |             0 |         1 |      11 | curated · npm package · public repository |
 | [`excalidraw-pipeline/excalidraw-pipeline.workflow.mjs`](./excalidraw-pipeline/excalidraw-pipeline.workflow.mjs) |   673 |             3 |         0 |       2 | tracked only                              |
 
 Three distribution levels, and they are independent:
@@ -68,16 +68,22 @@ The four short `review` prompts and all five `review-fix` prompts moved inline o
 2026-07-26 under the amendment recorded in
 [`docs/adr/text-agent-results-and-prompt-resources.md`](../../../docs/adr/text-agent-results-and-prompt-resources.md).
 
-**Shape versus meaning.** Lengths, counts, id patterns, and enums belong in
-`agent({ schema })`, where a violation is re-asked by the runtime's retry.
-Cross-field agreement, referential integrity, uniqueness, budgets summed across
-items, and graph shape stay in script code, where they end the run.
+**Shape versus meaning, in three tiers.** Lengths, counts, id patterns, enums,
+uniqueness and blankness belong in `agent({ schema })`. Cross-field agreement,
+referential integrity, budgets summed across items and graph shape belong in
+`validate` on the same call — script code that the runtime re-asks rather than
+script code that ends the run. Only two classes stay fatal throws: self-reported
+status, a model's verdict graded against its own findings, and evidence this
+child did not produce (host-owned provenance, prior-run text).
 
-| Example                            | Declared in the schema                                                                                          | Kept in script code                                                                                                                                                      |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `review`                           | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options | `decision` must agree with `questions`; ids and option labels unique; `recommended` must name a real option; 4,000-character combined prompt budget; blank-after-trim    |
-| `review-fix`                       | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes                           | Every id exists in the immutable review; no duplicate id or edge; no self-edge; dependencies must themselves be selected; acyclic; 32,000-character combined note budget |
-| `live-smoke`, `requirements-grill` | — (no shaped stage)                                                                                             | Input bounds only                                                                                                                                                        |
+That is why the `throw` column above fell from 14 to 5 and from 18 to 11 on
+2026-07-26 without a single check being dropped.
+
+| Example                            | Declared in the schema                                                                                                                                                 | Passed as `validate`                                                                                                                                | Still a fatal throw                                                       |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `review`                           | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings | `clarifierDecisionErrors`: `decision` must agree with `questions`; `recommended` must name a real option; combined prompt budget                    | Continuation identity, prepare-artifact provenance, operator-input bounds |
+| `review-fix`                       | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                 | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget | `reviewRef` provenance, parsing the prior run's review, input bounds      |
+| `live-smoke`, `requirements-grill` | — (no shaped stage)                                                                                                                                                    | —                                                                                                                                                   | Input bounds only                                                         |
 
 **Free-text bounds.** An agent's own answer is bounded by that call's
 `maxAnswerChars`, so an oversized handoff names the call that produced it.

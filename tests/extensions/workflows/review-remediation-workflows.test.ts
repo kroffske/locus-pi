@@ -184,7 +184,13 @@ describe("curated review remediation workflow", () => {
     expect(source).toContain("continuationArtifacts()");
     expect(source).toContain("requireReviewArtifact(consumedReview, reviewRef)");
     expect(source).toContain("FINDING_SELECTOR_SCHEMA");
-    expect(source).toContain("validateAndOrderFindingPlan");
+    // Split on 2026-07-26: one half decides and never throws, the other merges and
+    // orders and never rejects. Both names are pinned so neither can absorb the
+    // other's job again — a normalizer that can reject would end a run on something
+    // the child was never told.
+    expect(source).toContain("function findingPlanErrors");
+    expect(source).toContain("function orderFindingPlan");
+    expect(source).toContain("validate: (value) => findingPlanErrors(findings, value)");
     expect(source).toContain('artifact: "scope.md"');
     expect(source).toContain("artifact: `worker-${finding.id}.md`");
     expect(source).toContain('artifact: "check-evidence.md"');
@@ -290,6 +296,43 @@ describe("curated review remediation workflow", () => {
       await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow("terminal Package review verify-review answer");
       expect(agentCalls).toBe(0);
     }
+  });
+
+  it("keeps host-owned provenance and prior-run text out of the retry loop entirely", async () => {
+    // The safety boundary. A re-ask can only be offered where the model has exactly
+    // one satisfying move: comply. These checks are not that — the continuation
+    // shape and the review's provenance are the HOST's evidence, and the findings
+    // are text a PRIOR run's agent wrote. Handing any of them back as a bullet would
+    // coach a model toward the answer the gate accepts. They must never become
+    // `validate` rules, and this pins that they never end up as one: each ends the
+    // run with the selector given no second chance, and most with no child at all.
+    const workflow = await loadWorkflow();
+
+    // Host-owned continuation shape and reviewRef provenance: refused before the
+    // selector even runs, so the child is never asked to fix a run-shape problem.
+    for (const targetRef of ["lookalike-review"]) {
+      const fixture = createReviewFixture(undefined, targetRef);
+      let calls = 0;
+      const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+        calls += 1;
+        return completed(request, plan([{ id: "F1" }]));
+      });
+      await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow(
+        'Package review verify-review answer named "review.md"',
+      );
+      expect(calls).toBe(0);
+    }
+
+    // Text a prior run's agent wrote: this child did not produce the review and
+    // cannot repair it, so parsing it is fatal and spends no child.
+    const malformed = createReviewFixture(["### not-a-finding-id — [P2] Missing the F<n> prefix"]);
+    let parseCalls = 0;
+    const { dsl } = runtimeWith(malformed.root, malformed.reviewRef, async (request) => {
+      parseCalls += 1;
+      return completed(request, plan([{ id: "F1" }]));
+    });
+    await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow("review-fix invalid finding heading");
+    expect(parseCalls).toBe(0);
   });
 
   it("runs one sequential writer per kept complete block and returns the exact runtime-owned re-review", async () => {
@@ -420,26 +463,33 @@ describe("curated review remediation workflow", () => {
     expect(source.match(/\$\{HANDOFF_NOTE\}/gu)).toHaveLength(3);
   });
 
-  it("rejects invalid selector graphs before scope resolution or any writer runs", async () => {
+  it("re-asks the selector for an invalid graph, then fails closed before any writer runs", async () => {
     const fixture = createReviewFixture();
     const workflow = await loadWorkflow();
 
-    // These are the invariants a declared schema cannot express: agreement with
-    // the immutable review, and the shape of the dependency graph. They stay in
-    // the script, so they still end the run on the first attempt.
+    // Agreement with the immutable review and the shape of the dependency graph are
+    // invariants a declared schema cannot express. Until 2026-07-26 each ended the run
+    // on the first answer; passed to the runtime as `validate` they are handed back to
+    // the selector, which sees them on every retry and still fails closed at the budget.
+    // `findings` comes from the review the selector was shown verbatim, so a retry has
+    // exactly one satisfying move: name a real id.
     for (const [selectorOutput, message] of [
-      [plan([{ id: "F1" }, { id: "F1" }]), "repeats finding id: F1"],
-      [plan([{ id: "F9" }]), "finding id is unknown: F9"],
-      [plan([{ id: "F1", dependsOn: ["F1"] }]), "F1 depends on itself"],
-      [plan([{ id: "F1" }, { id: "F2", dependsOn: ["F1", "F1"] }]), "repeats dependency F1"],
-      [plan([{ id: "F1", dependsOn: ["F9"] }]), "dependency is unknown: F9"],
-      [plan([{ id: "F2", dependsOn: ["F1"] }]), "dependency F1 is not selected"],
+      [plan([{ id: "F9" }]), 'findings[0].id: value "F9" is not a finding id in the review'],
+      [plan([{ id: "F1", dependsOn: ["F1"] }]), `findings[0].dependsOn[0]: value "F1" is the finding's own id`],
+      [
+        plan([{ id: "F1", dependsOn: ["F9"] }]),
+        'findings[0].dependsOn[0]: value "F9" is not a finding id in the review',
+      ],
+      [
+        plan([{ id: "F2", dependsOn: ["F1"] }]),
+        'findings[0].dependsOn[0]: value "F1" is not one of the selected findings',
+      ],
       [
         plan([
           { id: "F1", dependsOn: ["F2"] },
           { id: "F2", dependsOn: ["F1"] },
         ]),
-        "contains a cycle",
+        "findings: the dependency graph contains a cycle among F1, F2",
       ],
     ] as const) {
       const calls: WorkflowAgentRequest[] = [];
@@ -448,12 +498,54 @@ describe("curated review remediation workflow", () => {
         if (request.label !== "plan finding graph") throw new Error("scope/writer must not run");
         return completed(request, selectorOutput);
       });
-      await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow(message);
-      expect(calls.map((call) => call.label)).toEqual(["plan finding graph"]);
+      const rejection = workflow(dsl, DEFAULT_INTENT);
+      await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+      await expect(rejection).rejects.toThrow(message);
+      // Three, not two: a call that declares `validate` gets one dedicated extra attempt.
+      expect(calls.map((call) => call.label)).toEqual([
+        "plan finding graph",
+        "plan finding graph",
+        "plan finding graph",
+      ]);
+      // Its own labelled block, never merged into the schema bullet list.
+      expect(calls[1]?.prompt).toContain("matched the required shape but was REJECTED by the workflow script for:");
+      expect(calls[1]?.prompt).toContain(message);
     }
   });
 
-  it("keeps the cross-finding note budget in the script because no schema keyword sums lengths", async () => {
+  it("re-asks the selector for a repeat the schema now declares instead of ending the run", async () => {
+    const fixture = createReviewFixture([FINDING_F1, FINDING_F2]);
+    const workflow = await loadWorkflow();
+
+    // Both inputs ended the run on the first answer until 2026-07-26. A repeated
+    // finding id is `uniqueBy: "id"` and a repeated dependency is `uniqueItems`,
+    // so the child is told and gets a second attempt before the call fails closed.
+    for (const [selectorOutput, message] of [
+      [plan([{ id: "F1" }, { id: "F1" }]), 'findings[1].id: value "F1" duplicates item 0'],
+      [
+        plan([{ id: "F1" }, { id: "F2", dependsOn: ["F1", "F1"] }]),
+        'findings[1].dependsOn[1]: value "F1" duplicates item 0',
+      ],
+    ] as const) {
+      const calls: WorkflowAgentRequest[] = [];
+      const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
+        calls.push(request);
+        if (request.label !== "plan finding graph") throw new Error("scope/writer must not run");
+        return completed(request, selectorOutput);
+      });
+      const rejection = workflow(dsl, DEFAULT_INTENT);
+      await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+      await expect(rejection).rejects.toThrow(message);
+      expect(calls.map((call) => call.label)).toEqual([
+        "plan finding graph",
+        "plan finding graph",
+        "plan finding graph",
+      ]);
+      expect(calls[1]?.prompt).toContain(message);
+    }
+  });
+
+  it("re-asks the selector for the cross-finding note budget the script sums after validation", async () => {
     const findings = Array.from({ length: 5 }, (_, index) =>
       [
         `### F${String(index + 1)} — [P2] Generated finding`,
@@ -476,8 +568,14 @@ describe("curated review remediation workflow", () => {
       return completed(request, selectorOutput);
     });
 
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow("exceed 32000 combined characters");
-    expect(calls.map((call) => call.label)).toEqual(["plan finding graph"]);
+    // No schema keyword sums lengths, so this stays script code — but script code is
+    // no longer the same thing as a fatal throw. Declared through `validate` the sum
+    // reaches the child in the retry prompt, and only exhaustion ends the run.
+    const rejection = (await loadWorkflow())(dsl, DEFAULT_INTENT);
+    await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+    await expect(rejection).rejects.toThrow("findings: expected at most 32000 combined note character(s), got 40000");
+    expect(calls.map((call) => call.label)).toEqual(["plan finding graph", "plan finding graph", "plan finding graph"]);
+    expect(calls[1]?.prompt).toContain("findings: expected at most 32000 combined note character(s), got 40000");
   });
 
   it("re-asks the selector for a bound the schema declares instead of ending the run on the first answer", async () => {
@@ -486,8 +584,8 @@ describe("curated review remediation workflow", () => {
 
     // Counts, the id pattern, and the per-note length used to be hand-rolled
     // throws. Declared in FINDING_SELECTOR_SCHEMA they are handed back to the
-    // child by the runtime retry, so the child sees the violation twice before
-    // the call fails closed.
+    // child by the runtime retry, so the child sees the violation on every
+    // attempt before the call fails closed.
     for (const [selectorOutput, message] of [
       [plan([]), "findings: expected at least 1 item(s), got 0"],
       [
@@ -507,7 +605,11 @@ describe("curated review remediation workflow", () => {
       const rejection = workflow(dsl, DEFAULT_INTENT);
       await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
       await expect(rejection).rejects.toThrow(message);
-      expect(calls.map((call) => call.label)).toEqual(["plan finding graph", "plan finding graph"]);
+      expect(calls.map((call) => call.label)).toEqual([
+        "plan finding graph",
+        "plan finding graph",
+        "plan finding graph",
+      ]);
     }
   });
 
@@ -522,8 +624,11 @@ describe("curated review remediation workflow", () => {
     await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
       /expected at most 8000 character\(s\), got 8001/u,
     );
-    expect(prompts).toHaveLength(2);
+    expect(prompts).toHaveLength(3);
     expect(prompts[1]).toContain("expected at most 8000 character(s), got 8001");
+    // A schema rejection keeps the schema wording even on a call that declares
+    // `validate`; only the rendered budget changes, because it is now truthfully 3.
+    expect(prompts[1]).toContain("The previous answer (attempt 1 of 3) was REJECTED for:");
   });
 
   it("bounds direct-dependency handoffs while preserving every dependency id", async () => {

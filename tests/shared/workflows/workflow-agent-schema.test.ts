@@ -234,5 +234,11 @@ describe("agent({ schema }) structured output", () => {
     // @ts-expect-error schema selects WorkflowAgentSchemaOptions, never WorkflowAgentOptions
     const invalidTextOptions: WorkflowAgentOptions = { schema: { type: "string" } };
     expect(invalidTextOptions).toBeDefined();
+
+    // Same contract for validate: it needs a parsed value, which only the shaped
+    // overload has, so a typo cannot silently run unvalidated on the text path.
+    // @ts-expect-error validate selects WorkflowAgentSchemaOptions, never WorkflowAgentOptions
+    const invalidValidateOptions: WorkflowAgentOptions = { validate: () => [] };
+    expect(invalidValidateOptions).toBeDefined();
   });
 });

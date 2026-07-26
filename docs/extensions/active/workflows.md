@@ -1183,23 +1183,24 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field             | Type                      | Default                                                                | Description                                                                                                                                                                                    |
-| ----------------- | ------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                             |
-| `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                                      |
-| `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                                         |
-| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.            |
-| `timeoutMs`       | positive safe integer     | none                                                                   | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. |
-| `maxAnswerChars`  | positive safe integer     | none                                                                   | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                        |
-| `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                             |
-| `artifact`        | string                    | safe label or agent name                                               | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                              |
-| `phase`           | string                    | current phase                                                          | Overrides the active phase tag                                                                                                                                                                 |
-| `permissionMode`  | string                    | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                                  |
-| `workspaceMode`   | string                    | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                            |
-| `workspaceHandle` | string                    | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                |
-| `sandbox`         | string                    | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win.           |
-| `model`           | string                    | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.             |
-| `schema`          | object (JSON Schema)      | none                                                                   | **Opt-in.** Declare the answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion.             |
+| Field             | Type                      | Default                                                                | Description                                                                                                                                                                                                                                                                                                              |
+| ----------------- | ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                       |
+| `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                                                                                                                                                                |
+| `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                                                                                                                                                                   |
+| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                      |
+| `timeoutMs`       | positive safe integer     | none                                                                   | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                           |
+| `maxAnswerChars`  | positive safe integer     | none                                                                   | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                  |
+| `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                                                                                                                                                       |
+| `artifact`        | string                    | safe label or agent name                                               | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                        |
+| `phase`           | string                    | current phase                                                          | Overrides the active phase tag                                                                                                                                                                                                                                                                                           |
+| `permissionMode`  | string                    | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                                                                                                                                                            |
+| `workspaceMode`   | string                    | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                                                                                                                                                      |
+| `workspaceHandle` | string                    | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                                                                                                                                          |
+| `sandbox`         | string                    | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win.                                                                                                                                     |
+| `model`           | string                    | current session model                                                  | Per-call selector `provider/id[:thinking]`. A resolved selector is passed to the child session; if absent or unresolved, the workflow agent bridge currently supplies `ctx.model`.                                                                                                                                       |
+| `schema`          | object (JSON Schema)      | none                                                                   | **Opt-in.** Declare the answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion.                                                                                                                                       |
+| `validate`        | `(value) => string[]`     | none                                                                   | **Opt-in, requires `schema`.** Cross-field rules the subset cannot declare. Runs only on a schema-valid parsed value; a non-empty return re-asks the child in its own labelled block. Must be pure, synchronous and deterministic; must not throw to signal a violation, transform the value, or call back into the DSL. |
 
 `agent()` resolves to exact non-empty text. The runtime persists that text before
 emitting terminal `agent_end`; fresh sessions also contribute their transcript
@@ -1248,7 +1249,8 @@ What the runtime does, in order:
 1. Recursively validates the declaration before any child starts. The only
    supported keywords are `type`, `enum`, `required`, `properties`,
    `additionalProperties:false`, `items`, the string bounds `minLength`,
-   `maxLength`, and `pattern`, and the array bounds `minItems` and `maxItems`;
+   `maxLength`, `pattern`, and `nonBlank`, and the array bounds `minItems`,
+   `maxItems`, `uniqueItems`, `uniqueTrimmedItems`, and `uniqueBy`;
    the only supported types are `object`, `array`, `string`, `number`,
    `integer`, and `boolean`. Unsupported types/keywords and malformed or
    misplaced declarations fail with zero child calls, as do a bound on the wrong
@@ -1257,6 +1259,29 @@ What the runtime does, in order:
    retry and then surface as an unexplained exhaustion. `pattern` follows the
    JSON Schema spec: an unanchored ECMA-262 search with no flags, so a schema
    that means the whole value writes `^`/`$` itself.
+
+   The uniqueness and blankness keywords carry their own placement rules, all
+   refused before the first child call:
+
+   | Keyword                    | Where             | Requires                                                                                                                            |
+   | -------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+   | `nonBlank: true`           | a `string` schema | literally `true`                                                                                                                    |
+   | `uniqueItems: true`        | an `array` schema | `items.type` is `string`, `number`, `integer`, or `boolean` — use `uniqueBy` for objects                                            |
+   | `uniqueTrimmedItems: true` | an `array` schema | `items.type` is `string`; cannot be declared beside `uniqueItems`, which it already implies                                         |
+   | `uniqueBy: "<property>"`   | an `array` schema | `items.type` is `object`, and the property is in `items.properties`, listed in `items.required`, and declared with a primitive type |
+
+   `uniqueItems` is restricted to primitive items on purpose: deep equality over
+   objects would be key-order sensitive, so duplicate detection would depend on
+   the child's key order — and these messages enter the replay key. Requiring the
+   `uniqueBy` property in `items.required` is what keeps "missing" from becoming
+   a third, invented uniqueness verdict; a child that omits it is already told
+   `missing required property`.
+
+   **Trimming is `String.prototype.trim`.** That is the canonicalization both
+   `nonBlank` and `uniqueTrimmedItems` use. Declare `uniqueTrimmedItems` whenever
+   the script trims labels afterwards, or a value the validator accepted can
+   still collapse into a duplicate in the normalizer.
+
 2. Appends a deterministic shape block (the JSON Schema plus "one JSON value,
    no prose") to the prompt the child receives.
 3. Runs the child exactly as an ordinary `agent()` call — same catalog agent,
@@ -1264,12 +1289,32 @@ What the runtime does, in order:
 4. Parses the child's final text as JSON (a `json` code fence is tolerated) and
    validates it with the DSL's JSON-Schema subset validator:
    `type` (object/array/string/number/integer/boolean), `required`, `properties`,
-   `additionalProperties:false`, `items`, `enum`, and the size/pattern bounds.
-   Bound violations are reported by value (`tags: expected at most 2 item(s),
-got 3`) because the child has to decide what to cut.
-5. On mismatch, retries with a fresh child whose prompt carries the previous
-   attempt's validator errors, up to `SCHEMA_MAX_ATTEMPTS` (2) child runs total.
-6. Resolves to the validated value, or throws `SchemaValidationError` carrying
+   `additionalProperties:false`, `items`, `enum`, the size/pattern bounds, and
+   the uniqueness/blankness keywords. Bound violations are reported by value
+   (`tags: expected at most 2 item(s), got 3`) because the child has to decide
+   what to cut. Uniqueness runs after the per-element pass and compares only
+   elements whose runtime type matches the declared one, so a wrong-typed element
+   reports its type error and nothing else. Every later duplicate is reported at
+   its own index and names the first occurrence, so the child knows which of the
+   two to edit:
+
+   - `uniqueItems` — `dependsOn[2]: value "F1" duplicates item 0`
+   - `uniqueTrimmedItems` — `options[1]: trimmed value "Keep" duplicates item 0`
+   - `uniqueBy` — `findings[3].id: value "F1" duplicates item 0`
+   - `nonBlank` — `prompt: expected a non-blank string, got 3 whitespace character(s)`
+     (the count, not the value: a blank string can be hundreds of characters, and
+     echoing them would splice junk into the retry prompt)
+
+5. When the call declared `validate`, calls it with the parsed, schema-valid
+   value. It never runs on a child that failed, returned empty text, overflowed
+   `maxAnswerChars`, or produced an answer that did not parse or did not
+   validate — a cross-field rule presupposes the shape holds, so author code
+   never receives an off-shape value. A non-empty return is a mismatch owned by
+   the script.
+6. On mismatch, retries with a fresh child whose prompt carries the previous
+   attempt's errors. A call without `validate` gets `SCHEMA_MAX_ATTEMPTS` (2)
+   child runs total; a call with `validate` gets one dedicated extra attempt, 3.
+7. Resolves to the validated value, or throws `SchemaValidationError` carrying
    `errors` and `attempts`.
 
 **The host cannot force the child to answer in shape; the runtime enforces it
@@ -1289,11 +1334,91 @@ schema-required overload, so a shaped object cannot be returned under a string
 type.
 
 **Evidence.** Every attempt stamps `schemaValidation`
-(`{status: "valid"|"mismatch", attempts, errors}`) on its own `agent_end`
-journal line, so a run's evidence shows whether a stage was shape-checked and
-how many tries it took. Each attempt is a real child run and counts against
-`maxTotalAgentInvocations`; a call without `schema` counts exactly once, as
-before.
+(`{status: "valid"|"mismatch", attempts, errors}`, plus `source: "schema" |
+"script"` on a mismatch when the call declared `validate`) on its own `agent_end`
+journal line, so a run's evidence shows whether a stage was shape-checked, which
+authority rejected it, and how many tries it took. `attempts` is the 1-based loop
+position of the attempt, not a count of live child runs: a replayed attempt
+occupies an ordinal and increments it while contributing no `usage`. Each attempt
+counts against `maxTotalAgentInvocations`; a call without `schema` counts exactly
+once, as before.
+
+### Cross-field rules the schema cannot declare — `agent({ schema, validate })`
+
+`schema` constrains one node. Referential integrity, agreement between two
+fields, a budget summed across items and the shape of a graph are joins over the
+whole answer, and teaching the validator to express them would grow the runtime a
+general-purpose constraint language. `validate` is the alternative: the script
+keeps the rule, and the runtime lends it the retry loop.
+
+```js
+const plan = await agent(prompt, {
+  schema: PLAN_SCHEMA,
+  // A per-call-site closure: the rule is checked against data the host owns.
+  validate: (value) => findingPlanErrors(findings, value),
+});
+```
+
+The contract:
+
+- **It runs after schema validation succeeds, on the parsed value**, inside the
+  same attempt and before `agent_end`.
+- **It returns `string[]`; empty means pass.** It must not throw to signal a
+  violation and must not return a transformed value — the call still resolves to
+  the validated, untransformed value. Accumulate: with one retry, reporting only
+  the first violation turns a repairable answer into a fatal one.
+- **Its errors reach the child in their own labelled block**, never merged into
+  the schema bullet list. Write them in the runtime's convention — 0-indexed JSON
+  path, observed value, what would satisfy it:
+
+  ```
+  The previous answer (attempt 1 of 3) matched the required shape but was REJECTED by the workflow script for:
+  - findings[0].dependsOn[0]: value "F9" is not a finding id in the review
+  Return the corrected JSON value only.
+  ```
+
+- **It requires `schema`.** `validate` without one is a type error and a runtime
+  error before any child runs, because the text overload has no parsed value to
+  hand it; a non-function `validate` is refused the same way.
+- **It must be pure, synchronous and deterministic.** A synchronous `string[]`
+  return makes `await` impossible, and clock or randomness reads in the entry file
+  already downgrade the script to `unproven`. Filesystem and network reads are
+  **not** detectable and are forbidden by this contract. Calling back into the DSL
+  throws: `agent() must not be called from inside a validate callback`.
+- **The runtime bounds what it returns**: at most 32 errors, at most 500
+  characters each, no empty string, no Promise. A breach fails the run closed and
+  spends no retry — truncating would silently rewrite the replay key.
+- **A throw is an author bug, not a model failure.** It propagates unchanged, ends
+  the run, consumes no retry, and is journaled as `{kind: "error", source: "script"}`.
+
+**What must NOT go in a validator.** A re-ask is safe only where the model's one
+satisfying move is to comply — a membership, uniqueness, sum or graph re-check
+over data the model does not control. Two classes can be talked past and must
+stay fatal throws:
+
+1. **Self-reported status** — the check accepts the model's word about something
+   the host did not verify (`a verification pass cannot override failed
+repository checks`). The repair bullet tells the model _why_ its success claim
+   was refused, which is coaching toward a claim the host accepts.
+2. **Verdict coherence** — a model's verdict graded against its own findings
+   list ("a `revise` verdict requires at least one finding"). Re-asking offers two
+   satisfying moves, fabricate a finding or flip the verdict, and both destroy the
+   signal.
+
+Host-owned continuation and provenance evidence, and text a _prior_ run's agent
+wrote, are likewise not this child's to repair and stay fatal.
+
+**Replay policy.** `validate` never joins the canonical request — `JSON.stringify`
+drops functions silently, so including it would produce an identical key for two
+different validators with no divergence signal. Its _body_ is covered instead: the
+entry bytes are hashed and any change refuses the whole resume. It **is** re-applied
+to replayed answers, held to the caller's current rule the way `maxAnswerChars` is;
+and when the current validator rejects a replayed answer the run **fails closed**
+rather than re-asking. Re-asking would form an attempt-2 prompt whose key misses at
+that ordinal, trip the one-way divergence latch and silently convert the operator's
+resume into a full live run. Because the error strings are spliced into the retry
+prompt, they enter the replay key: a `Set` iteration order, a timestamp or an
+absolute path in a message is a replay defect, not a cosmetic one.
 
 ---
 
@@ -1552,7 +1677,8 @@ A replayed call reports **no** token usage, so the run budget shown by
 ```
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
-`schemaValidation`, plus full answer/transcript/result artifact references when
+`schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared
+`validate`), plus full answer/transcript/result artifact references when
 those records exist. `/workflows status` shows `agents=…` and sums the run budget from those
 `usage` values. Journals written before 0.2.x may still contain `llm_start` / `llm_end` /
 `llm_delta` lines; they parse but are no longer counted or specially rendered.

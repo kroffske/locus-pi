@@ -928,7 +928,10 @@ function isSchemaValidation(value: unknown): boolean {
     typeof value.attempts === "number" &&
     Number.isSafeInteger(value.attempts) &&
     value.attempts >= 0 &&
-    isStringArray(value.errors)
+    isStringArray(value.errors) &&
+    // Which authority rejected the answer. Absent on every line written before the
+    // script-validation callback existed, and on every schema-only call since.
+    (value.source === undefined || isOneOf(value.source, ["schema", "script"]))
   );
 }
 

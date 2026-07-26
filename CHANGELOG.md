@@ -28,6 +28,78 @@ This file records user-visible changes to the public package.
   unsatisfiable `min > max` pair, and a `pattern` that does not compile are all
   refused before the first child call. `pattern` follows the JSON Schema spec:
   unanchored, no flags.
+- `agent({ schema })` now supports four uniqueness and blankness keywords:
+  `uniqueItems: true`, `uniqueTrimmedItems: true`, `uniqueBy: "<property>"`, and
+  `nonBlank: true`. A repeated finding id, a dependency listed twice, two option
+  labels that differ only by surrounding whitespace, and a prompt that is nothing
+  but spaces were all hand-written checks after validation returned, so each
+  could only `throw` and end the run on an answer the child could have repaired.
+  Declared instead, they join the existing schema retry: the child is told which
+  element duplicates which — every later duplicate reports at its own index and
+  names the first occurrence — and gets a second attempt.
+  `uniqueItems` is restricted to arrays of `string`/`number`/`integer`/`boolean`
+  items, with `uniqueBy` as the route for arrays of objects, because deep
+  equality over objects would depend on the child's key order.
+  `uniqueTrimmedItems` is strictly stronger than `uniqueItems` and exists for the
+  common case where the script trims labels afterwards — plain `uniqueItems`
+  accepts `["a", " a"]` and the normalizer then collapses them, shipping a
+  duplicate the validator never saw. It cannot be declared beside `uniqueItems`.
+  Both it and `nonBlank` canonicalize with `String.prototype.trim`, the same call
+  a normalizer uses. Every misplaced or ill-formed declaration — a value other
+  than `true`, an object item type under `uniqueItems`, a `uniqueBy` property
+  that is not declared in `items.properties`, not listed in `items.required`, or
+  not of primitive type — is refused before the first child call.
+- `agent({ schema, validate })` — an optional script-supplied callback that joins
+  the same retry loop the schema uses. A declared schema constrains one node;
+  referential integrity, agreement between two fields, a budget summed across
+  items and the shape of a graph are joins over the whole answer, and until now
+  those were checked by ordinary script code after the `await`, where the only
+  available verdict was a `throw` that ended the run having paid for every
+  earlier child call. `validate` receives the parsed, schema-valid value and
+  returns `string[]`; a non-empty return re-asks the child with those errors in
+  their own labelled repair block, never merged into the schema bullet list —
+  schema errors carry 0-indexed JSON paths and observed values, and one merged
+  list would hand the child two index bases.
+  It runs only after schema validation succeeds, so author code never receives an
+  off-shape value, and it inherits the existing gating: no run on a child that
+  failed, returned empty text, or overflowed `maxAnswerChars`. It requires
+  `schema` on both the type and the runtime side, because the text overload has
+  no parsed value to hand it. A call that declares it gets one dedicated extra
+  attempt (3 rather than 2), unconditionally: the repair block must state a true
+  budget in text that enters the replay key, and at render time nobody knows
+  which authority will reject the next answer. A schema-only call is unchanged in
+  every respect, including its rendered budget.
+  The callback must be pure, synchronous and deterministic; it must not throw to
+  signal a violation, must not transform the value, and must not call back into
+  the DSL, which now throws. A throw from it is treated as an author bug: it
+  propagates unchanged, consumes no retry, and is journaled as
+  `{kind: "error", source: "script"}`. The runtime bounds what it returns — at
+  most 32 errors, at most 500 characters each, no empty string, no Promise — and
+  a breach fails the run closed rather than truncating, because truncating would
+  silently rewrite the replay key.
+  Replay: `validate` never joins the canonical request (`JSON.stringify` drops
+  functions silently, so including it would fake key coverage), its body is
+  covered by the existing script hash, and it **is** re-applied to replayed
+  answers. When the current validator rejects a replayed answer the run fails
+  closed, exactly as an over-long replayed answer does; re-asking would form an
+  attempt-2 prompt whose key misses at that ordinal and silently convert a resume
+  into a full live run. On a mismatch, `agent_end`'s `schemaValidation` now names
+  the rejecting authority through `source: "schema" | "script"`, present only on
+  calls that declared `validate`.
+  Proven on a live host (`openai-codex/gpt-5.6-sol`), run `20260726-135149-d68a`:
+  a real child violated a declared `uniqueTrimmedItems` bound, was told
+  `tags[5]: trimmed value "deploy" duplicates item 4`, and returned six distinct
+  tags on the retry; a script-authored rule the schema cannot state was rejected
+  with `source: "script"` and repaired from its own bullet on the retry; an
+  unsatisfiable validator consumed all three attempts and failed the run closed
+  with no partial value. A companion measurement, run `20260726-135354-44aa`,
+  sampled eight independent calls under the curated clarifier's declared bounds
+  and recorded **zero first-attempt schema mismatches** — so the compounding
+  failure the extra attempt guards against (a schema miss on attempt 1 leaving
+  nothing for a cross-field miss on attempt 2) is uncommon on this host. That
+  measurement did not use a deliberately weak model and does not by itself
+  justify narrowing the budget; the unconditional form was chosen so the repair
+  block can state a true budget, not to cover a high miss rate.
 - `agent({ schema })` now supports `type: "integer"` — the most common JSON
   Schema type after `string`, previously rejected outright. A fractional answer
   is reported by value (`count: expected integer, got 2.5`) so the schema retry

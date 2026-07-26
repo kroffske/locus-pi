@@ -148,6 +148,39 @@ export default async function runWorkflow(dsl) {
 }
 `;
 
+/**
+ * The same shaped stage plus a script validator whose verdict comes from the run
+ * INPUT, not from the script bytes. That is what makes a rejected replay reachable
+ * at all: the entry file is byte-identical between the two runs, so the resume is
+ * not refused, and the prompt is input-independent, so the recorded key still hits.
+ */
+const VALIDATED_WORKFLOW = `export const meta = { name: "validated", description: "one shaped stage with a script validator" };
+const FENCE = "\\u0060\\u0060\\u0060";
+const COUNT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["count"],
+  properties: { count: { type: "integer" } },
+};
+export default async function runWorkflow(dsl, input) {
+  const prompt = ["answer with:", FENCE + "json", '{"count":3}', FENCE].join("\\n");
+  const expected = Number(input ?? "3");
+  let value = null;
+  let rejected = "";
+  try {
+    value = await dsl.agent(prompt, {
+      schema: COUNT_SCHEMA,
+      validate: (answer) =>
+        answer.count === expected ? [] : ["count: expected " + String(expected) + ", got " + String(answer.count)],
+    });
+  } catch (error) {
+    rejected = String(error.message);
+  }
+  const tail = await dsl.agent("tail");
+  return { value, rejected, tail };
+}
+`;
+
 const UNSUPPORTED_SCHEMA_WORKFLOW = `export const meta = { name: "unsupported", description: "declares an ignored keyword" };
 export default async function runWorkflow(dsl) {
   return await dsl.agent("shape me", { schema: { type: "number", minimum: 3 } });
@@ -218,6 +251,52 @@ describe("workflow --resume replays recorded agent calls", () => {
     expect(rejected.error).toMatch(/unsupported keyword "minimum"/u);
     expect(rejected.executedPrompts).toEqual([]);
     expect(readWorkflowReplayLog(root, rejected.runId).filter((entry) => entry.kind === "agent")).toHaveLength(0);
+  });
+
+  it("re-applies the current script validator to a replayed answer", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "validated", VALIDATED_WORKFLOW);
+
+    const first = await runWorkflow(root, "validated", { input: "3" });
+    expect(first.ok).toBe(true);
+    expect(first.result).toMatchObject({ value: { count: 3 }, rejected: "" });
+
+    const resumed = await runWorkflow(root, "validated", { input: "3", resumeFromRunId: first.runId });
+    expect(resumed.executedPrompts).toEqual([]);
+    expect(resumed.result).toEqual(first.result);
+    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 2, freshCalls: 0 });
+
+    // A replayed attempt occupies an ordinal and increments `attempts`, and it
+    // contributes no `usage` — a replayed call cost nothing and must not inflate
+    // the run budget.
+    const shapedEnd = resumed.journal.find((line) => line.kind === "agent_end" && line.schemaValidation !== undefined);
+    expect(shapedEnd?.replayed).toBe(true);
+    expect(shapedEnd?.schemaValidation).toEqual({ status: "valid", attempts: 1, errors: [] });
+    expect(shapedEnd?.usage).toBeUndefined();
+  });
+
+  it("fails the run closed when the current validator rejects a replayed answer, without diverging", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "validated", VALIDATED_WORKFLOW);
+    const first = await runWorkflow(root, "validated", { input: "3" });
+
+    // Same script bytes, same prompt, different validator verdict. Re-asking here
+    // would form an attempt-2 prompt whose key misses at that ordinal, trip the
+    // one-way divergence latch and silently convert the operator's resume into a
+    // full live run. Failing closed keeps the loss local and loud.
+    const resumed = await runWorkflow(root, "validated", { input: "4", resumeFromRunId: first.runId });
+
+    expect(resumed.executedPrompts).toEqual([]);
+    expect(resumed.result).toMatchObject({
+      value: null,
+      rejected: "Replayed agent answer was rejected by the workflow script: count: expected 4, got 3",
+    });
+    const failed = resumed.journal.filter((line) => line.kind === "agent_end" && line.status === "failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.schemaValidation).toMatchObject({ status: "mismatch", source: "script" });
+    // No divergence: the later call in the same run still replays.
+    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 2, freshCalls: 0 });
+    expect(resumed.replay.divergedAtCall).toBeUndefined();
   });
 
   it("invalidates an edited call AND every later call, even when the later prompts are unchanged", async () => {
