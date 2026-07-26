@@ -3,11 +3,12 @@ import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_sh
 import {
   requestInlineOperatorInteraction,
   StaleInlineOperatorInteractionError,
+  SupersededInlineOperatorInteractionError,
 } from "../../../extensions/_shared/operator-interaction.js";
 import { createHarness } from "../../test-harness.js";
 
 describe("inline operator interaction ownership", () => {
-  it("serializes Locus custom components within one session generation", async () => {
+  it("gives the slot to the newest interaction and tells the one it replaced", async () => {
     const harness = createHarness();
     const mounted: string[] = [];
     const completions: Array<(value: string) => void> = [];
@@ -19,18 +20,25 @@ describe("inline operator interaction ownership", () => {
       });
     }) as NonNullable<typeof harness.ctx.ui.custom>;
 
-    const first = requestInlineOperatorInteraction(harness.ctx, () => component("first"));
+    // Pi shows one component at a time and replaces it without disposing the
+    // old one, so the newest request owns the slot rather than queueing behind
+    // a component the operator may no longer be looking at.
+    // The rejection is observed from the start: it lands before the assertion
+    // below and would otherwise surface as an unhandled promise.
+    let firstError: unknown;
+    const first = requestInlineOperatorInteraction(harness.ctx, () => component("first")).catch((error: unknown) => {
+      firstError = error;
+    });
     const second = requestInlineOperatorInteraction(harness.ctx, () => component("second"));
 
-    await vi.waitFor(() => expect(mounted).toEqual(["first"]));
-    completions[0]!("first-result");
-    await expect(first).resolves.toBe("first-result");
     await vi.waitFor(() => expect(mounted).toEqual(["first", "second"]));
+    await first;
+    expect(firstError).toBeInstanceOf(SupersededInlineOperatorInteractionError);
     completions[1]!("second-result");
     await expect(second).resolves.toBe("second-result");
   });
 
-  it("drops a queued interaction when its caller lease becomes stale", async () => {
+  it("never mounts an interaction whose caller lease is already stale", async () => {
     const harness = createHarness();
     const completions: Array<(value: string) => void> = [];
     harness.ctx.ui.custom = vi.fn(async <T>(factory: CustomUiFactory<T>) => {
@@ -39,15 +47,15 @@ describe("inline operator interaction ownership", () => {
         completions.push(resolve as (value: string) => void);
       });
     }) as NonNullable<typeof harness.ctx.ui.custom>;
-    let current = true;
 
     const active = requestInlineOperatorInteraction(harness.ctx, () => component("active"));
+    await vi.waitFor(() => expect(completions).toHaveLength(1));
+
+    // A caller that has already lost its lease leaves the live component alone.
     const stale = requestInlineOperatorInteraction(harness.ctx, () => component("must-not-mount"), {
-      isCurrent: () => current,
+      isCurrent: () => false,
     });
 
-    await vi.waitFor(() => expect(completions).toHaveLength(1));
-    current = false;
     completions[0]!("done");
     await expect(active).resolves.toBe("done");
     await expect(stale).rejects.toBeInstanceOf(StaleInlineOperatorInteractionError);
@@ -80,7 +88,7 @@ describe("inline operator interaction ownership", () => {
     await expect(oldGeneration).resolves.toBe("old-result");
   });
 
-  it("releases the queue when Pi disposes a component whose custom promise remains unsettled", async () => {
+  it("releases the slot when Pi disposes a component whose custom promise remains unsettled", async () => {
     const harness = createHarness();
     const mounted: CustomUiComponent[] = [];
     const completions: Array<(value: string) => void> = [];
@@ -93,15 +101,17 @@ describe("inline operator interaction ownership", () => {
     }) as NonNullable<typeof harness.ctx.ui.custom>;
 
     const retired = requestInlineOperatorInteraction(harness.ctx, () => component("retired"));
-    const next = requestInlineOperatorInteraction(harness.ctx, () => component("next"));
     await vi.waitFor(() => expect(mounted).toHaveLength(1));
 
+    // Pi can dispose a replaced component without ever resolving its promise.
     mounted[0]!.dispose?.();
+
+    const next = requestInlineOperatorInteraction(harness.ctx, () => component("next"));
     await vi.waitFor(() => expect(mounted).toHaveLength(2));
     completions[1]!("next-result");
     await expect(next).resolves.toBe("next-result");
 
-    // The first host promise is still pending when the next component mounts.
+    // The first host promise was still pending when the next component mounted.
     completions[0]!("retired-result");
     await expect(retired).resolves.toBe("retired-result");
   });

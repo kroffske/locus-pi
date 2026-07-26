@@ -110,6 +110,29 @@ This file records user-visible changes to the public package.
 
 ### Fixed
 
+- **`/ps` no longer stops opening for the rest of a session.** Pi owns a single
+  editor slot, and mounting anything there detaches whatever was already
+  displayed without disposing it or settling its promise. Every blocking
+  operator surface in this package — the fleet selector, the agent viewer,
+  `ask_user_question`, and a workflow's clarification question — shared one
+  queue whose place was freed only when a component finished or was disposed. A
+  component the host had silently replaced did neither, so it held the queue
+  forever and every later `/ps` or question waited on something no longer on
+  screen: the command was typed and nothing happened.
+  The surface now models what the host actually does. The newest interaction
+  that is genuinely able to mount takes the slot, and the one it replaces is
+  failed with an explicit superseded error so its owner drops its own UI state
+  instead of waiting. An interaction that cannot mount — a caller whose lease is
+  gone, a host without custom UI — never supersedes: it waits its turn and
+  leaves the live component alone, so a question that declines to appear cannot
+  take an open fleet selector off the screen. The replaced component's host
+  promise is deliberately left pending, because Pi's own close path restores the
+  editor and would clear whatever replaced it.
+  The trade this accepts: two genuinely concurrent interactions no longer queue,
+  the later one wins. That is already what the host does to the rendered
+  component; the queue only pretended otherwise, and the pretence is what froze.
+  Sequential callers — a controller asking question 1 and then question 2 — are
+  unchanged.
 - `repository_check` can now actually run a declared check. It executes in a
   disposable worktree holding only tracked and untracked repository files, so the
   Git-ignored install tree was missing and every real check died at startup with
