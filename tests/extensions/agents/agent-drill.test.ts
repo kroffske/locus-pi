@@ -305,6 +305,19 @@ describe("agent drill command and inline interaction", () => {
   });
 });
 
+describe("/ps never fails silently", () => {
+  it("says so when there is nothing to show", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+
+    await h.commands.get("ps")!.handler("", h.ctx as ExtensionCommandContext);
+
+    expect(h.customComponents).toHaveLength(0);
+    expect(h.notifications).toContain("/ps found no live agent rows.");
+  });
+});
+
 describe("re-run agent identity", () => {
   it("resolves a plain agent name to its newest workflow run, not a retained earlier one", async () => {
     const older = agentLiveStore.begin({

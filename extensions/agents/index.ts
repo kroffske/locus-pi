@@ -65,6 +65,7 @@ import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operato
 import { setOperatorWidget } from "../_shared/widget-render.js";
 import {
   isStaleInlineOperatorInteractionError,
+  isSupersededInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
 } from "../_shared/operator-interaction.js";
 
@@ -453,6 +454,9 @@ async function openFleetMenu(
       primary: "No live agent rows.",
       controls: ["Catalog: /agent list"],
     });
+    // A widget alone is easy to miss under a live workflow panel, and an
+    // operator who sees nothing at all reads it as a broken command.
+    ctx.ui.notify("/ps found no live agent rows.", "warning");
     return;
   }
   fleetMenuState.setVisibleRows(initialRows);
@@ -475,7 +479,10 @@ async function openFleetMenu(
         return component;
       });
     } catch (error) {
-      if (isStaleInlineOperatorInteractionError(error)) return;
+      if (isStaleInlineOperatorInteractionError(error)) {
+        notifyInteractionEnded(ctx, error, "Agent fleet");
+        return;
+      }
       throw error;
     }
     disposeComponent();
@@ -863,7 +870,10 @@ async function executeAgentDrillCommand(
         return viewer;
       });
     } catch (error) {
-      if (isStaleInlineOperatorInteractionError(error)) return;
+      if (isStaleInlineOperatorInteractionError(error)) {
+        notifyInteractionEnded(ctx, error, "Agent view");
+        return;
+      }
       throw error;
     }
   } finally {
@@ -915,6 +925,17 @@ type AgentDrillResolution =
   | { ok: false; reason: "not-found" }
   | { ok: false; reason: "aggregate"; row: AgentLiveRow; children: AgentLiveRow[] }
   | { ok: false; reason: "ambiguous"; candidates: AgentLiveRow[] };
+
+/**
+ * Pi shows one inline component at a time, so a newer prompt can take the
+ * screen from an open fleet or viewer. Saying so is the difference between a
+ * surface that closed for a reason and a command that looks broken; a session
+ * that is simply gone stays quiet, because there is nobody left to tell.
+ */
+function notifyInteractionEnded(ctx: ExtensionContext, error: unknown, subject: string): void {
+  if (!isSupersededInlineOperatorInteractionError(error)) return;
+  ctx.ui.notify(`${subject} closed: another prompt took the screen. Run /ps again when it is answered.`, "info");
+}
 
 function resolveAgentDrillTarget(target: string): AgentDrillResolution {
   const exactRow = agentLiveStore.rows.get(target);

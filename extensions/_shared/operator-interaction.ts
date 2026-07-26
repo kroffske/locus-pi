@@ -164,6 +164,12 @@ async function whenReadyToMount(
   if (ctx.ui.custom === undefined) return await new Promise<void>(() => {});
 }
 
+export function isSupersededInlineOperatorInteractionError(
+  error: unknown,
+): error is SupersededInlineOperatorInteractionError {
+  return error instanceof SupersededInlineOperatorInteractionError;
+}
+
 export function isStaleInlineOperatorInteractionError(error: unknown): error is StaleInlineOperatorInteractionError {
   return error instanceof StaleInlineOperatorInteractionError;
 }
