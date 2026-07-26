@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  announceCommandWorkflowStart,
   createWorkflowTranscript,
   persistCommandWorkflowTranscript,
-  WORKFLOW_EVENT_CUSTOM_TYPE,
+  WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../extensions/workflows/workflow-transcript.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
 import {
@@ -32,13 +33,13 @@ describe("workflow persistent transcript", () => {
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
     expect(harness.sentMessages).toHaveLength(1);
     expect(harness.sentMessages[0]?.message.content).toEqual(
-      expect.stringContaining("● workflow demo.workflow.mjs started"),
+      expect.stringContaining("── workflow demo.workflow.mjs · run #run1 · finished"),
     );
     expect(harness.sentMessages[0]?.message.content).toEqual(
       expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"),
     );
     for (const entry of harness.sentMessages) {
-      expect(entry.message).toMatchObject({ customType: WORKFLOW_EVENT_CUSTOM_TYPE, display: true });
+      expect(entry.message).toMatchObject({ customType: WORKFLOW_RUN_CUSTOM_TYPE, display: true });
       expect(String(entry.message.content).length).toBeLessThanOrEqual(4096);
       expect(entry.options).toEqual({ triggerTurn: false });
       expect(entry.options).not.toHaveProperty("deliverAs");
@@ -296,8 +297,8 @@ describe("workflow persistent transcript", () => {
         resultPersistence: { ok: true, path: "/tmp/run-cancelled/result.json" },
       });
 
-      expect(completion.digest).toContain("● agent reviewer started — sleep 60");
       expect(completion.digest).toContain("⊘ agent reviewer cancelled · 1m — sleep 60");
+      expect(completion.digest).not.toContain("● agent reviewer started");
       expect(completion.digest).not.toContain("✓ agent");
       expect(completion.digest).not.toContain(parentPetname);
       expect(completion.digest).not.toContain(childPetname);
@@ -360,5 +361,161 @@ describe("workflow persistent transcript", () => {
     expect(await pending).toBe(false);
     expect(harness.sentMessages).toEqual([]);
     expect(harness.notificationEvents).toEqual([]);
+  });
+
+  it("opens a run with one idle-checked boundary banner and keeps a busy session unsteered", () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "review", "command");
+    const announcement = transcript.start("20260726-183012-a6aa");
+
+    expect(announcement).toMatchObject({ eventKind: "workflow_start", runId: "20260726-183012-a6aa" });
+    expect(announcement?.text).toContain("── workflow review · run #a6aa · started");
+    expect(announceCommandWorkflowStart(harness.pi, harness.ctx, announcement!)).toBe(true);
+    expect(harness.sentMessages).toHaveLength(1);
+    expect(harness.sentMessages[0]?.message).toMatchObject({
+      customType: WORKFLOW_RUN_CUSTOM_TYPE,
+      display: true,
+      details: { eventKind: "workflow_start", runId: "20260726-183012-a6aa" },
+    });
+    expect(harness.customMessageDeliveries).toEqual(["append"]);
+
+    // A second start is not a second boundary.
+    expect(transcript.start("20260726-183012-a6aa")).toBeUndefined();
+
+    const busy = createHarness(process.cwd(), { isStreaming: true });
+    const busyTranscript = createWorkflowTranscript(busy.ctx, "review", "command");
+    const busyAnnouncement = busyTranscript.start("20260726-183500-b2c4");
+    expect(announceCommandWorkflowStart(busy.pi, busy.ctx, busyAnnouncement!)).toBe(false);
+    expect(busy.sentMessages).toEqual([]);
+    expect(busy.customMessageDeliveries).toEqual([]);
+  });
+
+  it("keeps one row per agent: the started row becomes the finished row", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
+    transcript.event({
+      ts: "t1",
+      runId: "r",
+      kind: "agent_start",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+    });
+    transcript.event({
+      ts: "t2",
+      runId: "r",
+      kind: "agent_end",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+      status: "completed",
+      durationMs: 45_000,
+    });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("✓ agent default finished · 45s — decide clarification");
+    expect(completion.digest).not.toContain("● agent default started");
+    expect(completion.digest.match(/agent default/g)).toHaveLength(1);
+  });
+
+  it("never folds an agent without an end event into a clean run", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t1", runId: "r", kind: "agent_start", agent: "reviewer", callId: "call-9" });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("■ agent reviewer started — no end recorded (evidence missing)");
+  });
+
+  it("renders the operator gate as its own block naming the stage, the tool, and the questions", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      result: { mode: "prepared" },
+      journal: [],
+      operatorHandoff: {
+        version: 1,
+        handoffId: "handoff-a6aa",
+        originRunId: "20260726-183012-a6aa",
+        title: "review clarification",
+        questions: [{ kind: "text", id: "q1", prompt: "Which commit should this review cover?" }],
+        continuationArtifactRefs: [],
+        target: { kind: "name", ref: "review" },
+        scriptIdentity: { path: "review.workflow.mjs", sha256: "a".repeat(64) },
+      } as never,
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("◐ WAITING FOR OPERATOR — review clarification");
+    expect(completion.digest).toContain('   asked during stage "clarify" · via awaitOperator');
+    expect(completion.digest).toContain("   Q1: Which commit should this review cover?");
+    expect(completion.digest).toContain("   answer: pending — reply in Pi to continue (handoff #a6aa)");
+    // The terminal verdict stays exactly what downstream readers already pin.
+    expect(completion.digest).toContain("◐ workflow review awaiting operator");
+  });
+
+  it("declares the run it continues, the answer that unblocked it, and replayed evidence", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool", {
+      input: "b09e8e8 — feat(workflows): schema uniqueness",
+    });
+    transcript.start("20260726-183412-b2c4");
+    transcript.event({
+      ts: "t1",
+      runId: "r",
+      kind: "agent_end",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+      status: "completed",
+      durationMs: 45_000,
+      replayed: true,
+      resumeFromRunId: "20260726-183012-a6aa",
+    });
+    const completion = transcript.finish({
+      runId: "20260726-183412-b2c4",
+      runDir: "/tmp/b2c4",
+      ok: true,
+      result: { summary: "done" },
+      journal: [
+        {
+          ts: "t1",
+          runId: "20260726-183412-b2c4",
+          kind: "agent_end",
+          agent: "default",
+          status: "completed",
+          replayed: true,
+        },
+      ],
+      resumeFromRunId: "20260726-183012-a6aa",
+      continuation: { originRunId: "20260726-183012-a6aa", artifacts: [] },
+      resultPersistence: { ok: true, path: "/tmp/b2c4/result.json" },
+    });
+
+    expect(completion.digest).toContain(
+      '↳ continues run #a6aa · operator answered: "b09e8e8 — feat(workflows): schema uniqueness"',
+    );
+    expect(completion.digest).toContain("↻ agent default replayed from run #a6aa · 45s — decide clarification");
+    expect(completion.digest).toContain("1 replayed from run #a6aa");
+    expect(completion.digest).not.toContain("✓ agent default finished");
   });
 });

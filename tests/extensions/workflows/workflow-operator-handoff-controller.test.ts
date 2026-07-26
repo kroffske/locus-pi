@@ -150,6 +150,22 @@ describe("workflow operator handoff controller", () => {
     expect(harness.customRenderFrames.at(-1)?.join("\n")).toContain("Prompt 2 of 2");
   });
 
+  it("names the blocked run and the tool that blocked it inside the question block", async () => {
+    const item = handoff("20260725-120000-multi", {
+      questions: [{ kind: "text", id: "note", prompt: "Add a note" }],
+    });
+    const { controller: queue } = controller([item]);
+    const harness = createHarness();
+    harness.customInputQueue.push("Keep generated files excluded.", "\r");
+
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({ status: "started" });
+    const frame = harness.customRenderFrames[0]?.join("\n") ?? "";
+    // Provenance survives a narrow terminal because it is a body line, not a
+    // badge, and the progress badge is still there beside it.
+    expect(frame).toContain("run #ulti · awaitOperator");
+    expect(frame).toContain("Question 1 of 1");
+  });
+
   it("validates explicit noninteractive answers without mounting UI", async () => {
     const item = handoff("20260725-120000-explicit", {
       questions: [

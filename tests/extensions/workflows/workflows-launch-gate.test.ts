@@ -219,19 +219,22 @@ describe("/workflows run launch gate", () => {
 
       expect(h.ctx.isIdle()).toBe(false);
       expect(h.waitForIdleCalls).toBe(1);
-      expect(h.sentMessages).toEqual([]);
-      expect(h.customMessageDeliveries).toEqual([]);
+      // The run-boundary banner is published at launch, while the session is
+      // still idle; nothing else is sent while the host streams.
+      expect(h.sentMessages).toHaveLength(1);
+      expect(h.sentMessages[0]?.message.details).toMatchObject({ eventKind: "workflow_start" });
+      expect(h.customMessageDeliveries).toEqual(["append"]);
 
       h.setStreaming(false);
       await command;
-      await waitForBackground(() => h.sentMessages.length === 1);
+      await waitForBackground(() => h.sentMessages.length === 2);
 
-      expect(h.sentMessages).toHaveLength(1);
-      expect(h.customMessageDeliveries).toEqual(["append"]);
+      expect(h.sentMessages).toHaveLength(2);
+      expect(h.customMessageDeliveries).toEqual(["append", "append"]);
       expect(h.customMessageDeliveries).not.toContain("steer");
       expect(h.customMessageDeliveries).not.toContain("followUp");
       expect(h.customMessageDeliveries).not.toContain("turn");
-      const digest = String(h.sentMessages[0]?.message.content ?? "");
+      const digest = String(h.sentMessages[1]?.message.content ?? "");
       expect(digest).toContain("settled complete");
       expect(digest).not.toContain("rawSecret");
       expect(digest).not.toContain("hidden");
@@ -269,7 +272,7 @@ describe("/workflows run launch gate", () => {
       expect(sendMessage).not.toHaveBeenCalled();
       expect(result.content).toHaveLength(1);
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-      expect(text).toContain("Workflow lifecycle (eventKind=workflow_end):");
+      expect(text).toContain("── workflow live-smoke · run #run2 · failed ");
       expect(text.match(/same failure/g)).toHaveLength(1);
       expect(result.details?.transcript).toEqual({ surface: "tool", eventKind: "workflow_end", lineCount: 2 });
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);

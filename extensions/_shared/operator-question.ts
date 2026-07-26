@@ -30,6 +30,12 @@ export interface OperatorQuestionSpec {
   customLabel?: string;
   customPlaceholder?: string;
   progressText?: string;
+  /**
+   * Who is asking, in the operator's terms: the workflow, its run, and the tool
+   * that opened the gate. Without it a question block states what is being asked
+   * and never which of several running things stopped for an answer.
+   */
+  contextText?: string;
   navigation?: OperatorQuestionNavigation;
   initialAnswer?: OperatorQuestionInitialAnswer;
 }
@@ -138,7 +144,11 @@ class OperatorQuestionComponent implements CustomUiComponent {
   }
 
   render(width: number): string[] {
-    const [primary = "Choose an answer", ...questionBody] = splitLines(this.#spec.question);
+    const [primary = "Choose an answer", ...rest] = splitLines(this.#spec.question);
+    // Provenance goes in the body, not a badge: a narrow terminal drops all but
+    // the first badge, and dropping either "who is asking" or "which question of
+    // how many" is worse than one extra line.
+    const questionBody = this.#spec.contextText ? [this.#spec.contextText, ...rest] : rest;
     const body =
       this.#mode === "custom"
         ? [

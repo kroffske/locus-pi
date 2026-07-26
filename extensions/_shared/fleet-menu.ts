@@ -195,7 +195,34 @@ export function renderFleetMenuRows(
 }
 
 function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
-  return selectFleetMenuRows(withWorkflowGroupTokenTotals(sourceRows));
+  return partitionEarlierWorkflowRunRows(selectFleetMenuRows(withWorkflowGroupTokenTotals(sourceRows)));
+}
+
+/**
+ * Rows of the last few completed workflow runs stay drillable, so a re-run agent
+ * appears once per run and the list reads as one confusing fleet. Keeping the
+ * newest run (and every standalone agent) first, with earlier runs behind them
+ * in their existing order, makes "what is running now" the top of the list
+ * without hiding anything.
+ *
+ * Run ids are timestamp-prefixed, so lexicographic order is chronological.
+ */
+function partitionEarlierWorkflowRunRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const newestRunId = newestWorkflowRunId(rows);
+  if (newestRunId === undefined) return rows;
+  const current = rows.filter((row) => row.workflowRunId === undefined || row.workflowRunId === newestRunId);
+  const earlier = rows.filter((row) => row.workflowRunId !== undefined && row.workflowRunId !== newestRunId);
+  return earlier.length === 0 ? rows : [...current, ...earlier];
+}
+
+export function newestWorkflowRunId(rows: readonly AgentLiveRow[]): string | undefined {
+  let newest: string | undefined;
+  for (const row of rows) {
+    const runId = row.workflowRunId;
+    if (runId === undefined) continue;
+    if (newest === undefined || runId > newest) newest = runId;
+  }
+  return newest;
 }
 
 function renderProjectedFleetMenuRows(
@@ -212,12 +239,28 @@ function renderProjectedFleetMenuRows(
   });
   const focused = options.focused === true;
   const selectedRowId = options.selectedRowId;
+  const newestRunId = newestWorkflowRunId(rows);
+  let earlierRunsAnnounced = false;
   const lines = rows.flatMap((row) => {
+    const heading: string[] = [];
+    // One label is enough to answer "am I looking at this run or the last one".
+    if (
+      !earlierRunsAnnounced &&
+      newestRunId !== undefined &&
+      row.workflowRunId !== undefined &&
+      row.workflowRunId !== newestRunId
+    ) {
+      earlierRunsAnnounced = true;
+      heading.push(truncateToWidth("  earlier workflow runs", safeWidth));
+    }
     const projected = panel.renderRows([row], Math.max(1, safeWidth - 2));
-    return projected.map((line, index) => {
-      const prefix = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId ? "▸ " : "  ";
-      return truncateToWidth(`${prefix}${line}`, safeWidth);
-    });
+    return [
+      ...heading,
+      ...projected.map((line, index) => {
+        const prefix = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId ? "▸ " : "  ";
+        return truncateToWidth(`${prefix}${line}`, safeWidth);
+      }),
+    ];
   });
   if (hidden > 0) lines.push(truncateToWidth(`  … and ${hidden} more`, safeWidth));
   const selected = rows.find((row) => row.groupKind === undefined && row.id === selectedRowId);

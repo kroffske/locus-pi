@@ -246,6 +246,17 @@ export class WorkflowOperatorHandoffController {
   }
 }
 
+/**
+ * Name the blocked run and the tool that blocked it. The envelope records no
+ * asking agent, so this states the workflow, its run, and `awaitOperator` — and
+ * never guesses a child agent.
+ */
+function workflowHandoffContext(handoff: ActionableWorkflowHandoff): string {
+  const compact = handoff.runId.replace(/[^a-zA-Z0-9]/gu, "");
+  const shortRunId = compact === "" ? handoff.runId : compact.slice(-4);
+  return `workflow ${handoff.value.target.ref} · run #${shortRunId} · awaitOperator`;
+}
+
 function operatorQuestionSpec(
   handoff: ActionableWorkflowHandoff,
   question: WorkflowHandoffQuestion,
@@ -261,6 +272,7 @@ function operatorQuestionSpec(
       options: [],
       allowCustom: true,
       progressText: `Question 1 of ${queueLength}${questionProgress}`,
+      contextText: workflowHandoffContext(handoff),
     };
   }
   return {

@@ -304,3 +304,33 @@ describe("agent drill command and inline interaction", () => {
     expect(overlay.render(40).join("\n")).toContain("q/esc close");
   });
 });
+
+describe("re-run agent identity", () => {
+  it("resolves a plain agent name to its newest workflow run, not a retained earlier one", async () => {
+    const older = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183012-a6aa:default",
+      agentName: "default",
+      label: "decide clarification",
+      workflowRunId: "20260726-183012-a6aa",
+    });
+    agentLiveStore.patch(older.id, { status: "done" });
+    const newer = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183412-b2c4:default",
+      agentName: "default",
+      label: "decide clarification",
+      workflowRunId: "20260726-183412-b2c4",
+    });
+    agentLiveStore.patch(newer.id, { status: "working" });
+
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    h.customInputQueue.push("escape");
+    agents(h.pi);
+    await h.commands.get("ps")!.handler("default", h.ctx as ExtensionCommandContext);
+
+    const frame = h.customRenderFrames[0]?.join("\n") ?? "";
+    expect(frame).toContain(newer.displayName!);
+    expect(frame).not.toContain(older.displayName!);
+    expect(h.widgets.get("agents") ?? "").not.toContain("ambiguous");
+  });
+});

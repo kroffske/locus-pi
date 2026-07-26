@@ -86,6 +86,7 @@ import {
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { WorkflowRunViewer } from "./run-viewer.js";
 import {
+  announceCommandWorkflowStart,
   createWorkflowTranscript,
   persistCommandWorkflowTranscript,
   renderMainWorkflowStatus,
@@ -221,10 +222,16 @@ export default function workflows(pi: ExtensionAPI): void {
       const cleanupPanel = (): void => {
         if (panel !== undefined) disposePanel(panel);
       };
-      const transcript = createWorkflowTranscript(request.ctx, request.scriptRef, "command");
+      const transcript = createWorkflowTranscript(request.ctx, request.scriptRef, "command", {
+        ...(request.input === undefined ? {} : { input: request.input }),
+      });
       return {
         onRunStart(runId) {
-          transcript.start(runId);
+          const announcement = transcript.start(runId);
+          // The run boundary is published while the session is still idle from
+          // the launch check; a busy session gets no banner rather than a
+          // steered parent agent.
+          if (announcement !== undefined) announceCommandWorkflowStart(pi, request.ctx, announcement);
           if (preparation.hasUI && !panel) {
             panel = installWorkflowProgress(request.ctx, WORKFLOW_LIVE_WIDGET_KEY, request.scriptRef, runId, {
               scope: "workflow",
@@ -357,7 +364,9 @@ export default function workflows(pi: ExtensionAPI): void {
       if (commandLauncher.currentLease(ctx) === undefined) {
         return errorResult("workflow: this extension session has already shut down", { owner: "workflows" });
       }
-      const transcript = createWorkflowTranscript(ctx, workflowTargetLabel(valid.value), "tool");
+      const transcript = createWorkflowTranscript(ctx, workflowTargetLabel(valid.value), "tool", {
+        ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
+      });
       const launched = commandLauncher.attach<RunWorkflowScriptResult>(ctx, signal, async (background) =>
         runWorkflowScript({
           pi,

@@ -1070,7 +1070,11 @@ describe("workflow progress widget", () => {
         workflowsExt(harness.pi);
 
         await harness.commands.get("workflows")!.handler("run silent.workflow.mjs", harness.ctx);
-        await waitUntil(() => harness.sentMessages.length === 1);
+        await waitUntil(() =>
+          harness.sentMessages.some(
+            (entry) => (entry.message.details as { eventKind?: string } | undefined)?.eventKind === "workflow_end",
+          ),
+        );
 
         let text: string;
         if (surface === "tui") {
@@ -1285,7 +1289,11 @@ describe("workflow progress widget", () => {
       expect(harness.statuses.get("locus")).toContain("WF");
 
       await runPromise;
-      await waitUntil(() => harness.sentMessages.length === 1);
+      await waitUntil(() =>
+        harness.sentMessages.some(
+          (entry) => (entry.message.details as { eventKind?: string } | undefined)?.eventKind === "workflow_end",
+        ),
+      );
       expect(harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY)).not.toBeUndefined();
       const payload = harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY);
       const component = (payload as (tui: { requestRender: () => void }, theme: unknown) => WorkflowProgressComponent)(
@@ -1338,12 +1346,13 @@ describe("workflow progress widget", () => {
       expect(agentLiveStore.rows.has("unrelated-row")).toBe(true);
       expect(harness.statuses.has("locus")).toBe(false);
       const persisted = harness.sentMessages.map((entry) => String(entry.message.content));
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0]).toContain("● workflow slow.workflow.mjs started");
-      expect(persisted[0]).toContain("✓ workflow slow.workflow.mjs finished · completed");
+      expect(persisted).toHaveLength(2);
+      expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
+      expect(persisted[0]).toContain("● workflow started");
+      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished · completed");
       expect(
         harness.sentMessages.every(
-          (entry) => entry.message.customType === "locus-workflow-event" && entry.message.display === true,
+          (entry) => entry.message.customType === "locus-workflow-run" && entry.message.display === true,
         ),
       ).toBe(true);
       expect(
@@ -1366,7 +1375,11 @@ describe("workflow progress widget", () => {
       workflowsExt(harness.pi);
 
       await harness.commands.get("workflows")!.handler("run done.workflow.mjs", harness.ctx);
-      await waitUntil(() => harness.sentMessages.length === 1);
+      await waitUntil(() =>
+        harness.sentMessages.some(
+          (entry) => (entry.message.details as { eventKind?: string } | undefined)?.eventKind === "workflow_end",
+        ),
+      );
       const payload = harness.widgetPayloads.get(WORKFLOW_LIVE_WIDGET_KEY);
       expect(typeof payload).toBe("function");
       const component = (payload as (tui: { requestRender: () => void }, theme: unknown) => WorkflowProgressComponent)(
@@ -1538,16 +1551,21 @@ describe("workflow progress widget", () => {
     });
     try {
       await harness.commands.get("workflows")!.handler("run live-smoke", harness.ctx);
-      await waitUntil(() => harness.sentMessages.length === 1);
+      await waitUntil(() =>
+        harness.sentMessages.some(
+          (entry) => (entry.message.details as { eventKind?: string } | undefined)?.eventKind === "workflow_end",
+        ),
+      );
 
       const mainStatuses = [...harness.statuses.values()].join("\n");
       expect(mainStatuses).not.toContain("[agent] ->");
       expect(mainStatuses).not.toContain("[agent] <-");
       expect(mainStatuses).toContain("[error] boom");
       const persisted = harness.sentMessages.map((entry) => String(entry.message.content));
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0]).toContain("● agent ");
-      expect(persisted[0]).toContain("✓ agent ");
+      expect(persisted).toHaveLength(2);
+      // One row per agent: the finished row replaced the started row in place.
+      expect(persisted[1]).toContain("✓ agent ");
+      expect(persisted[1]).not.toContain("● agent ");
       expect(harness.notifications).toContain("⚠ agent evidence · weak proof");
       expect(harness.notificationEvents).toContainEqual({ message: "⚠ agent evidence · weak proof", level: "warning" });
       expect(persisted.filter((message) => message.includes("boom"))).toEqual([

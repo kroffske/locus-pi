@@ -38,6 +38,37 @@ function row(id: string, title: string, status: AgentLiveStatus = "working") {
 }
 
 describe("agent fleet menu", () => {
+  it("puts the newest workflow run first and labels the runs behind it", () => {
+    const earlier = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183012-a6aa:default",
+      agentName: "default",
+      label: "decide clarification",
+      title: "decide clarification",
+      workflowRunId: "20260726-183012-a6aa",
+    });
+    agentLiveStore.patch(earlier.id, { status: "done" });
+    const current = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183412-b2c4:reviewer",
+      agentName: "reviewer",
+      label: "inventory changes",
+      title: "inventory changes",
+      workflowRunId: "20260726-183412-b2c4",
+    });
+    agentLiveStore.patch(current.id, { status: "working" });
+
+    const rendered = renderFleetMenuRows([...agentLiveStore.rows.values()], 120, {});
+    const text = rendered.join("\n");
+    const label = rendered.findIndex((line) => line.includes("earlier workflow runs"));
+    const currentRow = rendered.findIndex((line) => line.includes("inventory changes"));
+    const earlierRow = rendered.findIndex((line) => line.includes("decide clarification"));
+
+    expect(label).toBeGreaterThan(-1);
+    expect(currentRow).toBeLessThan(label);
+    expect(earlierRow).toBeGreaterThan(label);
+    // Nothing is hidden: the earlier run stays drillable, it is only ranked below.
+    expect(text).toContain("decide clarification");
+  });
+
   it("keeps the same row projection when focus adds only the cursor and controls", () => {
     const first = row("row-a", "review auth");
     const second = row("row-b", "run tests");

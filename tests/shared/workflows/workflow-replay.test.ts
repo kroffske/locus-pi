@@ -496,10 +496,12 @@ export default async function runWorkflow(dsl) {
 
     // The digest is the only workflow surface persisted into the model's
     // context, so it is checked against the same journal the run produced.
-    expect(digestFor(root, first)).not.toContain("[replayed]");
+    expect(digestFor(root, first)).not.toContain("replayed");
     const resumedDigest = digestFor(root, resumed);
-    expect(resumedDigest).toContain("[replayed]");
-    expect(resumedDigest).toContain("3 replayed from a recorded run");
+    // Every replayed row names the run it came from, so recorded evidence is
+    // never read as work this run performed.
+    expect(resumedDigest).toContain(`↻ agent default replayed from run #${first.runId.slice(-4)}`);
+    expect(resumedDigest).toContain(`3 replayed from run #${first.runId.slice(-4)}`);
   });
 
   it("declares the replay in the digest of a run that FAILED after reusing recorded calls", async () => {
@@ -529,8 +531,8 @@ export default async function runWorkflow(dsl, input) {
     // the aggregate must not depend on the per-agent markers surviving the cap.
     const digest = digestFor(root, resumed);
     expect(digest).toContain("✗ workflow stages failed");
-    expect(digest).toContain("2 replayed from a recorded run");
-    expect(digestFor(root, first)).not.toContain("replayed from a recorded run");
+    expect(digest).toContain(`2 replayed from run #${first.runId.slice(-4)}`);
+    expect(digestFor(root, first)).not.toContain("replayed from");
   });
 
   it("keeps the recorded payload out of journal.ndjson and in the sidecar record", async () => {

@@ -146,6 +146,47 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **A workflow run now reads as one run in the session transcript.** Two runs of
+  the same workflow used to arrive as two identical, undelimited blocks titled
+  `[locus-workflow-event]` — a name that says neither what the block is nor when
+  it appears — and every agent appeared twice, once as `started` and once as
+  `finished`. Runs are now delimited by their own boundary: a `── workflow <name>
+· run #<id> · <state> <time> ─────` rule opens both a launch banner and the
+  closing digest, so a reader can tell the current run from the one above it
+  without reading the text. Each agent occupies one row that is rewritten in
+  place when it ends. The custom message type is now `locus-workflow-run`, which
+  names the object rather than the emission moment; it is also the marker the
+  model sees, so the rename applies to both readers at once.
+  The launch banner is the only new send, and it is sent only when a synchronous
+  idle recheck passes: Pi routes a message to `agent.steer()` while streaming
+  regardless of `triggerTurn:false`, so a busy session gets no banner rather than
+  a steered agent. Live per-event messages remain impossible for the same reason;
+  the below-editor panel and `/ps` stay the surfaces for watching a run.
+  Three things the block used to leave out are now stated: an agent that started
+  and never ended keeps an explicit `no end recorded (evidence missing)` row
+  instead of vanishing from a green run; replayed work carries `↻ … replayed from
+run #<source>` instead of a success glyph, with the source run id the digest
+  previously dropped; and a run that stops for a human renders that gate as its
+  own block naming the stage, the tool, the questions, and the pending answer,
+  with a continuation run opening as `↳ continues run #<source>` plus the answer
+  that unblocked it.
+- **An agent that ran twice is no longer two identical entries.** Rows from the
+  last few completed runs stay inspectable, so a re-run agent appeared once per
+  run: the fleet list read as one confused fleet, and typing the agent's name
+  was rejected as ambiguous. The list now ranks the newest run and every
+  standalone agent first, puts earlier runs behind a single `earlier workflow
+runs` label, and resolves a bare agent name to that agent's row in the newest
+  run — so opening an agent shows the dialog of the run being watched, not a
+  finished one. Nothing is hidden: an earlier run is still reachable through its
+  own row id.
+- **A question that stops a workflow now says which run it stopped.** The block
+  asking for an answer stated the question and the workflow's title but not
+  which run was blocked or what opened the gate, which is unreadable when more
+  than one thing is running. It now carries `workflow <name> · run #<id> ·
+awaitOperator` — as a body line rather than a badge, because a narrow terminal
+  keeps only the first badge and dropping either the provenance or the question
+  counter is worse than one extra line. It names the stage and the tool, never a
+  guessed agent: the stored handoff records no asking agent.
 - **The curated `review` and `review-fix` examples now demonstrate the shape the
   documentation teaches.** The review family was previously exempt from the
   inline-prompt default because it predated it — provenance, not a property.

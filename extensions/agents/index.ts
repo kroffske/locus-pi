@@ -38,6 +38,7 @@ import {
   FleetFocusComponent,
   fleetMenuState,
   isFleetRowStoppable,
+  newestWorkflowRunId,
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
 } from "../_shared/fleet-menu.js";
@@ -984,6 +985,15 @@ function agentDescendants(parentRowId: string, rows: readonly AgentLiveRow[]): A
 function resolutionFromCandidates(candidates: AgentLiveRow[]): AgentDrillResolution | undefined {
   if (candidates.length === 0) return undefined;
   if (candidates.length === 1) return { ok: true, row: candidates[0]! };
+  // An agent that ran again matches its own retained row from every earlier run
+  // of the same workflow, which used to make its plain name ambiguous. The name
+  // means the newest run — the one the operator is watching — and an earlier
+  // run stays reachable through its own row id.
+  const newestRunId = newestWorkflowRunId(candidates);
+  if (newestRunId !== undefined && candidates.every((row) => row.workflowRunId !== undefined)) {
+    const newest = candidates.filter((row) => row.workflowRunId === newestRunId);
+    if (newest.length === 1) return { ok: true, row: newest[0]! };
+  }
   return { ok: false, reason: "ambiguous", candidates };
 }
 
