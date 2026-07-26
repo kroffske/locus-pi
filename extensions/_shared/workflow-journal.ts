@@ -973,6 +973,87 @@ function isWorkflowRunSummary(value: unknown): boolean {
   );
 }
 
+/**
+ * Turn whatever the operator typed into one persisted run id.
+ *
+ * The chat digest and the live panel head a run with its short suffix
+ * (`run #98cc`), so that is usually what an operator has in front of them, while
+ * the run list and detail widgets print full ids. Both resolve here, `last` is the
+ * newest run, and a full id still resolves exactly. An ambiguous short suffix is refused rather than
+ * guessed, because opening the wrong run's evidence is worse than being asked
+ * for the full id.
+ */
+export type WorkflowRunIdResolution =
+  | { status: "resolved"; runId: string }
+  | { status: "not-found" }
+  | { status: "ambiguous"; matched: number; candidates: string[] };
+
+export function resolveWorkflowRunId(projectRoot: string, selector: string): WorkflowRunIdResolution {
+  const runIds = listWorkflowRunIds(projectRoot);
+  const wanted = selector.trim();
+  if (wanted === "" || wanted === "last" || wanted === "latest") {
+    const newest = runIds[0];
+    return newest === undefined ? { status: "not-found" } : { status: "resolved", runId: newest };
+  }
+  if (runIds.includes(wanted)) return { status: "resolved", runId: wanted };
+  const needle = wanted.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
+  if (needle === "") return { status: "not-found" };
+  const matches = runIds.filter((runId) =>
+    runId
+      .replace(/[^a-zA-Z0-9]/gu, "")
+      .toLowerCase()
+      .endsWith(needle),
+  );
+  if (matches.length === 1) return { status: "resolved", runId: matches[0]! };
+  if (matches.length > 1) {
+    // The count is the real number of matches; the list is what fits in one
+    // message. Reporting the truncated length as the count would read as
+    // exhaustive while quietly dropping runs.
+    return { status: "ambiguous", matched: matches.length, candidates: matches.slice(0, 5) };
+  }
+  return { status: "not-found" };
+}
+
+export type WorkflowRunResultText =
+  { status: "ready"; runId: string; path: string; text: string } | { status: "none"; runId: string; message: string };
+
+/**
+ * The whole terminal output of one finished run, read from disk. `result.md` is
+ * the verbatim copy a prose run writes; older runs and structured results are
+ * recovered from result.json, so a run finished before that file existed still
+ * opens. Nothing here is truncated — being readable is the entire point.
+ */
+export function readWorkflowRunResultText(projectRoot: string, runId: string): WorkflowRunResultText {
+  const runDir = workflowRunDir(projectRoot, runId);
+  const textPath = path.join(runDir, "result.md");
+  try {
+    const text = readFileSync(textPath, "utf8");
+    if (text.trim() !== "") return { status: "ready", runId, path: textPath, text };
+  } catch {
+    // No verbatim copy: fall through to the JSON envelope.
+  }
+  const envelope = readWorkflowRunResult(projectRoot, runId);
+  const jsonPath = path.join(runDir, "result.json");
+  if (envelope === null) {
+    return { status: "none", runId, message: `No persisted result was found for run ${runId}.` };
+  }
+  if (typeof envelope.result === "string" && envelope.result.trim() !== "") {
+    return { status: "ready", runId, path: jsonPath, text: envelope.result };
+  }
+  if (envelope.result !== undefined) {
+    try {
+      const json = JSON.stringify(envelope.result, null, 2);
+      if (json !== undefined) return { status: "ready", runId, path: jsonPath, text: json };
+    } catch {
+      // An unserializable persisted value falls through to the error/none paths.
+    }
+  }
+  if (envelope.error !== undefined && envelope.error.trim() !== "") {
+    return { status: "ready", runId, path: jsonPath, text: `Run failed: ${envelope.error}` };
+  }
+  return { status: "none", runId, message: `Run ${runId} persisted no readable result text.` };
+}
+
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
 export function readWorkflowRunResult(projectRoot: string, runId: string): WorkflowRunResultEnvelope | null {
   try {

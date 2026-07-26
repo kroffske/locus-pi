@@ -47,8 +47,10 @@ import {
   readWorkflowRunJournal,
   readWorkflowRunJournalState,
   readWorkflowRunResult,
+  readWorkflowRunResultText,
   readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
+  resolveWorkflowRunId,
   workflowRunDir,
 } from "../_shared/workflow-journal.js";
 import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
@@ -64,7 +66,10 @@ import {
 } from "../_shared/workflow-result.js";
 import type { OperatorBlock, OperatorTone } from "../_shared/operator-ui.js";
 import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator-status.js";
-import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import {
+  isStaleInlineOperatorInteractionError,
+  requestInlineOperatorInteraction,
+} from "../_shared/operator-interaction.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
 import {
   WORKFLOW_LIVE_WIDGET_KEY,
@@ -84,7 +89,7 @@ import {
   type WorkflowBrowserIntent,
 } from "./workflow-catalog.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
-import { WorkflowRunViewer } from "./run-viewer.js";
+import { WorkflowResultViewer, WorkflowRunViewer } from "./run-viewer.js";
 import {
   announceCommandWorkflowStart,
   createWorkflowTranscript,
@@ -156,11 +161,13 @@ const WORKFLOW_RPC_STATUS_ROWS = 4;
 const WORKFLOW_RPC_DETAIL_EVENT_LIMIT = 1;
 
 const RUNS_IN_STATUS_LIST = 10;
+/** Bounded preview for hosts without custom UI; the file path carries the rest. */
+const WORKFLOW_RESULT_WIDGET_LINES = 40;
 const WORKFLOW_DETAIL_EVENT_LIMIT = 20;
 const WORKFLOW_BUSY_MESSAGE =
   "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";
 const WORKFLOW_STATUS_ID = "workflow.run";
-const FLAT_WORKFLOW_COMMANDS = ["run", "stop", "list", "info", "status", "continue"] as const;
+const FLAT_WORKFLOW_COMMANDS = ["run", "stop", "list", "info", "status", "result", "continue"] as const;
 
 type FlatWorkflowCommand = (typeof FLAT_WORKFLOW_COMMANDS)[number];
 
@@ -636,8 +643,26 @@ export default function workflows(pi: ExtensionAPI): void {
     }
     const statusMatch = /^status\s+(\S+)$/.exec(text);
     if (statusMatch !== null) {
-      if (await openWorkflowRunViewer(ctx, projectRoot, statusMatch[1] ?? "")) return;
-      setOperatorWidget(ctx, "workflows", buildRunDetailBlock(projectRoot, statusMatch[1] ?? "", ctx.mode !== "tui"));
+      const selector = statusMatch[1] ?? "";
+      // The chat digest and the live panel head a run with its short suffix
+      // (`run #98cc`), so that is what an operator has in front of them; the run
+      // list and detail widgets print full ids. Both resolve here, and an id that
+      // matches several runs is named as such rather than reported as missing.
+      const resolved = resolveWorkflowRunId(projectRoot, selector);
+      if (resolved.status === "ambiguous") {
+        setOperatorWidget(ctx, "workflows", ambiguousWorkflowRunBlock(selector, resolved));
+        return;
+      }
+      const runId = resolved.status === "resolved" ? resolved.runId : selector;
+      if (await openWorkflowRunViewer(ctx, projectRoot, runId)) return;
+      setOperatorWidget(ctx, "workflows", buildRunDetailBlock(projectRoot, runId, ctx.mode !== "tui"));
+      return;
+    }
+
+    // `/workflows result [runId|last]` — the whole terminal text of a finished run.
+    const resultMatch = /^result(?:\s+(\S+))?$/.exec(text);
+    if (resultMatch !== null) {
+      await presentWorkflowRunResultText(ctx, projectRoot, resultMatch[1] ?? "last");
       return;
     }
 
@@ -870,6 +895,8 @@ function flatWorkflowCommandDescription(command: FlatWorkflowCommand): string {
       return "Show workflow information: /workflow-info [name]";
     case "status":
       return "Inspect persisted workflow evidence: /workflow-status [runId]";
+    case "result":
+      return "Read the full text a run finished with: /workflow-result [runId|last]";
     case "continue":
       return "Answer and continue an actionable workflow handoff: /workflow-continue <runId> [--answer <text>]";
     default:
@@ -885,6 +912,87 @@ function flatWorkflowCommandDescription(command: FlatWorkflowCommand): string {
  */
 function isOneShotCommandMode(ctx: ExtensionCommandContext): boolean {
   return ctx.mode === "print" || ctx.mode === "json";
+}
+
+/**
+ * Show the full text a run finished with. Interactive hosts get a scrollable
+ * screen; every other host gets the text bounded by the widget plus the exact
+ * file path, because the file is the copy that is never truncated.
+ */
+async function presentWorkflowRunResultText(
+  ctx: ExtensionCommandContext,
+  projectRoot: string,
+  selector: string,
+): Promise<void> {
+  const resolved = resolveWorkflowRunId(projectRoot, selector);
+  if (resolved.status === "ambiguous") {
+    setOperatorWidget(ctx, "workflows", ambiguousWorkflowRunBlock(selector, resolved));
+    return;
+  }
+  if (resolved.status === "not-found") {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(
+        selector === "last" || selector === ""
+          ? "No workflow run with persisted evidence was found."
+          : `No workflow run matches ${selector}.`,
+        "List runs: /workflows status",
+      ),
+    );
+    return;
+  }
+  const read = readWorkflowRunResultText(projectRoot, resolved.runId);
+  if (read.status === "none") {
+    setOperatorWidget(ctx, "workflows", workflowWarningBlock(read.message, "Inspect evidence: /workflows status"));
+    return;
+  }
+  const title = `workflow result · run ${read.runId}`;
+  if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
+    clearWorkflowWidget(ctx, "workflows");
+    try {
+      await requestInlineOperatorInteraction<void>(
+        ctx,
+        (tui, theme, keybindings, done) => new WorkflowResultViewer(tui, theme, keybindings, title, read.text, done),
+      );
+      return;
+    } catch (error) {
+      if (!isStaleInlineOperatorInteractionError(error)) throw error;
+      // Another prompt owns the screen. Say so and leave the path behind, so the
+      // command never ends with nothing on screen — best-effort, because a
+      // replaced session may no longer accept a notification at all.
+      try {
+        ctx.ui.notify("Workflow result closed: another prompt took the screen. Retry /workflows result.", "info");
+      } catch {
+        // The bounded widget below is still written.
+      }
+    }
+  }
+  // The widget re-bounds this body itself and marks what it drops, so the only
+  // honest thing to add is the size of the whole result and where all of it is.
+  // Claiming a second, different line count here would contradict that marker.
+  const allLines = read.text.replace(/\n$/u, "").split(/\r?\n/u);
+  setOperatorWidget(ctx, "workflows", {
+    type: "VIEW",
+    subject: "Workflow result",
+    primary: title,
+    body: allLines.slice(0, WORKFLOW_RESULT_WIDGET_LINES),
+    metadata: [`full text: ${allLines.length} line(s) at ${read.path}`],
+    controls: ["Read it all in an interactive Pi TUI, or open the file above"],
+  });
+}
+
+/** One wording for a short run id that names more than one run. */
+function ambiguousWorkflowRunBlock(
+  selector: string,
+  resolved: { matched: number; candidates: string[] },
+): OperatorBlock {
+  return workflowWarningBlock(
+    `Run id ${selector} matches ${resolved.matched} runs.`,
+    resolved.matched > resolved.candidates.length
+      ? `Retry with a full id; ${resolved.candidates.length} of ${resolved.matched} shown: ${resolved.candidates.join(" · ")}`
+      : `Retry with a full id: ${resolved.candidates.join(" · ")}`,
+  );
 }
 
 async function openWorkflowRunViewer(

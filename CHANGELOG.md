@@ -6,6 +6,29 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **`/workflows result [runId|last]`** — the whole text a run finished with, in
+  one command. Every finished-run surface is bounded deliberately: the chat digest
+  caps a line at 160 characters because it enters model context, and the live
+  panel clips to the terminal width. A run whose result _is_ prose — a review, a
+  plan, an answer — therefore had no readable copy anywhere: the full text existed
+  only as one escaped JSON string inside `result.json`, and reaching it meant
+  walking run → stage → evidence → content in the evidence viewer and guessing
+  which artifact held it. A prose result is now also written verbatim to
+  `result.md` in the run directory, the digest and the panel name that file plus
+  the command that opens it, and `/workflows result` (alias `/workflow-result`)
+  shows the whole text in a scrollable read-only screen — `↑/↓` and
+  PageUp/PageDown to scroll, Home/End to jump, Esc to close. Hosts without custom
+  UI get a bounded preview plus the exact path. Structured results stay in
+  `result.json`, which already pretty-prints them, and a run recorded before
+  `result.md` existed is recovered from its persisted envelope so older runs still
+  open.
+- `/workflows result` and `/workflows status` accept the short run id every
+  surface prints. Runs are shown as `run #98cc`, so that is what an operator has
+  to type back; until now only the full `20260726-212752-98cc` resolved, and the
+  short form reported the run as not found. `last` selects the newest run, a full id
+  still resolves exactly, and a short suffix matching several runs is reported with
+  the real match count and the listed candidates — never opened as the wrong run,
+  and never reported as "not found" when runs were in fact found.
 - Two per-call bounds on `agent()`, so a workflow script no longer re-implements
   them. `timeoutMs` is a wall-clock fuse that **aborts the child** on expiry and
   fails the call closed — `maxToolCalls` bounds tool usage and cannot end a
@@ -128,6 +151,28 @@ This file records user-visible changes to the public package.
   take an open fleet selector off the screen. The replaced component's host
   promise is deliberately left pending, because Pi's own close path restores the
   editor and would clear whatever replaced it.
+  Leaving that promise pending is not sufficient on its own, and the first fix
+  stopped one step short of the operator-visible symptom. A replaced component
+  still holds the callback Pi handed it, and Pi keeps one such callback per
+  `custom()` call for that call's whole life. When a superseded prompt calls it
+  later — an `ask.timeout` expiring, an abort listener firing, a queued key — the
+  host runs that old call's close path: `editorContainer.clear()` and the editor
+  re-added, over whichever interaction is on screen at that moment. Answer a
+  workflow's question, open `/ps`, and the fleet could be wiped from the screen
+  with its own promise still pending: typed the command, nothing there.
+  That callback is now fenced by slot ownership. A request that no longer owns
+  the slot drops the call and disposes its own component instead, so no
+  superseded surface can blank the live one, and the newest interaction stays on
+  screen until it closes itself. For the same reason the slot changes hands only
+  once the newcomer's factory has actually returned a component, so a request
+  that never appears cannot take it from a live surface. A factory that _rejects_
+  is the honest exception: Pi runs its own editor-restore on that path, so the
+  live component is off the screen regardless — that incumbent is now explicitly
+  retired and told, instead of being left awaiting a surface nobody can see.
+  Callers now read supersession as replacement rather than failure: the ask tool
+  returns `status: "superseded"` with a retryable message instead of
+  `Ask UI failed`, and `/model-roles` closes benignly with any applied route
+  intact.
   The trade this accepts: two genuinely concurrent interactions no longer queue,
   the later one wins. That is already what the host does to the rendered
   component; the queue only pretended otherwise, and the pretence is what froze.

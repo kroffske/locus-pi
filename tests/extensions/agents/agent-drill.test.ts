@@ -4,6 +4,7 @@ import agents from "../../../extensions/agents/index.js";
 import { ScrollableTextOverlay } from "../../../extensions/agents/drill-overlay.js";
 import * as sessionViewer from "../../../extensions/agents/session-viewer.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { SupersededInlineOperatorInteractionError } from "../../../extensions/_shared/operator-interaction.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
 
@@ -315,6 +316,23 @@ describe("/ps never fails silently", () => {
 
     expect(h.customComponents).toHaveLength(0);
     expect(h.notifications).toContain("/ps found no live agent rows.");
+  });
+
+  it("falls back to the bounded catalog and says why when the scroll surface loses the screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    // Pi shows one inline surface at a time: this models the newer prompt that
+    // takes the screen while /agent list is opening.
+    h.ctx.ui.custom = async () => {
+      throw new SupersededInlineOperatorInteractionError();
+    };
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("list", h.ctx as ExtensionCommandContext);
+
+    // Neither surface may end blank: the operator gets the catalog either way.
+    expect(h.widgets.get("agents") ?? "").toContain("Agent catalog");
+    expect(h.notifications.some((message) => message.startsWith("Agent catalog closed:"))).toBe(true);
   });
 });
 

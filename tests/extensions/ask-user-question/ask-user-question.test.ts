@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import askUserQuestion from "../../../extensions/ask-user-question/index.js";
+import {
+  StaleInlineOperatorInteractionError,
+  SupersededInlineOperatorInteractionError,
+} from "../../../extensions/_shared/operator-interaction.js";
 import { sessionJsonlPath } from "../../../extensions/_shared/files.js";
 import { JsonlSessionStore } from "../../../extensions/_shared/session-core.js";
 import { createHarness, runTool } from "../../test-harness.js";
@@ -292,6 +296,31 @@ describe("ask-user-question decision journal", () => {
         metadata: { source: "ask" },
       },
     });
+  });
+
+  it.each([
+    ["superseded", "superseded", "another prompt took the screen"],
+    ["stale", "stale", "did not reach the screen"],
+  ])("reports a %s inline surface as its own retryable status, not a failed ask", async (_name, status, wording) => {
+    const h = createHarness();
+    askUserQuestion(h.pi);
+    h.ctx.ui.custom = async () => {
+      throw status === "superseded"
+        ? new SupersededInlineOperatorInteractionError()
+        : new StaleInlineOperatorInteractionError();
+    };
+
+    const result = await runTool(h, "ask", {
+      questions: [{ id: "deploy", question: "Deploy?", options: [{ label: "ship" }, { label: "hold" }] }],
+    });
+
+    // Losing the single editor slot is traffic, not a defect: the tool says which
+    // it was so the model can re-ask instead of reporting the ask as broken.
+    expect(result.details?.status).toBe(status);
+    expect(result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n")).toContain(wording);
+    expect(result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n")).not.toContain(
+      "Ask UI failed",
+    );
   });
 
   it("falls back to select prompts when custom UI is unavailable", async () => {

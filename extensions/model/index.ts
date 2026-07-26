@@ -14,7 +14,11 @@ import {
 } from "../_shared/model-settings.js";
 import { getCommandText, getProjectRoot, getSessionId, getWorkingDirectory } from "../_shared/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import {
+  isStaleInlineOperatorInteractionError,
+  isSupersededInlineOperatorInteractionError,
+  requestInlineOperatorInteraction,
+} from "../_shared/operator-interaction.js";
 import { clearOperatorStatus, setOperatorStatus, type OperatorStatusContribution } from "../_shared/operator-status.js";
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import { createSessionStore, getRuntimeCapabilityReport } from "../_shared/runtime-capabilities.js";
@@ -546,18 +550,41 @@ async function showModelRoleSelector(pi: ExtensionAPI, ctx: ExtensionContext, mo
   const rows = buildModelRows(models, state, currentSelector);
   if (rows.length === 0) return;
   publishModelRoleStatus(ctx, summaries);
-  await requestInlineOperatorInteraction<void>(
-    ctx,
-    (tui, theme, _keybindings, done) =>
-      new ModelRoleSelectorComponent(tui, createModelRoleSelectorTheme(theme), {
-        rows,
-        roleSummaries: summaries,
-        currentSelector,
-        currentThinking: pi.getThinkingLevel?.(),
-        applySelection: (selection) => applyModelRole(pi, ctx, selection),
-        done,
-      }),
-  );
+  try {
+    await requestInlineOperatorInteraction<void>(
+      ctx,
+      (tui, theme, _keybindings, done) =>
+        new ModelRoleSelectorComponent(tui, createModelRoleSelectorTheme(theme), {
+          rows,
+          roleSummaries: summaries,
+          currentSelector,
+          currentThinking: pi.getThinkingLevel?.(),
+          applySelection: (selection) => applyModelRole(pi, ctx, selection),
+          done,
+        }),
+    );
+  } catch (error) {
+    // Pi shows one inline surface at a time, so a newer prompt taking the screen
+    // is a normal outcome here, not a failed command: any role already applied
+    // stays applied, and nothing further is claimed.
+    if (!isStaleInlineOperatorInteractionError(error)) throw error;
+    // A session Pi has already replaced may not accept a notification at all.
+    notifyBenignInteractionEnd(
+      ctx,
+      isSupersededInlineOperatorInteractionError(error)
+        ? "Model roles closed: another prompt took the screen. Reopen /model-roles when it is answered."
+        : "Model roles did not open: this session's UI surface is no longer the one that asked. Reopen /model-roles.",
+    );
+  }
+}
+
+/** Notify best-effort: a replaced session has nobody left to tell. */
+function notifyBenignInteractionEnd(ctx: ExtensionContext, message: string): void {
+  try {
+    ctx.ui.notify(message, "info");
+  } catch {
+    // Nothing to recover: the surface this would describe is already gone.
+  }
 }
 
 function modelRoleFallbackBlock(

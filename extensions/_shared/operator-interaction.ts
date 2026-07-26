@@ -70,6 +70,10 @@ export async function requestInlineOperatorInteraction<T>(
   queues.set(generation.id, queue);
 
   const available = queue.tail;
+  // Slot ownership as this request sees it. It is what fences the host callback
+  // below: once this request has lost the editor slot — superseded by a newer
+  // one, or released — nothing it retained may act on the host's behalf again.
+  let ownsSlot = true;
   let resolveSlot!: () => void;
   queue.tail = new Promise<void>((resolve) => {
     resolveSlot = resolve;
@@ -78,6 +82,10 @@ export async function requestInlineOperatorInteraction<T>(
   const releaseSlot = (): void => {
     if (slotReleased) return;
     slotReleased = true;
+    // Releasing deliberately does NOT end callback ownership. A component may
+    // dispose itself and then report its result — `Esc` in the agent viewer does
+    // exactly that — and fencing on release would swallow that answer and leave
+    // the caller waiting. Only a newer interaction taking the slot ends it.
     queue.pending -= 1;
     if (queue.releaseCurrent === releaseSlot) {
       queue.releaseCurrent = undefined;
@@ -90,7 +98,10 @@ export async function requestInlineOperatorInteraction<T>(
   };
   let supersede!: () => void;
   const superseded = new Promise<never>((_resolve, reject) => {
-    supersede = () => reject(new SupersededInlineOperatorInteractionError());
+    supersede = () => {
+      ownsSlot = false;
+      reject(new SupersededInlineOperatorInteractionError());
+    };
   });
   // Nothing observes this until the race below, and an unobserved rejection
   // would surface as an unhandled promise.
@@ -118,26 +129,49 @@ export async function requestInlineOperatorInteraction<T>(
       throw new Error("Inline operator interaction is unavailable because this Pi host does not expose custom UI.");
     }
 
-    // Only now, with this request certain to mount, is the previous holder
-    // retired — a request that declined to mount must never take a live
-    // component off the operator's screen.
-    const releasePrevious = queue.releaseCurrent;
-    const supersedePrevious = queue.supersedeCurrent;
-    queue.releaseCurrent = releaseSlot;
-    queue.supersedeCurrent = supersede;
-    if (releasePrevious !== releaseSlot) {
+    /** Tell whoever holds the slot that they no longer do. */
+    const retireIncumbent = (nextOwner: { release: () => void; supersede: () => void } | undefined): void => {
+      const releasePrevious = queue.releaseCurrent;
+      const supersedePrevious = queue.supersedeCurrent;
+      if (releasePrevious === releaseSlot) return;
+      queue.releaseCurrent = nextOwner?.release;
+      queue.supersedeCurrent = nextOwner?.supersede;
       releasePrevious?.();
       supersedePrevious?.();
-    }
+    };
+
+    // Ownership changes only once this request has a real component in hand: Pi
+    // mounts after the factory promise fulfils, so retiring the incumbent any
+    // earlier would hand the slot to a request that may never appear.
+    let tookSlot = false;
+    const takeSlot = (): void => {
+      if (!ownsSlot) return;
+      tookSlot = true;
+      retireIncumbent({ release: releaseSlot, supersede });
+    };
 
     // The host's promise for a replaced component never settles, and its own
     // close path would restore the editor over whatever replaced it. So the
     // superseded caller is failed here instead, and the stale host promise is
     // left pending.
-    return await Promise.race([
-      custom.call(ctx.ui, wrapFactoryDisposal(factory, releaseSlot), INLINE_OPERATOR_INTERACTION_OPTIONS) as Promise<T>,
-      superseded,
-    ]);
+    try {
+      return await Promise.race([
+        custom.call(
+          ctx.ui,
+          wrapFactoryDisposal(factory, releaseSlot, takeSlot, () => ownsSlot),
+          INLINE_OPERATOR_INTERACTION_OPTIONS,
+        ) as Promise<T>,
+        superseded,
+      ]);
+    } catch (error) {
+      // A factory that rejects never mounts, but the host still runs its own
+      // `restoreEditor()` on that path — the live component is off the screen
+      // whether this request wanted the slot or not. Leaving the incumbent
+      // registered would leave its owner awaiting a surface nobody can see, so
+      // it is retired here and learns the same way it would from any takeover.
+      if (!tookSlot && !isSupersededInlineOperatorInteractionError(error)) retireIncumbent(undefined);
+      throw error;
+    }
   } finally {
     releaseSlot();
   }
@@ -194,11 +228,25 @@ function sessionLeaseIsCurrent(
   captured: SessionGeneration,
   callerGuard: (() => boolean) | undefined,
 ): boolean {
+  if (!sessionGenerationIsCurrent(ctx, captured)) return false;
   try {
-    const currentOwner = currentGenerationOwner(ctx);
-    if (currentOwner !== captured.owner) return false;
-    if ((currentSessionId(ctx) ?? "session-unknown") !== captured.id) return false;
     return callerGuard?.() ?? true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Session identity alone: the same owner object and the same session id this
+ * request captured. `sessionLeaseIsCurrent` adds the caller's own guard on top
+ * for the pre-mount decision. Nothing consults this after mounting — a surface
+ * on screen must stay closable even when the session it belongs to has moved on,
+ * because a component that cannot report its result is worse than a late one.
+ */
+function sessionGenerationIsCurrent(ctx: ExtensionContext, captured: SessionGeneration): boolean {
+  try {
+    if (currentGenerationOwner(ctx) !== captured.owner) return false;
+    return (currentSessionId(ctx) ?? "session-unknown") === captured.id;
   } catch {
     // Pi invalidates captured contexts after session replacement/reload.
     return false;
@@ -210,9 +258,40 @@ function currentGenerationOwner(ctx: ExtensionContext): object {
   return ctx.ui;
 }
 
-function wrapFactoryDisposal<T>(factory: CustomUiFactory<T>, releaseSlot: () => void): CustomUiFactory<T> {
+/**
+ * Wrap the component Pi is about to mount so this package controls two things
+ * the host does not: when the slot changes hands, and who may still speak for
+ * the host afterwards.
+ *
+ * The second one is the load-bearing part. Pi keeps one `close` callback per
+ * `custom()` call for that call's whole lifetime, and for a non-overlay
+ * component `close` runs `editorContainer.clear()` + re-adds the editor. A
+ * component the host silently replaced still holds its own `close`, so a late
+ * call — an `ask.timeout` firing, an abort listener, a queued key — would
+ * restore the editor over whichever interaction is on screen now, leaving the
+ * newer one invisible and its caller waiting forever. `ownsSlot` fences that
+ * callback: a request that no longer owns the slot drops the call and disposes
+ * its own component instead, so a superseded surface can never blank the live
+ * one.
+ */
+function wrapFactoryDisposal<T>(
+  factory: CustomUiFactory<T>,
+  releaseSlot: () => void,
+  takeSlot: () => void,
+  ownsSlot: () => boolean,
+): CustomUiFactory<T> {
   return async (tui, theme, keybindings, done) => {
-    const component = await factory(tui, theme, keybindings, done);
+    let mounted: { dispose?: () => void } | undefined;
+    const fencedDone = (value: T): void => {
+      if (!ownsSlot()) {
+        // Nothing is retained beyond this point: the component's own timers and
+        // listeners are exactly what would call back again.
+        mounted?.dispose?.();
+        return;
+      }
+      done(value);
+    };
+    const component = await factory(tui, theme, keybindings, fencedDone);
     const dispose = component.dispose?.bind(component);
     let disposed = false;
     component.dispose = () => {
@@ -226,6 +305,8 @@ function wrapFactoryDisposal<T>(factory: CustomUiFactory<T>, releaseSlot: () => 
         releaseSlot();
       }
     };
+    mounted = component;
+    takeSlot();
     return component;
   };
 }

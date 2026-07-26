@@ -844,6 +844,26 @@ describe("workflow progress widget", () => {
     expect(text).toContain("saved: .locus/runtime/workflows/20260101-000000-r1");
   });
 
+  it("points a clipped prose verdict at the file and the command that show all of it", () => {
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 60 } };
+    const component = new WorkflowProgressComponent(tui, {}, "review", "20260726-212752-98cc");
+
+    component.finish({
+      ok: true,
+      result: `# Code Review\n\n${"A verdict far wider than this terminal. ".repeat(6)}`,
+      runDir: ".locus/runtime/workflows/20260726-212752-98cc",
+      resultTextPath: ".locus/runtime/workflows/20260726-212752-98cc/result.md",
+    });
+
+    const narrow = component.render(60).join("\n");
+    // The command names the run, so it is usable even where the panel clips paths.
+    expect(narrow).toContain("read the full result: /workflows result 98cc");
+    for (const line of narrow.split("\n")) expect(line.length).toBeLessThanOrEqual(60);
+    expect(component.render(120).join("\n")).toContain(
+      "result: .locus/runtime/workflows/20260726-212752-98cc/result.md",
+    );
+  });
+
   it("chooses a deterministic semantic completion without exposing arbitrary JSON", () => {
     const cases: Array<{ result: unknown; expected: string }> = [
       {

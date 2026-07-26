@@ -3,7 +3,11 @@ import { Input, Text } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui, ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, textResult } from "../_shared/pi-api.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
-import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
+import {
+  isStaleInlineOperatorInteractionError,
+  isSupersededInlineOperatorInteractionError,
+  requestInlineOperatorInteraction,
+} from "../_shared/operator-interaction.js";
 import { requestOperatorQuestion } from "../_shared/operator-question.js";
 import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
 import { validateParams } from "../_shared/validation.js";
@@ -231,6 +235,26 @@ async function askOmpCompatible(
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      // Pi shows one inline surface at a time. Another prompt taking the screen
+      // is normal traffic, not a broken tool: it is reported as its own
+      // retryable status so the model re-asks instead of treating the question
+      // as failed.
+      if (isStaleInlineOperatorInteractionError(error)) {
+        // Only a genuine takeover may claim one; a stale lease means this prompt
+        // never reached the screen at all, and saying "ask again" to that would
+        // promise a retry that fails the same way.
+        const superseded = isSupersededInlineOperatorInteractionError(error);
+        return errorResult(
+          superseded
+            ? "Ask was closed because another prompt took the screen; ask again."
+            : "Ask did not reach the screen: this session's prompt surface is no longer the one that asked.",
+          {
+            status: superseded ? "superseded" : "stale",
+            source,
+            question: question.id,
+          },
+        );
+      }
       return errorResult(`Ask UI failed: ${reason}`, {
         status: "error",
         source,

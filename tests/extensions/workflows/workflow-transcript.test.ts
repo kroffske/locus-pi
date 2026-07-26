@@ -205,6 +205,29 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).not.toContain("finished");
   });
 
+  it("says where the unabridged result text is and which command opens it", () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "review", "command");
+    transcript.start("20260726-212752-98cc");
+    const longResult = `# Code Review\n\n## Reviewed scope\n\n${"Detail line that runs well past the digest line cap. ".repeat(8)}`;
+
+    const completion = transcript.finish({
+      runId: "20260726-212752-98cc",
+      runDir: "/tmp/run-98cc",
+      ok: true,
+      result: longResult,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-98cc/result.json" },
+      resultTextPath: "/tmp/run-98cc/result.md",
+    });
+
+    // The verdict line itself stays bounded — it enters model context.
+    for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
+    expect(completion.digest).toContain("result: /tmp/run-98cc/result.md");
+    expect(completion.digest).toContain("read the full result: /workflows result 98cc");
+    expect(completion.digest).toContain("journal: /tmp/run-98cc/journal.ndjson");
+  });
+
   it("buffers a bounded tool digest without calling sendMessage and always retains workflow_end", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "bounded", "tool");

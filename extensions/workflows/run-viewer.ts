@@ -321,6 +321,81 @@ export class WorkflowRunViewer implements CustomUiComponent {
   }
 }
 
+/**
+ * One screen, one job: the entire terminal text of a finished run, scrollable
+ * and never clipped. `/workflows result` opens this instead of asking the
+ * operator to walk run → stage → evidence → content for the one artifact they
+ * always want, and instead of leaving them with the 160-character digest line.
+ */
+export class WorkflowResultViewer implements CustomUiComponent {
+  #scroll = 0;
+  #done: (() => void) | undefined;
+  readonly #theme: RunViewerTheme;
+  readonly #lines: string[];
+
+  constructor(
+    private readonly tui: CustomUiTui,
+    theme: unknown,
+    private readonly keybindings: unknown,
+    private readonly title: string,
+    text: string,
+    done: () => void,
+  ) {
+    this.#theme = asTheme(theme);
+    this.#done = done;
+    this.#lines = highlightCode(text, "markdown");
+  }
+
+  render(width: number): string[] {
+    const safeWidth = normalizeWidth(width);
+    const height = viewerRows(this.tui);
+    const header = style(this.#theme, "accent", fitLine(`[VIEW] ${this.title}`, safeWidth));
+    if (height === 1) return [header];
+    const footer = listFooter("↑/↓ scroll", height);
+    const bodyHeight = Math.max(0, height - 1 - footer.length);
+    const lines = this.#lines.flatMap((line) => wrapTextWithAnsi(line, safeWidth));
+    const maxScroll = Math.max(0, lines.length - bodyHeight);
+    this.#scroll = clamp(this.#scroll, 0, maxScroll);
+    const body = lines.slice(this.#scroll, this.#scroll + bodyHeight);
+    const first = Math.min(lines.length, this.#scroll + 1);
+    const last = Math.min(lines.length, this.#scroll + Math.max(1, body.length));
+    const position = lines.length === 0 ? "" : `${first}-${last}/${lines.length}`;
+    const renderedFooter = footer.map((line, index) =>
+      index === 0 && position !== "" ? `${line} · ${position}` : line,
+    );
+    return [
+      header,
+      ...padLines(body, bodyHeight, safeWidth),
+      ...renderedFooter.map((line) => fitLine(line, safeWidth)),
+    ];
+  }
+
+  handleInput(data: string): void {
+    if (isCancel(this.keybindings, data)) {
+      const done = this.#done;
+      this.#done = undefined;
+      done?.();
+      return;
+    }
+    const page = Math.max(1, contentBodyHeight(this.tui) - 1);
+    if (isUp(this.keybindings, data)) this.#scroll -= 1;
+    else if (isDown(this.keybindings, data)) this.#scroll += 1;
+    else if (["pageUp", "pageup", "\x1b[5~"].includes(data)) this.#scroll -= page;
+    else if (["pageDown", "pagedown", "\x1b[6~"].includes(data)) this.#scroll += page;
+    else if (["home", "\x1b[H", "\x1b[1~"].includes(data)) this.#scroll = 0;
+    else if (["end", "\x1b[F", "\x1b[4~"].includes(data)) this.#scroll = Number.MAX_SAFE_INTEGER;
+    else return;
+    this.#scroll = Math.max(0, this.#scroll);
+    this.tui.requestRender();
+  }
+
+  invalidate(): void {}
+
+  dispose(): void {
+    this.#done = undefined;
+  }
+}
+
 function runRow(projectRoot: string, runId: string): RunRow {
   const summary = readWorkflowRunSummary(projectRoot, runId);
   const journal = readWorkflowRunJournalState(projectRoot, runId);

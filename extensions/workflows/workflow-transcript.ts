@@ -177,6 +177,15 @@ export function createWorkflowTranscript(
       // it broke, which evidence proves it, and one copyable repair request. These
       // lines skip the 160-char compaction — a truncated path or repair request
       // would be unusable, and the diagnostic is already bounded at its source.
+      // The summary above is capped at 160 characters because this digest enters
+      // model context. A run whose result is prose therefore has to say where the
+      // unabridged text is, and which command shows it — otherwise the operator
+      // is left with a sentence fragment and no way forward. A failed run that
+      // still produced text needs it just as much as a clean one.
+      if (res.resultTextPath !== undefined && res.resultTextPath !== "") {
+        bodyLines.push(firstTranscriptLine(`result: ${res.resultTextPath}`));
+        bodyLines.push(firstTranscriptLine(`read the full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
+      }
       if (res.failureDiagnostic !== undefined) {
         for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {
           bodyLines.push(firstTranscriptLine(line));

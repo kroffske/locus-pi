@@ -313,7 +313,26 @@ JavaScript is not supported.
 /workflows info <name>            add exact first-wins source/path, static meta.description and declared phases
 /workflows status                 interactive persisted viewer; bounded run list without custom UI
 /workflows status <runId>         interactive stage evidence; bounded detail without custom UI
+/workflows result [runId|last]    the whole text the run finished with, scrollable and untruncated
 ```
+
+Every finished-run surface is bounded on purpose: the chat digest caps a line at
+160 characters because it enters model context, and the live panel clips to the
+terminal width. So a run whose result **is** prose — a review, a plan, an answer —
+writes that text verbatim to `result.md` in its run directory, and both the digest
+and the panel name that file plus the command that opens it. `/workflows result`
+(alias `/workflow-result`) opens the full text in a scrollable read-only screen:
+`↑/↓` and PageUp/PageDown scroll, Home/End jump, Esc closes. A host without custom
+UI gets a bounded preview plus the exact path, which is the copy that is never
+truncated. Structured (non-text) results stay in `result.json`, which already
+pretty-prints them; a run recorded before `result.md` existed is recovered from the
+persisted envelope, so older runs still open.
+
+`/workflows result` and `/workflows status` accept the short run suffix every
+surface prints (`run #98cc` → `/workflows result 98cc`), `last` for the newest run,
+or a full run id. A short suffix matching more than one run is refused with the real
+match count and the listed candidates — never opened as the wrong run, and never
+reported as missing when runs were found.
 
 The same owners are available as first-class commands:
 
@@ -323,6 +342,7 @@ The same owners are available as first-class commands:
 /workflow-list [query]
 /workflow-info [name]
 /workflow-status [runId]
+/workflow-result [runId|last]
 /workflow-continue <runId> [--answer <text>]
 ```
 

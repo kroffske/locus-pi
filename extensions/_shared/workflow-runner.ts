@@ -59,6 +59,7 @@ import {
   workflowDispositionForCompletion,
   workflowResultFile,
   writeWorkflowResultJson,
+  writeWorkflowResultText,
   type WorkflowDisposition,
   type WorkflowResultDiagnosticSentinel,
   type WorkflowResultPersistence,
@@ -174,6 +175,8 @@ export interface RunWorkflowScriptResult {
   result: unknown; // detached JSON value or explicit diagnostic sentinel
   resultDiagnostic?: WorkflowResultDiagnosticSentinel;
   resultPersistence: WorkflowResultPersistence;
+  /** Path of the verbatim text copy of a prose result, when the run produced one. */
+  resultTextPath?: string;
   journal: WorkflowJournalLine[];
   error?: string;
   /** Who failed, when the run failed. Presentation-only; wording, not truth. */
@@ -627,7 +630,19 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ...enrichedFields,
       resultPersistence: intendedPersistence,
     });
-    if (resultPersistence.ok) return { runId, runDir, ...enrichedFields, resultPersistence };
+    // A prose result gets a readable sibling file. Every live surface bounds its
+    // own output, so without this the whole text existed only as one escaped
+    // JSON string.
+    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
+    if (resultPersistence.ok) {
+      return {
+        runId,
+        runDir,
+        ...enrichedFields,
+        resultPersistence,
+        ...(resultTextPath === undefined ? {} : { resultTextPath }),
+      };
+    }
 
     const persistenceError: WorkflowJournalLine = {
       ts: new Date().toISOString(),
@@ -654,7 +669,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
     });
-    return { runId, runDir, ...failedFields, resultPersistence };
+    return {
+      runId,
+      runDir,
+      ...failedFields,
+      resultPersistence,
+      ...(resultTextPath === undefined ? {} : { resultTextPath }),
+    };
   };
 
   /** Attach the actionable diagnostic to a failed envelope; other outcomes pass through. */

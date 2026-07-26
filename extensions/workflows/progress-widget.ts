@@ -75,6 +75,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     status: WorkflowProjectedStatus;
     summary: string;
     runDir?: string;
+    resultTextPath?: string;
     resultPersistence?: WorkflowResultPersistence;
     failureDiagnostic?: WorkflowFailureDiagnostic;
   };
@@ -130,6 +131,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     result?: unknown;
     disposition?: WorkflowDisposition;
     runDir?: string;
+    resultTextPath?: string;
     resultPersistence?: WorkflowResultPersistence;
     failureDiagnostic?: WorkflowFailureDiagnostic;
   }): void {
@@ -143,6 +145,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       status: disposition.status,
       summary: disposition.summary,
       ...(res.runDir !== undefined ? { runDir: res.runDir } : {}),
+      ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
       ...(res.resultPersistence !== undefined ? { resultPersistence: res.resultPersistence } : {}),
       ...(res.failureDiagnostic !== undefined ? { failureDiagnostic: res.failureDiagnostic } : {}),
     };
@@ -325,6 +328,16 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       for (const line of formatWorkflowFailureDiagnosticLines(this.done.failureDiagnostic)) {
         lines.push(this.#fg("dim", truncate(line, width)));
       }
+    }
+    // The verdict line above is clipped to the terminal width, so a run whose
+    // result is prose needs one line saying where the whole text is and the one
+    // command that opens it.
+    // Gated on the same fact the digest uses: a readable text copy exists. A run
+    // that produced none must not be told to go and read one.
+    if (this.done.resultTextPath !== undefined) {
+      const command = `read the full result: /workflows result ${shortWorkflowRunId(this.runId)}`;
+      lines.push(this.#fg("dim", truncate(command, width)));
+      lines.push(this.#fg("dim", truncate(`result: ${this.done.resultTextPath}`, width)));
     }
     // Honest pointer to the saved run on disk (T-188 W5, fix-candidate #8).
     if (this.done.runDir !== undefined) lines.push(this.#fg("dim", truncate(`saved: ${this.done.runDir}`, width)));

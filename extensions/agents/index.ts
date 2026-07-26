@@ -552,7 +552,14 @@ async function renderAgentBlockInteraction(ctx: ExtensionCommandContext, block: 
       (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
     );
   } catch (error) {
-    if (isStaleInlineOperatorInteractionError(error)) return true;
+    if (isStaleInlineOperatorInteractionError(error)) {
+      // The scroll surface never made it to the screen, and the transient widget
+      // was already cleared for it. Reporting success here left the operator with
+      // a blank screen and no catalog at all, so the bounded widget renders
+      // instead — the same fallback a host without custom UI gets.
+      notifyInteractionEnded(ctx, error, "Agent catalog");
+      return false;
+    }
     throw error;
   }
   return true;
@@ -844,7 +851,19 @@ async function executeAgentDrillCommand(
   }
   const row = resolution.row;
   const executionAuthority = agentLiveStore.captureExecutionAuthority(row.id);
-  if (executionAuthority === undefined) return;
+  if (executionAuthority === undefined) {
+    // A row the store can no longer bind to an execution cannot be opened. It is
+    // still a resolved target the operator asked for by name, so it says so
+    // instead of returning to an unchanged screen.
+    setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
+      type: "WARN",
+      subject: "Agent view",
+      primary: `Agent ${row.displayName ?? row.agentName ?? row.id} is no longer attached to a session.`,
+      metadata: ["Its live row was retired; persisted evidence is unaffected."],
+      controls: ["Fleet: /ps · Catalog: /agent list"],
+    });
+    return;
+  }
   const isCurrent = (): boolean =>
     sessionAuthority.isCurrent(capturedSessionAuthority) &&
     agentLiveStore.isExecutionAuthorityCurrent(executionAuthority);
@@ -927,14 +946,24 @@ type AgentDrillResolution =
   | { ok: false; reason: "ambiguous"; candidates: AgentLiveRow[] };
 
 /**
- * Pi shows one inline component at a time, so a newer prompt can take the
- * screen from an open fleet or viewer. Saying so is the difference between a
- * surface that closed for a reason and a command that looks broken; a session
- * that is simply gone stays quiet, because there is nobody left to tell.
+ * Pi shows one inline component at a time, so a newer prompt can take the screen
+ * from an open fleet or viewer. Saying so is the difference between a surface
+ * that closed for a reason and a command that looks broken, and both reasons are
+ * worth saying: a takeover, and a lease that went stale — which also covers a
+ * failure to read host session state, in a session that is very much alive and
+ * waiting for its answer. The only silence left is a host that cannot deliver a
+ * notification at all.
  */
 function notifyInteractionEnded(ctx: ExtensionContext, error: unknown, subject: string): void {
-  if (!isSupersededInlineOperatorInteractionError(error)) return;
-  ctx.ui.notify(`${subject} closed: another prompt took the screen. Run /ps again when it is answered.`, "info");
+  if (!isStaleInlineOperatorInteractionError(error)) return;
+  const message = isSupersededInlineOperatorInteractionError(error)
+    ? `${subject} closed: another prompt took the screen. Run /ps again when it is answered.`
+    : `${subject} did not open: this session's UI surface is no longer the one that asked. Run /ps again.`;
+  try {
+    ctx.ui.notify(message, "info");
+  } catch {
+    // A replaced session has nobody left to tell.
+  }
 }
 
 function resolveAgentDrillTarget(target: string): AgentDrillResolution {
