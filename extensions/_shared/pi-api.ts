@@ -63,17 +63,27 @@ export interface ToolDefinition {
    * persistent transcript card from `result.details` instead of collapsing to a
    * one-line string. The real host (`@earendil-works/pi-coding-agent`
    * ToolDefinition) already exposes `renderResult`/`renderCall`; this models that
-   * seam in the shim, loosely typed to the shim's `CustomUiComponent`/string[]
-   * idiom rather than the host's `Component`/`Theme` so existing tools that omit
-   * it are unaffected.
+   * seam in the shim. The host requires a renderable component here; returning
+   * raw `string[]` crashes the live TUI after a tool completes.
    */
-  renderResult?: (result: ToolResult, ctx?: ExtensionContext) => CustomUiComponent | string[];
+  renderResult?: (result: ToolResult, ctx?: ExtensionContext) => CustomUiComponent;
 }
 
 export interface CommandOptions {
   description?: string;
   args?: unknown[];
+  /**
+   * Pi replaces the entire argument buffer with `value`; providers therefore
+   * return complete argument strings, not token fragments.
+   */
+  getArgumentCompletions?: (prefix: string) => CommandArgumentCompletion[] | null;
   handler: (args: CommandArgs, ctx: ExtensionCommandContext) => Promise<void> | void;
+}
+
+export interface CommandArgumentCompletion {
+  value: string;
+  label: string;
+  description?: string;
 }
 
 export type CommandArgs =
@@ -85,7 +95,7 @@ export type CommandArgs =
 
 export type LifecycleEvent =
   | "session_start"
-  | "session_end"
+  | "session_shutdown"
   | "session_compact"
   | "resources_discover"
   | "input"
@@ -316,7 +326,7 @@ export interface ExtensionContext {
   mode?: "tui" | "rpc" | "json" | "print";
   model?: ModelLike;
   modelRegistry?: ModelRegistryLike;
-  /** Real Pi 0.80.3 ctx.isIdle(): false while the parent agent is streaming. */
+  /** Real Pi 0.82.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
   /** Abort the active parent agent turn (real Pi: ctx.abort()). */
   abort?(): void;
@@ -440,7 +450,6 @@ export interface ExtensionAPI {
   setModel?(model: ModelLike): boolean | Promise<boolean>;
   setThinkingLevel?(level: ThinkingLevel): void;
   getThinkingLevel?(): ThinkingLevel;
-  getSessionId(): string;
 }
 
 export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;

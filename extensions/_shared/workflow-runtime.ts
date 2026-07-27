@@ -11,16 +11,37 @@
 // ---------------------------------------------------------------------------
 
 import type { WorkflowRunSummary } from "./workflow-journal.js";
+import type { WorkflowReplayController } from "./workflow-replay.js";
 import type { WorkflowResourceLoader } from "./workflow-resources.js";
-import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type { WorkflowSourceState, WorkflowSourceStateReader, WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type {
+  WorkflowArtifactPorts,
+  WorkflowArtifactRef,
+  WorkflowBoundContinuation,
+  WorkflowConsumedTextArtifact,
+  WorkflowContinuationArtifact,
+  WorkflowContinuationJournal,
+} from "./workflow-artifacts.js";
+import {
+  normalizeWorkflowAwaitOperatorDeclaration,
+  type WorkflowAwaitOperatorDeclaration,
+  type WorkflowOperatorHandoffDeclaration,
+  type WorkflowOperatorQuestion,
+} from "./workflow-handoff.js";
 import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
+export type {
+  WorkflowAwaitOperatorDeclaration,
+  WorkflowOperatorHandoffDeclaration,
+  WorkflowOperatorQuestion,
+} from "./workflow-handoff.js";
 
 /** The single agent-execution callback the runtime depends on. The bridge supplies
  *  the real implementation; tests supply a fake. The runtime never imports the SDK. */
 export type WorkflowAgentRunner = (req: WorkflowAgentRequest) => Promise<WorkflowAgentResult>;
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
+export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
 /** High per-child safety fuse. Ordinary agent work should finish far below this value. */
 export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = 1_000;
 export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
@@ -36,6 +57,8 @@ export interface WorkflowAgentRequest {
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
+  /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
+  timeoutMs?: number;
   label?: string;
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
@@ -46,6 +69,8 @@ export interface WorkflowAgentRequest {
   workspaceMode?: WorkspaceMode;
   /** Opaque runtime-owned workspace identity. The bridge resolves it to cwd. */
   workspaceHandle?: string;
+  /** Runtime-owned stable identity allocated before this attempt is scheduled. */
+  callId?: string;
 }
 
 export interface WorkflowAgentResult {
@@ -69,7 +94,7 @@ export interface WorkflowAgentResult {
   /** Loop round for the slot (≥1); the bridge increments it per slot re-invoke (REQ-009). */
   round?: number;
   /** Token usage for this run, projected from the child session stats for the round journal (D-004/D-006). */
-  usage?: WorkflowLlmUsage;
+  usage?: WorkflowUsage;
   permissionMode?: PermissionMode;
   workspaceMode?: WorkspaceMode;
   /** Resolved host-enforced read-only capability boundary. */
@@ -84,58 +109,29 @@ export interface WorkflowAgentChildTrace {
 
 export interface WorkflowSchemaValidation {
   status: "valid" | "mismatch";
-  /** Number of fresh child/model completions actually executed for this DSL call. */
+  /** 1-based loop position of the attempt this verdict describes. A replayed attempt
+   *  occupies an ordinal and increments it, and contributes no `usage`. */
   attempts: number;
   /** Final validator/parser errors on mismatch; empty after a valid attempt. */
   errors: string[];
+  /** Which authority rejected the answer. Present only on a mismatch, and only on a
+   *  call that declared `validate` — a schema-only call has one possible authority,
+   *  so naming it would change every existing journal line for no added information. */
+  source?: "schema" | "script";
 }
 
-/** The single direct-model callback the runtime depends on for dsl.llm(). The llm-bridge
- *  supplies the real impl (pi-ai completeSimple); tests supply a fake. The runtime never
- *  imports the SDK or pi-ai — it reaches the model ONLY through this injected runner. */
-export type WorkflowLlmRunner = (req: WorkflowLlmRequest) => Promise<WorkflowLlmResult>;
-
-export interface WorkflowLlmRequest {
-  prompt: string;
-  /** Maps to Context.systemPrompt; optional. */
-  system?: string;
-  /** Per-call model selector, e.g. "provider/id[:thinking]"; else the session model. */
-  model?: string;
-  /** Provider thinking level pass-through (pi-ai SimpleStreamOptions.reasoning). */
-  reasoning?: string;
-  /** When true, the bridge uses streamSimple and forwards text chunks to onDelta. */
-  stream?: boolean;
-  /** Internal: set by the runtime when stream is true; the bridge calls it per text chunk
-   *  so the runtime can journal an llm_delta line. Not part of the public DSL options. */
-  onDelta?: (textDelta: string) => void;
-  label?: string;
-  phase?: string;
-}
-
-/** Token + cost projection of pi-ai AssistantMessage.usage. */
-export interface WorkflowLlmUsage {
+/** Token + cost projection for one model-backed child run, summed per run for the budget view. */
+export interface WorkflowUsage {
   input: number;
   output: number;
   totalTokens: number;
   costTotal: number;
 }
 
-export interface WorkflowLlmResult {
-  ok: boolean; // true when the model returned normally (stopReason stop/length)
-  text: string; // concatenated assistant text content
-  stopReason: string; // raw provider stop reason ("stop" | "length" | "error" | ...)
-  model?: string; // resolved model selector actually used
-  thinking?: string;
-  usage?: WorkflowLlmUsage;
-  output?: unknown; // parsed JSON value when a schema was provided and validation passed
-  diagnostics: string[];
-  label?: string;
-  /** Present only when the call requested schema validation. This is protocol
-   *  accounting, not a domain-quality verdict. */
-  schemaValidation?: WorkflowSchemaValidation;
-}
-
 export interface WorkflowDsl {
+  /** Run one child agent under a declared answer shape. Success resolves to the
+   *  VALIDATED value (not text); exhausting the retry budget throws SchemaValidationError. */
+  agent(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
   /** Run one child agent. Success resolves to its exact non-empty final text. */
   agent(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   /** Render one neighboring .prompt.md resource from the original workflow source. */
@@ -144,10 +140,14 @@ export interface WorkflowDsl {
   workspace(label: string, ref: string): Promise<string>;
   /** Absolute project root captured by the workflow runner. */
   projectRoot(): string;
-  /** Direct one-shot model completion node — a thin sibling of agent(). No child session,
-   *  no tools. Returns ok:false (never throws) when no llmRunner is configured or the model
-   *  errors; a group classifies that explicit result as a typed branch failure. */
-  llm(prompt: string, opts?: WorkflowLlmOptions): Promise<WorkflowLlmResult>;
+  /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
+  publishArtifact(name: string, text: string): WorkflowArtifactRef;
+  /** Verify and copy one complete prior-run text reference into this run. */
+  consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
+  /** Host-verified continuation artifacts bound before trusted workflow code starts. */
+  continuationArtifacts(): readonly WorkflowContinuationArtifact[];
+  /** Capture and persist one deterministic host-owned source-state fingerprint. */
+  captureSourceState(label: string): WorkflowSourceState;
   /** Run independent branches behind one fail-closed barrier and preserve input order. */
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
   /** Run ordered stages for every item; a failed item stops before its later stages. */
@@ -156,8 +156,16 @@ export interface WorkflowDsl {
   phase(name: string): void;
   /** Append a script-owned journal message tagged with the current phase. */
   log(msg: string): void;
+  /** Declare that a successful run is waiting for bounded operator input.
+   *  This is runtime control state; it never changes the script's returned value. */
+  awaitOperator(input: WorkflowAwaitOperatorDeclaration): void;
+  /** Replay-safe wall clock. Records its value on the first run and returns the
+   *  recorded one on `--resume`; a direct `Date.now()` is neither banned nor replayable. */
+  now(): number;
+  /** Replay-safe randomness with the same record/replay contract as `now()`. */
+  random(): number;
   /** Run a nested workflow function with the same typed DSL handle. */
-  workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>, input?: unknown): Promise<T>;
+  workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input?: string) => Promise<T>, input?: string): Promise<T>;
 }
 
 export interface WorkflowAgentOptions {
@@ -170,7 +178,21 @@ export interface WorkflowAgentOptions {
   maxToolCalls?: number;
   /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
   model?: string;
+  /**
+   * Wall-clock fuse for one child attempt, in milliseconds. `maxToolCalls` bounds
+   * tool usage and cannot end a stalled child. On expiry the child is aborted and
+   * the call fails closed; it never resolves to a partial answer.
+   */
+  timeoutMs?: number;
+  /**
+   * Upper bound on the child's answer, in characters. An oversized handoff breaks
+   * the next stage's prompt, so the runtime fails the call here instead of letting
+   * a script re-implement the check. Enforced on replayed answers too.
+   */
+  maxAnswerChars?: number;
   label?: string;
+  /** Logical name for the exact returned answer in the run artifact index. */
+  artifact?: string;
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
@@ -180,27 +202,34 @@ export interface WorkflowAgentOptions {
   workspaceMode?: WorkspaceMode;
   /** Reuse a runtime-owned workspace allocated by workspace(). */
   workspaceHandle?: string;
+  /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
+  schema?: never;
+  /** validate needs a parsed value, which only the shaped overload has. */
+  validate?: never;
 }
 
-export interface WorkflowLlmOptions {
-  /** Maps to Context.systemPrompt. */
-  system?: string;
-  /** Per-call model selector, e.g. "provider/id[:thinking]"; else the session model. */
-  model?: string;
-  /** Provider thinking level pass-through. */
-  reasoning?: string;
-  /** Stream the completion: emit llm_delta journal events per text chunk. Default false. */
-  stream?: boolean;
-  /** When set, the runtime parses result.text as JSON, validates it against this schema, and
-   *  retries up to SCHEMA_MAX_ATTEMPTS; on final mismatch returns ok:false (or throws when
-   *  throwOnSchemaMismatch). A valid value is returned in result.output. */
-  schema?: unknown;
-  /** When true AND schema is set, a final schema mismatch throws SchemaValidationError instead
-   *  of returning ok:false. Default false. */
-  throwOnSchemaMismatch?: boolean;
-  label?: string;
-  phase?: string;
+/**
+ * Script-supplied cross-field validation for one shaped answer.
+ *
+ * Receives the parsed, schema-valid value; returns the violations it found, empty
+ * for a pass. It must be pure, synchronous and deterministic, must not throw to
+ * signal a violation, must not transform the value, and must not call back into
+ * the DSL. Its strings are spliced into the retry prompt and therefore enter the
+ * canonical replay key, so an unstable message is a replay defect.
+ */
+export type WorkflowAgentValidate = (value: unknown) => readonly string[];
+
+/** Options for the shaped overload. The schema property cannot be smuggled through
+ *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
+export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "schema" | "validate"> {
+  schema: Record<string, unknown>;
+  /** Cross-field rules the schema subset cannot declare. Runs only after schema
+   *  validation succeeds; a non-empty return re-asks the child in its own labelled
+   *  repair block instead of ending the run. */
+  validate?: WorkflowAgentValidate;
 }
+
+type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentSchemaOptions;
 
 export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
 
@@ -326,17 +355,7 @@ export interface WorkflowJournalSink {
 export interface WorkflowJournalLine {
   ts: string;
   runId: string;
-  kind:
-    | "phase"
-    | "log"
-    | "group_start"
-    | "group_end"
-    | "agent_start"
-    | "agent_end"
-    | "llm_start"
-    | "llm_end"
-    | "llm_delta"
-    | "error";
+  kind: "phase" | "log" | "group_start" | "group_end" | "agent_start" | "agent_end" | "error";
   /** Provenance for log lines. Absent means legacy/unknown and must not be inferred. */
   source?: "script" | "runtime";
   phase?: string;
@@ -351,6 +370,11 @@ export interface WorkflowJournalLine {
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
   label?: string;
+  /** Runtime-owned stable identity for this concrete child attempt. */
+  callId?: string;
+  answerArtifact?: WorkflowArtifactRef;
+  transcriptArtifact?: WorkflowArtifactRef;
+  resultEnvelopeArtifact?: WorkflowArtifactRef;
   /** Workflow loop slot descriptor (phase,label) on agent lines (REQ-009); absent = no-rounds journal. */
   slotKey?: string;
   /** Loop round (≥1) on agent_end lines (REQ-009); the drill reads past rounds by (slotKey,round). */
@@ -372,25 +396,26 @@ export interface WorkflowJournalLine {
   permissionMode?: PermissionMode;
   /** Resolved workspace intent for agent_start/agent_end lines. Not a security boundary. */
   workspaceMode?: WorkspaceMode;
-  /** Token/cost usage for llm_end lines (present when the model reported usage). */
-  usage?: WorkflowLlmUsage;
-  /** Resolved model selector for agent and llm live-row display. */
+  /** Token/cost usage for agent_end lines (present when the child reported usage). */
+  usage?: WorkflowUsage;
+  /** Resolved model selector for agent live-row display. */
   model?: string;
-  /** Resolved thinking/reasoning level for agent and llm live-row display. */
+  /** Resolved thinking/reasoning level for agent live-row display. */
   thinking?: string;
-  /** Incremental text chunk for llm_delta lines (streaming). */
-  textDelta?: string;
+  /** True on agent lines served from a recorded run instead of a fresh child.
+   *  Absent means the call really executed; it is never inferred from anything else. */
+  replayed?: boolean;
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
+  continuation?: WorkflowContinuationJournal;
 }
 
 export interface WorkflowRuntimeOptions {
   runId: string;
   agentRunner: WorkflowAgentRunner;
-  /** Optional direct-model runner for dsl.llm(). When omitted, llm() returns a
-   *  fail-closed ok:false result (never throws, never fabricates text). */
-  llmRunner?: WorkflowLlmRunner;
-  args?: unknown;
+  args?: string;
+  /** Already consumed and digest-bound by the runner before workflow code starts. */
+  continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
@@ -401,15 +426,31 @@ export interface WorkflowRuntimeOptions {
   // cyclic workflows allowed up to the cap, exceeding it throws WorkflowInvocationCapError and exits the run.
   maxTotalAgentInvocations?: number;
   journal?: WorkflowJournalSink; // default: no-op sink
+  /** Recorded-call store for `--resume`. Absent means neither record nor replay. */
+  replay?: WorkflowReplayController;
+  artifactPorts?: WorkflowArtifactPorts;
+  sourceState?: WorkflowSourceStateReader;
+  replaySourceRunId?: string;
   now?: () => string; // default () => new Date().toISOString()
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
+  /** Runner-owned sink for one out-of-band operator handoff declaration. */
+  onAwaitOperator?: (declaration: WorkflowAwaitOperatorDeclaration) => void;
 }
 
 export interface WorkflowRuntime {
   dsl: WorkflowDsl;
   getJournal(): WorkflowJournalLine[]; // in-memory mirror (for tests / final render)
-  getArgs(): unknown;
+  getArgs(): string | undefined;
   currentPhase(): string | undefined;
+}
+
+export function assertWorkflowInput(value: unknown, field = "workflow input"): asserts value is string | undefined {
+  if (value !== undefined && typeof value !== "string") {
+    throw new Error(`${field} must be a string when provided`);
+  }
+  if (typeof value === "string" && value.length > WORKFLOW_INPUT_MAX_CHARS) {
+    throw new Error(`${field} exceeds ${WORKFLOW_INPUT_MAX_CHARS} characters`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +552,21 @@ function normalizeMaxToolCalls(maxToolCalls: number, field: string): number {
   return maxToolCalls;
 }
 
+/** A fuse of zero would abort before the child starts; that is a bug, not a bound. */
+function normalizeTimeoutMs(timeoutMs: number): number {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("agent timeoutMs must be a positive safe integer");
+  }
+  return timeoutMs;
+}
+
+function normalizeMaxAnswerChars(maxAnswerChars: number): number {
+  if (!Number.isSafeInteger(maxAnswerChars) || maxAnswerChars <= 0) {
+    throw new Error("agent maxAnswerChars must be a positive safe integer");
+  }
+  return maxAnswerChars;
+}
+
 function defaultWorkflowPermissionMode(agentName: string, requestedMode: PermissionMode | undefined): PermissionMode {
   if (agentName === DEFAULT_WORKFLOW_AGENT && requestedMode === "restricted") return "inherit-parent";
   if (requestedMode !== undefined) return requestedMode;
@@ -521,7 +577,7 @@ function workspaceModeFromSandbox(sandbox: WorkflowAgentOptions["sandbox"]): Wor
   return sandbox === "workspace-write" ? "worktree" : "project";
 }
 
-function defaultWorkflowWorkspaceMode(opts: WorkflowAgentOptions | undefined): WorkspaceMode {
+function defaultWorkflowWorkspaceMode(opts: WorkflowAgentAnyOptions | undefined): WorkspaceMode {
   if (opts?.workspaceMode !== undefined) return opts.workspaceMode;
   if (opts?.sandbox !== undefined) return workspaceModeFromSandbox(opts.sandbox);
   return "project";
@@ -531,8 +587,42 @@ function defaultWorkflowWorkspaceMode(opts: WorkflowAgentOptions | undefined): W
 // Schema enforcement (S2)
 // ---------------------------------------------------------------------------
 
-/** Maximum direct-model invocation attempts when a schema is provided. */
+/** Maximum child-run attempts when agent({schema}) declares an answer shape — one retry
+ *  budget for the DSL. */
 const SCHEMA_MAX_ATTEMPTS = 2;
+
+/** Upper bounds on what a script validator may hand back. Its strings reach the next
+ *  child's prompt, the journal verdict and — through the prompt — the replay key, and
+ *  nothing else caps them. A breach is a run error, never a truncation: truncating
+ *  would silently rewrite the replay key. */
+const MAX_SCRIPT_VALIDATION_ERRORS = 32;
+const MAX_SCRIPT_VALIDATION_ERROR_CHARS = 500;
+
+/** A validate() return is author data crossing into runtime-owned surfaces, so it is
+ *  checked like any other untrusted value. Every breach fails the run closed and
+ *  consumes no retry — a bug in author code must not be laundered into a repair loop
+ *  that blames the model for it. */
+function assertScriptValidationErrors(returned: unknown): readonly string[] {
+  if (isRecord(returned) && typeof returned.then === "function") {
+    throw new Error("agent validate must return an array of strings, not a Promise");
+  }
+  if (!Array.isArray(returned)) throw new Error("agent validate must return an array of strings");
+  if (returned.length > MAX_SCRIPT_VALIDATION_ERRORS) {
+    throw new Error(
+      `agent validate returned ${returned.length} error(s); at most ${MAX_SCRIPT_VALIDATION_ERRORS} are allowed`,
+    );
+  }
+  for (const [index, error] of returned.entries()) {
+    if (typeof error !== "string") throw new Error("agent validate must return an array of strings");
+    if (error === "") throw new Error(`agent validate error at index ${index} must be a non-empty string`);
+    if (error.length > MAX_SCRIPT_VALIDATION_ERROR_CHARS) {
+      throw new Error(
+        `agent validate error at index ${index} is ${error.length} character(s); at most ${MAX_SCRIPT_VALIDATION_ERROR_CHARS} are allowed`,
+      );
+    }
+  }
+  return returned as readonly string[];
+}
 
 /** Default global per-run cap on total dsl.agent() invocations. Cyclic workflows are
  *  allowed up to this cap; exceeding it throws WorkflowInvocationCapError and exits the run. */
@@ -562,8 +652,10 @@ export class WorkflowAgentExecutionError extends Error {
   }
 }
 
-/** Thrown by llm({ schema, throwOnSchemaMismatch: true }) when the model output still
- *  violates the schema after SCHEMA_MAX_ATTEMPTS. Carries the validator errors + attempt count. */
+/** The DSL's "declared shape not met" failure. Thrown by agent({ schema }) — that path always
+ *  fails closed — when the child's answer still violates the schema after SCHEMA_MAX_ATTEMPTS.
+ *  Carries the validator errors + attempt count. A child RUN failure stays
+ *  WorkflowAgentExecutionError; this error means the child ran and answered off-shape. */
 export class SchemaValidationError extends Error {
   readonly errors: string[];
   readonly attempts: number;
@@ -579,16 +671,277 @@ export class SchemaValidationError extends Error {
  * Minimal dependency-free JSON-schema subset validator.
  *
  * Supported keywords:
- *   - `type`: "object" | "array" | "string" | "number" | "boolean"
+ *   - `type`: "object" | "array" | "string" | "number" | "integer" | "boolean"
  *   - `required`: string[]  (for objects — lists required property names)
  *   - `properties`: Record<string, schema>  (recursive)
  *   - `additionalProperties`: false  (for objects — reject keys not in `properties`)
  *   - `items`: schema  (for arrays — validates every element, recursive)
- *   - `enum`: unknown[]  (value must be strictly equal to one listed member)
+ *   - `enum`: JSON primitive[]  (value must be strictly equal to one listed member)
+ *   - `minLength` / `maxLength` / `pattern`  (for strings)
+ *   - `minItems` / `maxItems`  (for arrays)
+ *   - `nonBlank: true`  (for strings — reject a value that is empty after trimming)
+ *   - `uniqueItems: true`  (for arrays of string/number/integer/boolean items)
+ *   - `uniqueTrimmedItems: true`  (for arrays of string items — unique after trimming)
+ *   - `uniqueBy: "<property>"`  (for arrays of objects — that property is unique)
+ *
+ * Trimming is `String.prototype.trim`, the same canonicalization a consumer's
+ * normalizer applies, so a value this validator accepts cannot collapse later.
  *
  * `schema === undefined` is a no-op — callers must guard before calling.
  * No ajv, no fs, no network. Host-agnostic.
  */
+const SUPPORTED_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean"]);
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+  "type",
+  "enum",
+  "required",
+  "properties",
+  "additionalProperties",
+  "items",
+  // Size and shape bounds. Without these a script must re-check every string and
+  // array by hand after validation succeeds, and a violation then throws and
+  // kills the run — whereas a bound expressed here is fed back to the child by
+  // the existing retry, which is the difference between a fatal answer and a
+  // correctable one.
+  "minLength",
+  "maxLength",
+  "pattern",
+  "minItems",
+  "maxItems",
+  // Uniqueness and blankness, for the same reason. A repeated id or a
+  // whitespace-only label is something the child can correct once told, but a
+  // hand-written check after validation can only throw and end the run.
+  // `uniqueItems` covers arrays of primitives, `uniqueBy` arrays of objects
+  // keyed on one named property, `uniqueTrimmedItems` string arrays a consumer
+  // trims anyway, and `nonBlank` a string that satisfies minLength 1 while
+  // being nothing but whitespace.
+  "nonBlank",
+  "uniqueItems",
+  "uniqueTrimmedItems",
+  "uniqueBy",
+]);
+
+const STRING_ONLY_KEYWORDS = ["minLength", "maxLength", "pattern", "nonBlank"] as const;
+const ARRAY_ONLY_KEYWORDS = ["minItems", "maxItems", "uniqueItems", "uniqueTrimmedItems", "uniqueBy"] as const;
+
+/** Item types `uniqueItems` and `uniqueBy` can compare without inventing an equality. */
+const PRIMITIVE_SCHEMA_TYPES = ["string", "number", "integer", "boolean"] as const;
+
+/** Validate the declaration before the first child call. Runtime value validation
+ *  is useful only when authors cannot accidentally declare an ignored contract. */
+function assertSupportedAgentSchema(schema: Record<string, unknown>, path = "schema"): void {
+  for (const keyword of Object.keys(schema)) {
+    if (!SUPPORTED_SCHEMA_KEYWORDS.has(keyword)) {
+      throw new Error(`${path}: unsupported keyword "${keyword}"`);
+    }
+  }
+
+  const type = schema.type;
+  if (type !== undefined && (typeof type !== "string" || !SUPPORTED_SCHEMA_TYPES.has(type))) {
+    throw new Error(`${path}: unsupported type ${JSON.stringify(type)}`);
+  }
+  if (type === undefined && schema.enum === undefined) {
+    throw new Error(`${path}: schema must declare type or enum`);
+  }
+
+  if (schema.enum !== undefined) {
+    if (!Array.isArray(schema.enum) || schema.enum.length === 0) {
+      throw new Error(`${path}: enum must be a non-empty array`);
+    }
+    for (const [index, member] of schema.enum.entries()) {
+      const supportedPrimitive =
+        member === null ||
+        typeof member === "string" ||
+        typeof member === "boolean" ||
+        (typeof member === "number" && Number.isFinite(member));
+      if (!supportedPrimitive) {
+        throw new Error(`${path}: enum value at index ${index} must be a JSON primitive`);
+      }
+      const matchesDeclaredType =
+        type === undefined ||
+        (type === "string" && typeof member === "string") ||
+        (type === "number" && typeof member === "number") ||
+        (type === "integer" && typeof member === "number" && Number.isInteger(member)) ||
+        (type === "boolean" && typeof member === "boolean");
+      if (!matchesDeclaredType) {
+        throw new Error(`${path}: enum value at index ${index} does not match declared type ${String(type)}`);
+      }
+    }
+  }
+
+  const objectKeywords = ["required", "properties", "additionalProperties"].filter(
+    (keyword) => schema[keyword] !== undefined,
+  );
+  if (objectKeywords.length > 0 && type !== "object") {
+    throw new Error(`${path}: ${objectKeywords[0]} is only valid for an object schema`);
+  }
+  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
+    throw new Error(`${path}: additionalProperties supports only false`);
+  }
+
+  let properties: Record<string, unknown> | undefined;
+  if (schema.properties !== undefined) {
+    if (!isRecord(schema.properties)) throw new Error(`${path}: properties must be an object`);
+    properties = schema.properties;
+    for (const [name, child] of Object.entries(properties)) {
+      if (!isRecord(child)) throw new Error(`${path}.properties.${name} must be a schema object`);
+      assertSupportedAgentSchema(child, `${path}.properties.${name}`);
+    }
+  }
+
+  if (schema.required !== undefined) {
+    if (!Array.isArray(schema.required) || !schema.required.every((key) => typeof key === "string")) {
+      throw new Error(`${path}: required must be an array of strings`);
+    }
+    const required = schema.required as string[];
+    if (new Set(required).size !== required.length) {
+      throw new Error(`${path}: required contains duplicate property names`);
+    }
+    for (const key of required) {
+      if (properties === undefined || !(key in properties)) {
+        throw new Error(`${path}: required property "${key}" is not declared in properties`);
+      }
+    }
+  }
+
+  if (type === "array") {
+    if (!isRecord(schema.items)) throw new Error(`${path}: array schema must declare items as a schema object`);
+    assertSupportedAgentSchema(schema.items, `${path}.items`);
+  } else if (schema.items !== undefined) {
+    throw new Error(`${path}: items is only valid for an array schema`);
+  }
+
+  assertBoundKeywords(schema, path, type);
+}
+
+/**
+ * A bound that can never be satisfied would burn every schema retry before
+ * failing, so an impossible or misplaced declaration is refused here — before
+ * the first child call — rather than discovered as an unexplained exhaustion.
+ */
+function assertBoundKeywords(schema: Record<string, unknown>, path: string, type: unknown): void {
+  for (const keyword of STRING_ONLY_KEYWORDS) {
+    if (schema[keyword] !== undefined && type !== "string") {
+      throw new Error(`${path}: ${keyword} is only valid for a string schema`);
+    }
+  }
+  for (const keyword of ARRAY_ONLY_KEYWORDS) {
+    if (schema[keyword] !== undefined && type !== "array") {
+      throw new Error(`${path}: ${keyword} is only valid for an array schema`);
+    }
+  }
+
+  for (const keyword of ["minLength", "maxLength", "minItems", "maxItems"] as const) {
+    const bound = schema[keyword];
+    if (bound === undefined) continue;
+    if (typeof bound !== "number" || !Number.isSafeInteger(bound) || bound < 0) {
+      throw new Error(`${path}: ${keyword} must be a non-negative safe integer`);
+    }
+  }
+
+  const impossible = (min: unknown, max: unknown): boolean =>
+    typeof min === "number" && typeof max === "number" && min > max;
+  if (impossible(schema.minLength, schema.maxLength)) {
+    throw new Error(`${path}: minLength ${String(schema.minLength)} exceeds maxLength ${String(schema.maxLength)}`);
+  }
+  if (impossible(schema.minItems, schema.maxItems)) {
+    throw new Error(`${path}: minItems ${String(schema.minItems)} exceeds maxItems ${String(schema.maxItems)}`);
+  }
+
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== "string") throw new Error(`${path}: pattern must be a string`);
+    try {
+      compilePattern(schema.pattern);
+    } catch (error) {
+      throw new Error(
+        `${path}: pattern is not a valid regular expression (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  }
+
+  assertUniquenessKeywords(schema, path);
+}
+
+/**
+ * The uniqueness and blankness keywords carry no numeric domain, so the ways to
+ * get them wrong are all declarative: a value other than `true`, an item type
+ * whose equality the runtime refuses to invent, or a `uniqueBy` property the
+ * items do not actually promise. Each is refused before the first child call —
+ * an ignored contract is worse than an absent one.
+ */
+function assertUniquenessKeywords(schema: Record<string, unknown>, path: string): void {
+  for (const keyword of ["nonBlank", "uniqueItems", "uniqueTrimmedItems"] as const) {
+    if (schema[keyword] !== undefined && schema[keyword] !== true) {
+      throw new Error(`${path}: ${keyword} supports only true`);
+    }
+  }
+
+  if (schema.uniqueItems === true && schema.uniqueTrimmedItems === true) {
+    throw new Error(
+      `${path}: uniqueItems and uniqueTrimmedItems cannot both be declared; uniqueTrimmedItems already rejects raw duplicates`,
+    );
+  }
+
+  // Reached only for an array schema (ARRAY_ONLY_KEYWORDS above), whose `items`
+  // is already proven to be a schema object by the caller.
+  const items = isRecord(schema.items) ? schema.items : undefined;
+  const itemType = items?.type;
+
+  if (schema.uniqueItems === true && !isPrimitiveSchemaType(itemType)) {
+    throw new Error(
+      `${path}: uniqueItems requires items to declare a string, number, integer, or boolean type; use uniqueBy for objects`,
+    );
+  }
+  if (schema.uniqueTrimmedItems === true && itemType !== "string") {
+    throw new Error(`${path}: uniqueTrimmedItems requires items to declare a string type`);
+  }
+
+  if (schema.uniqueBy === undefined) return;
+  if (typeof schema.uniqueBy !== "string" || schema.uniqueBy === "") {
+    throw new Error(`${path}: uniqueBy must be a non-empty string`);
+  }
+  const property = schema.uniqueBy;
+  if (itemType !== "object") {
+    throw new Error(`${path}: uniqueBy requires items to declare an object type`);
+  }
+  const properties = isRecord(items?.properties) ? items.properties : undefined;
+  if (properties === undefined || !(property in properties)) {
+    throw new Error(`${path}: uniqueBy property ${JSON.stringify(property)} is not declared in items.properties`);
+  }
+  // Without `required`, an element missing the property is neither unique nor a
+  // duplicate, and the runtime would have to invent that semantic. Requiring it
+  // instead means the child gets `missing required property` — a better error.
+  const required = Array.isArray(items?.required) ? items.required : [];
+  if (!required.includes(property)) {
+    throw new Error(`${path}: uniqueBy property ${JSON.stringify(property)} is not listed in items.required`);
+  }
+  const propertySchema = properties[property];
+  if (!isRecord(propertySchema) || !isPrimitiveSchemaType(propertySchema.type)) {
+    throw new Error(
+      `${path}: uniqueBy property ${JSON.stringify(property)} must declare a string, number, integer, or boolean type`,
+    );
+  }
+}
+
+function isPrimitiveSchemaType(type: unknown): type is (typeof PRIMITIVE_SCHEMA_TYPES)[number] {
+  return typeof type === "string" && (PRIMITIVE_SCHEMA_TYPES as readonly string[]).includes(type);
+}
+
+/**
+ * JSON Schema `pattern` is an unanchored ECMA-262 search with no flags, so an
+ * author who means "the whole value" writes the anchors themselves. Compiled
+ * results are cached because validation re-runs on every retry.
+ */
+const patternCache = new Map<string, RegExp>();
+
+function compilePattern(pattern: string): RegExp {
+  const cached = patternCache.get(pattern);
+  if (cached !== undefined) return cached;
+  const compiled = new RegExp(pattern);
+  patternCache.set(pattern, compiled);
+  return compiled;
+}
+
 function validateAgainstSchema(
   value: unknown,
   schema: Record<string, unknown>,
@@ -643,21 +996,43 @@ function validateAgainstSchema(
       if (!Array.isArray(value)) {
         errors.push(`${path || "root"}: expected array, got ${typeof value}`);
       } else {
+        const loc2 = path || "root";
+        const minItems = schema["minItems"];
+        const maxItems = schema["maxItems"];
+        // Counts are reported by value: "at most 6" alone does not tell the child
+        // how far over it went, and it has to decide what to drop.
+        if (typeof minItems === "number" && value.length < minItems) {
+          errors.push(`${loc2}: expected at least ${minItems} item(s), got ${value.length}`);
+        }
+        if (typeof maxItems === "number" && value.length > maxItems) {
+          errors.push(`${loc2}: expected at most ${maxItems} item(s), got ${value.length}`);
+        }
         const items = schema["items"];
         if (items !== null && typeof items === "object" && !Array.isArray(items)) {
           value.forEach((el, i) => {
-            const sub = validateAgainstSchema(el, items as Record<string, unknown>, `${path || "root"}[${i}]`);
+            const sub = validateAgainstSchema(el, items as Record<string, unknown>, `${loc2}[${i}]`);
             if (!sub.ok) errors.push(...sub.errors);
           });
+          errors.push(...arrayUniquenessErrors(value, schema, items as Record<string, unknown>, loc2));
         }
       }
     } else if (type === "string") {
       if (typeof value !== "string") {
         errors.push(`${path || "root"}: expected string, got ${typeof value}`);
+      } else {
+        errors.push(...stringBoundErrors(value, schema, path || "root"));
       }
     } else if (type === "number") {
       if (typeof value !== "number") {
         errors.push(`${path || "root"}: expected number, got ${typeof value}`);
+      }
+    } else if (type === "integer") {
+      // A fractional number is the failure the child must be told about by value:
+      // "got number" would read as a type mismatch it cannot act on.
+      if (typeof value !== "number") {
+        errors.push(`${path || "root"}: expected integer, got ${typeof value}`);
+      } else if (!Number.isInteger(value)) {
+        errors.push(`${path || "root"}: expected integer, got ${JSON.stringify(value)}`);
       }
     } else if (type === "boolean") {
       if (typeof value !== "boolean") {
@@ -675,6 +1050,93 @@ function validateAgainstSchema(
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
 
+function stringBoundErrors(value: string, schema: Record<string, unknown>, loc: string): string[] {
+  const errors: string[] = [];
+  const minLength = schema["minLength"];
+  const maxLength = schema["maxLength"];
+  // Lengths are reported by value so the child knows how much to cut, and the
+  // pattern is echoed because "invalid id" gives it nothing to correct toward.
+  if (typeof minLength === "number" && value.length < minLength) {
+    errors.push(`${loc}: expected at least ${minLength} character(s), got ${value.length}`);
+  }
+  if (typeof maxLength === "number" && value.length > maxLength) {
+    errors.push(`${loc}: expected at most ${maxLength} character(s), got ${value.length}`);
+  }
+  const pattern = schema["pattern"];
+  if (typeof pattern === "string" && !compilePattern(pattern).test(value)) {
+    errors.push(`${loc}: value ${JSON.stringify(value)} does not match pattern ${pattern}`);
+  }
+  // The count, not the value: a blank string can be hundreds of whitespace
+  // characters, and echoing them would splice junk into the retry prompt — and
+  // therefore into the replay key.
+  if (schema["nonBlank"] === true && value.trim() === "") {
+    errors.push(`${loc}: expected a non-blank string, got ${value.length} whitespace character(s)`);
+  }
+  return errors;
+}
+
+/**
+ * Uniqueness runs after the per-element `items` pass and only over elements
+ * whose runtime type matches the declared one, so a wrong-typed element reports
+ * its type error and nothing else — the error set stays a pure function of the
+ * value, which matters because these strings enter the retry prompt and the
+ * replay key. Every later duplicate is reported at its own index and names the
+ * first occurrence, which is the only form that says which one to edit.
+ */
+function arrayUniquenessErrors(
+  value: readonly unknown[],
+  schema: Record<string, unknown>,
+  items: Record<string, unknown>,
+  loc: string,
+): string[] {
+  const errors: string[] = [];
+  const itemType = items["type"];
+
+  const trimmed = schema["uniqueTrimmedItems"] === true;
+  if (schema["uniqueItems"] === true || trimmed) {
+    const firstIndex = new Map<unknown, number>();
+    value.forEach((element, index) => {
+      if (!matchesPrimitiveType(element, itemType)) return;
+      const key = trimmed ? (element as string).trim() : element;
+      const seen = firstIndex.get(key);
+      if (seen === undefined) {
+        firstIndex.set(key, index);
+        return;
+      }
+      errors.push(
+        trimmed
+          ? `${loc}[${index}]: trimmed value ${JSON.stringify(key)} duplicates item ${seen}`
+          : `${loc}[${index}]: value ${JSON.stringify(element)} duplicates item ${seen}`,
+      );
+    });
+  }
+
+  const uniqueBy = schema["uniqueBy"];
+  if (typeof uniqueBy === "string" && uniqueBy !== "") {
+    const firstIndex = new Map<unknown, number>();
+    value.forEach((element, index) => {
+      if (!isRecord(element) || !(uniqueBy in element)) return;
+      const key = element[uniqueBy];
+      const seen = firstIndex.get(key);
+      if (seen === undefined) {
+        firstIndex.set(key, index);
+        return;
+      }
+      errors.push(`${loc}[${index}].${uniqueBy}: value ${JSON.stringify(key)} duplicates item ${seen}`);
+    });
+  }
+
+  return errors;
+}
+
+function matchesPrimitiveType(value: unknown, type: unknown): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number";
+  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
+  if (type === "boolean") return typeof value === "boolean";
+  return false;
+}
+
 /** Strip a ```json … ``` (or bare ``` … ```) fence if the model wrapped its JSON. */
 function stripJsonFences(text: string): string {
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
@@ -682,7 +1144,7 @@ function stripJsonFences(text: string): string {
 }
 
 /**
- * Tolerant JSON extraction from llm() text for schema validation: try the whole
+ * Tolerant JSON extraction from a child's final text for schema validation: try the whole
  * (fence-stripped) string, then fall back to the first {...}/[...] block. Used only
  * when a schema is provided; never throws.
  */
@@ -704,13 +1166,116 @@ function parseJsonFromText(text: string): { ok: true; value: unknown } | { ok: f
   }
 }
 
+/** Shape verdict for ONE child attempt of agent({schema}). */
+interface AgentSchemaCheck {
+  validation: WorkflowSchemaValidation;
+  /** Present only when `validation.status === "valid"`. */
+  value?: unknown;
+}
+
+/** Result of ONE child execution: the exact child text plus, for a shaped call, its verdict. */
+interface AgentAttemptOutcome {
+  text: string;
+  schemaCheck?: AgentSchemaCheck;
+}
+
+/**
+ * Validate one child answer against a declared schema with the DSL's single JSON extractor and
+ * subset validator, then — only on a value that already validated — against the script's own
+ * `validate` callback. `attempt` is the 1-based child run this verdict describes.
+ *
+ * The order is the contract: a cross-field rule presupposes the shape holds, so an off-shape
+ * answer never reaches author code. `source` names the rejecting authority, and is recorded only
+ * when two authorities could have rejected — a schema-only call has exactly one.
+ */
+function checkAgentSchema(
+  text: string,
+  schema: Record<string, unknown>,
+  attempt: number,
+  validate?: WorkflowAgentValidate,
+): AgentSchemaCheck {
+  const authority = validate === undefined ? {} : { source: "schema" as const };
+  const parsed = parseJsonFromText(text);
+  if (!parsed.ok) {
+    return {
+      validation: {
+        status: "mismatch",
+        attempts: attempt,
+        errors: [`response is not valid JSON: ${parsed.error}`],
+        ...authority,
+      },
+    };
+  }
+  const validation = validateAgainstSchema(parsed.value, schema);
+  if (!validation.ok) {
+    return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors], ...authority } };
+  }
+  if (validate !== undefined) {
+    const scriptErrors = assertScriptValidationErrors(validate(parsed.value));
+    if (scriptErrors.length > 0) {
+      return { validation: { status: "mismatch", attempts: attempt, errors: [...scriptErrors], source: "script" } };
+    }
+  }
+  return { validation: { status: "valid", attempts: attempt, errors: [] }, value: parsed.value };
+}
+
+/**
+ * Append the shape contract to a child prompt for agent({schema}).
+ *
+ * The host cannot force a tool call (Pi's agent-session surface exposes no tool choice), so the
+ * prompt states the contract and the runtime ENFORCES it after the fact: parse, validate, retry,
+ * fail closed. A retry repeats the request with the previous attempt's validator errors, which is
+ * the only signal that makes a second try better than the first — a fresh child has no memory of it.
+ */
+function withSchemaContract(
+  prompt: string,
+  schema: Record<string, unknown>,
+  attempt: number,
+  previousErrors: readonly string[],
+  previousSource: "schema" | "script",
+  maxAttempts: number,
+): string {
+  // Exactly one repair block can appear, because the script validator only ever sees a
+  // schema-valid value: an attempt has one rejecting authority. Script errors are never
+  // merged into the schema list — schema errors carry 0-indexed JSON paths and observed
+  // values, and one merged list would hand the child two index bases and frame a
+  // cross-field violation as a shape violation.
+  const repair =
+    attempt > 1 && previousErrors.length > 0
+      ? [
+          "",
+          previousSource === "script"
+            ? `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) matched the required shape but was REJECTED by the workflow script for:`
+            : `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) was REJECTED for:`,
+          ...previousErrors.map((error) => `- ${error}`),
+          "Return the corrected JSON value only.",
+        ].join("\n")
+      : "";
+  return [
+    prompt,
+    "",
+    "## Required answer shape",
+    "",
+    "Your final message must be ONE JSON value that validates against this JSON Schema.",
+    "No prose before or after it, no explanation, no commentary.",
+    "",
+    "```json",
+    JSON.stringify(schema, null, 2),
+    "```",
+    repair,
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
 // ---------------------------------------------------------------------------
 // createWorkflowRuntime
 // ---------------------------------------------------------------------------
 
 export function createWorkflowRuntime(options: WorkflowRuntimeOptions): WorkflowRuntime {
   const { runId, agentRunner } = options;
-  const llmRunner = options.llmRunner;
+  assertWorkflowInput(options.args);
+  assertBoundContinuation(options.continuation, runId);
   const args = options.args;
   const agentConcurrencyGate = createAgentConcurrencyGate(options.maxConcurrentAgents);
   const defaultMaxToolCalls = normalizeMaxToolCalls(
@@ -725,6 +1290,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   const journalMirror: WorkflowJournalLine[] = [];
   let _currentPhase: string | undefined;
+  /** Set while a script `validate` callback is running. The callback sits between the
+   *  child answer and agent_end, before artifact recording and replay journaling, so a
+   *  nested child call there has no defined position in either sequence. */
+  let insideValidate = false;
   let groupCounter = 0;
   const groupStack: Array<{ id: string; kind: "parallel" | "pipeline"; label: string }> = [];
 
@@ -742,7 +1311,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
   }
 
-  async function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string> {
+  /** ONE child execution: invocation-cap accounting, journal start/end, fail-closed status
+   *  mapping. `checkSchema` is supplied only by the shaped path; it runs on the final child text
+   *  BEFORE agent_end is emitted so the journal records whether the answer was shape-checked. */
+  async function runAgentAttempt(
+    prompt: string,
+    opts: WorkflowAgentAnyOptions | undefined,
+    checkSchema?: (text: string) => AgentSchemaCheck,
+  ): Promise<AgentAttemptOutcome> {
+    if (insideValidate) throw new Error("agent() must not be called from inside a validate callback");
     // Global per-run cap across all agent() calls (including those nested in
     // parallel()/pipeline()). Count BEFORE doing any work so the call that breaches
     // the cap is itself counted, and throw a typed error that bubbles past grouped
@@ -751,6 +1328,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (totalAgentInvocations > maxTotalAgentInvocations) {
       throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
     }
+    const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
     if (prompt.trim() === "") throw new Error("agent prompt must be non-empty");
     if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
       throw new Error("workflow workspace manager is not configured");
@@ -770,16 +1348,28 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
+      ...(opts?.timeoutMs !== undefined ? { timeoutMs: normalizeTimeoutMs(opts.timeoutMs) } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
+      callId,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
+    // Replay eligibility is decided from the RESOLVED request, so defaults and
+    // aliases cannot make two different executions share a key. A worktree call
+    // is never served from a record: its recorded text would claim a filesystem
+    // mutation this run did not perform.
+    const replayable = req.workspaceMode === "project" && req.workspaceHandle === undefined;
+    const canonicalRequest = canonicalAgentRequest(req);
+    const lookup = options.replay?.beginAgentAttempt(canonicalRequest, replayable);
+    const replayed = lookup?.replayed === true;
+
     const requestedLiveModel = liveModelFromSelector(req.model);
     emit({
       ts: nowFn(),
       runId,
       kind: "agent_start",
       agent: req.agent,
+      ...(replayed ? { replayed: true } : {}),
       ...(req.readOnly !== undefined ? { readOnly: req.readOnly } : {}),
       permissionMode,
       workspaceMode,
@@ -788,40 +1378,64 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
+      callId,
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
       ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
     });
     const start = Date.now();
     let finalResult: WorkflowAgentResult;
-    try {
-      const [result] = await runScheduled<WorkflowAgentResult>([
-        async () => {
-          await agentConcurrencyGate.acquire();
-          try {
-            return await agentRunner(req);
-          } finally {
-            agentConcurrencyGate.release();
-          }
-        },
-      ]);
-      if (result === undefined) {
-        throw new Error("scheduler returned empty array for single-agent call");
-      }
-      finalResult = result;
-    } catch (err) {
-      const durationMs = Date.now() - start;
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "error",
+    if (lookup?.replayed === true) {
+      // No child runs. The recorded answer is projected into the same result
+      // shape a fresh child would produce, minus `usage` — a replayed call cost
+      // nothing, and claiming otherwise would inflate the run budget.
+      finalResult = {
+        ok: true,
+        status: "completed",
+        summary: "Replayed from a recorded run.",
+        text: lookup.text,
+        diagnostics: [],
         agent: req.agent,
+        permissionMode,
+        workspaceMode,
+        ...(req.readOnly !== undefined ? { readOnly: req.readOnly } : {}),
         ...(req.label !== undefined ? { label: req.label } : {}),
-        ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        message: err instanceof Error ? err.message : String(err),
-        durationMs,
-      });
-      throw err;
+      };
+    } else {
+      try {
+        const [result] = await runScheduled<WorkflowAgentResult>([
+          async () => {
+            await agentConcurrencyGate.acquire();
+            try {
+              return await agentRunner(req);
+            } finally {
+              agentConcurrencyGate.release();
+            }
+          },
+        ]);
+        if (result === undefined) {
+          throw new Error("scheduler returned empty array for single-agent call");
+        }
+        finalResult = result;
+      } catch (err) {
+        const durationMs = Date.now() - start;
+        // Record the failure so the recorded sequence keeps the same ordinals as
+        // the live one: a later resume then replays the prefix and re-runs the
+        // call that failed, which is the whole point of resuming.
+        options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "error",
+          agent: req.agent,
+          callId,
+          ...(req.label !== undefined ? { label: req.label } : {}),
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message: err instanceof Error ? err.message : String(err),
+          durationMs,
+        });
+        throw err;
+      }
     }
     if (opts?.sandbox !== undefined) {
       finalResult.diagnostics = finalResult.diagnostics ?? [];
@@ -842,16 +1456,117 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         diagnostics: [...finalResult.diagnostics, "Agent result text is empty."],
       };
     }
+    // The answer bound is a runtime gate, not part of the request: it is checked
+    // here so a replayed answer is held to the caller's CURRENT bound. Tightening
+    // it therefore fails an old recording loudly instead of passing text the next
+    // stage's prompt cannot hold.
+    if (opts?.maxAnswerChars !== undefined && finalResult.ok && finalResult.status === "completed") {
+      const maxAnswerChars = normalizeMaxAnswerChars(opts.maxAnswerChars);
+      const length = finalResult.text?.length ?? 0;
+      if (length > maxAnswerChars) {
+        const message = `Agent answer is ${length} characters; the call allows ${maxAnswerChars}.`;
+        finalResult = {
+          ...finalResult,
+          ok: false,
+          status: "failed",
+          summary: message,
+          diagnostics: [...finalResult.diagnostics, message],
+        };
+      }
+    }
+    // Shape check runs before agent_end so the run journal carries the verdict for THIS attempt.
+    // A child that failed or returned no text has nothing to validate; that stays a run failure.
+    let schemaCheck: AgentSchemaCheck | undefined;
+    if (checkSchema !== undefined && finalResult.ok && finalResult.status === "completed") {
+      try {
+        schemaCheck = checkSchema(finalResult.text ?? "");
+      } catch (err) {
+        // A script validator that throws — or hands back something that is not an error
+        // list — ends the run unchanged and spends no retry. The line is emitted because
+        // this attempt really ran: without it the journal holds an agent_start with no
+        // agent_end and no record of why the run stopped.
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "error",
+          source: "script",
+          agent: req.agent,
+          callId,
+          ...(req.label !== undefined ? { label: req.label } : {}),
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - start,
+        });
+        throw err;
+      }
+    }
+    // A replayed answer the CURRENT validator rejects fails the run closed, exactly as an
+    // over-long replayed answer does above. Re-asking would form an attempt-2 prompt whose
+    // key misses at that ordinal, trip the one-way divergence latch and silently turn the
+    // operator's resume into a full live run. A SCHEMA mismatch on a replayed answer keeps
+    // re-asking as before — that path predates this rule and is unchanged.
+    if (replayed && schemaCheck?.validation.status === "mismatch" && schemaCheck.validation.source === "script") {
+      const message = `Replayed agent answer was rejected by the workflow script: ${schemaCheck.validation.errors.join("; ")}`;
+      finalResult = {
+        ...finalResult,
+        ok: false,
+        status: "failed",
+        summary: message,
+        diagnostics: [...finalResult.diagnostics, message],
+      };
+    }
     const durationMs = Date.now() - start;
+    let artifactEvidence;
+    try {
+      artifactEvidence = options.artifactPorts?.recordAgentEvidence({
+        callId,
+        name: opts?.artifact ?? defaultArtifactName(req.label ?? req.agent, callId),
+        ...(req.phase !== undefined ? { stage: req.phase } : {}),
+        ...(finalResult.text !== undefined ? { text: finalResult.text } : {}),
+        replayed,
+        ...(replayed && options.replaySourceRunId !== undefined
+          ? { replaySourceRunId: options.replaySourceRunId }
+          : {}),
+        ...(finalResult.childSessionId !== undefined ? { childSessionId: finalResult.childSessionId } : {}),
+        ...(finalResult.childTrace?.path !== undefined ? { childTracePath: finalResult.childTrace.path } : {}),
+        ...(finalResult.resultArtifact !== undefined ? { resultArtifactPath: finalResult.resultArtifact } : {}),
+      });
+    } catch (err) {
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "error",
+        source: "runtime",
+        agent: req.agent,
+        callId,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        message: err instanceof Error ? err.message : String(err),
+        durationMs,
+      });
+      throw err;
+    }
+    // This run writes its OWN complete record, replayed entries included, so a
+    // resume of a resume still has an unbroken prefix to work from.
+    options.replay?.recordAgentAttempt(
+      canonicalRequest,
+      finalResult.ok && finalResult.status === "completed" && finalResult.text !== undefined
+        ? { ok: true, text: finalResult.text }
+        : { ok: false },
+    );
     emit({
       ts: nowFn(),
       runId,
       kind: "agent_end",
       agent: req.agent,
+      callId,
+      ...(replayed ? { replayed: true } : {}),
       ...((finalResult.readOnly ?? req.readOnly) !== undefined
         ? { readOnly: finalResult.readOnly ?? req.readOnly }
         : {}),
       status: finalResult.status,
+      // Shape verdict for THIS attempt; absent on every call that declared no schema.
+      ...(schemaCheck !== undefined ? { schemaValidation: schemaCheck.validation } : {}),
       permissionMode: finalResult.permissionMode ?? permissionMode,
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,
       ...activeGroupFields(),
@@ -864,6 +1579,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.childSessionId !== undefined ? { childSessionId: finalResult.childSessionId } : {}),
       ...(finalResult.childTrace !== undefined ? { childTrace: finalResult.childTrace } : {}),
       ...(finalResult.resultArtifact !== undefined ? { resultArtifact: finalResult.resultArtifact } : {}),
+      ...(artifactEvidence?.answer !== undefined ? { answerArtifact: artifactEvidence.answer } : {}),
+      ...(artifactEvidence?.transcript !== undefined ? { transcriptArtifact: artifactEvidence.transcript } : {}),
+      ...(artifactEvidence?.result !== undefined ? { resultEnvelopeArtifact: artifactEvidence.result } : {}),
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
@@ -878,185 +1596,70 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (!finalResult.ok || finalResult.status !== "completed") {
       throw new WorkflowAgentExecutionError(finalResult);
     }
-    return finalResult.text!;
+    return { text: finalResult.text!, ...(schemaCheck !== undefined ? { schemaCheck } : {}) };
   }
 
-  async function llmDsl(prompt: string, opts?: WorkflowLlmOptions): Promise<WorkflowLlmResult> {
-    const effectivePhase = opts?.phase ?? _currentPhase;
+  /**
+   * `agent()` — the exact-text default, plus the opt-in shaped answer.
+   *
+   * Without `schema` this is one child run resolving to the child's exact final text: no prompt
+   * augmentation, no parsing, unchanged journal. With `schema` the runtime owns the contract at
+   * the boundary: it appends a deterministic shape block to the prompt, runs the child, parses
+   * and validates its text, retries up to SCHEMA_MAX_ATTEMPTS with the previous validator errors
+   * fed back, and resolves to the validated value. Every attempt is a real child run and is
+   * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
+   *
+   * `validate` extends that loop to the rules a declared schema cannot say — referential
+   * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
+   * validation succeeds, its errors reach the child in their own labelled repair block, and a
+   * call that declares it gets one dedicated extra attempt.
+   */
+  function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
+  function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
+  async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
-    const wantStream = opts?.stream === true;
-    const req: WorkflowLlmRequest = {
-      prompt,
-      ...(opts?.system !== undefined ? { system: opts.system } : {}),
-      ...(opts?.model !== undefined ? { model: opts.model } : {}),
-      ...(opts?.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
-      ...(wantStream ? { stream: true } : {}),
-      ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
-      ...(opts?.label !== undefined ? { label: opts.label } : {}),
-    };
-    // Streaming: the bridge forwards each text chunk here so the runtime owns journaling.
-    if (wantStream) {
-      req.onDelta = (textDelta: string) => {
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "llm_delta",
-          textDelta,
-          ...activeGroupFields(),
-          ...(req.label !== undefined ? { label: req.label } : {}),
-          ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        });
-      };
+    const declaredValidate = opts?.validate;
+    // Refused before the text overload returns: the text path runs one attempt and has no
+    // parsed value, so a validator there would silently never run and report success.
+    if (declaredValidate !== undefined) {
+      if (schema === undefined) throw new Error("agent validate requires a schema");
+      if (typeof declaredValidate !== "function") throw new Error("agent validate must be a function");
     }
-    const requestedLiveModel = liveModelFromSelector(req.model);
-    emit({
-      ts: nowFn(),
-      runId,
-      kind: "llm_start",
-      ...activeGroupFields(),
-      ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
-      ...(req.reasoning !== undefined
-        ? { thinking: req.reasoning }
-        : requestedLiveModel?.thinking !== undefined
-          ? { thinking: requestedLiveModel.thinking }
-          : {}),
-      ...(req.label !== undefined ? { label: req.label } : {}),
-      ...(req.phase !== undefined ? { phase: req.phase } : {}),
-    });
-    const start = Date.now();
+    if (schema === undefined) return (await runAgentAttempt(prompt, opts)).text;
+    if (!isRecord(schema)) throw new Error("agent schema must be a JSON-schema object");
+    assertSupportedAgentSchema(schema);
 
-    function emitLlmEnd(status: string, r?: WorkflowLlmResult): void {
-      const diagnostic = firstWorkflowDiagnostic(r);
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "llm_end",
-        status,
-        ...activeGroupFields(),
-        ...(req.label !== undefined ? { label: req.label } : {}),
-        ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        ...(r?.model !== undefined ? { model: r.model } : {}),
-        ...(r?.thinking !== undefined
-          ? { thinking: r.thinking }
-          : req.reasoning !== undefined
-            ? { thinking: req.reasoning }
-            : {}),
-        ...(r?.usage !== undefined ? { usage: r.usage } : {}),
-        ...(r?.schemaValidation !== undefined ? { schemaValidation: r.schemaValidation } : {}),
-        ...(status !== "completed" && diagnostic !== undefined ? { message: diagnostic } : {}),
-        durationMs: Date.now() - start,
-      });
-    }
-
-    // No runner configured: fail closed (honest ok:false), never throw, never fabricate text.
-    if (llmRunner === undefined) {
-      const unavailableResult: WorkflowLlmResult = {
-        ok: false,
-        text: "",
-        stopReason: "error",
-        diagnostics: ["llm runner not configured"],
-        ...(req.label !== undefined ? { label: req.label } : {}),
-      };
-      emitLlmEnd("failed", unavailableResult);
-      return unavailableResult;
-    }
-
-    // Route through the single scheduler seam + concurrency gate, exactly like agent().
-    // With schema: parse result.text as JSON, validate, and retry up to SCHEMA_MAX_ATTEMPTS.
-    const throwOnMismatch = opts?.throwOnSchemaMismatch === true;
-    const maxAttempts = schema !== undefined ? SCHEMA_MAX_ATTEMPTS : 1;
-    let result: WorkflowLlmResult | undefined;
-    let lastResult: WorkflowLlmResult | undefined;
-    let lastSchemaErrors: string[] | undefined;
-    let schemaAttempts = 0;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      schemaAttempts += 1;
-      let r: WorkflowLlmResult;
-      try {
-        const [scheduled] = await runScheduled<WorkflowLlmResult>([
-          async () => {
-            await agentConcurrencyGate.acquire();
+    const validate: WorkflowAgentValidate | undefined =
+      declaredValidate === undefined
+        ? undefined
+        : (value) => {
+            insideValidate = true;
             try {
-              return await llmRunner(req);
+              return declaredValidate(value);
             } finally {
-              agentConcurrencyGate.release();
+              insideValidate = false;
             }
-          },
-        ]);
-        if (scheduled === undefined) {
-          throw new Error("scheduler returned empty array for single-llm call");
-        }
-        r = scheduled;
-      } catch (err) {
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "error",
-          ...(req.label !== undefined ? { label: req.label } : {}),
-          ...(req.phase !== undefined ? { phase: req.phase } : {}),
-          message: err instanceof Error ? err.message : String(err),
-          durationMs: Date.now() - start,
-        });
-        throw err; // bare llm() rejects; groups retain it in typed failure evidence
-      }
+          };
+    // A dedicated, unconditional extra attempt when a validator is declared. It is not
+    // conditioned on which authority rejected which attempt, because the repair block must
+    // state a TRUE budget ("attempt 1 of M") in text that enters the replay key, and at
+    // render time nobody knows who will reject the next answer. A schema-only call keeps
+    // the old constant, so every existing recording's attempt-2 prompt is byte-identical.
+    const maxAttempts = validate === undefined ? SCHEMA_MAX_ATTEMPTS : SCHEMA_MAX_ATTEMPTS + 1;
 
-      lastResult = r;
-      // No schema, or model-level failure: nothing to validate.
-      if (schema === undefined || !r.ok) {
-        result = r;
-        break;
-      }
-      // Validate: parse text as JSON, then check against the schema subset validator.
-      const parsed = parseJsonFromText(r.text);
-      if (parsed.ok) {
-        const validation = validateAgainstSchema(parsed.value, schema as Record<string, unknown>);
-        if (validation.ok) {
-          result = { ...r, output: parsed.value };
-          lastSchemaErrors = undefined;
-          break;
-        }
-        lastSchemaErrors = validation.errors;
-      } else {
-        lastSchemaErrors = [`response is not valid JSON: ${parsed.error}`];
-      }
-      result = undefined; // not valid yet; retry (fresh completion) or fail below
+    let lastErrors: string[] = [];
+    let lastSource: "schema" | "script" = "schema";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const attemptPrompt = withSchemaContract(prompt, schema, attempt, lastErrors, lastSource, maxAttempts);
+      const outcome = await runAgentAttempt(attemptPrompt, opts, (text) =>
+        checkAgentSchema(text, schema, attempt, validate),
+      );
+      const check = outcome.schemaCheck;
+      if (check?.validation.status === "valid") return check.value;
+      lastErrors = check?.validation.errors ?? ["agent returned no text to validate"];
+      lastSource = check?.validation.source === "script" ? "script" : "schema";
     }
-
-    // Schema enforcement produced a final mismatch after all attempts.
-    if (schema !== undefined && result === undefined && lastSchemaErrors !== undefined) {
-      const schemaValidation: WorkflowSchemaValidation = {
-        status: "mismatch",
-        attempts: schemaAttempts,
-        errors: [...lastSchemaErrors],
-      };
-      const mismatchResult: WorkflowLlmResult = {
-        ok: false,
-        text: lastResult?.text ?? "",
-        stopReason: lastResult?.stopReason ?? "error",
-        ...(lastResult?.model !== undefined ? { model: lastResult.model } : {}),
-        ...(lastResult?.usage !== undefined ? { usage: lastResult.usage } : {}),
-        diagnostics: [...(lastResult?.diagnostics ?? []), `schema mismatch: ${lastSchemaErrors.join("; ")}`],
-        schemaValidation,
-        ...(req.label !== undefined ? { label: req.label } : {}),
-      };
-      emitLlmEnd("failed", mismatchResult);
-      if (throwOnMismatch) {
-        throw new SchemaValidationError(lastSchemaErrors, maxAttempts);
-      }
-      return mismatchResult;
-    }
-
-    const baseResult = result!;
-    const finalResult: WorkflowLlmResult =
-      schema !== undefined && baseResult.ok
-        ? {
-            ...baseResult,
-            schemaValidation: { status: "valid", attempts: schemaAttempts, errors: [] },
-          }
-        : baseResult;
-    emitLlmEnd(finalResult.ok ? "completed" : "failed", finalResult);
-    return finalResult;
+    throw new SchemaValidationError(lastErrors, maxAttempts);
   }
 
   async function parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
@@ -1155,10 +1758,19 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     });
   }
 
+  function awaitOperator(input: WorkflowAwaitOperatorDeclaration): void {
+    const declaration = normalizeWorkflowAwaitOperatorDeclaration(input);
+    if (options.onAwaitOperator === undefined) {
+      throw new Error("awaitOperator is not configured by the workflow runner");
+    }
+    options.onAwaitOperator(declaration);
+  }
+
   async function workflowDsl<T = unknown>(
-    subFn: (dsl: WorkflowDsl, input: unknown) => Promise<T>,
-    input?: unknown,
+    subFn: (dsl: WorkflowDsl, input?: string) => Promise<T>,
+    input?: string,
   ): Promise<T> {
+    assertWorkflowInput(input, "nested workflow input");
     emit({
       ts: nowFn(),
       runId,
@@ -1270,16 +1882,65 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.projectRoot;
   }
 
+  function publishArtifact(name: string, text: string): WorkflowArtifactRef {
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    return options.artifactPorts.publishText(name, text, _currentPhase);
+  }
+
+  function consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact {
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    return options.artifactPorts.consumeText(ref, _currentPhase);
+  }
+
+  function continuationArtifacts(): readonly WorkflowContinuationArtifact[] {
+    return options.continuation?.artifacts ?? [];
+  }
+
+  function captureSourceState(label: string): WorkflowSourceState {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(label)) {
+      throw new Error("workflow source-state label must be a safe 1-96 character identifier");
+    }
+    if (options.sourceState === undefined) throw new Error("workflow source-state reader is not configured");
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    const state = options.sourceState.capture();
+    options.artifactPorts.publishText(
+      `source-state-${label}.json`,
+      `${JSON.stringify({ label, ...state }, null, 2)}\n`,
+      _currentPhase,
+    );
+    return state;
+  }
+
+  /**
+   * The DSL's answer to replay determinism: supply the nondeterministic value
+   * instead of banning the call. Without a replay store these are exactly
+   * `Date.now()` / `Math.random()`; with one they are recorded on the first run
+   * and returned from the record on a resumed run, until the prefix diverges.
+   */
+  function nowMs(): number {
+    return options.replay === undefined ? Date.now() : options.replay.resolveValue("clock", () => Date.now());
+  }
+
+  function random(): number {
+    return options.replay === undefined ? Math.random() : options.replay.resolveValue("random", () => Math.random());
+  }
+
   const dsl: WorkflowDsl = {
     agent: agentDsl,
     promptFile,
     workspace,
     projectRoot,
-    llm: llmDsl,
+    publishArtifact,
+    consumeTextArtifact,
+    continuationArtifacts,
+    captureSourceState,
     parallel,
     pipeline,
     phase,
     log,
+    awaitOperator,
+    now: nowMs,
+    random,
     workflow: workflowDsl,
   };
 
@@ -1291,6 +1952,33 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   };
 }
 
+function assertBoundContinuation(binding: WorkflowBoundContinuation | undefined, runId: string): void {
+  if (binding === undefined) return;
+  if (typeof binding.originRunId !== "string" || binding.originRunId.trim() === "") {
+    throw new Error("workflow continuation binding has an invalid originRunId");
+  }
+  if (!Array.isArray(binding.artifacts) || binding.artifacts.length < 1 || binding.artifacts.length > 8) {
+    throw new Error("workflow continuation binding must contain 1-8 artifacts");
+  }
+  const identities = new Set<string>();
+  for (const pair of binding.artifacts) {
+    if (!isRecord(pair) || !isRecord(pair.sourceRef) || !isRecord(pair.consumedArtifact)) {
+      throw new Error("workflow continuation binding has an invalid artifact pair");
+    }
+    const sourceRef = pair.sourceRef as unknown as WorkflowArtifactRef;
+    const consumed = pair.consumedArtifact as unknown as WorkflowConsumedTextArtifact;
+    if (sourceRef.runId !== binding.originRunId || consumed.source?.runId !== binding.originRunId) {
+      throw new Error("workflow continuation binding does not match its origin run");
+    }
+    if (!isRecord(consumed.ref) || consumed.ref.runId !== runId) {
+      throw new Error("workflow continuation consumed artifact does not belong to the current run");
+    }
+    const identity = `${sourceRef.runId}\u001f${sourceRef.artifactId}`;
+    if (identities.has(identity)) throw new Error("workflow continuation binding has a duplicate artifact identity");
+    identities.add(identity);
+  }
+}
+
 /**
  * Stable slot descriptor `(phase, label)` for a workflow agent (REQ-009, D-006). A loop
  * that re-invokes `agent()` with the same (phase,label) resolves to the same slot, so its
@@ -1300,6 +1988,46 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
  */
 export function workflowSlotKey(input: { phase?: string | undefined; label?: string | undefined }): string {
   return `${input.phase ?? ""}${input.label ?? ""}`;
+}
+
+/**
+ * Canonical identity of one child request for the replay record (T-109).
+ *
+ * Built from the RESOLVED request rather than the author's `opts`, so a default
+ * that later changes value cannot silently reuse a record made under the old
+ * default. Every field is listed explicitly: a field added to
+ * `WorkflowAgentRequest` without being added here would widen what counts as
+ * "the same call", so the omission has to be a deliberate edit rather than an
+ * accident of spreading the object. A declared `schema` needs no field of its
+ * own — it is already baked into `prompt` by `withSchemaContract`.
+ */
+function canonicalAgentRequest(req: WorkflowAgentRequest): string {
+  return JSON.stringify({
+    prompt: req.prompt,
+    agent: req.agent,
+    readOnly: req.readOnly ?? null,
+    tools: req.tools ?? null,
+    maxToolCalls: req.maxToolCalls ?? null,
+    model: req.model ?? null,
+    // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
+    // is a different call and must not reuse the earlier record.
+    timeoutMs: req.timeoutMs ?? null,
+    label: req.label ?? null,
+    phase: req.phase ?? null,
+    sandbox: req.sandbox ?? null,
+    permissionMode: req.permissionMode ?? null,
+    workspaceMode: req.workspaceMode ?? null,
+    workspaceHandle: req.workspaceHandle ?? null,
+  });
+}
+
+function defaultArtifactName(label: string, callId: string): string {
+  const safe = label
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 96);
+  return safe === "" ? `${callId}-answer` : safe;
 }
 
 function liveModelFromSelector(selector: string | undefined): { model: string; thinking?: string } | undefined {
@@ -1361,11 +2089,6 @@ function workflowErrorMessage(value: unknown): string {
   } catch {
     return "unknown branch failure";
   }
-}
-
-function firstWorkflowDiagnostic(result: WorkflowLlmResult | undefined): string | undefined {
-  const diagnostic = result?.diagnostics.find((entry) => typeof entry === "string" && entry.trim() !== "");
-  return diagnostic === undefined ? undefined : workflowErrorMessage(diagnostic);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

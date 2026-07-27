@@ -11,10 +11,86 @@ import {
   formatWorkflowResultSummary,
   isWorkflowResultExplicitFailure,
   prepareWorkflowResult,
+  projectWorkflowDisposition,
+  workflowDispositionForCompletion,
   writeWorkflowResultJson,
 } from "../../../extensions/_shared/workflow-result.js";
 
 describe("workflow result JSON boundary", () => {
+  it("projects new dispositions strictly while preserving only absent legacy envelopes", () => {
+    expect(projectWorkflowDisposition({ ok: true, result: { summary: "legacy" } })).toEqual({
+      status: "completed",
+      summary: "legacy",
+    });
+    expect(projectWorkflowDisposition({ ok: false, result: null, error: "legacy failed" })).toEqual({
+      status: "failed",
+      summary: "legacy failed",
+    });
+    expect(
+      projectWorkflowDisposition({
+        ok: true,
+        result: { mode: "prepared" },
+        disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      }),
+    ).toEqual({
+      status: "awaiting_operator",
+      summary: "awaiting operator · review clarification required",
+    });
+    expect(
+      projectWorkflowDisposition({
+        ok: false,
+        result: null,
+        disposition: { status: "cancelled", reason: "operator_stop" },
+      }),
+    ).toEqual({ status: "cancelled", summary: "cancelled by operator" });
+    expect(
+      projectWorkflowDisposition({
+        ok: true,
+        result: "would otherwise look successful",
+        disposition: { status: "future_status" },
+      }),
+    ).toEqual({ status: "unknown", summary: "unknown workflow disposition" });
+    expect(
+      projectWorkflowDisposition({
+        ok: true,
+        result: "inconsistent",
+        disposition: { status: "failed" },
+      }),
+    ).toEqual({ status: "unknown", summary: "unknown workflow disposition" });
+  });
+
+  it("gives controlling abort signals precedence over waiting and success", () => {
+    expect(
+      workflowDispositionForCompletion({
+        ok: true,
+        aborted: true,
+        abortReason: { kind: "operator_stop" },
+        awaitOperatorReason: "questions remain",
+      }),
+    ).toEqual({ status: "cancelled", reason: "operator_stop" });
+    expect(
+      workflowDispositionForCompletion({
+        ok: true,
+        aborted: true,
+        abortReason: { kind: "session_shutdown" },
+      }),
+    ).toEqual({ status: "cancelled", reason: "session_shutdown" });
+    expect(
+      workflowDispositionForCompletion({
+        ok: true,
+        aborted: false,
+        awaitOperatorReason: "questions remain",
+      }),
+    ).toEqual({ status: "awaiting_operator", detail: "questions remain" });
+    expect(
+      workflowDispositionForCompletion({
+        ok: true,
+        aborted: false,
+        awaitOperatorReason: "x".repeat(201),
+      }),
+    ).toEqual({ status: "failed" });
+  });
+
   it("treats explicit ok:false and partial:true as semantic non-success", () => {
     expect(isWorkflowResultExplicitFailure({ ok: false, summary: "stopped" })).toBe(true);
     expect(isWorkflowResultExplicitFailure({ partial: true })).toBe(true);
@@ -42,11 +118,17 @@ describe("workflow result JSON boundary", () => {
   it("preserves null but replaces undefined, BigInt, circular, and throwing toJSON results with an explicit sentinel", () => {
     const circular: Record<string, unknown> = { label: "cycle" };
     circular.self = circular;
-    const throwingToJson = { toJSON(): never { throw new Error("toJSON refused"); } };
+    const throwingToJson = {
+      toJSON(): never {
+        throw new Error("toJSON refused");
+      },
+    };
     const throwingSummary: Record<string, unknown> = {};
     Object.defineProperty(throwingSummary, "summary", {
       enumerable: true,
-      get(): never { throw new Error("summary getter refused"); },
+      get(): never {
+        throw new Error("summary getter refused");
+      },
     });
 
     expect(prepareWorkflowResult(null)).toEqual({ value: null });

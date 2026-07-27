@@ -34,6 +34,8 @@ export const AGENT_SDK_UNAVAILABLE_DIAGNOSTIC = "agent-sdk-host:unavailable";
 /** Stable substring shared by AgentSdkUnavailableError messages. */
 export const AGENT_SDK_UNAVAILABLE_HINT = "Pi SDK host";
 
+const DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS = 5_000;
+
 /** Raised when the installed Pi host cannot provide a usable `createAgentSession`. */
 export class AgentSdkUnavailableError extends Error {
   constructor(message: string) {
@@ -64,7 +66,7 @@ export interface SdkAgentSessionEventLike {
 }
 export interface SdkAgentSessionLike {
   readonly sessionId: string;
-  /** Pi 0.80.3 conversation history; optional for older hosts and structural mocks. */
+  /** Pi 0.82.0 conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
   prompt(text: string, options?: { source?: string }): Promise<void>;
@@ -111,6 +113,8 @@ const MAX_AGENT_LIVE_EVENT_LINE_LENGTH = 300;
 export interface AgentLiveRow {
   id: string;
   parentRowId?: string;
+  /** Durable owner provenance. Workflow-owned rows stop only through /workflows stop. */
+  workflowRunId?: string;
   agentName?: string;
   /** Memorable, deterministic petname for this row (REQ-002); assigned in `begin`. */
   displayName?: string;
@@ -170,6 +174,7 @@ export interface AgentLiveRow {
 interface AgentLiveBeginOptions {
   id?: string;
   parentRowId?: string;
+  workflowRunId?: string;
   agentName?: string;
   label: string;
   title?: string;
@@ -185,12 +190,31 @@ interface AgentLiveBeginOptions {
   now?: number;
 }
 
+const AGENT_LIVE_EXECUTION_AUTHORITY = Symbol("agent-live-execution-authority");
+const AGENT_LIVE_CANCELLATION_AUTHORITY = Symbol("agent-live-cancellation-authority");
+
+export interface AgentLiveExecutionHandle {
+  readonly [AGENT_LIVE_EXECUTION_AUTHORITY]: true;
+}
+interface AgentLiveCancellationAuthority {
+  readonly [AGENT_LIVE_CANCELLATION_AUTHORITY]: true;
+}
+
+interface AgentLiveCancelRegistration {
+  authority: AgentLiveCancellationAuthority;
+  cancel: () => void;
+  execution: AgentLiveExecutionHandle;
+}
+
 class AgentLiveStore {
   readonly rows = new Map<string, AgentLiveRow>();
   readonly emitter = new EventEmitter();
   readonly #agentNames = new Map<string, string>();
   readonly #petnames = new PetnameRegistry();
-  readonly #cancelHandlers = new Map<string, () => void>();
+  readonly #executionAuthorities = new Map<string, AgentLiveExecutionHandle>();
+  readonly #executionAuthorityRows = new WeakMap<AgentLiveExecutionHandle, string>();
+  readonly #cancelRegistrations = new Map<string, AgentLiveCancelRegistration>();
+  readonly #cancellationAuthorityRows = new WeakMap<AgentLiveCancellationAuthority, string>();
   readonly #transcripts = new Map<string, AgentLiveTranscript>();
   #nextId = 0;
 
@@ -198,7 +222,8 @@ class AgentLiveStore {
     this.rows.clear();
     this.#agentNames.clear();
     this.#petnames.reset();
-    this.#cancelHandlers.clear();
+    this.#executionAuthorities.clear();
+    this.#cancelRegistrations.clear();
     this.#transcripts.clear();
     this.#emit();
   }
@@ -210,7 +235,8 @@ class AgentLiveStore {
       if (!this.rows.delete(id)) continue;
       this.#agentNames.delete(id);
       this.#petnames.release(id);
-      this.#cancelHandlers.delete(id);
+      this.#executionAuthorities.delete(id);
+      this.#cancelRegistrations.delete(id);
       this.#transcripts.delete(id);
       removed += 1;
     }
@@ -224,21 +250,116 @@ class AgentLiveStore {
    * cannot be unregistered by an older run's finally block.
    */
   registerCancel(rowId: string, cancel: () => void): () => void {
-    this.#cancelHandlers.set(rowId, cancel);
+    const execution = this.#executionAuthorities.get(rowId);
+    if (execution === undefined) return () => {};
+    return this.#registerCancel(rowId, execution, cancel);
+  }
+
+  registerCancelForExecution(execution: AgentLiveExecutionHandle, cancel: () => void): () => void {
+    const rowId = this.#currentExecutionRowId(execution);
+    if (rowId === undefined) return () => {};
+    return this.#registerCancel(rowId, execution, cancel);
+  }
+
+  #registerCancel(rowId: string, execution: AgentLiveExecutionHandle, cancel: () => void): () => void {
+    const authority = Object.freeze({}) as AgentLiveCancellationAuthority;
+    const registration: AgentLiveCancelRegistration = { authority, cancel, execution };
+    this.#cancellationAuthorityRows.set(authority, rowId);
+    this.#cancelRegistrations.set(rowId, registration);
     return () => {
-      if (this.#cancelHandlers.get(rowId) === cancel) this.#cancelHandlers.delete(rowId);
+      if (this.#cancelRegistrations.get(rowId) === registration) this.#cancelRegistrations.delete(rowId);
     };
+  }
+
+  captureExecutionAuthority(rowId: string): AgentLiveExecutionHandle | undefined {
+    return this.#executionAuthorities.get(rowId);
+  }
+
+  isExecutionAuthorityCurrent(authority: AgentLiveExecutionHandle): boolean {
+    return this.#currentExecutionRowId(authority) !== undefined;
+  }
+
+  rowForExecution(execution: AgentLiveExecutionHandle): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    return rowId === undefined ? undefined : this.rows.get(rowId);
+  }
+
+  patchExecution(
+    execution: AgentLiveExecutionHandle,
+    patch: Partial<Omit<AgentLiveRow, "id">>,
+    now = Date.now(),
+  ): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    return rowId === undefined ? undefined : this.patch(rowId, patch, now);
+  }
+
+  feedExecutionEvent(execution: AgentLiveExecutionHandle, event: unknown, now = Date.now()): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    return rowId === undefined ? undefined : this.feedSessionEvent(rowId, event, now);
+  }
+
+  applyExecutionStats(execution: AgentLiveExecutionHandle, stats: SdkSessionStatsLike): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    return rowId === undefined ? undefined : this.applySessionStats(rowId, stats);
+  }
+
+  replaceExecutionTranscript(
+    execution: AgentLiveExecutionHandle,
+    messages: readonly unknown[],
+  ): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    return rowId === undefined ? undefined : this.replaceTranscriptFromMessages(rowId, messages);
+  }
+
+  #currentExecutionRowId(execution: AgentLiveExecutionHandle): string | undefined {
+    const rowId = this.#executionAuthorityRows.get(execution);
+    return rowId !== undefined && this.#executionAuthorities.get(rowId) === execution ? rowId : undefined;
+  }
+
+  captureCancellationAuthority(rowId: string): AgentLiveCancellationAuthority | undefined {
+    const registration = this.#cancelRegistrations.get(rowId);
+    if (registration === undefined || !this.isExecutionAuthorityCurrent(registration.execution)) return undefined;
+    return registration.authority;
+  }
+
+  isCancellationAuthorityCurrent(authority: AgentLiveCancellationAuthority): boolean {
+    const rowId = this.#cancellationAuthorityRows.get(authority);
+    const registration = rowId === undefined ? undefined : this.#cancelRegistrations.get(rowId);
+    return registration?.authority === authority && this.isExecutionAuthorityCurrent(registration.execution);
+  }
+
+  cancelWithAuthority(authority: AgentLiveCancellationAuthority): boolean {
+    const rowId = this.#cancellationAuthorityRows.get(authority);
+    const registration = rowId === undefined ? undefined : this.#cancelRegistrations.get(rowId);
+    if (registration?.authority !== authority || !this.isExecutionAuthorityCurrent(registration.execution))
+      return false;
+    registration.cancel();
+    return true;
   }
 
   /** Request cancellation of one selected child. False means no active child seam. */
   cancel(rowId: string): boolean {
-    const cancel = this.#cancelHandlers.get(rowId);
-    if (cancel === undefined) return false;
-    cancel();
-    return true;
+    const authority = this.captureCancellationAuthority(rowId);
+    return authority !== undefined && this.cancelWithAuthority(authority);
   }
 
+  /**
+   * Synchronous projection/compatibility API. It is intentionally row-id based
+   * and must not be retained across an async boundary. Async producers must use
+   * beginExecution() and the corresponding execution-handle methods.
+   */
   begin(options: AgentLiveBeginOptions): AgentLiveRow {
+    return this.#begin(options, false).row;
+  }
+
+  beginExecution(options: AgentLiveBeginOptions): AgentLiveExecutionHandle {
+    return this.#begin(options, true).execution;
+  }
+
+  #begin(
+    options: AgentLiveBeginOptions,
+    freshExecution: boolean,
+  ): { row: AgentLiveRow; execution: AgentLiveExecutionHandle } {
     const id = options.id ?? `agent-live-${Date.now()}-${++this.#nextId}`;
     const existing = this.rows.get(id);
     // Petname is stable per row: assigned once (never re-derived), and skipped for
@@ -252,11 +373,29 @@ class AgentLiveStore {
     const round = options.round ?? existing?.round;
     const slotKey = options.slotKey ?? existing?.slotKey;
     const isNewRound = existing !== undefined && options.round !== undefined && options.round > (existing.round ?? 0);
-    if (isNewRound) this.#transcripts.delete(id);
+    const resetTransient = freshExecution || isNewRound;
+    const lastActivityAt = freshExecution ? options.now : (existing?.lastActivityAt ?? options.now);
+    const model = freshExecution ? (options.model ?? existing?.model) : (existing?.model ?? options.model);
+    const thinking = freshExecution
+      ? (options.thinking ?? existing?.thinking)
+      : (existing?.thinking ?? options.thinking);
+    const currentPath = freshExecution
+      ? (options.currentPath ?? existing?.currentPath)
+      : (existing?.currentPath ?? options.currentPath);
+    const groupKind = freshExecution
+      ? (options.groupKind ?? existing?.groupKind)
+      : (existing?.groupKind ?? options.groupKind);
+    const groupTotal = freshExecution
+      ? (options.groupTotal ?? existing?.groupTotal)
+      : (existing?.groupTotal ?? options.groupTotal);
+    if (resetTransient) this.#transcripts.delete(id);
     const row: AgentLiveRow = {
       id,
       ...(existing?.parentRowId !== undefined || options.parentRowId !== undefined
         ? { parentRowId: existing?.parentRowId ?? options.parentRowId }
+        : {}),
+      ...(existing?.workflowRunId !== undefined || options.workflowRunId !== undefined
+        ? { workflowRunId: existing?.workflowRunId ?? options.workflowRunId }
         : {}),
       ...(existing?.agentName !== undefined || options.agentName !== undefined
         ? { agentName: existing?.agentName ?? options.agentName }
@@ -268,54 +407,63 @@ class AgentLiveStore {
         : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
-      status: existing?.status ?? "queued",
-      activityState: existing?.activityState ?? activityStateForStatus(existing?.status ?? "queued"),
-      ...(existing?.startedAt !== undefined ? { startedAt: existing.startedAt } : {}),
-      ...(!isNewRound && existing?.elapsedMs !== undefined ? { elapsedMs: existing.elapsedMs } : {}),
-      ...(existing?.lastActivityAt !== undefined || options.now !== undefined
-        ? { lastActivityAt: existing?.lastActivityAt ?? options.now }
+      status: freshExecution ? "queued" : (existing?.status ?? "queued"),
+      activityState: freshExecution
+        ? activityStateForStatus("queued")
+        : (existing?.activityState ?? activityStateForStatus(existing?.status ?? "queued")),
+      ...(!freshExecution && existing?.startedAt !== undefined ? { startedAt: existing.startedAt } : {}),
+      ...(!resetTransient && existing?.elapsedMs !== undefined ? { elapsedMs: existing.elapsedMs } : {}),
+      ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(thinking !== undefined ? { thinking } : {}),
+      ...(currentPath !== undefined ? { currentPath } : {}),
+      currentTools: resetTransient ? [] : (existing?.currentTools ?? []),
+      ...(!resetTransient && existing?.currentToolArgs !== undefined
+        ? { currentToolArgs: existing.currentToolArgs }
         : {}),
-      ...(existing?.model !== undefined || options.model !== undefined
-        ? { model: existing?.model ?? options.model }
-        : {}),
-      ...(existing?.thinking !== undefined || options.thinking !== undefined
-        ? { thinking: existing?.thinking ?? options.thinking }
-        : {}),
-      ...(existing?.currentPath !== undefined || options.currentPath !== undefined
-        ? { currentPath: existing?.currentPath ?? options.currentPath }
-        : {}),
-      currentTools: isNewRound ? [] : (existing?.currentTools ?? []),
-      ...(!isNewRound && existing?.currentToolArgs !== undefined ? { currentToolArgs: existing.currentToolArgs } : {}),
-      ...(!isNewRound && existing?.currentToolStartMs !== undefined
+      ...(!resetTransient && existing?.currentToolStartMs !== undefined
         ? { currentToolStartMs: existing.currentToolStartMs }
         : {}),
-      stepCount: existing?.stepCount ?? 0,
-      ...(existing?.turnCount !== undefined ? { turnCount: existing.turnCount } : {}),
-      ...(!isNewRound && existing?.tokenCount !== undefined ? { tokenCount: existing.tokenCount } : {}),
-      ...(existing?.childSessionId !== undefined ? { childSessionId: existing.childSessionId } : {}),
-      ...(existing?.resultArtifact !== undefined ? { resultArtifact: existing.resultArtifact } : {}),
-      ...(existing?.finalAnswer !== undefined ? { finalAnswer: existing.finalAnswer } : {}),
+      stepCount: freshExecution ? 0 : (existing?.stepCount ?? 0),
+      ...(!freshExecution && existing?.turnCount !== undefined ? { turnCount: existing.turnCount } : {}),
+      ...(!resetTransient && existing?.tokenCount !== undefined ? { tokenCount: existing.tokenCount } : {}),
+      ...(!freshExecution && existing?.childSessionId !== undefined ? { childSessionId: existing.childSessionId } : {}),
+      ...(!freshExecution && existing?.resultArtifact !== undefined ? { resultArtifact: existing.resultArtifact } : {}),
+      ...(!freshExecution && existing?.finalAnswer !== undefined ? { finalAnswer: existing.finalAnswer } : {}),
       isolated: options.isolated ?? existing?.isolated ?? false,
       noMcp: options.noMcp ?? existing?.noMcp ?? false,
-      ...(existing?.groupKind !== undefined || options.groupKind !== undefined
-        ? { groupKind: existing?.groupKind ?? options.groupKind }
-        : {}),
-      ...(existing?.groupTotal !== undefined || options.groupTotal !== undefined
-        ? { groupTotal: existing?.groupTotal ?? options.groupTotal }
-        : {}),
-      ...(existing?.groupCompleted !== undefined ? { groupCompleted: existing.groupCompleted } : {}),
-      ...(existing?.groupFailed !== undefined ? { groupFailed: existing.groupFailed } : {}),
-      errors: existing?.errors ?? [],
-      eventLines: existing?.eventLines ?? [],
-      ...(isNewRound || existing?.transcript === undefined ? {} : { transcript: existing.transcript }),
-      ...(isNewRound || existing?.latestMessage === undefined ? {} : { latestMessage: existing.latestMessage }),
+      ...(groupKind !== undefined ? { groupKind } : {}),
+      ...(groupTotal !== undefined ? { groupTotal } : {}),
+      ...(!freshExecution && existing?.groupCompleted !== undefined ? { groupCompleted: existing.groupCompleted } : {}),
+      ...(!freshExecution && existing?.groupFailed !== undefined ? { groupFailed: existing.groupFailed } : {}),
+      errors: freshExecution ? [] : (existing?.errors ?? []),
+      eventLines: freshExecution ? [] : (existing?.eventLines ?? []),
+      ...(resetTransient || existing?.transcript === undefined ? {} : { transcript: existing.transcript }),
+      ...(resetTransient || existing?.latestMessage === undefined ? {} : { latestMessage: existing.latestMessage }),
     };
     this.rows.set(id, row);
+    const executionAuthority = Object.freeze({}) as AgentLiveExecutionHandle;
+    this.#executionAuthorityRows.set(executionAuthority, id);
+    this.#executionAuthorities.set(id, executionAuthority);
+    this.#cancelRegistrations.delete(id);
     if (options.agentName !== undefined) this.#agentNames.set(id, options.agentName);
     this.#emit();
-    return row;
+    return { row, execution: executionAuthority };
   }
 
+  claimQueuedExecution(agentName: string, fallbackLabel: string): AgentLiveExecutionHandle {
+    for (const [id, row] of this.rows) {
+      if (row.status !== "queued" || this.#agentNames.get(id) !== agentName) continue;
+      const execution = this.#executionAuthorities.get(id);
+      if (execution !== undefined) return execution;
+    }
+    return this.beginExecution({ agentName, label: fallbackLabel });
+  }
+
+  /**
+   * Synchronous projection/compatibility API. Async producers must retain an
+   * AgentLiveExecutionHandle and call patchExecution() instead.
+   */
   patch(id: string, patch: Partial<Omit<AgentLiveRow, "id">>, now = Date.now()): AgentLiveRow | undefined {
     const current = this.rows.get(id);
     if (current === undefined) return undefined;
@@ -351,6 +499,7 @@ class AgentLiveStore {
     return this.begin({ agentName, label: fallbackLabel });
   }
 
+  /** Synchronous compatibility API; async event sources must call feedExecutionEvent(). */
   feedSessionEvent(rowId: string, event: unknown, now = Date.now()): AgentLiveRow | undefined {
     const current = this.rows.get(rowId);
     if (current === undefined) return undefined;
@@ -405,6 +554,7 @@ class AgentLiveStore {
     return this.patch(rowId, patch, now);
   }
 
+  /** Synchronous compatibility API; async stats sources must call applyExecutionStats(). */
   applySessionStats(rowId: string, stats: SdkSessionStatsLike): AgentLiveRow | undefined {
     const current = this.rows.get(rowId);
     if (current === undefined) return undefined;
@@ -420,6 +570,7 @@ class AgentLiveStore {
     });
   }
 
+  /** Synchronous compatibility API; async transcript sources must call replaceExecutionTranscript(). */
   replaceTranscriptFromMessages(rowId: string, messages: readonly unknown[]): AgentLiveRow | undefined {
     const current = this.rows.get(rowId);
     if (current === undefined) return undefined;
@@ -462,9 +613,9 @@ function transcriptPatch(snapshot: AgentLiveTranscriptSnapshot): Pick<AgentLiveR
  * file. Keep exactly one process-local store behind a versioned global symbol so
  * separately loaded entrypoints observe and control the same live rows.
  */
-const AGENT_LIVE_STORE_GLOBAL_KEY = Symbol.for("locus-pi.agent-live-store.v3");
+const AGENT_LIVE_STORE_GLOBAL_KEY = Symbol.for("locus-pi.agent-live-store.v4");
 interface SharedAgentLiveStoreSlot {
-  version: 3;
+  version: 4;
   store: AgentLiveStore;
 }
 
@@ -480,7 +631,7 @@ function sharedAgentLiveStore(): AgentLiveStore {
     // shared contract to this separately evaluated copy of the class.
     return existing.store as AgentLiveStore;
   }
-  const slot: SharedAgentLiveStoreSlot = { version: 3, store: new AgentLiveStore() };
+  const slot: SharedAgentLiveStoreSlot = { version: 4, store: new AgentLiveStore() };
   Object.defineProperty(runtimeGlobal, AGENT_LIVE_STORE_GLOBAL_KEY, {
     value: slot,
     enumerable: false,
@@ -491,11 +642,19 @@ function sharedAgentLiveStore(): AgentLiveStore {
 }
 
 function isSharedAgentLiveStoreSlot(value: unknown): value is SharedAgentLiveStoreSlot {
-  if (!isRecord(value) || value.version !== 3 || !isRecord(value.store)) return false;
+  if (!isRecord(value) || value.version !== 4 || !isRecord(value.store)) return false;
   return (
     value.store.rows instanceof Map &&
     typeof value.store.begin === "function" &&
-    typeof value.store.cancel === "function"
+    typeof value.store.beginExecution === "function" &&
+    typeof value.store.rowForExecution === "function" &&
+    typeof value.store.patchExecution === "function" &&
+    typeof value.store.feedExecutionEvent === "function" &&
+    typeof value.store.applyExecutionStats === "function" &&
+    typeof value.store.replaceExecutionTranscript === "function" &&
+    typeof value.store.registerCancelForExecution === "function" &&
+    typeof value.store.cancelWithAuthority === "function" &&
+    typeof value.store.captureExecutionAuthority === "function"
   );
 }
 
@@ -517,12 +676,15 @@ export interface AgentSdkSessionExecutorOptions {
    * value in tests to exercise the timeout fail-closed path deterministically.
    */
   turnTimeoutMs?: number;
+  /** Maximum wait for the SDK abort acknowledgement before evidence persistence continues. */
+  abortTimeoutMs?: number;
   /** Optional fail-closed tool-call budget for this child. */
   maxToolCalls?: number;
   /** Optional live-row identity supplied by callers that already created a UI row. */
   live?: {
     rowId?: string;
     parentRowId?: string;
+    workflowRunId?: string;
     label?: string;
     title?: string;
     /** Workflow slot descriptor (phase,label); anchors the row across loop rounds (REQ-009). */
@@ -534,6 +696,10 @@ export interface AgentSdkSessionExecutorOptions {
     model?: string;
     thinking?: string;
   };
+  /** Exact row execution created by an outer owner; prevents a second begin for the same genuine run. */
+  liveExecution?: AgentLiveExecutionHandle;
+  /** Reports the one exact execution used by this run to callers that need post-boundary attribution. */
+  onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
   /** Optional explicit env for prompt-building; defaults to process.env. */
   promptEnv?: NodeJS.ProcessEnv;
 }
@@ -542,6 +708,10 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
   const createSession = options.createSession ?? defaultCreateAgentSession;
   const now = options.now ?? (() => new Date().toISOString());
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_AGENT_SDK_TURN_TIMEOUT_MS;
+  const abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS;
+  if (!Number.isFinite(abortTimeoutMs) || abortTimeoutMs < 0) {
+    throw new Error("abortTimeoutMs must be a non-negative finite number when provided");
+  }
   const maxToolCalls = options.maxToolCalls;
   if (maxToolCalls !== undefined && (!Number.isInteger(maxToolCalls) || maxToolCalls < 0)) {
     throw new Error("maxToolCalls must be a non-negative integer when provided");
@@ -558,6 +728,32 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
       else signal.addEventListener("abort", forwardCallerAbort, { once: true });
       let unregisterCancel = () => {};
       try {
+        const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
+        const execution =
+          options.liveExecution ??
+          (options.live !== undefined
+            ? agentLiveStore.beginExecution(liveBeginOptions(options.live.rowId, request.agent.name, options.live, cwd))
+            : agentLiveStore.claimQueuedExecution(request.agent.name, request.agent.name));
+        unregisterCancel = agentLiveStore.registerCancelForExecution(execution, () => childController.abort());
+        try {
+          options.onLiveExecution?.(execution);
+        } catch (observerError) {
+          const reason = errorMessage(observerError);
+          const current = agentLiveStore.rowForExecution(execution);
+          if (current !== undefined) {
+            try {
+              agentLiveStore.patchExecution(execution, {
+                status: "error",
+                finalAnswer: reason,
+                errors: unique([...current.errors, reason]),
+              });
+            } catch {
+              // The terminal row is already stored before a synchronous change
+              // listener can throw. Preserve the original observer failure.
+            }
+          }
+          throw observerError;
+        }
         return await runWithSdkSession(
           request,
           childController.signal,
@@ -565,14 +761,11 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
           now,
           options.reportsDir,
           turnTimeoutMs,
+          abortTimeoutMs,
           maxToolCalls,
           model,
-          options.live,
+          execution,
           options.promptEnv,
-          (rowId) => {
-            unregisterCancel();
-            unregisterCancel = agentLiveStore.registerCancel(rowId, () => childController.abort());
-          },
         );
       } finally {
         unregisterCancel();
@@ -589,11 +782,11 @@ async function runWithSdkSession(
   now: () => string,
   reportsDirOverride: string | undefined,
   turnTimeoutMs: number,
+  abortTimeoutMs: number,
   maxToolCalls: number | undefined,
   model: unknown,
-  live: AgentSdkSessionExecutorOptions["live"],
+  execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
-  onLiveRow?: (rowId: string) => void,
 ): Promise<AgentRunResult> {
   // T-119 PRE-CHECK: getBranch UNREACHABLE
   //
@@ -605,7 +798,9 @@ async function runWithSdkSession(
   // fabricated parent_context block.
   // Pre-flight cancel: never create a child if we were already aborted.
   if (signal.aborted) {
-    return cancelledResult(request, "Agent run was cancelled before child session creation.");
+    const reason = "Agent run was cancelled before child session creation.";
+    agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
+    return cancelledResult(request, reason);
   }
 
   const diagnostics: string[] = [];
@@ -614,7 +809,11 @@ async function runWithSdkSession(
 
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
   const readOnlyCapabilities = request.agent.readOnly
-    ? createReadOnlyAgentSessionCapabilities(cwd, request.allowedTools)
+    ? createReadOnlyAgentSessionCapabilities(cwd, request.allowedTools, {
+        ...(request.repositoryCheckScripts !== undefined
+          ? { repositoryCheckScripts: request.repositoryCheckScripts }
+          : {}),
+      })
     : undefined;
   const effectiveTools =
     readOnlyCapabilities?.tools ?? (request.allowedTools.includes("*") ? undefined : [...request.allowedTools]);
@@ -631,12 +830,6 @@ async function runWithSdkSession(
   if (model !== undefined && model !== null) sessionOptions.model = model;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
   if (appendSystemPrompt !== undefined) sessionOptions.appendSystemPrompt = appendSystemPrompt;
-  const liveRow =
-    live !== undefined
-      ? agentLiveStore.begin(liveBeginOptions(live.rowId, request.agent.name, live, cwd))
-      : agentLiveStore.claimQueuedRow(request.agent.name, request.agent.name);
-  onLiveRow?.(liveRow.id);
-
   let created: SdkCreateSessionResultLike;
   try {
     created = await createSession(sessionOptions);
@@ -645,46 +838,64 @@ async function runWithSdkSession(
       // Substrate genuinely unavailable -> blocked, with a detectable diagnostic
       // token the wiring keys its graceful fallback on. The reason is HONEST,
       // never the stale M11 replacement-session text.
+      agentLiveStore.patchExecution(execution, {
+        status: "error",
+        errors: [error.message],
+        finalAnswer: error.message,
+      });
       return blockedResult(request, error.message, [...diagnostics, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC, error.message]);
     }
-    return failedResult(request, errorMessage(error), [...diagnostics, errorMessage(error)]);
+    const reason = errorMessage(error);
+    agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    return failedResult(request, reason, [...diagnostics, reason]);
   }
 
   const session = created.session;
-  agentLiveStore.patch(liveRow.id, {
-    status: "working",
-    startedAt: Date.now(),
-    lastActivityAt: Date.now(),
-    currentPath: cwd,
-    // Make the full uuid available to an active drill immediately, rather than
-    // only after the child has completed and its boundary result is parsed.
-    childSessionId: session.sessionId,
-  });
-
-  // MUST guard the gap between session creation and prompting: an abort that
-  // lands while createSession() was in flight would otherwise still kick off a
-  // real child turn. Dispose-and-cancel immediately instead.
-  if (signal.aborted) {
-    disposeQuietly(session);
-    const reason = "Agent run was cancelled before child session kickoff.";
-    agentLiveStore.patch(liveRow.id, { status: "cancelled", finalAnswer: reason });
-    return cancelledResult(request, reason);
-  }
-
-  // Budget scales with maxTurns so a legitimately long multi-turn child is not
-  // killed prematurely, while a stuck child still has a hard ceiling.
-  const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
+  let childSession = createSdkSessionRecord(request, session.sessionId);
+  let childOutputStats: AgentChildOutputStats | undefined;
+  let childTrace: AgentChildTrace | undefined;
+  let childTraceAttempted = false;
+  const preserveChildTrace = (): AgentChildTrace | undefined => {
+    if (!childTraceAttempted) {
+      childTraceAttempted = true;
+      childTrace = exportEvidence(session, request, now, reportsDirOverride, diagnostics);
+    }
+    return childTrace;
+  };
   try {
-    const turn = await driveChildTurn(session, kickoff, signal, turnBudgetMs, maxToolCalls, liveRow.id);
+    agentLiveStore.patchExecution(execution, {
+      status: "working",
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+      currentPath: cwd,
+      // Make the full uuid available to an active drill immediately, rather than
+      // only after the child has completed and its boundary result is parsed.
+      childSessionId: session.sessionId,
+    });
+
+    // MUST guard the gap between session creation and prompting: an abort that
+    // lands while createSession() was in flight must not kick off a real child.
+    // It is still a real session, so preserve its identity and attempt evidence
+    // export before returning the cancellation.
+    if (signal.aborted) {
+      const reason = "Agent run was cancelled before child session kickoff.";
+      agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
+      const preservedTrace = preserveChildTrace();
+      return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), preservedTrace);
+    }
+
+    // Budget scales with maxTurns so a legitimately long multi-turn child is not
+    // killed prematurely, while a stuck child still has a hard ceiling.
+    const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
+    const turn = await driveChildTurn(session, kickoff, signal, turnBudgetMs, maxToolCalls, execution);
 
     if (turn.settlement === "aborted" || turn.settlement === "timed_out" || turn.settlement === "tool_limit") {
       // Stop the child, then still export evidence and dispose (finally below).
-      await abortChild(session);
-      const childTrace = exportEvidence(session, request, now, reportsDirOverride, diagnostics);
-      const childSession = createSdkSessionRecord(request, session.sessionId);
+      await abortChild(session, abortTimeoutMs);
+      preserveChildTrace();
       if (turn.settlement === "timed_out") {
         const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
-        agentLiveStore.patch(liveRow.id, { status: "error", errors: [reason], finalAnswer: reason });
+        agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
           childTrace,
@@ -692,24 +903,26 @@ async function runWithSdkSession(
       }
       if (turn.settlement === "tool_limit") {
         const reason = `Child agent exceeded the ${maxToolCalls ?? 0} tool-call budget and was aborted.`;
-        agentLiveStore.patch(liveRow.id, { status: "error", errors: [reason], finalAnswer: reason });
+        agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
           childTrace,
         );
       }
       const reason = "Agent run was cancelled.";
-      agentLiveStore.patch(liveRow.id, { status: "cancelled", finalAnswer: reason });
+      agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), childTrace);
     }
 
     const stats = session.getSessionStats();
-    agentLiveStore.applySessionStats(liveRow.id, stats);
-    if (session.messages !== undefined) agentLiveStore.replaceTranscriptFromMessages(liveRow.id, session.messages);
+    if (childSession.id === "" && stats.sessionId !== "")
+      childSession = createSdkSessionRecord(request, stats.sessionId);
+    agentLiveStore.applyExecutionStats(execution, stats);
+    if (session.messages !== undefined) agentLiveStore.replaceExecutionTranscript(execution, session.messages);
     const text = session.getLastAssistantText();
-    const childTrace = exportEvidence(session, request, now, reportsDirOverride, diagnostics);
+    preserveChildTrace();
 
-    const childOutputStats: AgentChildOutputStats = {
+    childOutputStats = {
       // The SDK exposes aggregate counters, not an entry list, in this context.
       // entryCount is a defensible derived count from the genuine workload signals.
       entryCount: stats.toolCalls + stats.toolResults,
@@ -720,13 +933,13 @@ async function runWithSdkSession(
       hasWorkloadProof: stats.toolCalls > 0 || stats.toolResults > 0,
     };
 
-    const childSession = createSdkSessionRecord(request, session.sessionId || stats.sessionId);
     const providerFailure = assistantProviderFailure(session.messages);
     if (providerFailure !== undefined) {
-      agentLiveStore.patch(liveRow.id, {
+      const currentErrors = agentLiveStore.rowForExecution(execution)?.errors ?? [];
+      agentLiveStore.patchExecution(execution, {
         status: "error",
         childSessionId: childSession.id,
-        errors: unique([...agentLiveStore.rows.get(liveRow.id)!.errors, providerFailure]),
+        errors: unique([...currentErrors, providerFailure]),
         finalAnswer: providerFailure,
       });
       return withChildTrace(
@@ -736,7 +949,7 @@ async function runWithSdkSession(
     }
     const parsed = parseAgentText(text ?? "");
     if (!parsed.ok) {
-      agentLiveStore.patch(liveRow.id, {
+      agentLiveStore.patchExecution(execution, {
         status: "error",
         childSessionId: childSession.id,
         finalAnswer: parsed.reason,
@@ -756,7 +969,7 @@ async function runWithSdkSession(
       status: "completed",
     };
     const evidence = evaluateEvidence(evidenceInput);
-    agentLiveStore.patch(liveRow.id, {
+    agentLiveStore.patchExecution(execution, {
       status: "done",
       childSessionId: childSession.id,
       finalAnswer: parsed.text,
@@ -774,7 +987,18 @@ async function runWithSdkSession(
       ...(childTrace !== undefined ? { childTrace } : {}),
     };
   } catch (error) {
-    return failedResult(request, errorMessage(error), [...diagnostics, errorMessage(error)]);
+    const reason = errorMessage(error);
+    const currentErrors = agentLiveStore.rowForExecution(execution)?.errors ?? [];
+    agentLiveStore.patchExecution(execution, {
+      status: "error",
+      errors: unique([...currentErrors, reason]),
+      finalAnswer: reason,
+    });
+    const preservedTrace = preserveChildTrace();
+    return withChildTrace(
+      failedResult(request, reason, [...diagnostics, reason], childOutputStats, childSession),
+      preservedTrace,
+    );
   } finally {
     disposeQuietly(session);
   }
@@ -801,7 +1025,7 @@ async function driveChildTurn(
   signal: AbortSignal,
   turnBudgetMs: number,
   maxToolCalls: number | undefined,
-  liveRowId: string,
+  execution: AgentLiveExecutionHandle,
 ): Promise<ChildTurnObservation> {
   // Subscribe BEFORE prompting so a fast agent_end is never missed.
   let resolveEnd: () => void = () => {};
@@ -827,7 +1051,7 @@ async function driveChildTurn(
         toolCallCount += 1;
         if (maxToolCalls !== undefined && toolCallCount > maxToolCalls) resolveToolLimit();
       }
-      agentLiveStore.feedSessionEvent(liveRowId, event);
+      agentLiveStore.feedExecutionEvent(execution, event);
       if (isRecord(event) && event.type === "agent_end" && event.willRetry !== true) resolveEnd();
     } catch {
       // A malformed/late event must not crash the host from the SDK's emit path.
@@ -867,12 +1091,21 @@ function sdkToolEventName(event: unknown): string | undefined {
   return eventToolName(event)?.trim() || undefined;
 }
 
-/** Best-effort child abort; the SDK's abort() resolves once the child is idle. */
-async function abortChild(session: SdkAgentSessionLike): Promise<void> {
+/** Best-effort child abort with a bounded acknowledgement wait. */
+async function abortChild(session: SdkAgentSessionLike, timeoutMs: number): Promise<void> {
+  const abort = session.abort;
+  if (abort === undefined) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await session.abort?.();
-  } catch {
-    /* best effort: we are already tearing the child down */
+    const attempted = Promise.resolve()
+      .then(() => abort.call(session))
+      .catch(() => undefined);
+    const bounded = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    });
+    await Promise.race([attempted, bounded]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -1232,6 +1465,7 @@ function liveBeginOptions(
   if (live.slotKey !== undefined) options.slotKey = live.slotKey;
   if (live.round !== undefined) options.round = live.round;
   if (live.parentRowId !== undefined) options.parentRowId = live.parentRowId;
+  if (live.workflowRunId !== undefined) options.workflowRunId = live.workflowRunId;
   if (live.model !== undefined) options.model = live.model;
   if (live.thinking !== undefined) options.thinking = live.thinking;
   if (live.isolated !== undefined) options.isolated = live.isolated;

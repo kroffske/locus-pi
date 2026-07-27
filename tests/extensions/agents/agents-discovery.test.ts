@@ -370,7 +370,7 @@ describe("agent list/inspect rendering surface", () => {
     }
   }
 
-  it("routes /agent list through the scroll overlay (full catalog, untruncated) when custom UI is available", async () => {
+  it("routes /agent list through the inline scroll surface (full catalog, untruncated) when custom UI is available", async () => {
     const project = tempRoot("locus-pi-agents-list-overlay");
     writeManyAgents(project);
     const h = createHarness(project);
@@ -380,11 +380,11 @@ describe("agent list/inspect rendering surface", () => {
 
     await h.commands.get("agent")!.handler("list", h.ctx as ExtensionCommandContext);
 
-    expect(h.customOptions).toEqual([{ overlay: true }]);
+    expect(h.customOptions).toEqual([{ overlay: false }]);
     const frame = h.customRenderFrames[0]?.join("\n") ?? "";
     expect(frame).toContain("Agent catalog");
     expect(frame).toContain("proj-0");
-    // The overlay receives the FULL formatted catalog (no maxLines clip / "more:" stub).
+    // The inline surface receives the FULL formatted catalog (no maxLines clip / "more:" stub).
     expect(frame).not.toContain("not shown");
     // Footer denominator is the full body length (>> the bounded 10-line cap),
     // proving the untruncated catalog reached the overlay (14 project + 2 user + 11 bundled).
@@ -392,19 +392,19 @@ describe("agent list/inspect rendering surface", () => {
     const total = Number(/\/(\d+)/.exec(footer)?.[1] ?? "0");
     expect(total).toBeGreaterThanOrEqual(25);
     // A late project agent that the bounded passive path would hide is reachable by scrolling.
-    const overlay = h.customComponents.at(-1)!;
+    const surface = h.customComponents.at(-1)!;
     let foundLateProjectAgent = false;
-    await overlay.handleInput!("home");
+    await surface.handleInput!("home");
     for (let page = 0; page < 8; page += 1) {
-      if (overlay.render(80).join("\n").includes("proj-9")) foundLateProjectAgent = true;
-      await overlay.handleInput!("pageDown");
+      if (surface.render(80).join("\n").includes("proj-9")) foundLateProjectAgent = true;
+      await surface.handleInput!("pageDown");
     }
     expect(foundLateProjectAgent).toBe(true);
     // Passive bounded widget must NOT be the surface used here.
     expect(h.widgets.get("agents") ?? "").not.toMatch(/more: \d+ agent\(s\) not shown/);
   });
 
-  it("routes /agent inspect through the scroll overlay when custom UI is available", async () => {
+  it("routes /agent inspect through the inline scroll surface when custom UI is available", async () => {
     const project = tempRoot("locus-pi-agents-inspect-overlay");
     writeAgent(
       project,
@@ -419,7 +419,7 @@ describe("agent list/inspect rendering surface", () => {
 
     await h.commands.get("agent")!.handler("inspect reviewer", h.ctx as ExtensionCommandContext);
 
-    expect(h.customOptions).toEqual([{ overlay: true }]);
+    expect(h.customOptions).toEqual([{ overlay: false }]);
     const frame = h.customRenderFrames[0]?.join("\n") ?? "";
     expect(frame).toContain("[VIEW] Agent definition");
     expect(frame).toContain("reviewer: Project reviewer");

@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and five curated
+It provides ten default extensions, a bundled agent catalog, and four curated
 Package workflows through a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private
@@ -24,7 +24,7 @@ contains exactly these ten entrypoints:
 | `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
-| `workflows`           | Provides `/workflows` and the `workflow` tool for reviewed trusted JavaScript workflows, agent orchestration, and direct model-call nodes.                                                                                                             |
+| `workflows`           | Provides `/workflows`, first-class `/workflow-*` commands, and the `workflow` tool for reviewed trusted JavaScript workflows, child-agent orchestration, and actionable operator handoffs.                                                             |
 
 Each retained extension also has a manifest and a manual under
 [`docs/extensions/active/`](docs/extensions/active/). Maintainer source-audit
@@ -37,7 +37,6 @@ Only these names are registered as Package workflows:
 | Workflow             | Intended use                                                                                                  |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
-| `llm-smoke`          | Exercises direct `llm()` calls without child sessions.                                                        |
 | `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
@@ -45,17 +44,36 @@ Only these names are registered as Package workflows:
 Use the operator catalog to inspect and run them:
 
 ```text
-/workflows list
-/workflows info live-smoke
-/workflows run live-smoke
+/workflow-list
+/workflow-info live-smoke
+/workflow-run live-smoke
+/workflow-stop last
+/ps
 ```
 
-Project and user workflow directories remain scan-based. A valid file in
-`.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
-`~/.pi/workflows/` can change the next resolution result without changing the
-Package registry. Files that merely exist under the repository's workflow
-examples are not Package workflows and cannot be launched by bare name unless
-they are in the curated registry.
+`/workflow-run` starts one interactive run in the background and returns the
+editor immediately. The compact widget below the editor shows the current
+workflow stage and one active child; `/ps` expands the same shared agent fleet
+for leaf selection and readable drill-down. A second interactive run in the
+same session/project is rejected until the first run settles. `/workflow-stop [runId|last]`
+requests cancellation and remains honest about the run being
+`stopping` until its terminal result is persisted. The programmatic `workflow`
+tool remains awaited and headless. Compatibility `/workflows <subcommand>`
+forms remain available.
+
+When a workflow declares an actionable operator handoff, its oldest pending
+question opens directly in the primary editor after Pi is idle. Escape snoozes
+without cancelling; bare `/workflows` reopens it. `/workflow-continue` answers
+the source run through verified artifacts and one atomic continuation claim.
+
+Project and user workflow directories remain scan-based. A pi-native
+`<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,
+`.agents/workflows/`, or `~/.pi/workflows/` can change the next resolution result
+without changing the Package registry. That exact filename is the only one these
+directories accept, and a workflow written for another host's DSL is not portable
+here. Files that merely exist under the repository's workflow examples are not
+Package workflows and cannot be launched by bare name unless they are in the
+curated registry.
 
 ## Trust and safety boundary
 
@@ -73,7 +91,7 @@ package behavior.
 ## Requirements
 
 - Node.js `>=22.19.0`.
-- Pi `0.80.x`; the package peer floor is `0.80.3`.
+- Pi `0.82.x`; the package peer floor is `0.82.0`.
 - Ripgrep (`rg`) on `PATH`; the curated `requirements-grill` workflow uses it
   for its bounded read-only repository search.
 - A trusted project and reviewed local workflow sources.
@@ -107,15 +125,64 @@ pi remove npm:@kroffske/locus-pi
 This path is for current maintainers and reviewers. It is not an npm
 installation procedure.
 
+### 1. Remove any earlier installation first
+
+Two registrations of the same package both load, so clear the old one before
+adding the checkout. The two ways this package can already be present are
+different things and are removed differently:
+
 ```bash
-npm ci --ignore-scripts
-pi install -l .
-npm run check
-./bin/locus-pi doctor
+pi list                              # what Pi actually loads, per scope
+pi remove npm:@kroffske/locus-pi     # user scope  (~/.pi/agent/settings.json)
+pi remove npm:@kroffske/locus-pi -l  # project scope (.pi/settings.json)
 ```
 
-`pi install -l .` records the local checkout in the project's
-`.pi/settings.json`. Review the checkout before approving project-local code.
+```bash
+which locus-pi                       # a globally installed CLI, if any
+npm rm -g @kroffske/locus-pi
+```
+
+`pi remove` is the one that matters: it unregisters the extensions. A global npm
+install only puts the `locus-pi` CLI on `PATH` and never registers anything with
+Pi, so removing it changes no session behavior — remove it anyway if you want a
+single source of truth for `locus-pi doctor`.
+
+`pi list` is the authority. It prints user-scope and project-scope packages
+separately, and the same checkout registered in both scopes appears twice; drop
+it from one of them.
+
+A source is matched by its resolved path, not by the string in the settings
+file, so `pi remove -l .` from the checkout root removes an entry stored as
+`".."`, and passing the absolute path works too.
+
+Runtime state Pi wrote under `~/.pi/<project>/` is not an installation. Leave it
+alone unless you mean to discard that history.
+
+### 2. Install the checkout
+
+```bash
+npm ci --ignore-scripts
+pi install -l .        # project scope: records the checkout in .pi/settings.json
+npm run check
+./bin/locus-pi doctor  # expects: 10 extensions, all ok
+```
+
+Use `pi install .` without `-l` to register the checkout for every project of
+this user instead. Prefer `-l` while reviewing: a project-scoped entry cannot
+follow you into an unrelated repository. Review the checkout before approving
+project-local code — Pi loads its extension source, and this package does not
+sandbox it.
+
+A session started after that loads the extensions straight from the working
+tree, so an edit is live on the next start with no reinstall step.
+
+### 3. Go back to the published package
+
+```bash
+pi remove . -l                      # or: pi remove .   for the user scope
+pi install npm:@kroffske/locus-pi
+pi list
+```
 
 The release-quality package checks are:
 

@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator-ui.js";
+import { parsePromptShelfCommand, type PromptShelfTarget } from "../../../extensions/plan/command-parser.js";
 import {
-  parsePromptShelfCommand,
   promptShelfBodyBlock,
   promptShelfChangeBlock,
   promptShelfSummaryBlock,
   promptShelfWarningBlock,
-  type PromptShelfTarget,
 } from "../../../extensions/plan/prompt-shelf-ui.js";
 
 const projectReviewTarget: PromptShelfTarget = {
@@ -70,10 +69,12 @@ describe("prompt shelf blocks", () => {
   it("uses distinct canonical labels for empty goal and todos shelves", () => {
     const goal = { ...projectReviewTarget, kind: "goal" as const };
     const todos = { ...projectReviewTarget, kind: "todos" as const };
-    expect(renderOperatorBlockPlain(promptShelfSummaryBlock("goal", goal, undefined), 80).join("\n"))
-      .toContain("[WARN] Goal prompt shelf");
-    expect(renderOperatorBlockPlain(promptShelfSummaryBlock("todos", todos, undefined), 80).join("\n"))
-      .toContain("[WARN] Todos prompt shelf");
+    expect(renderOperatorBlockPlain(promptShelfSummaryBlock("goal", goal, undefined), 80).join("\n")).toContain(
+      "[WARN] Goal prompt shelf",
+    );
+    expect(renderOperatorBlockPlain(promptShelfSummaryBlock("todos", todos, undefined), 80).join("\n")).toContain(
+      "[WARN] Todos prompt shelf",
+    );
   });
 
   it("keeps the explicit task target in every recovery control", () => {

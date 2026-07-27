@@ -29,29 +29,30 @@ A workflow is one ESM module with exactly two exports:
   `[input]` from the run command (a string, possibly empty). Whatever the function
   returns is written to `result.json` as `result`.
 
-Destructure only what you use: `const { agent, llm, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;`
+Destructure only what you use: `const { agent, phase, log, parallel, pipeline, workflow, promptFile, workspace } = dsl;`
 
 Primitives:
 
-| Primitive     | Signature                                                                                                                        | Use                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`       | `agent(prompt, { agent?, readOnly?, model?, label?, tools?, maxToolCalls?, permissionMode?, workspaceMode?, workspaceHandle? })` | Spawns one REAL catalog-agent session with tools and resolves to its exact non-empty final text. Omitted `agent` uses the catalog `default` role. `readOnly: true` is a host-enforced per-call capability boundary; Git inspection uses `git_read`, never shell. `maxToolCalls` defaults to a 1,000-call runaway fuse. Runtime status, session ids, diagnostics, usage, and artifacts stay in journal evidence instead of model text. |
-| `promptFile`  | `promptFile(path, variables?)`                                                                                                   | Renders one neighboring `*.prompt.md` as the complete workflow-specific task. Keep both stable role instructions and dynamic `{{VARIABLE}}` handoffs in this one file; keep capability policy in `agent()` options.                                                                                                                                                                                                                   |
-| `workspace`   | `workspace(label, ref)`                                                                                                          | Allocates one retained linked worktree and returns an opaque handle for several agent calls.                                                                                                                                                                                                                                                                                                                                          |
-| `projectRoot` | `projectRoot()`                                                                                                                  | Returns the absolute project root captured by the runner for trusted deterministic workflow code.                                                                                                                                                                                                                                                                                                                                     |
-| `llm`         | `llm(prompt, { system?, model?, reasoning?, stream?, schema? })`                                                                 | ONE direct model call, no session/tools. Fail-closed `ok:false` (never throws) on no-runner/model error. Returns `{ ok, text, stopReason, model, usage, output }`. Use for a cheap gate/classify/draft.                                                                                                                                                                                                                               |
-| `phase`       | `phase(name)`                                                                                                                    | Journal phase boundary.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `log`         | `log(msg)`                                                                                                                       | Journal log line.                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `parallel`    | `parallel(thunks)`                                                                                                               | Bounded full barrier. All-success returns ordered `T[]`; an explicitly fulfilled `null` is a value. An ordinary thrown thunk or directly returned `ok:false`, `status:failed`, `status:blocked`, or `status:cancelled` rejects one typed `WorkflowGroupFailureError` after scheduled siblings settle.                                                                                                                                 |
-| `pipeline`    | `pipeline(items, ...stages)`                                                                                                     | Run items through ordered `(item, i) => Promise` stages. A failed direct stage result stops later stages for that item; siblings settle, then the group rejects the same typed error with item `index` and `stageIndex`.                                                                                                                                                                                                              |
-| `workflow`    | `workflow(subFn, input?)`                                                                                                        | Run a nested workflow function for composition.                                                                                                                                                                                                                                                                                                                                                                                       |
+| Primitive     | Signature                                                                                                                                            | Use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`       | `agent(prompt, { agent?, readOnly?, model?, label?, tools?, maxToolCalls?, permissionMode?, workspaceMode?, workspaceHandle?, schema?, validate? })` | The ONLY model-calling primitive. Spawns one REAL catalog-agent session with tools and resolves to its exact non-empty final text; with `schema` it resolves to a value validated against that JSON-Schema subset and throws `SchemaValidationError` after the bounded retry budget instead. Omitted `agent` uses the catalog `default` role. `readOnly: true` is a host-enforced per-call capability boundary; Git inspection uses `git_read`, never shell. `maxToolCalls` defaults to a 1,000-call runaway fuse. Runtime status, session ids, diagnostics, usage, and artifacts stay in journal evidence instead of model text. |
+| `promptFile`  | `promptFile(path, variables?)`                                                                                                                       | Escape hatch, not the default: renders one neighboring `*.prompt.md` for a role charter of roughly 80 lines and up, or a prompt shared by more than one workflow. Keep both stable role instructions and dynamic `{{VARIABLE}}` handoffs in that one file; keep capability policy in `agent()` options. Otherwise write the prompt inline.                                                                                                                                                                                                                                                                                        |
+| `workspace`   | `workspace(label, ref)`                                                                                                                              | Allocates one retained linked worktree and returns an opaque handle for several agent calls.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `projectRoot` | `projectRoot()`                                                                                                                                      | Returns the absolute project root captured by the runner for trusted deterministic workflow code.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `phase`       | `phase(name)`                                                                                                                                        | Journal phase boundary.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `log`         | `log(msg)`                                                                                                                                           | Journal log line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `parallel`    | `parallel(thunks)`                                                                                                                                   | Bounded full barrier. All-success returns ordered `T[]`; an explicitly fulfilled `null` is a value. An ordinary thrown thunk or directly returned `ok:false`, `status:failed`, `status:blocked`, or `status:cancelled` rejects one typed `WorkflowGroupFailureError` after scheduled siblings settle.                                                                                                                                                                                                                                                                                                                             |
+| `pipeline`    | `pipeline(items, ...stages)`                                                                                                                         | Run items through ordered `(item, i) => Promise` stages. A failed direct stage result stops later stages for that item; siblings settle, then the group rejects the same typed error with item `index` and `stageIndex`.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `workflow`    | `workflow(subFn, input?)`                                                                                                                            | Run a nested workflow function for composition.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Per-call `model` selector form: `"provider/id"` or `"provider/id:thinking"`. Prefer
 catalog model defaults unless the requirement asks otherwise.
 
-Agent output is always text. Do not ask an agent for a runtime envelope or parse
-JSON-looking agent text as status. When a workflow genuinely needs validated
-JSON, use a separate direct `llm({ schema })` step.
+Agent output is text by default. Do not ask an agent for a runtime envelope or parse
+JSON-looking agent text as status. When a workflow genuinely needs validated JSON,
+declare it with `agent(prompt, { schema })`: the runtime enforces the shape and the
+script branches on a value it never parsed. For a cheap gate or classification, add
+`tools: []` and `maxToolCalls: 0` so the child has nothing to call.
 
 Group failure is fail-closed by default. Do not filter failed positions from a normal return
 array: a failed group does not return one. The rejected error has stable
@@ -158,16 +159,85 @@ state only after naming either a reproduced failure in the simpler workflow, or
 a hard safety boundary where failure would mutate source, spend money, expose
 secrets, or be otherwise irreversible and externally visible.
 
+## What the script may check
+
+Handoffs pass forward as exact text. Orchestrate and bound; do not grade the
+answer. The whole allowed set of deterministic checks, and every item is about
+being able to continue at all:
+
+- non-empty text and a per-stage character cap, because an empty or oversized
+  handoff breaks the next prompt before the model sees it;
+- confining an operator-supplied path, or refusing to start when there is nothing
+  to act on;
+- host-owned trust: continuation refs, lineage, digests, identity;
+- one declaration the script must branch on — and then through
+  `agent({ schema })`, where the runtime re-asks the child with the previous
+  attempt's validator errors before failing closed. That retry is the only
+  correction loop the DSL gives you for free.
+
+Never write a validator over model prose: no required headings, no id ledgers, no
+cross-stage reconciliation, no "the answer must mention every X". Ids like `C1`,
+`U1`, `F1` are for the reader; nothing parses them. A `throw` over prose grammar
+has one outcome — the run dies having paid for every earlier stage, with no way to
+hand the prompt back for a correction. If a requirement asks for enforced
+coverage, offer a schema or a bounded re-ask loop and say what it costs; do not
+smuggle in a fatal gate. The removed `review` coverage gates are the worked
+example in `extensions/workflows/references/patterns.md` ("Writing one stage
+task").
+
 Keep read-only evidence gathering and source mutation as visibly separate
 capabilities. Prompt text is not a capability boundary.
 
+## Writing one stage task
+
+A stage is one `agent()` call plus the prompt written inline next to it. Decide
+exactly four things, then write them:
+
+1. the one question this stage answers — if it needs an "and", it is two stages,
+   or the second half only restates the first and it is one;
+2. its capability — read-only inspection, shell, source writes, or artifact
+   writes; the `agent()` options are the boundary;
+3. what it receives — the shared `COMMON` contract, then the previous stage's
+   exact text between `--- BEGIN <NAME> ---` / `--- END <NAME> ---` markers, plus
+   the original intent when the focus must survive, and nothing else;
+4. what it leaves behind — `label` as the verb phrase an operator reads in the
+   live panel and journal, `artifact: "<name>.md"` to name the answer in the run
+   store. The runtime persists it; text needs no publisher child.
+
+The task itself belongs in the prompt, not the script. Give every output contract
+an explicit empty case (`None.`, `- none`, a `## No changes` declaration): a stage
+with no way to say "nothing here" will invent something.
+
+Bounds are not the script's job either. Declare every length, count, id pattern,
+enum, uniqueness rule, and non-blankness rule in `agent({ schema })`, where the
+runtime hands a violation back to the child and re-asks; bound an agent's free
+text with that call's `maxAnswerChars`. Uniqueness is `uniqueItems` on a
+primitive array, `uniqueBy: "<property>"` on an array of objects,
+`uniqueTrimmedItems` when the script trims the values afterwards, and `nonBlank`
+for a whitespace-only string. What no keyword can express — cross-field
+agreement, referential integrity, sums across items, graph shape — goes in
+`validate` on the same call: `(value) => string[]`, run by the runtime after
+schema validation succeeds, whose non-empty return re-asks the child in its own
+repair block instead of ending the run. It must be pure, synchronous and
+deterministic, must not throw to signal a violation, must not transform the
+value, and must not call back into the DSL. Reserve a fatal `throw` for the two
+classes a retry loop can be talked past — self-reported status, and a model's
+verdict graded against its own findings list — and for host-owned evidence this
+child did not produce and cannot repair. Never run a regex over model prose
+to decide something — have the model declare the fact as a schema field and let a
+fresh reader check the declaration.
+
 ## Stage prompt style
 
-Neighboring `*.prompt.md` files follow one shape. Copy it from
-`extensions/workflows/examples/review/resources/` rather than inventing a
-layout:
+Write the prompt inline: one `COMMON` constant with the contract every stage
+shares, then a per-stage task next to its `agent()` call. Copy the shape from
+`extensions/workflows/examples/review-fix/review-fix.workflow.mjs`. Move a prompt
+to a neighboring `resources/<stage>.prompt.md` rendered through `promptFile()`
+only for a role charter long enough to bury the routing (roughly 80 lines and up,
+like `extensions/workflows/examples/review/resources/verifier.prompt.md`) or a
+prompt shared by more than one workflow. Either way the same order applies:
 
-1. `# <Imperative stage title>`.
+1. `# <Imperative stage title>` (inline: `TASK — <imperative>`).
 2. One role line: `You are <id>, the <role> for the <name> workflow.`
 3. One capability paragraph stating what the host actually enforces for this
    stage. There are four kinds: host-enforced read-only with no shell; read-only
@@ -195,19 +265,20 @@ for.
 
 1. Read the requirement, then **consult the pattern catalog**
    `extensions/workflows/references/patterns.md`: pick the matching pattern (single-agent,
-   llm()-gate, loop+judge, plan→build→review, adaptive owner-local, pipeline,
+   shaped-answer gate, loop+judge, plan→build→review, adaptive owner-local, pipeline,
    fan-out+merge, judge-panel, loop-until-dry) and adapt its skeleton or its runnable example. Pick the shape: a single
-   `agent()` (tool work / authoritative judge), a single `llm()` (cheap decision/text), the
-   staged text pipeline for multi-step work on one subject, or
+   `agent()` (tool work / authoritative judge), a single no-tool `agent({ schema })` (cheap
+   decision), the staged text pipeline for multi-step work on one subject, or
    a loop/judge/`parallel`/`pipeline` only if the requirement needs it. Default to the
    simplest shape that satisfies it. For multi-step work, adapt the staged text
    pipeline from the curated `review` and `review-fix` examples: sequential
    `agent()` stages, exact text handoffs, all read-only inspection first, then any
    stage that writes. Take the stage count from the requirement, not from the
    examples: two stages is a complete pipeline, and `review`'s six exist because a
-   review really is coverage, then grouping, then questions, then answers. Use one workflow-local `*.prompt.md`
-   resource beside the entry when a step needs substantial custom instructions
-   or dynamic handoffs. Launch a catalog agent with the rendered prompt. For
+   review really is coverage, then grouping, then questions, then answers. Write
+   each stage prompt inline under one `COMMON` contract, and reach for a
+   neighboring `*.prompt.md` only for a long role charter or a prompt two
+   workflows share. Launch a catalog agent with that prompt. For
    every group, default to uncaught fail-closed
    behavior; choose deliberate typed partial continuation only when the requirement says
    the surviving results are still useful.
@@ -219,11 +290,11 @@ for.
 3. Write `.pi/workflows/<name>.workflow.mjs` (create the directory if missing) from
    the template, adapting prompts and the returned `result`. `.pi/workflows/`
    is the canonical pi-native save target — it resolves first by bare name. Keep prompts
-   explicit about the tool action and required text. When custom step instructions are
-   substantial, place one `*.prompt.md` in a neighboring `resources/` directory
-   and load it with `promptFile()`. Put the stable role and dynamic handoffs in
-   that prompt, following the stage prompt style above; do not create a
-   workflow-local `*.agent.md`.
+   explicit about the tool action and required text. Prompts go inline by
+   default; place one `*.prompt.md` in a neighboring `resources/` directory and
+   load it with `promptFile()` only for a role charter of roughly 80 lines and up
+   or a prompt shared by more than one workflow, following the stage prompt style
+   above. Do not create a workflow-local `*.agent.md`.
    Keep the source self-contained unless the requirement itself needs modular or
    source-anchored code; only then add literal `meta.identityCoverage: "entry-only"`.
    Default agents to `permissionMode: "agent-defined"` and `workspaceMode: "project"`; set `workspaceMode: "worktree"` only when the requirement requires isolated file writes. A workflow reader must pass `readOnly: true` and only read tools such as `[read, git_read, grep, find]`; never give it `bash`.
@@ -252,7 +323,7 @@ for.
 5. Return: the exact file path, `meta.name`, the one-line run command the caller should
    use — `/workflows run <name>` for a file saved under `.pi/workflows/`, otherwise
    `/workflows run <path>` — and a 1–2 sentence summary of what the workflow does and its
-   shape (agent vs llm, any loop/judge). Note any requirement you could not express in
+   shape (text vs shaped agent stages, any loop/judge). Note any requirement you could not express in
    the DSL as a blocker rather than silently dropping it.
 
 You write minimal, valid, name-resolvable scripts. You do not run them, and you do not

@@ -21,31 +21,56 @@ import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
-import type { WorkflowDsl, WorkflowJournalLine, WorkflowRuntime } from "./workflow-runtime.js";
-import { createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
+import type {
+  WorkflowAwaitOperatorDeclaration,
+  WorkflowDsl,
+  WorkflowJournalLine,
+  WorkflowRuntime,
+} from "./workflow-runtime.js";
+import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
-import { createWorkflowLlmRunner } from "./workflow-llm-bridge.js";
+import {
+  buildWorkflowFailureDiagnostic,
+  type WorkflowFailureDiagnostic,
+  type WorkflowFailureOrigin,
+} from "./workflow-failure.js";
 import {
   newWorkflowRunId,
+  workflowJournalFile,
   workflowRunDir,
   createWorkflowJournalSink,
+  readWorkflowRunResult,
   readWorkflowRunSummary,
 } from "./workflow-journal.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import {
+  createWorkflowReplayController,
+  readWorkflowReplayLog,
+  type WorkflowReplayController,
+  type WorkflowReplayEntry,
+  type WorkflowReplayEnvelope,
+  type WorkflowReplayNotRecordedReason,
+  type WorkflowReplayRefusalReason,
+} from "./workflow-replay.js";
+import {
   prepareWorkflowResult,
   isWorkflowResultExplicitFailure,
+  workflowDispositionForCompletion,
   workflowResultFile,
   writeWorkflowResultJson,
+  writeWorkflowResultText,
+  type WorkflowDisposition,
   type WorkflowResultDiagnosticSentinel,
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
 import {
+  assessWorkflowReplaySafety,
   createWorkflowScriptSnapshot,
   sha256WorkflowBytes,
   verifyWorkflowScriptSnapshot,
   workflowScriptExecutionPath,
+  type WorkflowReplaySafety,
   type WorkflowScriptIdentity,
 } from "./workflow-script-identity.js";
 import {
@@ -54,10 +79,31 @@ import {
   type WorkflowResourceLoader,
 } from "./workflow-resources.js";
 import {
+  createWorkflowSourceStateReader,
   createWorkflowWorkspaceManager,
   type WorkflowWorkspaceEvidence,
   type WorkflowWorkspaceManager,
 } from "./workflow-worktree.js";
+import {
+  assertWorkflowContinuation,
+  consumeWorkflowContinuation,
+  continuationJournalProjection,
+  createWorkflowArtifactStore,
+  type WorkflowArtifactRef,
+  type WorkflowArtifactStore,
+  type WorkflowBoundContinuation,
+  type WorkflowContinuation,
+  type WorkflowContinuationJournal,
+} from "./workflow-artifacts.js";
+import {
+  assertWorkflowHandoffClaimEligibility,
+  assertWorkflowHandoffClaimForContinuation,
+  bindWorkflowHandoffClaim,
+  createWorkflowOperatorHandoffEnvelope,
+  releaseWorkflowHandoffClaim,
+  type WorkflowHandoffClaimLease,
+  type WorkflowOperatorHandoffEnvelope,
+} from "./workflow-handoff.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 
@@ -66,8 +112,8 @@ export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
 // ---------------------------------------------------------------------------
 
 export interface WorkflowScriptModule {
-  default?: (dsl: WorkflowDsl, input?: unknown) => Promise<unknown> | unknown;
-  runWorkflow?: (dsl: WorkflowDsl, input?: unknown) => Promise<unknown> | unknown;
+  default?: (dsl: WorkflowDsl, input?: string) => Promise<unknown> | unknown;
+  runWorkflow?: (dsl: WorkflowDsl, input?: string) => Promise<unknown> | unknown;
   meta?: { name?: string; description?: string; identityCoverage?: "self-contained-static" | "entry-only" };
 }
 
@@ -97,12 +143,23 @@ export interface RunWorkflowScriptOptions {
   name?: string;
   scriptPath?: string;
   script?: string;
-  input?: unknown;
+  /** Optional bounded human semantic request. */
+  input?: string;
+  /** Closed host-owned cross-run artifact binding. */
+  continuation?: WorkflowContinuation;
+  /** Atomic source-handoff claim. The runner binds it to this run before
+   * trusted workflow code starts; presentation callbacks are not authoritative. */
+  operatorHandoffClaim?: WorkflowHandoffClaimLease;
   resumeFromRunId?: string;
   /** Global per-run cap across all dsl.agent() calls. Defaults to the runtime default
    *  (DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS) when unset. Exceeding it fails the run. */
   maxTotalAgentInvocations?: number;
-  createExecutor?: (o: { model?: unknown }) => AgentExecutor; // pass-through to the bridge (tests)
+  createExecutor?: (o: {
+    model?: unknown;
+    live?: import("./agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
+    maxToolCalls?: number;
+    reportsDir?: string;
+  }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: (selector: string) => unknown; // pass-through to the bridge (tests)
   /** Called once after run identity is allocated and before any journal event. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
@@ -113,18 +170,37 @@ export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
   ok: boolean;
+  /** Runtime-owned terminal meaning. Optional only for legacy/test envelopes. */
+  disposition?: WorkflowDisposition;
   result: unknown; // detached JSON value or explicit diagnostic sentinel
   resultDiagnostic?: WorkflowResultDiagnosticSentinel;
   resultPersistence: WorkflowResultPersistence;
+  /** Path of the verbatim text copy of a prose result, when the run produced one. */
+  resultTextPath?: string;
   journal: WorkflowJournalLine[];
   error?: string;
+  /** Who failed, when the run failed. Presentation-only; wording, not truth. */
+  failureOrigin?: WorkflowFailureOrigin;
+  /** Actionable projection of a failed run: stage, script, evidence, repair request. */
+  failureDiagnostic?: WorkflowFailureDiagnostic;
   target?: ResolvedWorkflowTarget;
   scriptIdentity?: WorkflowScriptIdentity;
   resourceEvidence?: WorkflowResourceEvidence[];
   workspaceEvidence?: WorkflowWorkspaceEvidence[];
+  /** Bounded reader-facing output refs (answers and workflow-published text),
+   *  newest slice when a run produced more than the projection limit. */
+  artifactRefs?: WorkflowArtifactRef[];
+  artifactRefsOmitted?: number;
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
+  continuation?: WorkflowContinuationJournal;
+  operatorHandoff?: WorkflowOperatorHandoffEnvelope;
+  /** What this run did about recorded-call replay. Absent only when the run
+   *  failed before its script identity was established. */
+  replay?: WorkflowReplayEnvelope;
 }
+
+const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 
 // ---------------------------------------------------------------------------
 // Path resolution
@@ -133,17 +209,10 @@ export interface RunWorkflowScriptResult {
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
 /** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "llm-smoke",
-  "requirements-grill",
-  "review",
-  "review-fix",
-] as const;
+export const CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
 const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
   "live-smoke": "live-smoke.workflow.mjs",
-  "llm-smoke": "llm-smoke.workflow.mjs",
   "requirements-grill": "requirements-grill.workflow.mjs",
   review: path.join("review", "review.workflow.mjs"),
   "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),
@@ -195,10 +264,12 @@ function resolveConfinedScriptPath(scriptPath: string, projectRoot: string, disp
  * Project-relative directories a saved workflow may live in, in first-wins order.
  *
  * `.pi/workflows/` is the canonical pi-native save target (where `workflow-author`
- * writes). The other two are interop sources: a workflow found under `.claude/workflows/`
- * or `.agents/workflows/` may have been authored for a different tool and can differ
- * slightly in format from the pi-native DSL — they are scanned for convenience, not
- * guaranteed to be pi-native. All three carry `source: "project"`.
+ * writes). The other two exist for repositories that already keep agent assets under
+ * `.claude/` or `.agents/`; they are NOT foreign-format interop sources. Every entry
+ * here accepts exactly `<name>.workflow.mjs` (see `resolveSavedWorkflowPath`), so a
+ * host that writes `<name>.js` is never resolved, and a script authored against a
+ * different workflow DSL would fail at execution regardless of its filename. All
+ * three carry `source: "project"`.
  */
 const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
   [".pi", "workflows"],
@@ -403,9 +474,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const resumeFromRunId = opts.resumeFromRunId?.trim();
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
+  let replayPlan: WorkflowReplayPlan | undefined;
+  let replayController: WorkflowReplayController | undefined;
   let resourceLoader: WorkflowResourceLoader | undefined;
   let workspaceManager: WorkflowWorkspaceManager | undefined;
   let runtime: WorkflowRuntime | undefined;
+  let artifactStore: WorkflowArtifactStore | undefined;
+  let boundContinuation: WorkflowBoundContinuation | undefined;
+  let continuationProjection: WorkflowContinuationJournal | undefined;
+  let awaitOperatorDeclaration: WorkflowAwaitOperatorDeclaration | undefined;
+  let handoffClaimBound = false;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
   const preludeLines: WorkflowJournalLine[] = [];
   const emitPrelude = (line: WorkflowJournalLine): void => {
@@ -413,12 +491,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal.write(line);
     opts.onEvent?.(line);
   };
-  const resultMetadata = ():
-    Pick<RunWorkflowScriptResult, "resumeFromRunId" | "resumeSourceRunSummary" | "target"> | Record<string, never> => {
-    if (!hasResume) return {};
+  const resultMetadata = (): Pick<
+    RunWorkflowScriptResult,
+    "resumeFromRunId" | "resumeSourceRunSummary" | "continuation" | "target"
+  > => {
     return {
-      resumeFromRunId: resumeFromRunId!,
-      resumeSourceRunSummary: resumeSourceRunSummary ?? null,
+      ...(hasResume
+        ? { resumeFromRunId: resumeFromRunId!, resumeSourceRunSummary: resumeSourceRunSummary ?? null }
+        : {}),
+      ...(continuationProjection !== undefined ? { continuation: continuationProjection } : {}),
     };
   };
   const currentJournal = (runtime?: { getJournal(): WorkflowJournalLine[] }): WorkflowJournalLine[] => [
@@ -430,6 +511,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
+      ...(replayPlan === undefined ? {} : { replay: workflowReplayEnvelope(replayPlan, replayController) }),
     };
     if (workspaceManager !== undefined) {
       try {
@@ -443,13 +525,124 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         };
       }
     }
+    if (artifactStore !== undefined) {
+      try {
+        const outputRecords = artifactStore
+          .list()
+          .filter((record) => record.kind === "answer" || record.kind === "published");
+        const artifactRefs = outputRecords.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS).map((record) => ({
+          runId: record.runId,
+          artifactId: record.artifactId,
+          name: record.name,
+          sha256: record.sha256,
+        }));
+        enrichedFields = {
+          ...enrichedFields,
+          ...(artifactRefs.length > 0 ? { artifactRefs } : {}),
+          ...(outputRecords.length > artifactRefs.length
+            ? { artifactRefsOmitted: outputRecords.length - artifactRefs.length }
+            : {}),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? message,
+        };
+      }
+    }
+    if (awaitOperatorDeclaration?.operatorHandoff !== undefined && enrichedFields.ok) {
+      try {
+        if (enrichedFields.target === undefined || enrichedFields.scriptIdentity === undefined) {
+          throw new Error("Workflow operator handoff requires persisted target and script identity.");
+        }
+        enrichedFields = {
+          ...enrichedFields,
+          operatorHandoff: createWorkflowOperatorHandoffEnvelope({
+            declaration: awaitOperatorDeclaration.operatorHandoff,
+            runId,
+            target: enrichedFields.target,
+            scriptIdentity: enrichedFields.scriptIdentity,
+            terminalArtifactRefs: enrichedFields.artifactRefs ?? [],
+          }),
+        };
+      } catch (error) {
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          error: enrichedFields.error ?? (error instanceof Error ? error.message : String(error)),
+        };
+      }
+    }
+    const disposition = workflowDispositionForCompletion({
+      ok: enrichedFields.ok,
+      aborted: opts.signal.aborted,
+      ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
+      ...(awaitOperatorDeclaration !== undefined ? { awaitOperatorReason: awaitOperatorDeclaration.reason } : {}),
+    });
+    if (disposition.status === "cancelled") {
+      const cancellationMessage = `[workflow:cancelled] reason=${disposition.reason}`;
+      const alreadyRecorded = enrichedFields.journal.some(
+        (line) => line.kind === "log" && line.source === "runtime" && line.message === cancellationMessage,
+      );
+      if (!alreadyRecorded) {
+        const cancellationLine: WorkflowJournalLine = {
+          ts: new Date().toISOString(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: cancellationMessage,
+        };
+        journal.write(cancellationLine);
+        try {
+          opts.onEvent?.(cancellationLine);
+        } catch {
+          // Presentation callbacks cannot change durable cancellation truth.
+        }
+        enrichedFields = { ...enrichedFields, journal: [...enrichedFields.journal, cancellationLine] };
+      }
+    }
+    enrichedFields = {
+      ...enrichedFields,
+      ok: disposition.status === "completed" || disposition.status === "awaiting_operator",
+      disposition,
+    };
+    if (opts.operatorHandoffClaim !== undefined && !handoffClaimBound) {
+      try {
+        releaseWorkflowHandoffClaim(opts.operatorHandoffClaim);
+      } catch (error) {
+        enrichedFields = {
+          ...enrichedFields,
+          ok: false,
+          disposition: { status: "failed" },
+          error: enrichedFields.error ?? `Workflow handoff claim release failed: ${String(error)}`,
+        };
+      }
+    }
+    // One choke point for actionable failure text: every terminal route above
+    // funnels here, so the operator gets the same stage/script/evidence pointer
+    // whether the trusted script threw or the runtime around it did.
+    enrichedFields = withFailureDiagnostic(enrichedFields);
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
       ...enrichedFields,
       resultPersistence: intendedPersistence,
     });
-    if (resultPersistence.ok) return { runId, runDir, ...enrichedFields, resultPersistence };
+    // A prose result gets a readable sibling file. Every live surface bounds its
+    // own output, so without this the whole text existed only as one escaped
+    // JSON string.
+    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
+    if (resultPersistence.ok) {
+      return {
+        runId,
+        runDir,
+        ...enrichedFields,
+        resultPersistence,
+        ...(resultTextPath === undefined ? {} : { resultTextPath }),
+      };
+    }
 
     const persistenceError: WorkflowJournalLine = {
       ts: new Date().toISOString(),
@@ -465,14 +658,71 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       // Presentation callbacks cannot recover durable evidence and must not hide
       // the typed persistence failure returned below.
     }
-    const failedFields: RunResultFields = {
+    const failedFields: RunResultFields = withFailureDiagnostic({
       ...enrichedFields,
       ok: false,
+      disposition: workflowDispositionForCompletion({
+        ok: false,
+        aborted: opts.signal.aborted,
+        ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
+      }),
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
+    });
+    return {
+      runId,
+      runDir,
+      ...failedFields,
+      resultPersistence,
+      ...(resultTextPath === undefined ? {} : { resultTextPath }),
     };
-    return { runId, runDir, ...failedFields, resultPersistence };
   };
+
+  /** Attach the actionable diagnostic to a failed envelope; other outcomes pass through. */
+  function withFailureDiagnostic(fields: RunResultFields): RunResultFields {
+    // A script that deliberately returns `{ ok: false }` reported a domain
+    // verdict, not a defect: it already owns its own summary and needs no repair
+    // request. Only a thrown/transport failure earns a diagnostic.
+    if (fields.disposition?.status !== "failed" || fields.error === undefined) return fields;
+    let artifacts: readonly { kind: string; stage?: string; relativePath: string }[] = [];
+    try {
+      artifacts = artifactStore?.list() ?? [];
+    } catch {
+      // An unreadable artifact index costs the evidence pointer, never the verdict.
+    }
+    return {
+      ...fields,
+      failureDiagnostic: buildWorkflowFailureDiagnostic({
+        projectRoot,
+        runDir,
+        journalPath: workflowJournalFile(runDir),
+        journal: fields.journal,
+        ...(fields.failureOrigin === undefined ? {} : { origin: fields.failureOrigin }),
+        ...(fields.error === undefined ? {} : { error: fields.error }),
+        ...(fields.target === undefined ? {} : { target: fields.target }),
+        ...(fields.scriptIdentity === undefined ? {} : { scriptIdentity: fields.scriptIdentity }),
+        artifacts,
+      }),
+    };
+  }
+
+  try {
+    assertWorkflowInput(opts.input);
+    if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
+    if (hasResume && opts.continuation !== undefined) {
+      throw new Error("Workflow continuation and resumeFromRunId are mutually exclusive.");
+    }
+    if (opts.operatorHandoffClaim !== undefined) {
+      if (opts.continuation === undefined) {
+        throw new Error("Workflow operator handoff claim requires a continuation.");
+      }
+      assertWorkflowHandoffClaimForContinuation(opts.operatorHandoffClaim, opts.continuation, projectRoot);
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+    return finishRun({ ok: false, result: undefined, journal: currentJournal(), error, ...resultMetadata() });
+  }
 
   if (hasResume) {
     const sourceRunId = resumeFromRunId!;
@@ -524,6 +774,49 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const journalLines = currentJournal(runtime);
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
+  if (opts.operatorHandoffClaim !== undefined) {
+    try {
+      assertWorkflowHandoffClaimEligibility(opts.operatorHandoffClaim, { target, scriptIdentity });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      const journalLines = currentJournal(runtime);
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: journalLines,
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
+  }
+
+  replayPlan = planWorkflowReplay({
+    projectRoot,
+    scriptIdentity,
+    ...(hasResume ? { resumeFromRunId: resumeFromRunId! } : {}),
+  });
+  if (replayPlan.record) {
+    replayController = createWorkflowReplayController({
+      runDir,
+      ...(replayPlan.recorded === undefined ? {} : { recorded: replayPlan.recorded }),
+    });
+  }
+  // Silent on the default path. A plain run that records normally is the norm,
+  // and announcing it would turn every zero-event run into an eventful one; the
+  // record itself and the `replay` envelope in result.json carry that fact.
+  const replayPlanNote = describeWorkflowReplayPlan(replayPlan);
+  if (replayPlanNote !== undefined) {
+    emitPrelude({
+      ts: new Date().toISOString(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: replayPlanNote,
+      ...(hasResume ? { resumeFromRunId: resumeFromRunId! } : {}),
+    });
+  }
 
   resourceLoader = createWorkflowResourceLoader({
     workflowSourcePath: target.path,
@@ -533,32 +826,97 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     runId,
   });
+  try {
+    artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const journalLines = currentJournal(runtime);
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: journalLines,
+      error,
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
+  if (opts.continuation !== undefined) {
+    try {
+      boundContinuation = consumeWorkflowContinuation(artifactStore, opts.continuation);
+      continuationProjection = continuationJournalProjection(boundContinuation);
+      emitPrelude({
+        ts: new Date().toISOString(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: "[workflow:continuation]",
+        continuation: continuationProjection,
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: currentJournal(runtime),
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
+  }
+  if (opts.operatorHandoffClaim !== undefined) {
+    try {
+      bindWorkflowHandoffClaim(opts.operatorHandoffClaim, runId);
+      handoffClaimBound = true;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      emitPrelude({ ts: new Date().toISOString(), runId, kind: "error", source: "runtime", message: error });
+      return finishRun({
+        ok: false,
+        result: undefined,
+        journal: currentJournal(runtime),
+        error,
+        target,
+        scriptIdentity,
+        ...resultMetadata(),
+      });
+    }
+  }
   const agentRunner = createWorkflowAgentRunner({
     pi: opts.pi,
     ctx: opts.ctx,
     signal: opts.signal,
     workflowRunId: runId,
     workspaceManager,
+    evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
-    ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
-  const llmRunner = createWorkflowLlmRunner({
-    ctx: opts.ctx,
-    signal: opts.signal,
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
   });
   runtime = createWorkflowRuntime({
     runId,
     agentRunner,
-    llmRunner,
     journal,
     projectRoot,
     resourceLoader,
     workspaceManager,
+    artifactPorts: artifactStore,
+    sourceState: createWorkflowSourceStateReader(projectRoot),
+    ...(boundContinuation !== undefined ? { continuation: boundContinuation } : {}),
+    ...(hasResume ? { replaySourceRunId: resumeFromRunId! } : {}),
+    ...(replayController !== undefined ? { replay: replayController } : {}),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
+    onAwaitOperator: (declaration) => {
+      if (awaitOperatorDeclaration !== undefined) {
+        throw new Error("awaitOperator may be declared only once per workflow run");
+      }
+      awaitOperatorDeclaration = declaration;
+    },
   });
 
   let mod: WorkflowScriptModule;
@@ -601,6 +959,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       result: undefined,
       journal: journalLines,
       error,
+      failureOrigin: "script",
       target,
       scriptIdentity,
       ...resultMetadata(),
@@ -624,6 +983,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       result: groupFailure,
       journal: journalLines,
       error,
+      // The trusted script itself rejected the run: the repair belongs in the
+      // script or its prompts, not in the host.
+      failureOrigin: "script",
       target,
       scriptIdentity,
       ...resultMetadata(),
@@ -654,13 +1016,121 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ok: semanticOk,
     result: prepared.value,
     ...(prepared.diagnostic !== undefined
-      ? { resultDiagnostic: prepared.diagnostic, error: prepared.diagnostic.message }
+      ? {
+          resultDiagnostic: prepared.diagnostic,
+          error: prepared.diagnostic.message,
+          failureOrigin: "script" as const,
+        }
       : {}),
     journal: journalLines,
     target,
     scriptIdentity,
     ...resultMetadata(),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Replay gating (T-109)
+// ---------------------------------------------------------------------------
+
+interface WorkflowReplayPlan {
+  /** Whether this run writes a record a later `--resume` can consume. */
+  record: boolean;
+  /** Recorded entries to replay from. Present only when replay is active. */
+  recorded?: readonly WorkflowReplayEntry[];
+  sourceRunId?: string;
+  refusedReason?: WorkflowReplayRefusalReason;
+  notRecordedReason?: WorkflowReplayNotRecordedReason;
+}
+
+interface PlanWorkflowReplayInput {
+  projectRoot: string;
+  scriptIdentity: WorkflowScriptIdentity;
+  resumeFromRunId?: string;
+}
+
+/**
+ * Decide, once per run, whether recorded calls may be replayed and whether this
+ * run may be recorded. Every path out of here is fail-closed: an unproven
+ * script, an unreadable source run, or a moved script yields a NAMED refusal and
+ * a completely fresh execution, never a partially trusted one.
+ */
+function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan {
+  const { projectRoot, scriptIdentity, resumeFromRunId } = input;
+  // `entry-only` binds only the entry file's bytes, so an imported module can
+  // move the call sequence without changing `scriptSha256`. Unproven by
+  // construction — the AST never saw those bytes.
+  const coverageProven = scriptIdentity.identityCoverage === "self-contained-static";
+  const replaySafety = coverageProven ? readWorkflowReplaySafety(scriptIdentity) : "unproven";
+  const notRecordedReason: WorkflowReplayNotRecordedReason | undefined = !coverageProven
+    ? "identity-coverage-unproven"
+    : replaySafety === "unproven"
+      ? "replay-unsafe-script"
+      : undefined;
+  const record = notRecordedReason === undefined;
+
+  if (resumeFromRunId === undefined)
+    return { record, ...(notRecordedReason !== undefined ? { notRecordedReason } : {}) };
+
+  const refuse = (refusedReason: WorkflowReplayRefusalReason): WorkflowReplayPlan => ({
+    record,
+    sourceRunId: resumeFromRunId,
+    refusedReason,
+    ...(notRecordedReason !== undefined ? { notRecordedReason } : {}),
+  });
+
+  const sourceSha256 = readWorkflowRunResult(projectRoot, resumeFromRunId)?.scriptIdentity?.scriptSha256;
+  if (sourceSha256 === undefined) return refuse("source-run-unusable");
+  if (sourceSha256 !== scriptIdentity.scriptSha256) return refuse("script-changed");
+  if (!coverageProven) return refuse("identity-coverage-unproven");
+  if (replaySafety === "unproven") return refuse("replay-unsafe-script");
+
+  const recorded = readWorkflowReplayLog(projectRoot, resumeFromRunId);
+  if (recorded.length === 0) return refuse("no-recorded-calls");
+  return { record, recorded, sourceRunId: resumeFromRunId };
+}
+
+/** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
+function readWorkflowReplaySafety(scriptIdentity: WorkflowScriptIdentity): WorkflowReplaySafety {
+  try {
+    return assessWorkflowReplaySafety(readFileSync(scriptIdentity.snapshotPath, "utf8")).replaySafety;
+  } catch {
+    return "unproven";
+  }
+}
+
+function workflowReplayEnvelope(
+  plan: WorkflowReplayPlan,
+  controller: WorkflowReplayController | undefined,
+): WorkflowReplayEnvelope {
+  const counts = controller?.counts() ?? { replayedCalls: 0, freshCalls: 0 };
+  return {
+    replayed: counts.replayedCalls > 0,
+    recorded: plan.record,
+    ...(plan.sourceRunId !== undefined ? { sourceRunId: plan.sourceRunId } : {}),
+    ...(plan.refusedReason !== undefined ? { refusedReason: plan.refusedReason } : {}),
+    ...(plan.notRecordedReason !== undefined ? { notRecordedReason: plan.notRecordedReason } : {}),
+    replayedCalls: counts.replayedCalls,
+    freshCalls: counts.freshCalls,
+    ...(counts.divergedAtCall !== undefined ? { divergedAtCall: counts.divergedAtCall } : {}),
+  };
+}
+
+/**
+ * One journal line for the cases an operator must not have to infer, and
+ * `undefined` for the silent default (no resume asked for, recording on).
+ */
+function describeWorkflowReplayPlan(plan: WorkflowReplayPlan): string | undefined {
+  if (plan.recorded !== undefined) {
+    return `replay: active source=${plan.sourceRunId ?? "?"} recordedCalls=${plan.recorded.length}`;
+  }
+  if (plan.refusedReason !== undefined) {
+    return `replay: refused source=${plan.sourceRunId ?? "?"} reason=${plan.refusedReason} — every call runs fresh`;
+  }
+  if (plan.notRecordedReason !== undefined) {
+    return `replay: not recorded reason=${plan.notRecordedReason} — this run cannot be resumed`;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

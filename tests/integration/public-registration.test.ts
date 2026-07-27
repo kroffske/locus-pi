@@ -39,13 +39,7 @@ describe("public registration contract", () => {
   });
 
   it("declares exactly the curated Package workflows", () => {
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES]).toEqual([
-      "live-smoke",
-      "llm-smoke",
-      "requirements-grill",
-      "review",
-      "review-fix",
-    ]);
+    expect([...CURATED_PACKAGE_WORKFLOW_NAMES]).toEqual(["live-smoke", "requirements-grill", "review", "review-fix"]);
   });
 
   it("keeps manifest documentation and test evidence resolvable", () => {

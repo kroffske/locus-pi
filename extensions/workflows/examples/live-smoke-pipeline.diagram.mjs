@@ -21,62 +21,83 @@ const scene = new Scene({
   background: "#ffffff",
 });
 
-const canvas = new Bounds(0, 0, 3840, 1260);
+// The pipeline is authored as one long left-to-right strip and then wrapped.
+// Unwrapped it renders about 3800x1240 — a ~3:1 sliver that is unreadable at
+// fit-to-window — so every node whose authored x is at or past BAND_BREAK drops
+// into a second band below, and the four swim lanes are drawn once per band.
+// Authored coordinates stay untouched; only `bandX`/`bandY` move them.
+const BAND_BREAK = 2040;
+const BAND_DX = -1570;
+const BAND_DY = 995;
+const inBand2 = (x) => x >= BAND_BREAK;
+const bandX = (x) => (inBand2(x) ? x + BAND_DX : x);
+const bandY = (x, y) => (inBand2(x) ? y + BAND_DY : y);
+
+const canvas = new Bounds(0, 0, 2720, 2280);
 const BLUE = "#0b1fb3";
 const GREEN = "#087f3f";
 const GRAY = "#475569";
-const PURPLE = "#7c3aed";
 
-scene.text(40, 24, "LIVE smoke workflow — full agent sessions, no direct LLM call", {
+const HEADER_WIDTH = 2640;
+
+scene.text(40, 24, "LIVE smoke workflow — two sequential full agent sessions", {
   size: 30,
-  width: 3760,
+  width: HEADER_WIDTH,
   align: "center",
 });
 scene.text(
   40,
   68,
-  "Source: extensions/workflows/examples/live-smoke.workflow.mjs · sequential agent proof · runtime-owned persistence",
+  "Source: extensions/workflows/examples/live-smoke.workflow.mjs · sequential agent proof · runtime-owned persistence · read top band, then bottom band",
   {
     size: 16,
     color: GRAY,
-    width: 3760,
+    width: HEADER_WIDTH,
     align: "center",
   },
 );
 
-const laneRight = 3160;
 const lanes = [
   { label: "OPERATOR", top: 130, bottom: 315 },
   { label: "WORKFLOW-OWNED ORCHESTRATION / CHECKS", top: 315, bottom: 590 },
   { label: "FULL AGENT SESSIONS", top: 590, bottom: 820 },
-  { label: "DIRECT LLM CALLS", top: 820, bottom: 985 },
   { label: "ARTIFACTS", top: 985, bottom: 1240 },
 ];
 
-for (const lane of lanes) {
-  scene.text(20, lane.top + 12, lane.label, {
-    size: 14,
-    color: GRAY,
-    width: 280,
-    align: "left",
-  });
+// Band 1 stops short of the legend panel; band 2 runs the full content width and
+// omits the OPERATOR lane, which holds nothing after the wrap point.
+for (const [band, right, laneSubset] of [
+  [0, 2060, lanes],
+  [1, 2260, lanes.slice(1)],
+]) {
+  const dy = band * BAND_DY;
+  for (const lane of laneSubset) {
+    scene.text(20, lane.top + dy + 12, lane.label, {
+      size: 14,
+      color: GRAY,
+      width: 280,
+      align: "left",
+    });
+    scene.line(
+      [
+        [300, lane.top + dy],
+        [right, lane.top + dy],
+      ],
+      { color: "#cbd5e1", strokeWidth: 1, dashed: true },
+    );
+  }
   scene.line(
     [
-      [300, lane.top],
-      [laneRight, lane.top],
+      [300, laneSubset.at(-1).bottom + dy],
+      [right, laneSubset.at(-1).bottom + dy],
     ],
     { color: "#cbd5e1", strokeWidth: 1, dashed: true },
   );
 }
-scene.line(
-  [
-    [300, lanes.at(-1).bottom],
-    [3760, lanes.at(-1).bottom],
-  ],
-  { color: "#cbd5e1", strokeWidth: 1, dashed: true },
-);
 
-function operatorNode(id, x, y, width, height) {
+function operatorNode(id, authoredX, authoredY, width, height) {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const elements = [
     scene.ellipse(x, y, width, height, { color: GRAY, strokeWidth: 2 }),
     scene.placeAsset("chat_message", x + 24, y + 36, 58),
@@ -102,10 +123,10 @@ function operatorNode(id, x, y, width, height) {
   return { id, block: scene.group(elements) };
 }
 
-function workflowNode(id, title, iconId, bullets, x, y, width = 310, height = 180) {
+function workflowNode(id, title, iconId, bullets, authoredX, authoredY, width = 310, height = 180) {
   return {
     id,
-    block: layout.iconPanel(scene, x, y, width, height, {
+    block: layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
       title,
       iconId,
       bullets,
@@ -116,7 +137,9 @@ function workflowNode(id, title, iconId, bullets, x, y, width = 310, height = 18
   };
 }
 
-function checkNode(id, title, detail, x, y, width = 300, height = 170) {
+function checkNode(id, title, detail, authoredX, authoredY, width = 300, height = 170) {
+  const x = bandX(authoredX);
+  const y = bandY(authoredX, authoredY);
   const elements = [
     scene.line(
       [
@@ -144,8 +167,8 @@ function checkNode(id, title, detail, x, y, width = 300, height = 170) {
   return { id, block: scene.group(elements) };
 }
 
-function agentNode(id, agentName, bullets, x, y, width = 360, height = 205) {
-  const panel = layout.iconPanel(scene, x, y, width, height, {
+function agentNode(id, agentName, bullets, authoredX, authoredY, width = 360, height = 205) {
+  const panel = layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
     title: `Agent: ${agentName}`,
     iconId: "robot_agent",
     bullets,
@@ -160,34 +183,8 @@ function agentNode(id, agentName, bullets, x, y, width = 360, height = 205) {
   return { id, block: scene.group([outer, ...panel.elements]) };
 }
 
-function directLlmNoneNode(id, x, y, width, height) {
-  const elements = [
-    scene.ellipse(x, y, width, height, { color: PURPLE, strokeWidth: 2, dashed: true }),
-    scene.placeAsset("model_validation", x + 24, y + 31, 54),
-    scene.text(x + 94, y + 20, "Direct LLM: not used", {
-      size: 18,
-      color: PURPLE,
-      width: width - 116,
-      align: "center",
-    }),
-    scene.text(x + 94, y + 58, "dsl.llm() is not used", {
-      size: 13,
-      color: GRAY,
-      width: width - 116,
-      align: "center",
-    }),
-    scene.text(x + 94, y + 84, "all model work runs inside agents", {
-      size: 13,
-      color: GRAY,
-      width: width - 116,
-      align: "center",
-    }),
-  ];
-  return { id, block: scene.group(elements) };
-}
-
-function artifactNode(id, title, iconId, bullets, x, y, width, height) {
-  const panel = layout.iconPanel(scene, x, y, width, height, {
+function artifactNode(id, title, iconId, bullets, authoredX, authoredY, width, height) {
+  const panel = layout.iconPanel(scene, bandX(authoredX), bandY(authoredX, authoredY), width, height, {
     title,
     iconId,
     bullets,
@@ -283,14 +280,13 @@ const resultCheck = workflowNode(
   310,
   180,
 );
-const noDirectLlm = directLlmNoneNode("no-direct-llm", 1320, 842, 420, 126);
 
 const sourceFile = artifactNode(
   "source-file",
   "Artifact: live-smoke.workflow.mjs",
   "prompt_template",
   ["extensions/workflows/examples/", "meta.name = live-smoke", "default export = runWorkflow"],
-  120,
+  700,
   1015,
   430,
   190,
@@ -326,7 +322,6 @@ const nodes = [
   sequentialAwait,
   quickAgent,
   resultCheck,
-  noDirectLlm,
   sourceFile,
   journalFile,
   resultFile,
@@ -405,17 +400,19 @@ connect("phase-explore", phaseAndLog, exploreAgent, "prompt + agent=explore", {
   to: { side: "left", slot: 0.35 },
   labelOffset: { dx: -12, dy: -8 },
 });
-connect("explore-await", exploreAgent, sequentialAwait, "exact explore text", {
-  direction: "bottom-up",
-  from: { side: "right", slot: 0.35 },
-  to: { side: "left", slot: 0.75 },
-  labelOffset: { dx: 0, dy: -8 },
+// The wrap edge: band 1 ends here and band 2 continues below-left.
+connect("explore-await", exploreAgent, sequentialAwait, "exact explore text — continues in the band below", {
+  direction: "top-down",
+  from: { side: "bottom", slot: 0.8 },
+  to: { side: "left", slot: 0.35 },
+  labelWidth: 210,
+  labelOffset: { dx: -70, dy: 0 },
 });
 connect("await-quick", sequentialAwait, quickAgent, "prompt + agent=quick_task", {
   direction: "top-down",
   from: { side: "right", slot: 0.75 },
   to: { side: "left", slot: 0.35 },
-  labelOffset: { dx: -4, dy: -8 },
+  labelOffset: { dx: 32, dy: -8 },
 });
 connect("quick-check", quickAgent, resultCheck, "exact quick_task text", {
   direction: "bottom-up",
@@ -434,7 +431,7 @@ connect("phase-journal", phaseAndLog, journalFile, "phase + log events", {
   from: { side: "bottom", slot: 0.2 },
   to: { side: "left", slot: 0.2 },
   path: "outer",
-  routeBounds: new Bounds(1260, 340, 1340, 880),
+  routeBounds: new Bounds(1260, 340, 900, 880),
   outerSide: "left",
   outerGap: 20,
   kind: "provenance",
@@ -444,11 +441,16 @@ connect("phase-journal", phaseAndLog, journalFile, "phase + log events", {
 });
 connect("explore-journal", exploreAgent, journalFile, "explore agent_start / agent_end", {
   direction: "top-down",
-  from: { side: "bottom", slot: 0.55 },
-  to: { side: "top", slot: 0.25 },
+  from: { side: "left", slot: 0.85 },
+  to: { side: "left", slot: 0.3 },
+  path: "outer",
+  routeBounds: new Bounds(320, 820, 1780, 1440),
+  outerSide: "left",
+  outerGap: 24,
   kind: "provenance",
   dashed: true,
-  labelOffset: { dx: -30, dy: 0 },
+  labelWidth: 150,
+  labelOffset: { dx: 96, dy: -14 },
 });
 connect("quick-journal", quickAgent, journalFile, "quick_task agent_start / agent_end", {
   direction: "top-down",
@@ -463,7 +465,7 @@ connect("check-result", resultCheck, resultFile, "topic + ok + exact notes", {
   from: { side: "bottom", slot: 0.7 },
   to: { side: "top", slot: 0.5 },
   path: "outer",
-  routeBounds: new Bounds(2800, 340, 1000, 550),
+  routeBounds: new Bounds(bandX(2800), bandY(2800, 340), 1000, 550),
   outerSide: "bottom",
   outerGap: 40,
   labelOffset: { dx: 20, dy: -2 },
@@ -477,7 +479,7 @@ connect("journal-result", journalFile, resultFile, "journal snapshot in run enve
 });
 
 // Legend uses the same editable primitives as the graph.
-const legendX = 3210;
+const legendX = 2110;
 const legendY = 128;
 const legendWidth = 550;
 const legendHeight = 760;
@@ -534,22 +536,6 @@ scene.text(legendX + 145, legendY + 337, "Double rectangle", {
   width: 350,
 });
 scene.text(legendX + 145, legendY + 360, "full agent session with tools + childSessionId", {
-  size: 12,
-  color: GRAY,
-  width: 350,
-});
-
-scene.ellipse(legendX + 28, legendY + 423, 92, 54, {
-  color: PURPLE,
-  strokeWidth: 2,
-  dashed: true,
-});
-scene.text(legendX + 145, legendY + 430, "Dashed ellipse", {
-  size: 15,
-  color: PURPLE,
-  width: 350,
-});
-scene.text(legendX + 145, legendY + 453, "direct LLM call; explicitly unused here", {
   size: 12,
   color: GRAY,
   width: 350,

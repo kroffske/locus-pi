@@ -126,6 +126,38 @@ describe("agent command run (unified live surface)", () => {
     expect(line).not.toMatch(/reviewer#\w+/);
   });
 
+  it("suppresses the kickoff lifecycle line when begin emission synchronously replaces the execution", async () => {
+    mockSdkSession("sdk-reentrant", { summary: "stale execution completed" });
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
+    agents(h.pi);
+    let replaced = false;
+    const replaceOnBegin = () => {
+      if (replaced) return;
+      const row = reviewerRow(agentLiveStore);
+      if (row === undefined) return;
+      replaced = true;
+      agentLiveStore.beginExecution({
+        id: row.id,
+        agentName: "reviewer",
+        label: "replacement execution",
+      });
+    };
+    agentLiveStore.emitter.on("change", replaceOnBegin);
+    try {
+      await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+    } finally {
+      agentLiveStore.emitter.off("change", replaceOnBegin);
+    }
+
+    expect(replaced).toBe(true);
+    expect(h.notifications.filter((message) => message.includes(" started"))).toEqual([]);
+    expect(reviewerRow(agentLiveStore)).toMatchObject({
+      status: "queued",
+      label: "replacement execution",
+    });
+  });
+
   it("produces the same live row from the tool trigger and the slash trigger (Q8 parity)", async () => {
     mockSdkSession("sdk-parity", { summary: "Reviewed" });
     const { agents, agentLiveStore } = await loadAgents();

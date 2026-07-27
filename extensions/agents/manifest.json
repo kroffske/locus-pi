@@ -16,7 +16,7 @@
     "agent observe / agent summary render an on-demand bounded snapshot of current and recent live rows from agentLiveStore.rows; done/cancelled/error rows stay terminal, not running, with currentTools/currentToolArgs/currentToolStartMs cleared and elapsedMs frozen at terminal transition",
     "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
     "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
-    "no first-class createAgentSession JSON schema/response_format mode is present in the declared Pi SDK 0.80.3 peer; agent output is text-only",
+    "no first-class createAgentSession JSON schema/response_format mode is present in the declared Pi SDK 0.82.0 peer; agent output is text-only",
     "locus_workload_proof records diagnostic persisted child-workload evidence but does not control success by itself",
     "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
     "spawn_agent is the model-friendly primary subagent-spawn tool; task is a back-compat alias; both accept one required task string, create one child, return exact text in content, and keep runtime metadata in details",
@@ -24,8 +24,9 @@
     "readOnly=true is host-enforced: the child allowlist is narrowed to read, grep, find, ls, yield, and explicitly requested git_read; bash, write, edit, workflow, and unknown tools are removed; git_read invokes only allowlisted local Git query subcommands without a shell and rejects mutating or process-spawning options",
     "task spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
     "task resolves missing agent and default to task; general resolves to task only when no project/user general agent exists",
+    "the agent parameter of spawn_agent/task advertises the resolved first-match-wins catalog as bounded name - description lines (at most 12 entries, each description clamped to 96 characters, overflow stated as +N more); it is republished on every agent discovery pass including one before_agent_start refresh per turn, and it never replaces the unknown-agent check",
     "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
-    "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs keep the scroll overlay while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
+    "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs use the shared inline editor-replacement surface while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
     "unknown-target and headless settled-run chrome use typed ERROR/RESULT blocks without replacing the domain-owned live fleet, focus, drill, stop, resolver, or runtime store",
     "unknown or incomplete agent command syntax renders a typed WARN with no-action evidence and exact usage recovery",
     "task returns isError=true for unknown-agent and child-session failed/blocked/cancelled results",
@@ -36,13 +37,14 @@
     "skill names resolve through .agents/skills/<name>/SKILL.md then .pi/skills/<name>/SKILL.md under the project root, preserving Pi progressive-disclosure boundaries",
     "/ps opens the existing fleet selector, /ps <target> opens the canonical resolved row, and /agent ps plus /agent drill remain stable compatibility paths",
     "Pi command-context custom UI plus public AssistantMessageComponent and ToolExecutionComponent are required for the native viewer; missing capability is reported explicitly and RPC/headless modes keep passive text fallback",
-    "the native viewer uses a 100% overlay with terminal-height output, no frame, follow-tail pause/resume, compact/expanded tools, and Esc close without child abort",
+    "the native viewer uses the shared inline editor-replacement surface with terminal-height output, follow-tail pause/resume, compact/expanded tools, and Esc close without child abort",
     "AgentLiveStore owns live-row lifecycle while _shared/agent-live-transcript.ts owns one bounded typed timeline with stable block ids, complete assistant snapshots, structured tool lifecycle, cwd, redaction, and latestMessage projection; raw AgentLiveRow.eventLines remain diagnostic data",
     "terminal assistant stopReason=error surfaces errorMessage before the generic empty-result fallback; completed children still require a real non-empty answer and side-effect-only success is not part of the contract",
     "child turn_end assistant usage updates live tokenCount during execution; final getSessionStats tokens replace it with cumulative truth, and workflow parallel/pipeline summary rows show the sum of token-bearing descendants",
     "the passive fleet renders below the editor; bare Up/Down always remain owned by Pi editor/history, while /ps opens fleet management and shift+down remains the terminal-compatible entry fallback; aggregate rows stay visible as headings but only leaf rows are selectable or actionable, then configured select keys navigate, Enter drills the exact leaf row, x asks for confirmation before aborting its active SDK child, and Esc returns to the editor without stopping it",
     "when Pi app.interrupt Escape would abort an active parent turn with live agent rows, a Yes/No confirmation is required first; closing fleet/drill views reports that active agents continue running",
-    "agentLiveStore is process-shared through a versioned global symbol because Pi loads package entrypoints through independent jiti instances with moduleCache disabled"
+    "agentLiveStore is process-shared through a versioned global symbol because Pi loads package entrypoints through independent jiti instances with moduleCache disabled",
+    "the shared inline interaction slot fences Pi's own close callback by slot ownership: a component the host silently replaced can no longer run the host's editor-restore path, so a late timeout, abort, or queued key from a superseded prompt cannot blank the interaction that replaced it, and the incumbent is retired only once the newcomer's factory has produced a component, so a request that never appears cannot take the slot; when a factory rejects, Pi restores the editor over the live component anyway, so the incumbent is explicitly retired on that path too and its owner is told rather than left awaiting a surface that is off the screen; a retired caller sees the typed stale error and reports benign replacement rather than failure — /ps and the agent view say so and name the retry"
   ],
   "stateUsed": [
     "in-memory discovered agent definitions",
@@ -68,7 +70,7 @@
       "agent ps",
       "ps"
     ],
-    "hooks": ["session_start", "tool_call", "tool_result"],
+    "hooks": ["session_start", "before_agent_start", "tool_call", "tool_result"],
     "shortcuts": ["shift+down"]
   },
   "uiLifecycle": {
@@ -124,6 +126,7 @@
   "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/agents.md",
   "tests": [
     "tests/extensions/agents/agents-discovery.test.ts",
+    "tests/extensions/agents/agent-catalog-hint.test.ts",
     "tests/shared/agents/agent-runner.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
     "tests/shared/agents/agent-sdk-host.test.ts",
@@ -132,7 +135,8 @@
     "tests/extensions/agents/agent-drill.test.ts",
     "tests/extensions/agents/agent-fleet-menu.test.ts",
     "tests/extensions/agents/agent-live-store-entrypoints.test.ts",
-    "tests/integration/public-registration.test.ts"
+    "tests/integration/public-registration.test.ts",
+    "tests/shared/operator-interaction.test.ts"
   ],
   "review": {
     "status": "reviewed",

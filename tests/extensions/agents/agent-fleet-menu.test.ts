@@ -16,7 +16,12 @@ import {
   workflowGroupLiveRowId,
 } from "../../../extensions/_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
-import { installWorkflowProgress, type WorkflowProgressComponent } from "../../../extensions/workflows/progress-widget.js";
+import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
+import {
+  installWorkflowProgress,
+  type WorkflowProgressComponent,
+} from "../../../extensions/workflows/progress-widget.js";
+import { workflowBackgroundRunRegistry } from "../../../extensions/workflows/background-run-registry.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 afterEach(() => {
@@ -33,6 +38,37 @@ function row(id: string, title: string, status: AgentLiveStatus = "working") {
 }
 
 describe("agent fleet menu", () => {
+  it("puts the newest workflow run first and labels the runs behind it", () => {
+    const earlier = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183012-a6aa:default",
+      agentName: "default",
+      label: "decide clarification",
+      title: "decide clarification",
+      workflowRunId: "20260726-183012-a6aa",
+    });
+    agentLiveStore.patch(earlier.id, { status: "done" });
+    const current = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183412-b2c4:reviewer",
+      agentName: "reviewer",
+      label: "inventory changes",
+      title: "inventory changes",
+      workflowRunId: "20260726-183412-b2c4",
+    });
+    agentLiveStore.patch(current.id, { status: "working" });
+
+    const rendered = renderFleetMenuRows([...agentLiveStore.rows.values()], 120, {});
+    const text = rendered.join("\n");
+    const label = rendered.findIndex((line) => line.includes("earlier workflow runs"));
+    const currentRow = rendered.findIndex((line) => line.includes("inventory changes"));
+    const earlierRow = rendered.findIndex((line) => line.includes("decide clarification"));
+
+    expect(label).toBeGreaterThan(-1);
+    expect(currentRow).toBeLessThan(label);
+    expect(earlierRow).toBeGreaterThan(label);
+    // Nothing is hidden: the earlier run stays drillable, it is only ranked below.
+    expect(text).toContain("decide clarification");
+  });
+
   it("keeps the same row projection when focus adds only the cursor and controls", () => {
     const first = row("row-a", "review auth");
     const second = row("row-b", "run tests");
@@ -89,10 +125,7 @@ describe("agent fleet menu", () => {
     expect(down.every((result) => result === undefined)).toBe(true);
     expect(up.every((result) => result === undefined)).toBe(true);
     await h.shortcuts.get(FLEET_FOCUS_FALLBACK_SHORTCUT)!.handler(h.ctx);
-    await vi.waitFor(() => expect(h.customOptions).toEqual([undefined, {
-      overlay: true,
-      overlayOptions: { width: "100%", maxHeight: "100%", row: 0, col: 0, margin: 0 },
-    }]));
+    await vi.waitFor(() => expect(h.customOptions).toEqual([{ overlay: false }, { overlay: false }]));
 
     expect(h.customRenderFrames.at(-1)?.[0]).toContain(second.displayName);
     expect(fleetMenuState.focused).toBe(false);
@@ -114,27 +147,67 @@ describe("agent fleet menu", () => {
     expect(h.customComponents).toHaveLength(0);
   });
 
-  it("keeps focused controls as the last belowEditor widget line while the editor replacement stays empty", () => {
+  it("renders focused rows and controls in the shared selector while the passive widget stays below editor", () => {
     const active = row("screen-order-row", "prove screen order");
     const h = createHarness();
     h.ctx.hasUI = true;
     agents(h.pi);
     installWorkflowProgress(h.ctx, "fleet-order", "screen-order", "run");
-    const factory = h.widgetPayloads.get("fleet-order") as
-      ((tui: { requestRender(): void; terminal: { rows: number; columns: number } }, theme: unknown) => WorkflowProgressComponent);
+    const factory = h.widgetPayloads.get("fleet-order") as (
+      tui: { requestRender(): void; terminal: { rows: number; columns: number } },
+      theme: unknown,
+    ) => WorkflowProgressComponent;
     const widget = factory({ requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } }, {});
     fleetMenuState.setVisibleRows([active]);
     fleetMenuState.setFocused(true);
     const keyCapture = new FleetFocusComponent(() => [active], {}, { requestRender: vi.fn() }, vi.fn());
 
-    const screen = [...keyCapture.render(120), ...widget.render(120)];
+    const focused = keyCapture.render(120);
+    const passive = widget.render(120);
 
-    expect(keyCapture.render(120)).toEqual([]);
     expect(h.widgetOptions.get("fleet-order")).toEqual({ placement: "belowEditor" });
-    expect(screen.at(-1)).toContain("stop");
-    expect(screen.at(-1)).toContain("back");
-    expect(screen.findIndex((line) => line.includes("prove screen order"))).toBeLessThan(screen.length - 1);
+    expect(focused.join("\n")).toContain("prove screen order");
+    expect(focused.at(-1)).toContain("stop");
+    expect(focused.at(-1)).toContain("back");
+    expect(passive.join("\n")).toContain("prove screen order");
+    expect(passive.at(-1)).toContain("manage");
+    keyCapture.dispose();
     widget.dispose();
+  });
+
+  it("derives /ps rows from the global live store when ordinary and workflow panels coexist", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const ordinary = row("ordinary-agent-row", "ordinary agent work");
+    const workflowPanel = installWorkflowProgress(h.ctx, "workflow-coexistence", "review", "coexist-run", {
+      scope: "workflow",
+      declaredStages: [{ title: "review" }],
+    });
+    const workflowLine: WorkflowJournalLine = {
+      ts: "2026-07-22T00:00:00.000Z",
+      runId: "coexist-run",
+      kind: "agent_start",
+      agent: "reviewer",
+      label: "workflow agent work",
+      phase: "review",
+    };
+    applyWorkflowJournalLineToAgentLiveStore(workflowLine);
+    workflowPanel.push(workflowLine);
+    const workflowRow = agentLiveStore.rows.get(workflowAgentLiveRowId(workflowLine));
+    if (workflowRow === undefined) throw new Error("expected projected workflow row");
+    fleetMenuState.setVisibleRows([workflowRow]);
+    workflowPanel.render(120);
+
+    h.customInputQueue.push("escape");
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    const focused = h.customRenderFrames.at(-1)?.join("\n") ?? "";
+    expect(focused).toContain(ordinary.displayName);
+    expect(focused).toContain(workflowRow.displayName);
+    expect(fleetMenuState.visibleRows()).toEqual([]);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+    workflowPanel.dispose();
   });
 
   it("routes x through a stop request instead of cancelling immediately, while Esc only returns", () => {
@@ -144,12 +217,7 @@ describe("agent fleet menu", () => {
     fleetMenuState.setVisibleRows([active]);
     fleetMenuState.setFocused(true);
     const done = vi.fn();
-    const component = new FleetFocusComponent(
-      () => [active],
-      {},
-      { requestRender: vi.fn() },
-      done,
-    );
+    const component = new FleetFocusComponent(() => [active], {}, { requestRender: vi.fn() }, done);
 
     component.handleInput("x");
     component.handleInput("escape");
@@ -157,6 +225,34 @@ describe("agent fleet menu", () => {
     expect(cancel).not.toHaveBeenCalled();
     expect(done).toHaveBeenCalledWith({ kind: "stop", rowId: active.id });
     expect(done).toHaveBeenCalledWith({ kind: "close" });
+    component.dispose();
+  });
+
+  it("keeps workflow rows inspectable but removes the competing x stop path", () => {
+    const workflowLine: WorkflowJournalLine = {
+      ts: "t",
+      runId: "workflow-command-owned",
+      kind: "agent_start",
+      agent: "reviewer",
+      label: "workflow child",
+    };
+    applyWorkflowJournalLineToAgentLiveStore(workflowLine);
+    const workflowRow = agentLiveStore.rows.get(workflowAgentLiveRowId(workflowLine));
+    expect(workflowRow).toMatchObject({ status: "working", workflowRunId: "workflow-command-owned" });
+    if (workflowRow === undefined) throw new Error("expected workflow row");
+    const done = vi.fn();
+    fleetMenuState.setVisibleRows([workflowRow]);
+    const rendered = renderFleetMenuRows([workflowRow], 120, {
+      focused: true,
+      selectedRowId: workflowRow.id,
+    });
+    const component = new FleetFocusComponent(() => [workflowRow], {}, { requestRender: vi.fn() }, done);
+
+    component.handleInput("x");
+
+    expect(rendered.at(-1)).not.toContain("stop");
+    expect(done).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "stop" }));
+    component.dispose();
   });
 
   it("cancels a selected child only after the operator confirms the x stop request", async () => {
@@ -180,6 +276,69 @@ describe("agent fleet menu", () => {
     expect(h.notifications).toContain("Agent cancellation requested.");
   });
 
+  it("does not cancel a same-id replacement registered while stop confirmation is pending", async () => {
+    const original = row("confirm-authority-row", "original execution");
+    const originalCancel = vi.fn();
+    agentLiveStore.registerCancel(original.id, originalCancel);
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    let resolveConfirm!: (confirmed: boolean) => void;
+    const pendingConfirm = new Promise<boolean>((resolve) => {
+      resolveConfirm = resolve;
+    });
+    h.ctx.ui.confirm = vi.fn(async () => pendingConfirm);
+    h.customInputQueue.push("x");
+
+    const stopping = h.shortcuts.get(FLEET_FOCUS_FALLBACK_SHORTCUT)!.handler(h.ctx);
+    await vi.waitFor(() => expect(h.ctx.ui.confirm).toHaveBeenCalledOnce());
+    const replacement = agentLiveStore.begin({
+      id: original.id,
+      agentName: "reviewer",
+      label: "replacement execution",
+      title: "replacement execution",
+    });
+    agentLiveStore.patch(replacement.id, { status: "working" });
+    const replacementCancel = vi.fn();
+    agentLiveStore.registerCancel(replacement.id, replacementCancel);
+    resolveConfirm(true);
+    await stopping;
+
+    expect(originalCancel).not.toHaveBeenCalled();
+    expect(replacementCancel).not.toHaveBeenCalled();
+    expect(h.notifications).toContain(`Agent ${replacement.id} is no longer stoppable.`);
+
+    h.ctx.ui.confirm = vi.fn(async () => true);
+    h.customInputQueue.push("x");
+    await h.shortcuts.get(FLEET_FOCUS_FALLBACK_SHORTCUT)!.handler(h.ctx);
+    expect(replacementCancel).toHaveBeenCalledOnce();
+    expect(h.notifications).toContain("Agent cancellation requested.");
+  });
+
+  it("does not invoke a still-registered cancel seam after the row becomes terminal during confirmation", async () => {
+    const active = row("terminal-during-confirm", "finishing execution");
+    const cancel = vi.fn();
+    agentLiveStore.registerCancel(active.id, cancel);
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    let resolveConfirm!: (confirmed: boolean) => void;
+    const pendingConfirm = new Promise<boolean>((resolve) => {
+      resolveConfirm = resolve;
+    });
+    h.ctx.ui.confirm = vi.fn(async () => pendingConfirm);
+    h.customInputQueue.push("x");
+
+    const stopping = h.shortcuts.get(FLEET_FOCUS_FALLBACK_SHORTCUT)!.handler(h.ctx);
+    await vi.waitFor(() => expect(h.ctx.ui.confirm).toHaveBeenCalledOnce());
+    agentLiveStore.patch(active.id, { status: "done" });
+    resolveConfirm(true);
+    await stopping;
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(h.notifications).toContain(`Agent ${active.id} is no longer stoppable.`);
+  });
+
   it("asks before global Escape aborts an active parent agent operation", async () => {
     const h = createHarness(process.cwd(), { isStreaming: true });
     h.ctx.hasUI = true;
@@ -201,6 +360,52 @@ describe("agent fleet menu", () => {
     expect(h.notifications).toContain("Agent cancellation requested.");
   });
 
+  it("consumes global Escape without aborting or confirming while a workflow row is active", async () => {
+    const h = createHarness(process.cwd(), { isStreaming: true });
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    applyWorkflowJournalLineToAgentLiveStore({
+      ts: "t",
+      runId: "escape-workflow",
+      kind: "agent_start",
+      agent: "reviewer",
+      label: "workflow child",
+    });
+
+    const results = [...h.terminalInputHandlers].map((handler) => handler("\u001b"));
+
+    expect(results).toContainEqual({ consume: true });
+    expect(h.abortCalls).toBe(0);
+    expect(h.confirmCalls).toEqual([]);
+  });
+
+  it("consumes global Escape while a tool workflow is active before its first live row", async () => {
+    const sessionId = "escape-pending-workflow";
+    const h = createHarness(process.cwd(), { isStreaming: true, sessionId });
+    h.ctx.hasUI = true;
+    const registry = workflowBackgroundRunRegistry();
+    const lease = registry.startSession(process.cwd(), sessionId);
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const launched = registry.attach(lease, new AbortController().signal, async () => pending);
+    expect(launched.ok).toBe(true);
+    agents(h.pi);
+    await emit(h, "session_start");
+
+    const results = [...h.terminalInputHandlers].map((handler) => handler("\u001b"));
+
+    expect(results).toContainEqual({ consume: true });
+    expect(h.abortCalls).toBe(0);
+    expect(h.confirmCalls).toEqual([]);
+
+    settle();
+    if (launched.ok) await launched.run.terminal;
+    registry.shutdown(lease);
+  });
+
   it("removes the stop affordance and ignores x for a cancelled terminal row", () => {
     const terminal = row("cancelled-row", "cancelled child", "cancelled");
     const staleCancel = vi.fn();
@@ -209,17 +414,13 @@ describe("agent fleet menu", () => {
     fleetMenuState.setFocused(true);
 
     const rendered = renderFleetMenuRows([terminal], 120, { focused: true, selectedRowId: terminal.id });
-    const component = new FleetFocusComponent(
-      () => [terminal],
-      {},
-      { requestRender: vi.fn() },
-      vi.fn(),
-    );
+    const component = new FleetFocusComponent(() => [terminal], {}, { requestRender: vi.fn() }, vi.fn());
     component.handleInput("x");
 
     expect(rendered.at(-1)).not.toContain("stop");
     expect(rendered.join("\n")).toContain("⊘");
     expect(staleCancel).not.toHaveBeenCalled();
+    component.dispose();
   });
 
   it("renders aggregate rows but skips them for cursor, Enter, and x", () => {
@@ -230,8 +431,18 @@ describe("agent fleet menu", () => {
       groupKind: "parallel",
       groupTotal: 2,
     });
-    const firstRow = agentLiveStore.begin({ id: "parallel-child-1", parentRowId: group.id, agentName: "reviewer", label: "first child" });
-    const secondRow = agentLiveStore.begin({ id: "parallel-child-2", parentRowId: group.id, agentName: "reviewer", label: "second child" });
+    const firstRow = agentLiveStore.begin({
+      id: "parallel-child-1",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "first child",
+    });
+    const secondRow = agentLiveStore.begin({
+      id: "parallel-child-2",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "second child",
+    });
     const first = agentLiveStore.patch(firstRow.id, { status: "working" })!;
     const second = agentLiveStore.patch(secondRow.id, { status: "working" })!;
     const rows = selectFleetMenuRows([group, first, second]);
@@ -241,8 +452,12 @@ describe("agent fleet menu", () => {
     const tui = { requestRender: vi.fn() };
     const component = new FleetFocusComponent(() => rows, {}, tui, done);
 
-    expect(renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: fleetMenuState.selectedRowId! }).join("\n")).toContain("parallel (2)");
-    expect(renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: group.id }).some((line) => line.startsWith("▸ "))).toBe(false);
+    expect(
+      renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: fleetMenuState.selectedRowId! }).join("\n"),
+    ).toContain("parallel (2)");
+    expect(
+      renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: group.id }).some((line) => line.startsWith("▸ ")),
+    ).toBe(false);
     expect(fleetMenuState.selectedRowId).toBe(first.id);
     component.handleInput("down");
     expect(fleetMenuState.selectedRowId).toBe(second.id);
@@ -252,6 +467,204 @@ describe("agent fleet menu", () => {
     expect(done).toHaveBeenCalledWith({ kind: "drill", rowId: second.id });
     expect(done).toHaveBeenCalledWith({ kind: "stop", rowId: second.id });
     expect(done).not.toHaveBeenCalledWith(expect.objectContaining({ rowId: group.id }));
+    component.dispose();
+  });
+
+  it("repaints from live mutations, normalizes a removed cursor, and unsubscribes idempotently", () => {
+    const first = row("live-focus-a", "first live row");
+    const second = row("live-focus-b", "second live row");
+    const requestRender = vi.fn();
+    const before = agentLiveStore.emitter.listenerCount("change");
+    const done = vi.fn();
+    const component = new FleetFocusComponent(() => [...agentLiveStore.rows.values()], {}, { requestRender }, done);
+
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before + 1);
+    component.render(120);
+    expect(fleetMenuState.selectedRowId).toBe(first.id);
+    requestRender.mockClear();
+
+    agentLiveStore.removeRows([first.id]);
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    const rendered = component.render(120).join("\n");
+    expect(fleetMenuState.selectedRowId).toBe(second.id);
+    expect(rendered).toContain("second live row");
+    expect(rendered).not.toContain("first live row");
+
+    component.dispose();
+    component.dispose();
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
+    requestRender.mockClear();
+    agentLiveStore.patch(second.id, { label: "mutated after close" });
+    expect(requestRender).not.toHaveBeenCalled();
+    const selectedAfterDispose = fleetMenuState.selectedRowId;
+    expect(component.render(120)).toEqual([]);
+    component.handleInput("down");
+    component.handleInput("enter");
+    component.handleInput("x");
+    component.handleInput("escape");
+    component.invalidate();
+    expect(fleetMenuState.selectedRowId).toBe(selectedAfterDispose);
+    expect(done).not.toHaveBeenCalled();
+    expect(requestRender).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale menu result after reload even when the new session reuses the row id", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    row("reused-row", "old session row");
+    const oldRequestRender = vi.fn();
+    let oldComponent: CustomUiComponent | undefined;
+    let resolveOld!: (value: unknown) => void;
+    let oldFactoryDone = false;
+    const oldResult = new Promise<unknown>((resolve) => {
+      resolveOld = resolve;
+    });
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>): Promise<T> {
+      oldComponent = await factory({ requestRender: oldRequestRender }, {}, {}, (value) => {
+        oldFactoryDone = true;
+        resolveOld(value);
+      });
+      oldComponent.render(120);
+      return oldResult as Promise<T>;
+    };
+    const oldMenu = h.commands.get("ps")!.handler("", h.ctx);
+    await vi.waitFor(() => expect(oldComponent).toBeDefined());
+
+    await emit(h, "session_start");
+    const reused = row("reused-row", "new session row");
+    row("new-session-second", "new session second row");
+    const newCancel = vi.fn();
+    agentLiveStore.registerCancel(reused.id, newCancel);
+    const newRequestRender = vi.fn();
+    let newComponent: CustomUiComponent | undefined;
+    let resolveNew!: (value: unknown) => void;
+    const newResult = new Promise<unknown>((resolve) => {
+      resolveNew = resolve;
+    });
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>): Promise<T> {
+      newComponent = await factory({ requestRender: newRequestRender }, {}, {}, (value) => resolveNew(value));
+      newComponent.render(120);
+      return newResult as Promise<T>;
+    };
+    const newMenu = h.commands.get("ps")!.handler("", h.ctx);
+    await vi.waitFor(() => expect(newComponent).toBeDefined());
+    expect(fleetMenuState.focused).toBe(true);
+    expect(fleetMenuState.selectedRowId).toBe(reused.id);
+    const notificationsBeforeStaleResult = [...h.notifications];
+    oldRequestRender.mockClear();
+    newRequestRender.mockClear();
+
+    expect(oldComponent?.render(120)).toEqual([]);
+    oldComponent?.handleInput?.("down");
+    oldComponent?.handleInput?.("enter");
+    oldComponent?.handleInput?.("x");
+    oldComponent?.handleInput?.("escape");
+    expect(oldFactoryDone).toBe(false);
+    expect(oldRequestRender).not.toHaveBeenCalled();
+    expect(newRequestRender).not.toHaveBeenCalled();
+    expect(fleetMenuState.selectedRowId).toBe(reused.id);
+
+    resolveOld({ kind: "stop", rowId: reused.id });
+    await oldMenu;
+    expect(newCancel).not.toHaveBeenCalled();
+    expect(h.notifications).toEqual(notificationsBeforeStaleResult);
+    expect(fleetMenuState.focused).toBe(true);
+    expect(fleetMenuState.selectedRowId).toBe(reused.id);
+
+    resolveNew({ kind: "stop", rowId: reused.id });
+    await newMenu;
+    expect(newCancel).toHaveBeenCalledTimes(1);
+    expect(h.notifications).toContain("Agent cancellation requested.");
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
+
+  it("disposes open focused selectors before session reset and shutdown without carrying their cursor", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    const oldFirst = row("old-session-a", "old first row");
+    row("old-session-b", "old second row");
+    const before = agentLiveStore.emitter.listenerCount("change");
+    const discardedRequestRender = vi.fn();
+    const oldRequestRender = vi.fn();
+    let oldComponent: CustomUiComponent | undefined;
+    let resolveOld!: (value: unknown) => void;
+    const oldResult = new Promise<unknown>((resolve) => {
+      resolveOld = resolve;
+    });
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>): Promise<T> {
+      await factory({ requestRender: discardedRequestRender }, {}, {}, (value) => resolveOld(value));
+      oldComponent = await factory({ requestRender: oldRequestRender }, {}, {}, (value) => resolveOld(value));
+      oldComponent.render(120);
+      return oldResult as Promise<T>;
+    };
+
+    const oldMenu = h.commands.get("ps")!.handler("", h.ctx);
+    await vi.waitFor(() => expect(oldComponent).toBeDefined());
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before + 1);
+    expect(fleetMenuState.focused).toBe(true);
+    expect(fleetMenuState.selectedRowId).toBe(oldFirst.id);
+    agentLiveStore.patch(oldFirst.id, { label: "old row mutated" });
+    expect(oldRequestRender).toHaveBeenCalledTimes(1);
+    expect(discardedRequestRender).not.toHaveBeenCalled();
+    oldRequestRender.mockClear();
+
+    await emit(h, "session_start");
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
+    expect(oldRequestRender).not.toHaveBeenCalled();
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+    resolveOld({ kind: "close" });
+    await oldMenu;
+
+    const newFirst = row("new-session-a", "new first row");
+    const newSecond = row("new-session-b", "new second row");
+    let newRendered: string[] = [];
+    let selectedInNewSession: string | undefined;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>): Promise<T> {
+      let result: T | undefined;
+      const component = await factory({ requestRender: vi.fn() }, {}, {}, (value) => {
+        result = value;
+      });
+      newRendered = component.render(120);
+      component.handleInput?.("down");
+      selectedInNewSession = fleetMenuState.selectedRowId;
+      component.handleInput?.("escape");
+      return result as T;
+    };
+    await h.commands.get("ps")!.handler("", h.ctx);
+    expect(newRendered.join("\n")).toContain(newFirst.displayName);
+    expect(newRendered.join("\n")).toContain(newSecond.displayName);
+    expect(selectedInNewSession).toBe(newSecond.id);
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
+
+    const shutdownRequestRender = vi.fn();
+    let resolveShutdown!: (value: unknown) => void;
+    const shutdownResult = new Promise<unknown>((resolve) => {
+      resolveShutdown = resolve;
+    });
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>): Promise<T> {
+      const component = await factory({ requestRender: shutdownRequestRender }, {}, {}, (value) => {
+        resolveShutdown(value);
+      });
+      component.render(120);
+      return shutdownResult as Promise<T>;
+    };
+    const shutdownMenu = h.commands.get("ps")!.handler("", h.ctx);
+    await vi.waitFor(() => expect(agentLiveStore.emitter.listenerCount("change")).toBe(before + 1));
+    shutdownRequestRender.mockClear();
+    await emit(h, "session_shutdown", { reason: "reload" });
+    expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+    agentLiveStore.patch(newFirst.id, { label: "mutated after shutdown" });
+    expect(shutdownRequestRender).not.toHaveBeenCalled();
+    resolveShutdown({ kind: "close" });
+    await shutdownMenu;
   });
 
   it("traverses group to journal anchor to transcript leaf for guidance, exact /ps tails, and last", async () => {

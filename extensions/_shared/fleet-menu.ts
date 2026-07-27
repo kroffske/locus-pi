@@ -1,20 +1,25 @@
 import { EventEmitter } from "node:events";
 import { keyHint, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
-import { AgentLivePanel, orderAgentLiveRows, withWorkflowGroupTokenTotals, type AgentLiveThemeLike } from "./agent-live-panel.js";
+import {
+  AgentLivePanel,
+  orderAgentLiveRows,
+  withWorkflowGroupTokenTotals,
+  type AgentLiveThemeLike,
+} from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
 import type { CustomUiComponent, CustomUiTui } from "./pi-api.js";
 
 export const FLEET_MENU_MAX_ROWS = 8;
 export const FLEET_FOCUS_FALLBACK_SHORTCUT = "shift+down";
 
-export type FleetMenuAction =
-  | { kind: "close" }
-  | { kind: "drill"; rowId: string }
-  | { kind: "stop"; rowId: string };
+export type FleetMenuAction = { kind: "close" } | { kind: "drill"; rowId: string } | { kind: "stop"; rowId: string };
 
 interface KeybindingsLike {
-  matches(data: string, keybinding: "tui.select.up" | "tui.select.down" | "tui.select.confirm" | "tui.select.cancel"): boolean;
+  matches(
+    data: string,
+    keybinding: "tui.select.up" | "tui.select.down" | "tui.select.confirm" | "tui.select.cancel",
+  ): boolean;
 }
 
 /**
@@ -129,9 +134,11 @@ function sharedFleetMenuState(): FleetMenuState {
 
 function isSharedFleetMenuStateSlot(value: unknown): value is SharedFleetMenuStateSlot {
   if (!isRecord(value) || value.version !== 2 || !isRecord(value.state)) return false;
-  return typeof value.state.setFocused === "function" &&
+  return (
+    typeof value.state.setFocused === "function" &&
     typeof value.state.visibleRows === "function" &&
-    typeof value.state.setEmptyEditorFocusAvailable === "function";
+    typeof value.state.setEmptyEditorFocusAvailable === "function"
+  );
 }
 
 export const fleetMenuState = sharedFleetMenuState();
@@ -141,7 +148,9 @@ export function selectFleetMenuRows(rows: AgentLiveRow[], limit = FLEET_MENU_MAX
   const ordered = orderAgentLiveRows(rows);
   if (ordered.length <= limit) return ordered;
   const active = ordered.filter((row) => row.status === "working" || row.status === "queued");
-  const terminal = ordered.filter((row) => row.status === "done" || row.status === "cancelled" || row.status === "error");
+  const terminal = ordered.filter(
+    (row) => row.status === "done" || row.status === "cancelled" || row.status === "error",
+  );
   const selected = [...active.slice(0, limit), ...terminal.slice(-Math.max(0, limit - active.length))];
   const ids = new Set(selected.map((row) => row.id));
   return ordered.filter((row) => ids.has(row.id)).slice(0, limit);
@@ -149,8 +158,13 @@ export function selectFleetMenuRows(rows: AgentLiveRow[], limit = FLEET_MENU_MAX
 
 /** Aggregate/anchor rows remain visible headings; only terminal child/agent rows are actionable. */
 export function selectFleetMenuLeafRows(rows: AgentLiveRow[]): AgentLiveRow[] {
-  const parentIds = new Set(rows.flatMap((row) => row.parentRowId === undefined ? [] : [row.parentRowId]));
+  const parentIds = new Set(rows.flatMap((row) => (row.parentRowId === undefined ? [] : [row.parentRowId])));
   return rows.filter((row) => row.groupKind === undefined && !parentIds.has(row.id));
+}
+
+/** Workflow-owned rows are inspectable here but stop only through /workflows stop. */
+export function isFleetRowStoppable(row: AgentLiveRow | undefined): row is AgentLiveRow {
+  return row?.status === "working" && row.groupKind === undefined && row.workflowRunId === undefined;
 }
 
 export interface RenderFleetMenuOptions {
@@ -176,7 +190,47 @@ export function renderFleetMenuRows(
   width: number,
   options: RenderFleetMenuOptions = {},
 ): string[] {
-  const rows = selectFleetMenuRows(withWorkflowGroupTokenTotals(sourceRows));
+  const rows = projectFleetMenuRows(sourceRows);
+  return renderProjectedFleetMenuRows(rows, width, options, Math.max(0, sourceRows.length - rows.length));
+}
+
+function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
+  return partitionEarlierWorkflowRunRows(selectFleetMenuRows(withWorkflowGroupTokenTotals(sourceRows)));
+}
+
+/**
+ * Rows of the last few completed workflow runs stay drillable, so a re-run agent
+ * appears once per run and the list reads as one confusing fleet. Keeping the
+ * newest run (and every standalone agent) first, with earlier runs behind them
+ * in their existing order, makes "what is running now" the top of the list
+ * without hiding anything.
+ *
+ * Run ids are timestamp-prefixed, so lexicographic order is chronological.
+ */
+function partitionEarlierWorkflowRunRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const newestRunId = newestWorkflowRunId(rows);
+  if (newestRunId === undefined) return rows;
+  const current = rows.filter((row) => row.workflowRunId === undefined || row.workflowRunId === newestRunId);
+  const earlier = rows.filter((row) => row.workflowRunId !== undefined && row.workflowRunId !== newestRunId);
+  return earlier.length === 0 ? rows : [...current, ...earlier];
+}
+
+export function newestWorkflowRunId(rows: readonly AgentLiveRow[]): string | undefined {
+  let newest: string | undefined;
+  for (const row of rows) {
+    const runId = row.workflowRunId;
+    if (runId === undefined) continue;
+    if (newest === undefined || runId > newest) newest = runId;
+  }
+  return newest;
+}
+
+function renderProjectedFleetMenuRows(
+  rows: AgentLiveRow[],
+  width: number,
+  options: RenderFleetMenuOptions,
+  hidden: number,
+): string[] {
   if (rows.length === 0) return [];
   const safeWidth = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 80;
   const panel = new AgentLivePanel({
@@ -185,19 +239,34 @@ export function renderFleetMenuRows(
   });
   const focused = options.focused === true;
   const selectedRowId = options.selectedRowId;
+  const newestRunId = newestWorkflowRunId(rows);
+  let earlierRunsAnnounced = false;
   const lines = rows.flatMap((row) => {
+    const heading: string[] = [];
+    // One label is enough to answer "am I looking at this run or the last one".
+    if (
+      !earlierRunsAnnounced &&
+      newestRunId !== undefined &&
+      row.workflowRunId !== undefined &&
+      row.workflowRunId !== newestRunId
+    ) {
+      earlierRunsAnnounced = true;
+      heading.push(truncateToWidth("  earlier workflow runs", safeWidth));
+    }
     const projected = panel.renderRows([row], Math.max(1, safeWidth - 2));
-    return projected.map((line, index) => {
-      const prefix = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId ? "▸ " : "  ";
-      return truncateToWidth(`${prefix}${line}`, safeWidth);
-    });
+    return [
+      ...heading,
+      ...projected.map((line, index) => {
+        const prefix = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId ? "▸ " : "  ";
+        return truncateToWidth(`${prefix}${line}`, safeWidth);
+      }),
+    ];
   });
-  const hidden = Math.max(0, sourceRows.length - rows.length);
   if (hidden > 0) lines.push(truncateToWidth(`  … and ${hidden} more`, safeWidth));
   const selected = rows.find((row) => row.groupKind === undefined && row.id === selectedRowId);
   const focusedHint = [
     safeKeyHint("tui.select.confirm", "drill", "enter drill"),
-    ...(selected?.status === "working" ? [safeRawKeyHint("x", "stop")] : []),
+    ...(isFleetRowStoppable(selected) ? [safeRawKeyHint("x", "stop")] : []),
     safeKeyHint("tui.select.cancel", "back", "esc back"),
   ].join(" · ");
   const legacyAvailability = options.focusShortcutsAvailable === true;
@@ -210,29 +279,48 @@ export function renderFleetMenuRows(
     : passiveControls.length === 0
       ? "fleet manage unavailable on this host"
       : passiveControls.join(" · ");
-  // Footer belongs to the belowEditor widget in BOTH modes. The custom focus
-  // component captures keys only; moving the footer into it would move controls
-  // into the editor's screen slot and violate the no-jump projection contract.
+  // Passive panels keep this footer below the editor. The focused selector
+  // renders the same row grammar and owns its own actionable footer.
   lines.push(truncateToWidth(`  ${hint}`, safeWidth));
   return lines;
 }
 
-/** Editor-replacement component: it captures keys but renders only controls. */
+/** Focused selector: the agents extension supplies global rows; this owns cursor projection and keys. */
 export class FleetFocusComponent implements CustomUiComponent {
+  #disposed = false;
+  readonly #requestRender: () => void;
+
   constructor(
     private readonly rows: () => AgentLiveRow[],
     private readonly keybindings: unknown,
     private readonly tui: CustomUiTui,
     private readonly done: (action: FleetMenuAction) => void,
-  ) {}
+    private readonly theme: AgentLiveThemeLike = {},
+  ) {
+    this.#requestRender = () => this.tui.requestRender();
+    agentLiveStore.emitter.on("change", this.#requestRender);
+  }
 
   render(width: number): string[] {
-    void width;
-    return [];
+    if (this.#disposed) return [];
+    const sourceRows = this.rows();
+    const rows = projectFleetMenuRows(sourceRows);
+    fleetMenuState.setVisibleRows(rows);
+    return renderProjectedFleetMenuRows(
+      rows,
+      width,
+      {
+        focused: true,
+        ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
+        theme: this.theme,
+      },
+      Math.max(0, sourceRows.length - rows.length),
+    );
   }
 
   handleInput(data: string): void {
-    const rows = selectFleetMenuRows(this.rows());
+    if (this.#disposed) return;
+    const rows = projectFleetMenuRows(this.rows());
     fleetMenuState.setVisibleRows(rows);
     if (matchesConfigured(this.keybindings, data, "tui.select.up", Key.up)) {
       fleetMenuState.move(-1, rows);
@@ -251,7 +339,7 @@ export class FleetFocusComponent implements CustomUiComponent {
     }
     if (data === "x") {
       const row = rows.find((candidate) => candidate.id === fleetMenuState.selectedRowId);
-      if (row !== undefined && row.groupKind === undefined && row.status === "working") this.done({ kind: "stop", rowId: row.id });
+      if (isFleetRowStoppable(row)) this.done({ kind: "stop", rowId: row.id });
       this.tui.requestRender();
       return;
     }
@@ -261,15 +349,24 @@ export class FleetFocusComponent implements CustomUiComponent {
   }
 
   invalidate(): void {
+    if (this.#disposed) return;
     // Projection is read lazily from the shared store; no render cache to clear.
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    agentLiveStore.emitter.off("change", this.#requestRender);
   }
 }
 
 function preferredInitialRow(rows: AgentLiveRow[]): AgentLiveRow | undefined {
   const selectableRows = selectFleetMenuLeafRows(rows);
-  return selectableRows.find((row) => row.status === "working")
-    ?? selectableRows.find((row) => row.status === "queued")
-    ?? selectableRows.at(-1);
+  return (
+    selectableRows.find((row) => row.status === "working") ??
+    selectableRows.find((row) => row.status === "queued") ??
+    selectableRows.at(-1)
+  );
 }
 
 function matchesConfigured(

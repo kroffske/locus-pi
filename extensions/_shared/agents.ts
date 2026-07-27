@@ -119,46 +119,45 @@ export function parseAgentMarkdown(content: string, source: AgentSource, filePat
   return { definition: agent, diagnostics };
 }
 
-export interface AgentCatalogSummaryOptions {
-  maxAgents?: number;
-  maxLines?: number;
-  width?: number;
+/** Entries the caller-facing catalog advertises before it truncates (T-111). */
+export const AGENT_CATALOG_HINT_MAX_ENTRIES = 12;
+/** Per-entry description cap; same number the workflow catalog already uses. */
+export const AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS = 96;
+
+export interface AgentCatalogHintOptions {
+  maxEntries?: number;
+  maxDescriptionChars?: number;
 }
 
-export function formatAgentCatalogSummary(
-  definitions: AgentDefinition[],
-  diagnostics: AgentDiagnostic[],
-  options: AgentCatalogSummaryOptions = {},
+/**
+ * One bounded `name — description` line per resolved agent, for injection where
+ * the calling model picks an agent name (T-111). The input is expected to be the
+ * already-resolved first-match-wins set from `discoverAgentDefinitions`, so a
+ * project definition shadowing a bundled name contributes exactly one line.
+ *
+ * Bounded twice on purpose — the package's default surface stays narrow: at most
+ * `maxEntries` lines, each description clamped to `maxDescriptionChars`. Overflow
+ * is stated rather than hidden, so a caller that needs the rest knows the list is
+ * partial; the unknown-agent error path remains the fail-closed check.
+ */
+export function formatAgentCatalogHint(
+  definitions: readonly AgentDefinition[],
+  options: AgentCatalogHintOptions = {},
 ): string {
-  const width = options.width ?? 80;
-  const maxLines = Math.max(3, options.maxLines ?? 10);
-  const requestedPreview = Math.max(0, options.maxAgents ?? 7);
-  const sourceCounts = countAgentSources(definitions);
-  const hasDiagnostics = diagnostics.length > 0;
-  const diagnosticsLineCount = hasDiagnostics ? 1 : 0;
-  let previewCount = Math.min(requestedPreview, definitions.length);
-  while (
-    2 + previewCount + (definitions.length > previewCount ? 1 : 0) + diagnosticsLineCount > maxLines &&
-    previewCount > 0
-  ) {
-    previewCount -= 1;
-  }
-  const previewDefinitions = selectAgentCatalogPreview(definitions, previewCount);
-  const lines = [
-    `Agent catalog: ${definitions.length} loaded (project=${sourceCounts.project}, user=${sourceCounts.user}, bundled=${sourceCounts.bundled})`,
-    definitions.length === 0
-      ? "Preview: no loaded definitions"
-      : `Preview: showing ${previewDefinitions.length} of ${definitions.length} loaded definition(s)`,
-    ...previewDefinitions.map((agent) => formatAgentCatalogPreviewLine(agent)),
-  ];
-  const hiddenAgents = definitions.length - previewCount;
-  if (hiddenAgents > 0) lines.push(`more: ${hiddenAgents} agent(s) not shown; run /agent inspect <name>`);
-  if (hasDiagnostics) {
-    const first = diagnostics[0];
-    const firstText = first === undefined ? "" : `; first: ${path.basename(first.filePath)}: ${first.message}`;
-    lines.push(`diagnostics: ${diagnostics.length} issue(s)${firstText}`);
-  }
-  return lines.map((line) => truncatePlain(line, width)).join("\n");
+  const maxEntries = Math.max(0, options.maxEntries ?? AGENT_CATALOG_HINT_MAX_ENTRIES);
+  const maxDescriptionChars = Math.max(1, options.maxDescriptionChars ?? AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS);
+  // Project first, then user, then bundled: a locally authored agent must never
+  // be the entry that falls off the end of the cap.
+  const ordered = [...definitions].sort(
+    (left, right) => agentSourceRank(left) - agentSourceRank(right) || left.name.localeCompare(right.name),
+  );
+  const shown = ordered.slice(0, maxEntries);
+  const lines = shown.map(
+    (agent) => `${agent.name} — ${truncatePlain(flattenText(agent.description), maxDescriptionChars)}`,
+  );
+  const hidden = ordered.length - shown.length;
+  if (hidden > 0) lines.push(`+${hidden} more — /agent list`);
+  return lines.join("\n");
 }
 
 export function formatAgentListItem(agent: AgentDefinition): string {
@@ -358,47 +357,13 @@ function asSpawns(value: unknown): AgentDefinition["spawns"] {
   return spawns.length ? spawns : undefined;
 }
 
-function countAgentSources(definitions: AgentDefinition[]): Record<AgentSource, number> {
-  const counts: Record<AgentSource, number> = { bundled: 0, project: 0, user: 0, workflow: 0 };
-  for (const definition of definitions) {
-    if (definition.source !== undefined) counts[definition.source] += 1;
-  }
-  return counts;
+function agentSourceRank(agent: AgentDefinition): number {
+  return agent.source === "project" ? 0 : agent.source === "user" ? 1 : 2;
 }
 
-function formatAgentCatalogPreviewLine(agent: AgentDefinition): string {
-  const meta = compactAgentMeta(agent);
-  const source = agent.source ?? "unknown";
-  return `- ${agent.name} [${source}] ${meta} — ${agent.description}`;
-}
-
-function selectAgentCatalogPreview(definitions: AgentDefinition[], previewCount: number): AgentDefinition[] {
-  if (definitions.length <= previewCount) return definitions;
-  if (previewCount <= 0) return [];
-  const headCount = Math.ceil(previewCount / 2);
-  const tailCount = previewCount - headCount;
-  return [...definitions.slice(0, headCount), ...definitions.slice(definitions.length - tailCount)];
-}
-
-function compactAgentMeta(agent: AgentDefinition): string {
-  const parts = [
-    `tools=${compactList(agent.allowedTools, 2)}`,
-    agent.model?.length ? `model=${compactList(agent.model, 1)}` : undefined,
-    agent.thinkingLevel ? `thinking=${agent.thinkingLevel}` : undefined,
-    agent.spawns
-      ? `spawns=requested:${agent.spawns === "*" ? "*" : compactList(agent.spawns, 1)} (blocked)`
-      : undefined,
-    agent.blocking ? "blocking" : undefined,
-    agent.output === undefined ? undefined : "output",
-  ].filter((part): part is string => part !== undefined);
-  return parts.join(" ");
-}
-
-function compactList(items: string[], limit: number): string {
-  if (items.includes("*")) return "*";
-  const preview = items.slice(0, limit).join(",");
-  const hidden = items.length - Math.min(items.length, limit);
-  return hidden > 0 ? `${preview},+${hidden}` : preview;
+/** Collapses a multi-line frontmatter description into one catalog line. */
+function flattenText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
 }
 
 function truncatePlain(value: string, width: number): string {

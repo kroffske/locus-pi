@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
 import { renderOperatorBlock } from "../../../extensions/_shared/operator-ui.js";
 import {
   buildWorkflowActionPrompt,
@@ -22,13 +23,7 @@ describe("workflow operator catalog", () => {
       description: readWorkflowMetaDescription(packagedWorkflowPath(name)),
     }));
 
-    expect(descriptions.map(({ name }) => name)).toEqual([
-      "live-smoke",
-      "llm-smoke",
-      "requirements-grill",
-      "review",
-      "review-fix",
-    ]);
+    expect(descriptions.map(({ name }) => name)).toEqual(["live-smoke", "requirements-grill", "review", "review-fix"]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
       expect(description.length, name).toBeLessThanOrEqual(96);
@@ -44,7 +39,7 @@ describe("workflow operator catalog", () => {
         .current.filter((row) => row.source === "package")
         .map((row) => row.name);
 
-      expect(packageNames).toEqual(["live-smoke", "llm-smoke", "requirements-grill", "review-fix", "review"]);
+      expect(packageNames).toEqual(["live-smoke", "requirements-grill", "review-fix", "review"]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -266,18 +261,12 @@ describe("workflow operator catalog", () => {
       const currentState = { kind: "ready" as const, row: current, path: current.target.path, source: "source" };
       const historyState = { kind: "ready" as const, row: history, path: history.originPath, source: "source" };
       expect(buildWorkflowActionPrompt({ action: "start", row: current, sourceState: currentState })).toBe(
-        [
-          `Request: Start the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
-          "",
-          "Additional instructions:",
-          "",
-        ].join("\n"),
+        "/workflows run alpha",
       );
       expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe(
         [
           `Request: Edit the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -286,7 +275,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: current, sourceState: currentState })).toBe(
         [
           `Request: Review the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -295,7 +284,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: history, sourceState: historyState })).toBe(
         [
           `Request: Review the immutable workflow snapshot for run ${JSON.stringify(history.runId)}, target "name:alpha", at ${JSON.stringify(history.originPath)}, SHA-256 ${JSON.stringify(history.snapshot.sha256)}.`,
-          "Skill: $pi-workflow-authoring",
+          "Agent: workflow-author",
           "",
           "Additional instructions:",
           "",
@@ -308,6 +297,35 @@ describe("workflow operator catalog", () => {
           sourceState: historyState,
         } as unknown as WorkflowBrowserIntent),
       ).toThrow("Historical workflow actions are review-only");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hands off to an authoring agent that ships with the installed package", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-handoff-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = path.join(root, "home");
+      const workflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(workflowDir, { recursive: true });
+      writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), 'export const meta = { description: "Alpha" };\n');
+      const model = buildWorkflowCatalogModel(root, root);
+      const current = model.current.find((row) => row.name === "alpha")!;
+
+      const prompt = buildWorkflowActionPrompt({
+        action: "edit",
+        row: current,
+        sourceState: { kind: "ready", row: current, path: current.target.path, source: "source" },
+      });
+      const handoff = prompt.split("\n").find((line) => line.startsWith("Agent: "));
+      expect(handoff).toBeDefined();
+
+      // The handoff must name a real bundled catalog agent, not a phantom surface.
+      const bundled = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
+      expect(bundled.definitions.map((definition) => definition.name)).toContain(handoff!.slice("Agent: ".length));
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -332,15 +350,14 @@ describe("workflow operator catalog", () => {
       const named = buildWorkflowInfoBlock(root, root, "alpha");
       const namedText = named.body?.join("\n") ?? "";
       expect(namedText).toContain(`resolved path: ${path.join(workflowDir, "alpha.workflow.mjs")}`);
-      expect(namedText).toContain("static top-level export const meta.description only");
-      expect(namedText).toContain("DSL: agent(), llm(), parallel(), pipeline(), phase(), log(), workflow()");
+      expect(namedText).toContain("static top-level export const meta.description and meta.phases only");
+      // A workflow that declares no phases produces no phase lines at all.
+      expect(namedText).not.toContain("phases:");
+      expect(namedText).toContain("DSL: agent(), parallel(), pipeline(), phase(), log(), workflow()");
       expect(namedText).toContain('omitted agent uses role "default"');
       expect(namedText).toContain("opts.model selects the child-session model");
       expect(namedText).toContain("otherwise the active Pi session model is passed to the child executor");
-      expect(namedText).toContain("llm() is a direct one-shot model call with no child session or tools");
-      expect(namedText).toContain(
-        "curated Package names live-smoke, llm-smoke, requirements-grill, review, review-fix",
-      );
+      expect(namedText).toContain("curated Package names live-smoke, requirements-grill, review, review-fix");
       expect(namedText).toContain("Package files are not registered by existence");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 

@@ -37,22 +37,10 @@ describe("operator status projection", () => {
   });
 
   it("drops lower-priority contributions whole before truncating the primary token", () => {
-    const blocking = status(
-      "security.block",
-      "blocking",
-      1,
-      "blocked: credentials required",
-    );
-    const activity = status(
-      "workflow.run",
-      "activity",
-      100,
-      "running: repository indexing",
-    );
+    const blocking = status("security.block", "blocking", 1, "blocked: credentials required");
+    const activity = status("workflow.run", "activity", 100, "running: repository indexing");
 
-    expect(renderOperatorStatus([activity, blocking], 146)).toBe(
-      "blocked: credentials required",
-    );
+    expect(renderOperatorStatus([activity, blocking], 146)).toBe("blocked: credentials required");
 
     const longAnsiPrimary = status(
       "security.long",
@@ -69,14 +57,7 @@ describe("operator status projection", () => {
   });
 
   it("never exceeds the Locus budget or a smaller terminal width", () => {
-    const long = status(
-      "goal.long",
-      "blocking",
-      1,
-      "x".repeat(100),
-      "x".repeat(100),
-      "x".repeat(100),
-    );
+    const long = status("goal.long", "blocking", 1, "x".repeat(100), "x".repeat(100), "x".repeat(100));
 
     expect(visibleWidth(renderOperatorStatus([long], 146) ?? "")).toBeLessThanOrEqual(48);
     expect(visibleWidth(renderOperatorStatus([long], 80) ?? "")).toBeLessThanOrEqual(28);
@@ -101,12 +82,7 @@ describe("operator status projection", () => {
   });
 
   it("strips ANSI styling from a short contribution before the width decision", () => {
-    const styled = status(
-      "security.block",
-      "blocking",
-      1,
-      "\u001b[31mERR\u001b[0m",
-    );
+    const styled = status("security.block", "blocking", 1, "\u001b[31mERR\u001b[0m");
     const rendered = renderOperatorStatus([styled], 146);
 
     expect(rendered).toBe("ERR");
@@ -150,6 +126,25 @@ describe("operator status host registry", () => {
     clearAllOperatorStatuses(second.ctx);
   });
 
+  it("styles only the toned contribution in TUI while keeping the plain projection ANSI-free", () => {
+    const h = createHarness(process.cwd(), {
+      theme: {
+        fg: (tone: string, text: string) => `<${tone}>${text}</${tone}>`,
+        bg: (_tone: string, text: string) => text,
+        bold: (text: string) => text,
+      },
+    });
+    const activity = status("workflow.activity", "activity", 1, "workflow running");
+    const plan = status("plan.mode", "route", 1, "MODE PLAN", "MODE plan", "PLAN", "warning");
+
+    setOperatorStatus(h.ctx, activity, 146);
+    setOperatorStatus(h.ctx, plan, 146);
+
+    expect(h.statuses.get(OPERATOR_STATUS_KEY)).toBe("workflow running · <warning>MODE PLAN</warning>");
+    expect(renderOperatorStatus([activity, plan], 146)).toBe("workflow running · MODE PLAN");
+    clearAllOperatorStatuses(h.ctx);
+  });
+
   it("shares one host scope across fresh Pi entrypoint module caches", async () => {
     const producerPath = path.resolve("tests/fixtures/extensions/operator-status-producer.ts");
     const consumerPath = path.resolve("tests/fixtures/extensions/operator-status-consumer.ts");
@@ -173,9 +168,7 @@ describe("operator status host registry", () => {
     await consume?.("", h.ctx);
 
     expect([...h.statuses.keys()]).toEqual([OPERATOR_STATUS_KEY]);
-    expect(h.statuses.get(OPERATOR_STATUS_KEY)).toBe(
-      "run: goal review · route: plan-build-review",
-    );
+    expect(h.statuses.get(OPERATOR_STATUS_KEY)).toBe("run: goal review · route: plan-build-review");
     clearAllOperatorStatuses(h.ctx);
   });
 
@@ -187,11 +180,9 @@ describe("operator status host registry", () => {
 
     try {
       globalRecord[symbol] = { version: 2, byUi: new WeakMap() };
-      expect(() => setOperatorStatus(
-        h.ctx,
-        status("goal.mode", "route", 1, "goal"),
-        146,
-      )).toThrow(/Incompatible global operator status registry/);
+      expect(() => setOperatorStatus(h.ctx, status("goal.mode", "route", 1, "goal"), 146)).toThrow(
+        /Incompatible global operator status registry/,
+      );
     } finally {
       if (previous === undefined) delete globalRecord[symbol];
       else globalRecord[symbol] = previous;
@@ -206,6 +197,7 @@ function status(
   wide: string,
   compact = wide,
   narrow = compact,
+  tone?: OperatorStatusContribution["tone"],
 ): OperatorStatusContribution {
-  return { id, lane, priority, wide, compact, narrow };
+  return { id, lane, priority, wide, compact, narrow, ...(tone === undefined ? {} : { tone }) };
 }

@@ -11,6 +11,8 @@ interface PackageJson {
   files: string[];
   bin: Record<string, string>;
   pi: { extensions: string[] };
+  peerDependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
 }
 
 interface PackResult {
@@ -20,16 +22,15 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "llm-smoke",
-  "requirements-grill",
-  "review",
-  "review-fix",
+const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
+const PI_PACKAGES = [
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
 ] as const;
 const CURATED_PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
-  "llm-smoke": "extensions/workflows/examples/llm-smoke.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
@@ -58,6 +59,15 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
+  it("requires Pi 0.82.0 in both the published peer contract and exact development baseline", () => {
+    for (const packageName of PI_PACKAGES) {
+      expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.82.0");
+      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe("0.82.0");
+      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.82.0")).toBe(true);
+      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.80.3")).toBe(false);
+    }
+  });
+
   it("matches the file-granular package.json allowlist exactly", () => {
     expect(new Set(pkg.files).size).toBe(pkg.files.length);
     for (const relativePath of pkg.files) {
@@ -156,6 +166,22 @@ describe("npm public package boundary", () => {
     }
   }, 30_000);
 });
+
+function supportsPiVersion(range: string, version: string): boolean {
+  const match = /^\^(\d+)\.(\d+)\.(\d+)$/u.exec(range);
+  if (match === null) return false;
+  const floor = match.slice(1).map((part) => Number(part));
+  const candidate = version.split(".").map((part) => Number(part));
+  if (floor.length !== 3 || candidate.length !== 3 || candidate.some((part) => !Number.isSafeInteger(part)))
+    return false;
+  if (candidate[0] !== floor[0]) return false;
+  if (floor[0] === 0 && candidate[1] !== floor[1]) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (candidate[index]! > floor[index]!) return true;
+    if (candidate[index]! < floor[index]!) return false;
+  }
+  return true;
+}
 
 function localImportClosure(entrypoints: readonly string[]): string[] {
   const seen = new Set<string>();

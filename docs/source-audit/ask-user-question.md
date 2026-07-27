@@ -27,12 +27,23 @@ Ported contract:
 - Legacy `askUserQuestion` preserves old `sensitivity` / redaction behavior for compatibility.
 - Local Locus runtime records answers and cancellations as durable `decision` entries through `_shared/human-control.ts`.
 - When `ctx.ui.custom` is unavailable, the extension falls back to `select` / `editor` and loses the bounded checklist/navigation UI.
+- Single-question TUI calls and workflow handoffs share one narrow select/text
+  primitive plus the session-generation interaction queue. The question uses
+  `overlay:false`: Pi replaces the editor container, keeps the question anchored
+  at the command line, restores the editor after completion, and does not cover
+  scrollback.
+- `Other` switches to text editing inside the same TUI component; it does not
+  open `ctx.ui.editor`. RPC projects the same single-question contract through
+  Pi's native `select`/`input` requests. Multi-select/default/timeout policy
+  remains private to `ask`.
 - Custom selection uses the shared typed `SELECT` frame. Built-in fallback titles carry the same `[SELECT] Ask` role, custom free text uses `[INPUT] Ask custom response`, and final tool rendering uses `[RESULT] Ask` or `[ERROR] Ask`.
 - No-UI modes return `unavailable` without recording a cancelled decision, because no human cancellation occurred.
 
 Known gaps:
 
-- The local adapter is a bounded plain-text Pi custom UI, not the exact OMP renderer/styling.
+- The local adapter is a bounded plain-text Pi inline custom UI, not the exact OMP renderer/styling.
+- Locus serializes only its own inline components. Pi exposes no global focus
+  owner for unrelated third-party extensions.
 - The fallback path is still the older `select` / `editor` surface for hosts without custom UI.
 - Decision journaling is Locus-owned runtime behavior, not copied OMP UI code.
 - Pi's official `input` / `editor` result is `string | undefined`; `_shared/operator-input.ts` normalizes that plus the known legacy object result. The broader local facade repair is deferred.

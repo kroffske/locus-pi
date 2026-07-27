@@ -80,7 +80,7 @@ projection.
 
 ## Capability-backed effort
 
-The Pi `0.80.3` model registry reports capability through `reasoning` and
+The Pi `0.82.0` model registry reports capability through `reasoning` and
 `thinkingLevelMap`. The selector uses the same semantics as Pi:
 
 - a non-reasoning model supports only `off`;
@@ -139,8 +139,21 @@ stays discoverable in the selector.
 
 ## How it works in code
 
-- `extensions/model/index.ts` — command registration, Pi mutation, persistence,
-  runtime evidence and status publication.
+- `extensions/model/index.ts` — entrypoint; registers `/model-roles` and
+  `/effort` with their UI lifecycle taxonomy and wires the `session_start`
+  status sync. Wiring only.
+- `extensions/model/role-command.ts` — the `/model-roles` command: opens the
+  inline selector or falls back to the typed read-only block.
+- `extensions/model/role-apply.ts` — applying a chosen route: validates,
+  mutates the Pi session, and persists it.
+- `extensions/model/role-evidence.ts` — the session custom entry and
+  `model_role_runtime_event` runtime-store record left behind by an assignment.
+- `extensions/model/effort-command.ts` — the `/effort` pipeline: parses,
+  validates against model capability, mutates and verifies the thinking level.
+- `extensions/model/operator-surface.ts` — the ctx-bound reads/writes behind
+  the `model.roles` status lane.
+- `extensions/model/operator-ui.ts` — pure `OperatorBlock` builders for
+  `/effort` outcomes and the read-only `/model-roles` fallback.
 - `extensions/model/model-role-selector.ts` — role capability catalog,
   responsive model rows, provider filters and continuous keyboard state.
 - `extensions/_shared/model-settings.ts` — parsing, precedence, persistence and

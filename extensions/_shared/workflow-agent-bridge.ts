@@ -8,7 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
-import { getProjectRoot } from "./pi-api.js";
+import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
 import { createAgentRunRequest, executeAgentRunBoundary } from "./agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
@@ -18,7 +18,7 @@ import {
   createAgentSdkSessionExecutor,
   AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
   AGENT_SDK_UNAVAILABLE_HINT,
-  type AgentLiveRow,
+  type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
 } from "./agent-sdk-host.js";
 import { discoverAgentDefinitions } from "./agents.js";
@@ -30,10 +30,12 @@ import type {
   WorkflowAgentRunner,
   WorkflowAgentRequest,
   WorkflowAgentResult,
-  WorkflowLlmUsage,
+  WorkflowUsage,
 } from "./workflow-runtime.js";
 import { defaultResolveModel } from "./workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode, WorkspaceMode } from "./types.js";
+import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
+import { captureRepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -54,7 +56,8 @@ export interface WorkflowAgentBridgeOptions {
   ctx: ExtensionContext; // captured at tool/command execute time
   signal: AbortSignal;
   workflowRunId?: string;
-  args?: unknown;
+  /** Optional human semantic input; host continuation metadata is never mixed into it. */
+  args?: string;
   /**
    * Injectable executor factory — defaults to createAgentSdkSessionExecutor.
    * Tests inject a factory that returns createAgentSdkSessionExecutor({ createSession: fake })
@@ -64,10 +67,13 @@ export interface WorkflowAgentBridgeOptions {
     model?: unknown;
     live?: AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
+    reportsDir?: string;
+    onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
   }) => AgentExecutor;
   resolveModel?: (selector: string) => unknown;
   defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
   workspaceManager?: WorkflowWorkspaceManager;
+  evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
 }
 
 export function resolvePermissionMode(input: {
@@ -106,6 +112,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
   const { pi, ctx, signal, resolveModel } = options;
   const defaultAgentName = options.defaultAgent ?? DEFAULT_WORKFLOW_AGENT;
   const resolveModelFn = resolveModel ?? defaultResolveModel;
+  // Freeze executable package commands once, before the first workflow child can write.
+  const repositoryCheckScripts = captureRepositoryCheckScripts(getWorkingDirectory(ctx));
   let worktreeCounter = 0;
   // Per-run slot → round counter (REQ-009). The runner is created once per run
   // (workflow-runner.ts), so this closure persists across agent() calls: a slot re-invoked
@@ -233,6 +241,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       approvalTier,
       ...(req.tools !== undefined ? { allowedTools: req.tools } : {}),
       modelRoleResolution,
+      repositoryCheckScripts,
       ...(worktreePath !== undefined ? { workingDirectory: worktreePath } : {}),
       ...(options.args !== undefined || worktreePath !== undefined
         ? {
@@ -259,12 +268,24 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // 5. Build the executor via the injectable factory
     const createExecutorFn =
       options.createExecutor ??
-      ((o: { model?: unknown; live?: AgentSdkSessionExecutorOptions["live"]; maxToolCalls?: number }) =>
+      ((o: {
+        model?: unknown;
+        live?: AgentSdkSessionExecutorOptions["live"];
+        maxToolCalls?: number;
+        reportsDir?: string;
+        onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
+      }) =>
         createAgentSdkSessionExecutor({
           ...(o.model !== undefined ? { model: o.model } : {}),
           ...(o.live !== undefined ? { live: o.live } : {}),
           ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
+          ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
+          ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
         }));
+    const evidenceDestinations =
+      options.evidenceDestinations !== undefined && req.callId !== undefined
+        ? options.evidenceDestinations(req.callId)
+        : undefined;
     const perCallModel = req.model !== undefined ? await Promise.resolve(resolveModelFn(req.model)) : undefined;
     const workflowParentRowId =
       options.workflowRunId !== undefined
@@ -294,6 +315,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(slotRowId !== undefined ? { rowId: slotRowId } : {}),
       ...(workflowParentRowId !== undefined ? { parentRowId: workflowParentRowId } : {}),
+      ...(options.workflowRunId !== undefined ? { workflowRunId: options.workflowRunId } : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
       ...(liveModel?.model !== undefined ? { model: liveModel.model } : {}),
@@ -301,14 +323,65 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       isolated: workspaceMode !== "project",
       noMcp: permissionMode === "restricted",
     };
+    let liveExecution: AgentLiveExecutionHandle | undefined;
     const executor = createExecutorFn({
       model: perCallModel ?? (ctx as { model?: unknown }).model,
       live,
+      onLiveExecution: (execution) => {
+        liveExecution = execution;
+      },
       ...(req.maxToolCalls !== undefined ? { maxToolCalls: req.maxToolCalls } : {}),
+      ...(evidenceDestinations !== undefined ? { reportsDir: evidenceDestinations.transcriptDir } : {}),
     });
 
-    // 6. Execute through the boundary (same as task tool)
-    const boundary = await executeAgentRunBoundary({ pi, ctx, request, executor, signal });
+    // 6. Execute through the boundary (same as task tool).
+    // A per-call fuse aborts the child itself rather than abandoning it: a timeout
+    // that only stops waiting would leave a child burning tokens with nothing left
+    // to read its answer. The run-level signal still aborts everything.
+    const callAbort = new AbortController();
+    const abortFromRun = (): void => callAbort.abort(signal.reason);
+    if (signal.aborted) abortFromRun();
+    else signal.addEventListener("abort", abortFromRun, { once: true });
+    let timedOut = false;
+    const timer =
+      req.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
+          }, req.timeoutMs);
+    let boundary;
+    try {
+      boundary = await executeAgentRunBoundary({
+        pi,
+        ctx,
+        request,
+        executor,
+        signal: callAbort.signal,
+        ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
+      });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", abortFromRun);
+    }
+    if (timedOut) {
+      // Name the fuse. Without this the operator reads only the host's generic
+      // abort reason and cannot tell a timeout from an operator cancellation.
+      const message = `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`;
+      return {
+        ok: false,
+        status: "failed",
+        summary: message,
+        diagnostics: [...boundary.diagnostics, message],
+        agent: agent.name,
+        permissionMode,
+        workspaceMode,
+        readOnly: agent.readOnly,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
+        ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
+      };
+    }
     if (req.workspaceHandle !== undefined) {
       options.workspaceManager?.resolve(req.workspaceHandle);
     }
@@ -328,7 +401,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // Round journal payload (REQ-009): the accumulated child-session tokens land on the live
     // row (applySessionStats); project them into the agent_end usage so the drill shows a
     // per-round token count. No usage on the row ⇒ omit (never a fabricated 0).
-    const usage = slotRowId !== undefined ? usageFromRow(agentLiveStore.rows.get(slotRowId)) : undefined;
+    const usage =
+      slotRowId !== undefined && liveExecution !== undefined ? usageFromExecution(liveExecution) : undefined;
     const result: WorkflowAgentResult = {
       ok: boundary.status === "completed",
       status: boundary.status as WorkflowAgentResult["status"],
@@ -362,8 +436,9 @@ function nextRound(counter: Map<string, number>, rowId: string): number {
   return round;
 }
 
-/** Project a live row's accumulated child tokens into a round `usage`, or undefined when absent. */
-function usageFromRow(row: AgentLiveRow | undefined): WorkflowLlmUsage | undefined {
+/** Project the exact execution's accumulated child tokens, or omit when its slot was replaced. */
+function usageFromExecution(execution: AgentLiveExecutionHandle): WorkflowUsage | undefined {
+  const row = agentLiveStore.rowForExecution(execution);
   if (row?.tokenCount === undefined) return undefined;
   const { input, output } = row.tokenCount;
   return { input, output, totalTokens: input + output, costTotal: 0 };

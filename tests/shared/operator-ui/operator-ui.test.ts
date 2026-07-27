@@ -7,7 +7,7 @@ import {
   type OperatorSurfaceType,
   type OperatorThemeLike,
 } from "../../../extensions/_shared/operator-ui.js";
-import { setOperatorWidget } from "../../../extensions/_shared/widget-render.js";
+import { HOST_STRING_ARRAY_WIDGET_LINES, setOperatorWidget } from "../../../extensions/_shared/widget-render.js";
 import type { CustomUiComponent } from "../../../extensions/_shared/pi-api.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -87,11 +87,16 @@ describe("typed operator block renderer", () => {
   });
 
   it("prioritizes type and primary in a one-line ANSI-free compact projection", () => {
-    const compact = renderOperatorBlock({
-      type: "WARN",
-      subject: "A very long subject that cannot share the one-line viewport",
-      primary: "PRIMARY длинное значение remains visible",
-    }, 48, ansiTheme("33"), { maxLines: 1 });
+    const compact = renderOperatorBlock(
+      {
+        type: "WARN",
+        subject: "A very long subject that cannot share the one-line viewport",
+        primary: "PRIMARY длинное значение remains visible",
+      },
+      48,
+      ansiTheme("33"),
+      { maxLines: 1 },
+    );
 
     expect(compact).toHaveLength(1);
     expect(compact[0]).toContain("[WARN] PRIMARY");
@@ -216,11 +221,31 @@ describe("typed operator widget adapter", () => {
 
     const payload = harness.widgetPayloads.get("operator-proof");
     expect(Array.isArray(payload)).toBe(true);
-    expect(payload).toEqual(renderOperatorBlockPlain(block, 48));
+    expect(payload).toEqual(renderOperatorBlockPlain(block, 48, { maxLines: HOST_STRING_ARRAY_WIDGET_LINES }));
     expect((payload as string[]).every((line) => !line.includes("\x1b"))).toBe(true);
     expect(harness.widgetOptions.get("operator-proof")).toEqual({ placement: "belowEditor" });
     expect(harness.sentMessages).toEqual([]);
     expect(harness.entries).toEqual([]);
+  });
+
+  it("keeps controls when long content would overflow the host's string-array clamp", () => {
+    // Absolute paths in a deeply nested checkout wrap into many rows; the host
+    // clamps by slicing the tail, so without our own budget the operator loses
+    // the line that says how to act and gets no sign anything was dropped.
+    const long: OperatorBlock = {
+      type: "VIEW",
+      subject: "Workflow catalog",
+      primary: "10 runnable workflow(s).",
+      body: Array.from({ length: 8 }, (_unused, index) => `[P] Project entry-${index} · ${"/deep".repeat(24)}/w.mjs`),
+      metadata: ["Sources: [P] Project · [U] User"],
+      controls: ["Run: /workflows run <name|path>", "Filter: /workflows list <query>"],
+    };
+
+    const lines = renderOperatorBlockPlain(long, 80, { maxLines: HOST_STRING_ARRAY_WIDGET_LINES });
+
+    expect(lines.length).toBeLessThanOrEqual(HOST_STRING_ARRAY_WIDGET_LINES);
+    expect(lines.join("\n")).toContain("Run: /workflows run <name|path>");
+    expect(lines.join("\n")).toMatch(/\(\+\d+ hidden\)/u);
   });
 
   it("uses the plain projection for a partial host that does not declare a mode", () => {

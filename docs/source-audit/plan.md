@@ -4,7 +4,7 @@ Decision: `plan` is default-loaded and owns behavioral `/plan`/`/mode` runtime p
 
 `plan` owns three distinct groups of surfaces:
 
-- behavioral `/plan` and `/mode` runtime, including an explicitly enabled optional `Shift+Tab` shortcut, mode cues, authored plans, and exit handoff,
+- behavioral `/plan` and explicit `/mode plan|default` runtime, mode cues, authored plans, and exit handoff,
 - `/review` and `/todos` for explicit prompt shelves,
 - local goal runtime:
   - `/goal <objective>` for lifecycle state,
@@ -32,7 +32,7 @@ License note: OMP checkout is MIT-licensed. The listed files were used as source
 ## Current behavior and review basis
 
 - `/plan` is behavioral prompt injection: `before_agent_start` appends planning framing while plan mode is active; it does not enforce read-only execution.
-- `session_start` restores the shared status route and input-editor border cues. `/mode` cycles `default ⇄ plan` immediately. The extension does not register `Shift+Tab` at default startup; after `/mode bind-shift-tab` frees Pi's reserved chord and reload/restart applies the binding, it registers the optional shortcut.
+- `session_start` clears any persisted active mode before installing the input-editor cue, so a crash, restart, or reload cannot silently put the next workflow turn into planning. Bare `/mode` is read-only; only `/plan`, `/plan open`, `/mode plan`, and `/mode default` change mode. The extension registers no `Shift+Tab` mode shortcut and no longer edits Pi keybindings.
 - Commands and throwaway scripts remain allowed in plan mode. There is no `tool_call` hook and no permission guard owned by this extension.
 - Authored plan artifacts persist to `~/.pi/locus-pi/<project-slug>/plans/<plan-slug>.md`. Leaving plan mode in headless mode or without a composed artifact degrades to plain exit; with an artifact and UI it offers execute-in-context, execute-after-reset, tweak-then-execute, or keep-planning handoff. An unavailable replacement-session host blocks plan authoring and writes no plan artifact.
 - `/goal <objective>` and `/goal set <objective>` persist state to `.locus/runtime/goal/state.json`.

@@ -21,7 +21,7 @@ describe("workflow identity operator projection", () => {
 
       const absoluteScriptPath = path.join(root, "strict.workflow.mjs");
       const result = await runTool(harness, "workflow", { scriptPath: absoluteScriptPath });
-      const text = result.content?.map((part) => part.type === "text" ? part.text : "").join("\n") ?? "";
+      const text = result.content?.map((part) => (part.type === "text" ? part.text : "")).join("\n") ?? "";
       expect(text).toContain("coverage=self-contained-static");
       expect(text).toContain("exec=snapshot");
       expect(text).toContain("builtins=0");
@@ -54,6 +54,7 @@ describe("workflow identity operator projection", () => {
       expect(details.scriptIdentity.scriptSha256).toMatch(/^[a-f0-9]{64}$/u);
 
       harness.ctx.hasUI = true;
+      delete harness.ctx.ui.custom;
       await harness.commands.get("workflows")!.handler(`status ${details.runId}`, harness.ctx);
       const payload = harness.widgetPayloads.get("workflows");
       expect(typeof payload).toBe("function");

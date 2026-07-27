@@ -50,7 +50,9 @@ function fakeSession(config: {
   exportRawHeader?: string;
   exportOutsideReports?: boolean;
   exportError?: string;
+  promptError?: string;
   neverEnds?: boolean;
+  abortNeverSettles?: boolean;
 }): SdkAgentSessionLike {
   const exportDir = mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-export-"));
   let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
@@ -63,6 +65,7 @@ function fakeSession(config: {
       };
     },
     async prompt() {
+      if (config.promptError !== undefined) throw new Error(config.promptError);
       for (const event of config.events ?? []) listener?.(event);
       if (config.neverEnds !== true) listener?.({ type: "agent_end", willRetry: false });
     },
@@ -84,7 +87,7 @@ function fakeSession(config: {
       return target;
     },
     dispose() {},
-    async abort() {},
+    abort: config.abortNeverSettles === true ? () => new Promise<void>(() => {}) : async () => {},
   };
 }
 
@@ -290,7 +293,7 @@ describe("agent SDK evidence surfacing", () => {
     assert.ok(result.diagnostics.some((line) => line.includes("JSONL export failed:") && line.includes(diagnostic)));
   });
 
-  it("preserves an exported child trace on parse failure, timeout and cancellation", async () => {
+  it("preserves child identity and attempts trace export on every post-session failure or cancellation path", async () => {
     const parseExecutor = createAgentSdkSessionExecutor({
       createSession: (async () => ({
         session: fakeSession({ toolCalls: 0, toolResults: 0, text: "" }),
@@ -328,6 +331,59 @@ describe("agent SDK evidence surfacing", () => {
     controller.abort();
     const cancelled = await pending;
     assert.equal(cancelled.status, "cancelled");
+    assert.equal(cancelled.childSession?.id, "sdk-child");
     assert.equal(cancelled.childTrace?.childSessionId, "sdk-child");
+
+    const preKickoffController = new AbortController();
+    const preKickoffExecutor = createAgentSdkSessionExecutor({
+      createSession: (async () => {
+        preKickoffController.abort();
+        return { session: fakeSession({ toolCalls: 0, toolResults: 0, text: "" }) };
+      }) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "pre-kickoff",
+    });
+    const preKickoff = await preKickoffExecutor.run(request(), preKickoffController.signal);
+    assert.equal(preKickoff.status, "cancelled");
+    assert.equal(preKickoff.childSession?.id, "sdk-child");
+    assert.equal(preKickoff.childTrace?.childSessionId, "sdk-child");
+
+    const exceptionExecutor = createAgentSdkSessionExecutor({
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: "", promptError: "transport failed" }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "exception",
+    });
+    const exception = await exceptionExecutor.run(request(), new AbortController().signal);
+    assert.equal(exception.status, "failed");
+    assert.match(exception.reason, /transport failed/u);
+    assert.equal(exception.childSession?.id, "sdk-child");
+    assert.equal(exception.childTrace?.childSessionId, "sdk-child");
+  });
+
+  it("persists timeout evidence when the SDK abort acknowledgement never settles", async () => {
+    const executor = createAgentSdkSessionExecutor({
+      createSession: (async () => ({
+        session: fakeSession({
+          toolCalls: 0,
+          toolResults: 0,
+          text: "",
+          neverEnds: true,
+          abortNeverSettles: true,
+        }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "hung-abort",
+      turnTimeoutMs: 1,
+      abortTimeoutMs: 5,
+    });
+
+    const startedAt = Date.now();
+    const result = await executor.run(request(), new AbortController().signal);
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.childTrace?.childSessionId, "sdk-child");
+    assert.ok(Date.now() - startedAt < 500, "bounded abort should not block evidence persistence");
   });
 });
