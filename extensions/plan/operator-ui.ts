@@ -1,9 +1,10 @@
 /**
- * extensions/plan/plan-operator-ui.ts — pure OperatorBlock builders for the
+ * extensions/plan/operator-ui.ts — pure OperatorBlock builders for the
  * `/plan` and `/mode` surfaces: the saved-plan list and help, the open receipt,
  * the exit receipt, the mode view/change receipts, and the two blocks every
  * host input dialog can end in (cancelled, unsupported result). Sibling of
- * `goal-operator-ui.ts` and `prompt-shelf-ui.ts`; no Pi handle, no widget write.
+ * `goal-operator-ui.ts` and `prompt-shelf-ui.ts`; the ctx-bound writes that
+ * render these blocks stay in `operator-surface.ts`.
  */
 
 import type { OperatorBlock } from "../_shared/operator-ui.js";

@@ -1,9 +1,13 @@
 /**
  * extensions/plan/command-parser.ts — pure text -> intent for this extension's
  * command grammars: the leading verb every command splits on, the /goal budget
- * argument, the /goal continue free-form body, and the `--task` prefix /goal-ai
- * accepts. No Pi handle, no disk access.
+ * argument, the /goal continue free-form body, the `--task` prefix /goal-ai
+ * accepts, and the whole prompt-shelf grammar `/review`, `/todos` and
+ * `/goal prompt` share. No Pi handle, no disk access; the blocks these intents
+ * render live in `prompt-shelf-ui.ts` and `operator-ui.ts`.
  */
+
+import type { PromptCommandTargetSelector } from "../_shared/prompt-command-store.js";
 
 export function splitFirstWord(input: string): [string, string] {
   const trimmed = input.trim();
@@ -50,4 +54,112 @@ export function parsePromptCommandInput(text: string): {
     return { target: { type: "task", taskId: taskSeparated[1]! }, prompt: taskSeparated[2]!.trim() };
 
   return { target: { type: "project" }, prompt: trimmed };
+}
+
+export type PromptShelfKind = "goal" | "review" | "todos";
+
+export interface PromptShelfTarget {
+  kind: PromptShelfKind;
+  target: "project-local" | `task:${string}`;
+  path: string;
+  displayPath: string;
+}
+
+export type PromptShelfAction =
+  { kind: "summary" } | { kind: "show" } | { kind: "write"; prompt: string } | { kind: "invalid"; message: string };
+
+export interface ParsedPromptShelfCommand {
+  target: PromptCommandTargetSelector;
+  targetLabel: string;
+  action: PromptShelfAction;
+}
+
+/**
+ * Parse one prompt-shelf command without reading or writing artifacts.
+ *
+ * `show` and `read` are exact body-view verbs. `set <prompt>` is the escape
+ * that keeps those words storable as literal prompts. Every other non-empty
+ * value retains the old free-form write contract.
+ */
+export function parsePromptShelfCommand(text: string): ParsedPromptShelfCommand {
+  const selected = parseTargetPrefix(text.trim());
+  if (selected.error !== undefined) {
+    return {
+      target: selected.target,
+      targetLabel: selected.targetLabel,
+      action: { kind: "invalid", message: selected.error },
+    };
+  }
+
+  const remaining = selected.remaining.trim();
+  if (remaining === "") {
+    return { target: selected.target, targetLabel: selected.targetLabel, action: { kind: "summary" } };
+  }
+  if (remaining === "show" || remaining === "read") {
+    return { target: selected.target, targetLabel: selected.targetLabel, action: { kind: "show" } };
+  }
+  if (remaining === "set") {
+    return {
+      target: selected.target,
+      targetLabel: selected.targetLabel,
+      action: { kind: "invalid", message: "set requires a non-empty prompt" },
+    };
+  }
+  if (remaining.startsWith("set ")) {
+    const prompt = remaining.slice(4).trim();
+    return {
+      target: selected.target,
+      targetLabel: selected.targetLabel,
+      action:
+        prompt === "" ? { kind: "invalid", message: "set requires a non-empty prompt" } : { kind: "write", prompt },
+    };
+  }
+  return {
+    target: selected.target,
+    targetLabel: selected.targetLabel,
+    action: { kind: "write", prompt: remaining },
+  };
+}
+
+function parseTargetPrefix(text: string): {
+  target: PromptCommandTargetSelector;
+  targetLabel: string;
+  remaining: string;
+  error?: string;
+} {
+  if (text.startsWith("--task=")) {
+    const [token = "", ...rest] = text.split(/\s+/u);
+    const taskId = token.slice("--task=".length).trim();
+    return taskId === ""
+      ? {
+          target: { type: "task", taskId: "" },
+          targetLabel: "task:(missing)",
+          remaining: rest.join(" "),
+          error: "--task requires a non-empty task id",
+        }
+      : {
+          target: { type: "task", taskId },
+          targetLabel: `task:${taskId}`,
+          remaining: rest.join(" "),
+        };
+  }
+
+  if (text === "--task" || text.startsWith("--task ")) {
+    const parts = text.split(/\s+/u);
+    const taskId = parts[1]?.trim() ?? "";
+    return taskId === ""
+      ? {
+          target: { type: "task", taskId: "" },
+          targetLabel: "task:(missing)",
+          remaining: parts.slice(2).join(" "),
+          error: "--task requires a non-empty task id",
+        }
+      : {
+          target: { type: "task", taskId },
+          targetLabel: `task:${taskId}`,
+          remaining: parts.slice(2).join(" "),
+        };
+  }
+
+  return { target: { type: "project" }, targetLabel: "project-local", remaining: text };
 }

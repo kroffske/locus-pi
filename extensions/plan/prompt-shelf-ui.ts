@@ -1,74 +1,14 @@
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import type { PromptCommandTargetSelector } from "../_shared/prompt-command-store.js";
-
-export type PromptShelfKind = "goal" | "review" | "todos";
-
-export interface PromptShelfTarget {
-  kind: PromptShelfKind;
-  target: "project-local" | `task:${string}`;
-  path: string;
-  displayPath: string;
-}
-
-export type PromptShelfAction =
-  | { kind: "summary" }
-  | { kind: "show" }
-  | { kind: "write"; prompt: string }
-  | { kind: "invalid"; message: string };
-
-export interface ParsedPromptShelfCommand {
-  target: PromptCommandTargetSelector;
-  targetLabel: string;
-  action: PromptShelfAction;
-}
-
 /**
- * Parse one prompt-shelf command without reading or writing artifacts.
- *
- * `show` and `read` are exact body-view verbs. `set <prompt>` is the escape
- * that keeps those words storable as literal prompts. Every other non-empty
- * value retains the old free-form write contract.
+ * extensions/plan/prompt-shelf-ui.ts — pure OperatorBlock builders for the
+ * prompt shelf `/review`, `/todos` and `/goal prompt` share: the summary, the
+ * explicit body view, the saved receipt, and the warning/error blocks, plus the
+ * label and path vocabulary they render. No Pi handle, no artifact access; the
+ * grammar these blocks answer to is parsed in `command-parser.ts` and the
+ * ctx-bound writes happen in `operator-surface.ts`.
  */
-export function parsePromptShelfCommand(text: string): ParsedPromptShelfCommand {
-  const selected = parseTargetPrefix(text.trim());
-  if (selected.error !== undefined) {
-    return {
-      target: selected.target,
-      targetLabel: selected.targetLabel,
-      action: { kind: "invalid", message: selected.error },
-    };
-  }
 
-  const remaining = selected.remaining.trim();
-  if (remaining === "") {
-    return { target: selected.target, targetLabel: selected.targetLabel, action: { kind: "summary" } };
-  }
-  if (remaining === "show" || remaining === "read") {
-    return { target: selected.target, targetLabel: selected.targetLabel, action: { kind: "show" } };
-  }
-  if (remaining === "set") {
-    return {
-      target: selected.target,
-      targetLabel: selected.targetLabel,
-      action: { kind: "invalid", message: "set requires a non-empty prompt" },
-    };
-  }
-  if (remaining.startsWith("set ")) {
-    const prompt = remaining.slice(4).trim();
-    return {
-      target: selected.target,
-      targetLabel: selected.targetLabel,
-      action: prompt === ""
-        ? { kind: "invalid", message: "set requires a non-empty prompt" }
-        : { kind: "write", prompt },
-    };
-  }
-  return {
-    target: selected.target,
-    targetLabel: selected.targetLabel,
-    action: { kind: "write", prompt: remaining },
-  };
-}
+import type { OperatorBlock } from "../_shared/operator-ui.js";
+import type { PromptShelfKind, PromptShelfTarget } from "./command-parser.js";
 
 export function promptShelfSummaryBlock(
   kind: PromptShelfKind,
@@ -122,13 +62,18 @@ export function promptShelfBodyBlock(
     type: "VIEW",
     subject: `${label} body`,
     primary: `Explicit body view: ${fullBody.length} line(s).`,
-    body: [...visibleBody, ...(hidden > 0 ? [`(+${hidden} hidden; full body: ${compactPromptShelfPath(target)})`] : [])],
-    metadata: options.compact === true
-      ? [`target: ${target.target}`, `path: ${compactPromptShelfPath(target)}`]
-      : promptShelfMetadata(target),
-    controls: options.compact === true
-      ? [`Return to summary: ${command}`]
-      : [`Return to summary: ${command}`, `Replace: ${command} set <prompt>`],
+    body: [
+      ...visibleBody,
+      ...(hidden > 0 ? [`(+${hidden} hidden; full body: ${compactPromptShelfPath(target)})`] : []),
+    ],
+    metadata:
+      options.compact === true
+        ? [`target: ${target.target}`, `path: ${compactPromptShelfPath(target)}`]
+        : promptShelfMetadata(target),
+    controls:
+      options.compact === true
+        ? [`Return to summary: ${command}`]
+        : [`Return to summary: ${command}`, `Replace: ${command} set <prompt>`],
   };
 }
 
@@ -190,10 +135,7 @@ function promptShelfCommand(kind: PromptShelfKind): string {
   return kind === "goal" ? "/goal prompt" : `/${kind}`;
 }
 
-function promptShelfScopedCommand(
-  kind: PromptShelfKind,
-  target: PromptShelfTarget["target"] | string,
-): string {
+function promptShelfScopedCommand(kind: PromptShelfKind, target: PromptShelfTarget["target"] | string): string {
   const command = promptShelfCommand(kind);
   if (!target.startsWith("task:")) return command;
   const taskId = target.slice("task:".length);
@@ -217,47 +159,4 @@ function promptStats(prompt: string): { lines: number; characters: number } {
     lines: normalized === "" ? 0 : normalized.split(/\r?\n/u).length,
     characters: normalized.length,
   };
-}
-
-function parseTargetPrefix(text: string): {
-  target: PromptCommandTargetSelector;
-  targetLabel: string;
-  remaining: string;
-  error?: string;
-} {
-  if (text.startsWith("--task=")) {
-    const [token = "", ...rest] = text.split(/\s+/u);
-    const taskId = token.slice("--task=".length).trim();
-    return taskId === ""
-      ? {
-        target: { type: "task", taskId: "" },
-        targetLabel: "task:(missing)",
-        remaining: rest.join(" "),
-        error: "--task requires a non-empty task id",
-      }
-      : {
-        target: { type: "task", taskId },
-        targetLabel: `task:${taskId}`,
-        remaining: rest.join(" "),
-      };
-  }
-
-  if (text === "--task" || text.startsWith("--task ")) {
-    const parts = text.split(/\s+/u);
-    const taskId = parts[1]?.trim() ?? "";
-    return taskId === ""
-      ? {
-        target: { type: "task", taskId: "" },
-        targetLabel: "task:(missing)",
-        remaining: parts.slice(2).join(" "),
-        error: "--task requires a non-empty task id",
-      }
-      : {
-        target: { type: "task", taskId },
-        targetLabel: `task:${taskId}`,
-        remaining: parts.slice(2).join(" "),
-      };
-  }
-
-  return { target: { type: "project" }, targetLabel: "project-local", remaining: text };
 }

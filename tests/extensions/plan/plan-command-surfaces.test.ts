@@ -189,6 +189,34 @@ describe("/goal help and budget parsing", () => {
   );
 });
 
+/**
+ * The `/goal` registration wraps its handler in the extension's only command
+ * error boundary. `tests/shared/operator-ui/goal-operator-ui.test.ts` covers the
+ * block builder in isolation, but nothing pinned the boundary itself, so it is
+ * characterized here before the dispatch zone moves out of the entrypoint.
+ */
+describe("/goal command error boundary", () => {
+  it("renders the goal error block when the command body throws and claims no state change", async () => {
+    const root = tempRoot();
+    // A file where the goal state directory belongs makes the state write throw.
+    mkdirSync(path.join(root, ".locus", "runtime"), { recursive: true });
+    writeFileSync(path.join(root, ".locus", "runtime", "goal"), "not a directory", "utf8");
+    const h = createHarness(root, { sessionId: "goal-error-boundary" });
+    plan(h.pi);
+
+    await expect(h.commands.get("goal")!.handler("Ship a goal that cannot be written", h.ctx)).resolves.toBeUndefined();
+
+    const widget = h.widgets.get("goal") ?? "";
+    expect(widget).toContain("[ERROR] Goal state");
+    expect(widget).toContain("Goal command failed; no successful state change is claimed.");
+    expect(widget).toContain("error: ");
+    expect(widget).toContain("Inspect current state: /goal");
+    expect(widget).toContain("Help: /goal help");
+    // The boundary passes no explicit placement, so the shared widget default applies.
+    expect(h.widgetOptions.get("goal")).toEqual({ placement: "aboveEditor" });
+  });
+});
+
 describe("goal tool transitions", () => {
   it("declares read approval only for op=get", () => {
     const root = tempRoot();

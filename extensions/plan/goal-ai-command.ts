@@ -17,7 +17,7 @@ import {
 } from "../_shared/prompt-command-store.js";
 import { parsePromptCommandInput } from "./command-parser.js";
 import { setGoalOperatorBlock } from "./operator-surface.js";
-import { cancelledInputBlock, dialogFailureBlock } from "./plan-operator-ui.js";
+import { cancelledInputBlock, dialogFailureBlock } from "./operator-ui.js";
 
 export async function handleGoalAiCommand(args: CommandArgs, ctx: ExtensionContext): Promise<void> {
   let parsed = parsePromptCommandInput(getCommandText(args));

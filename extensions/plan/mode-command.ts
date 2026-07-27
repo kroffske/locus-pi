@@ -17,7 +17,7 @@ import {
 } from "../_shared/mode-state.js";
 import { splitFirstWord } from "./command-parser.js";
 import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "./operator-surface.js";
-import { modeChangeBlock, modeViewBlock, planExitBlock } from "./plan-operator-ui.js";
+import { modeChangeBlock, modeViewBlock, planExitBlock } from "./operator-ui.js";
 import { runPlanExitDecision } from "./plan-exit-handoff.js";
 
 /** Set the active mode, persist it, and update the status badge + input border. */

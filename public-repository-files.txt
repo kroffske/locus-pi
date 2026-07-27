@@ -158,6 +158,7 @@ extensions/model/role-apply.ts
 extensions/model/role-command.ts
 extensions/model/role-evidence.ts
 extensions/plan/command-parser.ts
+extensions/plan/command-router.ts
 extensions/plan/goal-ai-command.ts
 extensions/plan/goal-command.ts
 extensions/plan/goal-operator-ui.ts
@@ -166,9 +167,9 @@ extensions/plan/index.ts
 extensions/plan/manifest.json
 extensions/plan/mode-command.ts
 extensions/plan/operator-surface.ts
+extensions/plan/operator-ui.ts
 extensions/plan/plan-command.ts
 extensions/plan/plan-exit-handoff.ts
-extensions/plan/plan-operator-ui.ts
 extensions/plan/prompt-shelf-command.ts
 extensions/plan/prompt-shelf-ui.ts
 extensions/plan/system-prompt.ts

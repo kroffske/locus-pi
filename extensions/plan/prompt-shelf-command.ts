@@ -1,8 +1,8 @@
 /**
  * extensions/plan/prompt-shelf-command.ts — the ctx-bound half of the prompt
  * shelf: resolve one command's target, read or write the artifact, and render
- * exactly one block per outcome. Parsing and block construction stay pure in
- * `prompt-shelf-ui.ts`.
+ * exactly one block per outcome. Parsing stays pure in `command-parser.ts` and
+ * block construction in `prompt-shelf-ui.ts`.
  */
 
 import type { CommandArgs, ExtensionContext } from "../_shared/pi-api.js";
@@ -13,16 +13,14 @@ import {
   resolvePromptCommandTarget,
   writePromptCommand,
 } from "../_shared/prompt-command-store.js";
+import { parsePromptShelfCommand, type PromptShelfKind, type PromptShelfTarget } from "./command-parser.js";
 import { setPromptShelfOperatorBlock } from "./operator-surface.js";
 import {
-  parsePromptShelfCommand,
   promptShelfBodyBlock,
   promptShelfChangeBlock,
   promptShelfErrorBlock,
   promptShelfSummaryBlock,
   promptShelfWarningBlock,
-  type PromptShelfKind,
-  type PromptShelfTarget,
 } from "./prompt-shelf-ui.js";
 
 export async function handlePromptCommand(

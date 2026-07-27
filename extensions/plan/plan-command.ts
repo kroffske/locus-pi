@@ -31,7 +31,7 @@ import {
   planHelpBlock,
   planListBlock,
   planOpenBlock,
-} from "./plan-operator-ui.js";
+} from "./operator-ui.js";
 import { runPlanExitDecision } from "./plan-exit-handoff.js";
 
 export async function handlePlanCommand(

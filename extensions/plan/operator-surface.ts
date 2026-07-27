@@ -17,7 +17,7 @@ import {
   modeStatusLabel,
   PLAN_MODE_COLOR,
 } from "../_shared/mode-state.js";
-import type { PromptShelfKind } from "./prompt-shelf-ui.js";
+import type { PromptShelfKind } from "./command-parser.js";
 
 export function setPlanOperatorBlock(
   ctx: ExtensionContext,
