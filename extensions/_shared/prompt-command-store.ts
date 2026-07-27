@@ -19,17 +19,21 @@ export class PromptCommandTargetError extends Error {
   }
 }
 
-export function resolvePromptCommandTarget(projectRoot: string, kind: PromptCommandKind, selector: PromptCommandTargetSelector = { type: "project" }): PromptCommandTarget {
+export function resolvePromptCommandTarget(
+  projectRoot: string,
+  kind: PromptCommandKind,
+  selector: PromptCommandTargetSelector = { type: "project" },
+): PromptCommandTarget {
   if (selector.type === "project") {
     const filePath = path.join(projectRoot, ".locus", "runtime", "prompts", `${kind}.md`);
-    return { kind, target: "project-local", path: filePath, displayPath: displayPath(projectRoot, filePath) };
+    return { kind, target: "project-local", path: filePath, displayPath: projectDisplayPath(projectRoot, filePath) };
   }
 
   const taskRoot = tasksRoot(projectRoot);
   const task = findTask(projectRoot, selector.taskId);
   const taskDir = safeTaskDir(taskRoot, task.path, selector.taskId);
   const filePath = path.join(taskDir, "artifacts", `${kind}-prompt.md`);
-  return { kind, target: `task:${task.id}`, path: filePath, displayPath: displayPath(projectRoot, filePath) };
+  return { kind, target: `task:${task.id}`, path: filePath, displayPath: projectDisplayPath(projectRoot, filePath) };
 }
 
 export function readPromptCommand(target: PromptCommandTarget): string | undefined {
@@ -52,11 +56,15 @@ function findTask(projectRoot: string, taskId: string): ProjectTaskIndexEntry {
   try {
     tasks = flattenProjectTasks(readProjectTaskIndex(tasksRoot(projectRoot)));
   } catch {
-    throw new PromptCommandTargetError(`Task target ${taskId} cannot be resolved because .tasks/index.json is missing or unsupported.`);
+    throw new PromptCommandTargetError(
+      `Task target ${taskId} cannot be resolved because .tasks/index.json is missing or unsupported.`,
+    );
   }
   const matches = tasks.filter((task) => task.id === taskId);
-  if (matches.length === 0) throw new PromptCommandTargetError(`Task target ${taskId} was not found in .tasks/index.json.`);
-  if (matches.length > 1) throw new PromptCommandTargetError(`Task target ${taskId} is ambiguous in .tasks/index.json.`);
+  if (matches.length === 0)
+    throw new PromptCommandTargetError(`Task target ${taskId} was not found in .tasks/index.json.`);
+  if (matches.length > 1)
+    throw new PromptCommandTargetError(`Task target ${taskId} is ambiguous in .tasks/index.json.`);
   return matches[0]!;
 }
 
@@ -64,10 +72,18 @@ function safeTaskDir(taskRoot: string, taskPath: string, taskId: string): string
   const taskDir = path.resolve(taskRoot, taskPath);
   const root = path.resolve(taskRoot);
   if (taskDir !== root && taskDir.startsWith(`${root}${path.sep}`)) return taskDir;
-  throw new PromptCommandTargetError(`Task target ${taskId} resolves outside .tasks and cannot receive prompt artifacts.`);
+  throw new PromptCommandTargetError(
+    `Task target ${taskId} resolves outside .tasks and cannot receive prompt artifacts.`,
+  );
 }
 
-function displayPath(projectRoot: string, filePath: string): string {
+/**
+ * Canonical project-relative path formatter for operator-facing receipts: a
+ * path inside the project root renders as `./<relative>`, anything outside it
+ * stays absolute. Exported because `extensions/plan/goal-operator-ui.ts` needs
+ * exactly this format for goal continuation receipts.
+ */
+export function projectDisplayPath(projectRoot: string, filePath: string): string {
   const relative = path.relative(projectRoot, filePath).split(path.sep).join("/");
   return relative.startsWith("..") ? filePath : `./${relative}`;
 }
