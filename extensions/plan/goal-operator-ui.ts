@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { GoalOperationResult, GoalState } from "../_shared/goal-mode.js";
 import type { OperatorBlock, OperatorBadge } from "../_shared/operator-ui.js";
+import { projectDisplayPath } from "../_shared/prompt-command-store.js";
 
 interface GoalBlockOptions {
   compact?: boolean;
@@ -13,9 +14,10 @@ export function goalStateBlock(state: GoalState, options: GoalBlockOptions = {})
     primary: state.goal.objective,
     badges: [goalStatusBadge(state)],
     metadata: goalStateMetadata(state, options.compact === true),
-    controls: options.compact === true
-      ? ["Transitions: /goal help"]
-      : ["Transitions: /goal help", "Prompt shelf: /goal prompt"],
+    controls:
+      options.compact === true
+        ? ["Transitions: /goal help"]
+        : ["Transitions: /goal help", "Prompt shelf: /goal prompt"],
   };
 }
 
@@ -52,24 +54,26 @@ export function goalOperationBlock(
       subject: "Goal continuation",
       primary: result.message,
       badges: [{ text: "ARTIFACT", tone: "success" }],
-      metadata: options.compact === true
-        ? [
-          `path: ${displayProjectPath(projectRoot, result.continuation.path)}`,
-          `maxSteps: ${result.continuation.maxSteps}`,
-          `autoDispatch: ${String(result.continuation.autoDispatch)}`,
-        ]
-        : [
-          `goalId: ${result.continuation.goalId}`,
-          `path: ${displayProjectPath(projectRoot, result.continuation.path)}`,
-          `maxSteps: ${result.continuation.maxSteps}`,
-          `autoDispatch: ${String(result.continuation.autoDispatch)}`,
-          `status: ${result.continuation.status}`,
-          `stopReason: ${result.continuation.stopReason}`,
-        ],
+      metadata:
+        options.compact === true
+          ? [
+              `path: ${projectDisplayPath(projectRoot, result.continuation.path)}`,
+              `maxSteps: ${result.continuation.maxSteps}`,
+              `autoDispatch: ${String(result.continuation.autoDispatch)}`,
+            ]
+          : [
+              `goalId: ${result.continuation.goalId}`,
+              `path: ${projectDisplayPath(projectRoot, result.continuation.path)}`,
+              `maxSteps: ${result.continuation.maxSteps}`,
+              `autoDispatch: ${String(result.continuation.autoDispatch)}`,
+              `status: ${result.continuation.status}`,
+              `stopReason: ${result.continuation.stopReason}`,
+            ],
       hint: ["Prompt body is stored in the artifact and omitted from this receipt."],
-      controls: options.compact === true
-        ? ["Inspect state: /goal"]
-        : ["Inspect state: /goal", "Inspect continuation: /loop status"],
+      controls:
+        options.compact === true
+          ? ["Inspect state: /goal"]
+          : ["Inspect state: /goal", "Inspect continuation: /loop status"],
     };
   }
 
@@ -105,8 +109,8 @@ export function goalOperationBlock(
       ...(result.completionAudit === undefined
         ? []
         : [
-          `completionAudit: ${displayProjectPath(projectRoot, path.join(projectRoot, ".locus", "runtime", "goal", "completion-audit.json"))}`,
-        ]),
+            `completionAudit: ${projectDisplayPath(projectRoot, path.join(projectRoot, ".locus", "runtime", "goal", "completion-audit.json"))}`,
+          ]),
     ],
     controls: result.changed ? ["Inspect: /goal"] : ["Inspect: /goal", "Help: /goal help"],
   };
@@ -147,17 +151,13 @@ function goalStateMetadata(state: GoalState, compact = false): string[] {
 
 function goalStatusBadge(state: GoalState): OperatorBadge {
   const status = state.goal.status;
-  const tone = status === "active"
-    ? "success"
-    : status === "budget-limited"
-      ? "warning"
-      : status === "dropped"
-        ? "error"
-        : "muted";
+  const tone =
+    status === "active"
+      ? "success"
+      : status === "budget-limited"
+        ? "warning"
+        : status === "dropped"
+          ? "error"
+          : "muted";
   return { text: status.toUpperCase(), tone };
-}
-
-function displayProjectPath(projectRoot: string, filePath: string): string {
-  const relative = path.relative(projectRoot, filePath).split(path.sep).join("/");
-  return relative.startsWith("..") ? filePath : `./${relative}`;
 }

@@ -9,7 +9,11 @@ import {
   modeStatePath,
   writeModeState,
 } from "../../../extensions/_shared/mode-state.js";
-import plan, { __resetModeUiStateForTests, __setEditorBaseLoaderForTests } from "../../../extensions/plan/index.js";
+import plan from "../../../extensions/plan/index.js";
+import {
+  __resetModeUiStateForTests,
+  __setEditorBaseLoaderForTests,
+} from "../../../extensions/plan/operator-surface.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 const fakeTheme = {
