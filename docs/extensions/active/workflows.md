@@ -1003,7 +1003,7 @@ export const meta = {
     { title: "resolve-scope", detail: "Turn exact intent and clarification into one review scope." },
     { title: "inventory-changes", detail: "Prove complete coverage of the changed surface." },
     { title: "plan-units", detail: "Group the inventory into atomic units of meaning." },
-    { title: "ask-questions", detail: "Write falsifiable questions without answering them." },
+    { title: "ask-questions", detail: "Loop: write falsifiable questions, then assess whether a round is missing." },
     { title: "verify-review", detail: "Reopen evidence, answer questions, and author review.md." },
   ],
 };

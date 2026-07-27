@@ -23,6 +23,19 @@ The units are a work map and the questions are hypotheses. Neither is evidence.
 Reopen the changed code, direct callers, tests, configuration, and existing
 documentation yourself, then answer every question from what you actually read.
 
+The question document below is the interrogator's final round and holds the
+complete set, earlier rounds included. Answer every question in it exactly once.
+
+## Every question id carries its question
+
+Your review is read on its own, by someone who does not have the question
+document open. An id such as `U2-Q3` means nothing to that reader, so **every
+place an id appears, the question appears with it**: in a finding's `Question:`
+line, in the resolution heading's own `Question:` line, and in the coverage
+ledger. Quote the question as the interrogator wrote it — do not paraphrase it,
+do not shorten it to the part your answer happens to address, and never write a
+bare id and move on.
+
 The original inventory is the coverage source of truth. Reconcile every stable
 `C<n>` id against the units and question ledger before deciding the verdict. A
 dropped, duplicated, or renumbered id is an explicit coverage gap: inspect it
@@ -69,25 +82,28 @@ Stability: live working tree or refs; no snapshot was taken.
 ### F1 — [P1] Short title
 Path: `path/to/file`
 Anchor: `symbol or heading`
-Question: `U1-Q1`
+Question: `U1-Q1` — Can every direct caller of `run` handle the new null result?
 Evidence: What you read and what it shows.
 Impact: What breaks and for whom.
 Recommended change: One discrete change.
 
 ## Question resolutions
 ### U1-Q1
+Question: Can every direct caller of `run` handle the new null result?
 Answer: Confirmed | Rejected | Unresolved.
 Evidence: What you read.
 
 ## Coverage and limits
-List every C<n> id exactly once with its assigned unit, questions or
-no-question reason, and inspection outcome. Each ledger line must use the exact
-grammar `C<n>: U<n>; <questions or reason>; <inspection outcome>`. Do not
-mention a coverage id elsewhere in that section. Then state what remains
+List every C<n> id exactly once with its assigned unit, its questions with their
+text or the no-question reason, and the inspection outcome. Each ledger line must
+use the exact grammar
+`C<n>: U<n>; <questions with their text, or the no-question reason>; <inspection outcome>`.
+Do not mention a coverage id elsewhere in that section. Then state what remains
 unproven.
 ```
 
-Repeat every question id exactly once under `## Question resolutions`. With no
+Repeat every question id exactly once under `## Question resolutions`, each with
+its own `Question:` line quoting the interrogator's wording. With no
 confirmed problems, write `None.` under `## Findings`. Severity is `P1`
 (blocking), `P2` (should fix), or `P3` (minor). The verdict is blocked only
 when the scope could not be inspected.

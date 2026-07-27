@@ -83,7 +83,13 @@ describe("curated workflow diagram contract", () => {
     expect(text).toMatch(/Agent: R1.*scope resolver.*catalog default.*resolve review scope/su);
     expect(text).toMatch(/Agent: R2a.*change inventory.*catalog default.*inventory changes/su);
     expect(text).toMatch(/Agent: R2b.*review-unit planner.*catalog default.*plan review units/su);
-    expect(text).toMatch(/Agent: R3.*interrogator.*catalog default.*ask review questions/su);
+    expect(text).toMatch(/Agent: R3.*interrogator.*catalog default.*ask review questions round/su);
+    // Interrogation is a loop, so the render must show the agent that decides
+    // whether it runs again, the schema it decides with, and both exits.
+    expect(text).toMatch(/Agent: R3c.*question-coverage assessor.*QUESTION_COVERAGE_SCHEMA \{decision, gaps\[\]\}/su);
+    expect(text).toMatch(/Workflow: assess the round, then loop or leave.*last round is never assessed/su);
+    expect(text).toContain("more_questions_needed: exact gaps[] start round n+1");
+    expect(text).toContain("complete or round cap:");
     expect(text).toMatch(/Agent: R4.*verifier and review author.*catalog default.*verify and write review/su);
     expect(text).toMatch(/Workflow: return Agent R4 exact text.*review\.md contains the same exact bytes/su);
 
@@ -100,11 +106,11 @@ describe("curated workflow diagram contract", () => {
     }
 
     // review keeps exactly the two role charters above the inline-prompt bar and
-    // writes its four short stage tasks inline.
+    // writes its five short stage tasks inline.
     expect(text).toContain("resources/*.prompt.md");
     expect(text).toContain("interrogator.prompt.md");
     expect(text).toContain("verifier.prompt.md");
-    expect(text).toContain("Inline COMMON contract + 4 stage tasks");
+    expect(text).toContain("Inline COMMON contract + 5 stage tasks");
     expect(text).not.toContain("scope-resolver.prompt.md");
     expect(text).not.toContain("change-inventory.prompt.md");
     expect(text).not.toContain("unit-planner.prompt.md");
