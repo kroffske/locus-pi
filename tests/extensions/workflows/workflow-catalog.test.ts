@@ -14,16 +14,25 @@ import {
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
-import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
 
 describe("workflow operator catalog", () => {
   it("keeps every curated Package workflow description concise and purpose-first", () => {
-    const descriptions = CURATED_PACKAGE_WORKFLOW_NAMES.map((name) => ({
+    const descriptions = packagedWorkflowNames().map((name) => ({
       name,
       description: readWorkflowMetaDescription(packagedWorkflowPath(name)),
     }));
 
-    expect(descriptions.map(({ name }) => name)).toEqual(["live-smoke", "requirements-grill", "review", "review-fix"]);
+    // Scan order is entry filename, so "plan-implement.workflow.mjs" precedes
+    // "plan.workflow.mjs" exactly as review-fix precedes review.
+    expect(descriptions.map(({ name }) => name)).toEqual([
+      "live-smoke",
+      "plan-implement",
+      "plan",
+      "requirements-grill",
+      "review-fix",
+      "review",
+    ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
       expect(description.length, name).toBeLessThanOrEqual(96);
@@ -39,7 +48,16 @@ describe("workflow operator catalog", () => {
         .current.filter((row) => row.source === "package")
         .map((row) => row.name);
 
-      expect(packageNames).toEqual(["live-smoke", "requirements-grill", "review-fix", "review"]);
+      // Package rows are ordered by entry filename, so "plan-implement.workflow.mjs"
+      // sorts before "plan.workflow.mjs" exactly as review-fix sorts before review.
+      expect(packageNames).toEqual([
+        "live-smoke",
+        "plan-implement",
+        "plan",
+        "requirements-grill",
+        "review-fix",
+        "review",
+      ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -357,8 +375,10 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain('omitted agent uses role "default"');
       expect(namedText).toContain("opts.model selects the child-session model");
       expect(namedText).toContain("otherwise the active Pi session model is passed to the child executor");
-      expect(namedText).toContain("curated Package names live-smoke, requirements-grill, review, review-fix");
-      expect(namedText).toContain("Package files are not registered by existence");
+      expect(namedText).toContain(
+        "the packaged examples directory, currently live-smoke, plan-implement, plan, requirements-grill, review-fix, review",
+      );
+      expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 
       expect(buildWorkflowInfoBlock(root, root, "unknown")).toMatchObject({

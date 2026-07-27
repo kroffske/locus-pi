@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
 
 interface ExcalidrawElement {
   type?: string;
@@ -27,7 +27,7 @@ function diagramText(name: string): string {
 
 describe("curated workflow diagram contract", () => {
   it("keeps an editable generator, Excalidraw source, and PNG preview beside every curated workflow", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const workflowPath = packagedWorkflowPath(name);
       const directory = path.dirname(workflowPath);
       const generatorPath = path.join(directory, `${name}-pipeline.diagram.mjs`);
@@ -58,7 +58,7 @@ describe("curated workflow diagram contract", () => {
   });
 
   it("makes ownership, source, persistence, and the visual legend readable without opening workflow code", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const text = diagramText(name);
       // T-108 deleted `llm()` from the DSL, so neither the source generator nor
       // the checked-in reader-facing render may advertise that primitive.
@@ -213,6 +213,65 @@ describe("curated workflow diagram contract", () => {
     expect(reviewFix).toContain("FINDING_SELECTOR_SCHEMA");
     expect(reviewFix).not.toContain("fix-plan.md");
     expect(reviewFix).not.toMatch(/disposition/iu);
+  });
+
+  it("shows plan's paused operator round, its drafting loop, and both loop exits", () => {
+    const plan = diagramText("plan");
+
+    expect(plan).toMatch(/Agent: P0.*clarification decider.*CLARIFIER_SCHEMA \{decision, questions\[\]\}/su);
+    expect(plan).toMatch(/Workflow: check clarifier output\.decision.*needs_operator publishes id \+ full prompt/su);
+    expect(plan).toContain("input:string + optional continuation");
+    expect(plan).toContain("continued task + questions + answers");
+    expect(plan).toMatch(/Agent: P1.*task-context mapper.*Describes what exists; proposes nothing/su);
+    expect(plan).toMatch(/Agent: P2.*plan drafter.*Writes the COMPLETE plan every round/su);
+    expect(plan).toMatch(/Agent: P3.*plan critic.*PLAN_VERDICT_SCHEMA \{verdict, defects\[\]\}/su);
+    // Both exits are named, because "accepted" and "gave up at the cap" are
+    // different outcomes for whoever reads the run.
+    expect(plan).toMatch(/Workflow: check critic output\.verdict.*round cap without accept fails the run/su);
+    expect(plan).toContain("revise: exact defects[] start round n+1");
+    expect(plan).toContain("accept: exact planText");
+    expect(plan).toContain("Round cap instead returns ok:false + unresolvedRows");
+
+    for (const phase of ["phase clarify-task", "phase map-context", "phase draft-plan", "phase critique-plan"]) {
+      expect(plan, phase).toContain(phase);
+    }
+    // Planning reads and never writes, so no mutated-source surface may appear.
+    expect(plan).not.toMatch(/mutated|launch checkout/iu);
+    expect(plan).toContain("no local agent files");
+    expect(plan).toContain("one plan-critique.json per drafting round");
+    expect(plan).toMatch(/plan\.md.*Primary reader-facing runtime artifact/su);
+    expect(plan).toMatch(/Operator: inspect plan\.md.*complete reference to plan-implement/su);
+  });
+
+  it("shows plan-implement's verified plan input, one writer per step, and the partial outcome", () => {
+    const implement = diagramText("plan-implement");
+
+    expect(implement).toMatch(/Workflow: consume the accepted plan.*terminal\.result must equal these exact bytes/su);
+    expect(implement).toContain("Rejects a same-named draft from an earlier round");
+    expect(implement).toMatch(/Workflow: parse complete ### S<n> blocks.*Malformed plan fails before the selector/su);
+    expect(implement).toContain("Full {runId, artifactId, name, sha256}");
+    expect(implement).toMatch(/Workflow: launch the step selector.*tools: \[\] — no repository access at all/su);
+    expect(implement).toMatch(/Agent: I0.*step selector.*Chooses 1–30 ids with per-step operator notes/su);
+    expect(implement).toMatch(/Workflow: validate ids and restore plan order.*plan's order wins over the selector/su);
+    expect(implement).toMatch(/Agent: I2.*one writer for current S<n>.*workspaceMode: project/su);
+    expect(implement).toContain("A failure skips the steps after it, not the run");
+    expect(implement).toMatch(/Agent: I3.*check-evidence collector.*disposable worktrees/su);
+    expect(implement).toMatch(/Agent: I4.*fresh implementation reporter.*every planned step, selected or not/su);
+    expect(implement).toContain("A failed writer returns ok:false + partial:true");
+
+    for (const phase of [
+      "phase select-steps",
+      "phase resolve-implementation-scope",
+      "phase apply-steps",
+      "phase collect-check-evidence",
+      "phase report-implementation",
+    ]) {
+      expect(implement, phase).toContain(phase);
+    }
+    // The one mutated surface is drawn as its own artifact, like review-fix.
+    expect(implement).toMatch(/the launch checkout.*The one surface this workflow mutates/su);
+    expect(implement).toContain("source-state-*.json fingerprints per window");
+    expect(implement).toMatch(/Never committed, pushed, or stashed/u);
   });
 
   it("does not disguise workflow-owned repository search as agents", () => {

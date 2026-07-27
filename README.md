@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and four curated
+It provides ten default extensions, a bundled agent catalog, and six curated
 Package workflows through a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private

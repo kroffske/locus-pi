@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.js";
 
 interface PackageJson {
   files: string[];
@@ -38,8 +38,17 @@ describe("public registration contract", () => {
     expect(pkg.files.some((file) => file.startsWith("extensions/beta/"))).toBe(false);
   });
 
-  it("declares exactly the curated Package workflows", () => {
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES]).toEqual(["live-smoke", "requirements-grill", "review", "review-fix"]);
+  it("resolves exactly the workflows the packaged examples directory holds", () => {
+    // No allowlist backs this: the names come from scanning the shipped
+    // directory, in entry-filename order.
+    expect(packagedWorkflowNames()).toEqual([
+      "live-smoke",
+      "plan-implement",
+      "plan",
+      "requirements-grill",
+      "review-fix",
+      "review",
+    ]);
   });
 
   it("keeps manifest documentation and test evidence resolvable", () => {

@@ -6,7 +6,7 @@ import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared
 import { readWorkflowRunSummary } from "../../../extensions/_shared/workflow-journal.js";
 import { readWorkflowReplayLog } from "../../../extensions/_shared/workflow-replay.js";
 import {
-  CURATED_PACKAGE_WORKFLOW_NAMES,
+  packagedWorkflowNames,
   packagedWorkflowPath,
   runWorkflowScript,
 } from "../../../extensions/_shared/workflow-runner.js";
@@ -651,7 +651,7 @@ describe("static replay-safety assessment", () => {
   });
 
   it("keeps every curated packaged workflow replay-safe", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const assessment = assessWorkflowReplaySafety(readFileSync(packagedWorkflowPath(name), "utf8"));
       expect(assessment, name).toEqual({ replaySafety: "static-deterministic", nondeterministicCalls: [] });
     }

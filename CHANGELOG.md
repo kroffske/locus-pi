@@ -6,8 +6,8 @@ This file records user-visible changes to the public package.
 
 ### Added
 
-- **Two tracked workflow examples for planning and implementation:
-  `extensions/workflows/examples/plan/` and `examples/plan-implement/`.** The
+- **Two Package workflows for planning and implementation: `plan` and
+  `plan-implement`.** The
   authoring catalog described the loop shapes and the plan → build seam without
   shipping a runnable instance of either, so the only worked examples of a paused
   operator round and a cross-run artifact handoff were the review pair, which is
@@ -25,9 +25,21 @@ This file records user-visible changes to the public package.
   A failing writer skips the steps after it but still checks and reports, because
   the operator's working tree has already changed; that outcome returns
   `partial: true`, which the runner projects as a non-success.
-  Both are tracked examples only: they are absent from the curated registry, from
-  `package.json#files`, and from `public-repository.json`, so neither resolves by
-  name. `plan-implement` writes to the launch checkout — review a copy first.
+  Both live in `extensions/workflows/examples/`, which is the Package registry, so
+  `/workflow-run plan` and `/workflow-run plan-implement` resolve without any
+  project file, and both ship in `package.json#files` and
+  `public-repository.json` with the diagram triple every workflow there carries.
+  That directory is also the only route to a workflow that is both tracked in the
+  repository and resolvable by name: every other directory the resolver scans —
+  `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/` — is git-ignored,
+  so a copy placed there works on one machine and exists in no clone. The
+  portfolio decision and its criteria are recorded in
+  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  Every `plan` stage is read-only; `plan-implement` writes to the launch checkout,
+  which is why it is a separate workflow the operator starts deliberately.
+  One name collision is deliberate and documented: the `plan` **workflow** is not
+  the `/plan` command of the `plan` extension and not the `plan` catalog agent.
+  They occupy different namespaces and nothing resolves across them.
 
 - **`/workflows result [runId|last]`** — the whole text a run finished with, in
   one command. Every finished-run surface is bounded deliberately: the chat digest
@@ -237,6 +249,31 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The Package workflow registry is now the shipped `extensions/workflows/examples/`
+  directory itself, not a hand-maintained allowlist.** Every
+  `<name>.workflow.mjs` in it resolves through `/workflow-run <name>`, discovered
+  on each call exactly like a project directory, and
+  `CURATED_PACKAGE_WORKFLOW_NAMES` is gone. Registering a workflow used to mean
+  editing a constant, a relative-path map, the package allowlist, the
+  public-repository inventory, six test files, five manuals, the support
+  boundary, and an ADR — for a change whose entire content was "this file is
+  runnable by name". The bookkeeping that merely duplicated the filesystem is
+  what was removed; everything that describes a public surface stayed.
+  Two bounds keep the scan honest: it descends one directory level, so a workflow
+  keeps its prompt resources and diagram triple beside its entry while support
+  material nested deeper is never mistaken for an entry point, and it accepts
+  only regular files, so a symlink never resolves out of the package. What an
+  install ships is still `package.json#files`, and the package-boundary test now
+  asserts that the packed workflow names equal the names the directory resolves —
+  a workflow added to the directory and not packed fails the build instead of
+  working in a checkout and vanishing after `npm i`. The same test keeps a
+  reviewed snapshot of the expected names, so adding or removing a file there
+  still fails until a human looks at it.
+  `excalidraw-pipeline` moved to `extensions/workflows/references/` as part of
+  this: it was documented as "reference only, do not run it by name", and under a
+  scanned registry that is a location, not a note. The trade-off this accepts is
+  recorded in
+  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
 - **`review` asks its questions in assessed rounds, and every question id now
   carries its question.** Interrogation was one call: whatever the first reader
   thought of was the whole question set, and nothing ever checked whether a risk

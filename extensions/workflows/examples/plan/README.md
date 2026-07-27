@@ -6,21 +6,33 @@ workflows on purpose: planning is read-only and cheap to repeat, implementation
 writes to the operator's checkout, and the operator decides — by launching the
 second one — whether a plan is worth executing.
 
-Both are **tracked examples, not curated Package workflows.** Neither name
-resolves through `/workflow-run <name>`: they are absent from
-`CURATED_PACKAGE_WORKFLOW_NAMES`, from `package.json#files`, and from
-`public-repository.json`. Run a reviewed copy from `.pi/workflows/`, or by path.
-Workflow JavaScript is trusted local code with full Node.js host access; it is
-not sandboxed.
+Both are **Package workflows**: they live in `extensions/workflows/examples/`,
+which the resolver scans, so `/workflow-run plan "<task>"` and
+`/workflow-run plan-implement "<request>"` resolve without any project file, and
+both ship in `package.json#files` and `public-repository.json`. Workflow
+JavaScript is trusted local code with full Node.js host access; it is not
+sandboxed. `plan` is read-only end to end, `plan-implement` writes to the launch
+checkout, and that difference is why they are two workflows rather than one.
 
 ```text
 plan/
 ├── README.md
-└── plan.workflow.mjs
+├── plan.workflow.mjs
+├── plan-pipeline.diagram.mjs
+├── plan-pipeline.excalidraw
+└── plan-pipeline.png
 
 plan-implement/
-└── plan-implement.workflow.mjs
+├── README.md
+├── plan-implement.workflow.mjs
+├── plan-implement-pipeline.diagram.mjs
+├── plan-implement-pipeline.excalidraw
+└── plan-implement-pipeline.png
 ```
+
+The diagram triple is part of the Package-workflow contract: the `.diagram.mjs` generator
+is the source of truth, and the `.excalidraw` and `.png` beside it are
+regenerated from it rather than hand-edited.
 
 There are no prompt resources and no workflow-local agent definitions. Every
 stage task is written inline under one `COMMON` contract, because no prompt here

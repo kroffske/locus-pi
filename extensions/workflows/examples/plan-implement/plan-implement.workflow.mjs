@@ -20,10 +20,11 @@
 //     changed and needs describing. That outcome returns `partial: true`, which
 //     the runner projects as a non-success.
 //
-// This is a tracked example, not a curated Package workflow: it is not in
-// CURATED_PACKAGE_WORKFLOW_NAMES, not in `package.json#files`, and not in
-// `public-repository.json`. It writes to the launch checkout — read it before
-// you run it.
+// This is a Package workflow: it lives in the shipped examples directory the
+// resolver scans, so `/workflow-run plan-implement "<request>"` resolves it
+// without any project file. Unlike its `plan` sibling it writes to
+// the launch checkout, so the operator starts it deliberately, with one accepted
+// plan already in hand.
 
 /** Prepended to every stage: one contract, one place to change it. */
 const COMMON = `You are one stage of the \`plan-implement\` workflow, which carries out one
@@ -137,8 +138,7 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan-implement",
-  description:
-    "Implements one accepted plan step by step, with one writer per step, then checks and reports the result.",
+  description: "Implements an accepted plan with one writer per step, then checks and reports it.",
   phases: [
     { title: "select-steps", detail: "Consume the accepted plan and validate which steps this run implements." },
     { title: "resolve-implementation-scope", detail: "Reopen the checkout and resolve what the selected steps touch." },

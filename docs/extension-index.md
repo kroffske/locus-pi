@@ -16,11 +16,12 @@ this clean repository or the first public release.
 | `plan`                | active | high     | planning/mode/goal/review/todo prompt surfaces and the `goal` tool                   | `./extensions/plan/index.ts`                |
 | `security-gate`       | active | critical | `/security-audit` and an audit-only `tool_call` observer                             | `./extensions/security-gate/index.ts`       |
 | `todo-context`        | active | high     | `todo_write`, bounded settled continuation, and operator `/todo`                     | `./extensions/todo-context/index.ts`        |
-| `workflows`           | active | critical | `/workflows`, `workflow`, and the four curated Package workflows                     | `./extensions/workflows/index.ts`           |
+| `workflows`           | active | critical | `/workflows`, `workflow`, and the six shipped Package workflows                      | `./extensions/workflows/index.ts`           |
 
-## Curated Package workflows
+## Package workflows
 
-Only these names are registered by `CURATED_PACKAGE_WORKFLOW_NAMES`:
+`extensions/workflows/examples/` is the registry: every `<name>.workflow.mjs`
+there resolves by name. It currently holds:
 
 | Workflow             | Purpose                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -28,13 +29,19 @@ Only these names are registered by `CURATED_PACKAGE_WORKFLOW_NAMES`:
 | `requirements-grill` | Produces a bounded requirements challenge and handoff.                                                |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.    |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports. |
+| `plan`               | Clarifies one task, then drafts and critiques a plan until a read-only critic accepts it.             |
+| `plan-implement`     | Implements one accepted plan with a writer per step, then checks and reports independently.           |
 
-Project and user workflow directories remain scan-based. A file found there is
-local trusted code, not a Package workflow promise.
+Every workflow directory is scan-based, including this one. What separates a
+Package workflow from a project file is not the mechanism but the promise: the
+shipped directory is a public surface covered by `package.json#files`, the
+package-boundary test, and the support boundary. A file found under
+`.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/` is local trusted
+code with no such promise.
 
 ## Excluded material
 
 The clean release repository and npm package exclude beta/backlog modules,
-uncurated workflow examples, reports, galleries, transcripts, benchmarks,
+workflow references under `extensions/workflows/references/`, reports, galleries, transcripts, benchmarks,
 evaluations, archives, and local runtime/planning state. Historical decisions
 remain in the private internal repository; their absence here is intentional.

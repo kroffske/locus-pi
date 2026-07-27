@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
-import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.js";
 
 interface PackageJson {
   files: string[];
@@ -22,15 +22,30 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
+/**
+ * The Package registry is the examples directory itself, so this list is not the
+ * registry — it is the reviewed snapshot of what that directory currently holds.
+ * A file added or removed there fails here on purpose: adding a Package workflow
+ * is cheap, but it is still a public-surface change somebody has to look at.
+ */
+const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
+  "live-smoke",
+  "plan",
+  "plan-implement",
+  "requirements-grill",
+  "review",
+  "review-fix",
+] as const;
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
 ] as const;
-const CURATED_PACKAGE_WORKFLOW_PATHS = {
+const PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
+  plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
+  "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
@@ -84,7 +99,7 @@ describe("npm public package boundary", () => {
   it("ships every prompt resource a curated workflow renders", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
 
-    for (const [name, workflowPath] of Object.entries(CURATED_PACKAGE_WORKFLOW_PATHS)) {
+    for (const [name, workflowPath] of Object.entries(PACKAGE_WORKFLOW_PATHS)) {
       const source = readFileSync(path.join(root, workflowPath), "utf8");
       const directory = path.posix.dirname(workflowPath);
       for (const match of source.matchAll(/promptFile\(\s*"(\.\/[^"]+\.prompt\.md)"/gu)) {
@@ -111,15 +126,20 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships exactly the five curated Package workflows and no forbidden paths", () => {
+  it("packs exactly the workflows the examples directory resolves, and no forbidden paths", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))
       .map((file) => path.basename(file, ".workflow.mjs"))
       .sort();
 
-    expect([...CURATED_PACKAGE_WORKFLOW_NAMES].sort()).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
-    expect(packedWorkflowNames).toEqual([...EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES].sort());
+    // The load-bearing assertion of the scanned registry: what a checkout
+    // resolves by name and what an install ships must be the same set. A
+    // workflow present here and missing from `package.json#files` would work in
+    // this repository and be gone after `npm i`, which is the one way "the
+    // folder is the registry" could lie to an operator.
+    expect(packedWorkflowNames).toEqual(packagedWorkflowNames().sort());
+    expect(packagedWorkflowNames().sort()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
     expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
   });
@@ -143,9 +163,9 @@ describe("npm public package boundary", () => {
       const entrypointUrls = pkg.pi.extensions.map(
         (entrypoint) => pathToFileURL(path.join(packageRoot, entrypoint)).href,
       );
-      const workflowUrls = EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES.map((name) => ({
+      const workflowUrls = EXPECTED_PACKAGE_WORKFLOW_NAMES.map((name) => ({
         name,
-        url: pathToFileURL(path.join(packageRoot, CURATED_PACKAGE_WORKFLOW_PATHS[name])).href,
+        url: pathToFileURL(path.join(packageRoot, PACKAGE_WORKFLOW_PATHS[name])).href,
       }));
       const loadScript = `for (const url of ${JSON.stringify(entrypointUrls)}) {
         const loaded = await import(url);
