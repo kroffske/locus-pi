@@ -125,15 +125,64 @@ pi remove npm:@kroffske/locus-pi
 This path is for current maintainers and reviewers. It is not an npm
 installation procedure.
 
+### 1. Remove any earlier installation first
+
+Two registrations of the same package both load, so clear the old one before
+adding the checkout. The two ways this package can already be present are
+different things and are removed differently:
+
 ```bash
-npm ci --ignore-scripts
-pi install -l .
-npm run check
-./bin/locus-pi doctor
+pi list                              # what Pi actually loads, per scope
+pi remove npm:@kroffske/locus-pi     # user scope  (~/.pi/agent/settings.json)
+pi remove npm:@kroffske/locus-pi -l  # project scope (.pi/settings.json)
 ```
 
-`pi install -l .` records the local checkout in the project's
-`.pi/settings.json`. Review the checkout before approving project-local code.
+```bash
+which locus-pi                       # a globally installed CLI, if any
+npm rm -g @kroffske/locus-pi
+```
+
+`pi remove` is the one that matters: it unregisters the extensions. A global npm
+install only puts the `locus-pi` CLI on `PATH` and never registers anything with
+Pi, so removing it changes no session behavior — remove it anyway if you want a
+single source of truth for `locus-pi doctor`.
+
+`pi list` is the authority. It prints user-scope and project-scope packages
+separately, and the same checkout registered in both scopes appears twice; drop
+it from one of them.
+
+A source is matched by its resolved path, not by the string in the settings
+file, so `pi remove -l .` from the checkout root removes an entry stored as
+`".."`, and passing the absolute path works too.
+
+Runtime state Pi wrote under `~/.pi/<project>/` is not an installation. Leave it
+alone unless you mean to discard that history.
+
+### 2. Install the checkout
+
+```bash
+npm ci --ignore-scripts
+pi install -l .        # project scope: records the checkout in .pi/settings.json
+npm run check
+./bin/locus-pi doctor  # expects: 10 extensions, all ok
+```
+
+Use `pi install .` without `-l` to register the checkout for every project of
+this user instead. Prefer `-l` while reviewing: a project-scoped entry cannot
+follow you into an unrelated repository. Review the checkout before approving
+project-local code — Pi loads its extension source, and this package does not
+sandbox it.
+
+A session started after that loads the extensions straight from the working
+tree, so an edit is live on the next start with no reinstall step.
+
+### 3. Go back to the published package
+
+```bash
+pi remove . -l                      # or: pi remove .   for the user scope
+pi install npm:@kroffske/locus-pi
+pi list
+```
 
 The release-quality package checks are:
 
