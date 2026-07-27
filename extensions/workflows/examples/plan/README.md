@@ -6,8 +6,8 @@ workflows on purpose: planning is read-only and cheap to repeat, implementation
 writes to the operator's checkout, and the operator decides — by launching the
 second one — whether a plan is worth executing.
 
-Both are **curated Package workflows**: their names are in
-`CURATED_PACKAGE_WORKFLOW_NAMES`, so `/workflow-run plan "<task>"` and
+Both are **Package workflows**: they live in `extensions/workflows/examples/`,
+which the resolver scans, so `/workflow-run plan "<task>"` and
 `/workflow-run plan-implement "<request>"` resolve without any project file, and
 both ship in `package.json#files` and `public-repository.json`. Workflow
 JavaScript is trusted local code with full Node.js host access; it is not

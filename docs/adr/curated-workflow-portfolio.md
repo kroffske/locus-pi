@@ -2,11 +2,13 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2)
 
 ## Decision
 
-The Package registry remains a strict allowlist. A workflow is curated only when
+~~The Package registry remains a strict allowlist.~~ (See the second 2026-07-27
+amendment: the registry is now the shipped `examples/` directory, scanned by
+existence.) A workflow belongs in it only when
 it is useful across repositories, has a stable and bounded input/output contract,
 produces inspectable evidence, fails closed when evidence is unavailable, and has
 a permission posture that the package can support as a public promise.
@@ -301,6 +303,55 @@ this run cannot re-ask for, and operator-input bounds.
 different namespaces and nothing resolves across them, but an operator reading
 `/workflow-run plan` next to `/plan` has to know that. The alternative — a longer
 name nobody would type — was judged worse than one documented collision.
+
+## Amendment 2026-07-27 (second) — the directory replaces the allowlist
+
+**The owner replaced `CURATED_PACKAGE_WORKFLOW_NAMES` with a scan of
+`extensions/workflows/examples/` on 2026-07-27.** A Package workflow is now
+registered by the existence of its `<name>.workflow.mjs` file in that directory,
+discovered on every resolve/list/info call exactly like a project directory.
+There is no allowlist. This paragraph is the decision record.
+
+What this repeals is the sentence at the top of this ADR — "the Package registry
+remains a strict allowlist" — and only that. The five portfolio criteria stand,
+and the promotion decision above is unchanged; what changed is the _mechanism_
+that admits a workflow, not the judgement about which workflows belong. The
+honest reason is cost, and it was measured on this repository: promoting two
+workflows touched a registry constant, a relative-path map, the package
+allowlist, the public-repository inventory, six test files, five manuals, the
+support boundary, and this ADR — for a change whose entire content was "these two
+files are runnable by name". Everything on that list except the constant and the
+path map is still required, because they are the parts that describe a public
+surface. The two that are gone were bookkeeping that duplicated the filesystem.
+
+**What replaces the allowlist as the safety property.** An allowlist could refuse
+a file that was dropped into the directory; a scan cannot. The compensating
+boundaries are these, and they are weaker in exactly one way that is stated here
+rather than glossed:
+
+- The scan descends **one** directory level and accepts only `entry.isFile()`, so
+  a symlink is never followed out of the package and support material nested
+  deeper is never mistaken for an entry point.
+- `package.json#files` still decides what an install ships, and
+  `tests/integration/package-boundary.test.ts` now asserts that the packed
+  workflow names equal the scanned names. A workflow added to the directory and
+  not packed fails the build rather than resolving in a checkout and vanishing
+  after `npm i`.
+- That same test keeps a reviewed snapshot of the expected names, so adding or
+  removing a file in the directory still fails until a human updates it. This is
+  the honest replacement for the allowlist: not "the host refuses it", but "the
+  build refuses it until somebody looks".
+- What is genuinely lost: a file present in the directory of a _checkout_ — a
+  work-in-progress example, a fixture — is resolvable by name in that checkout
+  before any test runs. The mitigation is that this directory is now documented
+  as the registry rather than as an examples folder, and a workflow that should
+  not be registered belongs under `extensions/workflows/references/`, which is
+  where `excalidraw-pipeline` moved as part of this amendment.
+
+The name of this ADR is now slightly wrong: "curated" describes the portfolio
+judgement, not the mechanism. It is kept because the file is linked from the
+manuals, the support boundary, and two changelog entries, and a redirect costs
+more than the imprecision.
 
 ## Consequences
 

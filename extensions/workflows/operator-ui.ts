@@ -17,15 +17,15 @@ import {
   type WorkflowDispositionProjection,
   type WorkflowProjectedStatus,
 } from "../_shared/workflow-result.js";
-import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../_shared/workflow-runner.js";
 import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
 import type { WorkflowBackgroundStopResult } from "./background-run-registry.js";
 import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "./workflow-catalog.js";
 import { compactOperatorLine } from "../_shared/operator-ui.js";
 
-/** Curated Package names shared with resolution and catalog enumeration. */
+/** Package names shared with resolution and catalog enumeration, scanned per call. */
 export function listExampleNames(): string[] {
-  return [...CURATED_PACKAGE_WORKFLOW_NAMES];
+  return packagedWorkflowNames();
 }
 
 export function workflowHelpBlock(): OperatorBlock {

@@ -49,6 +49,6 @@ CI repeats source checks, tests, source-audit checks, public-repository inventor
 ## Public package boundary
 
 - `package.json#pi.extensions`, extension manifests, public manuals, source-audit notes, and `public-repository.json` define the public surface.
-- Do not widen the default extension list, curated Package workflow registry, runtime dependencies, or npm allowlist without an explicit ownership decision and matching tests and documentation.
+- Do not widen the default extension list, the Package workflow registry (the shipped `extensions/workflows/examples/` directory, scanned by existence — adding a `<name>.workflow.mjs` there widens it), runtime dependencies, or npm allowlist without an explicit ownership decision and matching tests and documentation.
 - Never commit or publish credentials, auth files, absolute workstation paths, private runtime state, generated research, transcripts, benchmarks, or evaluation artifacts.
 - Repository visibility changes and npm publication remain explicit owner actions.

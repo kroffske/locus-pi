@@ -208,9 +208,12 @@ remains the machine-readable run envelope, while
 `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
-These six names form the Package registry. They are intentionally small and
-owned as part of the package product surface, not discovered merely because a file
-exists in `extensions/workflows/examples/`.
+These six names are what `extensions/workflows/examples/` currently holds, and
+that directory **is** the Package registry — a workflow is registered by the
+existence of its entry file, exactly like a project one. The set stays small
+because it is a public surface: `package.json#files` still decides what an
+install ships, and a package-boundary test fails when the two disagree, so a
+workflow that resolves in a checkout can never be missing after `npm i`.
 
 `plan` and `plan-implement` are the second curated pair, and the seam between
 them is the same shape as `review` → `review-fix` with one extra check. `plan`
@@ -300,14 +303,19 @@ order:
    exact text unless the call declares a `schema`. Port such a script to the DSL
    contract below rather than dropping it in.
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
-4. The curated Package registry — human source `Package`; currently `live-smoke`,
-   `plan`, `plan-implement`, `requirements-grill`, `review`, and `review-fix`.
+4. The packaged examples directory — human source `Package`. Every
+   `<name>.workflow.mjs` under `extensions/workflows/examples/` is a Package
+   workflow; currently `live-smoke`, `plan`, `plan-implement`,
+   `requirements-grill`, `review`, and `review-fix`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
 removing a valid file changes the next result and removing a shadow reveals the next
-source. Package registration is explicit in `CURATED_PACKAGE_WORKFLOW_NAMES`; adding or
-removing a file under `examples/` alone does not change the catalog. An already-open
+source. The packaged examples directory is scanned the same way, so adding or
+removing a `<name>.workflow.mjs` there is the whole of adding or removing a
+Package workflow. The scan descends one directory level, which is how a workflow
+keeps prompt resources or a diagram triple beside its entry, and it accepts only
+regular files, so a symlink never resolves out of the package. An already-open
 catalog selection is revalidated, so a precedence change fails explicitly instead of
 switching paths silently.
 
@@ -640,8 +648,8 @@ fresh `jiti` instance with `moduleCache:false`, so an ordinary module singleton
 would split workflow progress from `/agent drill` and fleet control.
 
 `/workflows list [query]` is a read model over the same first-wins resolver used
-by `/workflows run`: scan-based Project/User discovery plus the curated Package
-registry. It does not add a separate UI-only registry. Every current row
+by `/workflows run`: scan-based discovery for Project, User, and Package alike.
+It does not add a separate UI-only registry. Every current row
 is one selectable two-line block: the first line shows the compact badge, human
 source label (`Project`, `User`, or `Package`), name, and one-line description;
 the second line indents the exact origin path under the content column. A path

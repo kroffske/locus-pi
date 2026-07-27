@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  CURATED_PACKAGE_WORKFLOW_NAMES,
+  packagedWorkflowNames,
   loadWorkflowScript,
   packagedWorkflowPath,
   runWorkflowScript,
@@ -94,7 +94,7 @@ describe("workflow script identity coverage", () => {
   });
 
   it("keeps curated identity coverage explicit for static and resource-backed workflows", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const assessment = assessWorkflowSourceIdentity(readFileSync(packagedWorkflowPath(name), "utf8"));
       expect(assessment, name).toMatchObject({
         identityCoverage: "self-contained-static",

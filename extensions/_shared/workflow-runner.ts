@@ -17,6 +17,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
@@ -208,37 +209,80 @@ const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
-/** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = [
-  "live-smoke",
-  "plan",
-  "plan-implement",
-  "requirements-grill",
-  "review",
-  "review-fix",
-] as const;
-const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
-const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
-  "live-smoke": "live-smoke.workflow.mjs",
-  plan: path.join("plan", "plan.workflow.mjs"),
-  "plan-implement": path.join("plan-implement", "plan-implement.workflow.mjs"),
-  "requirements-grill": "requirements-grill.workflow.mjs",
-  review: path.join("review", "review.workflow.mjs"),
-  "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),
-};
+/** The one filename shape every saved and packaged workflow entry must have. */
+const WORKFLOW_ENTRY_SUFFIX = ".workflow.mjs";
+
+export interface PackagedWorkflowEntry {
+  name: string;
+  path: string;
+}
+
+/**
+ * The Package registry is the shipped examples directory itself: every
+ * `<name>.workflow.mjs` under it is a Package workflow, discovered by existence
+ * on each call exactly like a project directory. There is no second allowlist to
+ * keep in sync, so adding a workflow is adding a file — and removing one is
+ * removing a file.
+ *
+ * Two bounds make that safe to say. Depth is one nested directory, which is how a
+ * workflow that owns prompt resources or a diagram triple keeps them beside its
+ * entry; anything deeper is support material, not another entry point. Only
+ * `entry.isFile()` is accepted, so a symlink is never followed out of the
+ * package. Both are properties of this scan, not of the filesystem it reads.
+ *
+ * What the *npm artifact* contains is still `package.json#files`, and a test
+ * pins the two together: a workflow that lives here and is not packed would
+ * resolve in a checkout and be missing after install, which is the one way this
+ * simplification could lie to an operator.
+ */
+export function listPackagedWorkflowEntries(): PackagedWorkflowEntry[] {
+  const found = new Map<string, string>();
+  const visit = (directory: string, remainingDepth: number): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (remainingDepth > 0) visit(full, remainingDepth - 1);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(WORKFLOW_ENTRY_SUFFIX)) continue;
+      const name = entry.name.slice(0, -WORKFLOW_ENTRY_SUFFIX.length);
+      if (name === "" || found.has(name)) continue;
+      found.set(name, full);
+    }
+  };
+  visit(PACKAGED_EXAMPLES_DIR, 1);
+  // Ordered by entry filename so the catalog, the resolver, and every test see
+  // one stable sequence regardless of directory iteration order.
+  return [...found.entries()]
+    .map(([name, entryPath]) => ({ name, path: entryPath }))
+    .sort((left, right) => {
+      const leftEntry = `${left.name}${WORKFLOW_ENTRY_SUFFIX}`;
+      const rightEntry = `${right.name}${WORKFLOW_ENTRY_SUFFIX}`;
+      return leftEntry < rightEntry ? -1 : leftEntry > rightEntry ? 1 : 0;
+    });
+}
+
+/** Package workflow names currently present in the shipped examples directory. */
+export function packagedWorkflowNames(): string[] {
+  return listPackagedWorkflowEntries().map((entry) => entry.name);
+}
 
 /** Absolute path to this package's shipped workflow examples directory. */
 export function packagedExamplesDir(): string {
   return PACKAGED_EXAMPLES_DIR;
 }
 
-/** Absolute path to one explicitly curated Package workflow entry module. */
+/** Absolute path to one Package workflow entry module. */
 export function packagedWorkflowPath(name: string): string {
-  if (!CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) {
-    throw new WorkflowNameNotFoundError(name);
-  }
-  const relativePath = CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS[name as (typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number]];
-  return path.join(PACKAGED_EXAMPLES_DIR, relativePath);
+  const entry = listPackagedWorkflowEntries().find((candidate) => candidate.name === name);
+  if (entry === undefined) throw new WorkflowNameNotFoundError(name);
+  return entry.path;
 }
 
 function hasPathSeparators(value: string): boolean {
@@ -288,13 +332,14 @@ const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
 
 function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDirectory: string): ResolvedWorkflowTarget {
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
-    if (search.source === "package" && !CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) continue;
     const candidate =
-      search.source === "package" ? packagedWorkflowPath(name) : path.join(search.directory, `${name}.workflow.mjs`);
-    if (existsSync(candidate)) {
+      search.source === "package"
+        ? listPackagedWorkflowEntries().find((entry) => entry.name === name)?.path
+        : path.join(search.directory, `${name}${WORKFLOW_ENTRY_SUFFIX}`);
+    if (candidate !== undefined && existsSync(candidate)) {
       const targetPath =
         search.source === "project"
-          ? resolveConfinedScriptPath(candidate, projectRoot, `${name}.workflow.mjs`)
+          ? resolveConfinedScriptPath(candidate, projectRoot, `${name}${WORKFLOW_ENTRY_SUFFIX}`)
           : candidate;
       return { kind: "name", ref: name, path: targetPath, source: search.source };
     }
@@ -372,23 +417,16 @@ export function listWorkflowCatalogTargets(
 ): ResolvedWorkflowTarget[] {
   const targets = new Map<string, ResolvedWorkflowTarget>();
   for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
-    if (search.source === "package") addCuratedPackageCatalogTargets(targets);
+    if (search.source === "package") addPackagedCatalogTargets(targets);
     else addCatalogDirectory(targets, search.directory, search.source);
   }
   return [...targets.values()];
 }
 
-function addCuratedPackageCatalogTargets(targets: Map<string, ResolvedWorkflowTarget>): void {
-  const namesByEntryFilename = [...CURATED_PACKAGE_WORKFLOW_NAMES].sort((left, right) => {
-    const leftEntry = `${left}.workflow.mjs`;
-    const rightEntry = `${right}.workflow.mjs`;
-    return leftEntry < rightEntry ? -1 : leftEntry > rightEntry ? 1 : 0;
-  });
-  for (const name of namesByEntryFilename) {
-    if (targets.has(name)) continue;
-    const candidate = packagedWorkflowPath(name);
-    if (!existsSync(candidate)) continue;
-    targets.set(name, { kind: "name", ref: name, path: candidate, source: "package" });
+function addPackagedCatalogTargets(targets: Map<string, ResolvedWorkflowTarget>): void {
+  for (const entry of listPackagedWorkflowEntries()) {
+    if (targets.has(entry.name)) continue;
+    targets.set(entry.name, { kind: "name", ref: entry.name, path: entry.path, source: "package" });
   }
 }
 
@@ -400,15 +438,14 @@ function addCatalogDirectory(
   let entries: string[];
   try {
     entries = readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".workflow.mjs"))
+      .filter((entry) => entry.isFile() && entry.name.endsWith(WORKFLOW_ENTRY_SUFFIX))
       .map((entry) => entry.name)
       .sort();
   } catch {
     return;
   }
   for (const entry of entries) {
-    const name = entry.slice(0, -".workflow.mjs".length);
-    if (source === "package" && !CURATED_PACKAGE_WORKFLOW_NAME_SET.has(name)) continue;
+    const name = entry.slice(0, -WORKFLOW_ENTRY_SUFFIX.length);
     if (name === "" || targets.has(name)) continue;
     targets.set(name, { kind: "name", ref: name, path: path.join(directory, entry), source });
   }

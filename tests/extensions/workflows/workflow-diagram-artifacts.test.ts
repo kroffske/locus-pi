@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURATED_PACKAGE_WORKFLOW_NAMES, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
 
 interface ExcalidrawElement {
   type?: string;
@@ -27,7 +27,7 @@ function diagramText(name: string): string {
 
 describe("curated workflow diagram contract", () => {
   it("keeps an editable generator, Excalidraw source, and PNG preview beside every curated workflow", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const workflowPath = packagedWorkflowPath(name);
       const directory = path.dirname(workflowPath);
       const generatorPath = path.join(directory, `${name}-pipeline.diagram.mjs`);
@@ -58,7 +58,7 @@ describe("curated workflow diagram contract", () => {
   });
 
   it("makes ownership, source, persistence, and the visual legend readable without opening workflow code", () => {
-    for (const name of CURATED_PACKAGE_WORKFLOW_NAMES) {
+    for (const name of packagedWorkflowNames()) {
       const text = diagramText(name);
       // T-108 deleted `llm()` from the DSL, so neither the source generator nor
       // the checked-in reader-facing render may advertise that primitive.

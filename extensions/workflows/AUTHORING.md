@@ -78,18 +78,20 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      host's workflow DSL will not run here even if renamed. Port it to the DSL
      contract instead.
   3. personal `~/.pi/workflows/<name>.workflow.mjs`.
-  4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES` —
-     `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`, and
-     `review-fix`. Files under
-     `extensions/workflows/examples/` are not registered merely because they exist:
-     `plan` and `plan-implement` resolve by name because their names are in that
-     list, and `excalidraw-pipeline` sits in the same directory and does not.
-     Every directory in steps 1–3 above is git-ignored in this repository, so the
-     registry is also the only way a workflow can be both tracked and resolvable
-     by name.
+  4. the packaged examples directory `extensions/workflows/examples/`, scanned
+     the same way as the directories above: every `<name>.workflow.mjs` in it is
+     a Package workflow, and there is no second allowlist. The scan descends one
+     directory level, so a workflow can keep prompt resources and its diagram
+     triple beside its entry. Adding one is adding a file — but it is still a
+     public-surface change, and a package-boundary test fails until
+     `package.json#files` ships it too, because a workflow that resolves in a
+     checkout and vanishes after `npm i` is worse than one that never existed.
+     Every directory in steps 1–3 above is git-ignored in this repository, so
+     `examples/` is also the only place a workflow can be both tracked and
+     resolvable by name.
      This repository's `locus-plan` and `test-code` workflows live in ignored
      `.pi/workflows/` only. They are project-local planning/testing dogfood, not
-     tracked examples, curated Package workflows, or npm package files.
+     tracked examples, Package workflows, or npm package files.
      Their final planning verifier and test attribution roles use
      host-enforced `readOnly: true` plus `repository_check`, never unrestricted
      shell, and their intent, plans, units, predecessor handoffs, results, and

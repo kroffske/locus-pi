@@ -8,7 +8,7 @@ import {
   staticWorkflowMetaPhases,
 } from "../../../extensions/workflows/workflow-catalog.js";
 import {
-  CURATED_PACKAGE_WORKFLOW_NAMES,
+  packagedWorkflowNames,
   packagedWorkflowPath,
   runWorkflowScript,
 } from "../../../extensions/_shared/workflow-runner.js";
@@ -210,7 +210,7 @@ describe("curated workflow declarations", () => {
   });
 
   it("keeps meta.phases optional across the curated registry", () => {
-    const undeclared = CURATED_PACKAGE_WORKFLOW_NAMES.filter(
+    const undeclared = packagedWorkflowNames().filter(
       (name) => readWorkflowMeta(packagedWorkflowPath(name)).phases.length === 0,
     );
 

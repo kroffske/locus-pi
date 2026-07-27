@@ -12,53 +12,58 @@ Measured 2026-07-27 against the files in this directory.
 Counts are of real occurrences — `promptFile()` calls, `agent({ schema })` calls,
 and `throw` statements — not of the words where a comment happens to mention one.
 
-| Example                                                                                                          | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                              |
-| ---------------------------------------------------------------------------------------------------------------- | ----: | -------------: | -----------: | ------: | ----------------------------------------- |
-| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                                           |    51 |              0 |            0 |       0 | curated · npm package · public repository |
-| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                           |   309 |              0 |            0 |       0 | curated · npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                     |   876 |              2 |            2 |       5 | curated · npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                     |   696 |              0 |            1 |      10 | curated · npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                             |   754 |              0 |            2 |       4 | curated · npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                     |   648 |              0 |            1 |       8 | curated · npm package · public repository |
-| [`excalidraw-pipeline/excalidraw-pipeline.workflow.mjs`](./excalidraw-pipeline/excalidraw-pipeline.workflow.mjs) |   673 |              3 |            0 |       1 | tracked only                              |
+| Example                                                                                      | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
+| -------------------------------------------------------------------------------------------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       |    51 |              0 |            0 |       0 | npm package · public repository |
+| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       |   309 |              0 |            0 |       0 | npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 |   876 |              2 |            2 |       5 | npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 |   696 |              0 |            1 |      10 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   754 |              0 |            2 |       4 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |   648 |              0 |            1 |       8 | npm package · public repository |
 
-Three distribution levels, and they are independent:
+**This directory is the Package registry.** Every `<name>.workflow.mjs` in it
+resolves through `/workflow-run <name>`, discovered by existence on each call
+exactly like a project directory — there is no separate allowlist to keep in
+sync. The scan descends one directory level, which is how a workflow keeps its
+prompt resources and diagram triple beside its entry, and it accepts only regular
+files, so a symlink never resolves out of the package.
 
-- **Curated** means the name resolves through `/workflow-run <name>`. The
-  registry is the explicit allowlist `CURATED_PACKAGE_WORKFLOW_NAMES` in
-  [`extensions/_shared/workflow-runner.ts`](../../_shared/workflow-runner.ts) —
-  exactly `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
-  `review-fix`. **Living in this directory registers nothing**, which is why
-  `excalidraw-pipeline` sits beside them and does not resolve by name.
+Two distribution levels remain, and they are independent of resolution:
+
 - **npm package** means the exact file is listed in `package.json#files`.
 - **Public repository** means the exact file is listed in `public-repository.json`.
   Both lists name regular files, never directories, so a new file under an
   already-public folder is not published implicitly.
 
-`excalidraw-pipeline` is tracked in Git and absent from all three. It is a
-worked reference for a long fan-out pipeline with a per-stage model pin; read it,
-copy from it, do not expect to run it by name.
+Resolution and packing are pinned together by
+[`tests/integration/package-boundary.test.ts`](../../../tests/integration/package-boundary.test.ts):
+the packed workflow names must equal the names this directory resolves. A
+workflow added here without a `package.json#files` entry would run in a checkout
+and be missing after `npm i`, which is the one way "the folder is the registry"
+could lie to an operator.
 
-The registry is also the only route to "tracked **and** resolvable by name":
-every directory the resolver scans — `.pi/workflows/`, `.claude/workflows/`,
-`.agents/workflows/` — is git-ignored in this repository, so a copy placed there
-works on one machine and exists in no clone.
+Adding a file here is adding a Package workflow, so it is still a public-surface
+change: the boundary test, the manuals, the support boundary, and the changelog
+move with it. A worked reference you do **not** want registered belongs under
+[`../references/`](../references/) instead — that is where
+`excalidraw-pipeline` lives, and why it runs by path only.
 
-Adding a curated workflow is not a file drop: registry, tests, package
-allowlist, manuals, support boundary, and changelog change together. See
-[`docs/adr/curated-workflow-portfolio.md`](../../../docs/adr/curated-workflow-portfolio.md).
+This directory is also the only place a workflow can be both tracked and
+resolvable by name: every other directory the resolver scans — `.pi/workflows/`,
+`.claude/workflows/`, `.agents/workflows/` — is git-ignored in this repository,
+so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                | Read it for                                                                                                                                                                          |
-| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `live-smoke`          | Child-session diagnostic    | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
-| `requirements-grill`  | Requirements refinement     | Workflow-owned repository search (a bounded `rg` the script runs itself, not an agent), and fail-closed exits at every stage.                                                        |
-| `review`              | Evidence-backed code review | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
-| `review-fix`          | Human-directed fixes        | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, host-owned source fingerprints.                      |
-| `plan`                | Task → accepted plan        | Two loops with different owners: one operator clarification round that can pause the run, and a bounded draft/critique loop whose exit is a shaped verdict.                          |
-| `plan-implement`      | Accepted plan → changes     | The other end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true` outcome.                           |
-| `excalidraw-pipeline` | Reference only              | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
+| Example               | Product role                                             | Read it for                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live-smoke`          | Child-session diagnostic                                 | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
+| `requirements-grill`  | Requirements refinement                                  | Workflow-owned repository search (a bounded `rg` the script runs itself, not an agent), and fail-closed exits at every stage.                                                        |
+| `review`              | Evidence-backed code review                              | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
+| `review-fix`          | Human-directed fixes                                     | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, host-owned source fingerprints.                      |
+| `plan`                | Task → accepted plan                                     | Two loops with different owners: one operator clarification round that can pause the run, and a bounded draft/critique loop whose exit is a shaped verdict.                          |
+| `plan-implement`      | Accepted plan → changes                                  | The other end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true` outcome.                           |
+| `excalidraw-pipeline` | Reference only, under [`../references/`](../references/) | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
 `plan` and `plan-implement` are a pair, and the seam between them is the point:
 `plan` ends by returning the accepted plan text, which the runtime retains as
@@ -66,7 +71,7 @@ allowlist, manuals, support boundary, and changelog change together. See
 `{ runId, artifactId, name, sha256 }` reference through the workflow tool's
 closed `continuation` control and refuses anything else — including a same-named
 draft from an earlier round of the same run, because it checks that these bytes
-were the run's terminal result. `review` → `review-fix` is the curated version of
+were the run's terminal result. `review` → `review-fix` is the older version of
 the same seam.
 
 ## Which authoring shape each one demonstrates
@@ -137,7 +142,7 @@ as such at its definition.
 
 ## Diagrams
 
-Every curated example ships a `<name>-pipeline.diagram.mjs` generator, an
+Every workflow in this directory ships a `<name>-pipeline.diagram.mjs` generator, an
 editable `<name>-pipeline.excalidraw`, and a rendered `<name>-pipeline.png`. The
 generator is the source of truth: edit it and regenerate, never hand-edit the
 `.excalidraw`. The generators require `@kroffske/excalidraw-diagrams`, which is
@@ -149,5 +154,5 @@ generator, because an unwrapped strip renders as a 3:1–4:1 sliver whose text i
 unreadable at fit-to-window. Authored coordinates never change; only the
 transform moves them.
 
-`extensions/workflows/examples/excalidraw-pipeline` ships no diagram triple —
-the contract applies to curated workflows.
+`extensions/workflows/references/excalidraw-pipeline` ships no diagram triple —
+the contract applies to the workflows this directory registers.

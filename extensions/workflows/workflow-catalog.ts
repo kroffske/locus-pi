@@ -10,7 +10,7 @@ import {
   type WorkflowRunScriptSnapshot,
 } from "../_shared/workflow-journal.js";
 import {
-  CURATED_PACKAGE_WORKFLOW_NAMES,
+  packagedWorkflowNames,
   listWorkflowCatalogTargets,
   type ResolvedWorkflowTarget,
 } from "../_shared/workflow-runner.js";
@@ -350,8 +350,8 @@ function workflowContractLines(projectRoot: string, workingDirectory: string): s
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
     "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), promptFile(), workspace()",
-    `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then curated Package names ${CURATED_PACKAGE_WORKFLOW_NAMES.join(", ")}`,
-    "registration: project and user directories are scanned on every call; Package files are not registered by existence and require an explicit curated-list change",
+    `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then the packaged examples directory, currently ${packagedWorkflowNames().join(", ")}`,
+    "registration: every directory including the packaged examples directory is scanned on every call, so a workflow is registered by the existence of its <name>.workflow.mjs file",
   ];
 }
 

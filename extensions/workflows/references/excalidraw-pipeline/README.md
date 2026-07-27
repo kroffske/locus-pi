@@ -1,12 +1,13 @@
 # Excalidraw diagram pipeline
 
 A project-local workflow that turns a free-form diagram intent into a readable
-Excalidraw diagram and a rendered PNG. It is **not** a curated Package workflow:
-it is not in `CURATED_PACKAGE_WORKFLOW_NAMES` and not in `package.json#files`, so
+Excalidraw diagram and a rendered PNG. It is **not** a Package workflow: it lives
+under `references/` rather than in the scanned `examples/` directory, and it is
+not in `package.json#files`, so
 it runs by path only.
 
 ```
-extensions/workflows/examples/excalidraw-pipeline/
+extensions/workflows/references/excalidraw-pipeline/
 ├── excalidraw-pipeline.workflow.mjs       entry — routing, preflight, both runs
 ├── excalidraw-pipeline.section-host.mjs   executes agent-written section files
 ├── resources/
@@ -45,7 +46,7 @@ diagram-request.md ──▶  one agent per section ──▶ workflow executes 
 ### Run 1 — draft
 
 ```
-/workflows run extensions/workflows/examples/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs draft the review workflow stages and where each artifact lands
+/workflows run extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs draft the review workflow stages and where each artifact lands
 ```
 
 Creates one run folder under the ignored `.tasks/` tree
@@ -71,7 +72,7 @@ That single word is the gate. `build` refuses to start without it, with the reas
 ### Run 2 — build
 
 ```
-/workflows run extensions/workflows/examples/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs build .tasks/excalidraw-pipeline/<run>/diagram-request.md
+/workflows run extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs build .tasks/excalidraw-pipeline/<run>/diagram-request.md
 ```
 
 ## The request file contract

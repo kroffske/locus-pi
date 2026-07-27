@@ -210,12 +210,6 @@ extensions/workflows/command-completions.ts
 extensions/workflows/command-parser.ts
 extensions/workflows/command-router.ts
 extensions/workflows/examples/README.md
-extensions/workflows/examples/excalidraw-pipeline/README.md
-extensions/workflows/examples/excalidraw-pipeline/excalidraw-pipeline.section-host.mjs
-extensions/workflows/examples/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs
-extensions/workflows/examples/excalidraw-pipeline/resources/intent-to-draft.prompt.md
-extensions/workflows/examples/excalidraw-pipeline/resources/section-author.prompt.md
-extensions/workflows/examples/excalidraw-pipeline/resources/section-repair.prompt.md
 extensions/workflows/examples/live-smoke-pipeline.diagram.mjs
 extensions/workflows/examples/live-smoke-pipeline.excalidraw
 extensions/workflows/examples/live-smoke-pipeline.png
@@ -253,6 +247,12 @@ extensions/workflows/operator-handoff-service.ts
 extensions/workflows/operator-surface.ts
 extensions/workflows/operator-ui.ts
 extensions/workflows/progress-widget.ts
+extensions/workflows/references/excalidraw-pipeline/README.md
+extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.section-host.mjs
+extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs
+extensions/workflows/references/excalidraw-pipeline/resources/intent-to-draft.prompt.md
+extensions/workflows/references/excalidraw-pipeline/resources/section-author.prompt.md
+extensions/workflows/references/excalidraw-pipeline/resources/section-repair.prompt.md
 extensions/workflows/references/patterns.md
 extensions/workflows/run-evidence.ts
 extensions/workflows/run-viewer.ts
