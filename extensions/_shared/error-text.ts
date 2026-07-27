@@ -4,10 +4,10 @@
  *
  * `catch` binds `unknown`, so every surface that reports a failure to an
  * operator has to answer the same question: is this an `Error` with a message,
- * or something else that has to be stringified? Five extensions had each grown
- * their own private copy of the answer (`errorMessage`, `dialogErrorMessage`)
- * plus a dozen inline repetitions of the same ternary. This module is that one
- * answer.
+ * or something else that has to be stringified? Six modules had each grown their
+ * own private copy of the answer (`errorMessage`, `dialogErrorMessage`), and the
+ * same ternary was repeated inline at sixteen more call sites across eight
+ * extensions. This module is that one answer.
  *
  * Formatting of the resulting text — prefixes, labels, block layout — belongs to
  * the `-ui` module that renders it, not here.
