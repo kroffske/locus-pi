@@ -148,9 +148,15 @@ extensions/loop/manifest.json
 extensions/loop/operator-surface.ts
 extensions/loop/operator-ui.ts
 extensions/model/README.md
+extensions/model/effort-command.ts
 extensions/model/index.ts
 extensions/model/manifest.json
 extensions/model/model-role-selector.ts
+extensions/model/operator-surface.ts
+extensions/model/operator-ui.ts
+extensions/model/role-apply.ts
+extensions/model/role-command.ts
+extensions/model/role-evidence.ts
 extensions/plan/command-parser.ts
 extensions/plan/goal-ai-command.ts
 extensions/plan/goal-command.ts
@@ -245,6 +251,7 @@ tests/extensions/ask-user-question/ask-user-question.test.ts
 tests/extensions/ast-structural-edit/tools.test.ts
 tests/extensions/loop/loop-command-surfaces.test.ts
 tests/extensions/loop/loop.test.ts
+tests/extensions/model/model-command-surfaces.test.ts
 tests/extensions/model/model.test.ts
 tests/extensions/plan/plan-behavioral-mode.test.ts
 tests/extensions/plan/plan-command-surfaces.test.ts

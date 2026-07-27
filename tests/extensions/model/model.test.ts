@@ -3,24 +3,22 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import model, {
-  buildEffortOperatorBlock,
-  effortLevelsForModel,
-  getModelRolesConfigPaths,
-  loadModelRolesState,
-  modelEffortCapability,
-  modelRoleStatusContribution,
-  MODEL_ROLE_ACTIONS,
-  ModelRoleSelectorComponent,
-  type EffortCommandOutcome,
-} from "../../../extensions/model/index.js";
+import model from "../../../extensions/model/index.js";
 import {
   buildModelRows,
+  effortLevelsForModel,
+  modelEffortCapability,
   roleSummaries,
+  MODEL_ROLE_ACTIONS,
+  ModelRoleSelectorComponent,
   type AppliedModelRoleState,
 } from "../../../extensions/model/model-role-selector.js";
+import { modelRoleStatusContribution } from "../../../extensions/model/operator-surface.js";
+import { buildEffortOperatorBlock, type EffortCommandOutcome } from "../../../extensions/model/operator-ui.js";
 import {
   buildModelRolesState,
+  getModelRolesConfigPaths,
+  loadModelRolesState,
   resolveAgentModelPreference,
   resolvePromptPlanningModelRole,
   resolveSummaryModelRole,
@@ -79,7 +77,9 @@ describe("model extension", () => {
   });
 
   it("publishes source-backed capability labels for all six roles", () => {
-    expect(MODEL_ROLE_ACTIONS.map(({ role, support, appliesCurrentModel }) => ({ role, support, appliesCurrentModel }))).toEqual([
+    expect(
+      MODEL_ROLE_ACTIONS.map(({ role, support, appliesCurrentModel }) => ({ role, support, appliesCurrentModel })),
+    ).toEqual([
       { role: "default", support: "active", appliesCurrentModel: true },
       { role: "agent", support: "active", appliesCurrentModel: false },
       { role: "task", support: "fallback", appliesCurrentModel: false },
@@ -120,8 +120,16 @@ describe("model extension", () => {
 
   it("assigns two routes with different efforts in one selector session", async () => {
     harness.customInputQueue.push(
-      ENTER, ENTER, ...repeat(DOWN, 4), ENTER,
-      DOWN, ENTER, DOWN, ENTER, ...repeat(DOWN, 2), ENTER,
+      ENTER,
+      ENTER,
+      ...repeat(DOWN, 4),
+      ENTER,
+      DOWN,
+      ENTER,
+      DOWN,
+      ENTER,
+      ...repeat(DOWN, 2),
+      ENTER,
       "q",
     );
 
@@ -329,7 +337,9 @@ describe("model extension", () => {
         if (!this.colors.has(color)) throw new Error(`unknown color ${color}`);
         return `<${color}>${text}</${color}>`;
       },
-      bold(text: string) { return `*${text}*`; },
+      bold(text: string) {
+        return `*${text}*`;
+      },
     };
     harness = createHarness(join(root, "project"), { models: REASONING_MODELS, customTheme: theme });
     model(harness.pi);
@@ -376,10 +386,17 @@ describe("model extension", () => {
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     const filePath = sessionJsonlPath(harness.ctx.session!.projectRoot);
-    const records = (await readFile(filePath, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
-      entry?: { payload?: { type?: string; data?: Record<string, unknown> } };
-    });
-    const event = records.find((record) => record.entry?.payload?.type === "model_role_runtime_event")?.entry?.payload?.data;
+    const records = (await readFile(filePath, "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            entry?: { payload?: { type?: string; data?: Record<string, unknown> } };
+          },
+      );
+    const event = records.find((record) => record.entry?.payload?.type === "model_role_runtime_event")?.entry?.payload
+      ?.data;
     expect(event).toMatchObject({
       role: "default",
       assignment: "test/strong:high",
@@ -642,16 +659,24 @@ describe("ModelRoleSelectorComponent", () => {
       borderAccent: "36",
       borderMuted: "90",
     };
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {
-      fg(tone, text) { return `\x1b[${colors[tone]}m${text}\x1b[39m`; },
-      bold(text) { return `\x1b[1m${text}\x1b[22m`; },
-    }, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {
+        fg(tone, text) {
+          return `\x1b[${colors[tone]}m${text}\x1b[39m`;
+        },
+        bold(text) {
+          return `\x1b[1m${text}\x1b[22m`;
+        },
+      },
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        applySelection: vi.fn(),
+      },
+    );
 
     const text = component.render(146).join("\n");
     expect(text).toContain("\x1b[32m[ALL]\x1b[39m");
@@ -682,16 +707,24 @@ describe("ModelRoleSelectorComponent", () => {
       borderAccent: "36",
       borderMuted: "90",
     };
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {
-      fg(tone, text) { return `\x1b[${colors[tone]}m${text}\x1b[39m`; },
-      bold(text) { return `\x1b[1m${text}\x1b[22m`; },
-    }, {
-      rows: buildModelRows(REASONING_MODELS, state, undefined),
-      roleSummaries: roleSummaries(state),
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {
+        fg(tone, text) {
+          return `\x1b[${colors[tone]}m${text}\x1b[39m`;
+        },
+        bold(text) {
+          return `\x1b[1m${text}\x1b[22m`;
+        },
+      },
+      {
+        rows: buildModelRows(REASONING_MODELS, state, undefined),
+        roleSummaries: roleSummaries(state),
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection: vi.fn(),
+      },
+    );
 
     const lines = component.render(146);
     const routingIndex = lines.findIndex((line) => line.includes("Routing roles:"));
@@ -704,13 +737,17 @@ describe("ModelRoleSelectorComponent", () => {
 
   it("renders typed, width-safe SELECT hierarchy at 146/80/48 columns", () => {
     const { rows, summaries } = selectorFixture();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        applySelection: vi.fn(),
+      },
+    );
 
     for (const width of [146, 80, 48]) {
       const lines = component.render(width);
@@ -728,14 +765,18 @@ describe("ModelRoleSelectorComponent", () => {
     const { rows, summaries } = selectorFixture();
     const done = vi.fn();
     const applySelection = vi.fn<() => Promise<AppliedModelRoleState>>();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection,
-      done,
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection,
+        done,
+      },
+    );
 
     await component.handleInput(ENTER);
     expect(component.render(80).join("\n")).toContain("Choose routing role:");
@@ -760,19 +801,24 @@ describe("ModelRoleSelectorComponent", () => {
       name: `Bulk ${index + 1}`,
       reasoning: false,
     }));
-    const state = buildModelRolesState(
-      { project: "/project/config.json", user: "/user/config.json" },
-      {}, {}, {}, {},
+    const state = buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, {}, {}, {});
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows: buildModelRows(models, state, undefined),
+        roleSummaries: roleSummaries(state),
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection: vi.fn(),
+      },
     );
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows: buildModelRows(models, state, undefined),
-      roleSummaries: roleSummaries(state),
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection: vi.fn(),
-    });
 
-    for (const [width, expectedRows] of [[146, 8], [80, 6], [48, 4]] as const) {
+    for (const [width, expectedRows] of [
+      [146, 8],
+      [80, 6],
+      [48, 4],
+    ] as const) {
       const lines = component.render(width);
       expect(lines.filter((line) => line.includes("bulk/model-")).length).toBe(expectedRows);
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -782,21 +828,25 @@ describe("ModelRoleSelectorComponent", () => {
   it("keeps effort focus usable after an inline apply error", async () => {
     const { rows, summaries } = selectorFixture();
     const done = vi.fn();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: undefined,
-      currentThinking: "off",
-      async applySelection() {
-        return {
-          currentSelector: undefined,
-          currentThinking: "off",
-          roleSummaries: summaries,
-          receipt: { kind: "error", text: "Persistence denied" },
-        };
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: undefined,
+        currentThinking: "off",
+        async applySelection() {
+          return {
+            currentSelector: undefined,
+            currentThinking: "off",
+            roleSummaries: summaries,
+            receipt: { kind: "error", text: "Persistence denied" },
+          };
+        },
+        done,
       },
-      done,
-    });
+    );
 
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
@@ -812,20 +862,24 @@ describe("ModelRoleSelectorComponent", () => {
 
   it("returns to the model list with the receipt after a successful assignment", async () => {
     const { rows, summaries } = selectorFixture();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      async applySelection() {
-        return {
-          currentSelector: "test/fast",
-          currentThinking: "high",
-          roleSummaries: summaries,
-          receipt: { kind: "success", text: "SUMMARY saved" },
-        };
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        async applySelection() {
+          return {
+            currentSelector: "test/fast",
+            currentThinking: "high",
+            roleSummaries: summaries,
+            receipt: { kind: "success", text: "SUMMARY saved" },
+          };
+        },
       },
-    });
+    );
 
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
@@ -842,14 +896,20 @@ describe("ModelRoleSelectorComponent", () => {
 describe("model effort capability", () => {
   it("matches Pi reasoning/thinkingLevelMap capability semantics", () => {
     expect(effortLevelsForModel({ provider: "p", id: "plain", reasoning: false })).toEqual(["off"]);
-    expect(effortLevelsForModel({
-      provider: "p",
-      id: "reasoning",
-      reasoning: true,
-      thinkingLevelMap: { minimal: null, xhigh: "xhigh" },
-    })).toEqual(["off", "low", "medium", "high", "xhigh"]);
+    expect(
+      effortLevelsForModel({
+        provider: "p",
+        id: "reasoning",
+        reasoning: true,
+        thinkingLevelMap: { minimal: null, xhigh: "xhigh" },
+      }),
+    ).toEqual(["off", "low", "medium", "high", "xhigh"]);
     expect(effortLevelsForModel({ provider: "p", id: "reasoning", reasoning: true })).toEqual([
-      "off", "minimal", "low", "medium", "high",
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
     ]);
   });
 
