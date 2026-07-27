@@ -159,8 +159,19 @@ extensions/plan/prompt-shelf-ui.ts
 extensions/plan/system-prompt.ts
 extensions/security-gate/index.ts
 extensions/security-gate/manifest.json
+extensions/todo-context/command-parser.ts
+extensions/todo-context/command-router.ts
 extensions/todo-context/index.ts
 extensions/todo-context/manifest.json
+extensions/todo-context/markdown-checklist.ts
+extensions/todo-context/operator-surface.ts
+extensions/todo-context/operator-ui.ts
+extensions/todo-context/phase-ops.ts
+extensions/todo-context/phase-store.ts
+extensions/todo-context/queue-controller.ts
+extensions/todo-context/state-commands.ts
+extensions/todo-context/task-bridge-commands.ts
+extensions/todo-context/todo-write-tool.ts
 extensions/workflows/AUTHORING.md
 extensions/workflows/background-run-registry.ts
 extensions/workflows/catalog-viewer.ts
@@ -228,6 +239,7 @@ tests/extensions/model/model.test.ts
 tests/extensions/plan/plan-behavioral-mode.test.ts
 tests/extensions/plan/plan-command-surfaces.test.ts
 tests/extensions/plan/plan-prompt-commands.test.ts
+tests/extensions/todo-context/todo-command-surfaces.test.ts
 tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
 tests/extensions/workflows/requirements-grill-workflow.test.ts
