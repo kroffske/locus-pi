@@ -15,6 +15,8 @@ import {
 } from "../_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
 import { errorMessage } from "../_shared/error-text.js";
+import { clamp } from "../_shared/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 const PI_HOST_FOOTER_ROWS = 3;
@@ -642,8 +644,7 @@ function listFooter(action: string, height: number): string[] {
 }
 
 function terminalRows(tui: CustomUiTui): number {
-  const rows = tui.terminal?.rows;
-  return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : DEFAULT_TERMINAL_ROWS;
+  return sharedTerminalRows(tui, 3, DEFAULT_TERMINAL_ROWS);
 }
 
 function viewerRows(tui: CustomUiTui): number {
@@ -680,10 +681,6 @@ function windowStart(selected: number, total: number, limit: number): number {
 
 function cycleIndex(index: number, delta: number, total: number): number {
   return total <= 0 ? 0 : (index + delta + total) % total;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function isUp(keybindings: unknown, data: string): boolean {

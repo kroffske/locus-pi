@@ -17,6 +17,7 @@ import { setTextWidget } from "../_shared/pi-api.js";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { ScrollableTextOverlay } from "./drill-overlay.js";
 import { AGENTS_WIDGET_FALLBACK_WIDTH } from "./operator-ui.js";
+import { notifyOperator } from "../_shared/operator-notify.js";
 
 export const AGENTS_WIDGET_KEY = "agents";
 const AGENTS_WIDGET_MAX_LINES = 10;
@@ -160,9 +161,5 @@ export function notifyInteractionEnded(ctx: ExtensionContext, error: unknown, su
  * than throwing into the agent run.
  */
 export function emitAgentEventLine(ctx: ExtensionContext, line: string, level: "info" | "warning" | "error"): void {
-  try {
-    ctx.ui.notify(line, level);
-  } catch {
-    // Headless / partial UI host: the row + drill remain the durable record.
-  }
+  notifyOperator(ctx, line, level);
 }

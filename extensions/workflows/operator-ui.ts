@@ -9,7 +9,6 @@
  */
 
 import path from "node:path";
-import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { OperatorBlock, OperatorTone } from "../_shared/operator-ui.js";
 import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
 import type { WorkflowRunStatus } from "../_shared/workflow-journal.js";
@@ -22,6 +21,7 @@ import { CURATED_PACKAGE_WORKFLOW_NAMES } from "../_shared/workflow-runner.js";
 import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
 import type { WorkflowBackgroundStopResult } from "./background-run-registry.js";
 import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "./workflow-catalog.js";
+import { compactOperatorLine } from "../_shared/operator-ui.js";
 
 /** Curated Package names shared with resolution and catalog enumeration. */
 export function listExampleNames(): string[] {
@@ -197,9 +197,7 @@ export function buildWorkflowResultBlock(res: RunWorkflowScriptResult, compact =
 }
 
 export function compactWorkflowLine(value: string): string {
-  const plain = value.replace(/\s+/gu, " ").trim();
-  if (visibleWidth(plain) <= 72) return plain;
-  return `${sliceByColumn(plain, 0, 71)}…`;
+  return compactOperatorLine(value, 72);
 }
 
 export function workflowStatusTone(status: WorkflowRunStatus | WorkflowProjectedStatus): OperatorTone {

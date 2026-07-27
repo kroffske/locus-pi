@@ -9,6 +9,7 @@ import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
 import { formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
 import { errorMessage } from "../_shared/error-text.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 
@@ -418,8 +419,7 @@ function isNativeComponentModule(value: unknown): value is NativeComponentModule
 }
 
 function terminalRows(tui: ViewerTui): number {
-  const rows = tui.terminal?.rows;
-  return typeof rows === "number" && Number.isFinite(rows) ? Math.max(2, Math.floor(rows)) : DEFAULT_TERMINAL_ROWS;
+  return sharedTerminalRows(tui, 2, DEFAULT_TERMINAL_ROWS);
 }
 
 function fitLine(value: string, width: number): string {

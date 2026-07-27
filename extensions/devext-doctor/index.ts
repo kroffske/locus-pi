@@ -1,5 +1,4 @@
 import { Type } from "@sinclair/typebox";
-import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
 import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
@@ -12,6 +11,7 @@ import {
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
 import { errorMessage } from "../_shared/error-text.js";
+import { compactOperatorLine } from "../_shared/operator-ui.js";
 
 const ReloadParams = Type.Object({});
 const DEVEXT_WIDGET_KEY = "devext-doctor";
@@ -290,9 +290,7 @@ function compactTaskLifecycleBlock(plan: TaskLifecyclePlan): OperatorBlock {
 }
 
 function compactDevextLine(value: string): string {
-  const plain = value.replace(/\s+/gu, " ").trim();
-  if (visibleWidth(plain) <= 72) return plain;
-  return `${sliceByColumn(plain, 0, 71)}…`;
+  return compactOperatorLine(value, 72);
 }
 
 function summarizeIds(ids: string[]): string {

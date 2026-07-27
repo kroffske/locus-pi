@@ -316,3 +316,15 @@ function truncatePlainText(text: string, width: number): string {
   if (width <= 3) return ".".repeat(width);
   return `${sliceByColumn(text, 0, width - 3, true)}...`;
 }
+
+/**
+ * One operator line compacted to `width` visible columns: whitespace collapsed,
+ * trimmed, and column-sliced with an ellipsis when it does not fit. Three
+ * extensions had this exact expression privately, differing only in the width
+ * they pass.
+ */
+export function compactOperatorLine(value: string, width: number): string {
+  const plain = value.replace(/\s+/gu, " ").trim();
+  if (visibleWidth(plain) <= width) return plain;
+  return `${sliceByColumn(plain, 0, width - 1)}…`;
+}

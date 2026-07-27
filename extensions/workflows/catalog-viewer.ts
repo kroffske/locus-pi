@@ -2,6 +2,8 @@ import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
 import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
+import { clamp } from "../_shared/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
   workflowSourceBadge,
@@ -616,8 +618,7 @@ function style(theme: WorkflowCatalogTheme, color: string, text: string): string
 }
 
 function terminalRows(tui: CustomUiTui): number {
-  const rows = tui.terminal?.rows;
-  return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : DEFAULT_TERMINAL_ROWS;
+  return sharedTerminalRows(tui, 3, DEFAULT_TERMINAL_ROWS);
 }
 
 function viewerRows(tui: CustomUiTui): number {
@@ -685,8 +686,4 @@ function windowStart(selected: number, total: number, limit: number): number {
 
 function cycleIndex(index: number, delta: number, total: number): number {
   return total <= 0 ? 0 : (index + delta + total) % total;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

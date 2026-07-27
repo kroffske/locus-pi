@@ -5,6 +5,7 @@ import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
 import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
 import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "../_shared/workflow-result.js";
+import { notifyOperator } from "../_shared/operator-notify.js";
 
 /**
  * One custom message type carries both run-boundary records. The name says what
@@ -112,7 +113,7 @@ export function createWorkflowTranscript(
         if (surface === "command") {
           for (const warning of line.evidenceWarnings ?? []) {
             if (warning.trim() !== "")
-              notifyFallback(ctx, `⚠ agent evidence · ${compactTranscriptText(warning)}`, "warning");
+              notifyOperator(ctx, `⚠ agent evidence · ${compactTranscriptText(warning)}`, "warning");
           }
         }
       } else if (line.kind === "error") {
@@ -472,7 +473,7 @@ export async function persistCommandWorkflowTranscript(
 }
 
 function notifyWhenCurrent(ctx: ExtensionContext, isCurrent: () => boolean, message: string): void {
-  if (isCurrent()) notifyFallback(ctx, message, "warning");
+  if (isCurrent()) notifyOperator(ctx, message, "warning");
 }
 
 /** Main status omits agent transport markers already represented by the fleet. */
@@ -491,14 +492,6 @@ export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | un
   }
   if (line.kind === "error") return `[error] ${line.message ?? ""}`;
   return `[${line.kind}]`;
-}
-
-function notifyFallback(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error"): void {
-  try {
-    ctx.ui.notify(message, level);
-  } catch {
-    // A partial UI host still retains journal/result artifacts.
-  }
 }
 
 function safeTranscriptTarget(value: string): string {

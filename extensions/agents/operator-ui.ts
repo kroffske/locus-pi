@@ -4,13 +4,13 @@
  * `/agent run` result a headless host gets. No Pi handle, no ExtensionContext,
  * no I/O.
  */
-import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentDiagnostic } from "../_shared/agents.js";
 import { formatAgentListItem } from "../_shared/agents.js";
 import { agentShortIdFromSource } from "../_shared/agent-live-panel.js";
 import type { executeAgentRunBoundary } from "../_shared/agent-runner.js";
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import type { AgentDefinition } from "../_shared/types.js";
+import { compactOperatorLine } from "../_shared/operator-ui.js";
 
 export const AGENTS_WIDGET_FALLBACK_WIDTH = 80;
 
@@ -102,10 +102,7 @@ export function agentInspectBlock(agent: AgentDefinition, compact = false): Oper
 }
 
 export function compactAgentCatalogLine(value: string): string {
-  const plain = value.replace(/\s+/gu, " ").trim();
-  const width = AGENTS_WIDGET_FALLBACK_WIDTH - 8;
-  if (visibleWidth(plain) <= width) return plain;
-  return `${sliceByColumn(plain, 0, width - 1)}…`;
+  return compactOperatorLine(value, AGENTS_WIDGET_FALLBACK_WIDTH - 8);
 }
 
 export function agentRunBoundaryBlock(boundary: Awaited<ReturnType<typeof executeAgentRunBoundary>>): OperatorBlock {
