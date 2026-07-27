@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "../_shared/pi-api.js";
 import { getProjectRoot } from "../_shared/pi-api.js";
 import type { WorkflowOperatorHandoffEnvelope } from "../_shared/workflow-handoff.js";
+import { errorMessage } from "../_shared/error-text.js";
 import {
   isStaleInlineOperatorInteractionError,
   type StaleInlineOperatorInteractionError,
@@ -232,7 +233,7 @@ export class WorkflowOperatorHandoffController {
         }
         return {
           status: "invalid",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         };
       }
       if (result.status === "cancelled") return { status: "cancelled" };
@@ -364,8 +365,4 @@ function isStaleInteraction(error: unknown): error is StaleInlineOperatorInterac
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled workflow handoff result: ${String(value)}`);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

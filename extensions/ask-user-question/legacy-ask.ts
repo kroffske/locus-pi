@@ -13,6 +13,7 @@ import { requestOperatorInput } from "../_shared/operator-input.js";
 import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, textResult } from "../_shared/pi-api.js";
 import { redactForSensitivity } from "../_shared/redaction.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type { LegacyAskParams, OmpAskParams } from "./ask-tool.js";
 import { inputTitle } from "./prompt-text.js";
 import type { OmpQuestion } from "./question-prompt.js";
@@ -77,7 +78,7 @@ export async function askLegacy(
       );
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     return errorResult(`Ask UI failed: ${reason}`, {
       status: "error",
       source: "askUserQuestion",

@@ -21,6 +21,18 @@ import {
 } from "./option-labels.js";
 import { splitLines } from "./prompt-text.js";
 import type { AskNavigation, AskSelection, OmpQuestion } from "./question-prompt.js";
+import {
+  isCtrlC,
+  isDown,
+  isEnd,
+  isEnter,
+  isEscape,
+  isHome,
+  isLeft,
+  isRight,
+  isSpace,
+  isUp,
+} from "../_shared/operator-keys.js";
 
 export interface AskQuestionComponentArgs {
   tui: CustomUiTui;
@@ -372,44 +384,4 @@ export class AskQuestionComponent implements CustomUiComponent {
   #requestRender(): void {
     this.#tui.requestRender();
   }
-}
-
-function isEnter(data: string): boolean {
-  return data === "\r" || data === "\n";
-}
-
-function isSpace(data: string): boolean {
-  return data === " ";
-}
-
-function isEscape(data: string): boolean {
-  return data === "\x1b";
-}
-
-function isCtrlC(data: string): boolean {
-  return data === "\x03";
-}
-
-function isUp(data: string): boolean {
-  return data === "\x1b[A" || data === "\x1bOA" || data === "k";
-}
-
-function isDown(data: string): boolean {
-  return data === "\x1b[B" || data === "\x1bOB" || data === "j";
-}
-
-function isRight(data: string): boolean {
-  return data === "\x1b[C" || data === "\x1bOC" || data === "l";
-}
-
-function isLeft(data: string): boolean {
-  return data === "\x1b[D" || data === "\x1bOD" || data === "h";
-}
-
-function isHome(data: string): boolean {
-  return data === "\x1b[H" || data === "\x1bOH" || data === "g";
-}
-
-function isEnd(data: string): boolean {
-  return data === "\x1b[F" || data === "\x1bOF" || data === "G";
 }

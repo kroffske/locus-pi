@@ -73,6 +73,7 @@ extensions/_shared/agents.ts
 extensions/_shared/artifacts.ts
 extensions/_shared/ast-engine.ts
 extensions/_shared/command-ui.ts
+extensions/_shared/error-text.ts
 extensions/_shared/event-bus.ts
 extensions/_shared/extension-inventory.ts
 extensions/_shared/files.ts
@@ -86,6 +87,7 @@ extensions/_shared/mode-state.ts
 extensions/_shared/model-settings.ts
 extensions/_shared/operator-input.ts
 extensions/_shared/operator-interaction.ts
+extensions/_shared/operator-keys.ts
 extensions/_shared/operator-question.ts
 extensions/_shared/operator-status.ts
 extensions/_shared/operator-ui.ts

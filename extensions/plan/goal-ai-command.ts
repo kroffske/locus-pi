@@ -10,6 +10,7 @@ import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
 import { runGoalAiDraftSession } from "../_shared/goal-ai-draft.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
+import { errorMessage } from "../_shared/error-text.js";
 import {
   PromptCommandTargetError,
   resolvePromptCommandTarget,
@@ -151,7 +152,7 @@ function resolveGoalAiTargetOrRenderError(
       type: "ERROR",
       subject: "Goal AI target",
       primary: "Target resolution failed unexpectedly; no artifact was written.",
-      body: [`error: ${error instanceof Error ? error.message : String(error)}`],
+      body: [`error: ${errorMessage(error)}`],
       metadata: [`target: ${target}`, "kind: goal"],
       controls: ["Retry: /goal-ai <request>"],
     });

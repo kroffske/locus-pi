@@ -13,6 +13,7 @@ import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
 import { SETTINGS_HELP_PLACEMENT } from "../_shared/widget-render.js";
 import { readLoopStatus, renderLoopStatus } from "../_shared/loop-continuation.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { parseLoopCommand, parseLoopInput } from "./command-parser.js";
 import { runLoopOnce } from "./continuation-launcher.js";
 import {
@@ -84,7 +85,7 @@ async function handleLoopInput(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
         type: "ERROR",
         subject: "Loop input",
         primary: "The host input dialog returned an unsupported result.",
-        metadata: [`reason: ${dialogErrorMessage(error)}`],
+        metadata: [`reason: ${errorMessage(error)}`],
         hint: ["No continuation artifact was created."],
         controls: ["Use explicit syntax: /loop once goal [focus]", "Help: /loop help"],
       });
@@ -133,8 +134,4 @@ async function handleLoopInput(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
     presentLoopResult(ctx, result);
     return;
   }
-}
-
-function dialogErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

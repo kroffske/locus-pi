@@ -9,6 +9,7 @@ import { createRuntimeArtifactStore } from "../_shared/artifacts.js";
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import type { ExtensionContext } from "../_shared/pi-api.js";
 import { getProjectRoot, getSessionId } from "../_shared/pi-api.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { listAvailableAgents, listBuiltInAliases, normalizeRequestedAgentName } from "./catalog.js";
 import { compactAgentCatalogLine } from "./operator-ui.js";
 
@@ -155,6 +156,6 @@ function writeUnknownAgentArtifact(
     });
     return { ok: true, path: artifact.path };
   } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    return { ok: false, reason: errorMessage(error) };
   }
 }

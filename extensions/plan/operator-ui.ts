@@ -9,6 +9,7 @@
 
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "../_shared/mode-state.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type { PlanExitAction } from "./plan-exit-handoff.js";
 
 export function cancelledInputBlock(subject: string, reopenCommand: string): OperatorBlock {
@@ -26,7 +27,7 @@ export function dialogFailureBlock(subject: string, reopenCommand: string, error
     type: "ERROR",
     subject,
     primary: "The host input dialog returned an unsupported result.",
-    metadata: [`reason: ${error instanceof Error ? error.message : String(error)}`],
+    metadata: [`reason: ${errorMessage(error)}`],
     hint: ["No state or artifact was changed."],
     controls: [`Retry: ${reopenCommand}`],
   };

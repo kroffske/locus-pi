@@ -7,6 +7,7 @@ import type {
 } from "../_shared/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
 import { formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
@@ -446,9 +447,6 @@ function isEnd(data: string): boolean {
 }
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === "object" && value !== null;

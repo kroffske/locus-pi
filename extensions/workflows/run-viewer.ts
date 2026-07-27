@@ -14,6 +14,7 @@ import {
   type WorkflowRunStatus,
 } from "../_shared/workflow-journal.js";
 import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+import { errorMessage } from "../_shared/error-text.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 const PI_HOST_FOOTER_ROWS = 3;
@@ -720,8 +721,4 @@ function asTheme(value: unknown): RunViewerTheme {
 
 function style(theme: RunViewerTheme, color: string, text: string): string {
   return typeof theme.fg === "function" ? theme.fg(color, text) : text;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

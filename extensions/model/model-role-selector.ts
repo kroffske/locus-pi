@@ -1,15 +1,8 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type {
-  CustomUiComponent,
-  CustomUiTui,
-  ModelLike,
-  ThinkingLevel,
-} from "../_shared/pi-api.js";
-import {
-  renderOperatorBlock,
-  type OperatorBlock,
-  type OperatorThemeLike,
-} from "../_shared/operator-ui.js";
+import { errorMessage } from "../_shared/error-text.js";
+import { isDown, isEnter, isEscape, isLeft, isPageDown, isPageUp, isRight, isUp } from "../_shared/operator-keys.js";
+import type { CustomUiComponent, CustomUiTui, ModelLike, ThinkingLevel } from "../_shared/pi-api.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
 import {
   formatAssignment,
   type ModelRoleAssignment,
@@ -157,8 +150,8 @@ export function modelEffortCapability(model: ModelLike | undefined): ModelEffort
   }
 
   if (Array.isArray(capability.thinking)) {
-    const advertised = capability.thinking.filter(
-      (level): level is ThinkingLevel => (THINKING_LEVELS as readonly string[]).includes(level),
+    const advertised = capability.thinking.filter((level): level is ThinkingLevel =>
+      (THINKING_LEVELS as readonly string[]).includes(level),
     );
     return {
       levels: [...new Set<ThinkingLevel>(["off", ...advertised])],
@@ -196,7 +189,9 @@ export function buildModelRows(
     const existing = rowsBySelector.get(selector);
     rowsBySelector.set(selector, existing ? preferredDuplicateRow(existing, row) : row);
   }
-  return [...rowsBySelector.values()].sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
+  return [...rowsBySelector.values()].sort(
+    (left, right) => left.rank - right.rank || left.label.localeCompare(right.label),
+  );
 }
 
 export function roleSummaries(state: ModelRolesState): RoleSummary[] {
@@ -249,8 +244,9 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     this.#done = options.done;
     this.#providers = [
       ALL_PROVIDER_FILTER,
-      ...[...new Set(options.rows.map((row) => row.provider).filter(Boolean))]
-        .sort((left, right) => left.localeCompare(right)),
+      ...[...new Set(options.rows.map((row) => row.provider).filter(Boolean))].sort((left, right) =>
+        left.localeCompare(right),
+      ),
     ];
   }
 
@@ -304,9 +300,10 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #operatorBlock(width: number): OperatorBlock {
     const current = this.#currentSelector ?? "unset";
-    const effort = this.#currentThinking === undefined
-      ? ""
-      : ` · effort ${semanticText(this.#theme, "warning", this.#currentThinking, true)}`;
+    const effort =
+      this.#currentThinking === undefined
+        ? ""
+        : ` · effort ${semanticText(this.#theme, "warning", this.#currentThinking, true)}`;
     const body = [
       this.#defaultRouteLine(),
       ...this.#routingLines(width),
@@ -342,7 +339,9 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       this.#filterLine(width),
       this.#rolesLine(width),
       `Models ${rows.length === 0 ? "0" : `${start + 1}-${end}`} of ${rows.length}`,
-      ...rows.slice(start, end).map((row, offset) => this.#modelRow(row, start + offset === this.#selectedIndex, width)),
+      ...rows
+        .slice(start, end)
+        .map((row, offset) => this.#modelRow(row, start + offset === this.#selectedIndex, width)),
     ];
   }
 
@@ -357,7 +356,10 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
         const marker = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
         const capability = width < 60 ? action.narrowCapability : action.capability;
         const role = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.tag, selected);
-        return truncateToWidth(`${marker} ${role} · ${semanticText(this.#theme, "dim", capability)}`, Math.max(1, width - 4));
+        return truncateToWidth(
+          `${marker} ${role} · ${semanticText(this.#theme, "dim", capability)}`,
+          Math.max(1, width - 4),
+        );
       }),
     ];
   }
@@ -396,10 +398,12 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     if (assigned.length === 0) return ["Routing roles: none"];
     return [
       "Routing roles:",
-      ...assigned.map((item) => truncateToWidth(
-        `  ${semanticText(this.#theme, "warning", item.tag, true)}=${semanticText(this.#theme, "warning", formatAssignment(item.assignment!), true)}`,
-        Math.max(1, width - 4),
-      )),
+      ...assigned.map((item) =>
+        truncateToWidth(
+          `  ${semanticText(this.#theme, "warning", item.tag, true)}=${semanticText(this.#theme, "warning", formatAssignment(item.assignment!), true)}`,
+          Math.max(1, width - 4),
+        ),
+      ),
     ];
   }
 
@@ -409,9 +413,11 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       const selected = semanticText(this.#theme, "success", `[${formatProvider(active)}]`, true);
       return `Provider filter ${this.#activeProviderIndex + 1}/${this.#providers.length}: ${selected}`;
     }
-    const filters = this.#providers.map((provider, index) => index === this.#activeProviderIndex
-      ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
-      : semanticText(this.#theme, "dim", formatProvider(provider)));
+    const filters = this.#providers.map((provider, index) =>
+      index === this.#activeProviderIndex
+        ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
+        : semanticText(this.#theme, "dim", formatProvider(provider)),
+    );
     return truncateToWidth(`Provider filters: ${filters.join("  ")}`, Math.max(1, width - 4));
   }
 
@@ -427,9 +433,10 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #modelRow(row: ModelRow, selected: boolean, width: number): string {
     const markers = [row.current ? "CURRENT" : "", ...row.roleTags].filter(Boolean);
-    const markerText = markers.length === 0
-      ? ""
-      : `${markers.map((marker) => semanticText(this.#theme, "warning", `[${marker}]`, true)).join(" ")} `;
+    const markerText =
+      markers.length === 0
+        ? ""
+        : `${markers.map((marker) => semanticText(this.#theme, "warning", `[${marker}]`, true)).join(" ")} `;
     const pointer = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
     const assigned = row.current || row.roleTags.length > 0;
     const selector = semanticText(this.#theme, assigned ? "warning" : "accent", row.selector, selected || assigned);
@@ -460,7 +467,14 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       if (row === undefined || action === undefined) return;
       this.#selectedAction = action;
       const levels = effortLevelsForModel(row.model);
-      this.#effortIndex = preferredEffortIndex(levels, this.#roleSummaries, action, row, this.#currentSelector, this.#currentThinking);
+      this.#effortIndex = preferredEffortIndex(
+        levels,
+        this.#roleSummaries,
+        action,
+        row,
+        this.#currentSelector,
+        this.#currentThinking,
+      );
       this.#stage = "effort";
       this.#receipt = undefined;
       this.#requestRender();
@@ -489,7 +503,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       this.#stage = applied.receipt.kind === "error" ? "effort" : "models";
       if (this.#stage === "models") this.#selectedAction = undefined;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       this.#receipt = { kind: "error", text: `Apply failed: ${message}` };
       this.#stage = "effort";
     } finally {
@@ -499,13 +513,15 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
   }
 
   #refreshRows(): void {
-    this.#rows = this.#rows.map((row, index) => {
-      const roleTags = this.#roleSummaries
-        .filter((role) => role.assignment?.model === row.selector)
-        .map((role) => role.tag);
-      const current = row.selector === this.#currentSelector;
-      return { ...row, roleTags, current, rank: modelRowRank(roleTags, current, index) };
-    }).sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
+    this.#rows = this.#rows
+      .map((row, index) => {
+        const roleTags = this.#roleSummaries
+          .filter((role) => role.assignment?.model === row.selector)
+          .map((role) => role.tag);
+        const current = row.selector === this.#currentSelector;
+        return { ...row, roleTags, current, rank: modelRowRank(roleTags, current, index) };
+      })
+      .sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
   }
 
   #restoreSelectedModel(selector: string): void {
@@ -576,7 +592,12 @@ export function createModelRoleSelectorTheme(theme: unknown): OperatorThemeLike 
   const fg = typeof candidate.fg === "function" ? candidate.fg : undefined;
   const bold = typeof candidate.bold === "function" ? candidate.bold : undefined;
   return {
-    ...(fg === undefined ? {} : { fg: (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) => String(fg.call(candidate, color, text)) }),
+    ...(fg === undefined
+      ? {}
+      : {
+          fg: (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) =>
+            String(fg.call(candidate, color, text)),
+        }),
     ...(bold === undefined ? {} : { bold: (text: string) => String(bold.call(candidate, text)) }),
   };
 }
@@ -610,9 +631,9 @@ function preferredDuplicateRow(left: ModelRow, right: ModelRow): ModelRow {
 }
 
 function assignedRoleTags(selector: string, state: ModelRolesState): string[] {
-  return MODEL_ROLE_ACTIONS
-    .filter((action) => state.effective.get(action.role)?.assignment?.model === selector)
-    .map((action) => action.tag);
+  return MODEL_ROLE_ACTIONS.filter((action) => state.effective.get(action.role)?.assignment?.model === selector).map(
+    (action) => action.tag,
+  );
 }
 
 function modelRowRank(roleTags: string[], current: boolean, originalIndex: number): number {
@@ -639,11 +660,12 @@ function preferredEffortIndex(
   currentThinking: ThinkingLevel | undefined,
 ): number {
   const assigned = summaries.find((summary) => summary.role === action.role)?.assignment;
-  const preferred = assigned?.model === row.selector
-    ? assigned.thinking
-    : action.appliesCurrentModel && currentSelector === row.selector
-      ? currentThinking
-      : "off";
+  const preferred =
+    assigned?.model === row.selector
+      ? assigned.thinking
+      : action.appliesCurrentModel && currentSelector === row.selector
+        ? currentThinking
+        : "off";
   const index = preferred === undefined ? -1 : levels.indexOf(preferred);
   return Math.max(0, index);
 }
@@ -675,36 +697,4 @@ function windowStart(selected: number, total: number, limit: number): number {
 function cycleIndex(index: number, delta: number, total: number): number {
   if (total <= 0) return 0;
   return (index + delta + total) % total;
-}
-
-function isEnter(data: string): boolean {
-  return data === "\r" || data === "\n";
-}
-
-function isEscape(data: string): boolean {
-  return data === "\x1b";
-}
-
-function isUp(data: string): boolean {
-  return data === "\x1b[A" || data === "\x1bOA" || data === "k";
-}
-
-function isDown(data: string): boolean {
-  return data === "\x1b[B" || data === "\x1bOB" || data === "j";
-}
-
-function isRight(data: string): boolean {
-  return data === "\x1b[C" || data === "\x1bOC" || data === "l";
-}
-
-function isLeft(data: string): boolean {
-  return data === "\x1b[D" || data === "\x1bOD" || data === "h";
-}
-
-function isPageDown(data: string): boolean {
-  return data === "\x1b[6~";
-}
-
-function isPageUp(data: string): boolean {
-  return data === "\x1b[5~";
 }

@@ -12,6 +12,7 @@ import {
 } from "../_shared/workflow-handoff.js";
 import { listWorkflowRunIds } from "../_shared/workflow-journal.js";
 import { resolveWorkflowTarget } from "../_shared/workflow-runner.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type {
   ActionableWorkflowHandoff,
   WorkflowHandoffLaunchResult,
@@ -169,10 +170,6 @@ function actionableWorkflowHandoff(handoff: WorkflowOperatorHandoffEnvelope): Ac
 function contextIdleWaiter(ctx: ExtensionContext): (() => Promise<void>) | undefined {
   const waitForIdle = (ctx as ExtensionContext & { waitForIdle?: () => Promise<void> }).waitForIdle;
   return typeof waitForIdle === "function" ? () => waitForIdle.call(ctx) : undefined;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function assertNever(value: never): never {

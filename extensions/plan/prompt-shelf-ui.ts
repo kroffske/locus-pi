@@ -8,6 +8,7 @@
  */
 
 import type { OperatorBlock } from "../_shared/operator-ui.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type { PromptShelfKind, PromptShelfTarget } from "./command-parser.js";
 
 export function promptShelfSummaryBlock(
@@ -107,7 +108,7 @@ export function promptShelfWarningBlock(
 }
 
 export function promptShelfErrorBlock(kind: PromptShelfKind, error: unknown, targetLabel: string): OperatorBlock {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   const command = promptShelfScopedCommand(kind, targetLabel);
   return {
     type: "ERROR",

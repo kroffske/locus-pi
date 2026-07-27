@@ -17,6 +17,7 @@ import {
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
 import type { AgentDefinition } from "../_shared/types.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
 import { resolveAgentSelection } from "./catalog.js";
 import type { CommandApprovalTier } from "./command-parser.js";
@@ -195,7 +196,7 @@ export async function executeAgentRunCommand(
       setOperatorWidget(ctx, AGENTS_WIDGET_KEY, agentRunBoundaryBlock(boundary));
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     if (hasUI) panel?.finish({ ok: false, error: message });
     else
       setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {

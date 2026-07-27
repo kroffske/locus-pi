@@ -12,6 +12,7 @@
 import type { OperatorBlock } from "../_shared/operator-ui.js";
 import { formatCurrentProjectTaskResolution, type CurrentProjectTaskResolution } from "../_shared/task-bridge.js";
 import type { TodoPhase } from "../_shared/todo-state.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { phasesToMarkdown } from "./markdown-checklist.js";
 import { findActiveTask } from "./phase-ops.js";
 
@@ -127,7 +128,7 @@ export function todoResultBlock(primary: string, metadata: string[] = [], subjec
 }
 
 export function todoErrorBlock(error: unknown): OperatorBlock {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return {
     type: "ERROR",
     subject: "Session todos",

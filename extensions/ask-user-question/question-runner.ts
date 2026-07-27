@@ -15,6 +15,7 @@ import {
 } from "../_shared/operator-interaction.js";
 import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, textResult } from "../_shared/pi-api.js";
+import { errorMessage } from "../_shared/error-text.js";
 import type { OmpAskParams } from "./ask-tool.js";
 import { askSingleQuestion, type AskNavigation, type AskSelection } from "./question-prompt.js";
 
@@ -74,7 +75,7 @@ export async function askOmpCompatible(
         askOptions,
       );
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       // Pi shows one inline surface at a time. Another prompt taking the screen
       // is normal traffic, not a broken tool: it is reported as its own
       // retryable status so the model re-asks instead of treating the question

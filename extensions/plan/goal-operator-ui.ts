@@ -2,6 +2,7 @@ import path from "node:path";
 import type { GoalOperationResult, GoalState } from "../_shared/goal-mode.js";
 import type { OperatorBlock, OperatorBadge } from "../_shared/operator-ui.js";
 import { projectDisplayPath } from "../_shared/prompt-command-store.js";
+import { errorMessage } from "../_shared/error-text.js";
 
 interface GoalBlockOptions {
   compact?: boolean;
@@ -117,7 +118,7 @@ export function goalOperationBlock(
 }
 
 export function goalErrorBlock(error: unknown): OperatorBlock {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return {
     type: "ERROR",
     subject: "Goal state",

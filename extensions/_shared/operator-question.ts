@@ -2,6 +2,7 @@ import { Input } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui, ExtensionContext } from "./pi-api.js";
 import { requestInlineOperatorInteraction, type InlineOperatorInteractionRequest } from "./operator-interaction.js";
 import { renderOperatorBlock, type OperatorThemeLike } from "./operator-ui.js";
+import { isCtrlC, isDown, isEnd, isEnter, isEscape, isHome, isLeft, isRight, isSpace, isUp } from "./operator-keys.js";
 
 const DEFAULT_CUSTOM_LABEL = "Other (type your own)";
 const RECOMMENDED_SUFFIX = " (Recommended)";
@@ -419,46 +420,6 @@ function displayOptionLabel(option: Pick<OperatorQuestionOption, "label" | "reco
   return option.recommended === true && !option.label.endsWith(RECOMMENDED_SUFFIX)
     ? `${option.label}${RECOMMENDED_SUFFIX}`
     : option.label;
-}
-
-function isEnter(data: string): boolean {
-  return data === "\r" || data === "\n";
-}
-
-function isSpace(data: string): boolean {
-  return data === " ";
-}
-
-function isEscape(data: string): boolean {
-  return data === "\x1b";
-}
-
-function isCtrlC(data: string): boolean {
-  return data === "\x03";
-}
-
-function isUp(data: string): boolean {
-  return data === "\x1b[A" || data === "\x1bOA" || data === "k";
-}
-
-function isDown(data: string): boolean {
-  return data === "\x1b[B" || data === "\x1bOB" || data === "j";
-}
-
-function isRight(data: string): boolean {
-  return data === "\x1b[C" || data === "\x1bOC" || data === "l";
-}
-
-function isLeft(data: string): boolean {
-  return data === "\x1b[D" || data === "\x1bOD" || data === "h";
-}
-
-function isHome(data: string): boolean {
-  return data === "\x1b[H" || data === "\x1bOH" || data === "g";
-}
-
-function isEnd(data: string): boolean {
-  return data === "\x1b[F" || data === "\x1bOF" || data === "G";
 }
 
 function operatorTheme(value: unknown): OperatorThemeLike | undefined {

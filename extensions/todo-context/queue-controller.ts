@@ -11,6 +11,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
 import type { TodoStateSnapshot } from "../_shared/todo-state.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { setTodoBlock } from "./operator-surface.js";
 import { todoChangeBlock, todoWarningBlock } from "./operator-ui.js";
 import { findActiveTask, findActiveTaskDetails } from "./phase-ops.js";
@@ -153,7 +154,7 @@ async function dispatchActiveTodo(
     return true;
   } catch (error) {
     await pauseAutonomousState(pi, ctx, current);
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     setTodoBlock(
       ctx,
       todoWarningBlock(

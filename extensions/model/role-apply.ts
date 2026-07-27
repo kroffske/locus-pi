@@ -14,6 +14,7 @@ import {
 } from "../_shared/model-settings.js";
 import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "../_shared/pi-api.js";
 import { getProjectRoot } from "../_shared/pi-api.js";
+import { errorMessage } from "../_shared/error-text.js";
 import {
   effortLevelsForModel,
   modelSelector,
@@ -83,7 +84,7 @@ export async function applyModelRole(
         }
       }
     } catch (error) {
-      applyError = error instanceof Error ? error.message : String(error);
+      applyError = errorMessage(error);
     }
   }
 
@@ -93,7 +94,7 @@ export async function applyModelRole(
     try {
       rolePersisted = await setModelRoleSetting(ctx, selection.action.role, assignment);
     } catch (error) {
-      rolePersistenceError = error instanceof Error ? error.message : String(error);
+      rolePersistenceError = errorMessage(error);
       rolePersisted = false;
     }
     customEntryAppended = await appendModelRoleEntry(

@@ -11,6 +11,7 @@ import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/mod
 import type { ExtensionAPI } from "../_shared/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
 import { validateParams } from "../_shared/validation.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
 import {
   DEFAULT_TASK_AGENT_NAME,
@@ -133,7 +134,7 @@ async function runTaskTool(
     // Agent/host crash mid-run: stop the spinner AND surface a visible error
     // instead of leaving the panel spinning forever (no silent vanish). finish()
     // disposes the live timer and doneLines() renders the "error: <msg>" line.
-    panel?.finish({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    panel?.finish({ ok: false, error: errorMessage(err) });
     throw err;
   } finally {
     if (hasUI) unpinTransientUiKey(pi, AGENTS_WIDGET_KEY);

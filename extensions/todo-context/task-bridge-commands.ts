@@ -21,6 +21,7 @@ import {
   type TaskBridgeSnapshot,
 } from "../_shared/task-bridge.js";
 import { tasksRoot, type ProjectTaskWorkspace } from "../_shared/tasks-store.js";
+import { errorMessage } from "../_shared/error-text.js";
 import { parseCompletionNoteInput } from "./command-parser.js";
 import { setTodoBlock } from "./operator-surface.js";
 import {
@@ -160,7 +161,7 @@ function resolveTaskWorkspace(projectRoot: string, task: TaskBridgeTask): Projec
 }
 
 function renderExplicitTaskFailure(ctx: ExtensionContext, action: string, taskId: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   setTodoBlock(
     ctx,
     todoWarningBlock(
