@@ -331,6 +331,24 @@ or borrowed runtime implementation was identified for this source-audit slice.
   the entry under `resources/`; runtime resolves, confines, snapshots, and
   hashes them. Repository/forge evidence remains child-session-owned. The
   review entry imports nothing and retains `self-contained-static` identity.
+- `extensions/workflows/examples/plan/plan.workflow.mjs` and
+  `extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs` are
+  the second curated pair and add no runtime primitive. `plan` is read-only end to
+  end: a shaped clarifier either continues or publishes exact `task.md` plus
+  readable `clarification-questions.md` and stops, and a drafter/critic pair then
+  loops on a declared `accept`/`revise` enum with the critic's exact defects
+  forwarded to the next round. Reaching the round cap without an acceptance
+  returns `ok:false`, which is also what keeps an unaccepted draft out of
+  implementation. `plan-implement` accepts semantic text plus host continuation
+  containing one complete `plan.md` ref; entry code requires the bytes to equal
+  the source run's terminal result, so a same-named draft from an earlier round of
+  the same run is refused. Deterministic code parses `### S<n>` blocks, a no-tool
+  selector chooses the steps, the plan's own order is restored, and one
+  write-capable session owns each step in the launch checkout with host-owned Git
+  fingerprints around every writer. A read-only checker and a fresh reporter
+  follow; a failed writer skips the remaining steps and the run returns
+  `partial: true`. Both entries import nothing and retain
+  `self-contained-static` identity.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner

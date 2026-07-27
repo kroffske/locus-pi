@@ -22,7 +22,14 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
+const EXPECTED_CURATED_PACKAGE_WORKFLOW_NAMES = [
+  "live-smoke",
+  "plan",
+  "plan-implement",
+  "requirements-grill",
+  "review",
+  "review-fix",
+] as const;
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -31,6 +38,8 @@ const PI_PACKAGES = [
 ] as const;
 const CURATED_PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
+  plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
+  "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
@@ -111,7 +120,7 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships exactly the five curated Package workflows and no forbidden paths", () => {
+  it("ships exactly the six curated Package workflows and no forbidden paths", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))

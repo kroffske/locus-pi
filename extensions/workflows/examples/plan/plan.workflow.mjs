@@ -21,10 +21,11 @@
 // Every stage is host-enforced read-only: planning reads the repository and
 // writes nothing to it. The only durable output is runtime-owned text.
 //
-// This is a tracked example, not a curated Package workflow: it is not in
-// CURATED_PACKAGE_WORKFLOW_NAMES, not in `package.json#files`, and not in
-// `public-repository.json`. Copy it under `.pi/workflows/` (or run it by path)
-// after reading it — workflow JavaScript executes with full Node.js host access.
+// This is a curated Package workflow: its name is in
+// CURATED_PACKAGE_WORKFLOW_NAMES, so `/workflow-run plan "<task>"` resolves it
+// without any project file. Workflow JavaScript is trusted local code with full
+// Node.js host access; every stage here is read-only, and the sibling
+// `plan-implement` is the one that writes.
 
 /** Prepended to every stage: one contract, one place to change it. */
 const COMMON = `You are one stage of the \`plan\` workflow, which turns one operator task into an
@@ -151,8 +152,7 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan",
-  description:
-    "Clarifies one operator task, then drafts and critiques an implementation plan until a critic accepts it.",
+  description: "Clarifies one task, then drafts and critiques a plan until the critic accepts it.",
   phases: [
     { title: "clarify-task", detail: "Persist the exact task and prepare the questions only an operator can answer." },
     { title: "consume-clarification", detail: "Verify the prior-run references and persist the operator's answers." },
@@ -685,9 +685,10 @@ function normalizeClarifierDecision(value) {
 }
 
 /**
- * Host-owned provenance for one continuation artifact. Unlike a curated Package
- * workflow, a tracked example can be launched by name or by path, so the target
- * check accepts either form of *this* workflow and nothing else.
+ * Host-owned provenance for one continuation artifact. A curated name resolves
+ * through the registry, but the same file can also be launched by path from a
+ * checkout, so the target check accepts either form of *this* workflow and
+ * nothing else.
  */
 function requirePrepareArtifact(consumed, sourceRef, expectedName, taskRef, questionsRef) {
   const source = consumed?.source;

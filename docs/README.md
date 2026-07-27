@@ -12,7 +12,7 @@ drafts and one-off artifacts are not part of this map.
 - `extensions/<name>/manifest.json` — machine-readable metadata for an
   extension: commands, tools, hooks, permissions, risk and review/source status.
 - [extension-index.md](extension-index.md) — public status index for the ten
-  retained active extensions and four curated workflows.
+  retained active extensions and six curated workflows.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
   promotion decisions. If an extension changes the default surface, the decision
   must show up there.
@@ -61,8 +61,9 @@ promotion decision says otherwise:
 ## Package Boundary
 
 The npm package intentionally ships only the ten default entrypoints and their
-explicit local import closure, the four curated Package workflows
-(`live-smoke`, `requirements-grill`, `review`, `review-fix`), active manifests, the
+explicit local import closure, the six curated Package workflows
+(`live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
+`review-fix`), active manifests, the
 bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.

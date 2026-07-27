@@ -18,8 +18,8 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                           |   309 |              0 |            0 |       0 | curated · npm package · public repository |
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                     |   876 |              2 |            2 |       5 | curated · npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                     |   696 |              0 |            1 |      10 | curated · npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                             |   748 |              0 |            2 |       4 | tracked only                              |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                     |   647 |              0 |            1 |       8 | tracked only                              |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                             |   754 |              0 |            2 |       4 | curated · npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                     |   648 |              0 |            1 |       8 | curated · npm package · public repository |
 | [`excalidraw-pipeline/excalidraw-pipeline.workflow.mjs`](./excalidraw-pipeline/excalidraw-pipeline.workflow.mjs) |   673 |              3 |            0 |       1 | tracked only                              |
 
 Three distribution levels, and they are independent:
@@ -27,18 +27,22 @@ Three distribution levels, and they are independent:
 - **Curated** means the name resolves through `/workflow-run <name>`. The
   registry is the explicit allowlist `CURATED_PACKAGE_WORKFLOW_NAMES` in
   [`extensions/_shared/workflow-runner.ts`](../../_shared/workflow-runner.ts) —
-  exactly `live-smoke`, `requirements-grill`, `review`, `review-fix`. **Living in
-  this directory registers nothing.**
+  exactly `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
+  `review-fix`. **Living in this directory registers nothing**, which is why
+  `excalidraw-pipeline` sits beside them and does not resolve by name.
 - **npm package** means the exact file is listed in `package.json#files`.
 - **Public repository** means the exact file is listed in `public-repository.json`.
   Both lists name regular files, never directories, so a new file under an
   already-public folder is not published implicitly.
 
-`plan`, `plan-implement`, and `excalidraw-pipeline` are tracked in Git and absent
-from all three. They are worked references: read them, copy them into
-`.pi/workflows/` (or run them by path), do not expect them to resolve by name.
-Workflow JavaScript is trusted local code with full Node.js host access, and
-`plan-implement` writes to the launch checkout — review a copy before running it.
+`excalidraw-pipeline` is tracked in Git and absent from all three. It is a
+worked reference for a long fan-out pipeline with a per-stage model pin; read it,
+copy from it, do not expect to run it by name.
+
+The registry is also the only route to "tracked **and** resolvable by name":
+every directory the resolver scans — `.pi/workflows/`, `.claude/workflows/`,
+`.agents/workflows/` — is git-ignored in this repository, so a copy placed there
+works on one machine and exists in no clone.
 
 Adding a curated workflow is not a file drop: registry, tests, package
 allowlist, manuals, support boundary, and changelog change together. See
@@ -145,5 +149,5 @@ generator, because an unwrapped strip renders as a 3:1–4:1 sliver whose text i
 unreadable at fit-to-window. Authored coordinates never change; only the
 transform moves them.
 
-`extensions/workflows/examples/plan`, `plan-implement`, and `excalidraw-pipeline`
-ship no diagram triple — the contract applies to curated workflows.
+`extensions/workflows/examples/excalidraw-pipeline` ships no diagram triple —
+the contract applies to curated workflows.

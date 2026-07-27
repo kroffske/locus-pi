@@ -78,8 +78,15 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      host's workflow DSL will not run here even if renamed. Port it to the DSL
      contract instead.
   3. personal `~/.pi/workflows/<name>.workflow.mjs`.
-  4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES`. Files under
-     `extensions/workflows/examples/` are not registered merely because they exist.
+  4. the curated Package registry in `CURATED_PACKAGE_WORKFLOW_NAMES` —
+     `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`, and
+     `review-fix`. Files under
+     `extensions/workflows/examples/` are not registered merely because they exist:
+     `plan` and `plan-implement` resolve by name because their names are in that
+     list, and `excalidraw-pipeline` sits in the same directory and does not.
+     Every directory in steps 1–3 above is git-ignored in this repository, so the
+     registry is also the only way a workflow can be both tracked and resolvable
+     by name.
      This repository's `locus-plan` and `test-code` workflows live in ignored
      `.pi/workflows/` only. They are project-local planning/testing dogfood, not
      tracked examples, curated Package workflows, or npm package files.

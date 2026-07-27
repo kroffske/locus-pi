@@ -16,7 +16,7 @@ this clean repository or the first public release.
 | `plan`                | active | high     | planning/mode/goal/review/todo prompt surfaces and the `goal` tool                   | `./extensions/plan/index.ts`                |
 | `security-gate`       | active | critical | `/security-audit` and an audit-only `tool_call` observer                             | `./extensions/security-gate/index.ts`       |
 | `todo-context`        | active | high     | `todo_write`, bounded settled continuation, and operator `/todo`                     | `./extensions/todo-context/index.ts`        |
-| `workflows`           | active | critical | `/workflows`, `workflow`, and the four curated Package workflows                     | `./extensions/workflows/index.ts`           |
+| `workflows`           | active | critical | `/workflows`, `workflow`, and the six curated Package workflows                      | `./extensions/workflows/index.ts`           |
 
 ## Curated Package workflows
 

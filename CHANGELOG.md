@@ -6,8 +6,8 @@ This file records user-visible changes to the public package.
 
 ### Added
 
-- **Two tracked workflow examples for planning and implementation:
-  `extensions/workflows/examples/plan/` and `examples/plan-implement/`.** The
+- **Two curated Package workflows for planning and implementation: `plan` and
+  `plan-implement`.** The
   authoring catalog described the loop shapes and the plan → build seam without
   shipping a runnable instance of either, so the only worked examples of a paused
   operator round and a cross-run artifact handoff were the review pair, which is
@@ -25,9 +25,20 @@ This file records user-visible changes to the public package.
   A failing writer skips the steps after it but still checks and reports, because
   the operator's working tree has already changed; that outcome returns
   `partial: true`, which the runner projects as a non-success.
-  Both are tracked examples only: they are absent from the curated registry, from
-  `package.json#files`, and from `public-repository.json`, so neither resolves by
-  name. `plan-implement` writes to the launch checkout — review a copy first.
+  Both names are in `CURATED_PACKAGE_WORKFLOW_NAMES`, so `/workflow-run plan` and
+  `/workflow-run plan-implement` resolve without any project file, and both ship
+  in `package.json#files` and `public-repository.json` with the diagram triple the
+  curated contract requires. The registry is the only route to a workflow that is
+  both tracked in the repository and resolvable by name: every directory the
+  resolver scans — `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/` —
+  is git-ignored, so a copy placed there works on one machine and exists in no
+  clone. The portfolio decision and its criteria are recorded in
+  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  Every `plan` stage is read-only; `plan-implement` writes to the launch checkout,
+  which is why it is a separate workflow the operator starts deliberately.
+  One name collision is deliberate and documented: the `plan` **workflow** is not
+  the `/plan` command of the `plan` extension and not the `plan` catalog agent.
+  They occupy different namespaces and nothing resolves across them.
 
 - **`/workflows result [runId|last]`** — the whole text a run finished with, in
   one command. Every finished-run surface is bounded deliberately: the chat digest

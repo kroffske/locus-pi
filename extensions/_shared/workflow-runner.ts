@@ -209,10 +209,19 @@ const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
 
 /** User-facing Package workflows are explicitly curated; other files are authoring/test fixtures. */
-export const CURATED_PACKAGE_WORKFLOW_NAMES = ["live-smoke", "requirements-grill", "review", "review-fix"] as const;
+export const CURATED_PACKAGE_WORKFLOW_NAMES = [
+  "live-smoke",
+  "plan",
+  "plan-implement",
+  "requirements-grill",
+  "review",
+  "review-fix",
+] as const;
 const CURATED_PACKAGE_WORKFLOW_NAME_SET = new Set<string>(CURATED_PACKAGE_WORKFLOW_NAMES);
 const CURATED_PACKAGE_WORKFLOW_RELATIVE_PATHS: Record<(typeof CURATED_PACKAGE_WORKFLOW_NAMES)[number], string> = {
   "live-smoke": "live-smoke.workflow.mjs",
+  plan: path.join("plan", "plan.workflow.mjs"),
+  "plan-implement": path.join("plan-implement", "plan-implement.workflow.mjs"),
   "requirements-grill": "requirements-grill.workflow.mjs",
   review: path.join("review", "review.workflow.mjs"),
   "review-fix": path.join("review-fix", "review-fix.workflow.mjs"),

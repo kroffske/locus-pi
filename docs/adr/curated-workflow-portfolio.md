@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27
 
 ## Decision
 
@@ -19,6 +19,8 @@ The accepted Package portfolio is:
 | `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
 | `review`             | Evidence-backed code review | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
 | `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
+| `plan`               | Task to accepted plan       | It turns one free-form task into an ordered plan no reader has to trust, because a read-only critic accepted it against the repository, and it stays read-only throughout.        |
+| `plan-implement`     | Accepted plan to changes    | It executes one host-verified plan with a writer per step in the plan's own order, then checks and reports independently of the writers.                                          |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
 evidence adapter. Since the 2026-07-26 amendment to
@@ -248,12 +250,66 @@ together. `public-repository.json` lists exact regular files rather than
 directories, so a future file below an already public folder is not selected
 implicitly.
 
+## Amendment 2026-07-27 — the portfolio grows to six with `plan` and `plan-implement`
+
+**The owner approved promoting both on 2026-07-27**, after they shipped as tracked
+examples and the catalog made the cost of that status concrete: every directory
+the resolver scans — `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`
+— is git-ignored, so a workflow that lives in the repository and resolves by name
+has exactly one route, and it is this registry. This paragraph is the approval
+record; there is no separate artifact.
+
+They are judged against the same five criteria as the rest of the portfolio.
+_Useful across repositories_: "turn a task into a plan" and "carry a plan out" are
+not project-specific, and neither reads a project-specific contract. _Stable
+bounded contract_: `plan` takes one semantic string and returns the accepted plan
+text; `plan-implement` takes one semantic string plus exactly one digest-bound
+`plan.md` reference and returns the report text. Every handoff, operator input,
+and consumed artifact is bounded, and every agent answer is bounded by its own
+call's `maxAnswerChars`. _Inspectable evidence_: the runtime owns `task.md`,
+`context.md`, one `plan.md` and one `plan-critique.json` per drafting round, then
+`step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
+`check-evidence.md`, and `implementation-report.md`, plus `captureSourceState`
+fingerprints around every writer. _Fails closed_: a plan the critic never accepted
+ends the run `ok:false`, which is also what keeps it out of implementation, since
+continuation consumes only a successful run's projected artifacts; a failed writer
+returns `partial: true`, which is projected as non-success. _Supportable permission
+posture_: every `plan` stage is `readOnly: true`, and in `plan-implement` only the
+per-step writers hold `write`/`edit`/`bash` while the selector holds no tools at
+all.
+
+The seam between them is the same one `review` → `review-fix` established, with
+one check added. `plan-implement` requires the consumed bytes to equal the source
+run's terminal result, not merely to carry the right name, stage, and digest —
+because `plan` writes one `plan.md` **per drafting round** under the same logical
+name, and only the last one was accepted. Name plus stage plus a valid digest
+would happily bind a draft the critic rejected. That check is deterministic and
+fatal: it is host-owned provenance about a prior run, which is exactly the class
+this ADR keeps outside the retry loop.
+
+Both entries follow the schema/`validate`/throw split the 2026-07-26 amendments
+settled. `plan`'s clarifier and critic and `plan-implement`'s step selector declare
+their counts, lengths, id patterns, enums, uniqueness and blankness in
+`agent({ schema })`; `clarifierDecisionErrors`, `planVerdictErrors`, and
+`stepSelectionErrors` carry the cross-field agreement, referential integrity
+against the host-parsed plan, and the summed budgets as `validate` callbacks that
+join the retry loop. What stays fatal is continuation provenance, prior-run text
+this run cannot re-ask for, and operator-input bounds.
+
+**Named residual risk.** `plan` is a curated workflow name that reads like the
+`plan` extension's `/plan` command and like the `plan` catalog agent. They occupy
+different namespaces and nothing resolves across them, but an operator reading
+`/workflow-run plan` next to `/plan` has to know that. The alternative — a longer
+name nobody would type — was judged worse than one documented collision.
+
 ## Consequences
 
-The Package surface grew from three to five names, and then back to four when
-`llm-smoke` retired with the primitive it proved (2026-07-21 amendment). It is
-not a general automation catalog. The two review-family names expose one
-deliberate sequence—question-led evidence, then a human-directed fix—while
+The Package surface grew from three to five names, back to four when `llm-smoke`
+retired with the primitive it proved (2026-07-21 amendment), and to six with the
+planning pair (2026-07-27 amendment). It is
+not a general automation catalog. The four non-diagnostic names expose two
+deliberate sequences — question-led evidence then a human-directed fix, and an
+accepted plan then a step-by-step implementation — while
 keeping source mutation uncommitted and deployment outside the workflow boundary.
 
 The remediation binding now covers the review artifact, not an editable path or a

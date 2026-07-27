@@ -5,8 +5,8 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 `~/.pi/workflows/` before running it. Workflow JavaScript executes with full
 Node.js host access and is not sandboxed.
 
-The only curated Package workflows are `live-smoke`, `requirements-grill`,
-`review`, and `review-fix`.
+The only curated Package workflows are `live-smoke`, `plan`, `plan-implement`,
+`requirements-grill`, `review`, and `review-fix`.
 
 ## Choose a shape
 
