@@ -6,6 +6,29 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **Two tracked workflow examples for planning and implementation:
+  `extensions/workflows/examples/plan/` and `examples/plan-implement/`.** The
+  authoring catalog described the loop shapes and the plan → build seam without
+  shipping a runnable instance of either, so the only worked examples of a paused
+  operator round and a cross-run artifact handoff were the review pair, which is
+  about reviewing. `plan` turns one operator task into an accepted plan through
+  two loops that fail differently: a clarification round that persists the exact
+  task plus readable questions, declares an operator handoff and stops, and a
+  draft/critique loop whose exit is the critic's shaped `accept`/`revise` verdict
+  rather than a scan of the draft. Reaching the round cap without an acceptance is
+  a failed run, which is also what keeps an unaccepted draft out of implementation.
+  `plan-implement` consumes the accepted `plan.md` through the host's closed
+  `continuation` control — proving it was the terminal result of a successful
+  `plan` run, not a same-named draft from an earlier round — parses its `S<n>`
+  step blocks deterministically, and gives each selected step one write-capable
+  agent in the plan's own order, followed by independent checks and a fresh report.
+  A failing writer skips the steps after it but still checks and reports, because
+  the operator's working tree has already changed; that outcome returns
+  `partial: true`, which the runner projects as a non-success.
+  Both are tracked examples only: they are absent from the curated registry, from
+  `package.json#files`, and from `public-repository.json`, so neither resolves by
+  name. `plan-implement` writes to the launch checkout — review a copy first.
+
 - **`/workflows result [runId|last]`** — the whole text a run finished with, in
   one command. Every finished-run surface is bounded deliberately: the chat digest
   caps a line at 160 characters because it enters model context, and the live
@@ -214,6 +237,28 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **`review` asks its questions in assessed rounds, and every question id now
+  carries its question.** Interrogation was one call: whatever the first reader
+  thought of was the whole question set, and nothing ever checked whether a risk
+  had gone unasked. It is now a bounded loop. After each round a separate
+  read-only assessor reopens the units and the real code and returns the shaped
+  verdict `{decision, gaps}` — `complete`, or `more_questions_needed` with up to
+  eight concrete places where a reviewer could still be wrong and no question
+  would catch it. Script code branches on that enum and hands the gap sentences
+  to the next round verbatim; it never scans the interrogator's Markdown. Each
+  round returns the complete question set rather than a delta, so the workflow
+  still forwards one exact document, and every round is retained as its own
+  `questions.md` plus the `question-coverage.json` that judged it. The loop is
+  capped at three rounds and the last round is not assessed — a gap reported then
+  would have no round left to close it — and the run journal records whether the
+  assessor or the cap stopped it.
+  Separately, `review.md` no longer refers to questions by id alone. `U2-Q3` is
+  unreadable to someone who does not have `questions.md` open, so the verifier
+  now quotes the interrogator's wording wherever it emits an id: in each finding's
+  `Question:` line, under each resolution heading, and in the coverage ledger. The
+  interrogator does the same in its reconciliation, withdrawals, and gap notes,
+  and the clarification handoff carries each question's id together with its full
+  prompt.
 - **A workflow run now reads as one run in the session transcript.** Two runs of
   the same workflow used to arrive as two identical, undelimited blocks titled
   `[locus-workflow-event]` — a name that says neither what the block is nor when

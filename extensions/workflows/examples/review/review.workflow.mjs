@@ -44,6 +44,14 @@ const REVIEW_AGENT_DEFAULTS = Object.freeze({
 });
 
 const MAX_INTENT_CHARS = 16_000;
+/** Interrogation is a loop, not a single call: each round may add questions the
+ *  previous one could not see, and a coverage assessor decides between rounds
+ *  whether another one is worth paying for. The cap is the safety net; the
+ *  assessor is the measured exit, and the run records which of the two stopped it. */
+const MAX_QUESTION_ROUNDS = 3;
+const MAX_QUESTION_GAPS = 8;
+const MAX_QUESTION_GAP_CHARS = 400;
+const MAX_ALL_QUESTION_GAPS_CHARS = 2_000;
 const MAX_CLARIFIER_PROMPT_CHARS = 500;
 const MAX_CLARIFIER_OPTION_CHARS = 200;
 const MAX_CLARIFIER_QUESTIONS = 8;
@@ -105,6 +113,33 @@ const CLARIFIER_SCHEMA = freezeSchema({
   },
 });
 
+/**
+ * The interrogation loop's exit condition, declared rather than guessed. The
+ * script must branch on "is another question round worth paying for", and the
+ * only honest way to branch is a shaped answer: `complete` with nothing left, or
+ * `more_questions_needed` with the concrete gaps the next round must close.
+ *
+ * `gaps` are free-text descriptions of a missing question, not ids: nothing in
+ * this script parses them, they are handed to the next interrogator round as the
+ * exact text the assessor wrote. Uniqueness and blankness are keywords; the two
+ * rules that depend on the sibling `decision` field, and the budget summed across
+ * gaps, are `questionCoverageErrors` below.
+ */
+const QUESTION_COVERAGE_SCHEMA = freezeSchema({
+  type: "object",
+  additionalProperties: false,
+  required: ["decision", "gaps"],
+  properties: {
+    decision: { type: "string", enum: ["complete", "more_questions_needed"] },
+    gaps: {
+      type: "array",
+      maxItems: MAX_QUESTION_GAPS,
+      uniqueTrimmedItems: true,
+      items: { type: "string", nonBlank: true, maxLength: MAX_QUESTION_GAP_CHARS },
+    },
+  },
+});
+
 function freezeSchema(value) {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) freezeSchema(child);
@@ -132,7 +167,10 @@ export const meta = {
     { title: "resolve-scope", detail: "Turn the exact intent and clarification into one review scope." },
     { title: "inventory-changes", detail: "Prove complete coverage of the changed surface." },
     { title: "plan-units", detail: "Group the inventory into atomic units of meaning." },
-    { title: "ask-questions", detail: "Write falsifiable review questions per unit, without answering them." },
+    {
+      title: "ask-questions",
+      detail: "Loop: write falsifiable review questions per unit, then assess whether another round is needed.",
+    },
     { title: "verify-review", detail: "Reopen the evidence, answer the questions, and author review.md." },
   ],
 };
@@ -279,6 +317,46 @@ function clarifierDecisionErrors(value) {
     );
   }
   return errors;
+}
+
+/**
+ * The interrogation loop's counterpart to `clarifierDecisionErrors`, and the same
+ * three-tier split: `maxItems`, `maxLength`, `nonBlank`, and `uniqueTrimmedItems`
+ * are declared in `QUESTION_COVERAGE_SCHEMA`; what is left here needs a fact no
+ * keyword has — agreement between `decision` and `gaps`, and a budget summed
+ * across gaps. Unlike the clarifier's combined-prompt budget, this one is
+ * reachable: eight 400-character gaps are schema-valid and exceed the 2,000
+ * combined characters, so the sum is a real rule the assessor is re-asked about
+ * rather than arithmetic that can never fire.
+ *
+ * It accumulates, never throws, and never transforms — a violation is handed back
+ * to the assessor in its own repair block instead of ending a run that has already
+ * paid for scope, inventory, units, and at least one question round.
+ */
+function questionCoverageErrors(value) {
+  const { decision, gaps } = value;
+  const errors = [];
+  if (decision === "complete") {
+    if (gaps.length !== 0) {
+      errors.push(`gaps: expected 0 item(s) when decision is "complete", got ${gaps.length}`);
+    }
+    return errors;
+  }
+  if (gaps.length < 1) {
+    errors.push('gaps: expected at least 1 item(s) when decision is "more_questions_needed", got 0');
+  }
+  // `String.prototype.trim`, the same canonicalization `nonBlank` and
+  // `uniqueTrimmedItems` apply in the schema and `renderQuestionGaps` applies below.
+  const allGapChars = gaps.reduce((total, gap) => total + gap.trim().length, 0);
+  if (allGapChars > MAX_ALL_QUESTION_GAPS_CHARS) {
+    errors.push(`gaps: expected at most ${MAX_ALL_QUESTION_GAPS_CHARS} combined character(s), got ${allGapChars}`);
+  }
+  return errors;
+}
+
+/** Numbered so the next interrogator round can answer them one by one. */
+function renderQuestionGaps(gaps) {
+  return gaps.map((gap, index) => `${index + 1}. ${gap.trim()}`).join("\n");
 }
 
 /**
@@ -651,21 +729,116 @@ ${inventoryText}
   );
 
   phase("ask-questions");
-  log("Formulating falsifiable questions for every review unit.");
-  // Escape hatch, exactly as the authoring rule describes it: this role charter
-  // is long enough that inlining it would bury the routing between the stages.
-  const questionsPrompt = await promptFile("./resources/interrogator.prompt.md", {
-    INTENT_TEXT: intentText,
-    SCOPE_TEXT: scopeText,
-    INVENTORY_TEXT: inventoryText,
-    UNITS_TEXT: unitsText,
-  });
-  const questionsText = await agent(questionsPrompt, {
-    ...REVIEW_NAVIGATE_OPTIONS,
-    label: "ask review questions",
-    artifact: "questions.md",
-    maxAnswerChars: MAX_QUESTIONS_CHARS,
-  });
+  log("Formulating falsifiable questions for every review unit, one assessed round at a time.");
+  let questionsText = "";
+  let gapsText = "(none; this is the first round)";
+  let stoppedBy = "round-cap";
+  for (let round = 1; round <= MAX_QUESTION_ROUNDS; round += 1) {
+    // Escape hatch, exactly as the authoring rule describes it: this role charter
+    // is long enough that inlining it would bury the routing between the stages.
+    // The loader snapshots and hashes it once, so re-rendering it per round adds
+    // one rendering, not one more piece of prompt evidence.
+    const questionsPrompt = await promptFile("./resources/interrogator.prompt.md", {
+      INTENT_TEXT: intentText,
+      SCOPE_TEXT: scopeText,
+      INVENTORY_TEXT: inventoryText,
+      UNITS_TEXT: unitsText,
+      ROUND_NUMBER: String(round),
+      ROUND_CAP: String(MAX_QUESTION_ROUNDS),
+      PRIOR_QUESTIONS_TEXT: round === 1 ? "(none; this is the first round)" : questionsText,
+      COVERAGE_GAPS_TEXT: gapsText,
+    });
+    // Every round returns the COMPLETE question set — prior questions repeated
+    // verbatim under their own ids, plus whatever this round adds. The workflow
+    // therefore never merges two model documents into one, and the last round's
+    // exact text is the handoff. Rounds share the `questions.md` name on purpose:
+    // the artifact id is the identity, so the index keeps every round separately
+    // while the reader-facing name still says what the document is.
+    questionsText = await agent(questionsPrompt, {
+      ...REVIEW_NAVIGATE_OPTIONS,
+      label: `ask review questions round ${round}`,
+      artifact: "questions.md",
+      maxAnswerChars: MAX_QUESTIONS_CHARS,
+    });
+    if (round === MAX_QUESTION_ROUNDS) break;
+
+    const coverage = await agent(
+      `${COMMON}
+
+${AST_INDEX_NOTE}
+
+TASK — decide whether the review questions below are complete, or whether one
+more interrogation round is needed. You are the coverage assessor, not an
+interrogator and not a reviewer.
+
+Reopen the units and the real code they name, then judge the question set as a
+whole. Ask yourself only this: is there a place in the changed surface where a
+reviewer could still be wrong, and no question would catch it? Do not answer the
+existing questions, do not write findings, do not rewrite a question you think
+is poorly worded, and do not ask for more questions merely to be thorough — a
+unit that carries no real risk is allowed to have one question or none.
+
+Return one JSON value only. When the set already covers the material risk:
+
+\`\`\`json
+{ "decision": "complete", "gaps": [] }
+\`\`\`
+
+When another round is needed, name what is missing, not what to write:
+
+\`\`\`json
+{
+  "decision": "more_questions_needed",
+  "gaps": ["<unit or path>: <the risk no existing question could falsify>"]
+}
+\`\`\`
+
+Use at most ${MAX_QUESTION_GAPS} gaps of ${MAX_QUESTION_GAP_CHARS} characters
+each, ${MAX_ALL_QUESTION_GAPS_CHARS} characters combined. Each gap must be a
+distinct, concrete place a question is missing, so the next round can close it
+without guessing what you meant.
+
+This is round ${round} of at most ${MAX_QUESTION_ROUNDS}; the round after the
+last one never runs, so a gap you report late is a gap the review may keep.
+
+--- BEGIN EXACT OPERATOR INTENT ---
+${intentText}
+--- END EXACT OPERATOR INTENT ---
+
+--- BEGIN REVIEW SCOPE ---
+${scopeText}
+--- END REVIEW SCOPE ---
+
+--- BEGIN ORIGINAL CHANGE INVENTORY ---
+${inventoryText}
+--- END ORIGINAL CHANGE INVENTORY ---
+
+--- BEGIN REVIEW UNITS ---
+${unitsText}
+--- END REVIEW UNITS ---
+
+--- BEGIN REVIEW QUESTIONS SO FAR ---
+${questionsText}
+--- END REVIEW QUESTIONS SO FAR ---`,
+      {
+        ...REVIEW_NAVIGATE_OPTIONS,
+        label: `assess question coverage round ${round}`,
+        artifact: "question-coverage.json",
+        schema: QUESTION_COVERAGE_SCHEMA,
+        validate: questionCoverageErrors,
+      },
+    );
+    if (coverage.decision === "complete") {
+      stoppedBy = "assessor";
+      log(`Question round ${round} was assessed complete; interrogation stops here.`);
+      break;
+    }
+    gapsText = renderQuestionGaps(coverage.gaps);
+    log(`Question round ${round} left ${coverage.gaps.length} coverage gap(s); asking one more round.`);
+  }
+  if (stoppedBy === "round-cap") {
+    log(`Interrogation stopped at the ${MAX_QUESTION_ROUNDS}-round cap rather than at an assessed complete set.`);
+  }
 
   phase("verify-review");
   log("Independently verifying the questions and writing the review.");

@@ -30,7 +30,7 @@ const bandX = (x) => (inBand2(x) ? x + BAND_DX : x);
 const bandY = (x, y) => (inBand2(x) ? y + BAND_DY : y);
 
 const LANE_X = 40;
-const LANE_WIDTH = 2720;
+const LANE_WIDTH = 3260;
 const LANE_LABEL_WIDTH = 400;
 
 const COLORS = {
@@ -214,7 +214,7 @@ const lane = (title, subtitle, y, height, color, fill) => {
   }
 };
 
-scene.text(LANE_X, 20, "Curated review workflow — agent-decided clarification and five read-only review stages", {
+scene.text(LANE_X, 20, "Curated review workflow — agent-decided clarification and six read-only review stages", {
   size: 29,
   width: LANE_WIDTH,
   align: "center",
@@ -222,7 +222,7 @@ scene.text(LANE_X, 20, "Curated review workflow — agent-decided clarification 
 scene.text(
   LANE_X,
   61,
-  "One semantic string enters the workflow. A shaped read-only clarifier either continues immediately or pauses with intent.md + clarification-questions.md; a later host-verified continuation supplies those two refs and text answers before the same coverage-reconciled review chain.",
+  "One semantic string enters the workflow. A shaped read-only clarifier either continues immediately or pauses with intent.md + clarification-questions.md; a later host-verified continuation supplies those two refs and text answers before the same coverage-reconciled review chain, whose interrogation repeats until a shaped assessor calls it complete.",
   {
     size: 15,
     color: COLORS.muted,
@@ -319,7 +319,7 @@ lane(
 );
 lane(
   "FULL AGENT SESSIONS",
-  "One shaped clarifier on fresh input, then one linear review chain; every agent is read-only.",
+  "One shaped clarifier on fresh input, then a review chain whose interrogation repeats; every agent is read-only.",
   750,
   340,
   COLORS.agent,
@@ -457,7 +457,7 @@ const questionsAgent = agentNode(
   [
     "catalog default · label: plan review units",
     "Groups material decisions; owns every C id once",
-    "Workflow validates exact-once C<n> ledger",
+    "Coverage ids are prompt discipline, not a host gate",
     "Returns exact unitsText",
   ],
   "agent_debate",
@@ -469,9 +469,9 @@ const questionsAgent = agentNode(
 
 const launchVerify = workflowNode(
   "launch-agent-r4",
-  "Workflow: launch Agent R3",
+  "Workflow: launch Agent R3 rounds",
   [
-    "phase ask-questions",
+    "phase ask-questions · at most MAX_QUESTION_ROUNDS",
     "Renders resources/interrogator.prompt.md charter",
     "readOnly + ast_index, grep/find fallback",
   ],
@@ -486,13 +486,44 @@ const verifyAgent = agentNode(
   "agent-r4",
   "Agent: R3 — interrogator",
   [
-    "catalog default · label: ask review questions",
+    "catalog default · label: ask review questions round <n>",
     "Reconciles inventory C ids against units",
     "Asks falsifiable questions; answers none",
-    "Workflow validates coverage section",
+    "Returns the COMPLETE set every round",
   ],
   "model_validation",
   3270,
+  815,
+  410,
+  195,
+);
+
+const launchCoverage = workflowNode(
+  "launch-agent-r3c",
+  "Workflow: assess the round, then loop or leave",
+  [
+    "phase ask-questions · same phase as the round it judges",
+    "Inline task under COMMON + AST_INDEX_NOTE",
+    "Branches on decision; last round is never assessed",
+  ],
+  "function_router",
+  3840,
+  470,
+  390,
+  145,
+);
+
+const coverageAgent = agentNode(
+  "agent-r3c",
+  "Agent: R3c — question-coverage assessor",
+  [
+    "catalog default · label: assess question coverage round <n>",
+    "QUESTION_COVERAGE_SCHEMA {decision, gaps[]}",
+    "Reopens the code; never answers a question",
+    "Workflow branches on the enum, never on prose",
+  ],
+  "model_validation",
+  3830,
   815,
   410,
   195,
@@ -503,7 +534,7 @@ const launchPublish = workflowNode(
   "Workflow: launch Agent R4",
   ["phase verify-review", "Renders resources/verifier.prompt.md charter", "readOnly + ast_index, grep/find fallback"],
   "multi_agent_orchestrator",
-  3840,
+  4400,
   470,
   390,
   145,
@@ -519,7 +550,7 @@ const publishAgent = agentNode(
     "Runtime persists exact answer as review.md",
   ],
   "prompt_template",
-  3830,
+  4390,
   815,
   410,
   215,
@@ -530,7 +561,7 @@ const mapFinalResult = workflowNode(
   "Workflow: return Agent R4 exact text",
   ["No JSON/status parse", "review.md contains the same exact bytes", "Reference remains in artifact index"],
   "function_router",
-  4400,
+  4960,
   470,
   390,
   145,
@@ -541,7 +572,7 @@ const humanEdit = operatorNode(
   "Operator: inspect review.md",
   "Use the run viewer, then pass its\ncomplete reference to remediation",
   "human_review",
-  4880,
+  5440,
   240,
   440,
   110,
@@ -549,10 +580,10 @@ const humanEdit = operatorNode(
 
 const sourceFile = artifactNode(
   "source-file",
-  "Artifact: review.workflow.mjs\n(inline COMMON + 4 stage tasks)\n+ 2 resources/*.prompt.md charters",
+  "Artifact: review.workflow.mjs\n(inline COMMON + 5 stage tasks)\n+ 2 resources/*.prompt.md charters",
   [
     "String + continuation routing in the entry",
-    "Inline COMMON contract + 4 stage tasks;\nR3/R4 charters are prompt files",
+    "Inline COMMON contract + 5 stage tasks;\nR3/R4 charters are prompt files",
     "phase() and log() name every stage",
   ],
   "prompt_template",
@@ -582,7 +613,8 @@ const supportingFiles = artifactNode(
   "Artifact: runtime-owned named stage answers",
   [
     "intent.md, clarifier-decision.json, scope.md,",
-    "inventory.md, units.md, questions.md, answers",
+    "inventory.md, units.md, one questions.md +",
+    "question-coverage.json per round, answers",
     "Runtime-owned below <runId>/artifacts/",
     "Indexed with digest and provenance",
   ],
@@ -613,7 +645,7 @@ const reportFile = artifactNode(
     "Exact R4 text; digest stored in the index",
   ],
   "news_document",
-  4880,
+  5440,
   1200,
   460,
   175,
@@ -628,7 +660,7 @@ const resultFile = artifactNode(
     "Child metadata stays separate",
   ],
   "data_catalog",
-  4400,
+  4960,
   1200,
   380,
   175,
@@ -648,6 +680,8 @@ const nodes = [
   questionsAgent,
   launchVerify,
   verifyAgent,
+  launchCoverage,
+  coverageAgent,
   launchPublish,
   publishAgent,
   mapFinalResult,
@@ -790,7 +824,18 @@ launchEdge("launch-to-agent-r3", launchQuestions, questionsAgent, "scopeText + i
 handoffEdge("agent-r3-to-launch-r4", questionsAgent, launchVerify, "exact unitsText");
 
 launchEdge("launch-to-agent-r4", launchVerify, verifyAgent, "scopeText + inventoryText\n+ unitsText");
-handoffEdge("agent-r4-to-launch-r5", verifyAgent, launchPublish, "exact questionsText");
+// The interrogation loop: R3 asks, R3c assesses, and only a `complete` decision
+// or the round cap lets the exact questionsText leave for R4.
+handoffEdge("agent-r4-to-launch-r3c", verifyAgent, launchCoverage, "exact questionsText\nof round n");
+launchEdge("launch-to-agent-r3c", launchCoverage, coverageAgent, "questionsText + units");
+connect("agent-r3c-to-launch-r4", coverageAgent, launchVerify, {
+  direction: "right-to-left",
+  label: "more_questions_needed: exact gaps[] start round n+1",
+  labelWidth: 210,
+  from: { side: "left", slot: 0.2 },
+  to: { side: "bottom", slot: 0.8 },
+});
+handoffEdge("agent-r3c-to-launch-r5", coverageAgent, launchPublish, "complete or round cap:\nexact questionsText");
 
 connect("launch-to-agent-r5", launchPublish, publishAgent, {
   direction: "top-down",
@@ -844,7 +889,7 @@ const health = assertDiagramHealthy({
   })),
   edges,
   gap: 8,
-  renderBounds: new Bounds(0, 0, 2820, 2810),
+  renderBounds: new Bounds(0, 0, 3400, 2810),
   sceneBounds: scene.bounds(),
 });
 

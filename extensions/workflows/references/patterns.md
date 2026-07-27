@@ -213,7 +213,10 @@ Rules that make the shape work:
 
 Runnable examples to adapt: `extensions/workflows/examples/review/` and
 `extensions/workflows/examples/review-fix/`, with the reader algorithm in
-`examples/review/README.md`.
+`examples/review/README.md`. For the same shape with loops inside it — an
+operator clarification round that pauses the run, and a draft/critique loop that
+exits on a shaped verdict — read the tracked pair
+`extensions/workflows/examples/plan/` and `examples/plan-implement/`.
 
 ## Writing one stage task
 
@@ -608,6 +611,18 @@ first child call, so it cannot burn the retry budget and surface as an
 unexplained exhaustion.
 
 ## Bounded loop plus judge
+
+Two shipped loops use this shape: `review`'s interrogation rounds and `plan`'s
+drafting rounds. Both follow the same three rules —
+
+1. the judge returns a **declared enum** plus the concrete gaps or defects that
+   justify another round, never prose the script greps;
+2. each round returns the **complete document**, so the script forwards one text
+   instead of merging several, and the judge's free text reaches the next round
+   verbatim;
+3. the result records **which condition stopped the loop** — the judge's verdict
+   or the round cap — because those two outcomes mean different things to whoever
+   reads the run.
 
 ```js
 const maxRounds = 3;

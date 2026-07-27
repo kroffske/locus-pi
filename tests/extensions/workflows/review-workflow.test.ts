@@ -175,6 +175,12 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain("function clarifierDecisionErrors");
     expect(source).toContain("function normalizeClarifierDecision");
     expect(source).toContain("validate: clarifierDecisionErrors");
+    // The interrogation loop's exit condition is a declared shape plus a
+    // cross-field callback, never a scan of the interrogator's Markdown.
+    expect(source).toContain("QUESTION_COVERAGE_SCHEMA");
+    expect(source).toContain("function questionCoverageErrors");
+    expect(source).toContain("validate: questionCoverageErrors");
+    expect(source).toContain("const MAX_QUESTION_ROUNDS = 3");
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
     expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
@@ -202,7 +208,7 @@ describe("workflow example: review.workflow.mjs", () => {
     }
   });
 
-  it("keeps the four short stage tasks inline under one COMMON contract", () => {
+  it("keeps the five short stage tasks inline under one COMMON contract", () => {
     const source = readFileSync(workflowPath, "utf8");
     const resources = path.join(path.dirname(workflowPath), "resources");
 
@@ -215,8 +221,10 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source.match(/promptFile\("\.\/resources\//gu)).toHaveLength(2);
 
     expect(source).toContain("const COMMON = ");
-    // One shared contract, prepended by each of the four inline stages.
-    expect(source.match(/^\s*`\$\{COMMON\}$/gmu)).toHaveLength(4);
+    // One shared contract, prepended by each of the five inline stages: the
+    // clarifier, the scope resolver, the inventory, the unit planner, and the
+    // question-coverage assessor that decides whether interrogation runs again.
+    expect(source.match(/^\s*`\$\{COMMON\}$/gmu)).toHaveLength(5);
     expect(source).toContain("This stage is host-enforced read-only.");
     expect(source).toContain("You have no shell");
 
@@ -241,12 +249,13 @@ describe("workflow example: review.workflow.mjs", () => {
       expect(prompt, name).toMatch(/A missing AST Index never blocks a\s+review\./u);
       expect(prompt, name).toMatch(/continue with\s+`grep`, `find`, and direct reads/u);
     }
-    // Inline, the same guidance is one constant used by the one navigating stage
-    // that moved into the script; the clarifier, scope, and inventory stages
-    // must not receive it.
+    // Inline, the same guidance is one constant used by the two navigating stages
+    // written in the script — the unit planner and the question-coverage assessor,
+    // both of which reason about symbols. The clarifier, scope, and inventory
+    // stages must not receive it.
     expect(source).toContain("const AST_INDEX_NOTE = ");
     expect(source).toMatch(/A missing AST Index never blocks a\s+review\./u);
-    expect(source.match(/\$\{AST_INDEX_NOTE\}/gu)).toHaveLength(1);
+    expect(source.match(/\$\{AST_INDEX_NOTE\}/gu)).toHaveLength(2);
   });
 
   it("requires a reachable path, root-cause dedup, and concern-relative answers from the verifier", () => {
@@ -257,6 +266,44 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(verifier).toMatch(/Missing defence in depth is not a defect/u);
     expect(verifier).toMatch(/Deduplicate by root cause before writing findings/u);
     expect(verifier).toMatch(/never `Rejected` for a question whose answer produced a finding/u);
+  });
+
+  it("makes every question id carry its question in both question-writing roles", () => {
+    // The reader complaint this answers: a review that says `U2-Q3` and nothing
+    // else is unreadable on its own, because the question document is a separate
+    // artifact. Both roles that emit an id must emit the question beside it.
+    const interrogator = promptSource("interrogator.prompt.md");
+    const verifier = promptSource("verifier.prompt.md");
+
+    expect(interrogator).toContain("## Every question id carries its question");
+    expect(interrogator).toMatch(/Wherever an id\s+appears outside its own `## U<n>-Q<n>` block/u);
+    expect(interrogator).toContain("C1: U1; U1-Q1 (Can every direct caller of `run` handle the new null result?)");
+
+    expect(verifier).toContain("## Every question id carries its question");
+    expect(verifier).toMatch(/every\s+place an id appears, the question appears with it/u);
+    expect(verifier).toMatch(/do not paraphrase it/u);
+    // The two templates a reader actually sees: a finding and a resolution.
+    expect(verifier).toContain("Question: `U1-Q1` — Can every direct caller of `run` handle the new null result?");
+    expect(verifier).toMatch(
+      /### U1-Q1\nQuestion: Can every direct caller of `run` handle the new null result\?\nAnswer:/u,
+    );
+    expect(verifier).toMatch(/each with\s+its own `Question:` line quoting the interrogator's wording/u);
+  });
+
+  it("asks the interrogator for the complete set every round and forbids a silent drop", () => {
+    const interrogator = promptSource("interrogator.prompt.md");
+
+    expect(interrogator).toContain("{{ROUND_NUMBER}}");
+    expect(interrogator).toContain("{{ROUND_CAP}}");
+    expect(interrogator).toContain("{{PRIOR_QUESTIONS_TEXT}}");
+    expect(interrogator).toContain("{{COVERAGE_GAPS_TEXT}}");
+    // The loop only works because each round returns a whole document: the
+    // workflow forwards the last round's exact text and never merges two of them.
+    expect(interrogator).toMatch(/\*\*Return the complete question set every round, never a delta\.\*\*/u);
+    expect(interrogator).toMatch(/Repeat every\s+question from the previous round verbatim/u);
+    expect(interrogator).toMatch(/a question you leave out is a question\s+nobody answers/u);
+    expect(interrogator).toContain("## Withdrawn questions");
+    expect(interrogator).toContain("## Gaps not closed");
   });
 
   it("carries stable inventory coverage ids through interrogation and final verification", () => {
@@ -297,13 +344,14 @@ describe("workflow example: review.workflow.mjs", () => {
       "resolve review scope": "  # Review Scope\nTarget: `origin/main...HEAD`\n",
       "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
       "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
-      "ask review questions": [
+      "ask review questions round 1": [
         "# Review Questions",
         "## U1-Q1",
         "Question: Does it hold?",
         "## Coverage reconciliation",
-        "C1: U1-Q1",
+        "C1: U1; U1-Q1 (Does it hold?)",
       ].join("\n"),
+      "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
       "verify and write review": [
         "# Code Review",
         "## Verdict",
@@ -326,7 +374,8 @@ describe("workflow example: review.workflow.mjs", () => {
       "resolve review scope",
       "inventory changes",
       "plan review units",
-      "ask review questions",
+      "ask review questions round 1",
+      "assess question coverage round 1",
       "verify and write review",
     ]);
     expect(calls.every((call) => call.readOnly === true)).toBe(true);
@@ -337,12 +386,14 @@ describe("workflow example: review.workflow.mjs", () => {
       "inventory-changes",
       "plan-units",
       "ask-questions",
+      "ask-questions",
       "verify-review",
     ]);
     expect(calls[2]?.prompt).toContain(outputs["resolve review scope"]);
     expect(calls[3]?.prompt).toContain(outputs["inventory changes"]);
     expect(calls[4]?.prompt).toContain(outputs["plan review units"]);
-    expect(calls[5]?.prompt).toContain(outputs["ask review questions"]);
+    expect(calls[5]?.prompt).toContain(outputs["ask review questions round 1"]);
+    expect(calls[6]?.prompt).toContain(outputs["ask review questions round 1"]);
     expect(published.map((item) => item.ref.name)).toEqual(["intent.md"]);
     expect(answers.map((item) => item.ref.name)).toEqual([
       "clarifier-decision.json",
@@ -350,6 +401,7 @@ describe("workflow example: review.workflow.mjs", () => {
       "inventory.md",
       "units.md",
       "questions.md",
+      "question-coverage.json",
       "review.md",
     ]);
     expect(published[0]?.text).toBe(intent);
@@ -631,8 +683,9 @@ describe("workflow example: review.workflow.mjs", () => {
           "resolve review scope": "# Review Scope\nTarget: A...B",
           "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
           "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
-          "ask review questions":
+          "ask review questions round 1":
             "# Review Questions\n## Coverage reconciliation\nC1: U1; No question needed: trivial change",
+          "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
           "verify and write review": "# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected",
         };
         return completed(request, outputs[request.label!]!);
@@ -650,6 +703,7 @@ describe("workflow example: review.workflow.mjs", () => {
       "inventory.md",
       "units.md",
       "questions.md",
+      "question-coverage.json",
       "review.md",
     ]);
     expect(calls.every((call) => call.prompt.includes(intentText))).toBe(true);
@@ -884,7 +938,8 @@ describe("workflow example: review.workflow.mjs", () => {
       "resolve review scope": "# Review Scope\nTarget: working tree",
       "inventory changes": "# Change Inventory\n\nI looked around and found some stuff.",
       "plan review units": "# Review Units\n## U1\nPath: `src/a.ts`",
-      "ask review questions": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "ask review questions round 1": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
       "verify and write review": "# Code Review\n## Verdict\nNeeds changes.",
     };
     const { dsl } = runtimeWith(async (request) => {
@@ -898,12 +953,13 @@ describe("workflow example: review.workflow.mjs", () => {
       "resolve review scope",
       "inventory changes",
       "plan review units",
-      "ask review questions",
+      "ask review questions round 1",
+      "assess question coverage round 1",
       "verify and write review",
     ]);
     // Every stage still receives the exact preceding handoff.
     expect(calls[3]?.prompt).toContain(outputs["inventory changes"]);
-    expect(calls[5]?.prompt).toContain(outputs["ask review questions"]);
+    expect(calls[6]?.prompt).toContain(outputs["ask review questions round 1"]);
   });
 
   it("keeps reviewing when a stage drops or misassigns a coverage id", async () => {
@@ -922,7 +978,8 @@ describe("workflow example: review.workflow.mjs", () => {
         "Change: Dropped by the unit handoff.",
       ].join("\n"),
       "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/kept.ts`",
-      "ask review questions": "# Review Questions\n## Coverage reconciliation\nC1: U2; U2-Q1",
+      "ask review questions round 1": "# Review Questions\n## Coverage reconciliation\nC1: U2; U2-Q1 (Does it hold?)",
+      "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
       "verify and write review": [
         "# Code Review",
         "## Verdict",
@@ -938,7 +995,7 @@ describe("workflow example: review.workflow.mjs", () => {
     });
 
     expect(await runWorkflow(dsl, "review the dirty worktree")).toBe(outputs["verify and write review"]);
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(7);
     // The dropped id remains visible as evidence in the retained handoffs.
     expect(answers.map((item) => item.ref.name)).toEqual([
       "clarifier-decision.json",
@@ -946,6 +1003,7 @@ describe("workflow example: review.workflow.mjs", () => {
       "inventory.md",
       "units.md",
       "questions.md",
+      "question-coverage.json",
       "review.md",
     ]);
   });
@@ -964,13 +1022,161 @@ describe("workflow example: review.workflow.mjs", () => {
         "Change: except this.",
       ].join("\n"),
       "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
-      "ask review questions": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "ask review questions round 1": "# Review Questions\n## U1-Q1\nQuestion: Does it hold?",
+      "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
       "verify and write review": "# Code Review\n## Verdict\nNeeds changes.",
     };
     const { dsl } = runtimeWith(async (request) => completed(request, outputs[request.label!]!));
 
     // A contradictory inventory is not an empty scope: the review continues.
     expect(await runWorkflow(dsl, "review the worktree")).toBe(outputs["verify and write review"]);
+  });
+
+  /** Everything before interrogation, so a loop test only writes the loop. */
+  function preInterrogationOutputs(): Record<string, string> {
+    return {
+      "decide clarification": '{"decision":"continue","questions":[]}',
+      "resolve review scope": "# Review Scope\nTarget: working tree",
+      "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
+      "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+      "verify and write review": "# Code Review\n## Verdict\nNeeds changes.",
+    };
+  }
+
+  it("asks another question round with the assessor's exact gaps, and forwards the last round only", async () => {
+    // One interrogation call used to be the whole stage, so a risk the first
+    // reader did not think of was never asked about. The assessor decides between
+    // rounds, and what it reports is handed to the next round as its own text.
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      ...preInterrogationOutputs(),
+      "ask review questions round 1": "# Review Questions\n## U1-Q1\nQuestion: Does the guard hold?",
+      "assess question coverage round 1": JSON.stringify({
+        decision: "more_questions_needed",
+        gaps: ["U1: no question asks whether the new null result reaches `renderRow`"],
+      }),
+      "ask review questions round 2": [
+        "# Review Questions",
+        "## U1-Q1",
+        "Question: Does the guard hold?",
+        "## U1-Q2",
+        "Question: Can `renderRow` handle the new null result?",
+      ].join("\n"),
+      "assess question coverage round 2": '{"decision":"complete","gaps":[]}',
+    };
+    const { dsl, answers } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    const result = await runWorkflow(dsl, "review the worktree");
+
+    expect(result).toBe(outputs["verify and write review"]);
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+      "plan review units",
+      "ask review questions round 1",
+      "assess question coverage round 1",
+      "ask review questions round 2",
+      "assess question coverage round 2",
+      "verify and write review",
+    ]);
+    // The second round receives the first round's complete text and the exact
+    // gap sentence, numbered — not a summary the script invented.
+    expect(calls[6]?.prompt).toContain(outputs["ask review questions round 1"]);
+    expect(calls[6]?.prompt).toContain("1. U1: no question asks whether the new null result reaches `renderRow`");
+    // The verifier answers the last round, which is the complete set. The script
+    // forwards that one document; it never concatenates the rounds.
+    expect(calls[8]?.prompt).toContain(
+      `--- BEGIN REVIEW QUESTIONS ---\n${outputs["ask review questions round 2"]}\n--- END REVIEW QUESTIONS ---`,
+    );
+    // Both rounds are retained under the same reader-facing name; the artifact id
+    // is the identity, so nothing is overwritten and nothing is merged.
+    expect(answers.map((item) => item.ref.name)).toEqual([
+      "clarifier-decision.json",
+      "scope.md",
+      "inventory.md",
+      "units.md",
+      "questions.md",
+      "question-coverage.json",
+      "questions.md",
+      "question-coverage.json",
+      "review.md",
+    ]);
+    expect(answers[4]?.text).toBe(outputs["ask review questions round 1"]);
+    expect(answers[6]?.text).toBe(outputs["ask review questions round 2"]);
+  });
+
+  it("stops interrogation at the round cap and never assesses a round it cannot follow", async () => {
+    // The cap is the safety net, not the exit condition. Three rounds means two
+    // assessments: assessing the last round would ask a question nobody can answer.
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      const fixed = preInterrogationOutputs()[request.label!];
+      if (fixed !== undefined) return completed(request, fixed);
+      if (request.label!.startsWith("assess question coverage")) {
+        return completed(request, JSON.stringify({ decision: "more_questions_needed", gaps: ["still uncovered"] }));
+      }
+      return completed(request, `# Review Questions\n## U1-Q1\nQuestion: Round ${request.label!.at(-1)}?`);
+    });
+
+    expect(await runWorkflow(dsl, "review the worktree")).toBe("# Code Review\n## Verdict\nNeeds changes.");
+    expect(calls.map((call) => call.label)).toEqual([
+      "decide clarification",
+      "resolve review scope",
+      "inventory changes",
+      "plan review units",
+      "ask review questions round 1",
+      "assess question coverage round 1",
+      "ask review questions round 2",
+      "assess question coverage round 2",
+      "ask review questions round 3",
+      "verify and write review",
+    ]);
+  });
+
+  it.each([
+    [
+      { decision: "complete", gaps: ["a gap nobody will read"] },
+      'gaps: expected 0 item(s) when decision is "complete", got 1',
+    ],
+    [
+      { decision: "more_questions_needed", gaps: [] },
+      'gaps: expected at least 1 item(s) when decision is "more_questions_needed", got 0',
+    ],
+    [
+      {
+        decision: "more_questions_needed",
+        gaps: ["x".repeat(400), "y".repeat(400), "z".repeat(400), "w".repeat(400), "v".repeat(400), "u".repeat(400)],
+      },
+      "gaps: expected at most 2000 combined character(s), got 2400",
+    ],
+  ])("re-asks the coverage assessor for a cross-field violation, then fails closed", async (coverage, message) => {
+    // Unlike the clarifier's combined-prompt budget, this one is reachable: six
+    // schema-valid 400-character gaps exceed it, so the sum is a real rule the
+    // assessor is re-asked about rather than arithmetic that can never fire.
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      const fixed = preInterrogationOutputs()[request.label!];
+      if (fixed !== undefined) return completed(request, fixed);
+      if (request.label!.startsWith("assess question coverage")) {
+        return completed(request, JSON.stringify(coverage));
+      }
+      return completed(request, "# Review Questions\n## U1-Q1\nQuestion: Does it hold?");
+    });
+
+    const rejection = runWorkflow(dsl, "review the worktree");
+    await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+    await expect(rejection).rejects.toThrow(message);
+    expect(calls.filter((call) => call.label === "assess question coverage round 1")).toHaveLength(3);
+    expect(calls.some((call) => call.label === "verify and write review")).toBe(false);
   });
 
   it("bounds direct intent and model handoffs before forwarding them", async () => {
