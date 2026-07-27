@@ -33,9 +33,6 @@ there is no review-specific UI or result protocol.
 review/
 ├── README.md
 ├── review.workflow.mjs
-├── review-pipeline.diagram.mjs
-├── review-pipeline.excalidraw
-├── review-pipeline.png
 └── resources/
     ├── interrogator.prompt.md
     └── verifier.prompt.md

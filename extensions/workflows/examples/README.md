@@ -25,7 +25,7 @@ and `throw` statements — not of the words where a comment happens to mention o
 resolves through `/workflow-run <name>`, discovered by existence on each call
 exactly like a project directory — there is no separate allowlist to keep in
 sync. The scan descends one directory level, which is how a workflow keeps its
-prompt resources and diagram triple beside its entry, and it accepts only regular
+prompt resources and its diagram beside its entry, and it accepts only regular
 files, so a symlink never resolves out of the package.
 
 Two distribution levels remain, and they are independent of resolution:
@@ -142,17 +142,29 @@ as such at its definition.
 
 ## Diagrams
 
-Every workflow in this directory ships a `<name>-pipeline.diagram.mjs` generator, an
-editable `<name>-pipeline.excalidraw`, and a rendered `<name>-pipeline.png`. The
-generator is the source of truth: edit it and regenerate, never hand-edit the
-`.excalidraw`. The generators require `@kroffske/excalidraw-diagrams`, which is
-not a dependency of this package.
+A diagram here is **one hand-authored SVG** named `<name>-pipeline.svg`, checked
+in beside the entry it describes. [`plan/plan-pipeline.svg`](./plan/plan-pipeline.svg)
+is the first one and the shape the others follow.
 
-All four pipelines are authored as one long left-to-right strip and then wrapped
-into two stacked bands by a `bandX`/`bandY` transform at the top of each
-generator, because an unwrapped strip renders as a 3:1–4:1 sliver whose text is
-unreadable at fit-to-window. Authored coordinates never change; only the
-transform moves them.
+This replaces the generated triple that used to sit beside every example — a
+generator, an Excalidraw document, and an exported PNG. Three files had to agree,
+a rendering library that is not a dependency of this package had to be installed
+to change anything, and the picture a reader actually opened was the one file
+nobody could review in a diff. The generators, `.excalidraw` documents, and PNGs
+were removed on 2026-07-28; nothing in this package produces or reads them.
 
-`extensions/workflows/references/excalidraw-pipeline` ships no diagram triple —
-the contract applies to the workflows this directory registers.
+What the SVG must show, because these are the things the source makes hard to
+see at a glance:
+
+- the deterministic script, one box per `phase()`, distinct from the agents;
+- one box per child agent call, saying what it **receives** and what it
+  **returns** — the handoffs are the pipeline;
+- every artifact the run persists, under the name the code publishes it with;
+- each branch and loop with its real exit condition, including the ones that end
+  the run: an operator pause, a fail-closed stop, and the terminal result.
+
+Keep it self-contained and diffable: no scripts, no embedded images, no remote
+fonts or stylesheets, and a `<title>`/`<desc>` pair so it is readable without
+sight of the picture. `tests/extensions/workflows/workflow-diagram-artifacts.test.ts`
+pins those properties and checks the diagram against the workflow source, so a
+renamed phase or a new artifact fails instead of quietly making the picture lie.

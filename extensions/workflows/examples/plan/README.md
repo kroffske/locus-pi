@@ -18,21 +18,20 @@ checkout, and that difference is why they are two workflows rather than one.
 plan/
 ├── README.md
 ├── plan.workflow.mjs
-├── plan-pipeline.diagram.mjs
-├── plan-pipeline.excalidraw
-└── plan-pipeline.png
+└── plan-pipeline.svg
 
 plan-implement/
 ├── README.md
-├── plan-implement.workflow.mjs
-├── plan-implement-pipeline.diagram.mjs
-├── plan-implement-pipeline.excalidraw
-└── plan-implement-pipeline.png
+└── plan-implement.workflow.mjs
 ```
 
-The diagram triple is part of the Package-workflow contract: the `.diagram.mjs` generator
-is the source of truth, and the `.excalidraw` and `.png` beside it are
-regenerated from it rather than hand-edited.
+[`plan-pipeline.svg`](./plan-pipeline.svg) is the picture of the run below: the
+script's phases on the left, the four child agents in the middle with what each
+one receives and returns, the persisted artifacts on the right, and all three
+ways the run can end. It is hand-authored and edited directly — there is no
+generator, and nothing regenerates it.
+
+![The plan workflow, stage by stage](./plan-pipeline.svg)
 
 There are no prompt resources and no workflow-local agent definitions. Every
 stage task is written inline under one `COMMON` contract, because no prompt here

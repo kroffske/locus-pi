@@ -87,7 +87,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      the same way as the directories above: every `<name>.workflow.mjs` in it is
      a Package workflow, and there is no second allowlist. The scan descends one
      directory level, so a workflow can keep prompt resources and its diagram
-     triple beside its entry. Adding one is adding a file — but it is still a
+     beside its entry. Adding one is adding a file — but it is still a
      public-surface change, and a package-boundary test fails until
      `package.json#files` ships it too, because a workflow that resolves in a
      checkout and vanishes after `npm i` is worse than one that never existed.
@@ -275,9 +275,12 @@ than a publisher child. Take the stage count from the requirement — two stages
 complete pipeline. For the full primitive table,
 schema/trust rules, and edge-cases, read the canonical doc linked above.
 
-For a non-trivial workflow visual map, use `$pi-workflow-diagram`. Every curated
-Package workflow must keep `<name>-pipeline.diagram.mjs`, editable
-`<name>-pipeline.excalidraw`, and `<name>-pipeline.png` beside its source. The
-diagram must distinguish operator input, workflow-owned routing, child agents,
-and persisted artifacts; every decision and branch names its real owner. The canonical diagram contract lives in the authoring section of
-the workflow documentation linked above.
+A non-trivial workflow keeps a visual map beside its source: one hand-authored
+`<name>-pipeline.svg`, edited directly, with no generator and no rendering
+dependency. [`examples/plan/plan-pipeline.svg`](./examples/plan/plan-pipeline.svg)
+is the reference shape. It must separate the deterministic script from the child
+agents, name what each agent receives and returns, show every persisted artifact
+under its published name, and give every branch and loop its real exit —
+including the operator pause, the fail-closed stop, and the terminal result. The
+generated Excalidraw triple this contract used to require was removed on
+2026-07-28.

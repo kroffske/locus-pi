@@ -232,26 +232,15 @@ edit tools. Both loops in `plan` — the clarification round and the drafting
 round — end on a declared enum rather than on a scan of model prose, and the run
 journal records whether the critic or the round cap stopped the loop.
 
-Editable pipeline maps:
+Pipeline maps:
 
-- `live-smoke`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.excalidraw)
-- `requirements-grill`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
-- `review`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.excalidraw)
-- `review-fix`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.excalidraw)
 - `plan`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.excalidraw)
-- `plan-implement`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan-implement/plan-implement-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan-implement/plan-implement-pipeline.excalidraw)
+  [SVG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
+
+The generated Excalidraw triple every curated workflow used to carry — a
+generator, an `.excalidraw` document, and an exported PNG — was removed on
+2026-07-28 together with its contract. The remaining five maps are being
+re-authored as hand-written SVG in the shape `plan` now sets.
 
 ## Authoring patterns
 
@@ -314,7 +303,7 @@ removing a valid file changes the next result and removing a shadow reveals the 
 source. The packaged examples directory is scanned the same way, so adding or
 removing a `<name>.workflow.mjs` there is the whole of adding or removing a
 Package workflow. The scan descends one directory level, which is how a workflow
-keeps prompt resources or a diagram triple beside its entry, and it accepts only
+keeps prompt resources or its diagram beside its entry, and it accepts only
 regular files, so a symlink never resolves out of the package. An already-open
 catalog selection is revalidated, so a precedence change fails explicitly instead of
 switching paths silently.
@@ -918,46 +907,43 @@ runtime import and does not change source-identity coverage.
 
 ### Workflow diagram contract
 
-Use `$pi-workflow-diagram` when a workflow has multiple execution steps, agents,
-branches, parallel groups, or persisted handoffs. Every
-curated Package workflow must keep three sibling artifacts beside
-`<name>.workflow.mjs`:
+A workflow with several stages, agents, branches, parallel groups, or persisted
+handoffs keeps a visual map beside its source: exactly one hand-authored
+`<name>-pipeline.svg`. It is edited directly. There is no generator, no
+rendering dependency, and no exported preview to keep in sync;
+[`extensions/workflows/examples/plan/plan-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
+is the reference shape.
 
-- `<name>-pipeline.diagram.mjs` — reproducible Excalidraw.js generator.
-- `<name>-pipeline.excalidraw` — editable diagram with embedded assets.
-- `<name>-pipeline.png` — visually reviewed preview.
+This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,
+its `.excalidraw` document, and a rendered PNG — on 2026-07-28. Three files had
+to agree, changing anything required a library this package does not depend on,
+and the only file a reader opened was the one nobody could review in a diff.
 
 The diagram is an ownership map, not a decorative code trace:
 
-- Prefix each executable or data node with exactly one real owner/type:
-  `Operator:`, `Workflow:`, `Agent:`, or `Artifact:`. (`Direct LLM:` was a fifth
-  owner before 0.2.x; the primitive and its diagram vocabulary are now removed.)
-- A branch must say who produced the decision and who routes it. A text-only
-  `agent()` result is not implicit decision data: show the exact text handoff,
-  and show a deterministic workflow check only when trusted workflow code
-  actually validates something. Do not use ownerless labels such as
-  `Target ready?`.
-- Name workflow control explicitly: `Workflow: launch Agents 2 + 3 in parallel`
-  and `Workflow: wait for both lane results`, not `fan-out` or `barrier` alone.
-- Label important edges with the actual handoff. For text-only agents, name the
-  exact string such as `targetText` or `implementationText`; for a schema-bearing
-  call (`agent({ schema })`), name the schema and inspected field.
-- Show the source `<name>.workflow.mjs`, the persisted
-  `.locus/runtime/workflows/<runId>/result.json`, `journal.ndjson`, and artifact
-  index when they record meaningful execution evidence. Draw runtime-owned
-  Markdown as a separate artifact when `publishArtifact()` or
-  `agent({ artifact })` really persists it. The review family therefore shows
-  `review.md`, per-finding answers, independent check evidence, and `re-review.md`
-  under the run artifact store rather than a task-local publication surface.
-- Include a legend that explains the visual types and any accent colors. A
-  reader must understand the graph without opening the workflow source.
+- Separate the deterministic script from the child agents visually, and give the
+  script one box per `phase()`. A reader must be able to see which decisions the
+  code makes and which a model makes without opening the source.
+- Every agent box says what it **receives** and what it **returns**. The handoffs
+  between stages are the pipeline; a box that names only a role explains nothing.
+- Say what constrains each child: host-enforced `readOnly: true`, its tool list,
+  a declared answer shape, an answer cap. A branch on a shaped answer is not the
+  same claim as a branch on prose, and the picture must not blur them.
+- Every branch and loop carries its real exit condition, including the ones that
+  end the run: an operator pause with `disposition: awaiting_operator`, a
+  fail-closed stop, and the terminal result a later run may consume.
+- Draw each persisted artifact under the exact name the code publishes it with,
+  so the picture and `.locus/runtime/workflows/<runId>/artifacts/` agree.
+- Include a legend explaining every visual type used.
 
-Generate through `@kroffske/excalidraw-diagrams`, keep a fixed `Scene` seed, run
-`assertDiagramHealthy(...)`, validate the serialized Excalidraw document, render
-the PNG, and inspect the image itself. Do not hand-write raw Excalidraw element
-JSON. Repository tests enforce the artifact trio and the minimum ownership /
-persistence vocabulary; visual inspection remains required because structural
-validation cannot prove that a diagram is readable.
+Keep the file self-contained and diffable: no `<script>`, no embedded or remote
+images, no remote fonts or stylesheets, and a `<title>`/`<desc>` pair so the
+diagram is readable without seeing it. `tests/extensions/workflows/workflow-diagram-artifacts.test.ts`
+pins those properties, refuses any resurrected generator or Excalidraw artifact
+under the examples directory, and checks the diagram against the workflow source
+so a renamed phase or a new artifact fails the suite instead of quietly leaving
+the picture wrong. Visual inspection is still required: no structural check
+proves that a diagram is readable.
 
 ### Minimal working example
 
