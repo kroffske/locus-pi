@@ -20,9 +20,9 @@
 //     changed and needs describing. That outcome returns `partial: true`, which
 //     the runner projects as a non-success.
 //
-// This is a curated Package workflow: its name is in
-// CURATED_PACKAGE_WORKFLOW_NAMES, so `/workflow-run plan-implement "<request>"`
-// resolves it without any project file. Unlike its `plan` sibling it writes to
+// This is a Package workflow: it lives in the shipped examples directory the
+// resolver scans, so `/workflow-run plan-implement "<request>"` resolves it
+// without any project file. Unlike its `plan` sibling it writes to
 // the launch checkout, so the operator starts it deliberately, with one accepted
 // plan already in hand.
 

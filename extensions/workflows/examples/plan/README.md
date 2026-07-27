@@ -30,7 +30,7 @@ plan-implement/
 └── plan-implement-pipeline.png
 ```
 
-The diagram triple is part of the curated contract: the `.diagram.mjs` generator
+The diagram triple is part of the Package-workflow contract: the `.diagram.mjs` generator
 is the source of truth, and the `.excalidraw` and `.png` beside it are
 regenerated from it rather than hand-edited.
 

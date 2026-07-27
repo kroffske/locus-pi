@@ -21,9 +21,9 @@
 // Every stage is host-enforced read-only: planning reads the repository and
 // writes nothing to it. The only durable output is runtime-owned text.
 //
-// This is a curated Package workflow: its name is in
-// CURATED_PACKAGE_WORKFLOW_NAMES, so `/workflow-run plan "<task>"` resolves it
-// without any project file. Workflow JavaScript is trusted local code with full
+// This is a Package workflow: it lives in the shipped examples directory the
+// resolver scans, so `/workflow-run plan "<task>"` resolves it without any
+// project file. Workflow JavaScript is trusted local code with full
 // Node.js host access; every stage here is read-only, and the sibling
 // `plan-implement` is the one that writes.
 
@@ -685,10 +685,10 @@ function normalizeClarifierDecision(value) {
 }
 
 /**
- * Host-owned provenance for one continuation artifact. A curated name resolves
- * through the registry, but the same file can also be launched by path from a
- * checkout, so the target check accepts either form of *this* workflow and
- * nothing else.
+ * Host-owned provenance for one continuation artifact. A Package name resolves
+ * through the scanned examples directory, but the same file can also be launched
+ * by path from a checkout, so the target check accepts either form of *this*
+ * workflow and nothing else.
  */
 function requirePrepareArtifact(consumed, sourceRef, expectedName, taskRef, questionsRef) {
   const source = consumed?.source;
