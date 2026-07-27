@@ -89,10 +89,10 @@ What an agent could not previously find is the _concept_. A model asked to "run
 the review workflow" had no document telling it what a workflow is here, which
 names exist, or how to read a finished run, so it went looking for a repository
 that is not on the machine. The package therefore ships one skill,
-[`skills/locus-workflows/SKILL.md`](skills/locus-workflows/SKILL.md), declared
+[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md), declared
 through `package.json#pi.skills`. Pi loads package skills automatically and
 enabled, so its description is in the system prompt from the first session and
-the full text loads on demand — including through `/skill:locus-workflows`. It
+the full text loads on demand — including through `/skill:locus-pi-workflows`. It
 covers finding a workflow, running one, reading the result envelope, the name
 resolution order, and the authoring template with the four rules that decide
 whether a new file runs at all.
@@ -103,7 +103,7 @@ only under their own roots, so link the installed directory into the root that
 host uses instead of copying it — a copy stops matching the package on the next
 update. Pi writes user installs under `~/.pi/agent/npm/` and project installs
 under `.pi/npm/`; `pi list` prints the source of every registration, and the
-skill is at `skills/locus-workflows/` inside whichever one applies.
+skill is at `skills/locus-pi-workflows/` inside whichever one applies.
 
 ## Trust and safety boundary
 

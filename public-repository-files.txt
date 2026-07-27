@@ -269,7 +269,7 @@ scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
 scripts/materialize-public-repository.ts
-skills/locus-workflows/SKILL.md
+skills/locus-pi-workflows/SKILL.md
 tests/docs/adr.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts

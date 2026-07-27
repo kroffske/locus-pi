@@ -11,14 +11,18 @@ This file records user-visible changes to the public package.
   need no copied files, but nothing in a fresh session said what a "workflow" is
   here, which names exist, or how to read a finished run — so a weaker model
   asked to run one went looking for a source repository that is not on the
-  machine. `skills/locus-workflows/SKILL.md` is now declared through
+  machine. `skills/locus-pi-workflows/SKILL.md` is now declared through
   `package.json#pi.skills`, which Pi discovers and enables automatically, so its
   description sits in the system prompt from the first session and the full text
-  loads on demand or through `/skill:locus-workflows`. It covers the catalog and
+  loads on demand or through `/skill:locus-pi-workflows`. It covers the catalog and
   run commands, the result envelope and artifact locations, the four-step name
-  resolution order, the minimal authoring template with the rules that decide
-  whether a new file runs at all, and the trust boundary stated as it is: the
-  package does not sandbox workflow code. A package-boundary test pins the
+  resolution order, every member of the handle a workflow is given, an authoring
+  template with a shaped stage and the rules that decide whether a new file runs
+  at all, and the trust boundary stated as it is: the package does not sandbox
+  workflow code. Two tables send the reader to the shipped examples by exact
+  path — one for what each workflow is for, one for the technique each entry
+  file is the smallest place to see — so an agent copies a working shape instead
+  of inventing one. A package-boundary test pins the
   declaration to the shipped file and fails when the skill points at a document
   the tarball does not contain, because a reader who arrived lost cannot afford
   a dead link.

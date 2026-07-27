@@ -1,6 +1,6 @@
 # Authoring a pi-workflow — pointer
 
-> **Reading this as an agent?** [`skills/locus-workflows/SKILL.md`](../../skills/locus-workflows/SKILL.md)
+> **Reading this as an agent?** [`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md)
 > is the shorter entry point Pi loads on demand: what a workflow is here, the
 > commands that list and run one, where a result lands, and the minimal template.
 > Come back here for the full contract.
