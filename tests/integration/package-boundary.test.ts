@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +10,7 @@ import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.
 interface PackageJson {
   files: string[];
   bin: Record<string, string>;
-  pi: { extensions: string[] };
+  pi: { extensions: string[]; skills: string[] };
   peerDependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 }
@@ -142,6 +142,43 @@ describe("npm public package boundary", () => {
     expect(packagedWorkflowNames().sort()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
     expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
+  });
+
+  it("ships every declared skill, and every document a skill sends the reader to", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+
+    // Pi discovers package skills from `pi.skills`, so an install that ships the
+    // file without the declaration teaches nobody anything, and a declaration
+    // without the file is an empty promise in the system prompt.
+    expect(pkg.pi.skills).toEqual(["./skills"]);
+
+    const skillEntries = readdirSync(path.join(root, "skills"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `skills/${entry.name}/SKILL.md`)
+      .sort();
+    expect(skillEntries).toEqual(["skills/locus-workflows/SKILL.md"]);
+
+    for (const skillPath of skillEntries) {
+      expect(existsSync(path.join(root, skillPath)), `declared skill is missing: ${skillPath}`).toBe(true);
+      expect(packedPaths.has(skillPath), `unpacked skill: ${skillPath}`).toBe(true);
+
+      const source = readFileSync(path.join(root, skillPath), "utf8");
+      expect(source.startsWith("---\n"), `${skillPath} has no frontmatter`).toBe(true);
+      const frontmatter = source.slice(4, source.indexOf("\n---\n", 3));
+      expect(/^name:\s*\S+/mu.test(frontmatter), `${skillPath} declares no name`).toBe(true);
+      expect(/^description:\s*\S+/mu.test(frontmatter), `${skillPath} declares no description`).toBe(true);
+
+      // A skill is read from inside the installed package, so a pointer that
+      // resolves in this checkout and not in the tarball sends the reader —
+      // usually a weak model that came here precisely because it was lost — to
+      // a file that does not exist on their machine.
+      const directory = path.posix.dirname(skillPath);
+      for (const match of source.matchAll(/`(\.\.\/[^`\s]+\.md)`/gu)) {
+        const target = path.posix.normalize(path.posix.join(directory, match[1]!));
+        expect(existsSync(path.join(root, target)), `${skillPath} points at a missing file: ${target}`).toBe(true);
+        expect(packedPaths.has(target), `${skillPath} points at an unpacked file: ${target}`).toBe(true);
+      }
+    }
   });
 
   it("loads every declared entrypoint from an unpacked real tarball", () => {

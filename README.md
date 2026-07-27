@@ -1,8 +1,9 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, and six curated
-Package workflows through a deliberately narrow npm artifact.
+It provides ten default extensions, a bundled agent catalog, six curated
+Package workflows, and one skill that teaches an agent how to use them, through
+a deliberately narrow npm artifact.
 
 > `locus-pi` is MIT-licensed. Published releases use GitHub private
 > vulnerability reporting so security reports do not need to enter public
@@ -40,6 +41,8 @@ Only these names are registered as Package workflows:
 | `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
+| `plan`               | Clarifies one task with the operator, then drafts and critiques until a shaped verdict accepts `plan.md`.     |
+| `plan-implement`     | Consumes an accepted `plan.md` from its source run and gives each selected step one write-capable agent.      |
 
 Use the operator catalog to inspect and run them:
 
@@ -74,6 +77,33 @@ directories accept, and a workflow written for another host's DSL is not portabl
 here. Files that merely exist under the repository's workflow examples are not
 Package workflows and cannot be launched by bare name unless they are in the
 curated registry.
+
+## The shipped skill
+
+Nothing has to be copied anywhere for the six workflows above to be runnable:
+they resolve out of the installed package, so `/workflow-list` shows them the
+first time Pi starts after `pi install`, whether the package came from npm or
+from a local checkout.
+
+What an agent could not previously find is the _concept_. A model asked to "run
+the review workflow" had no document telling it what a workflow is here, which
+names exist, or how to read a finished run, so it went looking for a repository
+that is not on the machine. The package therefore ships one skill,
+[`skills/locus-workflows/SKILL.md`](skills/locus-workflows/SKILL.md), declared
+through `package.json#pi.skills`. Pi loads package skills automatically and
+enabled, so its description is in the system prompt from the first session and
+the full text loads on demand — including through `/skill:locus-workflows`. It
+covers finding a workflow, running one, reading the result envelope, the name
+resolution order, and the authoring template with the four rules that decide
+whether a new file runs at all.
+
+The file is a plain [Agent Skills](https://agentskills.io/specification)
+directory, so other hosts can read it too. Claude Code and Codex discover skills
+only under their own roots, so link the installed directory into the root that
+host uses instead of copying it — a copy stops matching the package on the next
+update. Pi writes user installs under `~/.pi/agent/npm/` and project installs
+under `.pi/npm/`; `pi list` prints the source of every registration, and the
+skill is at `skills/locus-workflows/` inside whichever one applies.
 
 ## Trust and safety boundary
 

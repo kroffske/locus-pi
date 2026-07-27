@@ -236,6 +236,7 @@
     "extensions/workflows/workflow-command-launcher.ts",
     "extensions/workflows/workflow-tool.ts",
     "extensions/workflows/workflow-transcript.ts",
+    "skills/locus-workflows/SKILL.md",
     "README.md"
   ],
   "bin": {
@@ -253,6 +254,9 @@
       "./extensions/security-gate/index.ts",
       "./extensions/todo-context/index.ts",
       "./extensions/workflows/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "scripts": {

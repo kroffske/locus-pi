@@ -9,6 +9,10 @@ drafts and one-off artifacts are not part of this map.
 
 - `package.json#pi.extensions` — the single list of extensions that are loaded
   by default.
+- `package.json#pi.skills` — the one directory Pi scans for shipped skills. It
+  holds [`../skills/locus-workflows/SKILL.md`](../skills/locus-workflows/SKILL.md),
+  which is what an agent reads to learn that workflows exist here, how to run
+  one, and how to author one.
 - `extensions/<name>/manifest.json` — machine-readable metadata for an
   extension: commands, tools, hooks, permissions, risk and review/source status.
 - [extension-index.md](extension-index.md) — public status index for the ten
@@ -39,6 +43,7 @@ Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast
 | Curated workflow portfolio                             | [adr/curated-workflow-portfolio.md](adr/curated-workflow-portfolio.md).                                                                            |
 | Source attribution and borrowed behavior               | [Repository-only source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit) named by active manifests.                  |
 | Bundled agent catalog used by `agents` and `workflows` | [../.agents/agents/](../.agents/agents/). This is package runtime surface, not private planning material.                                          |
+| Shipped skill an agent loads to use workflows          | [../skills/locus-workflows/SKILL.md](../skills/locus-workflows/SKILL.md), declared by `package.json#pi.skills`.                                    |
 
 ## Excluded from the clean release
 

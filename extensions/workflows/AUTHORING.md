@@ -1,5 +1,10 @@
 # Authoring a pi-workflow — pointer
 
+> **Reading this as an agent?** [`skills/locus-workflows/SKILL.md`](../../skills/locus-workflows/SKILL.md)
+> is the shorter entry point Pi loads on demand: what a workflow is here, the
+> commands that list and run one, where a result lands, and the minimal template.
+> Come back here for the full contract.
+
 > **Canonical reference:** [`docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md)
 > is the single source of truth for the DSL, options, schema, trust model, name
 > resolution, run commands, result/journal layout, and the "what is NOT supported"
