@@ -2,10 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import workflows, {
+import {
   workflowArgumentCompletions,
   workflowFlatCommandCompletions,
-} from "../../../extensions/workflows/index.js";
+} from "../../../extensions/workflows/command-completions.js";
+import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 const roots: string[] = [];
