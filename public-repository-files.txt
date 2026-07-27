@@ -121,8 +121,17 @@ extensions/agents/index.ts
 extensions/agents/interrupt-guard.ts
 extensions/agents/manifest.json
 extensions/agents/session-viewer.ts
+extensions/ask-user-question/ask-tool.ts
 extensions/ask-user-question/index.ts
+extensions/ask-user-question/legacy-ask.ts
 extensions/ask-user-question/manifest.json
+extensions/ask-user-question/option-labels.ts
+extensions/ask-user-question/prompt-text.ts
+extensions/ask-user-question/question-panel.ts
+extensions/ask-user-question/question-prompt.ts
+extensions/ask-user-question/question-runner.ts
+extensions/ask-user-question/result-card.ts
+extensions/ask-user-question/select-fallback.ts
 extensions/ast-structural-edit/ast-edit.ts
 extensions/ast-structural-edit/ast-grep.ts
 extensions/ast-structural-edit/index.ts
@@ -231,6 +240,7 @@ tests/extensions/agents/agent-task-tool.test.ts
 tests/extensions/agents/agents-discovery.test.ts
 tests/extensions/agents/agents-parent-context-tool.test.ts
 tests/extensions/agents/bundled-agent-profiles.test.ts
+tests/extensions/ask-user-question/ask-entrypoint-surfaces.test.ts
 tests/extensions/ask-user-question/ask-user-question.test.ts
 tests/extensions/ast-structural-edit/tools.test.ts
 tests/extensions/loop/loop-command-surfaces.test.ts
