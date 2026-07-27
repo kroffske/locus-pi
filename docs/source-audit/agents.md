@@ -50,7 +50,7 @@ Source note for T-120: the prompt shape is adapted from checkout-relative `pi-su
 
 Current local state:
 
-- `extensions/agents/index.ts` registers primary `task`, proof-evidence tool `locus_workload_proof`, and `/agent` through the shared command UI lifecycle helper that clears transient `agents` widgets/status on the next unrelated user input or slash command.
+- `extensions/agents/index.ts` is the entrypoint; it calls `task-tool.ts` to register primary `task`, `workload-proof-tool.ts` to register the proof-evidence tool `locus_workload_proof`, and `command-router.ts` to register `/agent` and `/ps` through the shared command UI lifecycle helper that clears transient `agents` widgets/status on the next unrelated user input or slash command.
 - `/agent list` can show markdown definitions from project `.agents/agents`, user `~/.agents/agents`, and bundled `.agents/agents`.
 - Agent catalog records preserve local metadata: `tools`, `spawns`, `model`, `thinking-level`, `blocking`, and opaque nested `output`.
 - `task.md` and `quick_task.md` carry ordinary frontmatter in the same `.agents` catalog as the other definitions.

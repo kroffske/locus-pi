@@ -8,18 +8,24 @@ or borrowed runtime implementation was identified for this source-audit slice.
 
 ## Local source truth
 
-- `extensions/workflows/index.ts` registers the `workflow` tool and `/workflows`
-  command. It wires lifecycle scheduling, rendering, command routing, target
-  resolution, transcript, launcher, handoff, and catalog owners without
-  redefining their policies. The
-  model-callable tool keeps Pi `approval: "exec"` with full-host/no-sandbox
+- `extensions/workflows/index.ts` is the entrypoint. It registers the
+  `workflow` tool (`workflow-tool.ts`) and the `/workflows` command
+  (`command-router.ts`), and wires only the per-session state those two need —
+  live progress panels, completed-run bookkeeping, the command launcher, and
+  the operator handoff controller. Command routing (`command-router.ts`),
+  launch-precondition target resolution (`launch-guard.ts`), transcript
+  (`workflow-transcript.ts`), launcher (`workflow-command-launcher.ts`),
+  handoff (`operator-handoff-controller.ts` / `operator-handoff-service.ts`),
+  and catalog (`workflow-catalog.ts` / `catalog-viewer.ts`) owners keep their
+  own policies; the entrypoint does not redefine them. The
+  model-callable tool (`workflow-tool.ts`) keeps Pi `approval: "exec"` with full-host/no-sandbox
   warning details; explicit operator `/workflows run` does not pass through that
   tool approval and adds no second Locus prompt. Interactive command runs claim
   one stable session/project background identity and return the editor; the programmatic
   tool remains awaited/headless but registers non-exclusive control with the
-  same run owner. `/workflows stop [runId|last]` reaches either launch origin,
+  same run owner. `/workflows stop [runId|last]` (`command-router.ts`) reaches either launch origin,
   is the sole workflow operator-cancellation path, and reports `stopping` until
-  terminal settlement. Native command completion returns full argument strings
+  terminal settlement. Native command completion (`command-completions.ts`) returns full argument strings
   for grammar-owned tokens and yields free-text tails.
 - `extensions/workflows/workflow-command-launcher.ts` is the single command
   execution policy used by flat and compatibility command routes. It owns the
@@ -96,9 +102,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   creation throws, command routing immediately returns the bounded static block
   instead of routing back into the same viewer. RPC, print/no-UI, and TUI hosts
   without custom UI keep that projection.
-- `extensions/workflows/index.ts` projects static help, catalog, status/detail,
+- `extensions/workflows/command-router.ts` projects static help, catalog, status/detail
+  (`run-evidence.ts`),
   launch errors and headless settled receipts through the shared typed operator
-  block. It also owns the single `/workflows info [name]` block and chooses its
+  block (`operator-ui.ts`). It also owns the single `/workflows info [name]` block and chooses its
   projection: interactive TUI with custom UI awaits `WorkflowInfoViewer`, while
   RPC, print/no-UI, and TUI without custom UI retain the bounded passive block
   with an honest fallback limitation. The info viewer cannot import or run a
@@ -173,7 +180,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   runtime cancellation journal line, so trusted script catches cannot turn an
   aborted run green. It also projects the newest 20 answer and
   workflow-published refs into the persisted run envelope, with an explicit
-  omitted count. `extensions/workflows/index.ts` copies the same bounded list
+  omitted count. `extensions/workflows/workflow-tool.ts` copies the same bounded list
   into native workflow tool details and text so the calling model can pass a
   complete ref to a later run without inventing an artifact id. The canonical
   full inventory remains the per-run artifact index.
@@ -400,7 +407,7 @@ Its local TUI documentation establishes the browser handoff order:
 - `docs/tui.md:661-684` awaits `ctx.ui.custom()` and calls
   `ctx.ui.setEditorText(result)` only after the custom component has completed.
 - `extensions/workflows/catalog-viewer.ts` therefore receives only
-  `done(intent)` and cannot mutate the editor. `extensions/workflows/index.ts`
+  `done(intent)` and cannot mutate the editor. `extensions/workflows/command-router.ts`
   owns the optional setter call after the awaited result. This is also why
   cancel, Back, custom-UI rejection, and absent/throwing setter tests require
   zero editor mutation and zero send/run fallback.
