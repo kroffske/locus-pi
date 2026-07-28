@@ -99,8 +99,10 @@ text or the no-question reason, and the inspection outcome. Each ledger line mus
 use the exact grammar
 `C<n>: U<n>; <questions with their text, or the no-question reason>; <inspection outcome>`.
 Do not mention a coverage id elsewhere in that section. Then state what remains
-unproven, and repeat every gap listed under `COVERAGE GAPS NOBODY ASKED ABOUT`
-there as ground no question covered. Never answer such a gap yourself and never
+unproven. Every gap listed in the supplied coverage-gap block belongs in that
+same prose, written as one more thing this review did not cover — never under a
+heading of its own, and never repeating the block's marker text, which is
+plumbing the reader should not see. Never answer such a gap yourself and never
 turn one into a finding: no question was asked about it, so it is a declared
 limit of this review, not a defect you verified.
 ```
@@ -108,8 +110,15 @@ limit of this review, not a defect you verified.
 Repeat every question id exactly once under `## Question resolutions`, each with
 its own `Question:` line quoting the interrogator's wording. With no
 confirmed problems, write `None.` under `## Findings`. Severity is `P1`
-(blocking), `P2` (should fix), or `P3` (minor). The verdict is blocked only
-when the scope could not be inspected.
+(blocking), `P2` (should fix), or `P3` (minor).
+
+The verdict must agree with your own findings, and it is the one place a review
+can quietly contradict itself. Write `Blocked` only when the scope could not be
+inspected at all. Write `Needs changes` whenever you confirmed even one `P1` or
+`P2` finding — a blocking problem you found yourself is not "ready", whatever
+else the change gets right. `Ready for human acceptance` is for no findings or
+`P3` findings only. If you are about to write a verdict that does not follow
+this rule, the mistake is the verdict, not the rule: change it.
 
 Do not include commit hashes, snapshots, a command journal, a fix plan, JSON,
 or a result envelope.

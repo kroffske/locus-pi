@@ -203,6 +203,23 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(prose).toContain("while a choice recorded under \\`## Assumptions\\` with its reason is not");
   });
 
+  it("tells both roles that a step is one changed thing, verified by a command", () => {
+    // Three failures from one live run on 2026-07-28, each addressed on both
+    // sides so the critic can refuse what the planner is told not to write: a
+    // plan whose first "step" only read nine files, a second step that wrote
+    // three independent document sections at once, and verifications no later
+    // agent could rerun, which forced the implementation report to grade every
+    // step partial.
+    const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
+
+    expect(prose).toContain("Every step changes the repository.");
+    expect(prose).toContain("a step that changes nothing");
+    expect(prose).toContain("give each one its own step");
+    expect(prose).toContain("one step covering more than one of them is exactly that");
+    expect(prose).toContain("one command a later agent can rerun without a human");
+    expect(prose).toContain("a step block missing any of the mandatory");
+  });
+
   it("accepts the first draft when the critic accepts it, and returns that exact text", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];

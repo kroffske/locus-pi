@@ -18,7 +18,7 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       |   350 |              0 |            0 |       1 | npm package · public repository |
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 |   915 |              2 |            2 |       5 | npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 |   696 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   461 |              0 |            1 |       1 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   477 |              0 |            1 |       1 | npm package · public repository |
 | [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |   615 |              0 |            1 |       7 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it

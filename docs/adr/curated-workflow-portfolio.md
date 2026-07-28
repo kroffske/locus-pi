@@ -488,6 +488,35 @@ reporter had to grade every step partial. A step now states one command a later
 agent can rerun, with the output that proves it, and a human observation only
 where the step says why no command can exist.
 
+A second run repeated the same three workflows on a 4-bit local model with no
+thinking mode, against a documentation task rather than a code-writing one. The
+three fixes above held on that model — the inventory returned one id per document
+section instead of one per file, the final round was assessed and its surviving
+gap recorded, and every step carried a rerunnable command, which is why the
+implementation report read "implemented" rather than the previous run's blanket
+"partial". Three further weaknesses surfaced and are closed here.
+
+**A step is one changed thing.** That run's plan opened with a step that only
+read nine files, then wrote three independent document sections in one step. The
+first is not work an implementer can be given and the second hides three
+independent pieces of evidence behind one verification. The planner is now told
+both, and the critic's defect list names both, because a rule only one of them
+knows is a rule the other cannot enforce.
+
+**A verdict must agree with its own findings.** The same run's review confirmed a
+blocking finding and still returned "ready for human acceptance". No script code
+grades that — the review's verdict is prose, by design — so the rule lives in the
+verifier's charter: one confirmed blocking or should-fix finding means "needs
+changes", and "blocked" stays reserved for a scope that could not be inspected.
+This is the self-grading class this ADR keeps outside the retry loop elsewhere,
+and here it has no mechanical guard at all; the prompt sentence and a pinning
+test are the whole of it, which this paragraph states rather than glosses.
+
+**Plumbing stopped leaking into the product.** The surviving coverage gaps were
+handed to the verifier inside a delimited block, and the verifier reproduced the
+block's marker as a heading in the finished review. Gaps now belong in the
+review's own prose about what it did not cover.
+
 Not changed, and deliberately: the verifier's `Confirmed`/`Rejected`/`Unresolved`
 vocabulary reads backwards to a human when a positively phrased question is
 answered `Rejected`, but it is a readability defect rather than a decomposition

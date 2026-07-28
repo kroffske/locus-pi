@@ -44,6 +44,20 @@ This file records user-visible changes to the public package.
   change is what unblocks the evidence chain below it — in the same run, the
   independent checker could rerun nothing and the reporter had to grade every
   step partial.
+  A second run, this time on a small 4-bit local model with no thinking mode at
+  all, closed three more. **A step is now one changed thing.** That run's plan
+  opened with a step that only read nine files and then wrote three independent
+  document sections in one go; the planner is now told that reading is how a plan
+  gets written rather than work an implementer can be given, and that several
+  things of the same kind get one step each unless a step says why they cannot be
+  done apart. The critic refuses both. **The verdict must agree with the
+  findings.** The same run's review reported a blocking defect and still called
+  the change ready for acceptance — nothing in the script grades a verdict
+  against its own findings, so the verifier now carries the rule that one
+  confirmed blocking or should-fix finding means "needs changes". **And the
+  plumbing stopped leaking**: coverage gaps that survive the round cap are
+  written into the review's prose as ground it did not cover, not under a heading
+  copied from the marker that delivered them.
 
 - **`requirements-grill` lets its agents search, and ripgrep is no longer a
   requirement of this package.** The workflow used to run one `rg` itself before

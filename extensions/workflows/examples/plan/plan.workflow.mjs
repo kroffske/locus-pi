@@ -285,6 +285,18 @@ A step is too big when its "done" cannot be checked in one sentence, and too
 small when it cannot be checked at all. Prefer few real steps over many
 ceremonial ones.
 
+Every step changes the repository. Reading, searching, and understanding are how
+you write this plan, not steps in it: a step whose \`Change:\` amounts to
+"inspect", "read", or "confirm" spends an implementer on work that produced
+nothing, and the next step has to do the reading again anyway.
+
+When the task names several things of the same kind — files, modules, endpoints,
+tables, sections of one document — give each one its own step. They are
+independent work with independent evidence even when the writing is repetitive,
+and one step covering several of them makes a single implementer own decisions
+nobody can check separately. Combine them only when a step says plainly why they
+cannot be done apart.
+
 Nobody will answer a question mid-run. Where the task leaves a real choice open,
 take the most defensible option, plan on it, and record it under
 \`## Assumptions\` in the exact form "assumed X, because Y; wrong if Z". An
@@ -384,7 +396,11 @@ something that would make an implementer stop, guess, or do the wrong thing:
   even if you would have chosen differently;
 - a surface the task requires that no step touches — callers, tests,
   configuration, or an existing document that states the contract being changed;
-- a step so large that it hides several independent decisions.
+- a step so large that it hides several independent decisions — and when the
+  task names several things of the same kind, one step covering more than one of
+  them is exactly that, unless the step says why they cannot be done apart;
+- a step that changes nothing, because reading and confirming are how the plan
+  was written rather than work an implementer can be given.
 
 Style, wording, and how you would have organized the plan are not defects. A
 plan you would have written differently but that implements the task correctly

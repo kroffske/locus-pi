@@ -266,6 +266,11 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(verifier).toMatch(/Missing defence in depth is not a defect/u);
     expect(verifier).toMatch(/Deduplicate by root cause before writing findings/u);
     expect(verifier).toMatch(/never `Rejected` for a question whose answer produced a finding/u);
+    // Nothing in the script grades the verdict against the findings, so this
+    // sentence is the only thing standing between a reader and a review that
+    // reports a blocking defect under "ready for acceptance". A live run on
+    // 2026-07-28 produced exactly that contradiction.
+    expect(verifier).toMatch(/Write `Needs changes` whenever you confirmed even one `P1` or\s+`P2` finding/u);
   });
 
   it("makes every question id carry its question in both question-writing roles", () => {
