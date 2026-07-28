@@ -5,7 +5,7 @@ This directory is the only place where a reader can see the authoring shape that
 teach, applied to code that actually runs. This file says what ships, what each
 example is for, which shape it demonstrates, and how far it travels.
 
-Measured 2026-07-27 against the files in this directory.
+Measured 2026-07-28 against the files in this directory.
 
 ## What ships
 
@@ -18,8 +18,8 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       |   309 |              0 |            0 |       0 | npm package · public repository |
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 |   876 |              2 |            2 |       5 | npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 |   696 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   754 |              0 |            2 |       4 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |   648 |              0 |            1 |       8 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   445 |              0 |            1 |       2 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |   615 |              0 |            1 |       7 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflow-run <name>`, discovered by existence on each call
@@ -61,7 +61,7 @@ so a copy placed there works on one machine and exists in no clone.
 | `requirements-grill`  | Requirements refinement                                  | Workflow-owned repository search (a bounded `rg` the script runs itself, not an agent), and fail-closed exits at every stage.                                                        |
 | `review`              | Evidence-backed code review                              | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
 | `review-fix`          | Human-directed fixes                                     | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, host-owned source fingerprints.                      |
-| `plan`                | Task → accepted plan                                     | Two loops with different owners: one operator clarification round that can pause the run, and a bounded draft/critique loop whose exit is a shaped verdict.                          |
+| `plan`                | Task → accepted plan                                     | A declared agent roster — `scout`, `planner`, `critic` — and a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                       |
 | `plan-implement`      | Accepted plan → changes                                  | The other end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true` outcome.                           |
 | `excalidraw-pipeline` | Reference only, under [`../references/`](../references/) | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
@@ -114,8 +114,8 @@ and 18 on 2026-07-26, without a single check being dropped.
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | `review`                           | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings; `QUESTION_COVERAGE_SCHEMA`: `complete`/`more_questions_needed`, ≤8 gaps, 400-character gaps, unique trimmed, non-blank | `clarifierDecisionErrors` and `questionCoverageErrors`: the decision must agree with its list; `recommended` must name a real option; combined budgets | Continuation identity, prepare-artifact provenance, operator-input bounds |
 | `review-fix`                       | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                                                                                                                                         | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget    | `reviewRef` provenance, parsing the prior run's review, input bounds      |
-| `plan`                             | `CLARIFIER_SCHEMA` as above at ≤6 questions; `PLAN_VERDICT_SCHEMA`: `accept`/`revise`, ≤12 defects, 600-character defects, unique trimmed, non-blank                                                                                                                                           | `clarifierDecisionErrors`, `planVerdictErrors`: `accept` with defects and `revise` without them are both unusable; combined budgets                    | Continuation identity and provenance, operator-input bounds               |
-| `plan-implement`                   | `STEP_SELECTOR_SCHEMA`: `^S[1-9][0-9]*$` ids, 1–30 steps, 4,000-character notes, unique ids                                                                                                                                                                                                    | `stepSelectionErrors`: every id exists in the accepted plan; combined note budget                                                                      | `planRef` provenance, parsing the prior run's plan, input bounds          |
+| `plan`                             | `PLAN_VERDICT_SCHEMA`: `accept`/`revise`, ≤12 defects, 600-character defects, unique trimmed, non-blank                                                                                                                                                                                        | `planVerdictErrors`: `accept` with defects and `revise` without them are both unusable; combined defect budget                                         | Operator-input bounds                                                     |
+| `plan-implement`                   | `STEP_SELECTOR_SCHEMA`: `^S[1-9][0-9]*$` ids, 1–30 steps, 4,000-character notes, unique ids                                                                                                                                                                                                    | `stepSelectionErrors`: every id exists in the accepted plan; combined note budget                                                                      | Continuation shape, parsing the prior run's plan, input bounds            |
 | `live-smoke`, `requirements-grill` | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                      | Input bounds only                                                         |
 
 **Loops need a declared exit, not a scan.** Two shipped loops — `review`'s
@@ -124,9 +124,11 @@ same way: the round's own reader returns a shaped verdict with the concrete gaps
 or defects that justify another round, script code branches on the enum, and the
 free text is handed to the next round verbatim. Neither greps the previous
 round's Markdown, and both record which condition stopped them — the measured
-verdict or the safety cap. `plan`'s clarification round is a different animal and
-is not one of them: it runs at most once, and what ends it is the operator
-answering, not a judge.
+verdict or the safety cap. `plan` used to carry a second, different loop — one
+clarification round ended by an operator answering rather than by a judge. It was
+removed on 2026-07-28: the run now records an open decision as a stated
+assumption and plans on it, because a halted run yields no plan at all while a
+written assumption can be read and corrected the moment the run finishes.
 
 **Free-text bounds.** An agent's own answer is bounded by that call's
 `maxAnswerChars`, so an oversized handoff names the call that produced it.

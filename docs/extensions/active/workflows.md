@@ -81,7 +81,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`.                                                                                    |
 | `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent. |
 | `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, terminal provenance, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                    |
-| `plan`               | **Task to accepted plan**: read-only throughout. A shaped clarifier either continues or persists exact `task.md` plus readable `clarification-questions.md` and stops, exactly like `review`. A recon stage then maps the repository, and a drafter/critic pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.                                                   |
+| `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. The run never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.        |
 | `plan-implement`     | **Accepted plan to changes**: semantic text plus host continuation supplies one `plan.md` whose bytes must equal a successful Package `plan` run's terminal result — a same-named draft from an earlier round of that run's loop is refused. Deterministic code parses `### S<n>` blocks; a no-tool selector chooses which steps this run implements and the plan's own order is restored. One writer owns each step, then a read-only checker and a fresh reporter run. A failed writer skips the remaining steps and returns `partial: true`.                                    |
 
 `review` always receives a non-empty semantic string. A shaped read-only
@@ -216,21 +216,28 @@ install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
 
 `plan` and `plan-implement` are the second curated pair, and the seam between
-them is the same shape as `review` → `review-fix` with one extra check. `plan`
-returns the accepted plan text, which the runtime retains as `plan.md`;
-`plan-implement` takes that artifact's complete
-`{ runId, artifactId, name, sha256 }` reference through host continuation and
-additionally requires those bytes to equal the source run's terminal result.
-That check is load-bearing rather than ceremonial: `plan` writes one `plan.md`
-per drafting round under the same logical name, so name, stage, and digest alone
-would happily bind a draft the critic rejected.
+them is the same shape as `review` → `review-fix`. `plan` returns the accepted
+plan text, which the runtime retains as `plan.md`; `plan-implement` takes that
+artifact's complete `{ runId, artifactId, name, sha256 }` reference through host
+continuation, and reads the bytes the host verified and copied. Entry code used
+to re-derive that proof and additionally require the bytes to equal the source
+run's terminal result — which distinguished the accepted plan from a same-named
+draft of an earlier round. That check was removed on 2026-07-28 as an accepted
+trade: it cost every reader of the entry, and the failure it prevented is a run
+implementing an unaccepted draft, which replanning corrects.
+
+`plan` declares its three participants in one frozen `PLAN_AGENTS` roster —
+`scout`, `planner`, `critic` — carrying each agent's capabilities beside what it
+receives and returns, so the cast is readable without following the control flow.
 
 Planning never writes. Every `plan` stage passes `readOnly: true`; in
 `plan-implement` only the per-step writers hold `write`, `edit`, and `bash`, the
 selector holds no tools at all, and the checker adds `repository_check` without
-edit tools. Both loops in `plan` — the clarification round and the drafting
-round — end on a declared enum rather than on a scan of model prose, and the run
-journal records whether the critic or the round cap stopped the loop.
+edit tools. `plan`'s one loop ends on a declared enum rather than on a scan of
+model prose, and the run journal records whether the critic or the round cap
+stopped it. The operator-clarification round it used to run first was removed on
+the same day: the run no longer stops to ask, and an open decision is recorded by
+the planner as a stated assumption the critic judges.
 
 Pipeline maps:
 

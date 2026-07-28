@@ -15,8 +15,8 @@ import {
 } from "../../../extensions/_shared/workflow-runtime.js";
 
 /**
- * The tracked `plan-implement` example. Its whole trust story is that the plan
- * arrives as bytes a *previous* successful run returned, so these tests build a
+ * The tracked `plan-implement` example. The plan arrives as bytes the host
+ * verified and copied from a *previous* successful run, so these tests build a
  * real prior-run artifact store on disk rather than a hand-written source record.
  */
 const workflowPath = path.join(
@@ -65,9 +65,7 @@ interface PlanFixture {
   planText: string;
 }
 
-function createPlanFixture(
-  options: { steps?: string[]; stage?: string; targetRef?: string; terminalResult?: unknown } = {},
-): PlanFixture {
+function createPlanFixture(options: { steps?: string[] } = {}): PlanFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-"));
   const sourceRunId = "plan-source";
   const sourceRunDir = path.join(root, ".locus", "runtime", "workflows", sourceRunId);
@@ -77,7 +75,7 @@ function createPlanFixture(
   const planRef = sourceStore.recordAgentEvidence({
     callId: "call-0003",
     name: "plan.md",
-    stage: options.stage ?? "draft-plan",
+    stage: "draft-plan",
     text,
     replayed: false,
   }).answer!;
@@ -85,11 +83,11 @@ function createPlanFixture(
     path.join(sourceRunDir, "result.json"),
     `${JSON.stringify({
       ok: true,
-      result: "terminalResult" in options ? options.terminalResult : text,
+      result: text,
       artifactRefs: [planRef],
       target: {
         kind: "scriptPath",
-        ref: options.targetRef ?? "extensions/workflows/examples/plan/plan.workflow.mjs",
+        ref: "extensions/workflows/examples/plan/plan.workflow.mjs",
         source: "project",
       },
     })}\n`,
@@ -189,7 +187,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain("continuationArtifacts()");
-    expect(source).toContain("requireAcceptedPlanArtifact(consumedPlan, planRef)");
     expect(source).toContain("function parseStepBlocks");
     expect(source).toContain("STEP_SELECTOR_SCHEMA");
     // Split the same way the curated examples are: one function decides and never
@@ -340,30 +337,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     // child that produced it, so it is re-asked rather than ending the run.
     expect(calls.map((call) => call.label)).toEqual(["select plan steps", "select plan steps", "select plan steps"]);
     expect(calls[1]?.prompt).toContain('steps[0].id: value "S9" is not a step id in the plan');
-  });
-
-  it.each([
-    ["a plan another workflow produced", { targetRef: "review.workflow.mjs" }],
-    ["a stage that is not the accepted draft", { stage: "map-context" }],
-    [
-      "bytes the run did not finish with",
-      { terminalResult: "# Implementation Plan\n## Steps\n### S1 — Something else" },
-    ],
-  ])("refuses %s", async (_caseName, options) => {
-    const fixture = createPlanFixture(options);
-    const calls: WorkflowAgentRequest[] = [];
-    const { dsl } = runtimeWith(fixture, async (request) => {
-      calls.push(request);
-      return completed(request, "unused");
-    });
-
-    // Host-owned provenance ends the run before any child is asked. The
-    // `terminalResult` case is the load-bearing one: same name, same run, right
-    // stage — but not the text the accepted run actually returned.
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      'must be the accepted "plan.md" answer a successful plan draft-plan run returned',
-    );
-    expect(calls).toHaveLength(0);
   });
 
   it.each([

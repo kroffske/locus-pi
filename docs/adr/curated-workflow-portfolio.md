@@ -353,6 +353,40 @@ judgement, not the mechanism. It is kept because the file is linked from the
 manuals, the support boundary, and two changelog entries, and a redirect costs
 more than the imprecision.
 
+## Amendment 2026-07-28 — `plan` names its agents and stops asking
+
+Two changes to the planning pair, both accepted by the maintainer against a
+stated cost.
+
+**The cast is declared.** `plan` now carries a frozen `PLAN_AGENTS` roster —
+`scout`, `planner`, `critic` — where each entry holds the agent's id, what it
+receives, what it returns, and its capability options; the call sites spread
+those options and add only the round label. The four participants previously
+existed only as `agent()` calls inside async functions, labelled with verb
+phrases, and the names printed on the workflow's diagram matched no identifier in
+the source at all. This is a legibility decision, not an architecture one: the
+control flow is unchanged, and the host script still owns the sequence.
+
+**The operator pause is removed.** The shaped clarifier, the operator handoff,
+and the continuation that resumed a paused planning run are gone. An open
+decision is now recorded by the planner in the plan under `## Assumptions` in the
+form "assumed X, because Y; wrong if Z", and the critic counts a decision the
+plan depends on but never states as a defect while a stated one is not. The
+reasoning: a paused run yields no plan until somebody answers it, while a written
+assumption is visible the moment the run finishes and is corrected by replanning,
+which this workflow is cheap enough to repeat. The clarification shape stays in
+`review`, where the answer changes what is reviewed at all.
+
+**`plan-implement` no longer re-derives provenance.** It still requires exactly
+one continuation artifact named `plan.md` and bounds it, but the entry-code
+checks on digest, source target, source stage, and terminal result are gone. The
+cost is real and is accepted here rather than hidden: that terminal-result check
+was what distinguished the accepted plan from a same-named draft of an earlier
+drafting round, so an implementation run can now start from a plan the critic had
+not accepted. Weighed against it, the ceremony sat in front of every reader of
+the entry and every author imitating it, and the failure it prevented is repaired
+by replanning rather than by anything irreversible.
+
 ## Consequences
 
 The Package surface grew from three to five names, back to four when `llm-smoke`

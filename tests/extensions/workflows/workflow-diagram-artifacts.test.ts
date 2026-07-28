@@ -84,8 +84,12 @@ describe("curated workflow diagrams", () => {
       expect(svg, `diagram omits artifact ${artifact}`).toContain(artifact);
     }
 
-    // The two outcomes a reader most needs to find before running anything.
-    expect(svg).toContain("awaiting_operator");
+    // The agents are the point of this diagram, so each one is named on it, and
+    // the two outcomes a reader needs before running anything are both there.
+    for (const agent of declaredNames(source, /\bid:\s*"([^"]+)"/gu)) {
+      expect(svg, `diagram omits agent ${agent}`).toContain(agent);
+    }
+    expect(svg).toMatch(/round cap|4th revise/u);
     expect(svg).toMatch(/plan-implement/u);
   });
 });

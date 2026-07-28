@@ -4,6 +4,33 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Changed
+
+- **`plan` is now three named agents and one loop, and it never stops to ask.**
+  The workflow's participants used to exist only as `agent()` calls inside async
+  functions, labelled with verb phrases; a reader could not list the cast without
+  following the control flow, and the names on its diagram matched no identifier
+  in the source. They are now declared once in a frozen `PLAN_AGENTS` roster —
+  `scout`, `planner`, `critic` — each entry carrying what the agent receives,
+  what it returns, and its capabilities, with the call sites spreading those
+  options and adding only the round label. The redrawn `plan-pipeline.svg` shows
+  the same three agents and the text that passes between them.
+  The operator-clarification round is gone with everything that supported it: no
+  clarifier stage, no operator pause, no continuation into a second run. When the
+  task leaves a real choice open the planner records it in the plan under
+  `## Assumptions` as "assumed X, because Y; wrong if Z" and plans on it, and the
+  critic counts a decision the plan depends on but never states as a defect while
+  a stated one is not. A halted run yields no plan at all; a written assumption is
+  visible when the run finishes and is corrected by replanning.
+  `plan-implement` no longer re-derives the host's continuation proof. It still
+  requires exactly one `plan.md` reference and bounds it, but the digest, target,
+  stage, and terminal-result checks are gone. That trade is deliberate and it is a
+  real one: the removed check is what distinguished the accepted plan from a
+  same-named draft of an earlier round, so a run can now implement a plan the
+  critic had not accepted. The cost of the ceremony — on every reader of the
+  entry, and on every weaker model asked to author something like it — was judged
+  higher than a failure replanning repairs.
+
 ### Added
 
 - **A shipped skill, so an agent can find the workflows the package already

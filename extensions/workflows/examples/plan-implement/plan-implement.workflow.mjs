@@ -1,9 +1,9 @@
 // plan-implement.workflow.mjs
 //
 // Executes one plan that a prior `plan` run produced and a critic accepted. The
-// plan arrives as host-verified continuation bytes, never as text pasted into
-// the input: the runtime proves which run wrote it, that the run succeeded, and
-// that these exact bytes were that run's final answer, before this module starts.
+// plan arrives as continuation bytes the host has already verified and copied,
+// never as text pasted into the input, so this module reads the plan and starts
+// working instead of re-proving where it came from.
 //
 // The shape is deliberate:
 //
@@ -166,7 +166,12 @@ export default async function runWorkflow(dsl, input) {
   }
   const planRef = continuation[0].sourceRef;
   const consumedPlan = continuation[0].consumedArtifact;
-  requireAcceptedPlanArtifact(consumedPlan, planRef);
+  // The host verifies and copies the referenced bytes before this module starts,
+  // so the script reads them and gets on with the work. It used to re-derive
+  // that proof here — matching digests, the source run's target, its stage, and
+  // its terminal result — which is cognitive load in every reader's way for a
+  // risk the operator judged not worth it: the worst case is implementing a plan
+  // the critic had not accepted, which replanning fixes.
   const planText = requireBoundedText(consumedPlan.text, "consumed plan", MAX_PLAN_CHARS);
   const steps = parseStepBlocks(planText);
 
@@ -542,44 +547,6 @@ function stepSelectionErrors(steps, value) {
 function orderStepSelection(steps, value) {
   const notesById = new Map(value.steps.map(({ id, note }) => [id, note]));
   return steps.filter((step) => notesById.has(step.id)).map((step) => ({ ...step, note: notesById.get(step.id) }));
-}
-
-/**
- * Host-owned provenance for the consumed plan. Every field is evidence about the
- * source run that no child of this run can produce or repair, which is why it
- * throws. `terminal.result === consumed.text` is the load-bearing one: it proves
- * these bytes were the accepted plan the run finished with, not merely a
- * same-named draft from an earlier round of its loop.
- */
-function requireAcceptedPlanArtifact(consumed, sourceRef) {
-  const source = consumed?.source;
-  const target = source?.target;
-  const projectedRefs = Array.isArray(source?.terminal?.artifactRefs) ? source.terminal.artifactRefs : [];
-  const namesPlanWorkflow =
-    (target?.kind === "name" && target.ref === "plan") ||
-    (target?.kind === "scriptPath" && /(^|[/\\])plan\.workflow\.mjs$/u.test(String(target.ref ?? "")));
-  if (
-    source?.runId !== sourceRef?.runId ||
-    !namesPlanWorkflow ||
-    source?.artifact?.kind !== "answer" ||
-    source?.artifact?.stage !== "draft-plan" ||
-    consumed?.ref?.name !== "plan.md" ||
-    source?.terminal?.result !== consumed?.text ||
-    !projectedRefs.some((ref) => sameArtifactRef(ref, sourceRef))
-  ) {
-    throw new Error(
-      'plan-implement planRef must be the accepted "plan.md" answer a successful plan draft-plan run returned',
-    );
-  }
-}
-
-function sameArtifactRef(left, right) {
-  return (
-    left?.runId === right?.runId &&
-    left?.artifactId === right?.artifactId &&
-    left?.name === right?.name &&
-    left?.sha256 === right?.sha256
-  );
 }
 
 function classifySourceTransition(expected, observed, changedClassification) {

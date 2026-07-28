@@ -334,15 +334,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/examples/plan/plan.workflow.mjs` and
   `extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs` are
   the second curated pair and add no runtime primitive. `plan` is read-only end to
-  end: a shaped clarifier either continues or publishes exact `task.md` plus
-  readable `clarification-questions.md` and stops, and a drafter/critic pair then
-  loops on a declared `accept`/`revise` enum with the critic's exact defects
-  forwarded to the next round. Reaching the round cap without an acceptance
-  returns `ok:false`, which is also what keeps an unaccepted draft out of
-  implementation. `plan-implement` accepts semantic text plus host continuation
-  containing one complete `plan.md` ref; entry code requires the bytes to equal
-  the source run's terminal result, so a same-named draft from an earlier round of
-  the same run is refused. Deterministic code parses `### S<n>` blocks, a no-tool
+  end and declares its three participants in one frozen `PLAN_AGENTS` roster:
+  `scout` maps the repository once, then a `planner`/`critic` pair loops on a
+  declared `accept`/`revise` enum with the critic's exact defects forwarded to the
+  next round. It never pauses for an operator; an undecided choice is recorded by
+  the planner under `## Assumptions` and judged by the critic, so an unstated
+  assumption is a defect and a stated one is not. Reaching the round cap without
+  an acceptance returns `ok:false`, which is also what keeps an unaccepted draft
+  out of implementation. `plan-implement` accepts semantic text plus host
+  continuation containing one complete `plan.md` ref, and reads the bytes the host
+  already verified and copied rather than re-deriving that proof in entry code. Deterministic code parses `### S<n>` blocks, a no-tool
   selector chooses the steps, the plan's own order is restored, and one
   write-capable session owns each step in the launch checkout with host-owned Git
   fingerprints around every writer. A read-only checker and a fresh reporter
