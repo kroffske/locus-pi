@@ -145,15 +145,10 @@ because the operator's working tree has already changed and needs describing, an
 the run returns `{ ok: false, partial: true, appliedSteps, failedStep,
 unresolvedRows }`. The runner projects a deliberate partial as a non-success.
 
-`captureSourceState()` fingerprints the checkout before and after every writer, so
-the reporter can separate what a declared writer window changed from drift that
-appeared outside one. It records evidence; it does not lock the checkout.
-
 ### What the run retains
 
 - `step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
   `check-evidence.md`, and `implementation-report.md`;
-- `source-state-*.json` fingerprints around every writer and check window;
 - the returned text, equal to `implementation-report.md`, unless the run was
   partial — then the returned value is the structured envelope above and the
   report is still retained.

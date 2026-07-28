@@ -41,7 +41,6 @@ export default async function runWorkflow(dsl, input) {
     publishArtifact,
     consumeTextArtifact,
     continuationArtifacts,
-    captureSourceState,
     awaitOperator,
     phase,
     log,
@@ -174,13 +173,6 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   The completed run envelope and model-callable workflow tool project the newest
   20 answer/published refs and an explicit omitted count, so a later call can
   carry a real ref without guessing the index. The full index remains canonical.
-- **Fingerprint mutable remediation:** `captureSourceState(label)` persists a
-  host-owned Git fingerprint under the current run. Use it around write-capable
-  stages and read-only checks to distinguish expected writer changes from drift
-  outside the declared window. Every initialized gitlink is enumerated
-  independently of its parent modification state and contributes the checked-out
-  submodule HEAD, index, status, and changed/untracked bytes. It records
-  evidence; it does not lock the checkout.
 - **Treat groups as fail-closed full barriers:** `parallel()` / `pipeline()` wait
   for scheduled siblings, then reject `WorkflowGroupFailureError` when an
   ordinary branch or stage throws or directly returns `ok:false` /

@@ -153,12 +153,11 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const { agent, captureSourceState, log, phase } = dsl;
+  const { agent, log, phase } = dsl;
   const intent = requireBoundedText(input, "intent", MAX_INTENT_CHARS);
 
   phase("select-steps");
   log("Binding the accepted plan and validating the selected steps.");
-  let expectedState = captureSourceState("before-implementation");
   const continuation = dsl.continuationArtifacts();
   if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "plan.md") {
     throw new Error('plan-implement continuation requires exactly one artifact named "plan.md"');
@@ -265,17 +264,8 @@ ${selectedText}
   phase("apply-steps");
   log("Applying each selected step with one sequential write-capable agent.");
   const workerResults = [];
-  const transitions = [];
   let failure;
   for (const [index, step] of selected.entries()) {
-    const beforeWriter = captureSourceState(`before-${step.id.toLowerCase()}`);
-    transitions.push(
-      classifySourceTransition(
-        expectedState,
-        beforeWriter,
-        index === 0 ? "unexpected_pre_writer_drift" : "unexpected_inter_writer_drift",
-      ),
-    );
     try {
       const text = await agent(
         `${COMMON}
@@ -320,11 +310,7 @@ ${step.note || "(no operator note)"}
 
 --- BEGIN PREVIOUS STEP RESULTS ---
 ${renderWorkerResults(workerResults.slice(-3), MAX_PREDECESSOR_CONTEXT_CHARS)}
---- END PREVIOUS STEP RESULTS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, beforeWriter)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END PREVIOUS STEP RESULTS ---`,
         {
           ...IMPLEMENT_WRITE_OPTIONS,
           artifact: `worker-${step.id}.md`,
@@ -336,9 +322,6 @@ ${renderSourceProvenance(transitions, beforeWriter)}
     } catch (error) {
       failure = { id: step.id, message: error instanceof Error ? error.message : String(error) };
     }
-    const afterWriter = captureSourceState(`after-${step.id.toLowerCase()}`);
-    transitions.push(classifySourceTransition(beforeWriter, afterWriter, "writer_window_changed"));
-    expectedState = afterWriter;
     if (failure !== undefined) {
       // Plan steps are ordered because each one builds on the last. Running the
       // rest on top of a failed predecessor is how a plan half-lands; the
@@ -350,8 +333,6 @@ ${renderSourceProvenance(transitions, beforeWriter)}
 
   phase("collect-check-evidence");
   log("Collecting independent diff evidence and running bounded repository checks.");
-  const beforeCheck = captureSourceState("before-check");
-  transitions.push(classifySourceTransition(expectedState, beforeCheck, "unexpected_post_writer_drift"));
   const checkText = await agent(
     `${COMMON}
 
@@ -384,11 +365,7 @@ ${scopeText}
 
 --- BEGIN ALL STEP RESULTS ---
 ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
---- END ALL STEP RESULTS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, beforeCheck)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END ALL STEP RESULTS ---`,
     {
       ...IMPLEMENT_CHECK_OPTIONS,
       artifact: "check-evidence.md",
@@ -396,8 +373,6 @@ ${renderSourceProvenance(transitions, beforeCheck)}
       maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
     },
   );
-  const afterCheck = captureSourceState("after-check");
-  transitions.push(classifySourceTransition(beforeCheck, afterCheck, "unexpected_check_window_drift"));
 
   phase("report-implementation");
   log("Reporting every planned step's outcome against the accepted plan.");
@@ -412,15 +387,9 @@ reviewer and you wrote none of the changes below.
 Start from the accepted plan and account for **every** step in it, including the
 ones this run did not select: each is done, partly done, blocked, or not
 attempted, and each verdict names the evidence you read rather than the claim you
-were given. Reopen the live diff and the affected files; the step results and the
-check evidence are leads, not proof. Say plainly what a reader must do next.
-
-Use the host-owned fingerprint transitions to separate two things: what the
-declared writer window changed, and change that appeared outside one. Treat any
-\`unexpected_*_drift\` classification as a provenance gap that may invalidate the
-worker or check evidence. A \`writer_window_changed\` classification records that
-files changed during that window; it does not prove the named writer was the only
-process that changed them.
+were given. Verify each implemented step against the plan with your own tools:
+reopen the live diff and the affected files; the step results and the check
+evidence are leads, not proof. Say plainly what a reader must do next.
 
 Return exact Markdown:
 
@@ -465,11 +434,7 @@ ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
 
 --- BEGIN CHECK EVIDENCE ---
 ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
---- END CHECK EVIDENCE ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, afterCheck)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END CHECK EVIDENCE ---`,
     {
       ...IMPLEMENT_READ_OPTIONS,
       artifact: "implementation-report.md",
@@ -554,37 +519,6 @@ function stepSelectionErrors(steps, value) {
 function orderStepSelection(steps, value) {
   const notesById = new Map(value.steps.map(({ id, note }) => [id, note]));
   return steps.filter((step) => notesById.has(step.id)).map((step) => ({ ...step, note: notesById.get(step.id) }));
-}
-
-function classifySourceTransition(expected, observed, changedClassification) {
-  const changed = expected.fingerprint !== observed.fingerprint;
-  return {
-    fromFingerprint: expected.fingerprint,
-    toFingerprint: observed.fingerprint,
-    changed,
-    classification: changed ? changedClassification : "stable",
-    fromHead: expected.head,
-    toHead: observed.head,
-  };
-}
-
-function renderSourceProvenance(transitions, current) {
-  const status = current.status.length === 0 ? ["(clean)"] : current.status.slice(0, 40);
-  return [
-    transitions.length === 0 ? "(none)" : JSON.stringify(transitions, null, 2),
-    "",
-    "Current host-owned source state:",
-    JSON.stringify(
-      {
-        fingerprint: current.fingerprint,
-        head: current.head,
-        status,
-        omittedStatusEntries: Math.max(0, current.status.length - status.length),
-      },
-      null,
-      2,
-    ),
-  ].join("\n");
 }
 
 function renderWorkerResults(results, maxChars) {

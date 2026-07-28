@@ -109,7 +109,17 @@ describe("workflow run report", () => {
         stage: "critique-plan",
       }),
       record({ artifactId: "published-0002", name: "questions.md", kind: "published" }),
-      record({ artifactId: "input-0001", name: "plan.md", kind: "input" }),
+      record({
+        artifactId: "input-0001",
+        name: "plan.md",
+        kind: "input",
+        source: {
+          runId: "20260728-180000-prev",
+          artifactId: "call-0002-answer",
+          name: "plan.md",
+          sha256: "b".repeat(64),
+        },
+      }),
     ];
     const outcome = writeWorkflowRunReport(
       {
@@ -162,11 +172,19 @@ describe("workflow run report", () => {
     assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
     assert.match(readme, /- Result: \[result\.md\]\(result\.md\)/u);
     assert.match(readme, new RegExp(`\\.locus/runtime/workflows/${RUN_ID}/`, "u"));
+    // Grouped by origin: agent answers first, then continuation inputs naming
+    // their source run, then workflow-published documents.
+    const agentHeading = readme.indexOf("## Agent documents, in creation order");
+    const inputsHeading = readme.indexOf("## Transferred inputs");
+    const publishedHeading = readme.indexOf("## Published by the workflow");
+    assert.ok(agentHeading > 0 && agentHeading < inputsHeading && inputsHeading < publishedHeading);
     const first = readme.indexOf("01-scout-context.md");
     const second = readme.indexOf("02-planner-round-1-plan.md");
     const third = readme.indexOf("03-critic-round-1-plan-critique.md");
-    assert.ok(first > 0 && first < second && second < third);
-    assert.match(readme, /scout · answer · scout-repository/u);
+    assert.ok(first > agentHeading && first < second && second < third && third < inputsHeading);
+    assert.match(readme, /scout · scout-repository/u);
+    assert.match(readme, /\[05-input-plan\.md\]\(05-input-plan\.md\) — transferred from run 20260728-180000-prev/u);
+    assert.ok(readme.indexOf("04-workflow-questions.md") > publishedHeading);
   });
 
   it("renders JSON documents as Markdown, fencing nested shapes and keeping non-JSON verbatim", () => {
@@ -257,7 +275,9 @@ describe("workflow run report", () => {
     assert.equal(existsSync(path.join(reportDir, "01-scout-context.md")), false);
     assert.equal(readFileSync(path.join(reportDir, "02-planner-round-1-plan.md"), "utf8"), "plan body");
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
-    assert.match(readme, /01-scout-context\.md — scout · answer — unavailable/u);
+    assert.match(readme, /01-scout-context\.md — scout — unavailable/u);
+    assert.doesNotMatch(readme, /## Transferred inputs/u);
+    assert.doesNotMatch(readme, /## Published by the workflow/u);
   });
 
   it("is written by the runner next to the machine records on a live run", async () => {

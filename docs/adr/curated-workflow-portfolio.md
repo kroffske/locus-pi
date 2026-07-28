@@ -76,15 +76,13 @@ before any writer starts.
 
 One read-only resolver narrows the selected fix scope. Exactly one sequential
 writer then owns each selected finding in the launch checkout, which makes mutation
-order and accountability explicit. Host-owned Git fingerprints bracket every
-writer, check, and re-review boundary so later source drift is visible. A
+order and accountability explicit. A
 separate host-enforced read-only child collects full-diff evidence and can run
 only declared package scripts through `repository_check`; the host executes each
 script in a disposable external worktree, never the operator checkout. The exact
 complete script-name-to-command map is frozen before the first writer and checked
 again before and inside the snapshot; additions, removals, changes, and newly
-introduced `pre`/`post` lifecycle hooks are refused. Source fingerprints also include a dirty
-submodule's checked-out HEAD. A fresh
+introduced `pre`/`post` lifecycle hooks are refused. A fresh
 read-only child re-reviews every original finding, affected dependency, and
 regression risk.
 The runtime automatically persists the named answers `scope.md`,
@@ -271,8 +269,7 @@ and consumed artifact is bounded, and every agent answer is bounded by its own
 call's `maxAnswerChars`. _Inspectable evidence_: the runtime owns `task.md`,
 `context.md`, one `plan.md` and one `plan-critique.json` per drafting round, then
 `step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
-`check-evidence.md`, and `implementation-report.md`, plus `captureSourceState`
-fingerprints around every writer. _Fails closed_: a plan the critic never accepted
+`check-evidence.md`, and `implementation-report.md`. _Fails closed_: a plan the critic never accepted
 ends the run `ok:false`, which is also what keeps it out of implementation, since
 continuation consumes only a successful run's projected artifacts; a failed writer
 returns `partial: true`, which is projected as non-success. _Supportable permission

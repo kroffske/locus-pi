@@ -125,26 +125,13 @@ function failed(request: WorkflowAgentRequest, summary: string): WorkflowAgentRe
   };
 }
 
-function sourceState(fingerprint = "a".repeat(64)) {
-  return {
-    schema: "locus.workflow-source-state.v1" as const,
-    fingerprint,
-    head: "1".repeat(40),
-    indexFingerprint: "2".repeat(64),
-    worktreeFingerprint: fingerprint,
-    status: [" M src/page.ts"],
-  };
-}
-
 let runtimeOrdinal = 0;
 
 function runtimeWith(
   fixture: PlanFixture,
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
-  sourceStates: ReturnType<typeof sourceState>[] = [sourceState()],
 ) {
   const runId = `plan-implement-test-${++runtimeOrdinal}`;
-  let sourceStateIndex = 0;
   const runDir = path.join(fixture.root, ".locus", "runtime", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
@@ -159,16 +146,13 @@ function runtimeWith(
         originRunId: fixture.planRef.runId,
         artifacts: [{ sourceRef: fixture.planRef, consumedArtifact: consumedPlan }],
       },
-      sourceState: {
-        capture: () => sourceStates[Math.min(sourceStateIndex++, sourceStates.length - 1)] ?? sourceState(),
-      },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner,
     }),
   };
 }
 
-/** Named answers only: the source-state fingerprints are host-published noise here. */
+/** Named answers only: the consumed plan is an input record, not reviewable work. */
 function namedAnswers(store: ReturnType<typeof createWorkflowArtifactStore>): string[] {
   return store
     .list()
@@ -194,7 +178,11 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("function stepSelectionErrors");
     expect(source).toContain("function orderStepSelection");
     expect(source).toContain("validate: (value) => stepSelectionErrors(steps, value)");
-    expect(source).toContain("captureSourceState");
+    // The worktree fingerprinting mechanism was removed 2026-07-29: a workflow
+    // runs on the operator's own checkout by guarantee, so per-step evidence is
+    // the writer's answer plus what the read-only check stage observes itself,
+    // and the script publishes nothing of its own.
+    expect(source).not.toContain("publishArtifact");
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
@@ -424,7 +412,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       runId,
       projectRoot: fixture.root,
       artifactPorts: artifactStore,
-      sourceState: { capture: () => sourceState() },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner: async (request) => completed(request, "unused"),
     });

@@ -360,7 +360,6 @@ tests/shared/workflows/workflow-run-report.test.ts
 tests/shared/workflows/workflow-run-snapshot.test.ts
 tests/shared/workflows/workflow-runner-host-crash.test.ts
 tests/shared/workflows/workflow-script-identity.test.ts
-tests/shared/workflows/workflow-source-state.test.ts
 tests/shared/workflows/workflow-target-confinement.test.ts
 tests/shared/workflows/workflow-workspace.test.ts
 tests/test-harness.ts

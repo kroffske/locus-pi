@@ -160,14 +160,8 @@ review order as its tie-break.
 
 One read-only scope resolver receives only the selected complete finding blocks.
 Exactly one sequential write-capable agent then owns each selected finding, so
-overlapping mutations have a visible order and one accountable writer. The host
-captures Git HEAD, index, status, and changed/untracked byte fingerprints before
-remediation, around each writer, around checks, and before re-review. Every
-initialized gitlink is enumerated independently of its parent modification
-state, then its submodule HEAD, index, status, and changed/untracked bytes are
-included. These
-artifacts distinguish declared writer-window changes from source drift; they do
-not lock the checkout. A separate host-enforced read-only child reopens the full
+overlapping mutations have a visible order and one accountable writer. A separate
+host-enforced read-only child reopens the full
 diff and may call `repository_check` with only a `package.json` script whose exact
 command was frozen when the workflow runner was created, before any writer. A
 script-map addition, removal, or modification is refused in both the launch checkout and the
@@ -175,8 +169,8 @@ materialized snapshot. The host, not the model, supplies argv, timeout, output b
 disposable external Git worktree containing the current tracked/untracked bytes;
 initialized submodule source is recursively materialized without copying Git
 administrative metadata. The operator checkout is never the command cwd. A fresh read-only re-review
-receives the immutable original review, bounded worker answers, check evidence,
-and source-state transitions; it reopens the source and reports every original
+receives the immutable original review, bounded worker answers, and check
+evidence; it reopens the source and reports every original
 finding, dependency, and regression. `agent({ artifact })` gives the automatic answers stable names:
 `scope.md`, `worker-F<n>.md`, `check-evidence.md`, and `re-review.md`. The final
 `re-review.md` answer is also the workflow result. No input helper, unit planner,
@@ -1143,7 +1137,6 @@ agent(prompt, opts?)          // Run a catalog/local agent; returns exact child 
 agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
-captureSourceState(label)     // Persist host-owned Git HEAD/index/worktree fingerprint evidence
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle

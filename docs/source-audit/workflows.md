@@ -140,7 +140,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   workflow renderer; the workflow event adapter verifies replay answer artifacts
   before it projects their text into the generic viewer row.
 - `extensions/_shared/workflow-runtime.ts` owns the DSL primitives:
-  `agent`, `publishArtifact`, `consumeTextArtifact`, `captureSourceState`,
+  `agent`, `publishArtifact`, `consumeTextArtifact`,
   `awaitOperator`, `promptFile`, `workspace`,
   `projectRoot`, `parallel`, `pipeline`, `phase`, `log`, `now`, and `random`.
   `agent()` is the
@@ -184,13 +184,11 @@ or borrowed runtime implementation was identified for this source-audit slice.
   into native workflow tool details and text so the calling model can pass a
   complete ref to a later run without inventing an artifact id. The canonical
   full inventory remains the per-run artifact index.
-- `extensions/_shared/workflow-worktree.ts` also owns deterministic source-state
-  capture for mutation-bearing workflows. It hashes Git HEAD, the index, status,
-  and bounded changed/untracked bytes without changing the checkout. It
-  enumerates every initialized gitlink independently of parent modification
-  state, then recursively includes submodule HEAD, index, status, and changed
-  bytes. The runtime stores each labeled snapshot as a run artifact. This is
-  drift evidence, not a repository lock or atomic filesystem snapshot.
+- `extensions/_shared/workflow-worktree.ts` owns disposable linked-worktree
+  creation and the retained workflow workspace manager: detached worktrees at
+  exact refs under the run directory, verification of the original checkout and
+  of each workspace's HEAD and realpath on every resolve, and workspace
+  evidence for the run envelope.
 - `extensions/_shared/workflow-journal.ts` owns run discovery/order and
   immutable executed-snapshot reads as well as journal-to-live status mapping.
   Status/catalog consumers see only evidenced directories with a canonical UTC
@@ -346,8 +344,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   already verified and copied — at any length — rather than re-deriving that proof
   or capping a plan somebody has already accepted. Deterministic code parses `### S<n>` blocks, a no-tool
   selector chooses the steps, the plan's own order is restored, and one
-  write-capable session owns each step in the launch checkout with host-owned Git
-  fingerprints around every writer. A read-only checker and a fresh reporter
+  write-capable session owns each step in the launch checkout. A read-only
+  checker and a fresh reporter
   follow; a failed writer skips the remaining steps and the run returns
   `partial: true`. Both entries import nothing and retain
   `self-contained-static` identity.
@@ -363,16 +361,14 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `### F<n>` blocks inside `## Findings`, rejects invalid ids, notes, edges and
   cycles, and computes stable topological order before writers. A read-only scope
   resolver sees only selected blocks. Exactly one sequential writer owns each
-  selected finding in the launch checkout. Host
-  fingerprints bracket remediation and every writer/check boundary, include
-  every initialized submodule HEAD/index/status/bytes, and every remediation input/handoff has a fixed character
+  selected finding in the launch checkout. Every remediation input/handoff has a fixed character
   bound. A separate
   host-enforced read-only child collects full-diff evidence and runs only
   baseline package scripts through the isolated `repository_check` tool while
   the complete pre-writer script map remains unchanged; added/removed/modified
   commands or lifecycle hooks are rejected before execution. A fresh
-  read-only child reopens every original finding, affected dependency,
-  regression risk, and source-state transition. `agent({artifact})` names
+  read-only child reopens every original finding, affected dependency, and
+  regression risk. `agent({artifact})` names
   the automatic answers `finding-plan.json`, `scope.md`, `worker-F<n>.md`, `check-evidence.md`, and
   `re-review.md`; the last is also the workflow result. There is no imported
   input helper, unit planner, publisher, task-local output, or `fix-report.md`,

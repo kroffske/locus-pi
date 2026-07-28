@@ -80,7 +80,6 @@ import {
   type WorkflowResourceLoader,
 } from "./workflow-resources.js";
 import {
-  createWorkflowSourceStateReader,
   createWorkflowWorkspaceManager,
   type WorkflowWorkspaceEvidence,
   type WorkflowWorkspaceManager,
@@ -977,7 +976,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     resourceLoader,
     workspaceManager,
     artifactPorts: artifactStore,
-    sourceState: createWorkflowSourceStateReader(projectRoot),
     ...(boundContinuation !== undefined ? { continuation: boundContinuation } : {}),
     ...(hasResume ? { replaySourceRunId: resumeFromRunId! } : {}),
     ...(replayController !== undefined ? { replay: replayController } : {}),

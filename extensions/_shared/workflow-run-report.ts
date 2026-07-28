@@ -6,9 +6,10 @@
  * journal, replay record, result envelope, script snapshot, transcripts, and the
  * hash-verified artifact store that replay and continuations depend on. This
  * module projects the human-facing part of that evidence — the task, the final
- * result, and every agent document in creation order under a name that says who
- * wrote it — so that opening the report folder answers "what happened here"
- * without opening a single machine file.
+ * result, and every document in creation order under a name that says who wrote
+ * it, with the README grouping them by origin (agent documents, transferred
+ * inputs, workflow-published) — so that opening the report folder answers "what
+ * happened here" without opening a single machine file.
  *
  * Best-effort by contract, like result.md: a failed report write costs the
  * reader's copy, never the run or its durable evidence.
@@ -62,6 +63,8 @@ interface WorkflowReportDocument {
   author: string;
   kind: string;
   stage?: string;
+  /** For continuation copies (kind `input`): the run the bytes came from. */
+  sourceRunId?: string;
   unavailable?: string;
 }
 
@@ -110,6 +113,7 @@ export function writeWorkflowRunReport(
         author,
         kind: record.kind,
         ...(record.stage !== undefined ? { stage: record.stage } : {}),
+        ...(record.kind === "input" && record.source?.runId !== undefined ? { sourceRunId: record.source.runId } : {}),
       };
       if (bytes === undefined) {
         document.unavailable = "the stored artifact could not be read back";
@@ -317,24 +321,48 @@ function reportReadme(options: {
     `- Machine records: \`.locus/runtime/workflows/${input.runId}/\` — journal, replay record, ` +
       `result envelope, script snapshot, transcripts and call envelopes`,
   );
-  lines.push("", "## Documents, in creation order", "");
   if (documents.length === 0) {
+    lines.push("", "## Documents", "");
     lines.push(
       options.indexUnavailable !== undefined
         ? `- none — the artifact index was unavailable: ${singleLine(options.indexUnavailable)}`
         : "- none",
     );
+    lines.push("");
+    return lines.join("\n");
   }
-  for (const [position, document] of documents.entries()) {
-    const describedAs = [document.author, document.kind, ...(document.stage !== undefined ? [document.stage] : [])];
-    const entry =
-      document.unavailable !== undefined
-        ? `${document.fileName} — ${describedAs.join(" · ")} — unavailable: ${document.unavailable}`
-        : `[${document.fileName}](${document.fileName}) — ${describedAs.join(" · ")}`;
-    lines.push(`${position + 1}. ${entry}`);
+  // Grouped by origin so a reader can tell at a glance what an agent wrote
+  // versus what arrived automatically. The `NN-` file prefix stays the run-wide
+  // creation order.
+  const groups: Array<{ heading: string; documents: WorkflowReportDocument[] }> = [
+    { heading: "## Agent documents, in creation order", documents: documents.filter((d) => d.kind === "answer") },
+    { heading: "## Transferred inputs", documents: documents.filter((d) => d.kind === "input") },
+    { heading: "## Published by the workflow", documents: documents.filter((d) => d.kind === "published") },
+  ];
+  for (const group of groups) {
+    if (group.documents.length === 0) continue;
+    lines.push("", group.heading, "");
+    for (const [position, document] of group.documents.entries()) {
+      lines.push(`${position + 1}. ${documentEntry(document)}`);
+    }
   }
   lines.push("");
   return lines.join("\n");
+}
+
+function documentEntry(document: WorkflowReportDocument): string {
+  const describedAs =
+    document.kind === "input"
+      ? [`transferred from run ${document.sourceRunId ?? "(unknown)"}`]
+      : document.kind === "published"
+        ? document.stage !== undefined
+          ? [document.stage]
+          : []
+        : [document.author, ...(document.stage !== undefined ? [document.stage] : [])];
+  const description = describedAs.length === 0 ? "" : ` — ${describedAs.join(" · ")}`;
+  return document.unavailable !== undefined
+    ? `${document.fileName}${description} — unavailable: ${document.unavailable}`
+    : `[${document.fileName}](${document.fileName})${description}`;
 }
 
 function lastJournalTimestamp(journal: readonly WorkflowJournalLine[]): string | undefined {
