@@ -115,11 +115,17 @@ flowchart LR
 
 The plan arrives as continuation bytes the host has already verified and copied,
 never as text pasted into the input. The entry requires exactly one continuation
-artifact named `plan.md`, bounds it, and reads it. It used to re-derive the
-host's proof as well — matching digests, the source run's target and stage, and
-its terminal result — and that ceremony was removed on 2026-07-28: it sat in
-front of every reader for a risk worth less than its cost, since the worst case
-is implementing a plan the critic had not accepted, which replanning fixes.
+artifact named `plan.md` and non-empty, and then reads it at whatever length it
+is.
+
+Two things it deliberately no longer does, both removed on 2026-07-28. It no
+longer re-derives the host's proof — matching digests, the source run's target
+and stage, and its terminal result — because that ceremony sat in front of every
+reader for a risk worth less than its cost: the worst case is implementing a plan
+the critic had not accepted, which replanning fixes. And it no longer caps the
+plan's length, because a cap here could only reject a plan somebody had already
+accepted, after the run that wrote it was over. The budgets that still matter are
+the per-step ones below, which are what keep a single writer's prompt in hand.
 
 Deterministic code then parses the `### S<n>` blocks. That text was written by a
 _previous_ run's agent, so a malformed plan is a fatal error: nobody in this run

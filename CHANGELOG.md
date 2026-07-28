@@ -23,13 +23,16 @@ This file records user-visible changes to the public package.
   a stated one is not. A halted run yields no plan at all; a written assumption is
   visible when the run finishes and is corrected by replanning.
   `plan-implement` no longer re-derives the host's continuation proof. It still
-  requires exactly one `plan.md` reference and bounds it, but the digest, target,
+  requires exactly one non-empty `plan.md` reference, but the digest, target,
   stage, and terminal-result checks are gone. That trade is deliberate and it is a
   real one: the removed check is what distinguished the accepted plan from a
   same-named draft of an earlier round, so a run can now implement a plan the
   critic had not accepted. The cost of the ceremony — on every reader of the
   entry, and on every weaker model asked to author something like it — was judged
-  higher than a failure replanning repairs.
+  higher than a failure replanning repairs. The plan is no longer length-capped
+  either: a cap there could only reject a plan somebody had already accepted,
+  after the run that wrote it had finished, and the per-step budgets are what
+  actually keep one writer's prompt in hand.
 
 ### Added
 

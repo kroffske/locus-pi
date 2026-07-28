@@ -378,14 +378,16 @@ which this workflow is cheap enough to repeat. The clarification shape stays in
 `review`, where the answer changes what is reviewed at all.
 
 **`plan-implement` no longer re-derives provenance.** It still requires exactly
-one continuation artifact named `plan.md` and bounds it, but the entry-code
+one non-empty continuation artifact named `plan.md`, but the entry-code
 checks on digest, source target, source stage, and terminal result are gone. The
 cost is real and is accepted here rather than hidden: that terminal-result check
 was what distinguished the accepted plan from a same-named draft of an earlier
 drafting round, so an implementation run can now start from a plan the critic had
 not accepted. Weighed against it, the ceremony sat in front of every reader of
 the entry and every author imitating it, and the failure it prevented is repaired
-by replanning rather than by anything irreversible.
+by replanning rather than by anything irreversible. The plan's length bound went
+with them for a simpler reason: it could only reject a plan that had already been
+accepted, and the per-step budgets are what keep a stage's prompt bounded.
 
 ## Consequences
 

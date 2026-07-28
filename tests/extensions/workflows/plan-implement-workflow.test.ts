@@ -381,6 +381,39 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("accepts a plan of any length, and refuses only an empty one", async () => {
+    // A length cap on the whole plan could only reject something somebody had
+    // already accepted, after the run that wrote it was over. Twelve ordinary
+    // steps put this plan past the 256,000-character bound the entry used to
+    // impose, while each block stays inside the per-step budget that really does
+    // keep one writer's prompt in hand.
+    const steps = Array.from({ length: 12 }, (_unused, index) =>
+      [
+        `### S${index + 1} — Rewrite pagination part ${index + 1}`,
+        "Files: `src/page.ts`",
+        `Change: ${"detail ".repeat(3_500)}`,
+        "Verify: `npm test -- page`",
+        index === 0 ? "Depends on: none" : `Depends on: S${index}`,
+      ].join("\n"),
+    );
+    const fixture = createPlanFixture({ steps });
+    expect(fixture.planText.length).toBeGreaterThan(256_000);
+
+    const report = "# Implementation Report\n## Outcome\nThe one step landed.";
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      switch (request.label) {
+        case "select plan steps":
+          return completed(request, selection([{ id: "S1" }]));
+        case "report implementation":
+          return completed(request, report);
+        default:
+          return completed(request, `# ${request.label}\nDone.`);
+      }
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(report);
+  });
+
   it("refuses a continuation that is not exactly one plan.md, and refuses empty input", async () => {
     const fixture = createPlanFixture();
     const runId = "plan-implement-no-continuation";

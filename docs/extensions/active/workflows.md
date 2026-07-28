@@ -219,7 +219,8 @@ workflow that resolves in a checkout can never be missing after `npm i`.
 them is the same shape as `review` → `review-fix`. `plan` returns the accepted
 plan text, which the runtime retains as `plan.md`; `plan-implement` takes that
 artifact's complete `{ runId, artifactId, name, sha256 }` reference through host
-continuation, and reads the bytes the host verified and copied. Entry code used
+continuation, and reads the bytes the host verified and copied, at any length.
+Entry code used
 to re-derive that proof and additionally require the bytes to equal the source
 run's terminal result — which distinguished the accepted plan from a same-named
 draft of an earlier round. That check was removed on 2026-07-28 as an accepted

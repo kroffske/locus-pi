@@ -86,7 +86,6 @@ const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
 
 const MAX_SELECTED_STEPS = 30;
 const MAX_INTENT_CHARS = 16_000;
-const MAX_PLAN_CHARS = 256_000;
 const MAX_STEP_BLOCK_CHARS = 32_000;
 const MAX_SELECTED_STEPS_CHARS = 128_000;
 const MAX_NOTE_CHARS = 4_000;
@@ -172,7 +171,15 @@ export default async function runWorkflow(dsl, input) {
   // its terminal result — which is cognitive load in every reader's way for a
   // risk the operator judged not worth it: the worst case is implementing a plan
   // the critic had not accepted, which replanning fixes.
-  const planText = requireBoundedText(consumedPlan.text, "consumed plan", MAX_PLAN_CHARS);
+  //
+  // The plan is not length-bounded either. A cap here could only reject a plan
+  // somebody already accepted, after the run that wrote it had finished; the
+  // runtime already bounds what a child may answer, and the per-step budgets
+  // below are what actually keep a stage's prompt in hand.
+  const planText = consumedPlan.text;
+  if (typeof planText !== "string" || planText.trim() === "") {
+    throw new Error("plan-implement requires a non-empty consumed plan");
+  }
   const steps = parseStepBlocks(planText);
 
   const selection = await agent(

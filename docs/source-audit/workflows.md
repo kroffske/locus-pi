@@ -343,7 +343,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   an acceptance returns `ok:false`, which is also what keeps an unaccepted draft
   out of implementation. `plan-implement` accepts semantic text plus host
   continuation containing one complete `plan.md` ref, and reads the bytes the host
-  already verified and copied rather than re-deriving that proof in entry code. Deterministic code parses `### S<n>` blocks, a no-tool
+  already verified and copied — at any length — rather than re-deriving that proof
+  or capping a plan somebody has already accepted. Deterministic code parses `### S<n>` blocks, a no-tool
   selector chooses the steps, the plan's own order is restored, and one
   write-capable session owns each step in the launch checkout with host-owned Git
   fingerprints around every writer. A read-only checker and a fresh reporter
