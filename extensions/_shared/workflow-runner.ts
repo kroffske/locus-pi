@@ -96,6 +96,7 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
+import { writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
   assertWorkflowHandoffClaimForContinuation,
@@ -680,6 +681,32 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // own output, so without this the whole text existed only as one escaped
     // JSON string.
     const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
+    // The reader's copy of the run under <projectRoot>/.locus-pi/<runId>/:
+    // table of contents, task, result, and the agent documents with
+    // author-and-step names. Best-effort like result.md — the envelope above
+    // stays the durable truth, and a report failure never fails the run.
+    if (artifactStore !== undefined) {
+      writeWorkflowRunReport(
+        {
+          projectRoot,
+          runId,
+          status: enrichedFields.disposition?.status ?? (enrichedFields.ok ? "completed" : "failed"),
+          ...(enrichedFields.target === undefined
+            ? {}
+            : {
+                target: {
+                  kind: enrichedFields.target.kind,
+                  ref: enrichedFields.target.ref,
+                  source: enrichedFields.target.source,
+                },
+              }),
+          result: enrichedFields.result,
+          ...(enrichedFields.error === undefined ? {} : { error: enrichedFields.error }),
+          journal: enrichedFields.journal,
+        },
+        artifactStore,
+      );
+    }
     if (resultPersistence.ok) {
       return {
         runId,

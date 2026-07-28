@@ -116,6 +116,7 @@
     "extensions/_shared/workflow-result.ts",
     "extensions/_shared/workflow-replay.ts",
     "extensions/_shared/workflow-resources.ts",
+    "extensions/_shared/workflow-run-report.ts",
     "extensions/_shared/workflow-runner.ts",
     "extensions/_shared/workflow-runtime.ts",
     "extensions/_shared/workflow-script-identity.ts",

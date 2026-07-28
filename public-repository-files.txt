@@ -48,6 +48,7 @@ docs/extensions/active/workflows.md
 docs/milestones.md
 docs/prd/todo-session-auto-continuation.md
 docs/runtime/locus-workspace.md
+docs/runtime/workflow-run-storage.md
 docs/source-audit/agents.md
 docs/source-audit/ask-user-question.md
 docs/source-audit/loop.md
@@ -116,6 +117,7 @@ extensions/_shared/workflow-model-resolve.ts
 extensions/_shared/workflow-replay.ts
 extensions/_shared/workflow-resources.ts
 extensions/_shared/workflow-result.ts
+extensions/_shared/workflow-run-report.ts
 extensions/_shared/workflow-runner.ts
 extensions/_shared/workflow-runtime.ts
 extensions/_shared/workflow-script-identity.ts
@@ -354,6 +356,7 @@ tests/shared/workflows/workflow-input.test.ts
 tests/shared/workflows/workflow-replay.test.ts
 tests/shared/workflows/workflow-result.test.ts
 tests/shared/workflows/workflow-rounds.test.ts
+tests/shared/workflows/workflow-run-report.test.ts
 tests/shared/workflows/workflow-run-snapshot.test.ts
 tests/shared/workflows/workflow-runner-host-crash.test.ts
 tests/shared/workflows/workflow-script-identity.test.ts
