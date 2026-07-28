@@ -64,7 +64,7 @@
   <g class="io">
     <rect x="330" y="104" width="440" height="52" rx="10"/>
     <text class="name" x="352" y="127">Operator task</text>
-    <text class="line" x="352" y="146">ordinary words, at most 16 000 characters</text>
+    <text class="line" x="352" y="146">ordinary words; the host bounds its length</text>
   </g>
   <g class="artifact">
     <rect x="850" y="110" width="220" height="40" rx="8"/>

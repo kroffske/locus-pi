@@ -1110,9 +1110,12 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(answers[6]?.text).toBe(outputs["ask review questions round 2"]);
   });
 
-  it("stops interrogation at the round cap and never assesses a round it cannot follow", async () => {
-    // The cap is the safety net, not the exit condition. Three rounds means two
-    // assessments: assessing the last round would ask a question nobody can answer.
+  it("assesses even the round it cannot follow, and hands the surviving gaps to the verifier", async () => {
+    // The cap is the safety net, not the exit condition — but a run that skips
+    // the last assessment can only ever report "the cap stopped me", which reads
+    // the same whether the question set was complete or the assessor was still
+    // arguing with it. The final verdict is evidence rather than a branch: the
+    // gaps it names reach the verifier as declared limits of the review.
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
     const { dsl } = runtimeWith(async (request) => {
@@ -1136,8 +1139,13 @@ describe("workflow example: review.workflow.mjs", () => {
       "ask review questions round 2",
       "assess question coverage round 2",
       "ask review questions round 3",
+      "assess question coverage round 3",
       "verify and write review",
     ]);
+    // The gap the third assessment still reported is written into the verifier's
+    // prompt, so an unasked question becomes a stated limit instead of silence.
+    expect(calls.at(-1)?.prompt).toContain("COVERAGE GAPS NOBODY ASKED ABOUT");
+    expect(calls.at(-1)?.prompt).toContain("still uncovered");
   });
 
   it.each([

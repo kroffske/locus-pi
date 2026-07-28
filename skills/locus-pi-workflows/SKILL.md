@@ -44,8 +44,12 @@ no second allowlist to keep in sync.
 | `plan-implement`     | Turn that accepted plan into changes, one writer per step.            | `plan-implement/plan-implement.workflow.mjs` |
 
 `plan` → `plan-implement` and `review` → `review-fix` are pairs. The second run
-consumes the first run's terminal artifact by digest, not by filename, so a
-same-named draft from an earlier round of the same run is refused.
+consumes the first run's artifact through the host-verified `continuation`
+control — a complete `{ runId, artifactId, name, sha256 }` reference, never a
+path you type. `review-fix` additionally refuses anything that was not the
+source run's terminal result; `plan-implement` stopped re-deriving that proof on
+2026-07-28, so it will accept a same-named draft from an earlier round of the
+same run.
 
 One more worked pipeline ships as reference only — **not** registered, not
 launchable by bare name: `extensions/workflows/references/excalidraw-pipeline/`.
@@ -225,14 +229,14 @@ up — or a prompt shared by more than one workflow.
 Read the entry file rather than inventing a shape. Each one is the smallest
 place a given technique is visible:
 
-| Read this                                    | To see                                                                                                                                                   |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke.workflow.mjs` (51 lines)         | The smallest complete workflow: two sequential read-only calls, one input check, no schemas.                                                             |
-| `requirements-grill.workflow.mjs`            | Workflow-owned repository search — a bounded `rg` the script runs itself instead of asking an agent — and fail-closed exits at every stage.              |
-| `review/review.workflow.mjs`                 | A staged text pipeline, two shaped gates, a bounded loop, an operator handoff that splits the run, and both prompt-placement rules in one file.          |
-| `review-fix/review-fix.workflow.mjs`         | A model-planned dependency graph that deterministic code validates and orders before any writer starts; one writer per finding; host-owned fingerprints. |
-| `plan/plan.workflow.mjs`                     | A frozen agent roster read before any control flow, and a draft/critique loop whose exit is a shaped verdict rather than a human being asked.            |
-| `plan-implement/plan-implement.workflow.mjs` | The receiving end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true`.   |
+| Read this                                     | To see                                                                                                                                                   |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke.workflow.mjs` (51 lines)          | The smallest complete workflow: two sequential read-only calls, one input check, no schemas.                                                             |
+| `requirements-grill.workflow.mjs` (350 lines) | The smallest declared roster: three agents in a straight line, no loop, no branch, and so no declared answer shape. The script searches nothing itself.  |
+| `review/review.workflow.mjs`                  | A staged text pipeline, two shaped gates, a bounded loop, an operator handoff that splits the run, and both prompt-placement rules in one file.          |
+| `review-fix/review-fix.workflow.mjs`          | A model-planned dependency graph that deterministic code validates and orders before any writer starts; one writer per finding; host-owned fingerprints. |
+| `plan/plan.workflow.mjs`                      | A frozen agent roster read before any control flow, and a draft/critique loop whose exit is a shaped verdict rather than a human being asked.            |
+| `plan-implement/plan-implement.workflow.mjs`  | The receiving end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true`.   |
 
 `extensions/workflows/examples/README.md` tabulates the same set with measured
 line counts, prompt placement, and which checks each one declares in a schema

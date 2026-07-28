@@ -12,6 +12,14 @@ import { packagedExamplesDir, packagedWorkflowPath } from "../../../extensions/_
  */
 const RETIRED_DIAGRAM_SUFFIXES = [".diagram.mjs", ".excalidraw", ".png"];
 
+/** Every example that has been redrawn in the hand-authored shape so far. */
+const DRAWN = ["plan", "requirements-grill"] as const;
+
+function diagramPath(name: string): string {
+  const workflowPath = packagedWorkflowPath(name);
+  return path.join(path.dirname(workflowPath), `${name}-pipeline.svg`);
+}
+
 function listFilesRecursively(root: string): string[] {
   const found: string[] = [];
   const visit = (directory: string): void => {
@@ -38,8 +46,8 @@ describe("curated workflow diagrams", () => {
     expect(stale).toEqual([]);
   });
 
-  it("ships one self-contained SVG beside plan, with nothing to fetch and nothing to run", () => {
-    const svgPath = path.join(path.dirname(packagedWorkflowPath("plan")), "plan-pipeline.svg");
+  it.each(DRAWN)("ships one self-contained SVG beside %s, with nothing to fetch and nothing to run", (name) => {
+    const svgPath = diagramPath(name);
     const svg = readFileSync(svgPath, "utf8");
 
     expect(svg.trimStart().startsWith("<svg"), svgPath).toBe(true);
@@ -65,10 +73,9 @@ describe("curated workflow diagrams", () => {
     expect(svg, svgPath).not.toMatch(/llm\(/iu);
   });
 
-  it("names every phase and every persisted artifact the plan workflow actually declares", () => {
-    const workflowPath = packagedWorkflowPath("plan");
-    const source = readFileSync(workflowPath, "utf8");
-    const svg = readFileSync(path.join(path.dirname(workflowPath), "plan-pipeline.svg"), "utf8");
+  it.each(DRAWN)("names every phase, artifact and agent the %s workflow actually declares", (name) => {
+    const source = readFileSync(packagedWorkflowPath(name), "utf8");
+    const svg = readFileSync(diagramPath(name), "utf8");
 
     const phases = declaredNames(source, /\bphase\("([^"]+)"\)/gu);
     const artifacts = declaredNames(source, /\bartifact:\s*"([^"]+)"/gu).concat(
@@ -78,18 +85,29 @@ describe("curated workflow diagrams", () => {
     // The point of pinning both lists: a stage renamed or an artifact added in
     // the workflow leaves the picture quietly wrong, and a wrong picture is
     // read as truth longer than missing prose would be.
-    expect(phases.length, "plan should declare phases").toBeGreaterThan(0);
-    for (const phase of phases) expect(svg, `diagram omits phase ${phase}`).toContain(phase);
+    expect(phases.length, `${name} should declare phases`).toBeGreaterThan(0);
+    for (const phase of phases) expect(svg, `${name} diagram omits phase ${phase}`).toContain(phase);
     for (const artifact of new Set(artifacts)) {
-      expect(svg, `diagram omits artifact ${artifact}`).toContain(artifact);
+      expect(svg, `${name} diagram omits artifact ${artifact}`).toContain(artifact);
     }
 
-    // The agents are the point of this diagram, so each one is named on it, and
-    // the two outcomes a reader needs before running anything are both there.
-    for (const agent of declaredNames(source, /\bid:\s*"([^"]+)"/gu)) {
-      expect(svg, `diagram omits agent ${agent}`).toContain(agent);
-    }
+    // The agents are the point of these diagrams, so each one is named on it.
+    const agents = declaredNames(source, /\bid:\s*"([^"]+)"/gu);
+    expect(agents.length, `${name} should declare an agent roster`).toBeGreaterThan(0);
+    for (const agent of agents) expect(svg, `${name} diagram omits agent ${agent}`).toContain(agent);
+  });
+
+  it("shows both ways a plan run can end", () => {
+    const svg = readFileSync(diagramPath("plan"), "utf8");
+
     expect(svg).toMatch(/round cap|4th revise/u);
     expect(svg).toMatch(/plan-implement/u);
+  });
+
+  it("shows that requirements-grill refuses an empty request before it spends an agent", () => {
+    const svg = readFileSync(diagramPath("requirements-grill"), "utf8");
+
+    expect(svg).toMatch(/Empty request/u);
+    expect(svg).toMatch(/before the first agent is spawned|before any agent runs/u);
   });
 });

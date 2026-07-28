@@ -22,7 +22,9 @@ Ask the smallest set of falsifiable questions that could change whether this
 change is accepted. A falsifiable question names a concrete place and can
 resolve to either "correct" or "finding" once someone opens the evidence.
 "Is this code good?" is not a question; "Can every direct caller of `run`
-handle the new null result?" is.
+handle the new null result?" is. The same test applies away from code: "Is this
+document good?" is not a question; "Does the section for `security-gate` state
+the same version its `manifest.json` declares?" is.
 
 Useful angles, applied only where the unit actually carries that risk:
 
@@ -40,6 +42,12 @@ already exist. Never ask for a broad documentation audit.
 
 Several questions on one unit are normal; a unit with no real risk gets one
 question or none. Do not answer your own questions and do not write findings.
+
+Ask at most 2 questions about one unit and at most 40 in the whole set. When you
+are at the limit and see one more risk, widen an existing question to cover it
+rather than adding another: you must repeat the entire set verbatim every round,
+and a set nobody can reproduce exactly is worse than a set that is one question
+short.
 
 ## Rounds
 

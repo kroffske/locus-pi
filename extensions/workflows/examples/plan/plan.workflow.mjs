@@ -68,7 +68,6 @@ const MAX_PLAN_DEFECTS = 12;
 const MAX_PLAN_DEFECT_CHARS = 600;
 const MAX_ALL_PLAN_DEFECTS_CHARS = 4_000;
 
-const MAX_TASK_CHARS = 16_000;
 const MAX_CONTEXT_CHARS = 128_000;
 const MAX_PLAN_CHARS = 256_000;
 
@@ -155,7 +154,7 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const taskText = requireBoundedText(input, "task", MAX_TASK_CHARS);
+  const taskText = requireTask(input);
   const { agent, phase, log, publishArtifact } = dsl;
 
   publishArtifact("task.md", taskText);
@@ -271,9 +270,16 @@ work; do not do it.
 Every step must be an action a single implementer can carry out and someone else
 can check afterwards. Name the real files the step touches — the context map
 below is a starting point, not a substitute for opening them. Order the steps so
-that each one leaves the repository in a state the next one can build on, and
-state each step's verification: the command to run, the test to add, or the
-observation that proves it worked.
+that each one leaves the repository in a state the next one can build on.
+
+State each step's verification as one command a later agent can rerun without a
+human, together with the output or exit status that proves the step worked, and
+make it checkable at this step's own place in the order rather than after some
+later step lands. The command is whatever fits the work — a test run, a build, a
+\`grep\` for a line that must now exist, a \`diff\` between what a directory holds
+and what a document lists. A human observation is allowed only when the step
+also says why no such command can exist; every step verified only by a person
+looking at something is a step nobody downstream can confirm.
 
 A step is too big when its "done" cannot be checked in one sentence, and too
 small when it cannot be checked at all. Prefer few real steps over many
@@ -363,8 +369,15 @@ it names and check each step against what is actually there. A defect is
 something that would make an implementer stop, guess, or do the wrong thing:
 
 - a step that names a file, symbol, or command that does not exist;
+- a step block missing any of the mandatory \`Files:\`, \`Change:\`, \`Verify:\` or
+  \`Depends on:\` lines — this is a defect and not a formatting nicety, because
+  the sibling \`plan-implement\` workflow parses these blocks and cannot keep a
+  subset of steps consistent without the declared dependencies;
 - a step whose "done" cannot be checked, or whose verification does not test the
-  change it claims to verify;
+  change it claims to verify, or whose verification a tool-equipped agent cannot
+  rerun without a human when a command could have been written instead;
+- a step whose verification cannot pass at that step's own place in the order,
+  because it depends on something a later step creates;
 - an ordering that requires something a later step creates;
 - a decision the plan depends on but never states — an unstated assumption is a
   defect, while a choice recorded under \`## Assumptions\` with its reason is not,
@@ -434,12 +447,15 @@ function planVerdictErrors(value) {
   return errors;
 }
 
-function requireBoundedText(value, field, maxChars) {
+/**
+ * The one thing this workflow cannot start without. Length is not checked here:
+ * the host already caps workflow input at `WORKFLOW_INPUT_MAX_CHARS` on both
+ * entry surfaces, and a second copy of that number in script code can only ever
+ * agree with it or wrongly disagree.
+ */
+function requireTask(value) {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`plan requires a non-empty ${field}`);
-  }
-  if (value.length > maxChars) {
-    throw new Error(`plan ${field} must stay within ${maxChars} characters`);
+    throw new Error("plan requires a non-empty task");
   }
   return value;
 }

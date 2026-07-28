@@ -50,6 +50,13 @@ const MAX_INTENT_CHARS = 16_000;
  *  assessor is the measured exit, and the run records which of the two stopped it. */
 const MAX_QUESTION_ROUNDS = 3;
 const MAX_QUESTION_GAPS = 8;
+/** Coverage is accounted per inventory id, so the inventory's granularity is the
+ *  ceiling on how fine every later stage can be. One id for a whole new file
+ *  makes "every id accounted for" true and meaningless. These two bound the
+ *  opposite failure: an inventory split so fine that the question set stops
+ *  fitting in one weak model's answer. */
+const MAX_IDS_PER_PATH = 4;
+const MAX_INVENTORY_IDS = 30;
 const MAX_QUESTION_GAP_CHARS = 400;
 const MAX_ALL_QUESTION_GAPS_CHARS = 2_000;
 const MAX_CLARIFIER_PROMPT_CHARS = 500;
@@ -627,6 +634,21 @@ first-seen order, never renumber or reuse them, and keep one id when an entry
 batches several mechanical files. Downstream stages receive this exact
 inventory and must account for every id.
 
+One path is not automatically one surface, and a large new or rewritten file is
+usually several. Give a path more than one id when a reviewer could accept one
+part of it and reject another independently — for example markup, styling,
+state logic, rendering and input handling in one page, or one section per
+documented subject in one assembled document. Repeat the same \`Path:\` on each
+and let \`Anchor:\` say which part it is. This is the difference between coverage
+that means something and an accounting identity: every later stage inherits the
+granularity you set here and none of them can recover a distinction you did not
+draw.
+
+Split for independent acceptance, never for thoroughness. Use at most
+${MAX_IDS_PER_PATH} ids for one path and at most ${MAX_INVENTORY_IDS} in the
+whole inventory; past that, batch by named subsystem under one id and say in
+\`Change:\` what the batch covers.
+
 Repeat \`Path:\` when one entry batches several files. Add a final
 \`## Not inspected\` section only when something could not be read. Do not return
 findings, verdicts, or severities.
@@ -733,6 +755,9 @@ ${inventoryText}
   let questionsText = "";
   let gapsText = "(none; this is the first round)";
   let stoppedBy = "round-cap";
+  /** Gaps the assessor still reported when the cap stopped the loop. They cannot
+   *  become questions any more, so they reach the verifier as declared limits. */
+  let unresolvedGaps = [];
   for (let round = 1; round <= MAX_QUESTION_ROUNDS; round += 1) {
     // Escape hatch, exactly as the authoring rule describes it: this role charter
     // is long enough that inlining it would bury the routing between the stages.
@@ -760,7 +785,6 @@ ${inventoryText}
       artifact: "questions.md",
       maxAnswerChars: MAX_QUESTIONS_CHARS,
     });
-    if (round === MAX_QUESTION_ROUNDS) break;
 
     const coverage = await agent(
       `${COMMON}
@@ -798,8 +822,10 @@ each, ${MAX_ALL_QUESTION_GAPS_CHARS} characters combined. Each gap must be a
 distinct, concrete place a question is missing, so the next round can close it
 without guessing what you meant.
 
-This is round ${round} of at most ${MAX_QUESTION_ROUNDS}; the round after the
-last one never runs, so a gap you report late is a gap the review may keep.
+This is round ${round} of at most ${MAX_QUESTION_ROUNDS}. Report every gap you
+can currently see in this one answer: a gap you hold back costs the review a
+whole round, and a gap first reported after the last round is written into the
+review as unproven ground rather than closed by a question.
 
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intentText}
@@ -834,6 +860,15 @@ ${questionsText}
       break;
     }
     gapsText = renderQuestionGaps(coverage.gaps);
+    // The last round is assessed too, even though no round can follow it. The
+    // verdict is no longer a control decision there — it is evidence: without it
+    // the run can only ever say "the cap stopped me", and a reader cannot tell a
+    // complete question set from one the assessor was still arguing with.
+    if (round === MAX_QUESTION_ROUNDS) {
+      unresolvedGaps = coverage.gaps.map((gap) => gap.trim());
+      log(`The ${MAX_QUESTION_ROUNDS}-round cap left ${unresolvedGaps.length} assessed coverage gap(s) open.`);
+      break;
+    }
     log(`Question round ${round} left ${coverage.gaps.length} coverage gap(s); asking one more round.`);
   }
   if (stoppedBy === "round-cap") {
@@ -848,6 +883,10 @@ ${questionsText}
     INVENTORY_TEXT: inventoryText,
     UNITS_TEXT: unitsText,
     QUESTIONS_TEXT: questionsText,
+    UNRESOLVED_GAPS_TEXT:
+      unresolvedGaps.length > 0
+        ? renderQuestionGaps(unresolvedGaps)
+        : "(none; the question set was assessed complete, or no gap survived the last round)",
   });
   return agent(verifierPrompt, {
     ...REVIEW_NAVIGATE_OPTIONS,

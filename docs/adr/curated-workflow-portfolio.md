@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2)
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x2)
 
 ## Decision
 
@@ -388,6 +388,110 @@ the entry and every author imitating it, and the failure it prevented is repaire
 by replanning rather than by anything irreversible. The plan's length bound went
 with them for a simpler reason: it could only reject a plan that had already been
 accepted, and the per-step budgets are what keep a stage's prompt bounded.
+
+## Amendment 2026-07-28 (second) — `requirements-grill` stops searching for its own agents
+
+**The script-owned repository search is deleted.** `requirements-grill` used to
+run one `rg` itself before spawning anything: it extracted up to five keywords
+from the operator's request against a hard-coded list of twenty-seven English
+stop words, rewrote `workflow`/`workflows` to `workflows?` as a special case,
+fell back to the literal string `workflow` when it matched nothing, ordered a
+hard-coded list of directory names against whatever the checkout happened to
+contain, and handed the resulting lines to three children that held no tools at
+all. That is deleted, and the workflow's first two agents now hold
+`read`, `git_read`, `ast_index`, `grep`, and `find` under host-enforced
+`readOnly: true` — the same bounded read-only set every `plan` stage already
+ships with. This is not the capability suspension the 2026-07-21 direction entry
+allowed: no stage gains shell, write, or edit, and the third stage still holds no
+tools at all, because it only composes two texts it was handed.
+
+Three reasons, in order of weight. The guess was worse than the search: an agent
+with those tools looks up the repository's own vocabulary, while the extractor
+could only match the words the operator happened to use. The guess was
+English-only — `.locus/soul.md` names search-term extraction as an English-only
+heuristic under _known traps_, and this removes one instance of it. And it was
+the sole reason ripgrep on `PATH` was an install requirement of this package;
+that line is gone from `README.md`.
+
+What is given up is stated rather than glossed: the search is no longer
+deterministic. The old `rg` ran with fixed arguments and returned the same lines
+for the same request, and a replay could reproduce it exactly. Now the coverage
+of the first stage depends on the model, which is the trade this package makes
+for every other agent stage it ships. The compensation is structural rather than
+scripted: the `challenger` reopens the files the `scout` names before relying on
+them, so a thin or wrong context map is contradicted by evidence rather than
+propagated into the handoff.
+
+**The cast is declared, and nothing branches.** The three participants are now a
+frozen `GRILL_AGENTS` roster — `scout`, `challenger`, `synthesizer` — each entry
+holding its id, what it receives, what it returns, and its capability options,
+exactly as `plan` does. Two capability sets exist and each is written once. No
+stage declares an `agent({ schema })` shape, and that is deliberate: this
+workflow is a straight line with no loop and no branch, so there is no decision
+for a declared shape to carry, and adding one would be ceremony. The
+`validate-input` and `collect-context` phases are gone with the search; an empty
+request throws before the first child.
+
+The entry no longer bounds the request's length either. It used to refuse
+anything over 12,000 characters, while both surfaces that can start a workflow —
+the run command and the model-callable tool — already refuse anything over
+`WORKFLOW_INPUT_MAX_CHARS`. A second, stricter number in script code cannot
+protect a stage the host's own bound does not already cover; all it can do is
+refuse a request the operator was permitted to send, with a reason that appears
+in no documentation. **The owner extended the same removal to `plan` on
+2026-07-28**, where the number was a copy of the host's rather than a stricter
+one and the check was therefore unreachable. Both entries now refuse only an
+empty input, which narrows the "operator-input bounds" clause of the 2026-07-27
+amendment's fatal-throw list: what stays fatal in these two entries is the
+absence of the one thing the run cannot start without, not its size.
+
+## Amendment 2026-07-28 (third) — what one live end-to-end run changed
+
+The planning pair and `review` were run end to end against a fresh sandbox
+repository on a mid-tier cloud model. The produced application worked and the
+review returned zero findings, and both were honest: the transcripts show every
+stage opening the files it cited. What the run exposed is weakness in scrutiny,
+and three prompt-level fixes follow from it. They are recorded here because each
+one narrows a claim this ADR already makes.
+
+**Coverage accounting is only as fine as the inventory that keys it.** `review`
+proves its thoroughness by accounting for every inventory id. The run's inventory
+returned one id for a 384-line new file, and units, questions, the coverage
+assessor and the verifier's ledger all inherited that granularity, so the
+accounting identity held while the rendering and input layers were never
+questioned. The inventory prompt now permits — and bounds — several ids per path,
+keyed to independent acceptability rather than to file count. The bound is not
+decoration: the interrogator is required to repeat its entire question set
+verbatim each round, so an inventory split without a ceiling produces a set a
+weak model cannot reproduce, and an unreproducible set corrupts the ledger that
+the coverage claim rests on. `MAX_IDS_PER_PATH`, `MAX_INVENTORY_IDS` and the
+interrogator's per-unit and total question limits are that ceiling.
+
+**A loop that cannot report its exit honestly is not an inspectable loop.** The
+interrogation loop broke before assessing its last round, on the reasoning that a
+verdict nobody can act on is wasted. The run showed the cost: the record says
+"stopped at the round cap" whether the question set was complete or the assessor
+was still naming gaps, and those two are not the same review. The last round is
+now assessed, the verdict is evidence rather than a branch, and surviving gaps
+reach the verifier as declared limits — never as findings, because no question
+was asked about them. This costs one child call in the runs that reach the cap.
+
+**A judge that calls a broken contract a matter of taste is not a gate.** The
+critic accepted a plan whose every step omitted the mandatory `Depends on:` line
+that `plan-implement` parses, while its own reasoning transcript named two
+separate problems it then did not report. Its defect list now names a missing
+mandatory step line and a verification that cannot pass at its own place in the
+order. Relatedly, the planner may no longer discharge a step's verification with
+"the observation that proves it worked": that clause licensed six manual checks
+in one run, after which the independent checker could rerun nothing and the
+reporter had to grade every step partial. A step now states one command a later
+agent can rerun, with the output that proves it, and a human observation only
+where the step says why no command can exist.
+
+Not changed, and deliberately: the verifier's `Confirmed`/`Rejected`/`Unresolved`
+vocabulary reads backwards to a human when a positively phrased question is
+answered `Rejected`, but it is a readability defect rather than a decomposition
+one, and it is left for its own change.
 
 ## Consequences
 

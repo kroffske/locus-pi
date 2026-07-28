@@ -38,10 +38,10 @@ Only these names are registered as Package workflows:
 | Workflow             | Intended use                                                                                                  |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
-| `requirements-grill` | Collects bounded repository context, challenges a request, and returns a structured requirements handoff.     |
+| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.   |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
-| `plan`               | Clarifies one task with the operator, then drafts and critiques until a shaped verdict accepts `plan.md`.     |
+| `plan`               | Scouts the repository, then drafts and critiques until a shaped verdict accepts `plan.md`.                    |
 | `plan-implement`     | Consumes an accepted `plan.md` from its source run and gives each selected step one write-capable agent.      |
 
 Use the operator catalog to inspect and run them:
@@ -122,8 +122,6 @@ package behavior.
 
 - Node.js `>=22.19.0`.
 - Pi `0.82.x`; the package peer floor is `0.82.0`.
-- Ripgrep (`rg`) on `PATH`; the curated `requirements-grill` workflow uses it
-  for its bounded read-only repository search.
 - A trusted project and reviewed local workflow sources.
 
 ## Install

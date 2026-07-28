@@ -6,6 +6,76 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **A live end-to-end run exposed three ways the curated pipeline lets a weak
+  model off the hook, and all three are now closed in the prompts.** The run
+  built a small application from one sentence, and everything it produced worked
+  — which is exactly why the failures are worth naming: they are failures of
+  scrutiny, not of output.
+  **Coverage was accounted at the wrong granularity.** `review` keys its
+  accounting to inventory ids, so the id set is the ceiling on how fine every
+  later stage can be. The inventory produced one id for a whole 384-line new
+  file, and units, questions, the coverage assessor and the final ledger all
+  inherited it; "every id accounted for" became true and meaningless, and the
+  rendering and input layers of that file were never questioned. The inventory
+  prompt now states that one path may carry several ids when a reviewer could
+  accept one part and reject another independently, bounded by
+  `MAX_IDS_PER_PATH` and `MAX_INVENTORY_IDS`. The interrogator gained the
+  matching bound — at most two questions per unit and forty in a set — because
+  the opposite failure is real: it must repeat the whole set verbatim every
+  round, and a set a weak model cannot reproduce exactly corrupts the ledger it
+  feeds.
+  **The question loop could not report an honest exit.** It broke out before
+  assessing its final round, so once the assessor asked for a third round,
+  "stopped at the cap" was the only reachable outcome and a reader could not tell
+  a complete question set from one still under argument. The final round is now
+  assessed as well — the verdict there is evidence, not a branch — and any gap
+  that survives reaches the verifier as a declared limit of the review, never as
+  a finding, since no question was asked about it.
+  **The plan critic treated a broken plan as a matter of taste.** It accepted a
+  plan whose every step omitted the mandatory `Depends on:` line, whose second
+  step bundled six independent decisions, and whose every verification was a
+  human looking at a screen — while its own reasoning named two of those as
+  problems. A missing mandatory step line is now a named defect rather than
+  formatting, and so is a verification that cannot pass at its own place in the
+  order. The planner is no longer allowed to end a step with "the observation
+  that proves it worked": it must write one command a later agent can rerun
+  without a human, with the output that proves the step worked, and a human
+  observation only when the step says why no command could exist. That last
+  change is what unblocks the evidence chain below it — in the same run, the
+  independent checker could rerun nothing and the reporter had to grade every
+  step partial.
+
+- **`requirements-grill` lets its agents search, and ripgrep is no longer a
+  requirement of this package.** The workflow used to run one `rg` itself before
+  spawning anything: it picked up to five keywords out of the operator's request
+  against a hard-coded list of English stop words, searched a hard-coded ordering
+  of directory names, and handed the matching lines to three children that held
+  no tools at all. The keyword guess was worse than the search an agent performs
+  with `grep`, `find`, `read`, and `ast_index`; it silently returned the wrong
+  lines for a request written in any other language; and it was the only reason
+  `rg` had to be on `PATH` to install this package. That line is gone from the
+  requirements in `README.md`.
+  The participants are now declared once in a frozen `GRILL_AGENTS` roster —
+  `scout`, `challenger`, `synthesizer` — each entry carrying what the agent
+  receives, what it returns, and its capabilities. The first two hold the same
+  bounded read-only tools every `plan` stage already had, under host-enforced
+  `readOnly: true`; the third holds none, because it only composes the two texts
+  it was handed. No stage gains shell, write, or edit. What is given up is that
+  the search is no longer byte-for-byte reproducible: coverage now depends on the
+  model, and what compensates is that the challenger reopens the files the scout
+  named instead of trusting them. Nothing in this workflow loops or branches, so
+  no stage declares an answer shape — there is no decision for one to carry. The
+  new `requirements-grill-pipeline.svg` shows the three agents and the text that
+  passes between them.
+  The workflow also stops capping the request's length. It used to refuse
+  anything over 12,000 characters, while the run command and the workflow tool
+  both already refuse anything over the host's own input limit. A stricter second
+  number in the entry could not protect anything the host's bound did not already
+  cover — it could only turn away a request the operator was allowed to send. An
+  empty request is still refused before any child is spawned. `plan` lost the
+  same check for the same reason, with one difference: its number was a copy of
+  the host's rather than a stricter one, so nothing could ever reach it.
+
 - **`plan` is now three named agents and one loop, and it never stops to ask.**
   The workflow's participants used to exist only as `agent()` calls inside async
   functions, labelled with verb phrases; a reader could not list the cast without

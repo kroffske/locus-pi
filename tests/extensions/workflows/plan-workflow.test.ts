@@ -329,12 +329,17 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(calls.some((call) => call.label === "planner round 2")).toBe(false);
   });
 
-  it("refuses empty input and oversized input", async () => {
+  it("refuses an empty task, and bounds nothing the host already bounds", async () => {
     const runWorkflow = await loadWorkflow();
     const { dsl } = runtimeWith(async (request) => completed(request, "unused"));
 
     await expect(runWorkflow(dsl, "   ")).rejects.toThrow("plan requires a non-empty task");
     await expect(runWorkflow(dsl, { task: "object" })).rejects.toThrow("plan requires a non-empty task");
-    await expect(runWorkflow(dsl, "x".repeat(16_001))).rejects.toThrow("plan task must stay within 16000 characters");
+
+    // The host caps workflow input on both entry surfaces. A second copy of that
+    // number here can only agree with it or wrongly disagree, and the copy that
+    // used to live here was never reachable.
+    const source = readFileSync(workflowPath, "utf8");
+    expect(source).not.toMatch(/MAX_TASK_CHARS|input\.length|taskText\.length/u);
   });
 });
