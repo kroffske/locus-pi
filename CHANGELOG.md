@@ -67,6 +67,21 @@ This file records user-visible changes to the public package.
   say so: sections appended to one document are separate work with separate
   evidence, and combining is justified only when one part cannot be written until
   another exists.
+  That run split the plan again, and a review of a document carrying three
+  planted false claims returned "needs changes" against its own two confirmed
+  findings. It also exposed three more ways a weak model keeps its own rules
+  while defeating them. **A closing verification step is a step that changes
+  nothing** — the plan ended with an "integrity pass" that only re-ran what each
+  step's own verification already proves, and the critic let it stand, so both
+  roles now say the plan ends with the last step that changes something.
+  **The inventory does not decide what belongs to the review**: it saw a real
+  structural defect in the reviewed file, judged it a different kind of problem
+  than the operator asked about, and wrote it in prose around the returned
+  document, where no later stage reads it — everything noticed now gets an id,
+  with the doubt written inside that entry. **And a claim the sources cannot
+  settle still gets a question**: the document asserted a measured per-call cost
+  no source can support, and it drew no question and no declared limit, so the
+  review reported ground it had never checked.
 
 - **`requirements-grill` lets its agents search, and ripgrep is no longer a
   requirement of this package.** The workflow used to run one `rg` itself before

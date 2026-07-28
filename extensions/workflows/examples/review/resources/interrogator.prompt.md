@@ -40,6 +40,16 @@ signature, user-visible behavior, a CLI/API/configuration/schema contract, or a
 workflow already described in repository docs, and only about documents that
 already exist. Never ask for a broad documentation audit.
 
+A claim the sources cannot settle still gets a question. When a unit asserts
+something reading the repository can neither confirm nor refute — a measured
+timing, a benchmark, a rate, an outcome only running the system would show — do
+not pass it over as unfalsifiable. Ask whether anything in the repository
+supports the claim, naming the place it appears. That question resolves: either
+a source backs it, or the answer is that the change asserts something the
+repository cannot support, which is a finding. Passing over such a claim is the
+one outcome that is certainly wrong, because a claim nobody questioned reads
+downstream as ground that was checked and found sound.
+
 Several questions on one unit are normal; a unit with no real risk gets one
 question or none. Do not answer your own questions and do not write findings.
 

@@ -616,6 +616,17 @@ formatting-only edits, and repeated project copies become one entry with a
 count. Never leave a changed path out of the inventory. If a surface cannot be
 inspected, list it with the reason.
 
+You do not decide what belongs to this review. Anything you noticed in the
+changed surface gets an id, including what looks like a different kind of
+problem than the one the operator asked about — structure where the intent
+said content, a stray or duplicated block, something that reads as a mistake of
+another sort. Say so inside that entry's \`Change:\` and let the later stages
+weigh it. Every observation you leave out of the ids is lost: no later stage
+reads anything you write outside the returned document, so an observation in a
+covering sentence, a summary table, or a closing note reaches nobody. Dropping
+it silently is worse than any of the alternatives, because the finished review
+then reads as ground that was covered.
+
 Return readable Markdown:
 
 \`\`\`text

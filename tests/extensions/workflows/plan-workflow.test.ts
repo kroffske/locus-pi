@@ -235,6 +235,22 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(prose).toContain("a shared file states where the work goes, not that it is one job");
   });
 
+  it("tells both roles that a closing verification step is a step that changes nothing", () => {
+    // The same rerun accepted a final "integrity pass" step whose whole content
+    // was re-checking what the earlier steps' own verifications already prove.
+    // The ban on steps that change nothing was already there; it did not read as
+    // covering a step called a verification, so both roles now say it does.
+    const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
+
+    expect(prose).toContain(
+      "A closing step that checks the finished result is the same mistake wearing a different name.",
+    );
+    expect(prose).toContain("The plan ends with the last step that changes something.");
+    expect(prose).toContain(
+      "A closing step that verifies the finished result is this defect and not an exception to it",
+    );
+  });
+
   it("accepts the first draft when the critic accepts it, and returns that exact text", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];

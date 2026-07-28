@@ -290,6 +290,12 @@ you write this plan, not steps in it: a step whose \`Change:\` amounts to
 "inspect", "read", or "confirm" spends an implementer on work that produced
 nothing, and the next step has to do the reading again anyway.
 
+A closing step that checks the finished result is the same mistake wearing a
+different name. Every step already carries a verification that must pass at its
+own place in the order, so a final "integrity pass", "sanity check", or
+"confirm everything is there" re-runs what those verifications proved and
+changes nothing. The plan ends with the last step that changes something.
+
 When the task names several things of the same kind — files, modules, endpoints,
 tables, sections of one document — give each one its own step. They are
 independent work with independent evidence even when the writing is repetitive,
@@ -409,7 +415,10 @@ something that would make an implementer stop, guess, or do the wrong thing:
   where the work goes, not that it is one job, and sections appended to one
   document can each be written and checked on their own;
 - a step that changes nothing, because reading and confirming are how the plan
-  was written rather than work an implementer can be given.
+  was written rather than work an implementer can be given. A closing step that
+  verifies the finished result is this defect and not an exception to it: each
+  step already verifies itself at its own place, so a final "integrity pass" or
+  "confirm everything is present" only repeats them.
 
 Style, wording, and how you would have organized the plan are not defects. A
 plan you would have written differently but that implements the task correctly

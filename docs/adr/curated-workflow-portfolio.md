@@ -531,6 +531,43 @@ not be exercised at all — that review found no findings, so no verdict could
 contradict them, and its question loop closed with no surviving gap, so no marker
 block reached the verifier.
 
+A fourth run carried that sentence plus a deliberately falsified document: the
+same task, the same local model, with three false claims planted in the finished
+file before the review — a version the manifest contradicts, an enforcement
+claim the source contradicts, and a measured per-call cost no source can settle.
+The plan split into one step per documented subject again, and the review
+returned "needs changes" against its own two confirmed findings, which is the
+first live evidence for the verdict rule above. Two caveats belong in the record:
+the review's own clarification round named both planted claims before any
+question was written, so this run does not show it would have found them
+unaided; and the question set closed complete in one round again, so the marker
+leak remains untested on a live run.
+
+Three further weaknesses surfaced, each one the same shape — a rule the model
+kept while defeating it — and each is closed by naming the escape rather than
+restating the rule.
+
+**A closing verification step changes nothing.** The accepted plan ended with an
+"integrity pass" that re-ran what each step's own verification already proves.
+The ban on steps that change nothing did not read as covering a step called a
+verification, so both roles now carry the consequence: the plan ends with the
+last step that changes something.
+
+**The inventory does not own scope.** It saw the split, orphaned block the
+implementation had itself reported, judged it structural rather than a content
+error, and wrote it in prose around the returned document. Nothing downstream
+reads that prose, so a real observation reached nobody while the finished review
+read as complete coverage. Everything the inventory notices now takes an id,
+with the doubt stated inside the entry, and the prompt says plainly that text
+outside the document is lost.
+
+**An unfalsifiable claim still gets a question.** The planted timing claim drew
+no question, no finding, and no declared limit. The fix is not a new section —
+the interrogator's `## Gaps not closed` reaches only the coverage assessor —
+but a question that resolves: does anything in the repository support this
+claim? A claim nothing supports is a finding, and asking is the only outcome
+that cannot silently pass.
+
 Not changed, and deliberately: the verifier's `Confirmed`/`Rejected`/`Unresolved`
 vocabulary reads backwards to a human when a positively phrased question is
 answered `Rejected`, but it is a readability defect rather than a decomposition

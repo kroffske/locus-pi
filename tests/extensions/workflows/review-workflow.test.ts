@@ -273,6 +273,29 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(verifier).toMatch(/Write `Needs changes` whenever you confirmed even one `P1` or\s+`P2` finding/u);
   });
 
+  it("forbids the inventory to drop what it judged out of scope, and outside its document", () => {
+    // A live run on 2026-07-28 saw a real structural defect in the reviewed file,
+    // decided it belonged to another class of problem than the operator asked
+    // about, and wrote it in prose around the returned document. No later stage
+    // reads that prose, so the finished review presented the ground as covered.
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain("You do not decide what belongs to this review.");
+    expect(source).toMatch(/Anything you noticed in the\s+changed surface gets an id/u);
+    expect(source).toMatch(/no later stage\s+reads anything you write outside the returned document/u);
+  });
+
+  it("makes the interrogator question a claim the sources cannot settle", () => {
+    // Same run: the reviewed document asserted a measured per-call cost that no
+    // source can support. It drew no question and no declared limit, so it
+    // reached the reader inside a review that claimed full coverage.
+    const interrogator = promptSource("interrogator.prompt.md");
+
+    expect(interrogator).toContain("A claim the sources cannot settle still gets a question.");
+    expect(interrogator).toMatch(/Ask whether anything in the repository\s+supports the claim/u);
+    expect(interrogator).toMatch(/asserts something the\s+repository cannot support, which is a finding/u);
+  });
+
   it("makes every question id carry its question in both question-writing roles", () => {
     // The reader complaint this answers: a review that says `U2-Q3` and nothing
     // else is unreadable on its own, because the question document is a separate
