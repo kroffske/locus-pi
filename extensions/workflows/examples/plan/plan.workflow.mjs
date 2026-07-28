@@ -297,6 +297,12 @@ and one step covering several of them makes a single implementer own decisions
 nobody can check separately. Combine them only when a step says plainly why they
 cannot be done apart.
 
+One destination is not such a reason. Three sections appended to the same new
+document are three pieces of work with three separate pieces of evidence: the
+shared file says where the work goes, not that it is one job. Combining is
+justified when one part cannot be written until another exists, not when the
+parts merely land next to each other.
+
 Nobody will answer a question mid-run. Where the task leaves a real choice open,
 take the most defensible option, plan on it, and record it under
 \`## Assumptions\` in the exact form "assumed X, because Y; wrong if Z". An
@@ -398,7 +404,10 @@ something that would make an implementer stop, guess, or do the wrong thing:
   configuration, or an existing document that states the contract being changed;
 - a step so large that it hides several independent decisions — and when the
   task names several things of the same kind, one step covering more than one of
-  them is exactly that, unless the step says why they cannot be done apart;
+  them is exactly that, unless the step says why they cannot be done apart. That
+  they share one destination file is not such a reason: a shared file states
+  where the work goes, not that it is one job, and sections appended to one
+  document can each be written and checked on their own;
 - a step that changes nothing, because reading and confirming are how the plan
   was written rather than work an implementer can be given.
 

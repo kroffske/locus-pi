@@ -58,6 +58,15 @@ This file records user-visible changes to the public package.
   plumbing stopped leaking**: coverage gaps that survive the round cap are
   written into the review's prose as ground it did not cover, not under a heading
   copied from the marker that delivered them.
+  A third run, same task and same local model, showed that "one changed thing"
+  needed one more sentence to bite. The fake reading step was gone, but the plan
+  had collapsed into a single step covering all three document sections, and the
+  critic accepted it on the ground that the task asked for one new file — reading
+  a shared destination as a reason the sections could not be done apart. **A
+  shared destination file is not that reason**, and both planner and critic now
+  say so: sections appended to one document are separate work with separate
+  evidence, and combining is justified only when one part cannot be written until
+  another exists.
 
 - **`requirements-grill` lets its agents search, and ripgrep is no longer a
   requirement of this package.** The workflow used to run one `rg` itself before

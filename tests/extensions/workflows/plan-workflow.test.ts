@@ -220,6 +220,21 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(prose).toContain("a step block missing any of the mandatory");
   });
 
+  it("tells both roles that a shared destination file does not justify one step", () => {
+    // The 2026-07-28 rerun on the same local model closed the previous gap and
+    // opened this one: the plan collapsed to a single step for all three
+    // sections, and the critic's own reasoning excused it because the task said
+    // "in one new file". The exemption for work that cannot be done apart is
+    // real, but a shared destination is not an instance of it, so both sides are
+    // told what does not count.
+    const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
+
+    expect(prose).toContain("One destination is not such a reason.");
+    expect(prose).toContain("the shared file says where the work goes, not that it is one job");
+    expect(prose).toContain("That they share one destination file is not such a reason");
+    expect(prose).toContain("a shared file states where the work goes, not that it is one job");
+  });
+
   it("accepts the first draft when the critic accepts it, and returns that exact text", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];

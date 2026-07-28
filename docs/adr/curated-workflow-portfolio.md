@@ -517,6 +517,20 @@ handed to the verifier inside a delimited block, and the verifier reproduced the
 block's marker as a heading in the finished review. Gaps now belong in the
 review's own prose about what it did not cover.
 
+A third run, the same task on the same local model, tested those three fixes and
+returned a split result worth recording, because the half that failed would have
+read as a success. The ban on steps that change nothing held: the fake "read nine
+files" step was gone. The rule that several things of the same kind get one step
+each did the opposite of its intent — with the fake step gone the plan collapsed
+into a single step covering all three sections, and the critic accepted it,
+reasoning in writing that one step for three extensions is justified because the
+task asks for one new file. The escape hatch for work that genuinely cannot be
+done apart was closed with the wrong key: a shared destination passed for a
+reason. Both roles are now told that it is not one. The remaining two fixes could
+not be exercised at all — that review found no findings, so no verdict could
+contradict them, and its question loop closed with no surviving gap, so no marker
+block reached the verifier.
+
 Not changed, and deliberately: the verifier's `Confirmed`/`Rejected`/`Unresolved`
 vocabulary reads backwards to a human when a positively phrased question is
 answered `Rejected`, but it is a readability defect rather than a decomposition
