@@ -221,16 +221,6 @@ export function resolveModelRoleForPurpose(
 }
 
 /**
- * Resolve ONE declared role, with no purpose fallback chain.
- *
- * `resolveModelRoleForPurpose` walks `preferred → agent → task → default`, which is
- * right for "give me something reasonable for this purpose" and wrong for an author
- * who wrote `modelRole: "smol"`: falling through to `agent` would answer a question
- * nobody asked and run a different tier under the requested tier's name. So a
- * declared role resolves to its own assignment or to none at all, and the caller
- * decides what "none" means (today: degrade to the parent model and record it).
- */
-/**
  * Split a display-only thinking suffix off a bare role token.
  *
  * `smol:high` names the role `smol` at the `high` level, exactly as
@@ -240,9 +230,15 @@ export function resolveModelRoleForPurpose(
  * the parent model — so an author who spelled out a tier would silently get a
  * different model, which is the substitution the tier work exists to stop.
  *
- * The level stays display-only. It reaches the label the operator reads and
- * never the child; plumbing effort into the child is a separate, deferred piece
- * of work, and this function must not be read as doing it.
+ * The level does not route: it is stripped again before the registry lookup, and
+ * the child session is created from the model half alone. It is not invisible to
+ * the child either — the resolution record travels in the kickoff prompt, so the
+ * child reads the level as text — but nothing acts on it. Plumbing effort into
+ * the child for real is separate, deferred work.
+ *
+ * The `:<level>` space is reserved by this grammar: a role literally named
+ * `foo:high` can no longer be addressed by that literal name. Six words are
+ * reserved; any other suffix stays part of the role name.
  */
 export function splitRoleSelector(token: string): { role: string; thinking?: ThinkingLevel } {
   const trimmed = token.trim();
@@ -253,6 +249,16 @@ export function splitRoleSelector(token: string): { role: string; thinking?: Thi
   return { role: trimmed.slice(0, colon), thinking: suffix };
 }
 
+/**
+ * Resolve ONE declared role, with no purpose fallback chain.
+ *
+ * `resolveModelRoleForPurpose` walks `preferred → agent → task → default`, which is
+ * right for "give me something reasonable for this purpose" and wrong for an author
+ * who wrote `modelRole: "smol"`: falling through to `agent` would answer a question
+ * nobody asked and run a different tier under the requested tier's name. So a
+ * declared role resolves to its own assignment or to none at all, and the caller
+ * decides what "none" means (today: degrade to the parent model and record it).
+ */
 export function resolveDeclaredModelRole(state: ModelRolesState, role: string): ModelRoleResolution {
   const { role: declaredRole, thinking } = splitRoleSelector(role);
   const effective = state.effective.get(declaredRole);

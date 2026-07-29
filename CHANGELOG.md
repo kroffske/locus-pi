@@ -22,7 +22,10 @@ This file records user-visible changes to the public package.
   real provider, no slash means a role. An optional
   `:off|minimal|low|medium|high|xhigh` suffix is display-only — the child's
   reasoning effort is not plumbed through yet, and the authoring guide says so
-  rather than letting the label imply otherwise.
+  rather than letting the label imply otherwise. Both spellings take the suffix:
+  it is split off before the lookup, so `smol:high` resolves the `smol` tier
+  rather than searching for a role by that whole name. Those six words are
+  reserved in role names; any other suffix stays part of the name.
   **The two failure modes are deliberately different.** A concrete selector this
   host cannot resolve ends the call with a named reason and zero child sessions —
   a typo must not silently run something else. A role that no configuration
