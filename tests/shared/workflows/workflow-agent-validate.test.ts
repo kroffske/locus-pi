@@ -232,6 +232,60 @@ describe("agent({ schema, validate }) script validation", () => {
     expect(getJournal().filter((line) => line.kind === "agent_end")).toHaveLength(0);
   });
 
+  it("keeps a spent transport attempt readable when the validator then throws", async () => {
+    // The same hiding hazard as a thrown transport failure, one layer further in: the
+    // attempt that ended the run has no `agent_end`, so its `error` line is the only record
+    // that a second child ran at all. Without the attempt trio on it, a reader sees one
+    // discarded attempt with no bound and no logical call — ungroupable, and the report
+    // drops the whole retry.
+    const requests: WorkflowAgentRequest[] = [];
+    const { dsl, getJournal } = createWorkflowRuntime({
+      runId: "agent-validate-throws-after-retry",
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            ok: false,
+            status: "failed",
+            failureCause: "host-turn-timeout",
+            summary: "Child agent turn exceeded its budget and was aborted.",
+            diagnostics: [],
+            agent: request.agent,
+          };
+        }
+        return {
+          ok: true,
+          status: "completed",
+          summary: "done",
+          text: '{"units":[]}',
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    await expect(
+      shaped(dsl, "Plan the units.", {
+        schema: { ...PLAN_SCHEMA },
+        label: "plan",
+        readOnly: true,
+        attempts: 2,
+        validate: () => {
+          throw new Error("author bug: cannot read properties of undefined");
+        },
+      }),
+    ).rejects.toThrow("author bug: cannot read properties of undefined");
+
+    expect(requests).toHaveLength(2);
+    const journal = getJournal();
+    const ends = journal.filter((line) => line.kind === "agent_end");
+    const errors = journal.filter((line) => line.kind === "error");
+    expect(ends.map((line) => [line.callId, line.attempt, line.attempts])).toEqual([["call-0001", 1, 2]]);
+    expect(errors.map((line) => [line.callId, line.attempt, line.attempts])).toEqual([["call-0002", 2, 2]]);
+    expect(errors[0]?.logicalCallId).toBe(ends[0]?.logicalCallId);
+    expect(errors[0]?.logicalCallId).toBeDefined();
+  });
+
   it.each([
     ["a non-array return", () => "nope" as unknown as string[], "agent validate must return an array of strings"],
     ["a non-string element", () => [1] as unknown as string[], "agent validate must return an array of strings"],

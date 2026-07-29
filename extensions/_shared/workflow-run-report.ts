@@ -321,6 +321,7 @@ function reportReadme(options: {
     `- Machine records: \`.locus/runtime/workflows/${input.runId}/\` — journal, replay record, ` +
       `result envelope, script snapshot, transcripts and call envelopes`,
   );
+  const retryLines = retriedCallLines(input.journal);
   if (documents.length === 0) {
     lines.push("", "## Documents", "");
     lines.push(
@@ -328,6 +329,7 @@ function reportReadme(options: {
         ? `- none — the artifact index was unavailable: ${singleLine(options.indexUnavailable)}`
         : "- none",
     );
+    lines.push(...retryLines);
     lines.push("");
     return lines.join("\n");
   }
@@ -346,8 +348,91 @@ function reportReadme(options: {
       lines.push(`${position + 1}. ${documentEntry(document)}`);
     }
   }
+  lines.push(...retryLines);
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * One logical `agent()` call that had to run more than one child.
+ *
+ * A discarded attempt is a real agent call: it burned an invocation of the run cap and left
+ * its own transcript. Without this section the reader's copy shows the stage as one clean
+ * answer and the second bill appears nowhere they would look.
+ */
+interface WorkflowReportRetriedCall {
+  author: string;
+  stage?: string;
+  attempts: Array<{ callId: string; attempt: number; declared: number; status: string; failureCause?: string }>;
+}
+
+/**
+ * Group the lines that carry an attempt ordinal into their logical calls.
+ *
+ * A physical attempt has exactly ONE terminal journal record: `agent_end` when the child
+ * returned a result, and `error` when it threw — the runtime emits the error line instead
+ * of, never alongside, the end line. Reading only `agent_end` would therefore hide the
+ * sequence that matters most: a call that timed out, was re-run, and then threw leaves one
+ * `agent_end` behind and would render as a stage that never retried at all.
+ *
+ * Grouped by the runtime's own `logicalCallId`, which every physical attempt of one
+ * `agent()` call carries. Neither adjacency nor (agent, label, phase, group) can do this
+ * job: `parallel()` may interleave two retrying calls that agree on all four of those
+ * fields, and grouping by them would attribute one call's discarded attempt to the other —
+ * worse than no section at all, because this one reads as evidence.
+ */
+function retriedCalls(journal: readonly WorkflowJournalLine[]): WorkflowReportRetriedCall[] {
+  const open = new Map<string, WorkflowReportRetriedCall>();
+  const ordered: WorkflowReportRetriedCall[] = [];
+  for (const line of journal) {
+    if (line.kind !== "agent_end" && line.kind !== "error") continue;
+    if (line.attempt === undefined || line.attempts === undefined || line.callId === undefined) continue;
+    // The journal reader refuses an ordinal without one, so absence here is a line this
+    // reader cannot honestly place — skipped rather than guessed into somebody's group.
+    if (line.logicalCallId === undefined) continue;
+    let group = open.get(line.logicalCallId);
+    if (group === undefined) {
+      group = {
+        author: line.label ?? line.agent ?? "agent",
+        ...(line.phase !== undefined ? { stage: line.phase } : {}),
+        attempts: [],
+      };
+      open.set(line.logicalCallId, group);
+      ordered.push(group);
+    }
+    group.attempts.push({
+      callId: line.callId,
+      attempt: line.attempt,
+      declared: line.attempts,
+      // An `error` line carries no status field: the attempt ended by throwing, which is a
+      // different fact from a failed result and is named as itself rather than flattened.
+      status: line.kind === "error" ? "threw" : (line.status ?? "unknown"),
+      ...(line.failureCause !== undefined ? { failureCause: line.failureCause } : {}),
+    });
+  }
+  // A call that declared a budget and never needed it is not a retried call.
+  return ordered.filter((group) => group.attempts.length > 1);
+}
+
+function retriedCallLines(journal: readonly WorkflowJournalLine[]): string[] {
+  const calls = retriedCalls(journal);
+  if (calls.length === 0) return [];
+  const lines: string[] = ["", "## Retried agent calls", ""];
+  lines.push(
+    "Each line below is a separate child run charged to this run's budget, with its own " +
+      "transcript in the machine records.",
+    "",
+  );
+  for (const call of calls) {
+    lines.push(`- ${call.author}${call.stage === undefined ? "" : ` · ${call.stage}`}`);
+    for (const attempt of call.attempts) {
+      const cause = attempt.failureCause === undefined ? "" : ` (${attempt.failureCause})`;
+      lines.push(
+        `  - attempt ${attempt.attempt} of ${attempt.declared} — \`${attempt.callId}\` — ${attempt.status}${cause}`,
+      );
+    }
+  }
+  return lines;
 }
 
 function documentEntry(document: WorkflowReportDocument): string {

@@ -233,6 +233,9 @@ extensions/workflows/operator-handoff-service.ts
 extensions/workflows/operator-surface.ts
 extensions/workflows/operator-ui.ts
 extensions/workflows/progress-widget.ts
+extensions/workflows/references/consilium/README.md
+extensions/workflows/references/consilium/consilium.workflow.mjs
+extensions/workflows/references/consilium/fixture-question.md
 extensions/workflows/references/excalidraw-pipeline/README.md
 extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.section-host.mjs
 extensions/workflows/references/excalidraw-pipeline/excalidraw-pipeline.workflow.mjs
@@ -280,6 +283,7 @@ tests/extensions/plan/plan-command-surfaces.test.ts
 tests/extensions/plan/plan-prompt-commands.test.ts
 tests/extensions/todo-context/todo-command-surfaces.test.ts
 tests/extensions/todo-context/todo-context.test.ts
+tests/extensions/workflows/consilium-reference-workflow.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
 tests/extensions/workflows/plan-implement-workflow.test.ts
 tests/extensions/workflows/plan-workflow.test.ts
@@ -344,6 +348,7 @@ tests/shared/session/session-core.test.ts
 tests/shared/task/tasks-bridge.test.ts
 tests/shared/workflows/workflow-agent-bounds.test.ts
 tests/shared/workflows/workflow-agent-schema.test.ts
+tests/shared/workflows/workflow-agent-transport.test.ts
 tests/shared/workflows/workflow-agent-uniqueness.test.ts
 tests/shared/workflows/workflow-agent-validate.test.ts
 tests/shared/workflows/workflow-artifacts.test.ts

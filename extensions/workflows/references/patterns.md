@@ -13,19 +13,23 @@ stays yours.
 
 ## Choose a shape
 
-| Requirement                             | Minimal shape                               |
-| --------------------------------------- | ------------------------------------------- |
-| One bounded tool-using task             | one `agent()`                               |
-| Cheap classification or draft           | one no-tool `agent({ schema })`             |
-| Cheap gate before tool work             | shaped `agent()` then conditional `agent()` |
-| Yes/no answer the script must branch on | `agent({ schema })` with an `enum`          |
-| A few fixed fields for the next stage   | `agent({ schema })`, closed object          |
-| Multi-step work on one subject          | staged text pipeline (see below)            |
-| Repeat until an evidenced verdict       | bounded loop plus judge                     |
-| Plan, implement, and verify             | planner, writer stages, reviewer loop       |
-| Ordered transformation per item         | `pipeline()`                                |
-| Independent work followed by synthesis  | `parallel()` then merge                     |
-| Independent acceptance votes            | `parallel()` judge panel                    |
+| Requirement                              | Minimal shape                               |
+| ---------------------------------------- | ------------------------------------------- |
+| One bounded tool-using task              | one `agent()`                               |
+| Cheap classification or draft            | one no-tool `agent({ schema })`             |
+| Cheap gate before tool work              | shaped `agent()` then conditional `agent()` |
+| Yes/no answer the script must branch on  | `agent({ schema })` with an `enum`          |
+| A few fixed fields for the next stage    | `agent({ schema })`, closed object          |
+| Multi-step work on one subject           | staged text pipeline (see below)            |
+| Repeat until an evidenced verdict        | bounded loop plus judge                     |
+| Plan, implement, and verify              | planner, writer stages, reviewer loop       |
+| Ordered transformation per item          | `pipeline()`                                |
+| Independent work followed by synthesis   | fan-out/fan-in — `parallel()` then merge    |
+| Independent acceptance votes             | `parallel()` judge panel                    |
+| A human decision the run cannot make     | human gate — `awaitOperator()`, two runs    |
+| Repeat while a script-visible fact holds | plain-JS loop, `dsl.now()` for the clock    |
+| A group that reads as one step           | nested `dsl.workflow()` around the group    |
+| One document several views must inform   | consilium — advisors, synthesis, verifier   |
 
 Prefer the staged text pipeline for any requirement that reads "understand X,
 then decide about X, then act on X". Reach for a loop, `parallel()`,
@@ -680,7 +684,7 @@ return { ok: true, outputs };
 only `WORKFLOW_GROUP_FAILURE` when requirements explicitly accept partial work,
 and return `partial: true`; partial is never projected as success.
 
-## Parallel fan-out and merge
+## Fan-out/fan-in
 
 ```js
 const findings = await parallel(
@@ -692,6 +696,16 @@ const merge = await agent(findings.map((item, index) => `${index + 1}. ${item}`)
 });
 return merge;
 ```
+
+The cost is the merge stage and the barrier. `parallel()` preserves input order and
+fails closed as a group, so `findings[i]` always belongs to `targets[i]` — but the
+branches never see each other, so anything one branch learns that would have changed
+another's work is lost, and the merge stage has to reconcile vocabularies rather than
+synthesize. Use it when the branches really are independent and expensive; two
+sessions plus a merge cost three calls to save one.
+
+See also `## Consilium` below, which is fan-out/fan-in with the merge split into a
+synthesizer and a separate reader that checks it.
 
 ## Judge panel
 
@@ -734,3 +748,177 @@ return { ok: false, stoppedBy: "round-cap", error: "Dry state was not proven" };
 
 Always separate the measured exit condition from the safety cap and record
 which condition stopped the run.
+
+## Human gate
+
+A workflow run cannot stop and ask a person: `ask` refuses when there is no UI and
+child agent sessions are headless. The gate is therefore two runs with a host-verified
+handoff between them — and the questions themselves are written by an agent, because
+"what does the operator have to decide" is a judgement, not a template.
+
+```js
+// Run 1 — a shaped stage decides whether a human is needed at all.
+const decision = await agent(`${COMMON}\n\nDecide whether this can start.`, {
+  readOnly: true,
+  tools: [],
+  label: "decide clarification",
+  schema: CLARIFIER_SCHEMA, // { decision: enum["continue","ask"], questions: [...] }
+});
+if (decision.decision === "continue") return await runTheWork(dsl, input);
+
+// Persist exactly what run 2 must receive, then declare the pause.
+const intentRef = publishArtifact("intent.md", input);
+const questionsRef = publishArtifact("clarification-questions.md", renderQuestions(decision.questions));
+awaitOperator({
+  reason: "clarification required",
+  operatorHandoff: {
+    title: "Clarification",
+    questions: decision.questions,
+    continuationArtifactRefs: [intentRef, questionsRef],
+  },
+});
+return { mode: "prepared", intentRef, questionsRef };
+
+// Run 2 — the operator's answers arrive as ordinary text, and the two artifacts
+// arrive through the host's closed `continuation` control, already verified.
+const [intent, questions] = dsl.continuationArtifacts();
+```
+
+The cost is real and worth stating before you reach for it. The run ends — there is no
+suspended process — so everything run 2 needs must be an artifact run 1 published, and
+run 2 must be written to start from those artifacts rather than from memory. In
+exchange the pause is durable: the operator can answer an hour later, on another
+machine, and the host verifies the references before run 2's code starts.
+
+Two rules keep the gate honest:
+
+- **Never let a model conclude that a human approved something.** The operator's
+  answer is text the host carried; a stage's claim that "the user agreed" is prose.
+- **Do not re-derive the host's proof of the references in script code.** The host
+  checks projection membership, digest and size before your module runs. Assert the
+  SHAPE you require — how many artifacts, under which names — and read them.
+
+`review` → `review-fix` is the shipped example of this shape; the
+`excalidraw-pipeline` reference uses a plain file the operator edits instead, which is
+the cheaper variant when there is no question list to render.
+
+## Plain-JS loop
+
+The DSL has no loop primitive, and does not need one: a workflow is JavaScript. What
+it does have is a replay-safe clock, and that is the part worth knowing.
+
+```js
+const deadline = dsl.now() + 10 * 60_000;
+let round = 0;
+let report = "";
+while (round < MAX_ROUNDS && dsl.now() < deadline) {
+  round += 1;
+  report = await agent(`Sweep round ${round}`, { readOnly: true, label: `sweep:${round}` });
+  const verdict = await agent(`Is this sweep dry?\n${report}`, {
+    readOnly: true,
+    tools: [],
+    label: `measure:${round}`,
+    schema: { type: "object", required: ["dry"], properties: { dry: { type: "boolean" } } },
+  });
+  if (verdict.dry) return { ok: true, stoppedBy: "dry", round, report };
+}
+return { ok: false, stoppedBy: round >= MAX_ROUNDS ? "round-cap" : "deadline", round, report };
+```
+
+Use `dsl.now()` and `dsl.random()`, never `Date.now()` or `Math.random()` directly.
+Both record their value on the first run and return the recorded one on `--resume`, so
+a resumed run takes the same branches; a direct `Date.now()` is not banned, but a loop
+that depends on one will not resume the same way, and the identity analyzer flags the
+syntax as replay-unsafe.
+
+The cost of a loop is that every round is a real cost, so a loop needs two exits and
+must say which one it took: a measured condition the script can read from a declared
+value, and a hard round cap. Reaching the cap is an outcome to report, not a silent
+fallthrough. Never make the exit condition a scan of model prose — see
+`## Declare the fact, do not scan the prose`.
+
+## Nested `dsl.workflow()`
+
+`dsl.workflow(fn, input)` runs a function with the same DSL handle and brackets it in
+the journal with `[workflow:enter]` / `[workflow:exit]`. It creates no new run, no new
+budget and no isolation — it is a **readability** boundary, and the honest reason to
+use it is that a group of calls belongs together in the record.
+
+```js
+const advice = await dsl.workflow(async (nested) =>
+  nested.parallel(ADVISORS.map((advisor) => () => nested.agent(brief, advisorOptions(advisor)))),
+);
+```
+
+The cost is one extra journal line each side and one more level of indentation. Reach
+for it when a reader of `journal.ndjson` would otherwise see a flat run of calls with
+no sign of which step they belonged to; skip it for a single call.
+
+The caller worth reading is the consilium reference at
+`extensions/workflows/references/consilium/consilium.workflow.mjs`, which wraps its
+advisor fan-out. That is a repository path, not a link: like `excalidraw-pipeline`,
+the reference is tracked in the locus-pi repository and runs by path, and is not one
+of the files an install ships — this catalog is.
+
+## Consilium
+
+Fan-out/fan-in for the case where the deliverable is a **document**: independent
+advisors, one synthesizer, and a separate reader that checks the synthesis against the
+advisor texts before anything is published.
+
+```js
+const brief = await agent(frameTask(question), { readOnly: true, tools: [], artifact: "brief.md" });
+const advice = await dsl.workflow(async (nested) =>
+  nested.parallel(ADVISORS.map((a) => () => nested.agent(`${a.charter}\n\n${brief}`, adviceOptions(a)))),
+);
+const synthesis = await agent(synthesizeTask(brief, advice), {
+  readOnly: true,
+  tools: [],
+  artifact: "synthesis-draft.md", // NOT the terminal name — see below
+});
+const check = await agent(verifyTask(synthesis, advice), {
+  readOnly: true,
+  tools: [],
+  schema: {
+    type: "object",
+    required: ["verdict", "reason"],
+    properties: {
+      verdict: { type: "string", enum: ["accept", "reject"] },
+      reason: { type: "string", nonBlank: true, maxLength: 600 },
+    },
+  },
+});
+if (check.verdict === "reject") return { ok: false, verdict: "reject", reason: check.reason };
+return { ok: true, consiliumRef: publishArtifact("consilium.md", synthesis) };
+```
+
+Four things make this different from `## Judge panel`, and each is a decision:
+
+- **The advisors differ by ROLE, not by adjective.** Three "strict / balanced /
+  skeptical" copies of one prompt on one model produce three of the same answer, and
+  the synthesizer then has nothing to synthesize. Give each advisor a different JOB —
+  what is known, what goes wrong, the strongest case for a different answer — and
+  three weak advisors still produce three genuinely different texts.
+- **The check is an agent, not `filter`.** A judge panel counts votes, which is fine
+  for an acceptance decision. A document's quality is not a tally: the failure to
+  catch is a synthesizer manufacturing consensus — dropping the advisor who
+  disagreed, or attributing a claim to an advisor who never made it — and counting
+  cannot see either. The script still branches on exactly one declared enum member.
+- **The verifier must be a fresh reader.** Do not fold it into the synthesizer:
+  two cognitive jobs in one stage is the definition of an under-decomposed stage, and
+  the checker would be grading its own output.
+- **Publish the terminal document AFTER the verdict.** If the synthesizer stage
+  declares `artifact: "consilium.md"`, that artifact exists whatever the verifier
+  said. Naming the draft something else and publishing on `accept` is what makes "a
+  rejected run leaves no terminal artifact" true rather than aspirational.
+
+The cost is four stages and N+3 children for one document, plus a framing stage that
+answers nothing by itself. Pay it when several views genuinely bear on the answer and
+the answer is a document someone will act on; for a yes/no acceptance, a judge panel
+is cheaper and enough.
+
+The runnable reference is
+`extensions/workflows/references/consilium/consilium.workflow.mjs` in the locus-pi
+repository, with its committed fixture question and a README stating what it does not
+yet demonstrate. It is tracked and runs by path rather than shipping in an install,
+so the skeleton above is the part you have if you arrived here through npm.

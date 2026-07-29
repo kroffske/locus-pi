@@ -19,6 +19,7 @@ import {
   writeWorkflowRunReport,
   type WorkflowRunReportEvidenceSource,
 } from "../../../extensions/_shared/workflow-run-report.js";
+import { readWorkflowRunJournalState } from "../../../extensions/_shared/workflow-journal.js";
 import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
 import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
@@ -330,5 +331,287 @@ describe("workflow run report", () => {
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
     assert.match(readme, /- Workflow: `report` \(project\)/u);
     assert.match(readme, /01-scout-review\.md/u);
+  });
+
+  it("names every discarded transport attempt, its callId and its class", async () => {
+    // A retried stage looks like one clean answer in the documents list. The second child
+    // really ran, burned an invocation and left its own transcript, so the reader's copy has
+    // to say so — otherwise the only trace of the second bill is a machine file.
+    const root = project();
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "retried.workflow.mjs"),
+      [
+        "export default async function runWorkflow(dsl) {",
+        '  return await dsl.agent("answer", {',
+        '    artifact: "review.md",',
+        '    label: "scout",',
+        '    phase: "review",',
+        "    readOnly: true,",
+        "    attempts: 2,",
+        "  });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness(root, { sessionId: "report-retry-parent" });
+    let child = 0;
+    const createExecutor = (): AgentExecutor => ({
+      async run(request: AgentRunRequest) {
+        child += 1;
+        // First child: the host turn budget expired mid-answer. Second: a real answer.
+        if (child === 1) {
+          return {
+            status: "failed",
+            agentName: request.agent.name,
+            reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
+            failureCause: "host-turn-timeout",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        }
+        return {
+          status: "completed",
+          agentName: request.agent.name,
+          reason: "exact answer",
+          text: "exact answer",
+          diagnostics: [],
+          lifecycleEntryIds: [],
+        };
+      },
+    });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "retried",
+      createExecutor,
+    });
+
+    assert.equal(result.ok, true, result.error);
+    assert.equal(child, 2, "the transport failure must have cost a second real child");
+
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /## Retried agent calls/u);
+    // BOTH attempts, each by its own callId, and the discarded one by its class.
+    assert.match(readme, /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)/u);
+    assert.match(readme, /- attempt 2 of 2 — `call-0002` — completed/u);
+    assert.match(readme, /- scout · review/u);
+
+    // The same two attempts are readable in the journal the report was projected from,
+    // and the journal a reader loads back reports no structural problem.
+    const journal = readWorkflowRunJournalState(root, result.runId);
+    assert.deepEqual(journal.diagnostics, []);
+    const ends = journal.lines.filter((line) => line.kind === "agent_end");
+    assert.deepEqual(
+      ends.map((line) => [line.callId, line.attempt, line.attempts, line.status, line.failureCause]),
+      [
+        ["call-0001", 1, 2, "failed", "host-turn-timeout"],
+        ["call-0002", 2, 2, "completed", undefined],
+      ],
+    );
+    assert.equal(
+      journal.lines.filter((line) => line.message?.startsWith("[workflow:retry]") === true).length,
+      1,
+      "the boundary between the two attempts is named in the journal",
+    );
+  });
+
+  it("names a retry whose second attempt threw, which leaves only one agent_end behind", async () => {
+    // The failure path that hides a retry: attempt 1 times out and IS re-run, attempt 2
+    // throws. A thrown attempt never reaches an `agent_end`, so a report built from
+    // `agent_end` alone sees one attempt, drops the group, and renders a stage that ran
+    // twice and cost twice as if it never retried — while the run's own error message
+    // names only the throw. The terminal `error` line is that attempt's record and has to
+    // carry the same attempt identity.
+    const root = project();
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "threw.workflow.mjs"),
+      [
+        "export default async function runWorkflow(dsl) {",
+        '  return await dsl.agent("answer", {',
+        '    artifact: "review.md",',
+        '    label: "scout",',
+        '    phase: "review",',
+        "    readOnly: true,",
+        "    attempts: 2,",
+        "  });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness(root, { sessionId: "report-threw-parent" });
+    let child = 0;
+    const createExecutor = (): AgentExecutor => ({
+      async run(request: AgentRunRequest) {
+        child += 1;
+        if (child === 1) {
+          return {
+            status: "failed",
+            agentName: request.agent.name,
+            reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
+            failureCause: "host-turn-timeout",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        }
+        throw new Error("the child host vanished mid-turn");
+      },
+    });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "threw",
+      createExecutor,
+    });
+
+    assert.equal(result.ok, false, "a thrown attempt ends the run");
+    assert.equal(child, 2, "the transport failure must have cost a second real child");
+
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /## Retried agent calls/u);
+    assert.match(readme, /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)/u);
+    // The thrown attempt is named as itself — not "failed", and not silently absent.
+    assert.match(readme, /- attempt 2 of 2 — `call-0002` — threw/u);
+
+    // The journal the report was projected from: one agent_end, one error line, the same
+    // logical call named on both, and no structural problem when a reader loads it back.
+    const journal = readWorkflowRunJournalState(root, result.runId);
+    assert.deepEqual(journal.diagnostics, []);
+    const ends = journal.lines.filter((line) => line.kind === "agent_end");
+    const errors = journal.lines.filter((line) => line.kind === "error" && line.callId !== undefined);
+    assert.deepEqual(
+      ends.map((line) => [line.callId, line.attempt, line.attempts]),
+      [["call-0001", 1, 2]],
+    );
+    assert.deepEqual(
+      errors.map((line) => [line.callId, line.attempt, line.attempts]),
+      [["call-0002", 2, 2]],
+    );
+    assert.equal(errors[0]?.logicalCallId, ends[0]?.logicalCallId);
+    assert.notEqual(errors[0]?.logicalCallId, undefined);
+  });
+
+  it("says nothing about retries when a call needed only one attempt", () => {
+    // The section is evidence, not decoration: a call that declared a budget and did not
+    // spend it must not grow a "Retried agent calls" heading.
+    const root = project();
+    const outcome = writeWorkflowRunReport(
+      {
+        projectRoot: root,
+        runId: RUN_ID,
+        status: "completed",
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            logicalCallId: "logical-0001",
+            attempt: 1,
+            attempts: 3,
+            status: "completed",
+          },
+        ] as WorkflowJournalLine[],
+      },
+      evidenceFrom([], {}),
+    );
+
+    assert.equal(outcome.ok, true);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    assert.doesNotMatch(readme, /Retried agent calls/u);
+  });
+
+  it("keeps two interleaved calls apart when agent, label, phase and group all agree", () => {
+    // `parallel()` can run two calls that agree on every descriptive field, and their
+    // attempts then interleave in the journal. Grouping by those fields would put three of
+    // these four attempts in one group and leave the other looking like it never retried —
+    // a section that reads as evidence while attributing one stage's second bill to another.
+    // Only the runtime's own logical-call identity separates them.
+    const root = project();
+    const shared = { runId: RUN_ID, kind: "agent_end" as const, agent: "default", label: "advise", phase: "advise" };
+    const outcome = writeWorkflowRunReport(
+      {
+        projectRoot: root,
+        runId: RUN_ID,
+        status: "completed",
+        journal: [
+          // A's first attempt, then B's first attempt, then A's second, then B's second.
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:01.000Z",
+            groupId: "group-1",
+            callId: "call-0001",
+            logicalCallId: "logical-0001",
+            attempt: 1,
+            attempts: 2,
+            status: "failed",
+            failureCause: "host-turn-timeout",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:02.000Z",
+            groupId: "group-1",
+            callId: "call-0002",
+            logicalCallId: "logical-0002",
+            attempt: 1,
+            attempts: 2,
+            status: "failed",
+            failureCause: "call-timeout",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:03.000Z",
+            groupId: "group-1",
+            callId: "call-0003",
+            logicalCallId: "logical-0001",
+            attempt: 2,
+            attempts: 2,
+            status: "completed",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:04.000Z",
+            groupId: "group-1",
+            callId: "call-0004",
+            logicalCallId: "logical-0002",
+            attempt: 2,
+            attempts: 2,
+            status: "completed",
+          },
+        ] as WorkflowJournalLine[],
+      },
+      evidenceFrom([], {}),
+    );
+
+    assert.equal(outcome.ok, true);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    const section = readme.slice(readme.indexOf("## Retried agent calls"));
+    // Two calls, each with exactly its OWN two attempts. Grouping by the descriptive fields
+    // produces one bullet with three attempt lines instead, so this fails on that shape.
+    assert.equal(section.split("\n").filter((line) => line === "- advise · advise").length, 2);
+    assert.match(
+      section,
+      /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)\n {2}- attempt 2 of 2 — `call-0003` — completed/u,
+    );
+    assert.match(
+      section,
+      /- attempt 1 of 2 — `call-0002` — failed \(call-timeout\)\n {2}- attempt 2 of 2 — `call-0004` — completed/u,
+    );
   });
 });

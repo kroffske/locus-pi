@@ -352,10 +352,15 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner
-  verifies the successful source run, full reference, and digest before copying
-  bytes into the new run; entry code additionally requires the bytes to equal
-  the source terminal result, the exact ref to be its last projected output, and
-  the final `verify-review` answer to come from the curated Package workflow named `review`.
+  verifies the successful source run, full reference, digest and terminal-projection
+  membership before copying bytes into the new run; since 2026-07-29 (owner decision 6)
+  entry code checks only that exactly one reference named `review.md` arrived and reads
+  the verified bytes. The digest re-derivation duplicated the host, and the assertion
+  that the bytes were the terminal `verify-review` answer of a Package `review` run
+  asserted provenance the host does not check and no agent can. The operator picks the
+  source run through the closed `continuation` control, the host verifies that choice,
+  and the accepted residual risk — remediating against another run's review — is fixed
+  by re-running with the right source.
   A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units through
   the shaped-agent boundary. Deterministic entry code then parses complete
   `### F<n>` blocks inside `## Findings`, rejects invalid ids, notes, edges and

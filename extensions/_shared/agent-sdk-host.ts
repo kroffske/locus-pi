@@ -5,6 +5,7 @@ import type {
   AgentChildOutputStats,
   AgentChildTrace,
   AgentExecutor,
+  AgentFailureCause,
   AgentRunRequest,
   AgentRunResult,
 } from "./agent-runner.js";
@@ -843,11 +844,17 @@ async function runWithSdkSession(
         errors: [error.message],
         finalAnswer: error.message,
       });
-      return blockedResult(request, error.message, [...diagnostics, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC, error.message]);
+      return blockedResult(request, error.message, "sdk-unavailable", [
+        ...diagnostics,
+        AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
+        error.message,
+      ]);
     }
     const reason = errorMessage(error);
     agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
-    return failedResult(request, reason, [...diagnostics, reason]);
+    // Catch-all: this branch also carries a bad model id, a rejected tool allowlist and any
+    // option-assembly bug. None of those is transient, so none of them may be retried.
+    return failedResult(request, reason, "unclassified", [...diagnostics, reason]);
   }
 
   const session = created.session;
@@ -897,7 +904,7 @@ async function runWithSdkSession(
         const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
         agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
-          failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
+          failedResult(request, reason, "host-turn-timeout", [...diagnostics, reason], undefined, childSession),
           childTrace,
         );
       }
@@ -905,7 +912,7 @@ async function runWithSdkSession(
         const reason = `Child agent exceeded the ${maxToolCalls ?? 0} tool-call budget and was aborted.`;
         agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
-          failedResult(request, reason, [...diagnostics, reason], undefined, childSession),
+          failedResult(request, reason, "tool-call-budget", [...diagnostics, reason], undefined, childSession),
           childTrace,
         );
       }
@@ -943,7 +950,14 @@ async function runWithSdkSession(
         finalAnswer: providerFailure,
       });
       return withChildTrace(
-        failedResult(request, providerFailure, [...diagnostics, providerFailure], childOutputStats, childSession),
+        failedResult(
+          request,
+          providerFailure,
+          "provider-error",
+          [...diagnostics, providerFailure],
+          childOutputStats,
+          childSession,
+        ),
         childTrace,
       );
     }
@@ -955,7 +969,14 @@ async function runWithSdkSession(
         finalAnswer: parsed.reason,
       });
       return withChildTrace(
-        failedResult(request, parsed.reason, [...diagnostics, parsed.reason], childOutputStats, childSession),
+        failedResult(
+          request,
+          parsed.reason,
+          "unparseable-answer",
+          [...diagnostics, parsed.reason],
+          childOutputStats,
+          childSession,
+        ),
         childTrace,
       );
     }
@@ -996,7 +1017,9 @@ async function runWithSdkSession(
     });
     const preservedTrace = preserveChildTrace();
     return withChildTrace(
-      failedResult(request, reason, [...diagnostics, reason], childOutputStats, childSession),
+      // Catch-all around the whole turn — parseAgentText, evidence evaluation, trace export
+      // included. Nothing here proves the throw was transient, so it never retries.
+      failedResult(request, reason, "unclassified", [...diagnostics, reason], childOutputStats, childSession),
       preservedTrace,
     );
   } finally {
@@ -1230,11 +1253,17 @@ function createSdkSessionRecord(request: AgentRunRequest, childSessionId: string
   return session;
 }
 
-function blockedResult(request: AgentRunRequest, reason: string, diagnostics: string[]): AgentRunResult {
+function blockedResult(
+  request: AgentRunRequest,
+  reason: string,
+  failureCause: AgentFailureCause,
+  diagnostics: string[],
+): AgentRunResult {
   return {
     status: "blocked",
     agentName: request.agent.name,
     reason,
+    failureCause,
     diagnostics,
     lifecycleEntryIds: [],
   };
@@ -1243,6 +1272,7 @@ function blockedResult(request: AgentRunRequest, reason: string, diagnostics: st
 function failedResult(
   request: AgentRunRequest,
   reason: string,
+  failureCause: AgentFailureCause,
   diagnostics: string[] = [reason],
   childOutputStats?: AgentChildOutputStats,
   childSession?: SessionRecord,
@@ -1251,6 +1281,7 @@ function failedResult(
     status: "failed",
     agentName: request.agent.name,
     reason,
+    failureCause,
     diagnostics,
     lifecycleEntryIds: [],
   };
@@ -1269,6 +1300,8 @@ function cancelledResult(
     status: "cancelled",
     agentName: request.agent.name,
     reason,
+    // Cancellation has exactly one origin, so the cause is a constant rather than a parameter.
+    failureCause: "cancelled",
     diagnostics: diagnostics.length === 0 ? [reason] : diagnostics,
     lifecycleEntryIds: [],
   };

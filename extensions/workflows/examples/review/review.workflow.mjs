@@ -218,63 +218,6 @@ function declaredNoChanges(inventoryText) {
     : reason;
 }
 
-function sameArtifactRef(left, right) {
-  if (
-    typeof left !== "object" ||
-    left === null ||
-    Array.isArray(left) ||
-    typeof right !== "object" ||
-    right === null ||
-    Array.isArray(right)
-  ) {
-    return false;
-  }
-  const allowedFields = ["runId", "artifactId", "name", "sha256"];
-  if (
-    Object.keys(left).some((field) => !allowedFields.includes(field)) ||
-    Object.keys(right).some((field) => !allowedFields.includes(field))
-  ) {
-    return false;
-  }
-  return allowedFields.every((field) => typeof left[field] === "string" && left[field] === right[field]);
-}
-
-function exactPrepareResult(result, intentRef, questionsRef) {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) return false;
-  const fields = Object.keys(result);
-  if (fields.length !== 3 || fields.some((field) => !["mode", "intentRef", "questionsRef"].includes(field))) {
-    return false;
-  }
-  return (
-    result.mode === "prepared" &&
-    sameArtifactRef(result.intentRef, intentRef) &&
-    sameArtifactRef(result.questionsRef, questionsRef)
-  );
-}
-
-function requirePrepareArtifact(consumed, sourceRef, expectedName, intentRef, questionsRef) {
-  const source = consumed?.source;
-  const target = source?.target;
-  const artifact = source?.artifact;
-  const terminal = source?.terminal;
-  const projectedRefs = Array.isArray(terminal?.artifactRefs) ? terminal.artifactRefs : [];
-  if (
-    source?.runId !== sourceRef?.runId ||
-    target?.kind !== "name" ||
-    target?.ref !== "review" ||
-    target?.source !== "package" ||
-    artifact?.kind !== "published" ||
-    artifact?.stage !== "prepare-clarification" ||
-    consumed?.ref?.name !== expectedName ||
-    !exactPrepareResult(terminal?.result, intentRef, questionsRef) ||
-    !projectedRefs.some((ref) => sameArtifactRef(ref, sourceRef))
-  ) {
-    throw new Error(
-      `review execute ${expectedName} reference must come from the verified terminal result of a Package review prepare-clarification run`,
-    );
-  }
-}
-
 /**
  * The cross-field rules the schema cannot declare, as a `validate` callback the
  * runtime runs inside the same retry loop it uses for a broken `maxLength`.
@@ -490,15 +433,18 @@ function consumeClarification(dsl, answers) {
   }
   const intentPair = byName.get("intent.md");
   const questionsPair = byName.get("clarification-questions.md");
-  const intentRef = intentPair.sourceRef;
-  const questionsRef = questionsPair.sourceRef;
   const { phase, log, publishArtifact } = dsl;
   phase("consume-clarification");
-  log("Verifying the prepare-run references and persisting operator answers.");
+  log("Persisting operator answers against the host-verified clarification references.");
   const intent = intentPair.consumedArtifact;
   const questions = questionsPair.consumedArtifact;
-  requirePrepareArtifact(intent, intentRef, "intent.md", intentRef, questionsRef);
-  requirePrepareArtifact(questions, questionsRef, "clarification-questions.md", intentRef, questionsRef);
+  // The host verifies both referenced artifacts — projection membership, digest and size —
+  // and copies them in before this module starts. The script used to re-derive that proof
+  // and then assert provenance the host cannot check: that these bytes came from the
+  // terminal result of a Package `review` `prepare-clarification` run. Both are gone. The
+  // operator picks the source run through the closed `continuation` control and the host
+  // verifies what they picked; the residual risk is answering questions from some other
+  // run, which re-running with the right source fixes.
   const intentText = requireNonEmptyText(intent.text, "consumed intent");
   const questionsText = requireNonEmptyText(
     questions.text,

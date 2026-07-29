@@ -16,7 +16,6 @@ import type { AgentExecutor } from "./agent-runner.js";
 import {
   agentLiveStore,
   createAgentSdkSessionExecutor,
-  AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
   AGENT_SDK_UNAVAILABLE_HINT,
   type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
@@ -33,7 +32,7 @@ import type {
   WorkflowUsage,
 } from "./workflow-runtime.js";
 import { defaultResolveModel } from "./workflow-model-resolve.js";
-import type { AgentDefinition, PermissionMode, WorkspaceMode } from "./types.js";
+import type { AgentDefinition, AgentFailureCause, PermissionMode, WorkspaceMode } from "./types.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "./agent-read-only-policy.js";
 
@@ -44,6 +43,15 @@ import { captureRepositoryCheckScripts } from "./agent-read-only-policy.js";
 /** Thrown when the host genuinely cannot spawn a child (fail closed, honest reason). */
 export class WorkflowAgentUnavailableError extends Error {
   readonly diagnostics: string[];
+  /**
+   * The same closed cause a result-shaped failure would carry.
+   *
+   * This failure never becomes a `WorkflowAgentResult` — the run must end, not be re-asked
+   * — so without the cause on the error itself the journal's terminal record of the call is
+   * an English sentence a reader would have to match on. The runtime reads it structurally
+   * and puts it on the `error` line.
+   */
+  readonly failureCause: AgentFailureCause = "sdk-unavailable";
   constructor(message: string, diagnostics: string[]) {
     super(message);
     this.name = "WorkflowAgentUnavailableError";
@@ -135,6 +143,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       return {
         ok: false,
         status: "failed",
+        failureCause: "unknown-agent",
         summary: `Unknown agent: ${agentName}`,
         diagnostics: [
           `Workflow agent bridge: agent "${agentName}" not found in catalog. Available: ${[...agentMap.keys()].join(", ")}`,
@@ -176,6 +185,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         return {
           ok: false,
           status: "failed",
+          failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
           agent: agent.name,
@@ -192,6 +202,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         return {
           ok: false,
           status: "failed",
+          failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
           agent: agent.name,
@@ -205,6 +216,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         return {
           ok: false,
           status: "failed",
+          failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
           agent: agent.name,
@@ -226,6 +238,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         return {
           ok: false,
           status: "failed",
+          failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
           agent: agent.name,
@@ -371,6 +384,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       return {
         ok: false,
         status: "failed",
+        // The fuse is a TRANSPORT failure: the child was aborted, not answered badly.
+        failureCause: "call-timeout",
         summary: message,
         diagnostics: [...boundary.diagnostics, message],
         agent: agent.name,
@@ -387,10 +402,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
 
     // 7. Fail-closed mapping: SDK host unavailable -> throw WorkflowAgentUnavailableError
-    if (
-      boundary.status === "blocked" &&
-      boundary.diagnostics.some((d) => typeof d === "string" && d.includes(AGENT_SDK_UNAVAILABLE_DIAGNOSTIC))
-    ) {
+    //
+    // Keyed on the typed cause the host declares where it knows it, not on a substring of
+    // English diagnostic prose. The two agreed on every path the moment the cause existed,
+    // which is exactly why the prose check had to go: it made the machine-readable channel
+    // decorative, and re-wording one diagnostic would silently downgrade a run-ending
+    // failure into a blocked result the script could read as an answer.
+    if (boundary.failureCause === "sdk-unavailable") {
       throw new WorkflowAgentUnavailableError(
         `${AGENT_SDK_UNAVAILABLE_HINT}: ${boundary.reason}`,
         boundary.diagnostics,
@@ -407,6 +425,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ok: boundary.status === "completed",
       status: boundary.status as WorkflowAgentResult["status"],
       summary: boundary.reason,
+      // Carried, never re-derived: the host declared the cause where it was known.
+      ...(boundary.failureCause !== undefined ? { failureCause: boundary.failureCause } : {}),
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
       diagnostics: boundary.diagnostics,
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),

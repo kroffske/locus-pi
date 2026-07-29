@@ -51,7 +51,19 @@ export interface ReadOnlyAgentSessionCapabilityOptions {
   repositoryCheckScripts?: RepositoryCheckScripts;
 }
 
-const SAFE_TOOLS = new Set(["read", "grep", "find", "ls", "git_read", "ast_index", "repository_check", "yield"]);
+/** Exported so a caller that must decide "can this child write?" without importing this
+ *  host module's fs/child_process weight can prove its own copy is a subset of this one. */
+export const READ_ONLY_SAFE_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "git_read",
+  "ast_index",
+  "repository_check",
+  "yield",
+]);
+const SAFE_TOOLS = READ_ONLY_SAFE_TOOLS;
 // `ast-index` keeps its database in the user cache directory, outside the
 // reviewed project. Query commands read it; `update`/`rebuild` refresh only
 // that external cache. `clear` and `watch` are destructive or long-lived, so

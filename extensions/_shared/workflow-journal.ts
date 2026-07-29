@@ -11,7 +11,13 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveStatus } from "./agent-sdk-host.js";
 import { runtimeStateDir } from "./files.js";
-import type { WorkflowJournalLine, WorkflowJournalSink, WorkflowUsage } from "./workflow-runtime.js";
+import { AGENT_FAILURE_CAUSES } from "./types.js";
+import type {
+  WorkflowAgentFailureCause,
+  WorkflowJournalLine,
+  WorkflowJournalSink,
+  WorkflowUsage,
+} from "./workflow-runtime.js";
 import {
   readWorkflowArtifactRecord,
   WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
@@ -635,6 +641,7 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
       "agent",
       "label",
       "callId",
+      "logicalCallId",
       "slotKey",
       "status",
       "childSessionId",
@@ -651,13 +658,33 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
 
   const numberProblem = optionalFieldsProblem(
     value,
-    ["groupTotal", "groupCompleted", "groupFailed", "round", "durationMs"],
+    ["groupTotal", "groupCompleted", "groupFailed", "round", "attempt", "attempts", "durationMs"],
     "finite number",
   );
   if (numberProblem !== undefined) return numberProblem;
   if (value.round !== undefined) {
     const round = value.round as number;
     if (!Number.isSafeInteger(round) || round < 1) return "Field round must be a positive safe integer.";
+  }
+  for (const field of ["attempt", "attempts"] as const) {
+    const fieldValue = value[field];
+    if (fieldValue !== undefined && (!Number.isSafeInteger(fieldValue) || (fieldValue as number) < 1)) {
+      return `Field ${field} must be a positive safe integer.`;
+    }
+  }
+  // The trio is only meaningful together: a lone ordinal has no bound to read it against,
+  // an ordinal past its bound describes an attempt that could not have happened, and an
+  // ordinal with no logical call named cannot be grouped with its siblings — a reader
+  // falling back to (agent, label, phase, group) would merge two `parallel()` calls that
+  // agree on all four and attribute one call's discarded attempt to the other.
+  if ((value.attempt === undefined) !== (value.attempts === undefined)) {
+    return "Fields attempt and attempts must be present together.";
+  }
+  if ((value.attempt === undefined) !== (value.logicalCallId === undefined)) {
+    return "Fields attempt and logicalCallId must be present together.";
+  }
+  if (value.attempt !== undefined && (value.attempt as number) > (value.attempts as number)) {
+    return "Field attempt must not exceed attempts.";
   }
   for (const field of ["groupTotal", "groupCompleted", "groupFailed", "durationMs"] as const) {
     const fieldValue = value[field];
@@ -683,6 +710,9 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   }
   if (eventKind === "agent_end" && !isOneOf(value.status, ["completed", "failed", "cancelled", "blocked"])) {
     return "Field status is invalid for agent_end events.";
+  }
+  if (value.failureCause !== undefined && !isOneOf(value.failureCause, AGENT_FAILURE_CAUSE_NAMES)) {
+    return "Field failureCause is invalid.";
   }
   if (
     value.permissionMode !== undefined &&
@@ -732,6 +762,16 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   return undefined;
 }
 
+/**
+ * The closed failure-cause list a persisted line is checked against.
+ *
+ * Read from the one declaration the runtime and the agent envelope also read, so the
+ * reader cannot fall behind the writer: a cause added to the list is accepted here the
+ * moment it exists, and a second hand-maintained copy can never reject a line the runtime
+ * legitimately wrote.
+ */
+const AGENT_FAILURE_CAUSE_NAMES: readonly WorkflowAgentFailureCause[] = AGENT_FAILURE_CAUSES;
+
 const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
   phase: ["phase"],
   log: ["source", "phase", "message", "resumeFromRunId", "resumeSourceRunSummary", "continuation"],
@@ -757,6 +797,9 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "readOnly",
     "label",
     "callId",
+    "attempt",
+    "attempts",
+    "logicalCallId",
     "slotKey",
     "workspaceHandle",
     "permissionMode",
@@ -774,12 +817,16 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "readOnly",
     "label",
     "callId",
+    "attempt",
+    "attempts",
+    "logicalCallId",
     "answerArtifact",
     "transcriptArtifact",
     "resultEnvelopeArtifact",
     "slotKey",
     "round",
     "status",
+    "failureCause",
     "evidence",
     "evidenceWarnings",
     "childSessionId",
@@ -806,6 +853,14 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "agent",
     "label",
     "callId",
+    // A failure that THREW never reaches an agent_end, so this line is the call's terminal
+    // record and the only place its declared cause — and its place in a retry sequence —
+    // can be read without parsing prose. The trio is validated as a trio for every kind,
+    // so an ordinal here is still refused without its bound and its logical call.
+    "failureCause",
+    "attempt",
+    "attempts",
+    "logicalCallId",
     "durationMs",
     "resumeFromRunId",
     "resumeSourceRunSummary",

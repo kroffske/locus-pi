@@ -29,6 +29,11 @@ import {
   type WorkflowOperatorQuestion,
 } from "./workflow-handoff.js";
 import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
+// The closed cause list is owned by the agent envelope that carries it and DEFINED in
+// `types.ts`, a module with no imports at all. Reading it as a value here keeps this core
+// host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the runtime
+// — while still validating against one list rather than a second copy of it.
+import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "./types.js";
 export type { PermissionMode, WorkspaceMode } from "./types.js";
 export type {
   WorkflowAwaitOperatorDeclaration,
@@ -39,6 +44,56 @@ export type {
 /** The single agent-execution callback the runtime depends on. The bridge supplies
  *  the real implementation; tests supply a fake. The runtime never imports the SDK. */
 export type WorkflowAgentRunner = (req: WorkflowAgentRequest) => Promise<WorkflowAgentResult>;
+
+/** The machine-readable cause carried from the host through the bridge. Re-exported so a
+ *  workflow-side caller never has to reach into the agent envelope for the same closed list. */
+export type WorkflowAgentFailureCause = AgentFailureCause;
+
+/** The ONLY causes `attempts` re-asks: the child never got to answer, or lost the channel
+ *  while answering. It is an allowlist, not "everything the never-retry list forgot" — an
+ *  unnamed cause reads as `unclassified` and fails closed. */
+const TRANSPORT_RETRYABLE_FAILURE_CAUSES: ReadonlySet<WorkflowAgentFailureCause> = new Set([
+  "host-turn-timeout",
+  "call-timeout",
+]);
+
+/** A result written before the cause field existed is `unclassified`, never retryable.
+ *  Absence is read here, once, instead of being inferred at each call site. */
+export function workflowAgentFailureCause(
+  result: Pick<WorkflowAgentResult, "failureCause">,
+): WorkflowAgentFailureCause {
+  return result.failureCause ?? "unclassified";
+}
+
+/** True only for a named transport cause. */
+export function isTransportRetryableFailure(result: Pick<WorkflowAgentResult, "failureCause">): boolean {
+  return TRANSPORT_RETRYABLE_FAILURE_CAUSES.has(workflowAgentFailureCause(result));
+}
+
+const AGENT_FAILURE_CAUSE_NAMES: ReadonlySet<string> = new Set(AGENT_FAILURE_CAUSES);
+
+/**
+ * The declared cause on a THROWN transport failure, or `undefined` when the throw carries
+ * none.
+ *
+ * Some failures never reach a result at all: the bridge throws
+ * `WorkflowAgentUnavailableError` when the SDK substrate is gone, because a run whose
+ * children cannot be spawned must end rather than be re-asked. That throw still knows its
+ * cause, and without this the journal's terminal record of the call is an English sentence
+ * — exactly the prose-matching the closed list exists to remove.
+ *
+ * Read structurally rather than by `instanceof`, because the thrower is host-side and this
+ * module may not import it, and validated against the closed list so an unrelated error
+ * that happens to carry a `failureCause` property can never write an unreadable journal
+ * line.
+ */
+function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const declared = (err as { failureCause?: unknown }).failureCause;
+  return typeof declared === "string" && AGENT_FAILURE_CAUSE_NAMES.has(declared)
+    ? (declared as WorkflowAgentFailureCause)
+    : undefined;
+}
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
 export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
@@ -77,6 +132,9 @@ export interface WorkflowAgentResult {
   ok: boolean; // true when status === "completed"
   status: "completed" | "failed" | "cancelled" | "blocked";
   summary: string;
+  /** Machine-readable origin of a non-completed call. Absent means the cause was never
+   *  declared, which reads as `unclassified` — see `workflowAgentFailureCause`. */
+  failureCause?: WorkflowAgentFailureCause;
   /** Exact final child text when status is completed. */
   text?: string;
   diagnostics: string[];
@@ -188,6 +246,17 @@ export interface WorkflowAgentOptions {
    * a script re-implement the check. Enforced on replayed answers too.
    */
   maxAnswerChars?: number;
+  /**
+   * Physical child attempts for this ONE logical call when the TRANSPORT failed — the child
+   * never got to answer, or lost the channel while answering. Default 1; ceiling 3; refused,
+   * never clamped, outside that range.
+   *
+   * It never re-asks because an answer was weak: that is a critic agent's job, and an answer
+   * whose SHAPE is wrong already has its own bounded repair (`schema` + `validate`). Refused
+   * at declaration time unless the call is both replay-eligible and provably unable to write,
+   * because a child that timed out mid-edit may already have changed the repository.
+   */
+  attempts?: number;
   label?: string;
   /** Logical name for the exact returned answer in the run artifact index. */
   artifact?: string;
@@ -378,6 +447,20 @@ export interface WorkflowJournalLine {
   /** Loop round (≥1) on agent_end lines (REQ-009); the drill reads past rounds by (slotKey,round). */
   round?: number;
   status?: string;
+  /** Machine-readable cause on a non-completed `agent_end`. Absent on old journals and on
+   *  every completed call; a reader treats absence as `unclassified`. */
+  failureCause?: WorkflowAgentFailureCause;
+  /** 1-based PHYSICAL transport attempt within one logical agent() call. Present only on a
+   *  call that declared `attempts > 1`, so every journal written before the option is
+   *  byte-identical and absence still means "one attempt". */
+  attempt?: number;
+  /** The declared transport-attempt bound this attempt belongs to. */
+  attempts?: number;
+  /** Stable identity of the ONE logical `agent()` call this physical attempt belongs to.
+   *  Travels with `attempt`/`attempts` and is the only field a reader may group attempts by:
+   *  `callId` is per-attempt, and `parallel()` can run two calls that agree on agent, label,
+   *  phase and group. */
+  logicalCallId?: string;
   evidence?: EvidenceEvaluation;
   evidenceWarnings?: string[];
   /** Runtime-owned child session identity; never parsed from agent text. */
@@ -562,6 +645,70 @@ function normalizeMaxAnswerChars(maxAnswerChars: number): number {
     throw new Error("agent maxAnswerChars must be a positive safe integer");
   }
   return maxAnswerChars;
+}
+
+/**
+ * Ceiling on physical transport attempts for one logical `agent()` call.
+ *
+ * Three, because the shape-repair loop can already call the physical executor three times
+ * when `validate` is declared (`SCHEMA_MAX_ATTEMPTS + 1`), so `attempts` MULTIPLIES that
+ * budget rather than adding to it: the worst case for one shaped call is `attempts × 3`
+ * children, each charged to the run's invocation cap.
+ */
+export const MAX_AGENT_TRANSPORT_ATTEMPTS = 3;
+
+/** Default 1: a package-wide retry default is a budget decision nobody has taken yet. */
+function normalizeAgentAttempts(attempts: number | undefined): number {
+  if (attempts === undefined) return 1;
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > MAX_AGENT_TRANSPORT_ATTEMPTS) {
+    throw new Error(`agent attempts must be a safe integer between 1 and ${MAX_AGENT_TRANSPORT_ATTEMPTS}`);
+  }
+  return attempts;
+}
+
+/**
+ * Tools this runtime will accept as proof that a child cannot write.
+ *
+ * Copied deliberately rather than imported: the host's own read-only allowlist lives in
+ * `agent-read-only-policy.ts`, which reaches for `node:fs` and `node:child_process`, and this
+ * module is the host-agnostic core. `tests/shared/workflows/workflow-agent-transport.test.ts`
+ * asserts this list stays a SUBSET of the host's, so the copy cannot drift into permitting
+ * something the host does not consider read-only.
+ */
+export const AGENT_NO_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "git_read",
+  "ast_index",
+  "repository_check",
+  "yield",
+]);
+
+/**
+ * Why this call may NOT repeat a dropped child, or `undefined` when it may.
+ *
+ * Two conditions, and replay eligibility alone is not enough. Replay asks "may a recorded
+ * answer be SUBSTITUTED for this call" — a question about the record. A retry asks "may this
+ * call be REPEATED" — a question about side effects. They coincide for a worktree call and
+ * diverge for a project-workspace writer: `workspaceMode` defaults to `"project"` and the
+ * bridge leaves a catalog agent write-capable unless the CALL asks for read-only, so a
+ * default-options writer editing the repository in place is replay-eligible while a second
+ * attempt could double-apply its edits or edit a half-finished tree.
+ */
+function transportRetryRefusal(req: WorkflowAgentRequest, replayable: boolean): string | undefined {
+  if (!replayable) {
+    return req.workspaceHandle !== undefined
+      ? "agent attempts > 1 is refused for a call bound to a workspace handle: a repeated attempt could act on a tree the first attempt already changed"
+      : `agent attempts > 1 is refused for a ${String(req.workspaceMode)} workspace call: a repeated attempt could act on a tree the first attempt already changed`;
+  }
+  const provablyNoWrite =
+    req.readOnly === true || (req.tools !== undefined && req.tools.every((tool) => AGENT_NO_WRITE_TOOLS.has(tool)));
+  if (!provablyNoWrite) {
+    return "agent attempts > 1 requires a call that provably cannot write: declare readOnly: true, or a tools allow-list with no write, edit or shell member";
+  }
+  return undefined;
 }
 
 function defaultWorkflowPermissionMode(agentName: string, requestedMode: PermissionMode | undefined): PermissionMode {
@@ -1176,6 +1323,27 @@ interface AgentAttemptOutcome {
   schemaCheck?: AgentSchemaCheck;
 }
 
+/** What one PHYSICAL child execution hands back to its logical call. A failure is returned,
+ *  not thrown, so the logical call can read its cause and decide whether it may repeat. */
+type PhysicalAgentAttempt =
+  { ok: true; text: string; outcome: AgentAttemptOutcome } | { ok: false; result: WorkflowAgentResult };
+
+interface PhysicalAgentAttemptInput {
+  /** The fully resolved request, minus the per-attempt `callId`. */
+  req: WorkflowAgentRequest;
+  permissionMode: PermissionMode;
+  workspaceMode: WorkspaceMode;
+  opts: WorkflowAgentAnyOptions | undefined;
+  checkSchema?: (text: string) => AgentSchemaCheck;
+  /** Present only when the logical call was served from a record; no child then runs. */
+  replayedText?: string;
+  /** 1-based position of this physical attempt, and the bound it was drawn from. */
+  attempt: number;
+  attempts: number;
+  /** Stable identity of the ONE logical call every attempt here belongs to. */
+  logicalCallId: string;
+}
+
 /**
  * Validate one child answer against a declared schema with the DSL's single JSON extractor and
  * subset validator, then — only on a value that already validated — against the script's own
@@ -1281,6 +1449,16 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   );
   const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(options.maxTotalAgentInvocations);
   let totalAgentInvocations = 0;
+  /**
+   * Logical `agent()` calls, so every physical attempt of one call can name the call it
+   * belongs to.
+   *
+   * `callId` cannot do that job: it is per-attempt by design (D5 — a discarded attempt is a
+   * real agent call with its own transcript). And (agent, label, phase, group) cannot either:
+   * `parallel()` may run two calls that agree on all four, and a reader grouping by those
+   * fields would attribute one call's discarded attempt to the other.
+   */
+  let totalLogicalAgentCalls = 0;
   const journal = options.journal;
   const nowFn = options.now ?? (() => new Date().toISOString());
   const onEvent = options.onEvent;
@@ -1308,24 +1486,28 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
   }
 
-  /** ONE child execution: invocation-cap accounting, journal start/end, fail-closed status
-   *  mapping. `checkSchema` is supplied only by the shaped path; it runs on the final child text
-   *  BEFORE agent_end is emitted so the journal records whether the answer was shape-checked. */
+  /**
+   * ONE logical `agent()` call: the resolved request, the transport-retry bound, and the
+   * replay envelope — opened once and closed once, whatever the physical executor below had
+   * to do to get an answer.
+   *
+   * The replay record is POSITIONAL (`workflow-replay.ts` advances a read cursor per
+   * `beginAgentAttempt` and latches divergence on a key mismatch), and a transport retry
+   * re-sends the identical prompt. So a discarded attempt recorded at its own ordinal would
+   * write two entries with the same key at consecutive positions; on resume the first
+   * re-executes, succeeds, and every later call reads an ordinal off by one — a key
+   * mismatch, the one-way divergence latch, and the recorded suffix discarded and re-run
+   * live. One script-level call, one ordinal, is the invariant the record already assumes.
+   *
+   * `checkSchema` is supplied only by the shaped path; it runs on the final child text
+   * BEFORE agent_end is emitted so the journal records whether the answer was shape-checked.
+   */
   async function runAgentAttempt(
     prompt: string,
     opts: WorkflowAgentAnyOptions | undefined,
     checkSchema?: (text: string) => AgentSchemaCheck,
   ): Promise<AgentAttemptOutcome> {
     if (insideValidate) throw new Error("agent() must not be called from inside a validate callback");
-    // Global per-run cap across all agent() calls (including those nested in
-    // parallel()/pipeline()). Count BEFORE doing any work so the call that breaches
-    // the cap is itself counted, and throw a typed error that bubbles past grouped
-    // contexts to exit the run. Cyclic workflows are allowed up to the cap.
-    totalAgentInvocations += 1;
-    if (totalAgentInvocations > maxTotalAgentInvocations) {
-      throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
-    }
-    const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
     if (prompt.trim() === "") throw new Error("agent prompt must be non-empty");
     if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
       throw new Error("workflow workspace manager is not configured");
@@ -1348,7 +1530,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.timeoutMs !== undefined ? { timeoutMs: normalizeTimeoutMs(opts.timeoutMs) } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
-      callId,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
     // Replay eligibility is decided from the RESOLVED request, so defaults and
@@ -1356,9 +1537,98 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // is never served from a record: its recorded text would claim a filesystem
     // mutation this run did not perform.
     const replayable = req.workspaceMode === "project" && req.workspaceHandle === undefined;
+    // Bounded and gated BEFORE the replay envelope opens and before any child exists, so a
+    // refused declaration costs neither an ordinal nor an invocation. Never clamped: a
+    // script that declares `attempts: 50` must hear "no", not silently receive 3.
+    const attempts = normalizeAgentAttempts(opts?.attempts);
+    if (attempts > 1) {
+      const refusal = transportRetryRefusal(req, replayable);
+      if (refusal !== undefined) throw new Error(refusal);
+    }
     const canonicalRequest = canonicalAgentRequest(req);
+    // Allocated once per logical call, and only where one ordinal is opened: it is the name
+    // the physical attempts below share, and the only field a report can group them by.
+    totalLogicalAgentCalls += 1;
+    const logicalCallId = `logical-${String(totalLogicalAgentCalls).padStart(4, "0")}`;
     const lookup = options.replay?.beginAgentAttempt(canonicalRequest, replayable);
-    const replayed = lookup?.replayed === true;
+    const replayedText = lookup?.replayed === true ? lookup.text : undefined;
+
+    let lastFailure: WorkflowAgentResult | undefined;
+    for (let attempt = 1; ; attempt++) {
+      let physical: PhysicalAgentAttempt;
+      try {
+        physical = await runPhysicalAgentAttempt({
+          req,
+          permissionMode,
+          workspaceMode,
+          opts,
+          attempt,
+          attempts,
+          logicalCallId,
+          ...(checkSchema !== undefined ? { checkSchema } : {}),
+          ...(replayedText !== undefined ? { replayedText } : {}),
+        });
+      } catch (err) {
+        // A THROWN failure carries no classified cause, so it is never retried. Record it so
+        // the recorded sequence keeps the same ordinals as the live one: a later resume then
+        // replays the prefix and re-runs the call that failed, which is the point of resuming.
+        options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+        throw err;
+      }
+      if (physical.ok) {
+        // This run writes its OWN complete record, replayed entries included, so a
+        // resume of a resume still has an unbroken prefix to work from.
+        options.replay?.recordAgentAttempt(canonicalRequest, { ok: true, text: physical.text });
+        return physical.outcome;
+      }
+      lastFailure = physical.result;
+      if (attempt >= attempts || !isTransportRetryableFailure(physical.result)) break;
+      // `log` carries no agent identity of its own (`workflow-journal.ts` rejects one), so the
+      // agent is named in the message; the attempt's own agent_end already holds the rest.
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        message: `[workflow:retry] ${req.agent}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
+      });
+    }
+    options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+    throw new WorkflowAgentExecutionError(lastFailure!);
+  }
+
+  /**
+   * ONE physical child execution inside a logical call: its own invocation-cap charge, its
+   * own `callId` and therefore its own transcript and result directories, its own
+   * `agent_start`/`agent_end` pair, and the fail-closed status mapping.
+   *
+   * A discarded transport attempt is a real agent call and pays for all of it. A cap that
+   * ignores retries is the same defect class as a cost counter hardcoded to zero: a gate
+   * that does not count what it gates. The discarded attempt's transcript is also the only
+   * evidence an operator has that the stage was paid for twice.
+   */
+  async function runPhysicalAgentAttempt(input: PhysicalAgentAttemptInput): Promise<PhysicalAgentAttempt> {
+    const { permissionMode, workspaceMode, opts, checkSchema, replayedText, attempt, attempts } = input;
+    // Emitted only when a retry budget was actually declared, so every journal written
+    // before `attempts` existed stays byte-identical and absence still means "one attempt".
+    // The three travel together: an ordinal with no logical call to belong to cannot be
+    // grouped, and a reader falling back to (agent, label, phase, group) would mis-attribute
+    // two `parallel()` calls that agree on all four.
+    const attemptFields = attempts > 1 ? { attempt, attempts, logicalCallId: input.logicalCallId } : {};
+    // Global per-run cap across all agent() calls (including those nested in
+    // parallel()/pipeline()). Count BEFORE doing any work so the attempt that breaches
+    // the cap is itself counted, and throw a typed error that bubbles past grouped
+    // contexts to exit the run. Cyclic workflows are allowed up to the cap.
+    totalAgentInvocations += 1;
+    if (totalAgentInvocations > maxTotalAgentInvocations) {
+      throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
+    }
+    const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
+    // `callId` is deliberately absent from `canonicalAgentRequest`, so giving each physical
+    // attempt its own identity leaves the logical call's replay key untouched.
+    const req: WorkflowAgentRequest = { ...input.req, callId };
+    const replayed = replayedText !== undefined;
 
     const requestedLiveModel = liveModelFromSelector(req.model);
     emit({
@@ -1376,13 +1646,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       callId,
+      ...attemptFields,
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
       ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
     });
     const start = Date.now();
     let finalResult: WorkflowAgentResult;
-    if (lookup?.replayed === true) {
+    if (replayedText !== undefined) {
       // No child runs. The recorded answer is projected into the same result
       // shape a fresh child would produce, minus `usage` — a replayed call cost
       // nothing, and claiming otherwise would inflate the run budget.
@@ -1390,7 +1661,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ok: true,
         status: "completed",
         summary: "Replayed from a recorded run.",
-        text: lookup.text,
+        text: replayedText,
         diagnostics: [],
         agent: req.agent,
         permissionMode,
@@ -1416,18 +1687,24 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         finalResult = result;
       } catch (err) {
         const durationMs = Date.now() - start;
-        // Record the failure so the recorded sequence keeps the same ordinals as
-        // the live one: a later resume then replays the prefix and re-runs the
-        // call that failed, which is the whole point of resuming.
-        options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+        // A thrown transport failure never reaches an `agent_end`, so this IS the terminal
+        // journal record of the call. Carrying the declared cause here is what makes
+        // `sdk-unavailable` readable end to end without matching on the message.
+        //
+        // The attempt trio travels with it for the same reason: a call that timed out, was
+        // re-run and then THREW leaves exactly one agent_end behind, so a reader that only
+        // consumed agent_end would render a stage that ran twice as if it never retried.
+        const thrownCause = thrownAgentFailureCause(err);
         emit({
           ts: nowFn(),
           runId,
           kind: "error",
           agent: req.agent,
           callId,
+          ...attemptFields,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          ...(thrownCause !== undefined ? { failureCause: thrownCause } : {}),
           message: err instanceof Error ? err.message : String(err),
           durationMs,
         });
@@ -1449,6 +1726,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...finalResult,
         ok: false,
         status: "failed",
+        // An empty answer is the clearest signal a stage is under-decomposed. Naming the
+        // cause keeps it OUT of the transport class rather than leaving it unclassified.
+        failureCause: "empty-answer",
         summary: "Agent result text is empty.",
         diagnostics: [...finalResult.diagnostics, "Agent result text is empty."],
       };
@@ -1466,6 +1746,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ...finalResult,
           ok: false,
           status: "failed",
+          // The child answered; the author's bound was wrong. Never a transport failure.
+          failureCause: "answer-too-long",
           summary: message,
           diagnostics: [...finalResult.diagnostics, message],
         };
@@ -1481,7 +1763,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         // A script validator that throws — or hands back something that is not an error
         // list — ends the run unchanged and spends no retry. The line is emitted because
         // this attempt really ran: without it the journal holds an agent_start with no
-        // agent_end and no record of why the run stopped.
+        // agent_end and no record of why the run stopped. It carries the attempt trio for
+        // the same reason the transport catch does — this is the attempt's terminal record.
         emit({
           ts: nowFn(),
           runId,
@@ -1489,6 +1772,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           source: "script",
           agent: req.agent,
           callId,
+          ...attemptFields,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
           message: err instanceof Error ? err.message : String(err),
@@ -1508,6 +1792,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...finalResult,
         ok: false,
         status: "failed",
+        failureCause: "script-rejected",
         summary: message,
         diagnostics: [...finalResult.diagnostics, message],
       };
@@ -1529,6 +1814,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...(finalResult.resultArtifact !== undefined ? { resultArtifactPath: finalResult.resultArtifact } : {}),
       });
     } catch (err) {
+      // The other terminal-by-throw record of a physical attempt: evidence writing failed,
+      // so no agent_end follows. It carries the attempt trio for the same reason the
+      // transport catch above does.
       emit({
         ts: nowFn(),
         runId,
@@ -1536,6 +1824,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         source: "runtime",
         agent: req.agent,
         callId,
+        ...attemptFields,
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
         message: err instanceof Error ? err.message : String(err),
@@ -1543,25 +1832,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       });
       throw err;
     }
-    // This run writes its OWN complete record, replayed entries included, so a
-    // resume of a resume still has an unbroken prefix to work from.
-    options.replay?.recordAgentAttempt(
-      canonicalRequest,
-      finalResult.ok && finalResult.status === "completed" && finalResult.text !== undefined
-        ? { ok: true, text: finalResult.text }
-        : { ok: false },
-    );
     emit({
       ts: nowFn(),
       runId,
       kind: "agent_end",
       agent: req.agent,
       callId,
+      ...attemptFields,
       ...(replayed ? { replayed: true } : {}),
       ...((finalResult.readOnly ?? req.readOnly) !== undefined
         ? { readOnly: finalResult.readOnly ?? req.readOnly }
         : {}),
       status: finalResult.status,
+      // Machine-readable cause on every non-completed call, so a reader never has to
+      // match on `summary` prose to tell a timeout from a cancellation.
+      ...(finalResult.status !== "completed" ? { failureCause: workflowAgentFailureCause(finalResult) } : {}),
       // Shape verdict for THIS attempt; absent on every call that declared no schema.
       ...(schemaCheck !== undefined ? { schemaValidation: schemaCheck.validation } : {}),
       permissionMode: finalResult.permissionMode ?? permissionMode,
@@ -1590,10 +1875,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.worktreePath !== undefined ? { worktreePath: finalResult.worktreePath } : {}),
       durationMs,
     });
-    if (!finalResult.ok || finalResult.status !== "completed") {
-      throw new WorkflowAgentExecutionError(finalResult);
+    if (!finalResult.ok || finalResult.status !== "completed" || finalResult.text === undefined) {
+      return { ok: false, result: finalResult };
     }
-    return { text: finalResult.text!, ...(schemaCheck !== undefined ? { schemaCheck } : {}) };
+    return {
+      ok: true,
+      text: finalResult.text,
+      outcome: { text: finalResult.text, ...(schemaCheck !== undefined ? { schemaCheck } : {}) },
+    };
   }
 
   /**

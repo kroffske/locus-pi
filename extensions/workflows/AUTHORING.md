@@ -238,7 +238,10 @@ ${selectedText}
 patterns, enums, uniqueness (`uniqueItems`, `uniqueBy`, `uniqueTrimmedItems`) and
 non-blankness (`nonBlank`) in `agent({ schema })`, where a violation is re-asked
 by the runtime's retry, and bound an agent's free text with that call's
-`maxAnswerChars`. What no keyword can express — cross-field agreement,
+`maxAnswerChars`. That retry is the **value** one; a child that never got to answer
+because the transport dropped is the other, and it is `attempts` (1-3, transport-only,
+read-only calls only) — the canonical doc's "The two retries" section says which
+failure each one owns. What no keyword can express — cross-field agreement,
 referential integrity, budgets summed across items, graph shape — goes in
 `validate` on the same call: a `(value) => string[]` callback the runtime runs
 after schema validation succeeds and whose non-empty return re-asks the child in
@@ -256,8 +259,11 @@ shape each example demonstrates, and which examples are curated, packaged, or
 tracked only.
 
 For _which shape to pick_ (single-agent, shaped `agent({ schema })` gate, staged text pipeline,
-loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
-judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog
+loop+judge, plan→build→review, adaptive owner-local, pipeline, judge-panel,
+loop-until-dry, plus the composition shapes — **human gate** (`awaitOperator`, two
+runs), **plain-JS loop** (with `dsl.now()`), **fan-out/fan-in**, **nested
+`dsl.workflow()`**, and **consilium** — each with its skeleton and the cost of the
+shape), use the inline skeletons in the pattern catalog
 [`references/patterns.md`](./references/patterns.md). Multi-step work on one
 subject defaults to the staged text pipeline used by the curated `review` and
 `review-fix` workflows: sequential `agent()` stages with one cognitive job each,

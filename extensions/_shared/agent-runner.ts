@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
 import { getProjectRoot, getSessionId, getWorkingDirectory } from "./pi-api.js";
-import type { AgentDefinition, EvidenceEvaluation } from "./types.js";
+import type { AgentDefinition, AgentFailureCause, EvidenceEvaluation } from "./types.js";
 import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "./session-core.js";
 import { createSessionStore, type SessionStore } from "./runtime-capabilities.js";
 import type { ModelRoleResolution } from "./model-settings.js";
@@ -12,6 +12,15 @@ import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
 export type ApprovalTier = "allow" | "prompt" | "deny";
+
+/**
+ * The closed failure-cause list, owned by this envelope and defined in the zero-import
+ * `types.ts` so the host-agnostic workflow core can validate against the same value
+ * without importing a module that reaches for `node:fs`. Re-exported here because this
+ * is the envelope that first carries it.
+ */
+export { AGENT_FAILURE_CAUSES } from "./types.js";
+export type { AgentFailureCause } from "./types.js";
 
 export interface AgentParentContext {
   inline?: string;
@@ -40,6 +49,9 @@ export interface AgentRunResult {
   status: AgentRunStatus;
   agentName: string;
   reason: string;
+  /** Why this run did not complete. Absent on success, and on results written before
+   *  the field existed — a reader treats absence as `unclassified`, never as retryable. */
+  failureCause?: AgentFailureCause;
   evidence?: EvidenceEvaluation;
   childSession?: SessionRecord;
   diagnostics: string[];
@@ -107,7 +119,7 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
     workingDirectory: options.request.workingDirectory ?? getWorkingDirectory(options.ctx),
   };
   const policyBlock = validateRunPolicy(request);
-  if (policyBlock !== undefined) return blockedResult(request, policyBlock, []);
+  if (policyBlock !== undefined) return blockedResult(request, policyBlock, "run-policy-blocked", []);
 
   const store = options.sessionStore ?? createSessionStore({ projectRoot });
   const childSession = createAgentChildSession(store, request);
@@ -143,7 +155,7 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
     return writeAgentRunResultArtifact(
       projectRoot,
       request,
-      blockedResult(request, "No agent executor is configured.", lifecycleEntryIds, childSession),
+      blockedResult(request, "No agent executor is configured.", "run-policy-blocked", lifecycleEntryIds, childSession),
       options.resultArtifactsDir,
     );
   }
@@ -213,6 +225,7 @@ function createAgentChildSession(store: MemorySessionStore, request: AgentRunReq
 function blockedResult(
   request: AgentRunRequest,
   reason: string,
+  failureCause: AgentFailureCause,
   lifecycleEntryIds: string[],
   childSession?: SessionRecord,
 ): AgentRunResult {
@@ -220,6 +233,7 @@ function blockedResult(
     status: "blocked",
     agentName: request.agent.name,
     reason,
+    failureCause,
     diagnostics: [reason],
     lifecycleEntryIds,
   };

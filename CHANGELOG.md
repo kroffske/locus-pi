@@ -144,6 +144,51 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **`agent({ attempts })` — a bounded retry for the failure where the child never
+  got to answer.** A dropped child session or an expired turn budget ended the whole
+  run, and an author's only recourse was to re-run the pipeline from the start. That
+  is now a declared, bounded, evidenced retry — and it is deliberately the narrow
+  one. It re-sends the **identical** prompt, because there is nothing to repair: it
+  never re-asks a child because its prose was thin, and it never touches the
+  pre-existing value repair (`schema` plus `validate`), which owns the opposite case
+  — the child answered, off-shape. The canonical doc now carries both loops in one
+  table with the failures each one owns.
+  The retry keys on a **machine-readable cause**, not on the wording of an error
+  message. `status` was a four-way split in which a turn timeout, a tool-call budget
+  breach, a provider error and any mid-turn throw all arrived as one `failed` plus an
+  English sentence, so a predicate over that sentence would have started retrying a
+  reworded string's worth of causes the day someone edited one. Every non-completed
+  child run now carries a closed, exhaustive cause set where the cause is known,
+  through the run envelope and the bridge onto `agent_end`. Exactly two members are
+  retryable — the host turn budget and the call's own `timeoutMs` fuse — and a cause
+  nothing has shown to be transient reads as `unclassified` and fails closed. A
+  result written before the field existed reads as `unclassified` too, so nothing
+  starts retrying by accident.
+  `attempts` defaults to 1, is capped at 3, and is **refused rather than clamped**
+  outside that range, before any child starts. It is also refused unless the call can
+  provably not have written — `readOnly: true`, or a `tools` allow-list drawn only
+  from the host's read-only set — because a child that timed out mid-edit may already
+  have changed the repository, and a second attempt would double-apply. Replay
+  eligibility alone is not that proof: `workspaceMode` defaults to `"project"` and a
+  catalog agent stays write-capable unless the call says otherwise.
+  Every physical attempt is a real agent call and is billed as one: its own `callId`,
+  its own transcript and result envelope, its own charge against
+  `maxTotalAgentInvocations`, and its own `agent_start`/`agent_end` pair carrying
+  `attempt`, `attempts` and the `logicalCallId` of the call they belong to. The
+  reader's copy under `.locus-pi/<runId>/` grows a `## Retried agent calls` section
+  naming every attempt and the discarded one's cause, grouped by that logical call —
+  `parallel()` can run two calls that agree on agent, label, phase and group, and a
+  report grouping by those would put one call's discarded attempt under the other.
+  An attempt that **throws** has no `agent_end` at all — an unavailable agent SDK
+  substrate leaves no channel to re-ask on, so the call throws and the run ends. Its
+  typed cause and its attempt fields travel on the terminal `error` line instead, and
+  the report reads that line too, so a retry already spent stays visible when the next
+  attempt is the one that ends the run.
+  Resume is unaffected by construction: the replay envelope opens once per **logical**
+  call and every physical attempt inside it shares that one ordinal, so a retry cannot
+  shift a later call's position, and `attempts` stays out of the canonical request so
+  recordings written before it existed still replay.
+
 - **A shipped skill, so an agent can find the workflows the package already
   installs.** The six Package workflows resolve out of the installed package and
   need no copied files, but nothing in a fresh session said what a "workflow" is
