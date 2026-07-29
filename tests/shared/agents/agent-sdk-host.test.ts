@@ -90,6 +90,8 @@ interface FakeSessionConfig {
   promptError?: string;
   messages?: readonly unknown[];
   events?: SdkAgentSessionEventLike[];
+  /** What the host says this session runs on. Absent = an older peer or a structural mock. */
+  model?: unknown;
 }
 
 interface FakeSession {
@@ -105,6 +107,7 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
   let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
   const session: SdkAgentSessionLike = {
     sessionId: config.sessionId ?? "sdk-child",
+    ...(config.model !== undefined ? { model: config.model } : {}),
     ...(config.messages !== undefined ? { messages: config.messages } : {}),
     subscribe(fn) {
       listener = fn;
@@ -1624,5 +1627,338 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.status).toBe("failed");
     expect(result.reason).toContain("No API key found");
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The executed model, at the host boundary.
+ *
+ * The bridge-level cases live in `tests/shared/workflows/workflow-model-tiers.test.ts`;
+ * these two prove the two halves that only this layer can prove — that the option
+ * object handed to `createSession` carries the exact model, and that the value the
+ * result reports is READ BACK from the session rather than the request repeated.
+ */
+describe("executed-model readback", () => {
+  const FAST = { provider: "test", id: "fast", name: "Test Fast" };
+  const STRONG = { provider: "test", id: "strong", name: "Test Strong" };
+
+  it("hands createSession the exact model object and reports the session's own model back", async () => {
+    const { session } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "done",
+      model: FAST,
+    });
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("completed");
+    // By value: `toBeTruthy()` would pass on any model at all.
+    expect(capturedOptions?.model).toEqual(FAST);
+    expect(result.executedModel).toBe("test/fast");
+  });
+
+  it("fails closed when the session's model contradicts the requested one", async () => {
+    const { session, disposeSpy } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "done",
+      model: STRONG,
+    });
+    let prompted = false;
+    const promptingSession = {
+      ...session,
+      async prompt(text: string, options?: { source?: string }) {
+        prompted = true;
+        return session.prompt(text, options);
+      },
+    } satisfies SdkAgentSessionLike;
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session: promptingSession }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toContain("test/strong");
+    expect(result.reason).toContain("test/fast");
+    // The refusal lands before the child spends a single token.
+    expect(prompted).toBe(false);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+    // NOT recorded as an executed model. The session was built on test/strong and then
+    // refused before a single token, so "executedModel: test/strong" would assert that
+    // test/strong ran — the same requested-vs-executed conflation on the failure path.
+    // The reason already carries both values, which is where a mismatch belongs.
+    expect(result.executedModel).toBeUndefined();
+    expect(result.reason).toContain("did not honour the selected model");
+  });
+
+  it("publishes no executed model when the run is cancelled before child kickoff", async () => {
+    // Round-2 finding 2. The readback used to be published the instant `createSession`
+    // returned, i.e. before the two terminal paths that never prompt the child. A
+    // session that was BUILT is not a session that RAN, and `executedModel` is the
+    // field every downstream surface reads as "this model did the work".
+    const controller = new AbortController();
+    const { session, disposeSpy } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "done",
+      model: FAST,
+    });
+    let prompted = false;
+    const promptingSession = {
+      ...session,
+      async prompt(text: string, options?: { source?: string }) {
+        prompted = true;
+        return session.prompt(text, options);
+      },
+    } satisfies SdkAgentSessionLike;
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      // Abort while createSession is in flight: the session is real, the child is not.
+      createSession: async () => {
+        controller.abort();
+        return { session: promptingSession };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "pre-kickoff-row", label: "pre kickoff", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), controller.signal);
+
+    expect(result.status).toBe("cancelled");
+    expect(prompted).toBe(false);
+    // The session's identity IS preserved — that part is real evidence.
+    expect(result.childSession?.id).toBe(session.sessionId);
+    // But nothing executed, so nothing may claim to have executed.
+    expect(result.executedModel).toBeUndefined();
+    // Including the row: the session was BUILT on test/fast and never prompted, so a
+    // terminal row labelled test/fast is the same claim in the surface an operator
+    // actually reads. The result says `cancelled`; the row must not say a model ran.
+    const row = agentLiveStore.rows.get("pre-kickoff-row");
+    expect(row?.status).toBe("cancelled");
+    expect(row?.model).toBeUndefined();
+    expect(disposeSpy).toHaveBeenCalled();
+  });
+
+  it("publishes no executed model when the transport rejects the prompt", async () => {
+    // The readback used to be promoted the moment the mismatch check passed — before
+    // `prompt()` was ever dispatched. A credential or transport rejection therefore
+    // returned a failed result that still named a model as EXECUTED, and because
+    // `modelRoleFallback` is gated on that same field it could publish a past-tense
+    // degradation note for a call that spent nothing. Verified against the shipped
+    // code before the fix: `executedModel: "test/fast"` on this exact scenario.
+    const { session, disposeSpy } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: undefined,
+      model: FAST,
+      promptError: "No API key found for deepseek.",
+    });
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "prompt-rejected-row", label: "prompt rejected", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toContain("No API key found");
+    expect(result.executedModel).toBeUndefined();
+    const row = agentLiveStore.rows.get("prompt-rejected-row");
+    expect(row?.status).toBe("error");
+    expect(row?.model).toBeUndefined();
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes no executed model when cancellation beats the prompt into the transport", async () => {
+    // The third way out without a turn, and the one that still returns normally rather
+    // than throwing: the operator cancels while `prompt()` is in flight, the transport
+    // never acknowledges, and no child event ever arrives. `driveChildTurn` settles on
+    // `aborted` with the dispatch unconfirmed — so the settlement alone cannot be the
+    // gate, and `promptAccepted` is what keeps this call out of the execution evidence.
+    const controller = new AbortController();
+    const { session } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: undefined,
+      model: FAST,
+    });
+    const hangingPrompt = {
+      ...session,
+      async prompt() {
+        controller.abort();
+        await new Promise<void>(() => {});
+      },
+    } satisfies SdkAgentSessionLike;
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session: hangingPrompt }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "abort-in-flight-row", label: "abort in flight", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), controller.signal);
+
+    expect(result.status).toBe("cancelled");
+    expect(result.executedModel).toBeUndefined();
+    expect(agentLiveStore.rows.get("abort-in-flight-row")?.model).toBeUndefined();
+  });
+
+  it("publishes no executed model when the child subscription throws before dispatch", async () => {
+    // The other way out of `driveChildTurn` without a turn: `subscribe()` throws, so
+    // the prompt is never sent. Same rule, different mechanism — no dispatch, no
+    // execution evidence, and no model left on the row.
+    const { session } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "done",
+      model: FAST,
+    });
+    const brokenSubscription = {
+      ...session,
+      subscribe() {
+        throw new Error("event subscription failed");
+      },
+    } satisfies SdkAgentSessionLike;
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session: brokenSubscription }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "subscribe-failed-row", label: "subscribe failed", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toContain("event subscription failed");
+    expect(result.executedModel).toBeUndefined();
+    expect(agentLiveStore.rows.get("subscribe-failed-row")?.model).toBeUndefined();
+  });
+
+  it("records `unavailable` rather than echoing the requested selector", async () => {
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("completed");
+    expect(result.executedModel).toBe("unavailable");
+    expect(result.executedModel).not.toBe("test/fast");
+  });
+
+  // The live row is where an operator actually watches a run. It is built BEFORE the
+  // child exists, from a request-side display value, so without a patch it shows the
+  // requested selector for the whole run — the "requested presented as executed"
+  // surface this task exists to remove, in the most-read place.
+  it("patches the live row with the readback so the row shows what ran", async () => {
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done", model: FAST });
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      // The row opens on a DIFFERENT value, so a passing assertion cannot be
+      // satisfied by the row having been right all along.
+      live: { rowId: "readback-row", label: "readback", model: "test/strong" },
+    });
+
+    await executor.run(request(), new AbortController().signal);
+
+    expect(agentLiveStore.rows.get("readback-row")).toMatchObject({ model: "test/fast" });
+  });
+
+  it("clears the row's requested model when the session was never created", async () => {
+    // Round-2 finding 3. A probe against the shipped code returned status `error` with
+    // no executedModel and the row still reading `model: "test/fast"` — a terminal row
+    // labelled with a model that never ran, indistinguishable to an operator from one
+    // that ran on test/fast and then errored. Absent is honest; the request echoed
+    // back is not.
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => {
+        throw new Error("create failed");
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "create-failed-row", label: "create failed", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.executedModel).toBeUndefined();
+    const row = agentLiveStore.rows.get("create-failed-row");
+    expect(row?.status).toBe("error");
+    expect(row?.model).toBeUndefined();
+  });
+
+  it("leaves the row's display value alone when the peer reports no model", async () => {
+    // `unavailable` is evidence, not a model name. It belongs in `executedModel`,
+    // never in a display field where it reads as a model called "unavailable".
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "no-readback-row", label: "no readback", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.executedModel).toBe("unavailable");
+    expect(agentLiveStore.rows.get("no-readback-row")).toMatchObject({ model: "test/fast" });
+  });
+
+  it("leaves no model on the row when the call fails closed on a mismatch", async () => {
+    // The mismatch refusal is precisely the case where the operator most needs the
+    // row to stop showing the model that did NOT run — and NEITHER value ran here.
+    // This assertion previously demanded the readback (`test/strong`) on the row,
+    // which was the same defect wearing the other value: the session was built on
+    // test/strong and refused before a single token, so labelling the row with it
+    // claims an execution that never happened. Both values are in the failure reason,
+    // which is where a mismatch belongs; the row shows none.
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done", model: STRONG });
+    const executor = createAgentSdkSessionExecutor({
+      model: FAST,
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "mismatch-row", label: "mismatch", model: "test/fast" },
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toContain("test/strong");
+    expect(result.reason).toContain("test/fast");
+    const row = agentLiveStore.rows.get("mismatch-row");
+    expect(row?.status).toBe("error");
+    expect(row?.model).toBeUndefined();
   });
 });

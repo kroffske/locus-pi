@@ -10,10 +10,14 @@ import { formatAgentFinishedEventLine, formatAgentStartedEventLine } from "../_s
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/command-ui.js";
 import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
 import {
+  formatAssignment,
   loadModelRolesState,
   resolveAgentModelPreference,
+  malformedRoleAssignmentNote,
+  unassignedRoleNote,
   type ModelRoleResolution,
 } from "../_shared/model-settings.js";
+import { resolveWorkflowModel } from "../_shared/workflow-model-resolve.js";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
 import type { AgentDefinition } from "../_shared/types.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
@@ -75,10 +79,34 @@ export async function runAgentLiveTask(
   const startedRow = agentLiveStore.rowForExecution(execution);
   // REQ-011: append-only transcript event line at kickoff.
   if (startedRow !== undefined) emitAgentEventLine(ctx, formatAgentStartedEventLine(startedRow), "info");
-  // Child inherits the parent's resolved model (ctx.model) so it runs on the same
-  // authenticated/capable model as the caller instead of the host default.
+  // Parity with the workflow bridge (OD2): `/agent run reviewer` and a workflow stage
+  // naming `reviewer` resolve their model the same way, so the same agent cannot run
+  // on two different models with nothing in the evidence to explain why. The
+  // precedence is identical — the agent's resolved tier, then the parent session
+  // model — and an unresolvable CONCRETE selector fails the run by name rather than
+  // silently inheriting. This is the one call site both interactive triggers share.
+  const tier = await resolveAgentExecutorModel(ctx, input.agent, input.modelRoleResolution);
+  if (tier.refusal !== undefined) {
+    // The refusal lands before any session is created, so the row's seeded
+    // `model`/`thinking` are the REQUEST talking to itself. Leaving them on a terminal
+    // row shows an operator a model that never ran and cannot be told apart from one
+    // that ran and failed, so the labels go with the same model-free patch the host
+    // uses for its own pre-execution exits.
+    agentLiveStore.patchExecutionWithoutModel(execution, {
+      status: "error",
+      errors: [tier.refusal],
+      finalAnswer: tier.refusal,
+    });
+    return {
+      status: "failed",
+      agentName: input.agent.name,
+      reason: tier.refusal,
+      diagnostics: [tier.refusal],
+      lifecycleEntryIds: [],
+    };
+  }
   const executor = createAgentSdkSessionExecutor({
-    model: (ctx as { model?: unknown }).model,
+    model: tier.model ?? (ctx as { model?: unknown }).model,
     live: {
       rowId,
       label,
@@ -92,6 +120,11 @@ export async function runAgentLiveTask(
     maxTurns: input.maxTurns,
     approvalTier: input.approvalTier,
     modelRoleResolution: input.modelRoleResolution,
+    // Travels on the request for the same reason it does in the bridge: the
+    // run-result artifact is written inside the boundary. `writeAgentRunResultArtifact`
+    // only promotes it once `executedModel` is set — i.e. after the child was actually
+    // prompted — so a run that died in setup records no degradation it cannot prove.
+    ...(tier.fallback !== undefined ? { modelRoleFallback: tier.fallback } : {}),
     ...(input.parentContext !== undefined ? { parentContext: input.parentContext } : {}),
   });
   const boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
@@ -108,6 +141,54 @@ export async function runAgentLiveTask(
     emitAgentEventLine(ctx, formatAgentFinishedEventLine(finishedRow), level);
   }
   return boundary;
+}
+
+/**
+ * The interactive half of the tier chain.
+ *
+ * The workflow bridge owns the full three-term precedence because only a workflow
+ * call can declare a per-call `model` / `modelRole`. An interactive child has no
+ * call site to declare one, so the chain here is the agent's own resolved tier, then
+ * the session model. The two asymmetric outcomes are the same as the bridge's: a
+ * concrete selector that does not resolve refuses by name, an unassigned role
+ * inherits (OD5).
+ */
+async function resolveAgentExecutorModel(
+  ctx: ExtensionContext,
+  agent: AgentDefinition,
+  resolution: ModelRoleResolution,
+): Promise<{ model?: unknown; refusal?: string; fallback?: string }> {
+  if (resolution.malformed !== undefined) {
+    // Same rule as the bridge (OD2 parity): a malformed assignment is a config error
+    // and refuses, only a genuinely unassigned role degrades.
+    return {
+      refusal: malformedRoleAssignmentNote(
+        agent.model?.[0] ?? resolution.role,
+        `agent "${agent.name}" frontmatter model`,
+        resolution.malformed,
+      ),
+    };
+  }
+  if (resolution.assignment === undefined) {
+    // OD5's other half: the degrade is quiet, the RECORD is loud. An interactive
+    // child that silently drops to the session model with nothing written down is
+    // the same unexplained-model problem OD2 asked us to close for `/agent run` and
+    // `spawn_agent`, so the note the bridge writes is written here too. The roles
+    // state is re-read only on this path, so the common case pays nothing.
+    const declared = agent.model?.[0];
+    if (declared === undefined) return {};
+    return {
+      fallback: unassignedRoleNote(declared, `agent "${agent.name}" frontmatter model`, await loadModelRolesState(ctx)),
+    };
+  }
+  const resolved = await resolveWorkflowModel(formatAssignment(resolution.assignment), ctx);
+  if (resolved.ok) return { model: resolved.model };
+  return {
+    refusal:
+      `Agent "${agent.name}" declares the model ${JSON.stringify(agent.model?.[0] ?? resolution.role)}, ` +
+      `resolved to ${JSON.stringify(formatAssignment(resolution.assignment))} by the ${resolution.source} layer, ` +
+      `but that ${resolved.message}`,
+  };
 }
 
 /**

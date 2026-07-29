@@ -299,12 +299,21 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/_shared/workflow-agent-bridge.ts` routes workflow `agent()` calls
   through the same agent boundary and host SDK child-session path used by the
   `task` tool. Catalog definitions resolve project → user → bundled, first-wins
-  by agent name; a missing role is an explicit failed result. Per-call
-  `opts.model` is the execution override; otherwise the SDK executor receives
-  the current session model. Agent-frontmatter model-role resolution is retained
-  in the request capsule and live/artifact metadata rather than silently treated
-  as the executor model. The bridge fails closed when the host cannot spawn a
-  child session.
+  by agent name; a missing role is an explicit failed result. The executor model
+  is `per-call opts.model` → `per-call opts.modelRole` → the agent's frontmatter
+  tier → `ctx.model`, resolved through `ctx.modelRegistry.find`
+  (`workflow-model-resolve.ts`) before any child is spawned. A CONCRETE
+  `provider/id` selector that the registry cannot resolve ends the call with a
+  named failed result and zero child sessions; a declared ROLE that no
+  model-roles layer assigns degrades to `ctx.model` and records
+  `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run
+  report; a ROLE whose assignment exists but does not parse as a selector fails
+  the call by name rather than degrading, because a typo is a config error and
+  not an unassigned tier. `modelRoleResolution` continues to travel in the request capsule and
+  live/artifact metadata. The model the child SESSION reports is read back after
+  `createSession` and carried as `executedModel`; a readback that contradicts the
+  resolved request fails the call with both values quoted. The bridge fails
+  closed when the host cannot spawn a child session.
 - No direct-model bridge exists. Every model call in a workflow is a child agent
   session through `workflow-agent-bridge.ts`. `workflow-runtime.ts` retains the
   latest bounded journal `error` message; status/detail and the final transcript

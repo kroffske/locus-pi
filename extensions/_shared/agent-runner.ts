@@ -30,16 +30,38 @@ export interface AgentRunRequest {
   allowedTools: string[];
   approvalTier: ApprovalTier;
   modelRoleResolution?: ModelRoleResolution;
+  /**
+   * Set when the caller declared a tier that no layer assigns, so the child ran on
+   * the parent session model instead. Request-side by construction: the caller knows
+   * it before the child starts, and the run-result artifact is written from the
+   * request, so this is the only shape that reaches the artifact at all.
+   */
+  modelRoleFallback?: string;
   parentContext?: AgentParentContext;
   /** Exact package scripts frozen by a workflow before any writer child runs. */
   repositoryCheckScripts?: RepositoryCheckScripts;
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Recorded when a child session was created but the host exposes no model on it —
+ * an older peer, or a structural mock. A literal value beats an absent field
+ * because absence is ambiguous, and it beats echoing the request because a request
+ * repeated back is not evidence of anything.
+ */
+export const EXECUTED_MODEL_UNAVAILABLE = "unavailable";
+
 export interface AgentRunResult {
   status: AgentRunStatus;
   agentName: string;
   reason: string;
+  /**
+   * What the CHILD SESSION reported it ran on, read back from the host after the
+   * session was created, formatted as `provider/id`. `EXECUTED_MODEL_UNAVAILABLE`
+   * when the host exposes nothing; absent when no child session was ever created.
+   * Never derived from the requested selector.
+   */
+  executedModel?: string;
   evidence?: EvidenceEvaluation;
   childSession?: SessionRecord;
   diagnostics: string[];
@@ -177,6 +199,13 @@ export function createAgentRunRequest(
   };
   if (input.metadata !== undefined) request.metadata = input.metadata;
   if (input.modelRoleResolution !== undefined) request.modelRoleResolution = input.modelRoleResolution;
+  // This builder is an ALLOWLIST, so an unforwarded field is silently dropped. Both
+  // the workflow bridge and the interactive launcher pass `modelRoleFallback` here
+  // and the artifact writer reads it off the request, so omitting this line meant
+  // the degradation note could never reach `locus.agent.run-result.v1` from either
+  // caller — the artifact test passed only because it built its request literal
+  // directly and never went through this function.
+  if (input.modelRoleFallback !== undefined) request.modelRoleFallback = input.modelRoleFallback;
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
   if (input.repositoryCheckScripts !== undefined) request.repositoryCheckScripts = input.repositoryCheckScripts;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
@@ -253,6 +282,20 @@ export function writeAgentRunResultArtifact(
     allowedTools: request.allowedTools,
     modelRole:
       request.modelRoleResolution === undefined ? undefined : modelRoleResolutionRecord(request.modelRoleResolution),
+    // What was asked for versus what ran, side by side and never conflated. The
+    // executed value comes from the host readback carried on the result; the
+    // fallback note comes from the request, because the caller knew it first.
+    executedModel: result.executedModel,
+    // The note is written before the child exists and says "the child inherited the
+    // parent session model" — a PAST-TENSE claim about a child. It is only true once a
+    // child actually RAN, so a call that died in `createSession` (unavailable
+    // substrate, bad model, abort) — or that built a session and was cancelled before
+    // the child was ever prompted — must not carry it: that would be fabricated
+    // execution evidence in the one artifact meant to prove execution. `executedModel`
+    // is published only after child kickoff, which makes it the honest gate; a created
+    // -but-never-prompted session has an id and must not qualify. Undefined keys are
+    // dropped by `JSON.stringify`, so this omits the field rather than writing a null.
+    modelRoleFallback: result.executedModel === undefined ? undefined : request.modelRoleFallback,
     diagnostics: result.diagnostics,
     lifecycleEntryIds: result.lifecycleEntryIds,
     evidence: result.evidence,

@@ -92,7 +92,6 @@ export interface AgentDefinition {
   allowedTools: string[];
   tools?: string[];
   spawns?: string[] | "*";
-  modelOverride?: string;
   model?: string[];
   thinkingLevel?: string;
   output?: unknown;

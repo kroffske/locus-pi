@@ -7,16 +7,29 @@ export interface LiveModelDisplay {
   thinking?: ThinkingLevel;
 }
 
+/**
+ * Which model to show for one child run.
+ *
+ * The precedence mirrors the EXECUTOR's precedence exactly — host readback, then the
+ * per-call selector, then the resolved role assignment, then the parent session model
+ * — because a row that shows a different model from the one the child was routed to
+ * is a lie in the place an operator is most likely to read it. Two consequences worth
+ * stating: a readback always wins (it is the only value that observed anything), and
+ * a resolved role assignment now outranks `ctx.model`, which it did not before the
+ * assignment actually reached the child.
+ */
 export function resolveLiveModelDisplay(input: {
   pi?: Pick<ExtensionAPI, "getThinkingLevel">;
   ctx?: Pick<ExtensionContext, "model">;
+  /** Host readback: what the child session reported it ran on. Outranks every request-side value. */
+  executedModel?: string | undefined;
   requestedModel?: string | undefined;
   assignment?: ModelRoleAssignment | undefined;
 }): LiveModelDisplay | undefined {
   const requested = input.requestedModel === undefined ? undefined : parseModelSelector(input.requestedModel);
   const currentModel = modelSelectorFromModel(input.ctx?.model);
   const currentThinking = input.pi?.getThinkingLevel?.();
-  const model = requested?.model ?? currentModel ?? input.assignment?.model;
+  const model = input.executedModel ?? requested?.model ?? input.assignment?.model ?? currentModel;
   const thinking = requested?.thinking ?? currentThinking ?? input.assignment?.thinking;
   if (model === undefined && thinking === undefined) return undefined;
   return {

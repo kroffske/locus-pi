@@ -15,7 +15,8 @@ Only `DEFAULT` calls `pi.setModel` and verified `pi.setThinkingLevel`; host
 `/model` may later make Current diverge without rewriting the route. Other
 roles only save `model:effort` to project-local
 `.pi/model-roles/config.json`. `AGENT` is an active agents/workflows route and
-`TASK` its fallback. `PLAN`, `SUMMARY`, and `SMOL` remain visible only with
+`TASK` its fallback; since T-129 both are executed — the resolved route becomes
+the child session's model rather than metadata beside it. `PLAN`, `SUMMARY`, and `SMOL` remain visible only with
 explicit beta/resolver/fallback capability labels.
 
 Provider rows are real filters. Effort options come from Pi model

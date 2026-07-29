@@ -6,6 +6,69 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **A workflow stage can now say which model it runs on, and the evidence names
+  the model that actually ran.** Per-call model selection was written down in
+  three evidence surfaces and reached the child in none of them: the resolver
+  imported `getModel` from a path the pinned host no longer exports it from, so
+  every selector resolved to nothing and the bridge fell through to the parent
+  session's model — while the journal, the live row and the run-result artifact
+  all reported the selector as if it had run. The shipped Excalidraw reference
+  pipeline pinned a model and carried a comment claiming the pin "keeps that
+  claim honest"; the comment was false, and the run evidence agreed with it.
+  Selection now resolves through the host's own model registry, and the resolved
+  model is what `createSession` receives.
+  **Two options, one meaning each.** `model: "provider/id"` names a concrete
+  model; `modelRole: "smol"` names a tier in the roles table. A slash means a
+  real provider, no slash means a role. An optional
+  `:off|minimal|low|medium|high|xhigh` suffix is display-only — the child's
+  reasoning effort is not plumbed through yet, and the authoring guide says so
+  rather than letting the label imply otherwise.
+  **The two failure modes are deliberately different.** A concrete selector this
+  host cannot resolve ends the call with a named reason and zero child sessions —
+  a typo must not silently run something else. A role that no configuration
+  assigns degrades to the session model and records the degradation on
+  `agent_end`, in the `locus.agent.run-result.v1` body and in the run report. The
+  package ships **no** role assignments and will not choose a vendor for you, so
+  a workflow naming `smol` still runs on a fresh install, and the evidence says
+  the tier was not honoured. A role you DID assign but mis-spelled (`"smol":
+"gpt-5.6-mini"`, missing the `provider/`) is a third case and fails by name: it
+  is a configuration error, not an unassigned tier, and degrading it would run the
+  session model under the name `smol` while reporting the role as unassigned —
+  which the operator's own config file contradicts.
+  **"Executed model" is read back, not remembered.** `agent_start` is written
+  before anything resolves, so it now carries `requestedModel` under a name that
+  says requested; `agent_end` carries `executedModel`, read from the child
+  session after it was created. A peer that exposes no model records
+  `unavailable` — never the request echoed back — and a readback that
+  contradicts the resolved request fails the call with both values quoted.
+  `executedModel` and the recorded degradation appear only once the child's first
+  prompt has been accepted by the transport: a session built and then cancelled, a
+  session built on the wrong model, and a `prompt()` the transport rejected — no
+  credentials, no route — executed nothing and say nothing. The live row obeys the
+  same rule and, on those paths and on a tier refused before any session exists,
+  drops the model label instead of ending as a terminal row wearing a selector that
+  never ran — including a replayed completion, which is served from a record with no
+  child at all. Absent is honest; the failure reason carries the details. Read the
+  other way, the rule keeps evidence rather than dropping it: a failure _after_ the
+  child answered — a script `validate` that threw, an artifact that could not be
+  written — carries the executed model on its error line and keeps it on the row.
+  **Replay identity follows the tier.** `modelRole` joined the canonical request,
+  so two stages on two tiers occupy two records; the replay schema version went
+  to 2 so a pre-fix record refuses with `no-recorded-calls` instead of the
+  misleading `key-mismatch`. Known residual, documented and tested: the key
+  carries the tier's NAME, so remapping a role in `.pi/model-roles/config.json`
+  does not invalidate a recorded run — discard those runs by hand.
+  **The ten bundled agents changed namespace.** They declared `model: pi/<role>`,
+  which no resolver ever read; now that a slash means a real provider, that value
+  would name a provider called `pi` that no host has. They now name their tier
+  bare (`model: smol`). An installed agent catalog that still says `pi/<role>`
+  will fail closed with a message naming the file's value and the bare form to
+  replace it with.
+  **`/agent run` and `spawn_agent` resolve the same chain**, so the same agent no
+  longer runs on different models depending on how it was started. The
+  write-only `AgentDefinition.modelOverride` field and its undocumented
+  frontmatter alias are gone; nothing read either.
+
 - **A live end-to-end run exposed three ways the curated pipeline lets a weak
   model off the hook, and all three are now closed in the prompts.** The run
   built a small application from one sentence, and everything it produced worked

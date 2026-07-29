@@ -1,7 +1,7 @@
 ---
 name: quick_task
 description: Low-reasoning agent for strictly mechanical updates or data collection only
-model: pi/smol
+model: smol
 thinking-level: minimal
 ---
 

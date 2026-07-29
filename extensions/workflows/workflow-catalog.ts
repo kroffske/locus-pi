@@ -345,7 +345,7 @@ function workflowContractLines(projectRoot: string, workingDirectory: string): s
     "commands: list [query] browses; info [name] explains; run <name|path> executes only after explicit command use; status [runId] reads persisted progress",
     "trust: executed workflow files are reviewed JavaScript with full Pi host Node.js/module access; inspection and info are inert text/static-metadata reads",
     "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
-    "agent models: opts.model selects the child-session model for that agent() call; otherwise the active Pi session model is passed to the child executor; agent frontmatter and saved model-role assignments remain routing/display metadata, not executor selection",
+    "agent models: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role degrades and is recorded, and agent_end reports the read-back executedModel",
     'agents: agent() is the single model-calling primitive and returns exact non-empty child text; opts.agent selects a discovered catalog role, omitted agent uses role "default", opts.readOnly can impose a host-enforced per-call read boundary, and opts.schema opts into a validated shaped answer instead of text',
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
