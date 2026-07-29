@@ -203,6 +203,17 @@ through `promptFile()` only for a role charter long enough to bury the routing
 Capability limits (`readOnly`, `tools`, `workspaceMode`, `maxToolCalls`) stay DSL
 options either way — never prompt claims.
 
+**Do not restate a package default.** Every run already applies
+`DEFAULT_WORKFLOW_BUDGET` — global agent concurrency, total agent invocations, run
+wall clock, and the per-call `timeoutMs`, `maxToolCalls`, `maxTurns` and
+`maxAnswerChars` — so a script that declares nothing is still bounded on all seven
+axes. Write a limit only where the stage genuinely needs a different one: a check
+stage narrowed to `maxToolCalls: 40`, a composing stage at `maxToolCalls: 0`, a
+per-stage `maxAnswerChars` sized to what the next prompt can hold. A stage that
+repeats the package number gains nothing and will silently disagree with it the
+day the default moves. A value ABOVE the default is allowed and is journalled as a
+raise, so it stays visible in the run evidence.
+
 One `COMMON` constant holds what every stage shares; the per-stage task sits next
 to the `agent()` call it belongs to, and the previous stage's exact text is
 interpolated between `--- BEGIN <NAME> ---` / `--- END <NAME> ---` markers. From

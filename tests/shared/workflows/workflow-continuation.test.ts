@@ -142,13 +142,17 @@ describe("workflow continuation", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.journal[0]).toMatchObject({
+    // Found by message, not by index: every run now opens with the applied budget
+    // line, and pinning this one to position 0 would make an unrelated prelude
+    // addition look like a continuation defect.
+    const continuationLine = result.journal.find((line) => line.message === "[workflow:continuation]");
+    expect(continuationLine).toMatchObject({
       kind: "log",
       source: "runtime",
       message: "[workflow:continuation]",
       continuation: { originRunId: "source-run" },
     });
-    const binding = result.journal[0]?.continuation;
+    const binding = continuationLine?.continuation;
     expect(binding?.artifacts.map((entry) => entry.sourceRef)).toEqual(refs);
     expect(binding?.artifacts.every((entry) => entry.consumedRef.runId === result.runId)).toBe(true);
     expect(result.result).toMatchObject({

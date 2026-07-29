@@ -55,7 +55,6 @@ relationships, falling back to \`grep\`, \`find\`, and direct reads.`;
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
 const IMPLEMENT_AGENT_DEFAULTS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });
@@ -72,6 +71,8 @@ const IMPLEMENT_READ_OPTIONS = Object.freeze({
   tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
+/** A check stage runs the repository's own commands and reads what they print;
+ *  forty tool calls is a deliberate narrowing, not a restatement of the default. */
 const IMPLEMENT_CHECK_OPTIONS = Object.freeze({
   ...IMPLEMENT_AGENT_DEFAULTS,
   readOnly: true,

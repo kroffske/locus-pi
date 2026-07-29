@@ -38,7 +38,6 @@ review. Documentation and other non-symbol references always use textual
 search.`;
 
 const REVIEW_AGENT_DEFAULTS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });

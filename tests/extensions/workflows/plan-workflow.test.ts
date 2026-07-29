@@ -122,7 +122,9 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(source).not.toContain('"write"');
     expect(source).not.toContain('"edit"');
     expect(source).not.toContain('"bash"');
-    expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
+    // No `maxToolCalls` at all: the package budget contract supplies it, and a
+    // stage that restated the default would silently disagree with it the day it moves.
+    expect(source.match(/maxToolCalls:/gu)).toBeNull();
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
 
     expect(source).toContain("const COMMON = ");

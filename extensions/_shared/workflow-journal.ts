@@ -911,6 +911,9 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "executedModel",
     "modelRoleFallback",
     "thinking",
+    // Post-child script/artifact failures use `error` as the sole terminal line.
+    // The child already ran, so its usage belongs here just as it does on agent_end.
+    "usage",
     "resumeFromRunId",
     "resumeSourceRunSummary",
   ],
@@ -1579,15 +1582,6 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
       // Only an explicit marker counts. Replay is never inferred from a missing
       // duration, a zero token count, or any other side effect of not running.
       if (line.replayed === true) agentsReplayed += 1;
-      // Run-level budget. Every model-backed child reports its own usage on agent_end, so the
-      // sum is the whole run's cost; a child whose host reported none simply does not contribute.
-      if (line.usage !== undefined && line.usage !== null) {
-        sawUsage = true;
-        usageInput += line.usage.input;
-        usageOutput += line.usage.output;
-        usageTotal += line.usage.totalTokens;
-        usageCost += line.usage.costTotal;
-      }
     } else if (line.kind === "error") errors += 1;
     else if (
       line.kind === "log" &&
@@ -1596,6 +1590,16 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
       line.message.startsWith("[workflow:cancelled]")
     ) {
       sawCancellation = true;
+    }
+    // A child normally reports usage on agent_end. When script validation or
+    // artifact adoption throws after the child answered, `error` is the sole
+    // terminal line and carries the same spend instead.
+    if ((line.kind === "agent_end" || line.kind === "error") && line.usage !== undefined) {
+      sawUsage = true;
+      usageInput += line.usage.input;
+      usageOutput += line.usage.output;
+      usageTotal += line.usage.totalTokens;
+      usageCost += line.usage.costTotal;
     }
   }
   const usage: WorkflowUsage | null = sawUsage

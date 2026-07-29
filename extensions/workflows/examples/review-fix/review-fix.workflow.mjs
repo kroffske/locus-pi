@@ -39,7 +39,6 @@ live checkout before you rely on any claim in a handoff.`;
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
 const REVIEW_FIX_AGENT_DEFAULTS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });
@@ -118,6 +117,8 @@ const FIX_READ_OPTIONS = Object.freeze({
   tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
+/** A check stage runs the repository's own commands and reads what they print;
+ *  forty tool calls is a deliberate narrowing, not a restatement of the default. */
 const FIX_CHECK_OPTIONS = Object.freeze({
   ...REVIEW_FIX_AGENT_DEFAULTS,
   readOnly: true,

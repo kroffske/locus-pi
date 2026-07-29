@@ -42,6 +42,7 @@ import type {
   WorkflowAgentResult,
   WorkflowUsage,
 } from "./workflow-runtime.js";
+import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "./workflow-model-resolve.js";
 import type { AgentDefinition, AgentFailureCause, PermissionMode, WorkspaceMode } from "./types.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
@@ -86,6 +87,9 @@ export interface WorkflowAgentBridgeOptions {
     model?: unknown;
     live?: AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
+    /** SDK turn budget derived from the call's declared `timeoutMs` (D4), so the
+     *  host's own child deadline can only ever fire after the workflow fuse. */
+    turnTimeoutMs?: number;
     reportsDir?: string;
     onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
   }) => AgentExecutor;
@@ -283,8 +287,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
 
     // 4. Build the request
+    // The turn budget is declared by the runtime (package contract or per-call
+    // option) and only falls back here when an embedder configured neither. It was
+    // a literal `5` invisible to authors while the child's whole wall clock is
+    // computed from it.
+    const maxTurns = req.maxTurns ?? DEFAULT_WORKFLOW_BUDGET.turns;
     const request = createAgentRunRequest(agent, req.prompt, {
-      maxTurns: 5,
+      maxTurns,
       approvalTier,
       ...(req.tools !== undefined ? { allowedTools: req.tools } : {}),
       modelRoleResolution,
@@ -322,6 +331,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         model?: unknown;
         live?: AgentSdkSessionExecutorOptions["live"];
         maxToolCalls?: number;
+        turnTimeoutMs?: number;
         reportsDir?: string;
         onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
       }) =>
@@ -329,6 +339,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           ...(o.model !== undefined ? { model: o.model } : {}),
           ...(o.live !== undefined ? { live: o.live } : {}),
           ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
+          ...(o.turnTimeoutMs !== undefined ? { turnTimeoutMs: o.turnTimeoutMs } : {}),
           ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
           ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
         }));
@@ -373,6 +384,12 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       noMcp: permissionMode === "restricted",
     };
     let liveExecution: AgentLiveExecutionHandle | undefined;
+    // ONE wall clock per child. The SDK host kills a child at `turnTimeoutMs * maxTurns`
+    // whether or not anyone asked it to, so leaving that budget at its own default made
+    // two independent deadlines race and the operator's failure text nondeterministic.
+    // Here the declared fuse is the authority and the SDK budget is derived from it,
+    // strictly above it — a backstop that cannot fire first (D4).
+    const turnTimeoutMs = req.timeoutMs === undefined ? undefined : workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns);
     const executor = createExecutorFn({
       // `perCallModel ?? resolvedRoleModel ?? ctx.model`, collapsed into the one term
       // `resolveWorkflowTier` already computed. The parent model is reachable only
@@ -384,6 +401,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         liveExecution = execution;
       },
       ...(req.maxToolCalls !== undefined ? { maxToolCalls: req.maxToolCalls } : {}),
+      ...(turnTimeoutMs !== undefined ? { turnTimeoutMs } : {}),
       ...(evidenceDestinations !== undefined ? { reportsDir: evidenceDestinations.transcriptDir } : {}),
     });
 

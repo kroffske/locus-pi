@@ -109,6 +109,7 @@
     "extensions/_shared/widget-render.ts",
     "extensions/_shared/workflow-agent-bridge.ts",
     "extensions/_shared/workflow-artifacts.ts",
+    "extensions/_shared/workflow-budget.ts",
     "extensions/_shared/workflow-failure.ts",
     "extensions/_shared/workflow-handoff.ts",
     "extensions/_shared/workflow-journal.ts",

@@ -55,7 +55,6 @@ fails, continue with \`grep\`, \`find\`, and direct reads and say so. A missing 
 Index never blocks planning.`;
 
 const PLAN_STAGE_OPTIONS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
   readOnly: true,

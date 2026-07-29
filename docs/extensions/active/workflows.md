@@ -66,7 +66,7 @@ with real session ids. See "Run a real workflow (live)" below.
 
 | Seam                                | Location                                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bounded concurrency                 | `extensions/_shared/workflow-runtime.ts` `runScheduled()`                                         | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task.                                                                                                                                                                                                                                                                                                                                   |
+| Bounded concurrency                 | `extensions/_shared/workflow-runtime.ts` `runScheduled()`                                         | DONE. `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering; width bounds each `runScheduled` call, not globally, so nested fan-out used to multiply. The **global limiter** now exists: every run applies `DEFAULT_WORKFLOW_BUDGET.concurrency` to the leaf `AgentConcurrencyGate` (see "Run budget"). `SCHEDULER_WIDTH` tuning and worktree-isolated real concurrency remain a future scheduler task.                                                                                                                             |
 | Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                |
 | Trusted script execution            | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
 | Owner-default agent + model routing | `extensions/_shared/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
@@ -1256,9 +1256,10 @@ contract, not an enforcement or security boundary.
 | `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                                                                                                                                                                                                                                                                                                                                                              |
-| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                 |
-| `timeoutMs`       | positive safe integer     | none                                                                   | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                                                      |
-| `maxAnswerChars`  | positive safe integer     | none                                                                   | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
+| `maxToolCalls`    | non-negative safe integer | budget `toolCalls` (`1000`)                                            | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                 |
+| `timeoutMs`       | integer 1..2147383628     | budget `timeoutMs` (`600000`)                                          | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. The upper bound reserves room for the SDK backstop at 20 turns while keeping both delays within Node's real timer range; larger delays would be clamped to roughly 1 ms.                                                                                                                                             |
+| `maxTurns`        | integer 1..20             | budget `turns` (`5`)                                                   | Assistant turns for one child attempt. A value outside the host clamp is refused before any child starts. It was a hidden constant that multiplied the child's whole wall clock; it is now a declared budget axis.                                                                                                                                                                                                                                                                                                  |
+| `maxAnswerChars`  | positive safe integer     | budget `answerChars` (`500000`)                                        | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
 | `attempts`        | safe integer 1–3          | `1`                                                                    | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3, and refused unless the call is both replay-eligible and provably unable to write. Never re-asks an answer the child did produce.                                                                                                                                                                                                 |
 | `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `artifact`        | string                    | safe label or agent name                                               | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1278,13 +1279,19 @@ and result envelope. Child metadata and diagnostics stay in journal/result
 evidence; model text is never parsed as status or JSON unless the call opted into
 `schema`.
 
-The host may replace the default agent fuse through
-`WorkflowRuntimeOptions.defaultMaxToolCalls`; an explicit per-call value wins.
-There is no small authoring ceiling such as the former 100-call cap.
+Every default above comes from ONE object — `DEFAULT_WORKFLOW_BUDGET` in
+`extensions/_shared/workflow-budget.ts` — which the runner applies to every run.
+An explicit per-call value always wins: below the default it applies silently,
+above it the runtime writes a journal line naming the axis, the default and the
+requested value. There is no small authoring ceiling such as the former 100-call cap.
+See "Run budget" for the run-level axes and for what the report shows.
 
-**Replay policy for the two bounds.** `timeoutMs` is part of the canonical
-request, exactly like `maxToolCalls`: it shapes execution, so changing it makes a
-different call and the earlier record is not reused. `maxAnswerChars` is
+**Replay policy for the bounds.** `timeoutMs` and `maxTurns` are part of the
+canonical request, exactly like `maxToolCalls`: they shape execution, so changing
+one makes a different call and the earlier record is not reused. Because
+`timeoutMs` and `maxTurns` gained package defaults, records written before those
+defaults existed are no longer replayed — reusing them would serve text produced
+by an unbounded child as if a fuse had been in force. `maxAnswerChars` is
 deliberately _not_ part of the request — it is a runtime gate applied to whatever
 answer arrives, fresh or replayed, so an old recording stays replayable and a
 tightened bound fails the run loudly instead of passing text the next stage
@@ -1603,6 +1610,68 @@ absolute path in a message is a replay defect, not a cosmetic one.
 
 ---
 
+## Run budget
+
+Every run is bounded on seven axes without the script saying anything.
+`DEFAULT_WORKFLOW_BUDGET` (`extensions/_shared/workflow-budget.ts`) is the single
+source, and `runWorkflowScript` applies it to the runtime on every run:
+
+| Axis          | Default           | What it bounds                                                                                                                                                                                                                    |
+| ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concurrency` | `4`               | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
+| `totalAgents` | `200`             | Total `agent()` invocations, nested and retried ones included. Exceeding it throws `WorkflowInvocationCapError` and exits the run.                                                                                                |
+| `runtimeMs`   | `7200000` (2 h)   | Wall clock over the agent chain. Exceeding it throws `WorkflowRunDeadlineError` and exits the run.                                                                                                                                |
+| `timeoutMs`   | `600000` (10 min) | One child attempt. The SDK host's own child deadline is derived from this, so the workflow-level failure always wins; both timers remain within Node's maximum real delay.                                                        |
+| `toolCalls`   | `1000`            | Tool calls per child attempt.                                                                                                                                                                                                     |
+| `turns`       | `5`               | Assistant turns per child attempt, within the host clamp of 1..20.                                                                                                                                                                |
+| `answerChars` | `500000`          | Characters in one child answer.                                                                                                                                                                                                   |
+
+**What `runtimeMs` does and does not bound.** It is a deadline check performed
+after a child acquires the run-wide concurrency slot and immediately before the
+child starts — not a timer that
+aborts a child mid-flight, because two abort paths for one child is the same
+defect the single per-child deadline removes. So a run is bounded by `runtimeMs`
+plus at most one child's own `timeoutMs`, and three cases are outside it: a script
+that stops calling `agent()` (a `while (true)` of pure script code is not bounded
+at all), script work after the last child returns, and that last in-flight child.
+Nothing in the runtime bounds workflow script code today either; this is a
+pre-existing limit stated rather than a new one introduced. "Bounded on every
+axis" therefore means **the agent chain**.
+
+**Narrowing versus raising.** A per-call value below the default applies silently.
+A value above it applies too — a down-only rule would make a legitimately long
+stage unauthorable, and the operator would answer by raising the package default
+for everyone — but never silently: the runtime writes a `[workflow:budget] call
+raised …` journal line naming the axis, the default and the requested value.
+
+**Which axes a script can override.** The four per-call axes — `maxToolCalls`,
+`timeoutMs`, `maxTurns`, `maxAnswerChars` — are ordinary `agent()` options. The
+three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — are **host-side
+only**: they are overridable through `RunWorkflowScriptOptions.budget`, which
+embedders and tests pass, and through nothing a `*.workflow.mjs` can reach.
+Neither production entrypoint passes it, so in practice every real run uses the
+package values. Giving scripts a run-level surface means deciding where
+operator-changeable knobs live, which is an open owner decision.
+
+**Evidence.** Every run's journal opens with one runtime-source line listing the
+applied budget, and `.locus-pi/<runId>/README.md` carries a `## Budget` section
+with each axis, its applied value, and the spend the run evidence can measure:
+agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
+concurrency. The peak comes from the concurrency gate rather than from journal
+intervals, because `agent_start` is written before the gate is acquired — counting
+overlapping intervals would report queued children as concurrent. Replayed calls
+are counted only where they really spend: one invocation against `totalAgents`,
+but no child, so the row reads `N invocations (M replayed, no child ran)` and
+their durations and tokens are excluded — a run served entirely from records
+reports its longest child as "not recorded". Per-child tool
+calls, turns and answer characters are enforced but counted by nobody, so they
+print as "not recorded" rather than `0`. Tokens are printed when the host reports
+them; cost prints as unavailable because `costTotal` is a hardcoded `0`, and a
+limit over a stub reports "under budget" forever. Neither tokens nor cost is
+enforced.
+
+---
+
 ## Cheap one-shot decisions without a second primitive
 
 There is no direct model-call node. `llm(prompt, opts?)` — one pi-ai
@@ -1635,9 +1704,12 @@ manifest filesystem, subprocess, network and browser fields are conservative
 `*`/enabled declarations. Those fields describe possible host capability; they do not
 add a DSL primitive.
 
-**Budget.** Each child run records token/cost `usage` on its `agent_end` journal line;
-`/workflows status` sums it per run (`tokens=… cost=$…`). Observational only — there
-is no hard cap.
+**Budget.** Each child run normally records token/cost `usage` on its `agent_end`
+journal line. If script validation or artifact adoption throws after the child
+answered, the sole terminal `error` line carries the same usage; transport errors
+that never produced an answer carry none. `/workflows status` sums both executed
+terminal shapes per run (`tokens=… cost=$…`). Observational only — there is no
+hard cap.
 
 ---
 

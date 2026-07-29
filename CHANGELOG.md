@@ -260,6 +260,43 @@ This file records user-visible changes to the public package.
   fuse fired, that classification is the one written down: the host honestly reports the
   cancellation it observed, and only the caller knows it pulled the trigger.
 
+- **One package budget contract, so a workflow run is bounded on every axis the
+  host can enforce without the script saying anything.**
+  `DEFAULT_WORKFLOW_BUDGET` in `extensions/_shared/workflow-budget.ts` is now the
+  single source for global agent concurrency (4), total agent invocations per run
+  (200), run wall clock over the agent chain (2 h), per-child wall clock (10 min),
+  per-child tool calls (1000), per-child turns (5) and answer characters
+  (500 000). Before it, two of those numbers lived 580 lines apart in the runtime
+  with no cross-reference, global concurrency had no default at all — a nested
+  fan-out of four branches of three really did run twelve children at once — and
+  no run had a wall clock. The runner applies the whole contract to every run, so
+  a script that declares nothing is still bounded; a stage may still narrow any
+  per-call axis, and a raise is written to the journal naming the axis, the
+  default and the requested value rather than applying in silence. Two axes are
+  reported and deliberately not enforced: token counts are printed when the host
+  supplies them, and cost is printed as unavailable, because `costTotal` is still
+  a hardcoded `0` and a limit over a stub reports "under budget" forever.
+  `maxTurns` becomes an ordinary `agent()` option within the host clamp of 1..20,
+  and `timeoutMs` is capped at 2,147,383,628 ms so neither the workflow fuse nor
+  its derived SDK backstop crosses Node's timer limit and collapses to an
+  approximately one-millisecond delay. The run's
+  `.locus-pi/<runId>/README.md` gains a `## Budget` section showing
+  every axis with its applied value beside the spend the run evidence can actually
+  measure — the axes it cannot measure print as "not recorded", never as `0`.
+  **Two consequences worth knowing before upgrading.** Recorded runs made before
+  this release are no longer replayed: `timeoutMs` is part of the canonical
+  request by design, so a record written while the axis had no default describes a
+  different call once it has one. Those children were not unbounded — the SDK host
+  has always stopped one at its per-turn timeout times `maxTurns`, which with the
+  values in force was the same ten minutes — but the bound was the host's, not a
+  declared workflow fuse, so it never named the axis and was never part of the
+  replay key. Reusing such a record would serve text produced under an implicit
+  host ceiling as though the declared fuse had been in force. Records live in
+  ignored per-workstation state, so the cost is a re-run, not lost work. And the
+  run wall clock is checked when a child starts, which bounds the agent chain: a
+  run is bounded by `runtimeMs` plus at most one child's own `timeoutMs`, and
+  script code that calls no further agent is not bounded by it at all.
+
 - **A shipped skill, so an agent can find the workflows the package already
   installs.** The six Package workflows resolve out of the installed package and
   need no copied files, but nothing in a fresh session said what a "workflow" is

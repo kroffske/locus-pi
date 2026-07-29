@@ -65,7 +65,6 @@ fails, continue with \`grep\`, \`find\`, and direct reads and say so.`;
 
 /** The two stages that open the repository. Read-only is host-enforced. */
 const INSPECT_OPTIONS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
   readOnly: true,

@@ -28,6 +28,12 @@ import type {
   WorkflowJournalLine,
   WorkflowRuntime,
 } from "./workflow-runtime.js";
+import {
+  formatWorkflowBudgetPrelude,
+  formatWorkflowBudgetRaise,
+  resolveWorkflowBudget,
+  type WorkflowBudget,
+} from "./workflow-budget.js";
 import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "./agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
@@ -95,7 +101,7 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
-import { writeWorkflowRunReport } from "./workflow-run-report.js";
+import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
   assertWorkflowHandoffClaimForContinuation,
@@ -152,13 +158,22 @@ export interface RunWorkflowScriptOptions {
    * trusted workflow code starts; presentation callbacks are not authoritative. */
   operatorHandoffClaim?: WorkflowHandoffClaimLease;
   resumeFromRunId?: string;
-  /** Global per-run cap across all dsl.agent() calls. Defaults to the runtime default
-   *  (DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS) when unset. Exceeding it fails the run. */
-  maxTotalAgentInvocations?: number;
+  /**
+   * Per-run narrowing or raising of the package budget contract, axis by axis.
+   * Unstated axes take `DEFAULT_WORKFLOW_BUDGET`. Narrowing is silent; a raise is
+   * journalled, never quiet.
+   *
+   * Host-side by design (D3): neither production entrypoint passes it and a
+   * `*.workflow.mjs` cannot reach it, so the three run-level axes — `concurrency`,
+   * `totalAgents`, `runtimeMs` — are overridable by embedders and tests only. The
+   * four per-call axes additionally have an author surface in `agent(prompt, opts)`.
+   */
+  budget?: Partial<WorkflowBudget>;
   createExecutor?: (o: {
     model?: unknown;
     live?: import("./agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
+    turnTimeoutMs?: number;
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: import("./workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
@@ -537,6 +552,45 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal.write(line);
     opts.onEvent?.(line);
   };
+  /**
+   * Evidence without a live announcement: the durable journal, `result.json` and
+   * the run report get the line; the progress surface does not.
+   *
+   * Used for facts that are true of EVERY run. Pushing those through `onEvent`
+   * would turn a run that emitted nothing into an eventful one and make the no-UI
+   * surface claim delivery for a workflow that never spoke — the same reason the
+   * default replay plan is silent below.
+   */
+  const journalPrelude = (line: WorkflowJournalLine): void => {
+    preludeLines.push(line);
+    journal.write(line);
+  };
+  // THE place the package budget contract becomes this run's policy. Resolved
+  // before anything else can spend, so every axis has a number before the first
+  // child and the journal can state it. A script says nothing and is still bounded.
+  const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
+  // The applied budget is the FIRST line of every run's journal: a reader who opens
+  // the evidence should see the policy before the first thing that spends under it,
+  // and a run that fails before its script loads still says what it was bounded by.
+  journalPrelude({
+    ts: new Date().toISOString(),
+    runId,
+    kind: "log",
+    source: "runtime",
+    message: formatWorkflowBudgetPrelude(budget),
+  });
+  // A narrowing applies silently; a raise never does. The line names the axis, the
+  // package default and what was asked for, so a raise is auditable from the run
+  // evidence alone instead of living in whoever's memory chose it.
+  for (const raise of budgetRaises) {
+    emitPrelude({
+      ts: new Date().toISOString(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: formatWorkflowBudgetRaise(raise, "run"),
+    });
+  }
   const resultMetadata = (): Pick<
     RunWorkflowScriptResult,
     "resumeFromRunId" | "resumeSourceRunSummary" | "continuation" | "target"
@@ -670,22 +724,14 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // funnels here, so the operator gets the same stage/script/evidence pointer
     // whether the trusted script threw or the runtime around it did.
     enrichedFields = withFailureDiagnostic(enrichedFields);
-    const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
-    const resultPersistence = writeWorkflowResultJson(runDir, {
-      runId,
-      ...enrichedFields,
-      resultPersistence: intendedPersistence,
-    });
-    // A prose result gets a readable sibling file. Every live surface bounds its
-    // own output, so without this the whole text existed only as one escaped
-    // JSON string.
-    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
     // The reader's copy of the run under <projectRoot>/.locus-pi/<runId>/:
-    // table of contents, task, result, and the agent documents with
-    // author-and-step names. Best-effort like result.md — the envelope above
-    // stays the durable truth, and a report failure never fails the run.
+    // table of contents, task, result, budget-versus-spend, and the agent
+    // documents with author-and-step names. Best-effort like result.md — the
+    // envelope below stays the durable truth, and a report failure never fails
+    // the run. It runs BEFORE result.json so a failed write can still be recorded
+    // in the journal that result.json persists.
     if (artifactStore !== undefined) {
-      writeWorkflowRunReport(
+      const reportOutcome = writeWorkflowRunReport(
         {
           projectRoot,
           runId,
@@ -702,10 +748,41 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           result: enrichedFields.result,
           ...(enrichedFields.error === undefined ? {} : { error: enrichedFields.error }),
           journal: enrichedFields.journal,
+          budget: { applied: budget, peakConcurrency: runtime?.peakAgentConcurrency() ?? 0 },
         },
         artifactStore,
       );
+      if (!reportOutcome.ok) {
+        // The run disposition is deliberately unchanged — reversing that is the
+        // evidence contract's call, not this one's. What changes is the silence:
+        // without this line the budget evidence could simply not exist and
+        // nothing would say so, which `evidence-over-claim` cannot live with.
+        const reportFailure: WorkflowJournalLine = {
+          ts: new Date().toISOString(),
+          runId,
+          kind: "error",
+          source: "runtime",
+          message: `Workflow run report was not written to ${workflowReportDir(projectRoot, runId)}: ${reportOutcome.message}`,
+        };
+        journal.write(reportFailure);
+        try {
+          opts.onEvent?.(reportFailure);
+        } catch {
+          // A presentation callback cannot change what the durable journal records.
+        }
+        enrichedFields = { ...enrichedFields, journal: [...enrichedFields.journal, reportFailure] };
+      }
     }
+    const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
+    const resultPersistence = writeWorkflowResultJson(runDir, {
+      runId,
+      ...enrichedFields,
+      resultPersistence: intendedPersistence,
+    });
+    // A prose result gets a readable sibling file. Every live surface bounds its
+    // own output, so without this the whole text existed only as one escaped
+    // JSON string.
+    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
     if (resultPersistence.ok) {
       return {
         runId,
@@ -980,7 +1057,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(hasResume ? { replaySourceRunId: resumeFromRunId! } : {}),
     ...(replayController !== undefined ? { replay: replayController } : {}),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
-    ...(opts.maxTotalAgentInvocations !== undefined ? { maxTotalAgentInvocations: opts.maxTotalAgentInvocations } : {}),
+    // Every axis of the contract, unconditionally. A run that declares nothing is
+    // bounded on all seven; a `...(x !== undefined ? ...)` guard here is what left
+    // global concurrency unlimited for the whole life of the runtime.
+    maxConcurrentAgents: budget.concurrency,
+    maxTotalAgentInvocations: budget.totalAgents,
+    runtimeMs: budget.runtimeMs,
+    defaultTimeoutMs: budget.timeoutMs,
+    defaultMaxToolCalls: budget.toolCalls,
+    defaultMaxTurns: budget.turns,
+    defaultMaxAnswerChars: budget.answerChars,
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
     onAwaitOperator: (declaration) => {
       if (awaitOperatorDeclaration !== undefined) {

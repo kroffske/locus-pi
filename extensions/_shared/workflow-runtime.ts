@@ -10,6 +10,15 @@
 // Public types
 // ---------------------------------------------------------------------------
 
+import {
+  DEFAULT_WORKFLOW_BUDGET,
+  WORKFLOW_AGENT_MAX_TURNS,
+  WORKFLOW_AGENT_MIN_TURNS,
+  WORKFLOW_MAX_TIMEOUT_MS,
+  assertWorkflowBudgetValue,
+  formatWorkflowBudgetRaise,
+  type WorkflowBudget,
+} from "./workflow-budget.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import type { WorkflowReplayController } from "./workflow-replay.js";
 import type { WorkflowResourceLoader } from "./workflow-resources.js";
@@ -95,8 +104,10 @@ function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | unde
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
 export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
-/** High per-child safety fuse. Ordinary agent work should finish far below this value. */
-export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = 1_000;
+/** High per-child safety fuse. Ordinary agent work should finish far below this value.
+ *  Single-sourced from the package budget contract: this name is kept because callers
+ *  and tests use it, but the number lives in exactly one place. */
+export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = DEFAULT_WORKFLOW_BUDGET.toolCalls;
 export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 
 export interface WorkflowAgentRequest {
@@ -114,6 +125,9 @@ export interface WorkflowAgentRequest {
   modelRole?: string;
   /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
   timeoutMs?: number;
+  /** Assistant turns this child attempt may take. Also the multiplier the SDK host
+   *  uses for its own child deadline, which is why it is a budget axis and not a detail. */
+  maxTurns?: number;
   label?: string;
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
@@ -268,6 +282,13 @@ export interface WorkflowAgentOptions {
    * the call fails closed; it never resolves to a partial answer.
    */
   timeoutMs?: number;
+  /**
+   * Assistant turns for one child attempt, within the host clamp of 1..20. It was
+   * a hardcoded `5` in the bridge and invisible to authors, while the child's whole
+   * wall clock is computed from it — a budget the package was making in silence.
+   * A value outside the clamp is refused before any child starts.
+   */
+  maxTurns?: number;
   /**
    * Upper bound on the child's answer, in characters. An oversized handoff breaks
    * the next stage's prompt, so the runtime fails the call here instead of letting
@@ -557,7 +578,26 @@ export interface WorkflowRuntimeOptions {
   maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
   /** Default per-child tool-call safety fuse; defaults to DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS. */
   defaultMaxToolCalls?: number;
-  // default DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS (1000); global per-run cap across agent() calls;
+  /** Default upper bound on a child answer, applied to calls that declare none.
+   *  Absent means the axis is enforced only where the call declared it — the
+   *  state every embedder was in before the package budget contract existed. */
+  defaultMaxAnswerChars?: number;
+  /** Default wall-clock fuse for one child attempt. Absent means a call that
+   *  declares none arms no workflow-level fuse and is bounded only by the SDK host. */
+  defaultTimeoutMs?: number;
+  /** Default assistant turns per child attempt, within the host clamp of 1..20.
+   *  Absent leaves the bridge's own default in place. */
+  defaultMaxTurns?: number;
+  /**
+   * Wall clock over the agent chain, in milliseconds, armed once at construction.
+   * The deadline is checked when a child STARTS, so a run is bounded by this value
+   * plus at most one child's own `timeoutMs`. Absent means no run deadline.
+   */
+  runtimeMs?: number;
+  /** Injectable numeric clock for the run deadline; defaults to `Date.now`. Separate
+   *  from `now()`, which produces ISO strings for journal lines. */
+  nowMs?: () => number;
+  // default DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS; global per-run cap across agent() calls;
   // cyclic workflows allowed up to the cap, exceeding it throws WorkflowInvocationCapError and exits the run.
   maxTotalAgentInvocations?: number;
   journal?: WorkflowJournalSink; // default: no-op sink
@@ -576,6 +616,9 @@ export interface WorkflowRuntime {
   getJournal(): WorkflowJournalLine[]; // in-memory mirror (for tests / final render)
   getArgs(): string | undefined;
   currentPhase(): string | undefined;
+  /** Gate-owned high-water mark of simultaneously executing leaf agents. The only
+   *  honest source for this number; the journal cannot produce it (see AgentConcurrencyGate). */
+  peakAgentConcurrency(): number;
 }
 
 export function assertWorkflowInput(value: unknown, field = "workflow input"): asserts value is string | undefined {
@@ -625,32 +668,52 @@ async function runScheduled<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
 interface AgentConcurrencyGate {
   acquire(): Promise<void>;
   release(): void;
+  /**
+   * High-water mark of simultaneously EXECUTING leaf agents.
+   *
+   * Gate-owned rather than derived from the journal, and that is the whole point:
+   * `agent_start` is emitted before `acquire()`, so counting overlapping
+   * start/end intervals counts children that are still queued. That number is
+   * demand, not concurrency, and printing it beside a concurrency limit would
+   * read as a limit breach that never happened.
+   */
+  peak(): number;
 }
 
 class UnlimitedAgentConcurrencyGate implements AgentConcurrencyGate {
+  #inUse = 0;
+  #peak = 0;
+
   acquire(): Promise<void> {
+    this.#inUse += 1;
+    if (this.#inUse > this.#peak) this.#peak = this.#inUse;
     return Promise.resolve();
   }
 
   release(): void {
-    // no-op
+    this.#inUse -= 1;
+  }
+
+  peak(): number {
+    return this.#peak;
   }
 }
 
 class CountingAgentConcurrencyGate implements AgentConcurrencyGate {
   private inUse = 0;
+  private peakInUse = 0;
   private readonly waiters: Array<() => void> = [];
 
   constructor(private readonly maxConcurrentAgents: number) {}
 
   acquire(): Promise<void> {
     if (this.inUse < this.maxConcurrentAgents) {
-      this.inUse += 1;
+      this.enter();
       return Promise.resolve();
     }
     return new Promise((resolve) => {
       this.waiters.push(() => {
-        this.inUse += 1;
+        this.enter();
         resolve();
       });
     });
@@ -660,6 +723,15 @@ class CountingAgentConcurrencyGate implements AgentConcurrencyGate {
     this.inUse -= 1;
     const next = this.waiters.shift();
     if (next !== undefined) next();
+  }
+
+  peak(): number {
+    return this.peakInUse;
+  }
+
+  private enter(): void {
+    this.inUse += 1;
+    if (this.inUse > this.peakInUse) this.peakInUse = this.inUse;
   }
 }
 
@@ -691,6 +763,11 @@ function normalizeTimeoutMs(timeoutMs: number): number {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error("agent timeoutMs must be a positive safe integer");
   }
+  if (timeoutMs > WORKFLOW_MAX_TIMEOUT_MS) {
+    throw new Error(
+      `agent timeoutMs must not exceed ${WORKFLOW_MAX_TIMEOUT_MS}; larger values cannot be represented by Node timers with the SDK backstop`,
+    );
+  }
   return timeoutMs;
 }
 
@@ -718,6 +795,18 @@ function executedModelEvidence(
     ...(result.modelRoleFallback !== undefined ? { modelRoleFallback: result.modelRoleFallback } : {}),
     ...(result.thinking !== undefined ? { thinking: result.thinking } : {}),
   };
+}
+
+/** The host clamps `maxTurns` to 1..20 (`agent-runner.ts`). The runtime refuses an
+ *  out-of-range value here, BEFORE any child starts, so an author sees the rule
+ *  instead of a request-validation failure after the run has begun spending. */
+function normalizeMaxTurns(maxTurns: number): number {
+  if (!Number.isSafeInteger(maxTurns) || maxTurns < WORKFLOW_AGENT_MIN_TURNS || maxTurns > WORKFLOW_AGENT_MAX_TURNS) {
+    throw new Error(
+      `agent maxTurns must be an integer between ${WORKFLOW_AGENT_MIN_TURNS} and ${WORKFLOW_AGENT_MAX_TURNS}`,
+    );
+  }
+  return maxTurns;
 }
 
 function normalizeMaxAnswerChars(maxAnswerChars: number): number {
@@ -849,8 +938,9 @@ function assertScriptValidationErrors(returned: unknown): readonly string[] {
 }
 
 /** Default global per-run cap on total dsl.agent() invocations. Cyclic workflows are
- *  allowed up to this cap; exceeding it throws WorkflowInvocationCapError and exits the run. */
-export const DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS = 1000;
+ *  allowed up to this cap; exceeding it throws WorkflowInvocationCapError and exits the run.
+ *  Single-sourced from the package budget contract. */
+export const DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS = DEFAULT_WORKFLOW_BUDGET.totalAgents;
 
 /** Thrown by agentDsl() when a run exceeds maxTotalAgentInvocations. Bubbles past
  *  grouped contexts (parallel/pipeline) so a cyclic/runaway workflow exits the run
@@ -861,6 +951,36 @@ export class WorkflowInvocationCapError extends Error {
     super(`workflow exceeded maxTotalAgentInvocations cap of ${cap}`);
     this.name = "WorkflowInvocationCapError";
     this.cap = cap;
+  }
+}
+
+/** The two failures that bound the RUN, not one branch. Both are thrown before any
+ *  child work and must exit grouped contexts unchanged. */
+function isRunLevelWorkflowFailure(err: unknown): boolean {
+  return err instanceof WorkflowInvocationCapError || err instanceof WorkflowRunDeadlineError;
+}
+
+/**
+ * Thrown when a child would START after the run's wall clock expired. Mirrors
+ * WorkflowInvocationCapError deliberately: same check site, same bubbling past
+ * grouped contexts, same "refuse the next one rather than abort the current one"
+ * discipline. Aborting a child mid-flight would need a second abort path racing
+ * the per-child fuse, which is the defect the single-deadline rule removes.
+ *
+ * What it bounds, stated so a reader does not have to infer it: the AGENT CHAIN.
+ * A run is bounded by `runtimeMs` plus at most one child's own `timeoutMs`. Script
+ * code that calls no further agent is not bounded by this at all.
+ */
+export class WorkflowRunDeadlineError extends Error {
+  readonly runtimeMs: number;
+  readonly elapsedMs: number;
+  constructor(runtimeMs: number, elapsedMs: number) {
+    super(
+      `workflow exceeded its runtimeMs budget of ${runtimeMs} ms (${elapsedMs} ms elapsed) before this agent call started`,
+    );
+    this.name = "WorkflowRunDeadlineError";
+    this.runtimeMs = runtimeMs;
+    this.elapsedMs = elapsedMs;
   }
 }
 
@@ -1414,6 +1534,9 @@ interface PhysicalAgentAttemptInput {
   permissionMode: PermissionMode;
   workspaceMode: WorkspaceMode;
   opts: WorkflowAgentAnyOptions | undefined;
+  /** Resolved answer bound, including the run default. Kept outside the request and
+   *  replay key so a tighter current bound rejects an older recorded answer. */
+  maxAnswerChars?: number;
   checkSchema?: (text: string) => AgentSchemaCheck;
   /** Present only when the logical call was served from a record; no child then runs. */
   replayedText?: string;
@@ -1527,6 +1650,30 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     options.defaultMaxToolCalls ?? DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
     "defaultMaxToolCalls",
   );
+  // No package fallback here on purpose: the runner owns the contract, and an
+  // embedder that supplies nothing keeps the pre-contract behaviour instead of
+  // silently acquiring a bound it never asked for.
+  const defaultMaxAnswerChars =
+    options.defaultMaxAnswerChars === undefined ? undefined : normalizeMaxAnswerChars(options.defaultMaxAnswerChars);
+  const defaultTimeoutMs =
+    options.defaultTimeoutMs === undefined ? undefined : normalizeTimeoutMs(options.defaultTimeoutMs);
+  const defaultMaxTurns =
+    options.defaultMaxTurns === undefined ? undefined : normalizeMaxTurns(options.defaultMaxTurns);
+  // Distinct from the DSL's own `nowMs()` below: that one is REPLAYED on a resume,
+  // and a replayed clock would let a resumed run inherit the original run's elapsed
+  // time. The budget deadline reads real time.
+  const deadlineNowMs = options.nowMs ?? (() => Date.now());
+  // Armed ONCE, here, so a nested parallel()/pipeline() child is checked on the same
+  // clock as a top-level one instead of restarting the budget per group.
+  let runtimeMs: number | undefined;
+  let runDeadlineMs: number | undefined;
+  let runStartedMs: number | undefined;
+  if (options.runtimeMs !== undefined) {
+    assertWorkflowBudgetValue("runtimeMs", options.runtimeMs);
+    runtimeMs = options.runtimeMs;
+    runStartedMs = deadlineNowMs();
+    runDeadlineMs = runStartedMs + runtimeMs;
+  }
   const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(options.maxTotalAgentInvocations);
   let totalAgentInvocations = 0;
   /**
@@ -1566,6 +1713,38 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
   }
 
+  function assertRunDeadline(): void {
+    if (runDeadlineMs === undefined) return;
+    const currentMs = deadlineNowMs();
+    if (currentMs > runDeadlineMs) {
+      throw new WorkflowRunDeadlineError(runtimeMs!, currentMs - runStartedMs!);
+    }
+  }
+
+  /**
+   * One runtime-source journal line per per-call axis raised above the value the run
+   * would otherwise have applied. An axis the run never bounded (no default configured)
+   * cannot be "raised", so it is skipped rather than reported against nothing.
+   */
+  function journalPerCallRaises(
+    axes: Partial<Record<keyof WorkflowBudget, { requested: number | undefined; applied: number | undefined }>>,
+  ): void {
+    for (const [axis, values] of Object.entries(axes) as Array<
+      [keyof WorkflowBudget, { requested: number | undefined; applied: number | undefined }]
+    >) {
+      const { requested, applied } = values;
+      if (requested === undefined || applied === undefined || requested <= applied) continue;
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: formatWorkflowBudgetRaise({ axis, applied, requested }, "call"),
+        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      });
+    }
+  }
+
   /**
    * ONE logical `agent()` call: the resolved request, the transport-retry bound, and the
    * replay envelope — opened once and closed once, whatever the physical executor below had
@@ -1594,6 +1773,28 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
     const effectivePhase = opts?.phase ?? _currentPhase;
     const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls ?? defaultMaxToolCalls, "agent maxToolCalls");
+    // Resolved here rather than at the check site below, so a call that declares
+    // NOTHING is held to the run's bound. Gating the check on `opts.maxAnswerChars`
+    // enforced the axis on exactly the calls that had already declared it, which is
+    // an axis in name only. The value is validated before a child starts; the bound
+    // itself is still applied to whatever answer arrives, fresh or replayed.
+    const maxAnswerChars =
+      opts?.maxAnswerChars !== undefined ? normalizeMaxAnswerChars(opts.maxAnswerChars) : defaultMaxAnswerChars;
+    const timeoutMs = opts?.timeoutMs !== undefined ? normalizeTimeoutMs(opts.timeoutMs) : defaultTimeoutMs;
+    // Refused here — before the invocation is spent on a child — so an out-of-clamp
+    // value is an authoring error the operator reads immediately, not a host
+    // request-validation failure discovered after the run started spending.
+    const maxTurns = opts?.maxTurns !== undefined ? normalizeMaxTurns(opts.maxTurns) : defaultMaxTurns;
+    // A stage that asks for MORE than the run's applied default gets it — a down-only
+    // rule would make a legitimately long stage unauthorable and the operator would
+    // answer by raising the package default for everyone. What it does not get is
+    // silence: the raise is journalled where the rest of the run's evidence lives.
+    journalPerCallRaises({
+      toolCalls: { requested: opts?.maxToolCalls, applied: defaultMaxToolCalls },
+      answerChars: { requested: opts?.maxAnswerChars, applied: defaultMaxAnswerChars },
+      timeoutMs: { requested: opts?.timeoutMs, applied: defaultTimeoutMs },
+      turns: { requested: opts?.maxTurns, applied: defaultMaxTurns },
+    });
     const agentName = opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
     const permissionMode = defaultWorkflowPermissionMode(agentName, opts?.permissionMode);
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
@@ -1608,7 +1809,12 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.modelRole !== undefined ? { modelRole: opts.modelRole } : {}),
-      ...(opts?.timeoutMs !== undefined ? { timeoutMs: normalizeTimeoutMs(opts.timeoutMs) } : {}),
+      // The declared fuse is the AUTHORITY over this child's wall clock (D4). It is
+      // resolved here — default included — so the request the bridge receives always
+      // carries the number the SDK turn budget is then derived from, and the two
+      // deadlines can never expire at the same instant.
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(maxTurns !== undefined ? { maxTurns } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
@@ -1643,6 +1849,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           permissionMode,
           workspaceMode,
           opts,
+          ...(maxAnswerChars !== undefined ? { maxAnswerChars } : {}),
           attempt,
           attempts,
           logicalCallId,
@@ -1690,7 +1897,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * evidence an operator has that the stage was paid for twice.
    */
   async function runPhysicalAgentAttempt(input: PhysicalAgentAttemptInput): Promise<PhysicalAgentAttempt> {
-    const { permissionMode, workspaceMode, opts, checkSchema, replayedText, attempt, attempts } = input;
+    const { permissionMode, workspaceMode, opts, maxAnswerChars, checkSchema, replayedText, attempt, attempts } = input;
     // Emitted only when a retry budget was actually declared, so every journal written
     // before `attempts` existed stays byte-identical and absence still means "one attempt".
     // The three travel together: an ordinal with no logical call to belong to cannot be
@@ -1705,12 +1912,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (totalAgentInvocations > maxTotalAgentInvocations) {
       throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
     }
+    // Refuse an already-expired attempt before it occupies a concurrency slot or
+    // inflates the gate-owned peak. Fresh work checks again after any queue wait,
+    // immediately before execution; a replay has no gate and this is its only check.
+    assertRunDeadline();
     const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
     // `callId` is deliberately absent from `canonicalAgentRequest`, so giving each physical
     // attempt its own identity leaves the logical call's replay key untouched.
     const req: WorkflowAgentRequest = { ...input.req, callId };
     const replayed = replayedText !== undefined;
-
     const requestedLiveModel = liveModelFromSelector(req.model);
     emit({
       ts: nowFn(),
@@ -1737,7 +1947,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
       ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
     });
-    const start = Date.now();
+    let executionStartedAtMs = Date.now();
     let finalResult: WorkflowAgentResult;
     if (replayedText !== undefined) {
       // No child runs. The recorded answer is projected into the same result
@@ -1761,6 +1971,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           async () => {
             await agentConcurrencyGate.acquire();
             try {
+              executionStartedAtMs = Date.now();
+              assertRunDeadline();
               return await agentRunner(req);
             } finally {
               agentConcurrencyGate.release();
@@ -1772,7 +1984,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         }
         finalResult = result;
       } catch (err) {
-        const durationMs = Date.now() - start;
+        const durationMs = Date.now() - executionStartedAtMs;
         // A thrown transport failure never reaches an `agent_end`, so this IS the terminal
         // journal record of the call. Carrying the declared cause here is what makes
         // `sdk-unavailable` readable end to end without matching on the message.
@@ -1823,11 +2035,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // here so a replayed answer is held to the caller's CURRENT bound. Tightening
     // it therefore fails an old recording loudly instead of passing text the next
     // stage's prompt cannot hold.
-    if (opts?.maxAnswerChars !== undefined && finalResult.ok && finalResult.status === "completed") {
-      const maxAnswerChars = normalizeMaxAnswerChars(opts.maxAnswerChars);
+    if (maxAnswerChars !== undefined && finalResult.ok && finalResult.status === "completed") {
       const length = finalResult.text?.length ?? 0;
       if (length > maxAnswerChars) {
-        const message = `Agent answer is ${length} characters; the call allows ${maxAnswerChars}.`;
+        // Keep the established first sentence stable for callers that surface it
+        // verbatim; append the budget classification instead of inserting it before
+        // the sentence-ending period.
+        const message = `Agent answer is ${length} characters; the call allows ${maxAnswerChars}. Budget axis: answerChars.`;
         finalResult = {
           ...finalResult,
           ok: false,
@@ -1864,7 +2078,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
           ...executedModelEvidence(finalResult),
           message: err instanceof Error ? err.message : String(err),
-          durationMs: Date.now() - start,
+          ...(finalResult.usage !== undefined ? { usage: finalResult.usage } : {}),
+          durationMs: Date.now() - executionStartedAtMs,
         });
         throw err;
       }
@@ -1885,7 +2100,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         diagnostics: [...finalResult.diagnostics, message],
       };
     }
-    const durationMs = Date.now() - start;
+    const durationMs = Date.now() - executionStartedAtMs;
     let artifactEvidence;
     try {
       artifactEvidence = options.artifactPorts?.recordAgentEvidence({
@@ -1921,6 +2136,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         // timeout into an unclassified store error and leave the operator matching prose.
         ...(finalResult.status !== "completed" ? { failureCause: workflowAgentFailureCause(finalResult) } : {}),
         ...executedModelEvidence(finalResult),
+        ...(finalResult.usage !== undefined ? { usage: finalResult.usage } : {}),
         message: err instanceof Error ? err.message : String(err),
         durationMs,
       });
@@ -2065,7 +2281,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
             }
             acc = next;
           } catch (err) {
-            if (err instanceof WorkflowInvocationCapError || err instanceof CapturedWorkflowBranchFailure) throw err;
+            if (isRunLevelWorkflowFailure(err) || err instanceof CapturedWorkflowBranchFailure) throw err;
             throw new CapturedWorkflowBranchFailure(undefined, {
               index: itemIndex,
               stageIndex: si,
@@ -2090,9 +2306,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         emitGroupBranchFailure(returnedFailure);
         return { index, status: "failed", value, failure: returnedFailure };
       } catch (err) {
-        // The invocation cap is a hard run-level failure and remains its own
-        // public error type instead of being converted into a partial group.
-        if (err instanceof WorkflowInvocationCapError) throw err;
+        // The invocation cap and the run deadline are hard RUN-level failures and
+        // keep their own public error types instead of being converted into a
+        // partial group: a bound on the whole run is not one branch's problem.
+        if (isRunLevelWorkflowFailure(err)) throw err;
         const failure =
           err instanceof CapturedWorkflowBranchFailure
             ? err.failure
@@ -2317,6 +2534,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     getJournal: () => [...journalMirror],
     getArgs: () => args,
     currentPhase: () => _currentPhase,
+    peakAgentConcurrency: () => agentConcurrencyGate.peak(),
   };
 }
 
@@ -2387,6 +2605,9 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
     // is a different call and must not reuse the earlier record.
     timeoutMs: req.timeoutMs ?? null,
+    // Same class again: two turn budgets produce different child behaviour, so a
+    // record made under one must not be served to the other.
+    maxTurns: req.maxTurns ?? null,
     label: req.label ?? null,
     phase: req.phase ?? null,
     sandbox: req.sandbox ?? null,

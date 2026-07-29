@@ -110,6 +110,7 @@ extensions/_shared/viewer-geometry.ts
 extensions/_shared/widget-render.ts
 extensions/_shared/workflow-agent-bridge.ts
 extensions/_shared/workflow-artifacts.ts
+extensions/_shared/workflow-budget.ts
 extensions/_shared/workflow-failure.ts
 extensions/_shared/workflow-handoff.ts
 extensions/_shared/workflow-journal.ts
@@ -352,6 +353,7 @@ tests/shared/workflows/workflow-agent-transport.test.ts
 tests/shared/workflows/workflow-agent-uniqueness.test.ts
 tests/shared/workflows/workflow-agent-validate.test.ts
 tests/shared/workflows/workflow-artifacts.test.ts
+tests/shared/workflows/workflow-budget.test.ts
 tests/shared/workflows/workflow-continuation.test.ts
 tests/shared/workflows/workflow-evidence.test.ts
 tests/shared/workflows/workflow-failure-diagnostic.test.ts

@@ -139,9 +139,20 @@ The default export receives `(dsl, input)`. Everything a stage needs is on
 | `workflow(subFn, input?)`      | Run a nested workflow function on the same handle.                                  |
 
 Useful `agent()` options: `agent` (catalog name), `readOnly: true`, `tools`,
-`maxToolCalls`, `model`, `timeoutMs`, `label`, `phase`, `artifact` (gives the
-answer a stable name), `sandbox`, and — on the shaped overload — `schema` plus
-`validate`.
+`maxToolCalls`, `model`, `timeoutMs`, `maxTurns`, `maxAnswerChars`, `label`,
+`phase`, `artifact` (gives the answer a stable name), `sandbox`, and — on the
+shaped overload — `schema` plus `validate`.
+
+Every run already applies the package budget contract, so a script that declares
+none of the limits above is still bounded: global agent concurrency, total agent
+invocations, a run wall clock over the agent chain, and per child a wall-clock
+fuse, tool calls, turns and answer characters. Declare an option only where the
+stage needs a different number than the package default; the run's
+`.locus-pi/<runId>/README.md` prints every axis with the value that applied,
+beside the spend evidence that actually exists. Per-child tool calls, turns and
+answer characters are enforced but counted by nobody, so they print as "not
+recorded" rather than as a number — as does cost, which the host reports as a
+constant zero.
 
 ## 7. Author a new one
 

@@ -24,6 +24,7 @@ import {
   type WorkflowArtifactRecord,
   type WorkflowArtifactRef,
 } from "./workflow-artifacts.js";
+import type { WorkflowBudget } from "./workflow-budget.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
 
 export const WORKFLOW_REPORT_ROOT_DIRNAME = ".locus-pi";
@@ -49,6 +50,21 @@ export interface WorkflowRunReportInput {
   result?: unknown;
   error?: string;
   journal: readonly WorkflowJournalLine[];
+  /** What this run was allowed to spend, and the one spend figure the journal
+   *  cannot produce. Absent only for callers that predate the budget contract. */
+  budget?: WorkflowRunReportBudget;
+}
+
+export interface WorkflowRunReportBudget {
+  applied: WorkflowBudget;
+  /**
+   * Gate-owned high-water mark of simultaneously executing leaf agents. It cannot
+   * be recomputed from the journal: `agent_start` is written before the
+   * concurrency gate is acquired, so overlapping start/end intervals count queued
+   * children too. That is demand, and printing it against a concurrency limit
+   * would show a breach that never happened.
+   */
+  peakConcurrency: number;
 }
 
 /** The slice of the artifact store the report needs; the store itself satisfies it. */
@@ -353,6 +369,7 @@ function reportReadme(options: {
     `- Machine records: \`.locus/runtime/workflows/${input.runId}/\` — journal, replay record, ` +
       `result envelope, script snapshot, transcripts and call envelopes`,
   );
+  lines.push(...budgetSection(input));
   const retryLines = retriedCallLines(input.journal);
   if (documents.length === 0) {
     lines.push("", "## Documents", "");
@@ -465,6 +482,136 @@ function retriedCallLines(journal: readonly WorkflowJournalLine[]): string[] {
     }
   }
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Budget versus spend
+// ---------------------------------------------------------------------------
+
+/** What the report prints when the evidence for an axis does not exist. Never `0`:
+ *  a zero would read as a measured spend of nothing, which is a different claim. */
+const NOT_RECORDED = "not recorded";
+
+/**
+ * Every axis with the value that applied, beside the spend this run's evidence can
+ * actually measure. Three tiers, and the report says which tier each axis is in:
+ * measurable from the journal, measurable only because the concurrency gate counts
+ * it, and not measurable at all. The last group prints "not recorded" rather than a
+ * number nobody counted — the same honesty rule cost is held to.
+ */
+function budgetSection(input: WorkflowRunReportInput): string[] {
+  if (input.budget === undefined) return [];
+  const { applied, peakConcurrency } = input.budget;
+  const spend = journalSpend(input.journal);
+  const rows: Array<[string, string, string]> = [
+    ["`concurrency`", String(applied.concurrency), `${String(peakConcurrency)} peak (gate-owned)`],
+    [
+      "`totalAgents`",
+      String(applied.totalAgents),
+      // "invocations", not "started": a replayed call spends one against this cap
+      // (the runtime counts it before the replay lookup) while starting no child,
+      // so the count is right and the word "started" would have been the lie.
+      spend.replayedAgents === 0
+        ? `${String(spend.agents)} invocations`
+        : `${String(spend.agents)} invocations (${String(spend.replayedAgents)} replayed, no child ran)`,
+    ],
+    ["`runtimeMs`", `${String(applied.runtimeMs)} ms`, `${String(spend.runMs)} ms over the journal`],
+    [
+      "`timeoutMs`",
+      `${String(applied.timeoutMs)} ms`,
+      // Fresh children only. A replayed attempt's durationMs measures projecting a
+      // recorded answer, which never ran against this fuse; a run served entirely
+      // from records therefore has no longest child at all and says so.
+      spend.longestChildMs === undefined ? NOT_RECORDED : `${String(spend.longestChildMs)} ms longest child`,
+    ],
+    ["`toolCalls`", String(applied.toolCalls), NOT_RECORDED],
+    ["`turns`", String(applied.turns), NOT_RECORDED],
+    ["`answerChars`", String(applied.answerChars), NOT_RECORDED],
+    ["tokens", "not enforced", spend.tokens === undefined ? NOT_RECORDED : `${String(spend.tokens)} observed`],
+    ["cost", "not enforced", "not available"],
+  ];
+  return [
+    "",
+    "## Budget",
+    "",
+    "| Axis | Applied | Spend |",
+    "| --- | --- | --- |",
+    ...rows.map(([axis, appliedText, spendText]) => `| ${axis} | ${appliedText} | ${spendText} |`),
+    "",
+    `Spend is read from this run's own journal, so it can only report what the journal carries. \`toolCalls\`, ` +
+      `\`turns\` and \`answerChars\` are enforced per child and counted by nobody, so they read "${NOT_RECORDED}" ` +
+      `rather than \`0\`. Cost is unavailable because the host reports a constant zero, and a limit over a stub ` +
+      "would report “under budget” forever.",
+    "",
+    "A replayed call spends an invocation against `totalAgents` but starts no child, so it is counted there and " +
+      "excluded from the longest-child duration and from the observed tokens. A run served entirely from records " +
+      `reports its longest child as "${NOT_RECORDED}", because no child ran.`,
+    "",
+    "`runtimeMs` bounds the agent chain: it is checked when a child starts, so a run is bounded by it plus at " +
+      "most one child's own `timeoutMs`, and script code that calls no further agent is not bounded by it.",
+  ];
+}
+
+interface WorkflowJournalSpend {
+  /** Agent invocations, replayed ones included — they spend the `totalAgents` cap. */
+  agents: number;
+  /** How many of those were served from a record, so the count above cannot be
+   *  read as "children that ran". */
+  replayedAgents: number;
+  runMs: number;
+  /** Longest FRESH child. Absent when nothing but replays ended. */
+  longestChildMs?: number;
+  tokens?: number;
+}
+
+function journalSpend(journal: readonly WorkflowJournalLine[]): WorkflowJournalSpend {
+  let agents = 0;
+  let replayedAgents = 0;
+  let longestChildMs: number | undefined;
+  let tokens: number | undefined;
+  let firstMs: number | undefined;
+  let lastMs: number | undefined;
+  for (const line of journal) {
+    if (line.kind === "agent_start") {
+      agents += 1;
+      // Never inferred from a missing duration or a zero token count — only the
+      // explicit marker the runtime writes on both start and end lines counts.
+      if (line.replayed === true) replayedAgents += 1;
+    }
+    // A post-child validator/artifact failure has no agent_end: its `error` line is
+    // the sole terminal record and carries executed-model evidence plus usage.
+    // Transport throws carry neither and therefore do not masquerade as executed
+    // children here.
+    const executedTerminal =
+      line.kind === "agent_end" ||
+      (line.kind === "error" && (line.executedModel !== undefined || line.usage !== undefined));
+    if (executedTerminal) {
+      // A replayed attempt started no child: its durationMs is how long projecting a
+      // recorded answer took, which is not a spend against the per-child wall clock.
+      if (
+        line.replayed !== true &&
+        typeof line.durationMs === "number" &&
+        (longestChildMs === undefined || line.durationMs > longestChildMs)
+      ) {
+        longestChildMs = line.durationMs;
+      }
+      const total = line.usage?.totalTokens;
+      // Absent usage is absent, not zero: the host omits it rather than reporting 0.
+      if (typeof total === "number") tokens = (tokens ?? 0) + total;
+    }
+    const ms = Date.parse(line.ts ?? "");
+    if (!Number.isNaN(ms)) {
+      if (firstMs === undefined) firstMs = ms;
+      lastMs = ms;
+    }
+  }
+  return {
+    agents,
+    replayedAgents,
+    runMs: firstMs === undefined || lastMs === undefined ? 0 : lastMs - firstMs,
+    ...(longestChildMs === undefined ? {} : { longestChildMs }),
+    ...(tokens === undefined ? {} : { tokens }),
+  };
 }
 
 function documentEntry(document: WorkflowReportDocument): string {

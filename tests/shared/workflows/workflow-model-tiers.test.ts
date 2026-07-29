@@ -15,10 +15,15 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
+  readWorkflowRunSummary,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
 } from "../../../extensions/_shared/workflow-journal.js";
-import { createWorkflowRuntime, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowAgentResult,
+  type WorkflowJournalLine,
+} from "../../../extensions/_shared/workflow-runtime.js";
 import {
   parseModelSelector,
   resolveWorkflowModel,
@@ -842,6 +847,46 @@ describe("executed-model evidence", () => {
     const row = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
     expect(row?.status).toBe("error");
     expect(row?.model).toBe("test/fast");
+  });
+
+  it("round-trips usage on the sole error line when a validator throws after execution", async () => {
+    const root = tieredProject();
+    const runId = "tier-validator-usage";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      journal: createWorkflowJournalSink(root, runId),
+      agentRunner: async (request): Promise<WorkflowAgentResult> => ({
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text: '{"count":3}',
+        diagnostics: [],
+        agent: request.agent,
+        executedModel: "test/fast",
+        usage: { input: 20, output: 10, totalTokens: 30, costTotal: 0 },
+      }),
+    });
+
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("cheap work", {
+        schema: COUNT_SCHEMA,
+        validate: () => {
+          throw new Error("validator exploded after measured execution");
+        },
+      }),
+    ).rejects.toThrow(/measured execution/u);
+
+    const persisted = readWorkflowRunJournalState(root, runId);
+    expect(persisted.diagnostics).toEqual([]);
+    const failure = persisted.lines.find((line) => line.kind === "error");
+    expect(failure?.executedModel).toBe("test/fast");
+    expect(failure?.usage).toEqual({ input: 20, output: 10, totalTokens: 30, costTotal: 0 });
+    expect(readWorkflowRunSummary(root, runId).usage).toEqual({
+      input: 20,
+      output: 10,
+      totalTokens: 30,
+      costTotal: 0,
+    });
   });
 
   it("keeps the readback on the error line when the artifact writer fails after the child ran", async () => {

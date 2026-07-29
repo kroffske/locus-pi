@@ -182,7 +182,9 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain("validate: questionCoverageErrors");
     expect(source).toContain("const MAX_QUESTION_ROUNDS = 3");
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
-    expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
+    // No `maxToolCalls` at all: the package budget contract supplies it, and a
+    // stage that restated the default would silently disagree with it the day it moves.
+    expect(source.match(/maxToolCalls:/gu)).toBeNull();
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
     expect(source.match(/readOnly: true/gu)).toHaveLength(2);
     expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
@@ -1174,7 +1176,7 @@ describe("workflow example: review.workflow.mjs", () => {
     await expect(runWorkflow(dsl, "x".repeat(16_001))).rejects.toThrow("16000-character context limit");
     expect(agentCalls).toBe(0);
     await expect(runWorkflow(dsl, "review current branch")).rejects.toThrow(
-      "Agent answer is 64001 characters; the call allows 64000.",
+      "Agent answer is 64001 characters; the call allows 64000. Budget axis: answerChars.",
     );
     expect(agentCalls).toBe(2);
   });
