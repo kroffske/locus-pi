@@ -47,16 +47,23 @@ on two separate lines.
 A non-default role assignment does not change the session model or the session
 effort. It saves an explicit `provider/model:effort` route.
 
+Since T-129 those routes are **executed**, not merely recorded: an agent whose
+frontmatter names a role, a workflow stage declaring `modelRole`, and
+`/agent run` all create the child session with the model the role resolves to. A
+role nothing assigns degrades to the session model and the degradation is
+recorded in the run evidence; a role assigned to a `provider/id` this host cannot
+resolve fails the call by name.
+
 ## Runtime capability of roles
 
-| Role      | Capability                          | Actual consumer                                                       |
-| --------- | ----------------------------------- | --------------------------------------------------------------------- |
-| `DEFAULT` | `active · session + route fallback` | Current session action and the last fallback of every resolver chain. |
-| `AGENT`   | `active · agents/workflows primary` | Default-loaded `agents` and the workflow agent bridge.                |
-| `TASK`    | `fallback · agents/workflows`       | Fallback after `AGENT` for the same active consumers.                 |
-| `PLAN`    | `dormant · beta prompt planning`    | Only the disabled beta `prompt-planning`; no default-loaded consumer. |
-| `SUMMARY` | `dormant · resolver only`           | Resolver contract and tests; no default-loaded consumer.              |
-| `SMOL`    | `fallback-only · summary resolver`  | Fallback in `SUMMARY → SMOL → DEFAULT`; no active summary caller yet. |
+| Role      | Capability                           | Actual consumer                                                                                                              |
+| --------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT` | `active · session + route fallback`  | Current session action and the last fallback of every resolver chain.                                                        |
+| `AGENT`   | `active · agents/workflows executor` | Default-loaded `agents` and the workflow agent bridge — this route selects the child session's model, not just its metadata. |
+| `TASK`    | `fallback · agents/workflows`        | Fallback after `AGENT` for the same active consumers.                                                                        |
+| `PLAN`    | `dormant · beta prompt planning`     | Only the disabled beta `prompt-planning`; no default-loaded consumer.                                                        |
+| `SUMMARY` | `dormant · resolver only`            | Resolver contract and tests; no default-loaded consumer.                                                                     |
+| `SMOL`    | `fallback-only · summary resolver`   | Fallback in `SUMMARY → SMOL → DEFAULT`; no active summary caller yet.                                                        |
 
 The selector deliberately does not present a dormant/resolver-only role as a
 fully active capability. The full source map is recorded in the task-local

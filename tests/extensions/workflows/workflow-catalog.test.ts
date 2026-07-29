@@ -373,8 +373,20 @@ describe("workflow operator catalog", () => {
       expect(namedText).not.toContain("phases:");
       expect(namedText).toContain("DSL: agent(), parallel(), pipeline(), phase(), log(), workflow()");
       expect(namedText).toContain('omitted agent uses role "default"');
-      expect(namedText).toContain("opts.model selects the child-session model");
-      expect(namedText).toContain("otherwise the active Pi session model is passed to the child executor");
+      // The reader-facing routing claim, kept honest by assertion: `/workflows info`
+      // must state the executor precedence and the two asymmetric failure modes, not
+      // the pre-T-129 "metadata beside the session model" story.
+      // The reader-facing routing claim, kept honest by assertion: `/workflows info`
+      // must state the executor precedence and the two asymmetric failure modes, not
+      // the pre-T-129 "metadata beside the session model" story. It also has to stay
+      // short enough to survive the bounded 48-column view asserted below.
+      expect(namedText).toContain(
+        "the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, " +
+          "else the session model",
+      );
+      expect(namedText).toContain("an unresolvable provider/id fails the call");
+      expect(namedText).toContain("an unassigned role degrades and is recorded");
+      expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain(
         "the packaged examples directory, currently live-smoke, plan-implement, plan, requirements-grill, review-fix, review",
       );

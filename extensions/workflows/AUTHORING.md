@@ -234,6 +234,93 @@ ${selectedText}
 );
 ```
 
+**Say which model a stage runs on, or say nothing.** A stage picks its model with
+one of two options, and each has exactly one meaning:
+
+```js
+// A TIER — a name in the roles table. What it resolves to is the operator's choice.
+await dsl.agent(prompt, { agent: "explore", modelRole: "smol", label: "scout" });
+
+// A CONCRETE model — always provider/id. This host must have it, or the call fails.
+await dsl.agent(prompt, { agent: "reviewer", model: "openai-codex/gpt-5.6-luna" });
+```
+
+The rule that separates them is one sentence: **a slash means a real provider, no
+slash means a role.** The full precedence a child is created with is
+
+```
+opts.model  →  opts.modelRole  →  the agent's frontmatter tier  →  the session model
+```
+
+and the two failure modes are deliberately different:
+
+- **A concrete `provider/id` that this host cannot resolve fails the call by
+  name**, with zero child sessions. A typo or an unconfigured provider is an
+  instruction that cannot be carried out, and running something else instead is
+  the bug this option exists to prevent.
+- **A role that no config assigns degrades to the session model** and records
+  `modelRoleFallback` on the `agent_end` journal line, in the run-result artifact
+  and in the run report. The package ships **no** role assignments — it will not
+  decide which vendor you pay — so a workflow that names `smol` still runs for
+  someone who has never configured a tier, and the evidence says the tier was not
+  honoured.
+- **A role you assigned but mis-spelled fails the call by name.** `"smol":
+"gpt-5.6-mini"` (no `provider/`) is a configuration error, not an unassigned
+  role, so it is **not** degraded: the refusal quotes the value as written and
+  names the layer holding it. Degrading it would run the session model under the
+  name `smol` and tell you the role was "not assigned in any model-roles layer" —
+  a statement your own config file contradicts.
+
+An optional `:off|minimal|low|medium|high|xhigh` suffix on a concrete selector is
+**display only**. It changes the label on the live row and nothing else — the
+child's reasoning effort is not plumbed through yet. Do not write `model:
+"provider/id:high"` and expect a harder-thinking child.
+
+**Making a tier mean something.** Roles resolve through `session` → Pi settings →
+project config → user config. The project layer is a local, git-ignored file:
+
+```jsonc
+// .pi/model-roles/config.json — never committed, never packed
+{
+  "version": 1,
+  "roles": {
+    "smol": "openai-codex/gpt-5.6-mini",
+    "slow": "openai-codex/gpt-5.6-luna",
+    "task": "openai-codex/gpt-5.6-luna",
+  },
+}
+```
+
+Use the provider/id strings your own host actually has — `/model` lists them, and
+a name this host does not have fails the call rather than quietly downgrading.
+
+`modelRole` only ever names a role. A slash-bearing value such as
+`modelRole: "openai/gpt-5"` is refused by name with zero child sessions, and the
+refusal points at `model:` — degrading it to the session model would run something
+other than the model you spelled out, which is the one thing this option must never
+do.
+
+**Deferred, and named so it is not mistaken for an oversight.** There is deliberately
+**no durable, shippable assignment layer** yet — no packaged defaults, no file the
+package installs. `.pi/model-roles/config.json` above is a local operator file, and
+that is the whole story for now. Where a shippable layer should live is the same
+question the run-budget work has to answer, and deciding it twice, differently, is the
+failure mode worth avoiding, so both are settled together in a later task.
+
+**Two more things a tier changes.** First, a stage's declared tier is part of its
+replay identity, so two stages on two tiers occupy two records instead of sharing
+one. Second, and this is the sharp edge: the replay key is built from the tier
+**name**, before the roles table is read. **Remapping a role in
+`.pi/model-roles/config.json`, or editing an agent's frontmatter, does not
+invalidate a recorded run** — `--resume` will serve the old answer under the
+unchanged key. After changing what a tier means, discard the recorded runs you
+care about by hand.
+
+**Interactive children use the same chain.** `/agent run <name>` and the
+`spawn_agent` / `task` tool resolve an agent's frontmatter tier exactly as a
+workflow stage does, so the same agent cannot silently run on two different
+models depending on how it was started.
+
 **The runtime owns shape; the script owns meaning.** Declare lengths, counts, id
 patterns, enums, uniqueness (`uniqueItems`, `uniqueBy`, `uniqueTrimmedItems`) and
 non-blankness (`nonBlank`) in `agent({ schema })`, where a violation is re-asked

@@ -154,13 +154,31 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
     if (current === undefined) return;
     if (line.kind === "error") {
       const message = line.message?.trim() || "Workflow agent failed without an error message.";
-      agentLiveStore.patchExecution(execution, {
-        status: "error",
+      const patch = {
+        status: "error" as const,
         finalAnswer: message,
         errors: current.errors.includes(message) ? current.errors : [...current.errors, message],
         ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
         currentTools: [],
-      });
+      };
+      // The row was opened from `agent_start`, which carries the REQUESTED selector by
+      // documented design — the bridge has resolved nothing at that point. A call that
+      // failed without ever reporting an `executedModel` never reached a child, so its
+      // terminal row must drop that label instead of leaving the request standing where
+      // an operator reads it as the model that ran (W7).
+      //
+      // The mirror case is just as wrong and is why this line carries the model at all:
+      // a validator or artifact writer that throws AFTER the child returned is a failure
+      // of a call that really executed, and the runtime forwards the readback onto the
+      // `error` line for exactly that reason. Clearing there would erase the one piece of
+      // evidence the run does own, so the executed value replaces the request instead.
+      if (line.executedModel === undefined) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+      else
+        agentLiveStore.patchExecution(execution, {
+          ...patch,
+          ...(line.model !== undefined ? { model: line.model } : {}),
+          ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
+        });
       return;
     }
     if (line.kind !== "agent_end") return;
@@ -170,10 +188,22 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       terminal && line.replayed === true && projectRoot === undefined
         ? "Replayed answer verification context is unavailable."
         : undefined;
-    agentLiveStore.patchExecution(execution, {
+    // A terminal call that never reported an executed model never reached a child — a
+    // refused tier, a malformed role, a run that died in setup, or a REPLAYED answer for
+    // which no child ran at all. Its row still carries the requested selector from
+    // `agent_start`, and such an `agent_end` sends no `model` to replace it, so the label
+    // has to be dropped rather than left to read as evidence of a run (W7). A call that
+    // DID execute keeps its label, including the `unavailable` readback case where the
+    // peer named nothing but the child ran.
+    //
+    // The gate is `executedModel` alone and NOT the status, because a completed call can
+    // be just as modelless: a replay is served from a recorded answer with no child and
+    // no readback (`workflow-runtime.ts` builds that result without either field), and
+    // leaving `done` rows out of the rule let a request stand as a result on the one
+    // status an operator is least likely to question.
+    const neverExecuted = terminal && line.executedModel === undefined;
+    const patch = {
       status,
-      ...(line.model !== undefined ? { model: line.model } : {}),
-      ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
       // Slot round on the anchor row (REQ-009): cosmetic while the executor row carries it, but
       // load-bearing in the degraded fallback where no executor row exists (host unavailable).
       ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
@@ -188,7 +218,14 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
               : [...current.errors, replayContextError],
           }
         : {}),
-    });
+    };
+    if (neverExecuted) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+    else
+      agentLiveStore.patchExecution(execution, {
+        ...patch,
+        ...(line.model !== undefined ? { model: line.model } : {}),
+        ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
+      });
     if (terminal && line.replayed === true && projectRoot !== undefined) {
       hydrateWorkflowAgentAnswerArtifact(projectRoot, line, execution);
     }

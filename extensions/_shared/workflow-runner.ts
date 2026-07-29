@@ -161,7 +161,7 @@ export interface RunWorkflowScriptOptions {
     maxToolCalls?: number;
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
-  resolveModel?: (selector: string) => unknown; // pass-through to the bridge (tests)
+  resolveModel?: import("./workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
   /** Called once after run identity is allocated and before any journal event. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
   onEvent?: (line: WorkflowJournalLine) => void;

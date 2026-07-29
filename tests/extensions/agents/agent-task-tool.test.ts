@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,27 @@ afterEach(() => {
 function tempRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), "locus-pi-agent-task-tool-"));
   tempRoots.push(root);
+  return root;
+}
+
+/**
+ * A project root that owns the `task` agent outright.
+ *
+ * Agent discovery is project → user → bundled (`agents.ts` `agentDiscoveryDirs`), so
+ * a root with no `.agents/agents/` silently borrows whatever catalog the developer
+ * happens to have installed under `$HOME`. That was invisible while agent frontmatter
+ * `model:` was parsed and never used; now that it selects the child's model, a stale
+ * home catalog decides what these assertions see. So the project declares its own.
+ */
+function tempRootWithTaskAgent(): string {
+  const root = tempRoot();
+  const dir = path.join(root, ".agents", "agents");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, "task.md"),
+    "---\nname: task\ndescription: General task agent\nmodel: task\n---\nDo the task.\n",
+    "utf8",
+  );
   return root;
 }
 
@@ -65,7 +86,7 @@ describe("agent task tool execution", () => {
   it("returns one child's exact text and keeps metadata in details", async () => {
     mockSdkResult("  done\nwith details\n");
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "openai", id: "gpt-5.5", name: "GPT 5.5" };
     h.pi.setThinkingLevel?.("high");
     agents(h.pi);
@@ -98,7 +119,7 @@ describe("agent task tool execution", () => {
     const text = '{"status":"failed","summary":"model words only"}';
     mockSdkResult(text);
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
     const result = await runTool(h, "spawn_agent", { task: "Return JSON-looking prose" });
@@ -111,7 +132,7 @@ describe("agent task tool execution", () => {
   it("returns isError when the child has no non-empty final text", async () => {
     mockSdkResult(" \n ");
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
     const result = await runTool(h, "task", { task: "Return nothing" });
@@ -134,7 +155,7 @@ describe("agent task tool execution", () => {
       };
     });
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.hasUI = true;
     agents(h.pi);
 

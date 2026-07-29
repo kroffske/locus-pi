@@ -187,6 +187,77 @@ describe("workflow run report", () => {
     assert.ok(readme.indexOf("04-workflow-questions.md") > publishedHeading);
   });
 
+  it("names the model each agent document ran on, and only from agent_end", () => {
+    const root = project();
+    const records = [
+      record({ artifactId: "call-0001-answer", name: "cheap.md", kind: "answer", callId: "call-0001", stage: "draft" }),
+      record({
+        artifactId: "call-0002-answer",
+        name: "strong.md",
+        kind: "answer",
+        callId: "call-0002",
+        stage: "judge",
+      }),
+      record({ artifactId: "call-0003-answer", name: "old.md", kind: "answer", callId: "call-0003", stage: "legacy" }),
+    ];
+    const journal = [
+      ...agentLines("call-0001", "cheap stage", "draft"),
+      ...agentLines("call-0002", "strong stage", "judge"),
+      ...agentLines("call-0003", "legacy stage", "legacy"),
+    ];
+    // agent_start carries a REQUEST; the report must ignore it. If it did not, the
+    // legacy call below would be reported as having run on `test/strong`, which
+    // nothing observed.
+    const startFor = (callId: string) => journal.find((l) => l.callId === callId && l.kind === "agent_start")!;
+    const endFor = (callId: string) => journal.find((l) => l.callId === callId && l.kind === "agent_end")!;
+    startFor("call-0001").requestedModel = "test/fast";
+    endFor("call-0001").executedModel = "test/fast";
+    startFor("call-0002").requestedModel = "test/strong";
+    endFor("call-0002").executedModel = "test/strong";
+    startFor("call-0003").requestedModel = "test/strong";
+    endFor("call-0003").modelRoleFallback = 'modelRole "smol" is not assigned in any model-roles layer';
+
+    const outcome = writeWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, status: "completed", journal },
+      evidenceFrom(records, {
+        "call-0001-answer": "cheap body",
+        "call-0002-answer": "strong body",
+        "call-0003-answer": "legacy body",
+      }),
+    );
+
+    assert.equal(outcome.ok, true, outcome.ok ? undefined : outcome.message);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    assert.match(readme, /cheap stage · draft · ran on test\/fast/u);
+    assert.match(readme, /strong stage · judge · ran on test\/strong/u);
+    // No executedModel on that line ⇒ the report says nothing about a model, and
+    // says the tier degraded. Absence is never filled in from the request.
+    assert.match(readme, /legacy stage · legacy · declared tier unassigned/u);
+    assert.equal(/legacy stage · legacy · ran on/u.test(readme), false);
+  });
+
+  it("spells out an unavailable readback instead of naming a model called `unavailable`", () => {
+    // `unavailable` is the D6 sentinel for "the peer reported nothing". Rendered as
+    // "ran on unavailable" it reads to a human as a model NAMED unavailable — a
+    // fabricated model name in the reader's own copy of the evidence.
+    const root = project();
+    const records = [
+      record({ artifactId: "call-0001-answer", name: "quiet.md", kind: "answer", callId: "call-0001", stage: "draft" }),
+    ];
+    const journal = [...agentLines("call-0001", "quiet stage", "draft")];
+    journal.find((l) => l.callId === "call-0001" && l.kind === "agent_end")!.executedModel = "unavailable";
+
+    const outcome = writeWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, status: "completed", journal },
+      evidenceFrom(records, { "call-0001-answer": "quiet body" }),
+    );
+
+    assert.equal(outcome.ok, true, outcome.ok ? undefined : outcome.message);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    assert.match(readme, /quiet stage · draft · executed model unavailable/u);
+    assert.equal(/ran on unavailable/u.test(readme), false);
+  });
+
   it("renders JSON documents as Markdown, fencing nested shapes and keeping non-JSON verbatim", () => {
     const root = project();
     const records = [

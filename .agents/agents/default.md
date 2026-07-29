@@ -1,7 +1,7 @@
 ---
 name: default
 description: Owner-default workflow agent for general delegated workflow steps
-model: pi/task
+model: task
 thinking-level: medium
 evidence:
   mode: none

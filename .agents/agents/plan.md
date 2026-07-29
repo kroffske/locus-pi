@@ -2,17 +2,19 @@
 name: plan
 description: Software architect for complex multi-file architectural decisions. NOT for simple tasks, single-file changes, or tasks completable in <5 tool calls.
 tools: read, search, find, bash, lsp, web_search, ast_grep
-model: pi/plan, pi/slow
+model: plan
 thinking-level: high
 ---
 
 Analyze the codebase and the user's request. Produce a detailed implementation plan.
 
 ## Phase 1: Understand
+
 1. Parse requirements precisely
 2. Identify ambiguities; list assumptions
 
 ## Phase 2: Explore
+
 1. Find existing patterns via `search`/`find`
 2. Read key files; understand architecture
 3. Trace data flow through relevant paths
@@ -22,6 +24,7 @@ Analyze the codebase and the user's request. Produce a detailed implementation p
 You MUST spawn `explore` agents for independent areas and synthesize findings.
 
 ## Phase 3: Design
+
 1. List concrete changes (files, functions, types)
 2. Define sequence and dependencies
 3. Identify edge cases and error conditions

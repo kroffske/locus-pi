@@ -21,8 +21,19 @@ import {
   type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
 } from "./agent-sdk-host.js";
+import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
 import { discoverAgentDefinitions } from "./agents.js";
-import { loadModelRolesState, resolveAgentModelPreference } from "./model-settings.js";
+import type { ModelRoleResolution } from "./model-settings.js";
+import {
+  DEFAULT_MODEL_ROLES,
+  formatAssignment,
+  loadModelRolesState,
+  resolveAgentModelPreference,
+  malformedRoleAssignmentNote,
+  resolveDeclaredModelRole,
+  unassignedRoleNote,
+  type ModelRolesState,
+} from "./model-settings.js";
 import { resolveLiveModelDisplay } from "./live-model-display.js";
 import { DEFAULT_WORKFLOW_AGENT, workflowSlotKey } from "./workflow-runtime.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
@@ -32,7 +43,7 @@ import type {
   WorkflowAgentResult,
   WorkflowUsage,
 } from "./workflow-runtime.js";
-import { defaultResolveModel } from "./workflow-model-resolve.js";
+import { createWorkflowModelResolver, type WorkflowModelResolver } from "./workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode, WorkspaceMode } from "./types.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "./agent-read-only-policy.js";
@@ -70,7 +81,8 @@ export interface WorkflowAgentBridgeOptions {
     reportsDir?: string;
     onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
   }) => AgentExecutor;
-  resolveModel?: (selector: string) => unknown;
+  /** Injectable concrete-selector resolver; defaults to the host model registry on `ctx`. */
+  resolveModel?: WorkflowModelResolver;
   defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
   workspaceManager?: WorkflowWorkspaceManager;
   evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
@@ -111,7 +123,7 @@ export function resolveWorkspaceMode(input: {
 export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): WorkflowAgentRunner {
   const { pi, ctx, signal, resolveModel } = options;
   const defaultAgentName = options.defaultAgent ?? DEFAULT_WORKFLOW_AGENT;
-  const resolveModelFn = resolveModel ?? defaultResolveModel;
+  const resolveModelFn: WorkflowModelResolver = resolveModel ?? createWorkflowModelResolver(ctx);
   // Freeze executable package commands once, before the first workflow child can write.
   const repositoryCheckScripts = captureRepositoryCheckScripts(getWorkingDirectory(ctx));
   let worktreeCounter = 0;
@@ -158,13 +170,32 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     });
     const workspaceMode = resolveWorkspaceMode({ reqMode: req.workspaceMode, sandbox: req.sandbox });
 
-    // 3. Model role resolution (mirror runTaskTool)
+    // 3. Tier resolution. This is the one place that decides which model the child
+    //    runs on, and it decides it BEFORE any child is spawned so a refusal costs
+    //    nothing. `modelRoleResolution` continues to travel into the request capsule
+    //    and the run-result artifact exactly as it did before.
     const modelRoles = await loadModelRolesState(ctx);
-    const modelRoleResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
+    const tier = await resolveWorkflowTier({ req, agent, modelRoles, resolveModelFn });
+    if (tier.kind === "refused") {
+      return {
+        ok: false,
+        status: "failed",
+        // The SUMMARY carries the whole reason, not a headline. `diagnostics` does not
+        // reach `agent_end` or the result envelope — a live run proved the actionable
+        // half ("provider X has no model Y", the pi/<role> migration hint) was being
+        // dropped and the operator was left with a quoted selector and no next step.
+        summary: tier.message,
+        diagnostics: [tier.message],
+        agent: agent.name,
+        workspaceMode,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+      };
+    }
+    const modelRoleResolution = tier.roleResolution;
     const liveModel = resolveLiveModelDisplay({
       pi,
       ctx,
-      requestedModel: req.model,
+      ...(tier.kind === "resolved" ? { requestedModel: tier.selector } : {}),
       assignment: modelRoleResolution.assignment,
     });
 
@@ -241,6 +272,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       approvalTier,
       ...(req.tools !== undefined ? { allowedTools: req.tools } : {}),
       modelRoleResolution,
+      // Travels on the REQUEST because the run-result artifact is written from the
+      // request, inside the boundary, before this bridge ever sees a result.
+      ...(tier.kind === "inherit" && tier.fallback !== undefined ? { modelRoleFallback: tier.fallback } : {}),
       repositoryCheckScripts,
       ...(worktreePath !== undefined ? { workingDirectory: worktreePath } : {}),
       ...(options.args !== undefined || worktreePath !== undefined
@@ -286,7 +320,6 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       options.evidenceDestinations !== undefined && req.callId !== undefined
         ? options.evidenceDestinations(req.callId)
         : undefined;
-    const perCallModel = req.model !== undefined ? await Promise.resolve(resolveModelFn(req.model)) : undefined;
     const workflowParentRowId =
       options.workflowRunId !== undefined
         ? workflowAgentLiveRowId({
@@ -325,7 +358,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     };
     let liveExecution: AgentLiveExecutionHandle | undefined;
     const executor = createExecutorFn({
-      model: perCallModel ?? (ctx as { model?: unknown }).model,
+      // `perCallModel ?? resolvedRoleModel ?? ctx.model`, collapsed into the one term
+      // `resolveWorkflowTier` already computed. The parent model is reachable only
+      // through `kind: "inherit"` — i.e. the call declared no tier, or declared one
+      // that no layer assigns and the degradation was recorded.
+      model: tier.kind === "resolved" ? tier.model : (ctx as { model?: unknown }).model,
       live,
       onLiveExecution: (execution) => {
         liveExecution = execution;
@@ -378,6 +415,14 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         workspaceMode,
         readOnly: agent.readOnly,
         ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(boundary.executedModel !== undefined ? { executedModel: boundary.executedModel } : {}),
+        // Same gate as the settled path below, for the same reason: the note is past
+        // tense, and a call the fuse killed before kickoff has no child to speak of.
+        // `executedModel` is set only after the child is prompted, so it is the one
+        // honest proof of execution on every path — including this early return.
+        ...(tier.kind === "inherit" && tier.fallback !== undefined && boundary.executedModel !== undefined
+          ? { modelRoleFallback: tier.fallback }
+          : {}),
         ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
         ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
       };
@@ -403,12 +448,27 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // per-round token count. No usage on the row ⇒ omit (never a fabricated 0).
     const usage =
       slotRowId !== undefined && liveExecution !== undefined ? usageFromExecution(liveExecution) : undefined;
+    // The host readback, or nothing. `unavailable` is carried through verbatim so the
+    // evidence distinguishes "the peer told us" from "the peer had nothing to tell",
+    // and neither is ever replaced by the selector this bridge asked for.
+    const executedModel = boundary.executedModel;
+    // An unassigned role is an INTENT to degrade; it becomes a DEGRADATION only once a
+    // child actually RAN on the parent's model. The note is phrased in the past tense
+    // ("the child inherited the parent session model"), so emitting it for a call that
+    // never reached `createSession` — or that built a session and was cancelled before
+    // the child was ever prompted — would put a claim about a child that never ran into
+    // `agent_end`, the result envelope and the run-result artifact: invented execution
+    // evidence in the surfaces this task exists to make trustworthy. `executedModel` is
+    // set only after child kickoff (agent-sdk-host), so it is the honest gate; a created
+    // -but-never-prompted session has an id and must not qualify.
+    const degradationConfirmed =
+      tier.kind === "inherit" && tier.fallback !== undefined && boundary.executedModel !== undefined;
     const result: WorkflowAgentResult = {
       ok: boundary.status === "completed",
       status: boundary.status as WorkflowAgentResult["status"],
       summary: boundary.reason,
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
-      diagnostics: boundary.diagnostics,
+      diagnostics: degradationConfirmed ? [tier.fallback!, ...boundary.diagnostics] : boundary.diagnostics,
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       agent: agent.name,
       ...(req.label !== undefined ? { label: req.label } : {}),
@@ -416,7 +476,15 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
       ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
-      ...(liveModel?.model !== undefined ? { model: liveModel.model } : {}),
+      // Display prefers a real readback over the request; the sentinel is evidence,
+      // not a selector, so it stays out of the row and only enters `executedModel`.
+      ...(executedModel !== undefined && executedModel !== EXECUTED_MODEL_UNAVAILABLE
+        ? { model: executedModel }
+        : liveModel?.model !== undefined
+          ? { model: liveModel.model }
+          : {}),
+      ...(executedModel !== undefined ? { executedModel } : {}),
+      ...(degradationConfirmed ? { modelRoleFallback: tier.fallback! } : {}),
       ...(liveModel?.thinking !== undefined ? { thinking: liveModel.thinking } : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
@@ -427,6 +495,178 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     };
     return result;
   };
+}
+
+/**
+ * Which model this call runs on, decided before any child exists.
+ *
+ * Three outcomes, and the difference between them is the whole point of the tier
+ * feature:
+ *
+ *  - `resolved` — a concrete model came out of the registry and reaches the child.
+ *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in any
+ *    layer. The child runs on the parent session model and, when a role was named,
+ *    `fallback` records that in one sentence. Quiet fallback, loud record.
+ *  - `refused`  — a CONCRETE `provider/id` selector did not resolve. A typo, a
+ *    provider that is not configured, a model the host does not have. The call ends
+ *    here with the selector quoted and zero child sessions.
+ *
+ * The asymmetry is deliberate and is the owner's decision (OD5): the package ships
+ * no role assignments, so refusing an unassigned role would make every bundled agent
+ * fail on a stock install; but a selector an author typed by hand is an instruction,
+ * and silently running something else is exactly what this task exists to stop.
+ */
+type WorkflowTier =
+  | {
+      kind: "resolved";
+      /** Where the tier came from — used only to phrase diagnostics. */
+      origin: "call-model" | "call-role" | "frontmatter";
+      selector: string;
+      model: unknown;
+      roleResolution: ModelRoleResolution;
+    }
+  | { kind: "inherit"; roleResolution: ModelRoleResolution; fallback?: string }
+  | { kind: "refused"; message: string };
+
+async function resolveWorkflowTier(input: {
+  req: WorkflowAgentRequest;
+  agent: AgentDefinition;
+  modelRoles: ModelRolesState;
+  resolveModelFn: WorkflowModelResolver;
+}): Promise<WorkflowTier> {
+  const { req, agent, modelRoles, resolveModelFn } = input;
+  // Frontmatter preference is computed either way: it is what the request capsule,
+  // the run-result artifact and the live row have always recorded, and dropping it
+  // on the per-call paths would silently change three evidence surfaces.
+  const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
+
+  if (req.model !== undefined) {
+    const resolution = await resolveModelFn(req.model);
+    if (!resolution.ok) {
+      return refusal(`Per-call model ${JSON.stringify(req.model)} could not be used: ${resolution.message}`, req.model);
+    }
+    return {
+      kind: "resolved",
+      origin: "call-model",
+      selector: resolution.selector,
+      model: resolution.model,
+      roleResolution: frontmatterResolution,
+    };
+  }
+
+  if (req.modelRole !== undefined) {
+    // `modelRole` is a NAME IN THE ROLES TABLE and never a provider selector (D4).
+    // A slash means a concrete `provider/id` under the OD1 grammar, so a
+    // slash-bearing `modelRole` is a category error, not an unassigned role — and
+    // treating it as one would degrade it to the session model, i.e. silently run
+    // something other than the model the author spelled out. That is the exact
+    // fail-closed case OD5 keeps loud, so it refuses with the option to use instead.
+    if (req.modelRole.includes("/")) {
+      return refusal(
+        `modelRole ${JSON.stringify(req.modelRole)} is not a role name: a "/" means a concrete ` +
+          `provider/id selector, and modelRole only ever names a role in the model-roles table. ` +
+          `Use \`model: ${JSON.stringify(req.modelRole)}\` to pin a concrete model, or name a bare ` +
+          `role (one of: ${DEFAULT_MODEL_ROLES.join(", ")}).`,
+        req.modelRole,
+      );
+    }
+    // The DECLARED role only. `resolveModelRoleForPurpose`'s
+    // `preferred → agent → task → default` walk would answer a question the author
+    // did not ask, and `modelRole: "smol"` would run whatever `agent` holds.
+    const declared = resolveDeclaredModelRole(modelRoles, req.modelRole);
+    if (declared.malformed !== undefined) {
+      // Assigned but unparseable — a config typo, not an unassigned role. Degrading
+      // it would run the parent's model under the requested tier's name and tell the
+      // operator their role was "not assigned in any layer", which their own file
+      // contradicts.
+      return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
+    }
+    if (declared.assignment === undefined) {
+      return {
+        kind: "inherit",
+        roleResolution: declared,
+        fallback: unassignedRoleNote(req.modelRole, "modelRole", modelRoles),
+      };
+    }
+    const selector = formatAssignment(declared.assignment);
+    const resolution = await resolveModelFn(selector);
+    if (!resolution.ok) {
+      return refusal(
+        `modelRole ${JSON.stringify(req.modelRole)} could not be used: it is assigned ` +
+          `${JSON.stringify(selector)} by the ${declared.source} layer, but that ${resolution.message}`,
+        selector,
+      );
+    }
+    return {
+      kind: "resolved",
+      origin: "call-role",
+      selector: resolution.selector,
+      model: resolution.model,
+      roleResolution: declared,
+    };
+  }
+
+  const frontmatterSelector = agent.model?.[0];
+  if (frontmatterResolution.malformed !== undefined) {
+    // D3b softens an UNASSIGNED frontmatter role so a stock install still works. It
+    // does not soften a broken roles file: no foreign operator has one, and the only
+    // way to reach here is for this machine's config to name a selector it cannot parse.
+    return refusal(
+      malformedRoleAssignmentNote(
+        frontmatterSelector ?? frontmatterResolution.role,
+        `agent "${agent.name}" frontmatter model`,
+        frontmatterResolution.malformed,
+      ),
+      frontmatterSelector,
+    );
+  }
+  if (frontmatterResolution.assignment === undefined) {
+    return {
+      kind: "inherit",
+      roleResolution: frontmatterResolution,
+      ...(frontmatterSelector !== undefined
+        ? { fallback: unassignedRoleNote(frontmatterSelector, `agent "${agent.name}" frontmatter model`, modelRoles) }
+        : {}),
+    };
+  }
+  const selector = formatAssignment(frontmatterResolution.assignment);
+  const resolution = await resolveModelFn(selector);
+  if (!resolution.ok) {
+    return refusal(
+      `Agent "${agent.name}" frontmatter model ${JSON.stringify(frontmatterSelector ?? selector)} could not be used: ` +
+        `it resolves to ${JSON.stringify(selector)} (${frontmatterResolution.source} layer), ` +
+        `but that ${resolution.message}`,
+      frontmatterSelector ?? selector,
+    );
+  }
+  return {
+    kind: "resolved",
+    origin: "frontmatter",
+    selector: resolution.selector,
+    model: resolution.model,
+    roleResolution: frontmatterResolution,
+  };
+}
+
+function refusal(message: string, selector?: string): WorkflowTier {
+  return { kind: "refused", message: `${message}${legacyRoleNamespaceHint(selector)}` };
+}
+
+/**
+ * The one predictable way this refusal fires on an upgrade.
+ *
+ * Before tiers, the bundled agents wrote their tier as `pi/<role>`, and nothing read
+ * it — `pi` was never a provider. Now that a slash means a real provider, a catalog
+ * that still says `pi/smol` fails closed, which is right, but "provider pi has no
+ * model smol" tells the operator nothing about what to edit. So the refusal says it.
+ */
+function legacyRoleNamespaceHint(selector: string | undefined): string {
+  if (selector === undefined || !selector.startsWith("pi/")) return "";
+  const role = selector.slice("pi/".length);
+  return (
+    ` "pi/<role>" was the pre-tier role namespace and is no longer read as a role: write the role bare ` +
+    `(\`model: ${role}\`), because a slash now means a real provider.`
+  );
 }
 
 /** Increment and return the round for a slot row id (first call → 1). */

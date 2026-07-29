@@ -45,6 +45,8 @@ function fakeSession(config: {
   toolCalls: number;
   toolResults: number;
   text: string;
+  /** What the host reports the session runs on; absent = an older peer or a mock. */
+  model?: unknown;
   events?: SdkAgentSessionEventLike[];
   exportHeaderId?: string;
   exportRawHeader?: string;
@@ -58,6 +60,7 @@ function fakeSession(config: {
   let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
   return {
     sessionId: "sdk-child",
+    ...(config.model !== undefined ? { model: config.model } : {}),
     subscribe(fn) {
       listener = fn;
       return () => {
@@ -218,6 +221,160 @@ describe("agent SDK evidence surfacing", () => {
     const body = JSON.parse(withArtifact.resultArtifact.content) as Record<string, unknown>;
     assert.equal(body.version, "locus.agent.run-result.v1");
     assert.equal(Object.hasOwn(body, "evidence"), false);
+  });
+
+  it("carries the host-read executed model into the run-result artifact on disk", async () => {
+    // The data-flow contract, asserted where it actually matters. The artifact is
+    // written INSIDE `executeAgentRunBoundary`, before the workflow bridge ever sees
+    // a result, so the only shape that can reach the JSON body is the readback
+    // travelling on `AgentRunResult`. The assertion therefore reads the written file,
+    // not the returned object.
+    const executor = createAgentSdkSessionExecutor({
+      createSession: (async () => ({
+        session: fakeSession({
+          toolCalls: 0,
+          toolResults: 0,
+          text: completedText("Reviewed."),
+          model: { provider: "test", id: "fast", name: "Test Fast" },
+        }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "fixed",
+    });
+    const req = request();
+
+    const result = await executor.run(req, new AbortController().signal);
+    assert.equal(result.status, "completed");
+    assert.equal(result.executedModel, "test/fast");
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    assert.ok(withArtifact.resultArtifact !== undefined);
+    const onDisk = JSON.parse(readFileSync(withArtifact.resultArtifact.path, "utf8")) as { content: string };
+    const body = JSON.parse(onDisk.content) as Record<string, unknown>;
+    assert.equal(body.executedModel, "test/fast");
+  });
+
+  it("records `unavailable` in the artifact when the peer exposes no model", async () => {
+    const executor = createAgentSdkSessionExecutor({
+      // No `model` on the session, but a model WAS requested — so a body that says
+      // "test/strong" here would be the request echoed back, which is the exact
+      // fabrication this field exists to prevent.
+      model: { provider: "test", id: "strong" },
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed.") }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "fixed",
+    });
+    const req = request();
+
+    const result = await executor.run(req, new AbortController().signal);
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const onDisk = JSON.parse(readFileSync(withArtifact.resultArtifact!.path, "utf8")) as { content: string };
+    const body = JSON.parse(onDisk.content) as Record<string, unknown>;
+
+    assert.equal(body.executedModel, "unavailable");
+  });
+
+  it("omits both model facts from the artifact when the transport rejected the prompt", async () => {
+    // Driven end to end through the executor, because the defect was in WHERE the
+    // readback got promoted, not in the writer: it was published the moment the model
+    // check passed, i.e. before `prompt()` was dispatched. A rejected prompt then wrote
+    // an artifact naming an executed model, and `modelRoleFallback` — gated on that
+    // same field — rode along, claiming "the child inherited the parent session model"
+    // for a child that spent nothing. A request-shaped literal cannot catch that; only
+    // a real run through the host can.
+    const executor = createAgentSdkSessionExecutor({
+      model: { provider: "test", id: "fast" },
+      createSession: (async () => ({
+        session: fakeSession({
+          toolCalls: 0,
+          toolResults: 0,
+          text: "",
+          model: { provider: "test", id: "fast" },
+          promptError: "No API key found for deepseek.",
+        }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
+      now: () => "prompt-rejected",
+    });
+    const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
+
+    const result = await executor.run(req, new AbortController().signal);
+    assert.equal(result.status, "failed");
+    assert.match(result.reason, /No API key found/u);
+    assert.equal(result.executedModel, undefined);
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const onDisk = JSON.parse(readFileSync(withArtifact.resultArtifact!.path, "utf8")) as { content: string };
+    const body = JSON.parse(onDisk.content) as Record<string, unknown>;
+
+    assert.ok(!("executedModel" in body));
+    assert.ok(!("modelRoleFallback" in body));
+  });
+
+  it("records a tier degradation in the artifact once the child actually ran", () => {
+    const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
+    const result: AgentRunResult = {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "ok",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      childSession: { id: "child-1", createdAt: "fixed", parentSessionId: req.parentSessionId, metadata: {} },
+      // Published only after child kickoff, so its presence is what proves a child ran.
+      executedModel: "test/fast",
+    };
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const body = JSON.parse(withArtifact.resultArtifact!.content) as Record<string, unknown>;
+
+    assert.equal(body.modelRoleFallback, 'modelRole "smol" is not assigned in any model-roles layer');
+  });
+
+  it("omits the tier degradation when a session was built but the child never ran", () => {
+    // The gap round 2 found: a session created and then cancelled before kickoff has a
+    // childSession id, so the old "child session exists" gate published a PAST-TENSE
+    // claim ("the child inherited the parent session model") about a child that never
+    // spent a token. Nothing executed, so nothing may be recorded as having degraded.
+    const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
+    const result: AgentRunResult = {
+      status: "cancelled",
+      agentName: req.agent.name,
+      reason: "Agent run was cancelled before child session kickoff.",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+      childSession: { id: "child-1", createdAt: "fixed", parentSessionId: req.parentSessionId, metadata: {} },
+      // No executedModel: the session existed, the child was never prompted.
+    };
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const body = JSON.parse(withArtifact.resultArtifact!.content) as Record<string, unknown>;
+
+    assert.ok(!("modelRoleFallback" in body));
+  });
+
+  it("omits the tier degradation when the call died before a child session existed", () => {
+    // The note reads "the child inherited the parent session model" — a past-tense
+    // claim about a child. A call that never reached `createSession` (unavailable
+    // substrate, refused model, abort in flight) has no child to have inherited
+    // anything, so copying the request's note into the artifact would invent
+    // execution evidence in the one file meant to prove execution.
+    const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
+    const result: AgentRunResult = {
+      status: "blocked",
+      agentName: req.agent.name,
+      reason: "agent SDK unavailable",
+      diagnostics: ["agent SDK unavailable"],
+      lifecycleEntryIds: [],
+    };
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const body = JSON.parse(withArtifact.resultArtifact!.content) as Record<string, unknown>;
+
+    // Absent, not null: `JSON.stringify` drops the undefined key, so the reader sees
+    // no claim rather than an empty one.
+    assert.ok(!("modelRoleFallback" in body));
   });
 
   it("keeps run-result artifacts distinct across fresh stores by child session id", () => {

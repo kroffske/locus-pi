@@ -32,7 +32,16 @@ import path from "node:path";
 import { workflowRunDir } from "./workflow-journal.js";
 
 export const WORKFLOW_REPLAY_FILE = "replay.ndjson";
-export const WORKFLOW_REPLAY_SCHEMA_VERSION = 1 as const;
+/**
+ * v2 (T-129): `modelRole` entered the canonical request, so every key changed.
+ *
+ * The bump is what makes the migration honest rather than merely safe. Leaving the
+ * version at 1 is equally fail-closed — a changed key diverges and the call
+ * re-executes — but the operator would be told `key-mismatch`, which everywhere else
+ * means "your script changed". Dropping v1 lines instead makes the log read as empty
+ * and the refusal reason becomes `no-recorded-calls`, which is true.
+ */
+export const WORKFLOW_REPLAY_SCHEMA_VERSION = 2 as const;
 
 /** Recorded nondeterministic value kinds, one cursor each. */
 export type WorkflowReplayValueKind = "clock" | "random";

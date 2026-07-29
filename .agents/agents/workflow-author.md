@@ -2,7 +2,7 @@
 name: workflow-author
 description: Writes a valid pi-workflow `<name>.workflow.mjs` from a plain-text requirement, saves it where it resolves by name, and confirms the module loads
 tools: read, search, find, write, edit
-model: pi/slow
+model: slow
 thinking-level: high
 ---
 

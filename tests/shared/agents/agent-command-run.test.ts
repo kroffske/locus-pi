@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,34 @@ import { createHarness, runTool, type Harness } from "../../test-harness.js";
 // `task`/`spawn_agent` tool, so both triggers converge on one surface (Q8 parity).
 
 const tempRoots: string[] = [];
+
+/**
+ * Every `locus.agent.run-result.v1` body the run wrote, read off disk.
+ *
+ * The artifact is written INSIDE the boundary, so it is the only place an
+ * interactive run's recorded degradation can be observed — the command handler
+ * returns nothing and the live row does not carry it.
+ */
+function readAgentRunArtifacts(projectRoot: string): Array<Record<string, unknown>> {
+  const dir = path.join(projectRoot, ".locus", "runtime", "artifacts");
+  const found: Array<Record<string, unknown>> = [];
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const next = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(next);
+      else if (entry.name.startsWith("agent-run-") && entry.name.endsWith(".json")) {
+        const envelope = JSON.parse(readFileSync(next, "utf8")) as { content?: string };
+        if (envelope.content !== undefined) found.push(JSON.parse(envelope.content) as Record<string, unknown>);
+      }
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+    return [];
+  }
+  return found;
+}
 
 afterEach(() => {
   vi.resetModules();
@@ -347,5 +375,192 @@ describe("agent command run (unified live surface)", () => {
     const row = reviewerRow(agentLiveStore)!;
     expect(row.title).toBe("review auth middleware");
     expect(renderRow(row)).toContain("review auth middleware");
+  });
+});
+
+/**
+ * OD2 — an interactive child and a workflow stage naming the same agent resolve
+ * their model through the same chain.
+ *
+ * Without this, `/agent run reviewer` and a workflow `agent("...", {agent:"reviewer"})`
+ * run on different models and the operator has nothing in the evidence that explains
+ * why. `runAgentLiveTask` is the one call site both interactive triggers share.
+ */
+describe("interactive children resolve the same tier as workflow children", () => {
+  function projectWithTieredReviewer(): string {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-pi-agent-tier-"));
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "reviewer.md"),
+      "---\nname: reviewer\ndescription: Project reviewer\ntools: read, search\nrisk: medium\nmodel: smol\n---\nProject.",
+      "utf8",
+    );
+    tempRoots.push(root);
+    return root;
+  }
+
+  /** Same fake session as above, but the createSession options are kept for inspection. */
+  function mockSdkSessionCapturing(captured: Array<Record<string, unknown>>): void {
+    vi.doMock("@earendil-works/pi-coding-agent", () => ({
+      DefaultResourceLoader: class {
+        constructor(_options: Record<string, unknown>) {}
+        reload() {}
+      },
+      getAgentDir() {
+        return tmpdir();
+      },
+      async createAgentSession(options: Record<string, unknown>) {
+        captured.push(options);
+        let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+        return {
+          session: {
+            sessionId: "sdk-tier",
+            model: options.model,
+            subscribe(fn: (event: SdkAgentSessionEventLike) => void) {
+              listener = fn;
+              return () => {
+                listener = undefined;
+              };
+            },
+            async prompt() {
+              listener?.({ type: "agent_end", willRetry: false });
+            },
+            getSessionStats() {
+              return { sessionId: "sdk-tier", toolCalls: 1, toolResults: 1 };
+            },
+            getLastAssistantText() {
+              return "Reviewed";
+            },
+            exportToJsonl(outputPath: string) {
+              return outputPath;
+            },
+            dispose() {},
+          },
+        };
+      },
+    }));
+  }
+
+  it("creates the child session with the agent's resolved tier, not the session model", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    await h.ctx.settings?.set("modelRoles", { smol: "test/fast" });
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    expect(reviewerRow(agentLiveStore)).toMatchObject({ status: "done" });
+    expect(captured).toHaveLength(1);
+    // By value; the session model is `test/strong`, so inheritance cannot pass this.
+    expect(captured[0]?.model).toEqual({ provider: "test", id: "fast", name: "Test Fast" });
+  });
+
+  it("inherits the session model when the agent's tier is unassigned", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    expect(reviewerRow(agentLiveStore)).toMatchObject({ status: "done" });
+    expect(captured[0]?.model).toEqual({ provider: "test", id: "strong", name: "Test Strong" });
+  });
+
+  it("records the degradation, so an inherited interactive run explains itself", async () => {
+    // OD5's second half. The bridge already wrote this note; `/agent run` and
+    // `spawn_agent` did not, so an interactive child dropped to the session model
+    // with nothing in the evidence saying why — the unexplained-model problem OD2
+    // asked us to close, surviving on the interactive side.
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const root = projectWithTieredReviewer();
+    const h = createHarness(root, { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    expect(reviewerRow(agentLiveStore)).toMatchObject({ status: "done" });
+    const bodies = readAgentRunArtifacts(root);
+    expect(bodies).toHaveLength(1);
+    const fallback = bodies[0]!.modelRoleFallback as string | undefined;
+    expect(fallback).toContain('"smol"');
+    expect(fallback).toContain("model-roles");
+  });
+
+  it("does not let the reviewer's declared tier fall through to another assigned role", async () => {
+    // Parity for the frontmatter half: `reviewer` declares `model: smol`. With
+    // `smol` unassigned and `task` assigned, the purpose chain would have run the
+    // `task` tier under the name `smol` here exactly as it did in the bridge.
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents } = await loadAgents();
+    const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    await h.ctx.settings?.set("modelRoles", { task: "test/fast", agent: "test/fast", default: "test/fast" });
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.model).toEqual({ provider: "test", id: "strong", name: "Test Strong" });
+  });
+
+  it("refuses by name when the agent's tier resolves to a model this host lacks", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    await h.ctx.settings?.set("modelRoles", { smol: "no-such-provider/no-such-model" });
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    const row = reviewerRow(agentLiveStore);
+    expect(row?.status).toBe("error");
+    expect(row?.errors.join("\n")).toContain('"no-such-provider/no-such-model"');
+    // Fail-closed: no child session was created at all.
+    expect(captured).toHaveLength(0);
+    // …and the row says so. It is opened from the REQUEST before anything resolves, so
+    // a refusal that never builds a session leaves a terminal row labelled with a model
+    // that ran nothing — indistinguishable, in the panel, from one that ran and failed.
+    expect(row?.model).toBeUndefined();
+    expect(row?.thinking).toBeUndefined();
+  });
+
+  it("refuses a malformed tier assignment rather than inheriting the session model", async () => {
+    // Round-2 finding 1, interactive half. One fix in `model-settings` covers the
+    // bridge, `/agent run` and `spawn_agent`, and OD2 says the three must agree — so
+    // the parity is asserted here rather than assumed from the bridge's test.
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    // Assigned, but missing the `provider/` half — a typo, not an unassigned role.
+    await h.ctx.settings?.set("modelRoles", { smol: "deepseek-v4-flash" });
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    const row = reviewerRow(agentLiveStore);
+    expect(row?.status).toBe("error");
+    const errors = row?.errors.join("\n") ?? "";
+    expect(errors).toContain('"deepseek-v4-flash"');
+    expect(errors).not.toContain("is not assigned in any model-roles layer");
+    expect(captured).toHaveLength(0);
+    // The malformed-role refusal takes the same exit as the concrete-selector one, so
+    // it owes the same honesty: the row seeded with the session model — which is NOT
+    // what this call asked for and is not what ran, because nothing ran — is cleared.
+    expect(row?.model).toBeUndefined();
+    expect(row?.thinking).toBeUndefined();
   });
 });
