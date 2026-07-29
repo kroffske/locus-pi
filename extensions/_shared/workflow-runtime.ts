@@ -110,8 +110,10 @@ export interface WorkflowAgentRequest {
   tools?: string[];
   /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
   maxToolCalls?: number;
-  /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
+  /** Per-call concrete model selector, e.g. "provider/id" or "provider/id:high". */
   model?: string;
+  /** Per-call tier: a name in the roles table, never a provider selector. */
+  modelRole?: string;
   /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
   timeoutMs?: number;
   label?: string;
@@ -145,8 +147,22 @@ export interface WorkflowAgentResult {
   childTrace?: WorkflowAgentChildTrace;
   resultArtifact?: string;
   worktreePath?: string;
+  /** Display selector for the live row; see WorkflowJournalLine.model. */
   model?: string;
   thinking?: string;
+  /**
+   * What the CHILD SESSION reported it ran on, read back from the host after the
+   * session was created — not the selector this bridge asked for. `"unavailable"`
+   * when the peer exposes no model on its session; never back-filled from the
+   * request, because repeating a request back proves only that we remember it.
+   */
+  executedModel?: string;
+  /**
+   * Set when a declared tier had no assignment in any layer and the child therefore
+   * inherited the parent session model. One sentence naming the role and the layers
+   * that were read. Quiet fallback, loud record.
+   */
+  modelRoleFallback?: string;
   /** Workflow loop slot descriptor (phase,label); set by the bridge for slotted agents (REQ-009). */
   slotKey?: string;
   /** Loop round for the slot (≥1); the bridge increments it per slot re-invoke (REQ-009). */
@@ -232,8 +248,22 @@ export interface WorkflowAgentOptions {
   tools?: string[];
   /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. 0 requires no tools. */
   maxToolCalls?: number;
-  /** Per-call model selector, e.g. "provider/id" or "provider/id:thinking". */
+  /**
+   * Concrete model for this call, always `provider/id` with an optional display-only
+   * `:off|minimal|low|medium|high|xhigh` suffix. A selector no configured provider
+   * can serve fails the call by name; it never silently runs on the session model.
+   */
   model?: string;
+  /**
+   * Tier for this call: a name in the roles table (`smol`, `slow`, `task`, …), never
+   * a provider selector. The package ships no assignments, so an operator layer
+   * (session / project `.pi/model-roles/config.json` / user config) has to say what
+   * the name means; a role nothing assigns degrades to the parent session model and
+   * the degradation is recorded on `agent_end`, in the run-result artifact and in the
+   * run report. `model` and `modelRole` each have exactly one meaning — the option
+   * chosen at the call site says which one the author meant.
+   */
+  modelRole?: string;
   /**
    * Wall-clock fuse for one child attempt, in milliseconds. `maxToolCalls` bounds
    * tool usage and cannot end a stalled child. On expiry the child is aborted and
@@ -479,8 +509,34 @@ export interface WorkflowJournalLine {
   workspaceMode?: WorkspaceMode;
   /** Token/cost usage for agent_end lines (present when the child reported usage). */
   usage?: WorkflowUsage;
-  /** Resolved model selector for agent live-row display. */
+  /**
+   * Resolved model selector for agent live-row display. On `agent_start` this is
+   * still an intent — the line is emitted before the bridge resolves anything — so
+   * read `requestedModel` there for the honest name and `executedModel` on
+   * `agent_end` for what actually ran.
+   */
   model?: string;
+  /**
+   * The selector the call ASKED for, on `agent_start`. Named for what it is: this
+   * line is written before any resolution happens, so it structurally cannot know
+   * what executed and must not be read as if it did.
+   */
+  requestedModel?: string;
+  /** The tier the call declared, on `agent_start`. A role name, never a provider selector. */
+  modelRole?: string;
+  /**
+   * What the child session reported it ran on, read back from the host.
+   * `"unavailable"` when the peer exposes no model. Absent on journals written before
+   * this field existed — absence is never evidence that a model ran.
+   *
+   * Carried by `agent_end`, and by the `error` lines emitted AFTER a child returned (a
+   * script `validate` that threw, an artifact writer that failed). Never by a line
+   * written before dispatch: `agent_start` structurally cannot know it, and a failure
+   * that never reached a child has nothing to report.
+   */
+  executedModel?: string;
+  /** With `executedModel`: a declared tier had no assignment and the child inherited the session model. */
+  modelRoleFallback?: string;
   /** Resolved thinking/reasoning level for agent live-row display. */
   thinking?: string;
   /** True on agent lines served from a recorded run instead of a fresh child.
@@ -638,6 +694,32 @@ function normalizeTimeoutMs(timeoutMs: number): number {
     throw new Error("agent timeoutMs must be a positive safe integer");
   }
   return timeoutMs;
+}
+
+/**
+ * The execution evidence a post-child failure still owns.
+ *
+ * The two `error` lines that carry this are emitted AFTER the child ran and returned —
+ * a script `validate`/parse callback that threw, an artifact writer that failed — so
+ * the run holds a real host readback at that point. Omitting it is the mirror image of
+ * naming a model that never ran: `executedModel` is the single proof of execution every
+ * read side keys on (`workflow-journal.ts`, `workflow-run-report.ts`), so a terminal
+ * line without it is read as "no child executed" and the live row's label is cleared.
+ * The one case where a child provably DID execute would then be the case that loses the
+ * evidence of it.
+ *
+ * `modelRoleFallback` rides along because the bridge already gates it on the same
+ * readback (`workflow-agent-bridge.ts`), so it is never a claim this line invents.
+ */
+function executedModelEvidence(
+  result: Pick<WorkflowAgentResult, "model" | "executedModel" | "modelRoleFallback" | "thinking">,
+): Pick<WorkflowJournalLine, "model" | "executedModel" | "modelRoleFallback" | "thinking"> {
+  return {
+    ...(result.model !== undefined ? { model: result.model } : {}),
+    ...(result.executedModel !== undefined ? { executedModel: result.executedModel } : {}),
+    ...(result.modelRoleFallback !== undefined ? { modelRoleFallback: result.modelRoleFallback } : {}),
+    ...(result.thinking !== undefined ? { thinking: result.thinking } : {}),
+  };
 }
 
 function normalizeMaxAnswerChars(maxAnswerChars: number): number {
@@ -1527,6 +1609,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
+      ...(opts?.modelRole !== undefined ? { modelRole: opts.modelRole } : {}),
       ...(opts?.timeoutMs !== undefined ? { timeoutMs: normalizeTimeoutMs(opts.timeoutMs) } : {}),
       ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
@@ -1642,7 +1725,12 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       workspaceMode,
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...activeGroupFields(),
+      // Both facts, neither fabricated: `model` keeps its documented live-row display
+      // meaning for existing readers, `requestedModel` says out loud that at this point
+      // in the run the value is a request and nothing has executed yet.
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
+      ...(requestedLiveModel?.model !== undefined ? { requestedModel: requestedLiveModel.model } : {}),
+      ...(req.modelRole !== undefined ? { modelRole: req.modelRole } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       callId,
@@ -1764,7 +1852,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         // list — ends the run unchanged and spends no retry. The line is emitted because
         // this attempt really ran: without it the journal holds an agent_start with no
         // agent_end and no record of why the run stopped. It carries the attempt trio for
-        // the same reason the transport catch does — this is the attempt's terminal record.
+        // the same reason the transport catch does — this is the attempt's terminal record —
+        // and the readback for the same reason: the child answered before the validator ran.
         emit({
           ts: nowFn(),
           runId,
@@ -1775,6 +1864,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ...attemptFields,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          ...executedModelEvidence(finalResult),
           message: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - start,
         });
@@ -1816,7 +1906,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     } catch (err) {
       // The other terminal-by-throw record of a physical attempt: evidence writing failed,
       // so no agent_end follows. It carries the attempt trio for the same reason the
-      // transport catch above does.
+      // transport catch above does. The artifact writer runs after the child returned, so
+      // this failure is the store's and not the call's — the readback rides along too.
       emit({
         ts: nowFn(),
         runId,
@@ -1827,6 +1918,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...attemptFields,
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        ...executedModelEvidence(finalResult),
         message: err instanceof Error ? err.message : String(err),
         durationMs,
       });
@@ -1853,6 +1945,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,
       ...activeGroupFields(),
       ...(finalResult.model !== undefined ? { model: finalResult.model } : {}),
+      // The two model facts this line can honestly carry: what the host said the child
+      // ran on, and — when a declared tier had nothing assigned — that it degraded.
+      ...(finalResult.executedModel !== undefined ? { executedModel: finalResult.executedModel } : {}),
+      ...(finalResult.modelRoleFallback !== undefined ? { modelRoleFallback: finalResult.modelRoleFallback } : {}),
       ...(finalResult.thinking !== undefined ? { thinking: finalResult.thinking } : {}),
       ...(finalResult.evidence !== undefined ? { evidence: finalResult.evidence } : {}),
       ...(finalResult.evidence?.warnings !== undefined && finalResult.evidence.warnings.length > 0
@@ -2279,6 +2375,13 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     tools: req.tools ?? null,
     maxToolCalls: req.maxToolCalls ?? null,
     model: req.model ?? null,
+    // The tier a stage DECLARED. Two stages on two tiers are two different calls and
+    // must not share one record. Known residual, tested in workflow-replay.test.ts:
+    // the key is built here, before the bridge consults the roles table, so it
+    // identifies the declared NAME and not the model that produced the answer —
+    // remapping `smol` in a roles config, or editing an agent's frontmatter, reuses
+    // the record. Recorded runs must be invalidated by hand after such a change.
+    modelRole: req.modelRole ?? null,
     // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
     // is a different call and must not reuse the earlier record.
     timeoutMs: req.timeoutMs ?? null,

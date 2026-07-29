@@ -9,6 +9,8 @@ import type {
   AgentRunRequest,
   AgentRunResult,
 } from "./agent-runner.js";
+import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
+import { modelSelectorFromModel } from "./live-model-display.js";
 import { createAgentExecutionPromptCapsule, formatAgentKickoffPrompt, parseAgentText } from "./agent-executor-host.js";
 import type { SessionRecord } from "./session-core.js";
 import { runtimeStateDir } from "./files.js";
@@ -67,6 +69,16 @@ export interface SdkAgentSessionEventLike {
 }
 export interface SdkAgentSessionLike {
   readonly sessionId: string;
+  /**
+   * The model this session actually runs on, as the host reports it.
+   *
+   * The real peer declares `get model(): Model<any> | undefined`
+   * (`@earendil-works/pi-coding-agent` `core/agent-session.d.ts`). Optional here
+   * because an older peer or a structural mock may not have it — and an absent
+   * readback is recorded as `unavailable`, never back-filled from what we asked
+   * for. Structurally opaque: `modelSelectorFromModel` formats it.
+   */
+  readonly model?: unknown;
   /** Pi 0.82.0 conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
@@ -292,6 +304,43 @@ class AgentLiveStore {
   ): AgentLiveRow | undefined {
     const rowId = this.#currentExecutionRowId(execution);
     return rowId === undefined ? undefined : this.patch(rowId, patch, now);
+  }
+
+  /**
+   * Terminal patch for a row whose child never ran: applies `patch` AND drops the
+   * request-side `model`/`thinking` labels in the same update.
+   *
+   * A dedicated method rather than `patch({ model: undefined })` because
+   * `exactOptionalPropertyTypes` makes that a type error, and because "this row must
+   * show no model" is worth stating outright instead of leaving a reader to infer it
+   * from a spread of `undefined`. The row is seeded with a requested selector before
+   * the child exists; if nothing was ever built, that label is the request talking to
+   * itself and an operator reading the panel cannot tell it from a model that ran.
+   */
+  patchExecutionWithoutModel(
+    execution: AgentLiveExecutionHandle,
+    patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>,
+    now = Date.now(),
+  ): AgentLiveRow | undefined {
+    const rowId = this.#currentExecutionRowId(execution);
+    if (rowId === undefined) return undefined;
+    const patched = this.patch(rowId, patch, now);
+    if (patched === undefined) return undefined;
+    // `patch()` emits, and a store listener may synchronously replace this row's
+    // execution authority on that emit — the terminal-listener replacement case. The
+    // second write must therefore re-check ownership and re-read the row rather than
+    // writing back the pre-emit snapshot: without this, clearing the model clobbers a
+    // replacement row that this execution no longer owns, and silently reverts
+    // whatever the listener wrote.
+    if (this.#currentExecutionRowId(execution) !== rowId) return undefined;
+    const current = this.rows.get(rowId);
+    if (current === undefined) return undefined;
+    const cleared: AgentLiveRow = { ...current };
+    delete cleared.model;
+    delete cleared.thinking;
+    this.rows.set(rowId, cleared);
+    this.#emit();
+    return cleared;
   }
 
   feedExecutionEvent(execution: AgentLiveExecutionHandle, event: unknown, now = Date.now()): AgentLiveRow | undefined {
@@ -776,6 +825,19 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
   };
 }
 
+/** Filled by the child-session run once a session exists; empty when none was created. */
+interface ExecutedModelObservation {
+  executedModel?: string;
+}
+
+/**
+ * Stamp the host's own readback onto every outcome of one child run.
+ *
+ * The readback is taken once, from the created session, and then travels out on
+ * `AgentRunResult` regardless of how the run ended — a failed or cancelled child
+ * still ran on a model, and its evidence should say which. Results returned before
+ * `createSession` succeeded carry nothing, because nothing ran.
+ */
 async function runWithSdkSession(
   request: AgentRunRequest,
   signal: AbortSignal,
@@ -789,6 +851,38 @@ async function runWithSdkSession(
   execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
 ): Promise<AgentRunResult> {
+  const observed: ExecutedModelObservation = {};
+  const result = await runChildSession(
+    request,
+    signal,
+    createSession,
+    now,
+    reportsDirOverride,
+    turnTimeoutMs,
+    abortTimeoutMs,
+    maxToolCalls,
+    model,
+    execution,
+    promptEnv,
+    observed,
+  );
+  return observed.executedModel === undefined ? result : { ...result, executedModel: observed.executedModel };
+}
+
+async function runChildSession(
+  request: AgentRunRequest,
+  signal: AbortSignal,
+  createSession: CreateAgentSessionFactory,
+  now: () => string,
+  reportsDirOverride: string | undefined,
+  turnTimeoutMs: number,
+  abortTimeoutMs: number,
+  maxToolCalls: number | undefined,
+  model: unknown,
+  execution: AgentLiveExecutionHandle,
+  promptEnv: NodeJS.ProcessEnv | undefined,
+  observed: ExecutedModelObservation,
+): Promise<AgentRunResult> {
   // T-119 PRE-CHECK: getBranch UNREACHABLE
   //
   // This SDK executor is created from tool-context `execute()` without a
@@ -800,7 +894,10 @@ async function runWithSdkSession(
   // Pre-flight cancel: never create a child if we were already aborted.
   if (signal.aborted) {
     const reason = "Agent run was cancelled before child session creation.";
-    agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
+    // Clear the request-side display model: no session was ever built, so leaving the
+    // selector on the row shows an operator a model that never ran (see the note on
+    // the `createSession` failure paths below).
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
     return cancelledResult(request, reason);
   }
 
@@ -839,7 +936,13 @@ async function runWithSdkSession(
       // Substrate genuinely unavailable -> blocked, with a detectable diagnostic
       // token the wiring keys its graceful fallback on. The reason is HONEST,
       // never the stale M11 replacement-session text.
-      agentLiveStore.patchExecution(execution, {
+      // The row was seeded with a REQUEST-side display selector before the child
+      // existed, and no session was built, so there is nothing to replace it with.
+      // Leaving it shows the operator a terminal row labelled with a model that never
+      // ran — the live panel is the surface they actually watch, and a failed row
+      // reading "test/fast" is indistinguishable from one that ran on test/fast and
+      // errored. Clear it: absent is honest, invented is not.
+      agentLiveStore.patchExecutionWithoutModel(execution, {
         status: "error",
         errors: [error.message],
         finalAnswer: error.message,
@@ -851,13 +954,22 @@ async function runWithSdkSession(
       ]);
     }
     const reason = errorMessage(error);
-    agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
     // Catch-all: this branch also carries a bad model id, a rejected tool allowlist and any
     // option-assembly bug. None of those is transient, so none of them may be retried.
     return failedResult(request, reason, "unclassified", [...diagnostics, reason]);
   }
 
   const session = created.session;
+  // The one honest source for "which model WOULD run": the session itself, after the
+  // host built it. Anything computed before this line is the request talking to
+  // itself. It is deliberately NOT `observed.executedModel` yet — a built session is
+  // not an executed one, and the two terminal paths below (kickoff cancellation and
+  // model mismatch) return without ever prompting the child. Publishing here would
+  // put "executedModel" on a call that spent no tokens, which is the same
+  // requested-vs-executed conflation this task exists to remove, one step later.
+  const sessionModelSelector = modelSelectorFromModel(session.model) ?? EXECUTED_MODEL_UNAVAILABLE;
+  const requestedSelector = modelSelectorFromModel(model);
   let childSession = createSdkSessionRecord(request, session.sessionId);
   let childOutputStats: AgentChildOutputStats | undefined;
   let childTrace: AgentChildTrace | undefined;
@@ -869,6 +981,19 @@ async function runWithSdkSession(
     }
     return childTrace;
   };
+  /**
+   * Terminal row patch that may only leave a model on the row once one executed.
+   *
+   * `observed.executedModel` is this file's single proof of execution, so the row and
+   * the result are held to the same evidence: a run that ends before the child was
+   * dispatched — a rejected `prompt()`, a subscription that threw, an abort landing
+   * while the prompt was in flight — drops the label the row was seeded with instead
+   * of leaving an operator a terminal row indistinguishable from one that ran.
+   */
+  const patchTerminalRow = (patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>): void => {
+    if (observed.executedModel === undefined) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+    else agentLiveStore.patchExecution(execution, patch);
+  };
   try {
     agentLiveStore.patchExecution(execution, {
       status: "working",
@@ -878,6 +1003,13 @@ async function runWithSdkSession(
       // Make the full uuid available to an active drill immediately, rather than
       // only after the child has completed and its boundary result is parsed.
       childSessionId: session.sessionId,
+      // The live row is where an operator actually watches a run, so it must show
+      // what RAN as soon as that is knowable. The row was built before the child
+      // existed and until this point carries a request-side display value; the
+      // readback replaces it the moment the session reports one. When the peer
+      // reports nothing the row keeps its display value rather than showing the
+      // `unavailable` sentinel, which is evidence and not a model name (D6/D7).
+      ...(sessionModelSelector !== EXECUTED_MODEL_UNAVAILABLE ? { model: sessionModelSelector } : {}),
     });
 
     // MUST guard the gap between session creation and prompting: an abort that
@@ -886,9 +1018,44 @@ async function runWithSdkSession(
     // export before returning the cancellation.
     if (signal.aborted) {
       const reason = "Agent run was cancelled before child session kickoff.";
-      agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
+      // Clear the label rather than leave the readback standing: the session was
+      // BUILT on that model and never prompted, so a terminal row naming it claims an
+      // execution that did not happen — the same conflation as echoing the request.
+      agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
       const preservedTrace = preserveChildTrace();
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), preservedTrace);
+    }
+
+    // A host that accepted a model and then built the session on a different one has
+    // ignored the selection — precisely the failure this evidence exists to catch. Fail
+    // before the first token is spent, and quote both values so the operator can see
+    // which side moved. Unavailable readback is NOT a mismatch: it is the absence of
+    // evidence, recorded as such, and it does not stop the run.
+    if (
+      requestedSelector !== undefined &&
+      sessionModelSelector !== EXECUTED_MODEL_UNAVAILABLE &&
+      sessionModelSelector !== requestedSelector
+    ) {
+      const reason =
+        `Child session runs on ${sessionModelSelector} but the call resolved ${requestedSelector}; ` +
+        "the host did not honour the selected model.";
+      // Both values are in `reason`, which is where a mismatch belongs. The ROW gets
+      // neither: the requested model did not run and the built-on model was never
+      // prompted, so any label here names a model that executed nothing.
+      agentLiveStore.patchExecutionWithoutModel(execution, {
+        status: "error",
+        errors: [reason],
+        finalAnswer: reason,
+      });
+      preserveChildTrace();
+      // A host that ignored the resolved selector is a permanent configuration fault, not a
+      // dropped channel: re-asking would land on the same wrong model. It stays `unclassified`
+      // rather than earning its own member, because D1 promotes a cause out of `unclassified`
+      // only on separate evidence that it is transient — and this one provably is not.
+      return withChildTrace(
+        failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession),
+        childTrace,
+      );
     }
 
     // Budget scales with maxTurns so a legitimately long multi-turn child is not
@@ -896,13 +1063,25 @@ async function runWithSdkSession(
     const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
     const turn = await driveChildTurn(session, kickoff, signal, turnBudgetMs, maxToolCalls, execution);
 
+    // THIS is the first point at which "executed" is a true word, so it is the first
+    // point the evidence may say it. Everything above returns without it: a session
+    // built and then cancelled, or built on the wrong model, executed nothing — and
+    // neither does one whose `prompt()` was REJECTED by the transport (no credentials,
+    // no route) or whose subscription threw, both of which leave `driveChildTurn` by
+    // exception and skip this line entirely. `promptAccepted` is the narrower gate for
+    // the case that still returns normally: an abort or a timeout that lands while the
+    // prompt is still in flight and no child event has ever arrived. A turn that was
+    // dispatched and then timed out DID execute, which is why promotion sits here
+    // rather than after the settlement branches.
+    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+
     if (turn.settlement === "aborted" || turn.settlement === "timed_out" || turn.settlement === "tool_limit") {
       // Stop the child, then still export evidence and dispose (finally below).
       await abortChild(session, abortTimeoutMs);
       preserveChildTrace();
       if (turn.settlement === "timed_out") {
         const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
-        agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
+        patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, "host-turn-timeout", [...diagnostics, reason], undefined, childSession),
           childTrace,
@@ -910,14 +1089,14 @@ async function runWithSdkSession(
       }
       if (turn.settlement === "tool_limit") {
         const reason = `Child agent exceeded the ${maxToolCalls ?? 0} tool-call budget and was aborted.`;
-        agentLiveStore.patchExecution(execution, { status: "error", errors: [reason], finalAnswer: reason });
+        patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, "tool-call-budget", [...diagnostics, reason], undefined, childSession),
           childTrace,
         );
       }
       const reason = "Agent run was cancelled.";
-      agentLiveStore.patchExecution(execution, { status: "cancelled", finalAnswer: reason });
+      patchTerminalRow({ status: "cancelled", finalAnswer: reason });
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), childTrace);
     }
 
@@ -1010,7 +1189,10 @@ async function runWithSdkSession(
   } catch (error) {
     const reason = errorMessage(error);
     const currentErrors = agentLiveStore.rowForExecution(execution)?.errors ?? [];
-    agentLiveStore.patchExecution(execution, {
+    // This catch takes both a transport rejection from `prompt()` (nothing ran) and a
+    // failure after the child answered (something did), so the model label follows the
+    // execution evidence rather than the code path.
+    patchTerminalRow({
       status: "error",
       errors: unique([...currentErrors, reason]),
       finalAnswer: reason,
@@ -1033,6 +1215,19 @@ const SDK_TOOL_EVIDENCE_EVENT_TYPES = new Set(["tool_execution_start", "tool_exe
 interface ChildTurnObservation {
   settlement: ChildTurnSettlement;
   recordedToolNames: string[];
+  /**
+   * Whether the child was actually dispatched: `prompt()` resolved (the SDK settles it
+   * once the turn is QUEUED, not when it finishes) or the child emitted its first
+   * event. Either one is proof the transport took the turn.
+   *
+   * A `prompt()` that REJECTS — no credentials, no route to the provider — leaves this
+   * function by exception and never returns an observation at all, which is the
+   * stronger half of the same rule. This flag covers what still returns normally: an
+   * abort or a timeout that wins the race while the prompt is in flight and no child
+   * event has ever arrived. Nothing ran then, and the caller must not record a model
+   * as executed.
+   */
+  promptAccepted: boolean;
 }
 
 /**
@@ -1062,12 +1257,18 @@ async function driveChildTurn(
   // event degrades to a recorded diagnostic, never a crash.
   const recordedToolNames = new Set<string>();
   let toolCallCount = 0;
+  // Set the moment the transport takes the turn — see ChildTurnObservation.
+  let promptAccepted = false;
   let resolveToolLimit: () => void = () => {};
   const toolLimited = new Promise<"tool_limit">((resolve) => {
     resolveToolLimit = () => resolve("tool_limit");
   });
   const unsubscribe = session.subscribe((event) => {
     try {
+      // An event from the child is proof it is live, even if `prompt()` has not
+      // settled yet: a host whose prompt promise only resolves at turn end would
+      // otherwise look like a turn that never started.
+      promptAccepted = true;
       const toolName = sdkToolEventName(event);
       if (toolName !== undefined) recordedToolNames.add(toolName);
       if (eventTypeName(event) === "tool_execution_start") {
@@ -1097,11 +1298,12 @@ async function driveChildTurn(
     // hung prompt() cannot block the abort/timeout branches from winning.
     const completed = (async (): Promise<"completed"> => {
       await session.prompt(kickoff, { source: "locus-pi-agent-sdk-host" });
+      promptAccepted = true;
       await ended;
       return "completed";
     })();
     const settlement = await Promise.race([completed, aborted, timedOut, toolLimited]);
-    return { settlement, recordedToolNames: [...recordedToolNames].sort() };
+    return { settlement, recordedToolNames: [...recordedToolNames].sort(), promptAccepted };
   } finally {
     unsubscribe();
     if (timer !== undefined) clearTimeout(timer);

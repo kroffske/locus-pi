@@ -80,9 +80,10 @@ function digestFor(root: string, outcome: RunOutcome): string {
 async function runWorkflow(
   root: string,
   name: string,
-  options: { input?: string; resumeFromRunId?: string } = {},
+  options: { input?: string; resumeFromRunId?: string; roles?: Record<string, string> } = {},
 ): Promise<RunOutcome> {
   const harness = createHarness(root, { sessionId: `replay-${name}` });
+  if (options.roles !== undefined) await harness.ctx.settings?.set("modelRoles", options.roles);
   const executedPrompts: string[] = [];
   const createExecutor = (): AgentExecutor => ({
     async run(request: AgentRunRequest) {
@@ -431,6 +432,116 @@ export default async function runWorkflow(dsl, input) {
     const resumed = await runWorkflow(root, "inert", { resumeFromRunId: first.runId });
     expect(resumed.ok).toBe(true);
     expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "no-recorded-calls", replayedCalls: 0 });
+    expect(resumed.executedPrompts).toEqual([]);
+  });
+
+  it("gives two stages on two tiers two distinct records", async () => {
+    // The defect this guards: `modelRole` missing from the canonical request would
+    // make these two calls "the same call", and a `slow` stage could be served an
+    // answer a `smol` stage produced.
+    const root = temporaryProject();
+    writeWorkflow(
+      root,
+      "tiers",
+      `export const meta = { name: "tiers", description: "one prompt on two tiers" };
+export default async function runWorkflow(dsl) {
+  const cheap = await dsl.agent("identical prompt", { modelRole: "smol" });
+  const strong = await dsl.agent("identical prompt", { modelRole: "slow" });
+  return { cheap, strong };
+}
+`,
+    );
+
+    const run = await runWorkflow(root, "tiers");
+    expect(run.ok).toBe(true);
+
+    const keys = readWorkflowReplayLog(root, run.runId)
+      .filter((entry) => entry.kind === "agent")
+      .map((entry) => entry.key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("still treats two untiered calls with one prompt as the same call", async () => {
+    // The control for the case above: without `modelRole` the two calls really are
+    // identical, so the differing keys there come from the tier and nothing else.
+    const root = temporaryProject();
+    writeWorkflow(
+      root,
+      "untiered",
+      `export const meta = { name: "untiered", description: "one prompt twice" };
+export default async function runWorkflow(dsl) {
+  const a = await dsl.agent("identical prompt");
+  const b = await dsl.agent("identical prompt");
+  return { a, b };
+}
+`,
+    );
+
+    const run = await runWorkflow(root, "untiered");
+
+    const keys = readWorkflowReplayLog(root, run.runId)
+      .filter((entry) => entry.kind === "agent")
+      .map((entry) => entry.key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("refuses a pre-tier record with no-recorded-calls rather than key-mismatch", async () => {
+    // Adding `modelRole` to the canonical request changed every sha256 key. Under the
+    // old schema version the operator would be told `key-mismatch`, which everywhere
+    // else means "your script changed" — a true-sounding lie. Dropping v1 lines makes
+    // the log read as empty, and the reason the operator gets is the true one.
+    const root = temporaryProject();
+    writeWorkflow(root, "stages", THREE_STAGE_WORKFLOW);
+
+    const first = await runWorkflow(root, "stages", { input: "alpha" });
+    expect(first.ok).toBe(true);
+
+    const recordPath = path.join(first.runDir, "replay.ndjson");
+    const downgraded = readFileSync(recordPath, "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.stringify({ ...(JSON.parse(line) as Record<string, unknown>), v: 1 }))
+      .join("\n");
+    writeFileSync(recordPath, `${downgraded}\n`, "utf8");
+
+    const resumed = await runWorkflow(root, "stages", { input: "alpha", resumeFromRunId: first.runId });
+    expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "no-recorded-calls", replayedCalls: 0 });
+    expect(resumed.replay.refusedReason).not.toBe("key-mismatch");
+    // Fail-closed either way: nothing was served from the unreadable record.
+    expect(resumed.executedPrompts).toHaveLength(3);
+  });
+
+  it("reuses a record after the roles table is remapped — the stated residual", async () => {
+    // KNOWN BEHAVIOUR, asserted so it cannot drift into a surprise. The canonical
+    // request is built in the runtime (`canonicalAgentRequest`) before the bridge
+    // consults the roles table, so the key identifies the tier a stage DECLARED, not
+    // the model that produced the answer. Remap `smol` and the stale answer is served
+    // under an unchanged key. Closing this means moving model resolution out of the
+    // bridge and into the runtime; until then, a roles-table change invalidates
+    // recorded runs BY HAND, and AUTHORING.md says so.
+    const root = temporaryProject();
+    writeWorkflow(
+      root,
+      "remapped",
+      `export const meta = { name: "remapped", description: "one tiered stage" };
+export default async function runWorkflow(dsl) {
+  return { answer: await dsl.agent("tiered stage", { modelRole: "smol" }) };
+}
+`,
+    );
+
+    const first = await runWorkflow(root, "remapped", { roles: { smol: "test/fast" } });
+    expect(first.ok).toBe(true);
+    expect(first.executedPrompts).toEqual(["tiered stage"]);
+
+    const resumed = await runWorkflow(root, "remapped", {
+      resumeFromRunId: first.runId,
+      roles: { smol: "test/strong" },
+    });
+
+    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 1 });
     expect(resumed.executedPrompts).toEqual([]);
   });
 

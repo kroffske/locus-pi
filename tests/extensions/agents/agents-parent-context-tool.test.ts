@@ -66,9 +66,29 @@ function tempRoot(prefix = "locus-parent-context-"): string {
   return root;
 }
 
+/**
+ * A root that owns `reviewer` outright.
+ *
+ * Discovery is project → user → bundled, so a root with no `.agents/agents/` reads
+ * whatever catalog the developer installed under `$HOME`. That was harmless while
+ * agent frontmatter `model:` was parsed and never used; now that it selects the
+ * child's model, a stale home catalog can refuse the run and these assertions would
+ * fail for a reason that has nothing to do with parent context.
+ */
+function tempRootWithReviewer(prefix = "locus-parent-context-"): string {
+  const root = tempRoot(prefix);
+  mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+  writeFileSync(
+    path.join(root, ".agents", "agents", "reviewer.md"),
+    "---\nname: reviewer\ndescription: Project reviewer\ntools: read, search\nrisk: medium\n---\nReview.",
+    "utf8",
+  );
+  return root;
+}
+
 describe("agents task parent context", () => {
   it("accepts one task string and omits parent context", async () => {
-    const h = createHarness(tempRoot());
+    const h = createHarness(tempRootWithReviewer());
     agents(h.pi);
 
     const result = await runTool(h, "task", {
@@ -84,7 +104,7 @@ describe("agents task parent context", () => {
   });
 
   it("forwards non-empty parent context and reads artifact payload into kickoff", async () => {
-    const root = tempRoot();
+    const root = tempRootWithReviewer();
     const h = createHarness(root);
     agents(h.pi);
     const artifactPath = path.join(root, "parent-context.md");

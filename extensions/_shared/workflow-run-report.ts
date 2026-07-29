@@ -17,6 +17,7 @@
 
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
 import {
   ensureWorkflowDirectoryNoSymlink,
   WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
@@ -65,6 +66,10 @@ interface WorkflowReportDocument {
   stage?: string;
   /** For continuation copies (kind `input`): the run the bytes came from. */
   sourceRunId?: string;
+  /** For agent answers: the model the child SESSION reported it ran on. */
+  executedModel?: string;
+  /** For agent answers: the declared tier had no assignment and the session model was used. */
+  modelRoleFallback?: string;
   unavailable?: string;
 }
 
@@ -85,6 +90,7 @@ export function writeWorkflowRunReport(
     }
 
     const authors = authorsByCallId(input.journal);
+    const executions = executionsByCallId(input.journal);
     const readable = records.filter(
       (record) => record.kind === "answer" || record.kind === "published" || record.kind === "input",
     );
@@ -108,12 +114,17 @@ export function writeWorkflowRunReport(
       // of it, and the verbatim bytes stay in the artifact store.
       const rendered = bytes !== undefined && record.name.endsWith(".json") ? renderedJsonMarkdown(bytes) : undefined;
       const fileName = documentFileName(position + 1, author, record.name, rendered !== undefined);
+      const execution = record.callId !== undefined ? executions.get(record.callId) : undefined;
       const document: WorkflowReportDocument = {
         fileName,
         author,
         kind: record.kind,
         ...(record.stage !== undefined ? { stage: record.stage } : {}),
         ...(record.kind === "input" && record.source?.runId !== undefined ? { sourceRunId: record.source.runId } : {}),
+        // Which model produced this document. Read from `agent_end`, which is the only
+        // line that can know it — `agent_start` is written before anything executes.
+        ...(execution?.executedModel !== undefined ? { executedModel: execution.executedModel } : {}),
+        ...(execution?.modelRoleFallback !== undefined ? { modelRoleFallback: execution.modelRoleFallback } : {}),
       };
       if (bytes === undefined) {
         document.unavailable = "the stored artifact could not be read back";
@@ -271,6 +282,27 @@ function authorsByCallId(journal: readonly WorkflowJournalLine[]): Map<string, s
     if (author !== undefined && author.trim() !== "") authors.set(line.callId, author);
   }
   return authors;
+}
+
+/**
+ * Per-call model facts, from `agent_end` only.
+ *
+ * `agent_start` carries a REQUEST, so reading it here would let the report name a
+ * model that never ran — the exact confusion the run README exists to remove.
+ */
+function executionsByCallId(
+  journal: readonly WorkflowJournalLine[],
+): Map<string, { executedModel?: string; modelRoleFallback?: string }> {
+  const executions = new Map<string, { executedModel?: string; modelRoleFallback?: string }>();
+  for (const line of journal) {
+    if (line.kind !== "agent_end" || line.callId === undefined) continue;
+    if (line.executedModel === undefined && line.modelRoleFallback === undefined) continue;
+    executions.set(line.callId, {
+      ...(line.executedModel !== undefined ? { executedModel: line.executedModel } : {}),
+      ...(line.modelRoleFallback !== undefined ? { modelRoleFallback: line.modelRoleFallback } : {}),
+    });
+  }
+  return executions;
 }
 
 function isTaskName(name: string): boolean {
@@ -443,7 +475,22 @@ function documentEntry(document: WorkflowReportDocument): string {
         ? document.stage !== undefined
           ? [document.stage]
           : []
-        : [document.author, ...(document.stage !== undefined ? [document.stage] : [])];
+        : [
+            document.author,
+            ...(document.stage !== undefined ? [document.stage] : []),
+            // The reader's answer to "which model wrote this". Absent rather than
+            // guessed when the run predates the field. `unavailable` is a SENTINEL
+            // meaning "the peer reported nothing", not a model name, so it is spelled
+            // out as a missing readback — "ran on unavailable" reads to a human like a
+            // model called `unavailable`, which is the kind of surface this task exists
+            // to stop.
+            ...(document.executedModel === undefined
+              ? []
+              : document.executedModel === EXECUTED_MODEL_UNAVAILABLE
+                ? ["executed model unavailable"]
+                : [`ran on ${document.executedModel}`]),
+            ...(document.modelRoleFallback !== undefined ? ["declared tier unassigned"] : []),
+          ];
   const description = describedAs.length === 0 ? "" : ` — ${describedAs.join(" · ")}`;
   return document.unavailable !== undefined
     ? `${document.fileName}${description} — unavailable: ${document.unavailable}`

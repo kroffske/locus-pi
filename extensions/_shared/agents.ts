@@ -89,7 +89,7 @@ export function parseAgentMarkdown(content: string, source: AgentSource, filePat
 
   const tools = normalizeTools(asStringList(metadata["allowedTools"] ?? metadata["tools"]));
   const spawns = asSpawns(metadata["spawns"] ?? (tools.includes("task") ? "*" : undefined));
-  const model = asStringList(metadata["modelOverride"] ?? metadata["model"]);
+  const model = asStringList(metadata["model"]);
   const permissionMode = asPermissionMode(metadata["permissionMode"], filePath, diagnostics);
   const agent: AgentDefinition = {
     name,
@@ -106,8 +106,6 @@ export function parseAgentMarkdown(content: string, source: AgentSource, filePat
   if (tools.length) agent.tools = tools;
   if (spawns) agent.spawns = spawns;
   if (model.length) agent.model = model;
-  const modelOverride = model[0];
-  if (modelOverride) agent.modelOverride = modelOverride;
   const thinkingLevel = asScalar(metadata["thinking-level"] ?? metadata["thinkingLevel"]);
   if (thinkingLevel) agent.thinkingLevel = thinkingLevel;
   const output = metadata["output"];

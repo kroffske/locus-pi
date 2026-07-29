@@ -5,7 +5,18 @@ import type { ExtensionContext, ThinkingLevel } from "./pi-api.js";
 import { getProjectRoot } from "./pi-api.js";
 
 const USER_HOME_ENV = "PI_MODEL_ROLES_HOME";
-export const DEFAULT_MODEL_ROLES = ["default", "smol", "slow", "plan", "summary", "agent", "vision", "designer", "commit", "task"] as const;
+export const DEFAULT_MODEL_ROLES = [
+  "default",
+  "smol",
+  "slow",
+  "plan",
+  "summary",
+  "agent",
+  "vision",
+  "designer",
+  "commit",
+  "task",
+] as const;
 export const DEFAULT_MODEL_CYCLE_ORDER = ["smol", "default", "slow"] as const;
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -42,11 +53,29 @@ export interface ModelRolesConfigPaths {
   project: string;
 }
 
+/**
+ * An assignment the operator DID write and this code could not parse.
+ *
+ * Distinct from "unset" on purpose. Collapsing the two is what let
+ * `smol: "deepseek-v4-flash"` (a missing `provider/`) read as an unassigned role and
+ * quietly run the parent's model under the name `smol`, while the degradation note
+ * told the operator the role "is not assigned in any model-roles layer" — a false
+ * statement about their own config file, and the exact requested-vs-executed
+ * conflation this task exists to remove. A typo is OD5's fail-closed case.
+ */
+export interface MalformedRoleAssignment {
+  /** The raw text as written, quoted back so the operator can find it. */
+  value: string;
+  /** Which layer carried it, so the operator knows which file to edit. */
+  layer: ModelRoleSource;
+}
+
 export interface EffectiveRole {
   role: string;
   source: ModelRoleSource;
   inherited: boolean;
   assignment?: ModelRoleAssignment;
+  malformed?: MalformedRoleAssignment;
 }
 
 export interface ModelRolesState {
@@ -66,6 +95,8 @@ export interface ModelRoleResolution {
   source: ModelRoleSource;
   inherited: boolean;
   assignment?: ModelRoleAssignment;
+  /** Set when the role's assignment exists but is not a parseable selector. */
+  malformed?: MalformedRoleAssignment;
   fallback: boolean;
 }
 
@@ -80,7 +111,10 @@ export interface ModelRoleResolutionRecord {
   thinking?: ThinkingLevel;
 }
 
-export function getModelRolesConfigPaths(projectRoot: string, env: NodeJS.ProcessEnv = process.env): ModelRolesConfigPaths {
+export function getModelRolesConfigPaths(
+  projectRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ModelRolesConfigPaths {
   const userRoot = env[USER_HOME_ENV] ?? join(homedir(), ".pi", "agent");
   return {
     user: join(userRoot, "model-roles", "config.json"),
@@ -97,27 +131,51 @@ export async function loadModelRolesState(ctx: ExtensionContext): Promise<ModelR
   return buildModelRolesState(paths, session, settings, user, project);
 }
 
-export function buildModelRolesState(paths: ModelRolesConfigPaths, session: ModelRolesConfig, settings: ModelRolesConfig, user: ModelRolesConfig, project: ModelRolesConfig): ModelRolesState {
-  const cycleOrder = session.cycleOrder ?? settings.cycleOrder ?? project.cycleOrder ?? user.cycleOrder ?? [...DEFAULT_MODEL_CYCLE_ORDER];
-  const roles = new Set([...DEFAULT_MODEL_ROLES, ...Object.keys(user.roles ?? {}), ...Object.keys(project.roles ?? {}), ...Object.keys(settings.roles ?? {}), ...Object.keys(session.roles ?? {}), ...cycleOrder]);
+export function buildModelRolesState(
+  paths: ModelRolesConfigPaths,
+  session: ModelRolesConfig,
+  settings: ModelRolesConfig,
+  user: ModelRolesConfig,
+  project: ModelRolesConfig,
+): ModelRolesState {
+  const cycleOrder = session.cycleOrder ??
+    settings.cycleOrder ??
+    project.cycleOrder ??
+    user.cycleOrder ?? [...DEFAULT_MODEL_CYCLE_ORDER];
+  const roles = new Set([
+    ...DEFAULT_MODEL_ROLES,
+    ...Object.keys(user.roles ?? {}),
+    ...Object.keys(project.roles ?? {}),
+    ...Object.keys(settings.roles ?? {}),
+    ...Object.keys(session.roles ?? {}),
+    ...cycleOrder,
+  ]);
   const effective = new Map<string, EffectiveRole>();
   for (const role of roles) {
     const sessionValue = session.roles?.[role];
     const settingsValue = settings.roles?.[role];
     const projectValue = project.roles?.[role];
     const userValue = user.roles?.[role];
+    // A value the operator wrote but this code cannot parse is recorded as
+    // `malformed`, never as plain "unset": the caller has to be able to tell a role
+    // nobody assigned (degrade, per OD5) from a typo (fail closed, per OD5).
+    const present = (
+      value: Exclude<ModelRoleValue, null>,
+      layer: ModelRoleSource,
+      inherited: boolean,
+    ): EffectiveRole => {
+      const assignment = normalizeAssignment(value);
+      if (assignment) return { role, source: layer, inherited, assignment };
+      return { role, source: "unset", inherited, malformed: { value: rawAssignmentText(value), layer } };
+    };
     if (sessionValue !== undefined && sessionValue !== null) {
-      const assignment = normalizeAssignment(sessionValue);
-      effective.set(role, assignment ? { role, source: "session", inherited: false, assignment } : { role, source: "unset", inherited: false });
+      effective.set(role, present(sessionValue, "session", false));
     } else if (settingsValue !== undefined && settingsValue !== null) {
-      const assignment = normalizeAssignment(settingsValue);
-      effective.set(role, assignment ? { role, source: "settings", inherited: false, assignment } : { role, source: "unset", inherited: false });
+      effective.set(role, present(settingsValue, "settings", false));
     } else if (projectValue !== undefined && projectValue !== null) {
-      const assignment = normalizeAssignment(projectValue);
-      effective.set(role, assignment ? { role, source: "project", inherited: false, assignment } : { role, source: "unset", inherited: false });
+      effective.set(role, present(projectValue, "project", false));
     } else if (userValue !== undefined && userValue !== null) {
-      const assignment = normalizeAssignment(userValue);
-      effective.set(role, assignment ? { role, source: "user", inherited: projectValue === null, assignment } : { role, source: "unset", inherited: projectValue === null });
+      effective.set(role, present(userValue, "user", projectValue === null));
     } else {
       effective.set(role, { role, source: "unset", inherited: projectValue === null });
     }
@@ -125,7 +183,11 @@ export function buildModelRolesState(paths: ModelRolesConfigPaths, session: Mode
   return { paths, session, settings, user, project, effective, cycleOrder };
 }
 
-export function resolveModelRoleForPurpose(state: ModelRolesState, purpose: ModelRolePurpose, preferredRoles: string[] = []): ModelRoleResolution {
+export function resolveModelRoleForPurpose(
+  state: ModelRolesState,
+  purpose: ModelRolePurpose,
+  preferredRoles: string[] = [],
+): ModelRoleResolution {
   const requestedRoles = [...preferredRoles, ...defaultRolesForPurpose(purpose)];
   for (const role of requestedRoles) {
     const effective = state.effective.get(role);
@@ -141,14 +203,127 @@ export function resolveModelRoleForPurpose(state: ModelRolesState, purpose: Mode
       };
     }
   }
+  // Nothing in the chain resolved. If one of the roles we consulted carries a
+  // malformed assignment, that is why, and saying "unassigned" here would hide an
+  // operator typo behind a silent degrade on the no-tier-declared path too.
+  const malformed = requestedRoles
+    .map((name) => state.effective.get(name)?.malformed)
+    .find((entry) => entry !== undefined);
   return {
     purpose,
     requestedRoles,
     role: requestedRoles[0] ?? "default",
     source: "unset",
     inherited: false,
+    ...(malformed !== undefined ? { malformed } : {}),
     fallback: true,
   };
+}
+
+/**
+ * Split a display-only thinking suffix off a bare role token.
+ *
+ * `smol:high` names the role `smol` at the `high` level, exactly as
+ * `provider/id:high` names a concrete model at that level in
+ * `parseModelSelector`. The two grammars must agree: looking the whole token up
+ * as a role name finds nothing, and a role that resolves to nothing degrades to
+ * the parent model — so an author who spelled out a tier would silently get a
+ * different model, which is the substitution the tier work exists to stop.
+ *
+ * The level does not route: it is stripped again before the registry lookup, and
+ * the child session is created from the model half alone. It is not invisible to
+ * the child either — the resolution record travels in the kickoff prompt, so the
+ * child reads the level as text — but nothing acts on it. Plumbing effort into
+ * the child for real is separate, deferred work.
+ *
+ * The `:<level>` space is reserved by this grammar: a role literally named
+ * `foo:high` can no longer be addressed by that literal name. Six words are
+ * reserved; any other suffix stays part of the role name.
+ */
+export function splitRoleSelector(token: string): { role: string; thinking?: ThinkingLevel } {
+  const trimmed = token.trim();
+  const colon = trimmed.lastIndexOf(":");
+  if (colon <= 0) return { role: trimmed };
+  const suffix = trimmed.slice(colon + 1);
+  if (!isThinkingLevel(suffix)) return { role: trimmed };
+  return { role: trimmed.slice(0, colon), thinking: suffix };
+}
+
+/**
+ * Resolve ONE declared role, with no purpose fallback chain.
+ *
+ * `resolveModelRoleForPurpose` walks `preferred → agent → task → default`, which is
+ * right for "give me something reasonable for this purpose" and wrong for an author
+ * who wrote `modelRole: "smol"`: falling through to `agent` would answer a question
+ * nobody asked and run a different tier under the requested tier's name. So a
+ * declared role resolves to its own assignment or to none at all, and the caller
+ * decides what "none" means (today: degrade to the parent model and record it).
+ */
+export function resolveDeclaredModelRole(state: ModelRolesState, role: string): ModelRoleResolution {
+  const { role: declaredRole, thinking } = splitRoleSelector(role);
+  const effective = state.effective.get(declaredRole);
+  // A suffix the author wrote overrides the level the assignment carries, the same
+  // way it does on a concrete selector. It is a label, not a routing input: the
+  // model half is what the registry resolves.
+  const assignment =
+    effective?.assignment !== undefined && thinking !== undefined
+      ? { ...effective.assignment, thinking }
+      : effective?.assignment;
+  return {
+    purpose: "agent",
+    requestedRoles: [role],
+    role: declaredRole,
+    source: effective?.source ?? "unset",
+    inherited: effective?.inherited ?? false,
+    ...(assignment !== undefined ? { assignment } : {}),
+    ...(effective?.malformed !== undefined ? { malformed: effective.malformed } : {}),
+    fallback: false,
+  };
+}
+
+/**
+ * The layers a role lookup read, named so a degradation notice is actionable.
+ *
+ * A message saying "role unassigned" leaves the operator guessing which file to
+ * edit; this names the two on-disk candidates by absolute path.
+ */
+export function modelRoleLayersConsulted(state: ModelRolesState): string[] {
+  return ["session", "settings", `project (${state.paths.project})`, `user (${state.paths.user})`];
+}
+
+/**
+ * One sentence an operator can act on: what was named, what was read, what happened
+ * instead.
+ *
+ * Shared by the workflow bridge and the interactive launcher so that `/agent run
+ * reviewer` and a workflow stage naming `reviewer` degrade with the SAME recorded
+ * sentence (OD2). The past tense is deliberate and load-bearing: callers may only
+ * emit this once the child has actually been prompted — a built-but-never-prompted
+ * session is not an execution, and this is a claim about one. `executedModel` is
+ * the gate every caller uses, because it is set only after child kickoff.
+ */
+export function unassignedRoleNote(role: string, origin: string, state: ModelRolesState): string {
+  return (
+    `${origin} ${JSON.stringify(role)} is not assigned in any model-roles layer ` +
+    `(${modelRoleLayersConsulted(state).join(", ")}); the child inherited the parent session model.`
+  );
+}
+
+/**
+ * The refusal text for a malformed assignment, shared by every caller so the
+ * workflow bridge and the interactive launcher name the same file and the same fix.
+ *
+ * Present tense and no claim about a child: this refusal is issued BEFORE anything
+ * is created, which is the point — a typo must never reach `createSession`.
+ */
+export function malformedRoleAssignmentNote(role: string, origin: string, malformed: MalformedRoleAssignment): string {
+  return (
+    `${origin} ${JSON.stringify(role)} is assigned ${JSON.stringify(malformed.value)} by the ` +
+    `${malformed.layer} model-roles layer, but that is not a "provider/id" selector ` +
+    `(an optional ":off|minimal|low|medium|high|xhigh" suffix is allowed and is display-only). ` +
+    `Fix or remove that assignment — a malformed assignment is a configuration error, not an ` +
+    `unassigned role, so it is NOT degraded to the session model.`
+  );
 }
 
 export function resolvePromptPlanningModelRole(state: ModelRolesState): ModelRoleResolution {
@@ -174,8 +349,20 @@ export function resolveAgentModelPreference(state: ModelRolesState, agentModels:
         fallback: false,
       };
     }
-    return resolveModelRoleForPurpose(state, "agent", [first]);
+    // A DECLARED role resolves to its own assignment or to none — never through
+    // `resolveModelRoleForPurpose`'s `preferred → agent → task → default` walk.
+    // An agent whose frontmatter says `model: smol` must not run the `task` tier
+    // because `smol` happens to be unassigned and `task` happens not to be: that is
+    // a different model under the requested tier's name, which is the silent
+    // substitution D3a exists to stop. It reads the same as the per-call
+    // `modelRole` rule in the bridge, and all three production callers
+    // (workflow bridge, `/agent run`, `spawn_agent`) inherit it from here, which is
+    // the parity OD2 asked for.
+    return resolveDeclaredModelRole(state, first);
   }
+  // No frontmatter tier at all — "no tier declared". The purpose chain is the right
+  // answer to "give me something reasonable for an agent", and it is the only case
+  // that may reach it.
   return resolveModelRoleForPurpose(state, "agent");
 }
 
@@ -195,7 +382,11 @@ export function modelRoleResolutionRecord(resolution: ModelRoleResolution): Mode
   return record;
 }
 
-export async function setModelRoleSetting(ctx: ExtensionContext, role: string, assignment: ModelRoleAssignment): Promise<boolean> {
+export async function setModelRoleSetting(
+  ctx: ExtensionContext,
+  role: string,
+  assignment: ModelRoleAssignment,
+): Promise<boolean> {
   const paths = getModelRolesConfigPaths(getProjectRoot(ctx));
   const project = await readConfig(paths.project);
   const roles = stringRecord(project.roles);
@@ -210,6 +401,11 @@ export async function setModelRoleSetting(ctx: ExtensionContext, role: string, a
     await ctx.settings.set("modelRoles", { ...current, [role]: formatAssignment(assignment) });
   }
   return true;
+}
+
+/** The assignment as the operator wrote it, for quoting back in a refusal. */
+export function rawAssignmentText(value: Exclude<ModelRoleValue, null>): string {
+  return typeof value === "string" ? value : formatAssignment(value);
 }
 
 export function normalizeAssignment(value: ModelRoleValue): ModelRoleAssignment | undefined {
@@ -311,5 +507,7 @@ function stringArray(value: unknown): string[] {
 }
 
 function isNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
+  return (
+    typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT"
+  );
 }

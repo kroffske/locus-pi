@@ -1,7 +1,7 @@
 ---
 name: task
 description: General-purpose subagent with full capabilities for delegated multi-step tasks
-model: pi/task
+model: task
 thinking-level: medium
 evidence:
   mode: warn
