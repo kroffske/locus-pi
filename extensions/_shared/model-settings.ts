@@ -230,15 +230,46 @@ export function resolveModelRoleForPurpose(
  * declared role resolves to its own assignment or to none at all, and the caller
  * decides what "none" means (today: degrade to the parent model and record it).
  */
+/**
+ * Split a display-only thinking suffix off a bare role token.
+ *
+ * `smol:high` names the role `smol` at the `high` level, exactly as
+ * `provider/id:high` names a concrete model at that level in
+ * `parseModelSelector`. The two grammars must agree: looking the whole token up
+ * as a role name finds nothing, and a role that resolves to nothing degrades to
+ * the parent model — so an author who spelled out a tier would silently get a
+ * different model, which is the substitution the tier work exists to stop.
+ *
+ * The level stays display-only. It reaches the label the operator reads and
+ * never the child; plumbing effort into the child is a separate, deferred piece
+ * of work, and this function must not be read as doing it.
+ */
+export function splitRoleSelector(token: string): { role: string; thinking?: ThinkingLevel } {
+  const trimmed = token.trim();
+  const colon = trimmed.lastIndexOf(":");
+  if (colon <= 0) return { role: trimmed };
+  const suffix = trimmed.slice(colon + 1);
+  if (!isThinkingLevel(suffix)) return { role: trimmed };
+  return { role: trimmed.slice(0, colon), thinking: suffix };
+}
+
 export function resolveDeclaredModelRole(state: ModelRolesState, role: string): ModelRoleResolution {
-  const effective = state.effective.get(role);
+  const { role: declaredRole, thinking } = splitRoleSelector(role);
+  const effective = state.effective.get(declaredRole);
+  // A suffix the author wrote overrides the level the assignment carries, the same
+  // way it does on a concrete selector. It is a label, not a routing input: the
+  // model half is what the registry resolves.
+  const assignment =
+    effective?.assignment !== undefined && thinking !== undefined
+      ? { ...effective.assignment, thinking }
+      : effective?.assignment;
   return {
     purpose: "agent",
     requestedRoles: [role],
-    role,
+    role: declaredRole,
     source: effective?.source ?? "unset",
     inherited: effective?.inherited ?? false,
-    ...(effective?.assignment !== undefined ? { assignment: effective.assignment } : {}),
+    ...(assignment !== undefined ? { assignment } : {}),
     ...(effective?.malformed !== undefined ? { malformed: effective.malformed } : {}),
     fallback: false,
   };

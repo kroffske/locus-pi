@@ -1,13 +1,18 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { evaluateEvidence } from "../../../extensions/_shared/agent-evidence-evaluator.js";
 import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
 import {
   buildModelRolesState,
   DEFAULT_MODEL_ROLES,
+  loadModelRolesState,
   resolveAgentModelPreference,
   type ModelRolesState,
 } from "../../../extensions/_shared/model-settings.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import { createHarness } from "../../test-harness.js";
 
 function loadBundledAgent(name: string): AgentDefinition {
   const loaded = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
@@ -95,17 +100,33 @@ describe("bundled agent tiers", () => {
     }
   });
 
-  it("ships no concrete model assignment for any role", () => {
+  it("ships no concrete model assignment for any role", async () => {
     // OD5, provider-neutral: the package must not decide which vendor a stranger
     // pays. Every role is a name until an operator layer assigns it, and an
     // unassigned role degrades to the session model with the degradation recorded.
     // If a package default is ever added, this test fails and the decision has to be
     // re-made on purpose instead of drifting in.
-    const state = emptyRolesState();
+    //
+    // This goes through the SHIPPED loader rather than four hand-built empty layers:
+    // hand-building the layers proves only that empty input yields empty output, and
+    // a default injected anywhere inside `loadModelRolesState` would sail past it.
+    // The operator layers are pointed at empty temp directories so the machine
+    // running the suite cannot lend the package its own assignments.
+    const previousHome = process.env.PI_MODEL_ROLES_HOME;
+    const root = await mkdtemp(join(tmpdir(), "pi-provider-neutral-"));
+    try {
+      process.env.PI_MODEL_ROLES_HOME = join(root, "home");
+      const harness = createHarness(join(root, "project"));
+      const state = await loadModelRolesState(harness.ctx);
 
-    for (const role of DEFAULT_MODEL_ROLES) {
-      expect(state.effective.get(role)).toMatchObject({ role, source: "unset" });
-      expect(state.effective.get(role)?.assignment).toBeUndefined();
+      for (const role of DEFAULT_MODEL_ROLES) {
+        expect(state.effective.get(role)).toMatchObject({ role, source: "unset" });
+        expect(state.effective.get(role)?.assignment).toBeUndefined();
+      }
+    } finally {
+      if (previousHome === undefined) delete process.env.PI_MODEL_ROLES_HOME;
+      else process.env.PI_MODEL_ROLES_HOME = previousHome;
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

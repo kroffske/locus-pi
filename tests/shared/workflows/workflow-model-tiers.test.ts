@@ -279,6 +279,31 @@ describe("the declared tier reaches the child session", () => {
     expect(h.ctx.model).toEqual(STRONG);
   });
 
+  it("resolves a tier that carries a thinking suffix as that tier, not as a role of its own", async () => {
+    // The two grammars have to agree. `provider/id:high` names a model at a level;
+    // `smol:high` names the SAME tier at a level. Looking the whole token up as a
+    // role name finds nothing, and a role that resolves to nothing degrades to the
+    // parent — so the author who spelled out the cheap tier would silently get the
+    // expensive one. The level itself is display-only and never reaches the child.
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "cheap work", agent: "bare", modelRole: "smol:high" });
+
+    expect(result.status).toBe("completed");
+    // By value: the parent is `test/strong`, so inheritance cannot satisfy this.
+    expect(probe.captured).toHaveLength(1);
+    expect(probe.captured[0]?.model).toEqual(FAST);
+    // And it resolved rather than degraded — a degradation would have recorded one.
+    expect(result.modelRoleFallback).toBeUndefined();
+  });
+
   it("lets a per-call model outrank the agent's frontmatter tier", async () => {
     const h = await harnessWithRoles({ smol: "test/fast" });
     const probe = sdkProbe(STRONG);
