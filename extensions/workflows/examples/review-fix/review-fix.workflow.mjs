@@ -144,13 +144,11 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const { agent, captureSourceState, log, phase } = dsl;
+  const { agent, log, phase } = dsl;
   const intent = requireBoundedText(input, "intent", MAX_INTENT_CHARS);
-  const sourceProvenance = [];
 
   phase("resolve-fix-scope");
   log("Binding the immutable review and validating an agent-selected remediation graph.");
-  let expectedState = captureSourceState("before-remediation");
   const continuation = dsl.continuationArtifacts();
   if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "review.md") {
     throw new Error('review-fix continuation requires exactly one artifact named "review.md"');
@@ -244,21 +242,13 @@ ${selectedText}
   const workerResults = [];
   const blockedFindingIds = new Set();
   const writerFailures = [];
-  for (const [index, finding] of selected.entries()) {
+  for (const finding of selected) {
     const failedDependencies = finding.dependsOn.filter((id) => blockedFindingIds.has(id));
     if (failedDependencies.length > 0) {
       blockedFindingIds.add(finding.id);
       log(`Skipping finding ${finding.id}: blocked by failed dependency ${failedDependencies.join(", ")}.`);
       continue;
     }
-    const beforeWriter = captureSourceState(`before-writer-${finding.id.toLowerCase()}`);
-    sourceProvenance.push(
-      classifySourceTransition(
-        expectedState,
-        beforeWriter,
-        index === 0 ? "unexpected_pre_writer_drift" : "unexpected_inter_writer_drift",
-      ),
-    );
     try {
       const text = await agent(
         `${COMMON}
@@ -296,11 +286,7 @@ ${finding.note ?? "(no operator note)"}
 
 --- BEGIN DIRECT DEPENDENCY WORKER RESULTS ---
 ${renderDependencyResults(workerResults, finding.dependsOn)}
---- END DIRECT DEPENDENCY WORKER RESULTS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(sourceProvenance, beforeWriter)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END DIRECT DEPENDENCY WORKER RESULTS ---`,
         {
           ...REVIEW_FIX_AGENT_DEFAULTS,
           artifact: `worker-${finding.id}.md`,
@@ -314,16 +300,11 @@ ${renderSourceProvenance(sourceProvenance, beforeWriter)}
       blockedFindingIds.add(finding.id);
       writerFailures.push({ id: finding.id, error });
     }
-    const afterWriter = captureSourceState(`after-writer-${finding.id.toLowerCase()}`);
-    sourceProvenance.push(classifySourceTransition(beforeWriter, afterWriter, "writer_window_changed"));
-    expectedState = afterWriter;
   }
   if (writerFailures.length > 0) throw writerFailures[0].error;
 
   phase("collect-check-evidence");
   log("Collecting independent diff evidence and running bounded checks in host-created disposable worktrees.");
-  const beforeCheck = captureSourceState("before-check");
-  sourceProvenance.push(classifySourceTransition(expectedState, beforeCheck, "unexpected_post_writer_drift"));
   const checkText = await agent(
     `${COMMON}
 
@@ -355,11 +336,7 @@ ${scopeText}
 
 --- BEGIN ALL WORKER CLAIMS ---
 ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
---- END ALL WORKER CLAIMS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(sourceProvenance, beforeCheck)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END ALL WORKER CLAIMS ---`,
     {
       ...FIX_CHECK_OPTIONS,
       artifact: "check-evidence.md",
@@ -367,13 +344,9 @@ ${renderSourceProvenance(sourceProvenance, beforeCheck)}
       maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
     },
   );
-  const afterCheck = captureSourceState("after-check");
-  sourceProvenance.push(classifySourceTransition(beforeCheck, afterCheck, "unexpected_check_window_drift"));
 
   phase("re-review-fixes");
   log("Freshly re-reviewing the original findings, worker claims, dependencies, and regressions.");
-  const beforeReReview = captureSourceState("before-re-review");
-  sourceProvenance.push(classifySourceTransition(afterCheck, beforeReReview, "unexpected_post_check_drift"));
   return agent(
     `${COMMON}
 
@@ -389,13 +362,6 @@ the worker claims and check evidence as leads, not proof: reopen the live diff
 and the affected files. Trace callers, dependents, tests, configuration,
 documentation, and shared contracts for regressions or incomplete dependency
 changes. Do not change files.
-
-Use the host-owned fingerprint transitions to separate two cases explicitly: a
-finding already stale at \`before-remediation\`, versus source drift after the
-workflow began. Treat any \`unexpected_*_drift\` classification as a provenance
-gap that may invalidate worker or check evidence. A \`writer_window_changed\`
-classification records observed change during that writer window; it does not
-prove the named writer was the only process that changed files.
 
 Return exact Markdown including the original review reference context, the
 operator intent, the selected findings, the per-finding outcome with evidence,
@@ -421,11 +387,7 @@ ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
 
 --- BEGIN CHECK EVIDENCE ---
 ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
---- END CHECK EVIDENCE ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(sourceProvenance, beforeReReview)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END CHECK EVIDENCE ---`,
     {
       ...FIX_READ_OPTIONS,
       artifact: "re-review.md",
@@ -639,38 +601,6 @@ function renderWorkerResults(results, maxChars) {
     results.map(({ id, text }) => `## Worker ${id}\n${truncateText(text, perWorkerLimit)}`).join("\n\n"),
     maxChars,
   );
-}
-
-function classifySourceTransition(expected, observed, changedClassification) {
-  const changed = expected.fingerprint !== observed.fingerprint;
-  return {
-    fromFingerprint: expected.fingerprint,
-    toFingerprint: observed.fingerprint,
-    changed,
-    classification: changed ? changedClassification : "stable",
-    fromHead: expected.head,
-    toHead: observed.head,
-  };
-}
-
-function renderSourceProvenance(transitions, current) {
-  const transitionText = transitions.length === 0 ? "(none)" : JSON.stringify(transitions, null, 2);
-  const status = current.status.length === 0 ? ["(clean)"] : current.status.slice(0, 40);
-  return [
-    transitionText,
-    "",
-    "Current host-owned source state:",
-    JSON.stringify(
-      {
-        fingerprint: current.fingerprint,
-        head: current.head,
-        status,
-        omittedStatusEntries: Math.max(0, current.status.length - status.length),
-      },
-      null,
-      2,
-    ),
-  ].join("\n");
 }
 
 function truncateText(text, maxChars) {

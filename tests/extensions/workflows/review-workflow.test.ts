@@ -266,6 +266,34 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(verifier).toMatch(/Missing defence in depth is not a defect/u);
     expect(verifier).toMatch(/Deduplicate by root cause before writing findings/u);
     expect(verifier).toMatch(/never `Rejected` for a question whose answer produced a finding/u);
+    // Nothing in the script grades the verdict against the findings, so this
+    // sentence is the only thing standing between a reader and a review that
+    // reports a blocking defect under "ready for acceptance". A live run on
+    // 2026-07-28 produced exactly that contradiction.
+    expect(verifier).toMatch(/Write `Needs changes` whenever you confirmed even one `P1` or\s+`P2` finding/u);
+  });
+
+  it("forbids the inventory to drop what it judged out of scope, and outside its document", () => {
+    // A live run on 2026-07-28 saw a real structural defect in the reviewed file,
+    // decided it belonged to another class of problem than the operator asked
+    // about, and wrote it in prose around the returned document. No later stage
+    // reads that prose, so the finished review presented the ground as covered.
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain("You do not decide what belongs to this review.");
+    expect(source).toMatch(/Anything you noticed in the\s+changed surface gets an id/u);
+    expect(source).toMatch(/no later stage\s+reads anything you write outside the returned document/u);
+  });
+
+  it("makes the interrogator question a claim the sources cannot settle", () => {
+    // Same run: the reviewed document asserted a measured per-call cost that no
+    // source can support. It drew no question and no declared limit, so it
+    // reached the reader inside a review that claimed full coverage.
+    const interrogator = promptSource("interrogator.prompt.md");
+
+    expect(interrogator).toContain("A claim the sources cannot settle still gets a question.");
+    expect(interrogator).toMatch(/Ask whether anything in the repository\s+supports the claim/u);
+    expect(interrogator).toMatch(/asserts something the\s+repository cannot support, which is a finding/u);
   });
 
   it("makes every question id carry its question in both question-writing roles", () => {
@@ -1110,9 +1138,12 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(answers[6]?.text).toBe(outputs["ask review questions round 2"]);
   });
 
-  it("stops interrogation at the round cap and never assesses a round it cannot follow", async () => {
-    // The cap is the safety net, not the exit condition. Three rounds means two
-    // assessments: assessing the last round would ask a question nobody can answer.
+  it("assesses even the round it cannot follow, and hands the surviving gaps to the verifier", async () => {
+    // The cap is the safety net, not the exit condition — but a run that skips
+    // the last assessment can only ever report "the cap stopped me", which reads
+    // the same whether the question set was complete or the assessor was still
+    // arguing with it. The final verdict is evidence rather than a branch: the
+    // gaps it names reach the verifier as declared limits of the review.
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
     const { dsl } = runtimeWith(async (request) => {
@@ -1136,8 +1167,13 @@ describe("workflow example: review.workflow.mjs", () => {
       "ask review questions round 2",
       "assess question coverage round 2",
       "ask review questions round 3",
+      "assess question coverage round 3",
       "verify and write review",
     ]);
+    // The gap the third assessment still reported is written into the verifier's
+    // prompt, so an unasked question becomes a stated limit instead of silence.
+    expect(calls.at(-1)?.prompt).toContain("COVERAGE GAPS NOBODY ASKED ABOUT");
+    expect(calls.at(-1)?.prompt).toContain("still uncovered");
   });
 
   it.each([

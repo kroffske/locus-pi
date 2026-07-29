@@ -18,82 +18,84 @@ checkout, and that difference is why they are two workflows rather than one.
 plan/
 ├── README.md
 ├── plan.workflow.mjs
-├── plan-pipeline.diagram.mjs
-├── plan-pipeline.excalidraw
-└── plan-pipeline.png
+└── plan-pipeline.svg
 
 plan-implement/
 ├── README.md
-├── plan-implement.workflow.mjs
-├── plan-implement-pipeline.diagram.mjs
-├── plan-implement-pipeline.excalidraw
-└── plan-implement-pipeline.png
+└── plan-implement.workflow.mjs
 ```
 
-The diagram triple is part of the Package-workflow contract: the `.diagram.mjs` generator
-is the source of truth, and the `.excalidraw` and `.png` beside it are
-regenerated from it rather than hand-edited.
+[`plan-pipeline.svg`](./plan-pipeline.svg) is the picture of the run below: the
+three agents down the middle with what each one receives and returns, the script
+phase that owns each of them on the left, the persisted artifacts on the right,
+and both ways the run can end. It is hand-authored and edited directly — there is
+no generator, and nothing regenerates it.
+
+![The plan workflow: a scout hands context to a planner, the planner hands a plan to a critic](./plan-pipeline.svg)
 
 There are no prompt resources and no workflow-local agent definitions. Every
 stage task is written inline under one `COMMON` contract, because no prompt here
 is long enough to bury the routing — the [authoring rule](../../AUTHORING.md) and
 the shipped counts are in [`../README.md`](../README.md).
 
-## `plan`: two loops with two different owners
+## `plan`: three agents, one loop
 
 ```mermaid
 flowchart LR
-    T["exact operator task"] --> C["read-only clarifier decision"]
-    C -->|"needs operator"| A["task.md + clarification-questions.md refs"]
-    C -->|"continue"| M
-    A --> H["host inline operator question"]
-    H --> X["atomic continuation: verify and consume refs"]
-    X --> M["map task context"]
-    M --> D["draft the complete plan"]
-    D --> K{"critic: accept or revise?"}
-    K -->|"revise + defects"| D
+    T["exact operator task"] --> S["agent scout: read the repository"]
+    S -->|"context.md"| D["agent planner: write the whole plan"]
+    D -->|"the plan under review"| K{"agent critic: accept or revise?"}
+    K -->|"revise + defects, verbatim"| D
     K -->|"accept"| O["runtime plan.md + exact return text"]
     K -->|"round cap"| F["ok:false, unresolved defects"]
 ```
 
-**The operator loop runs at most once and can pause the whole run.** A read-only
-clarifier returns the shaped decision `{decision, questions}`. `continue` starts
-planning. `needs_operator` persists the exact task and the readable questions,
-returns their complete `{ runId, artifactId, name, sha256 }` references, declares
-a generic operator handoff, and stops. The answers arrive as ordinary text on a
-continuation that also attaches those two references through the workflow host's
-closed `continuation` field; the runtime verifies and copies both before workflow
-code starts, and the entry then proves they came from this workflow's own
-`clarify-task` stage before using a byte of them.
+The cast is declared once, in the frozen `PLAN_AGENTS` roster at the top of the
+file: each entry carries the agent's id, what it receives, what it returns, and
+its capability options, and every call site spreads those options and adds only
+the round label. Reading that object tells you who takes part without following
+the control flow that calls them.
 
-`clarification-questions.md` carries each question's id _and_ its full prompt, and
-the answers are always forwarded together with the questions they answer. An
-answer sheet alone — "1. yes, 2. the second one" — is unreadable to every later
-stage and to every human who opens the run afterwards.
+**`scout` describes; it never proposes.** It is the only stage that reads the
+repository broadly, so the loop below never has to go looking: existing
+behaviour, the surfaces a change would touch, the conventions it would have to
+follow, and an explicit list of what it could not determine.
 
-**The drafting loop runs entirely inside one run.** The drafter writes the whole
-plan; a read-only critic reopens the repository, checks each step against what is
-actually there, and returns `{verdict, defects}`. Script code branches on the
-enum and hands the defect sentences to the next round verbatim, numbered. It
-never greps the draft's Markdown.
+**`planner` writes the whole plan every round, never a delta**, so the workflow
+never merges two model documents. Rounds share the `plan.md` name: the artifact
+id is the index identity, so every round is retained separately and the last one
+is the plan.
 
-Every round returns the complete plan, never a delta, so each round is a whole
-document and the workflow never merges two model texts. Rounds share the
-`plan.md` name: the artifact id is the index identity, so every round is retained
-separately and the last one is the plan.
+**`critic` is the exit.** It reopens the repository, checks each step against
+what is actually there, and returns the shaped `{verdict, defects}`. Script code
+branches on the enum and hands the defect sentences to the next round verbatim,
+numbered. It never greps the draft's Markdown.
+
+### The run never stops to ask
+
+There is no operator pause and no clarification round. When the task leaves a
+real choice open, the planner takes the most defensible option and records it in
+the plan under `## Assumptions`, in the form "assumed X, because Y; wrong if Z";
+the critic treats a decision the plan depends on but never states as a defect,
+and a choice recorded with its reason as not a defect even when it would have
+chosen differently.
+
+That is a deliberate trade. A run that halts to ask has to be resumed, and until
+it is there is no plan at all; an assumption written down is visible to the
+operator the moment the run finishes, and correcting it means replanning — which
+this workflow is cheap enough to do.
 
 The measured exit is the critic. `MAX_PLAN_ROUNDS` (4) is only the safety net, and
 reaching it is a failure — `{ ok: false, stoppedBy: "round-cap", unresolvedRows }`
 carrying the critic's last defects. That is deliberate: a draft nobody accepted is
-not a plan, and because continuation consumes only a _successful_ run's projected
-artifacts, an unaccepted draft cannot be handed to a writer.
+not a plan, and a failed run projects no terminal artifact, so an unaccepted draft
+cannot be handed to a writer.
 
 ### What the run retains
 
 - `task.md` — the exact operator task, byte for byte;
-- `clarification-questions.md` and `clarification-answers.md` when the run paused;
-- `clarifier-decision.json`, `context.md`, and one `plan.md` plus one
-  `plan-critique.json` per drafting round;
+- `context.md` — the scout's map;
+- one `plan.md` and one `plan-critique.json` per drafting round;
 - the returned text, equal to the accepted `plan.md`.
 
 ## `plan-implement`: one writer per step
@@ -111,12 +113,19 @@ flowchart LR
     Q --> O["runtime implementation-report.md"]
 ```
 
-The plan arrives as host-verified bytes, never as text pasted into the input. The
-entry requires exactly one continuation artifact named `plan.md` and proves four
-things about it: it came from the `plan` workflow, from its `draft-plan` stage, as
-an automatic answer, and `terminal.result` equals these exact bytes. That last
-check is the load-bearing one — it is what distinguishes the accepted plan from a
-same-named draft written by an earlier round of the same loop.
+The plan arrives as continuation bytes the host has already verified and copied,
+never as text pasted into the input. The entry requires exactly one continuation
+artifact named `plan.md` and non-empty, and then reads it at whatever length it
+is.
+
+Two things it deliberately no longer does, both removed on 2026-07-28. It no
+longer re-derives the host's proof — matching digests, the source run's target
+and stage, and its terminal result — because that ceremony sat in front of every
+reader for a risk worth less than its cost: the worst case is implementing a plan
+the critic had not accepted, which replanning fixes. And it no longer caps the
+plan's length, because a cap here could only reject a plan somebody had already
+accepted, after the run that wrote it was over. The budgets that still matter are
+the per-step ones below, which are what keep a single writer's prompt in hand.
 
 Deterministic code then parses the `### S<n>` blocks. That text was written by a
 _previous_ run's agent, so a malformed plan is a fatal error: nobody in this run
@@ -136,15 +145,10 @@ because the operator's working tree has already changed and needs describing, an
 the run returns `{ ok: false, partial: true, appliedSteps, failedStep,
 unresolvedRows }`. The runner projects a deliberate partial as a non-success.
 
-`captureSourceState()` fingerprints the checkout before and after every writer, so
-the reporter can separate what a declared writer window changed from drift that
-appeared outside one. It records evidence; it does not lock the checkout.
-
 ### What the run retains
 
 - `step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
   `check-evidence.md`, and `implementation-report.md`;
-- `source-state-*.json` fingerprints around every writer and check window;
 - the returned text, equal to `implementation-report.md`, unless the run was
   partial — then the returned value is the structured envelope above and the
   report is still retained.

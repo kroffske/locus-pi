@@ -13,7 +13,7 @@
 import type { WorkflowRunSummary } from "./workflow-journal.js";
 import type { WorkflowReplayController } from "./workflow-replay.js";
 import type { WorkflowResourceLoader } from "./workflow-resources.js";
-import type { WorkflowSourceState, WorkflowSourceStateReader, WorkflowWorkspaceManager } from "./workflow-worktree.js";
+import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import type {
   WorkflowArtifactPorts,
   WorkflowArtifactRef,
@@ -146,8 +146,6 @@ export interface WorkflowDsl {
   consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
   /** Host-verified continuation artifacts bound before trusted workflow code starts. */
   continuationArtifacts(): readonly WorkflowContinuationArtifact[];
-  /** Capture and persist one deterministic host-owned source-state fingerprint. */
-  captureSourceState(label: string): WorkflowSourceState;
   /** Run independent branches behind one fail-closed barrier and preserve input order. */
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
   /** Run ordered stages for every item; a failed item stops before its later stages. */
@@ -429,7 +427,6 @@ export interface WorkflowRuntimeOptions {
   /** Recorded-call store for `--resume`. Absent means neither record nor replay. */
   replay?: WorkflowReplayController;
   artifactPorts?: WorkflowArtifactPorts;
-  sourceState?: WorkflowSourceStateReader;
   replaySourceRunId?: string;
   now?: () => string; // default () => new Date().toISOString()
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
@@ -1896,21 +1893,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.continuation?.artifacts ?? [];
   }
 
-  function captureSourceState(label: string): WorkflowSourceState {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(label)) {
-      throw new Error("workflow source-state label must be a safe 1-96 character identifier");
-    }
-    if (options.sourceState === undefined) throw new Error("workflow source-state reader is not configured");
-    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
-    const state = options.sourceState.capture();
-    options.artifactPorts.publishText(
-      `source-state-${label}.json`,
-      `${JSON.stringify({ label, ...state }, null, 2)}\n`,
-      _currentPhase,
-    );
-    return state;
-  }
-
   /**
    * The DSL's answer to replay determinism: supply the nondeterministic value
    * instead of banning the call. Without a replay store these are exactly
@@ -1933,7 +1915,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     publishArtifact,
     consumeTextArtifact,
     continuationArtifacts,
-    captureSourceState,
     parallel,
     pipeline,
     phase,

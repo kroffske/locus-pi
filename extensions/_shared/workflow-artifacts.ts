@@ -269,7 +269,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     throw new Error("Workflow text artifact limit must be a positive safe integer.");
   }
   assertCanonicalRunDirectory(options.projectRoot, options.runDir, options.runId);
-  ensureDirectoryNoSymlink(options.runDir, artifactsDir);
+  ensureWorkflowDirectoryNoSymlink(options.runDir, artifactsDir);
   assertCanonicalRunDirectory(options.projectRoot, options.runDir, options.runId);
   let index = existsSync(indexPath)
     ? parseIndex(readFileSync(indexPath, "utf8"), options.runId)
@@ -316,7 +316,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       throw new Error(`Duplicate workflow artifact identity: ${input.artifactId}`);
     }
     const destination = path.join(artifactsDir, relativePath);
-    ensureDirectoryNoSymlink(artifactsDir, path.dirname(destination));
+    ensureWorkflowDirectoryNoSymlink(artifactsDir, path.dirname(destination));
     if (existsSync(destination)) throw new Error(`Workflow artifact destination already exists: ${relativePath}`);
     writeFileSync(destination, input.bytes, { flag: "wx" });
     try {
@@ -527,8 +527,8 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       assertSafeComponent(callId, "callId");
       const transcriptDir = path.join(artifactsDir, "transcripts", callId);
       const resultArtifactsDir = path.join(artifactsDir, "results", callId);
-      ensureDirectoryNoSymlink(artifactsDir, transcriptDir);
-      ensureDirectoryNoSymlink(artifactsDir, resultArtifactsDir);
+      ensureWorkflowDirectoryNoSymlink(artifactsDir, transcriptDir);
+      ensureWorkflowDirectoryNoSymlink(artifactsDir, resultArtifactsDir);
       return { transcriptDir, resultArtifactsDir };
     },
     list() {
@@ -756,7 +756,10 @@ function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId:
   }
 }
 
-function ensureDirectoryNoSymlink(root: string, directory: string): void {
+/** Create `directory` below `root` and prove no component of the chain is a symlink.
+ *  Shared by the artifact store and the run report writer, which mirrors this
+ *  path discipline for its own `.locus-pi` root. */
+export function ensureWorkflowDirectoryNoSymlink(root: string, directory: string): void {
   const lexicalRoot = path.resolve(root);
   const lexicalDirectory = path.resolve(directory);
   const relative = path.relative(lexicalRoot, lexicalDirectory);

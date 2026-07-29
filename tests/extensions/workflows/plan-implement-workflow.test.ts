@@ -15,8 +15,8 @@ import {
 } from "../../../extensions/_shared/workflow-runtime.js";
 
 /**
- * The tracked `plan-implement` example. Its whole trust story is that the plan
- * arrives as bytes a *previous* successful run returned, so these tests build a
+ * The tracked `plan-implement` example. The plan arrives as bytes the host
+ * verified and copied from a *previous* successful run, so these tests build a
  * real prior-run artifact store on disk rather than a hand-written source record.
  */
 const workflowPath = path.join(
@@ -65,9 +65,7 @@ interface PlanFixture {
   planText: string;
 }
 
-function createPlanFixture(
-  options: { steps?: string[]; stage?: string; targetRef?: string; terminalResult?: unknown } = {},
-): PlanFixture {
+function createPlanFixture(options: { steps?: string[] } = {}): PlanFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-"));
   const sourceRunId = "plan-source";
   const sourceRunDir = path.join(root, ".locus", "runtime", "workflows", sourceRunId);
@@ -77,7 +75,7 @@ function createPlanFixture(
   const planRef = sourceStore.recordAgentEvidence({
     callId: "call-0003",
     name: "plan.md",
-    stage: options.stage ?? "draft-plan",
+    stage: "draft-plan",
     text,
     replayed: false,
   }).answer!;
@@ -85,11 +83,11 @@ function createPlanFixture(
     path.join(sourceRunDir, "result.json"),
     `${JSON.stringify({
       ok: true,
-      result: "terminalResult" in options ? options.terminalResult : text,
+      result: text,
       artifactRefs: [planRef],
       target: {
         kind: "scriptPath",
-        ref: options.targetRef ?? "extensions/workflows/examples/plan/plan.workflow.mjs",
+        ref: "extensions/workflows/examples/plan/plan.workflow.mjs",
         source: "project",
       },
     })}\n`,
@@ -127,26 +125,13 @@ function failed(request: WorkflowAgentRequest, summary: string): WorkflowAgentRe
   };
 }
 
-function sourceState(fingerprint = "a".repeat(64)) {
-  return {
-    schema: "locus.workflow-source-state.v1" as const,
-    fingerprint,
-    head: "1".repeat(40),
-    indexFingerprint: "2".repeat(64),
-    worktreeFingerprint: fingerprint,
-    status: [" M src/page.ts"],
-  };
-}
-
 let runtimeOrdinal = 0;
 
 function runtimeWith(
   fixture: PlanFixture,
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
-  sourceStates: ReturnType<typeof sourceState>[] = [sourceState()],
 ) {
   const runId = `plan-implement-test-${++runtimeOrdinal}`;
-  let sourceStateIndex = 0;
   const runDir = path.join(fixture.root, ".locus", "runtime", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
@@ -161,16 +146,13 @@ function runtimeWith(
         originRunId: fixture.planRef.runId,
         artifacts: [{ sourceRef: fixture.planRef, consumedArtifact: consumedPlan }],
       },
-      sourceState: {
-        capture: () => sourceStates[Math.min(sourceStateIndex++, sourceStates.length - 1)] ?? sourceState(),
-      },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner,
     }),
   };
 }
 
-/** Named answers only: the source-state fingerprints are host-published noise here. */
+/** Named answers only: the consumed plan is an input record, not reviewable work. */
 function namedAnswers(store: ReturnType<typeof createWorkflowArtifactStore>): string[] {
   return store
     .list()
@@ -189,7 +171,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain("continuationArtifacts()");
-    expect(source).toContain("requireAcceptedPlanArtifact(consumedPlan, planRef)");
     expect(source).toContain("function parseStepBlocks");
     expect(source).toContain("STEP_SELECTOR_SCHEMA");
     // Split the same way the curated examples are: one function decides and never
@@ -197,7 +178,11 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("function stepSelectionErrors");
     expect(source).toContain("function orderStepSelection");
     expect(source).toContain("validate: (value) => stepSelectionErrors(steps, value)");
-    expect(source).toContain("captureSourceState");
+    // The worktree fingerprinting mechanism was removed 2026-07-29: a workflow
+    // runs on the operator's own checkout by guarantee, so per-step evidence is
+    // the writer's answer plus what the read-only check stage observes itself,
+    // and the script publishes nothing of its own.
+    expect(source).not.toContain("publishArtifact");
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
@@ -343,30 +328,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   });
 
   it.each([
-    ["a plan another workflow produced", { targetRef: "review.workflow.mjs" }],
-    ["a stage that is not the accepted draft", { stage: "map-context" }],
-    [
-      "bytes the run did not finish with",
-      { terminalResult: "# Implementation Plan\n## Steps\n### S1 — Something else" },
-    ],
-  ])("refuses %s", async (_caseName, options) => {
-    const fixture = createPlanFixture(options);
-    const calls: WorkflowAgentRequest[] = [];
-    const { dsl } = runtimeWith(fixture, async (request) => {
-      calls.push(request);
-      return completed(request, "unused");
-    });
-
-    // Host-owned provenance ends the run before any child is asked. The
-    // `terminalResult` case is the load-bearing one: same name, same run, right
-    // stage — but not the text the accepted run actually returned.
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      'must be the accepted "plan.md" answer a successful plan draft-plan run returned',
-    );
-    expect(calls).toHaveLength(0);
-  });
-
-  it.each([
     ["# Implementation Plan\n## Goal\nNo steps section here.", 'plan.md has no "## Steps" section'],
     ["# Implementation Plan\n## Steps\n\nProse, but no step headings.", "found no steps in plan.md"],
     ["# Implementation Plan\n## Steps\n### Advance the offset\nFiles: `a.ts`", "invalid step heading"],
@@ -408,6 +369,39 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("accepts a plan of any length, and refuses only an empty one", async () => {
+    // A length cap on the whole plan could only reject something somebody had
+    // already accepted, after the run that wrote it was over. Twelve ordinary
+    // steps put this plan past the 256,000-character bound the entry used to
+    // impose, while each block stays inside the per-step budget that really does
+    // keep one writer's prompt in hand.
+    const steps = Array.from({ length: 12 }, (_unused, index) =>
+      [
+        `### S${index + 1} — Rewrite pagination part ${index + 1}`,
+        "Files: `src/page.ts`",
+        `Change: ${"detail ".repeat(3_500)}`,
+        "Verify: `npm test -- page`",
+        index === 0 ? "Depends on: none" : `Depends on: S${index}`,
+      ].join("\n"),
+    );
+    const fixture = createPlanFixture({ steps });
+    expect(fixture.planText.length).toBeGreaterThan(256_000);
+
+    const report = "# Implementation Report\n## Outcome\nThe one step landed.";
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      switch (request.label) {
+        case "select plan steps":
+          return completed(request, selection([{ id: "S1" }]));
+        case "report implementation":
+          return completed(request, report);
+        default:
+          return completed(request, `# ${request.label}\nDone.`);
+      }
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(report);
+  });
+
   it("refuses a continuation that is not exactly one plan.md, and refuses empty input", async () => {
     const fixture = createPlanFixture();
     const runId = "plan-implement-no-continuation";
@@ -418,7 +412,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       runId,
       projectRoot: fixture.root,
       artifactPorts: artifactStore,
-      sourceState: { capture: () => sourceState() },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner: async (request) => completed(request, "unused"),
     });

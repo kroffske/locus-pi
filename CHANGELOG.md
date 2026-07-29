@@ -4,7 +4,166 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Changed
+
+- **A live end-to-end run exposed three ways the curated pipeline lets a weak
+  model off the hook, and all three are now closed in the prompts.** The run
+  built a small application from one sentence, and everything it produced worked
+  — which is exactly why the failures are worth naming: they are failures of
+  scrutiny, not of output.
+  **Coverage was accounted at the wrong granularity.** `review` keys its
+  accounting to inventory ids, so the id set is the ceiling on how fine every
+  later stage can be. The inventory produced one id for a whole 384-line new
+  file, and units, questions, the coverage assessor and the final ledger all
+  inherited it; "every id accounted for" became true and meaningless, and the
+  rendering and input layers of that file were never questioned. The inventory
+  prompt now states that one path may carry several ids when a reviewer could
+  accept one part and reject another independently, bounded by
+  `MAX_IDS_PER_PATH` and `MAX_INVENTORY_IDS`. The interrogator gained the
+  matching bound — at most two questions per unit and forty in a set — because
+  the opposite failure is real: it must repeat the whole set verbatim every
+  round, and a set a weak model cannot reproduce exactly corrupts the ledger it
+  feeds.
+  **The question loop could not report an honest exit.** It broke out before
+  assessing its final round, so once the assessor asked for a third round,
+  "stopped at the cap" was the only reachable outcome and a reader could not tell
+  a complete question set from one still under argument. The final round is now
+  assessed as well — the verdict there is evidence, not a branch — and any gap
+  that survives reaches the verifier as a declared limit of the review, never as
+  a finding, since no question was asked about it.
+  **The plan critic treated a broken plan as a matter of taste.** It accepted a
+  plan whose every step omitted the mandatory `Depends on:` line, whose second
+  step bundled six independent decisions, and whose every verification was a
+  human looking at a screen — while its own reasoning named two of those as
+  problems. A missing mandatory step line is now a named defect rather than
+  formatting, and so is a verification that cannot pass at its own place in the
+  order. The planner is no longer allowed to end a step with "the observation
+  that proves it worked": it must write one command a later agent can rerun
+  without a human, with the output that proves the step worked, and a human
+  observation only when the step says why no command could exist. That last
+  change is what unblocks the evidence chain below it — in the same run, the
+  independent checker could rerun nothing and the reporter had to grade every
+  step partial.
+  A second run, this time on a small 4-bit local model with no thinking mode at
+  all, closed three more. **A step is now one changed thing.** That run's plan
+  opened with a step that only read nine files and then wrote three independent
+  document sections in one go; the planner is now told that reading is how a plan
+  gets written rather than work an implementer can be given, and that several
+  things of the same kind get one step each unless a step says why they cannot be
+  done apart. The critic refuses both. **The verdict must agree with the
+  findings.** The same run's review reported a blocking defect and still called
+  the change ready for acceptance — nothing in the script grades a verdict
+  against its own findings, so the verifier now carries the rule that one
+  confirmed blocking or should-fix finding means "needs changes". **And the
+  plumbing stopped leaking**: coverage gaps that survive the round cap are
+  written into the review's prose as ground it did not cover, not under a heading
+  copied from the marker that delivered them.
+  A third run, same task and same local model, showed that "one changed thing"
+  needed one more sentence to bite. The fake reading step was gone, but the plan
+  had collapsed into a single step covering all three document sections, and the
+  critic accepted it on the ground that the task asked for one new file — reading
+  a shared destination as a reason the sections could not be done apart. **A
+  shared destination file is not that reason**, and both planner and critic now
+  say so: sections appended to one document are separate work with separate
+  evidence, and combining is justified only when one part cannot be written until
+  another exists.
+  That run split the plan again, and a review of a document carrying three
+  planted false claims returned "needs changes" against its own two confirmed
+  findings. It also exposed three more ways a weak model keeps its own rules
+  while defeating them. **A closing verification step is a step that changes
+  nothing** — the plan ended with an "integrity pass" that only re-ran what each
+  step's own verification already proves, and the critic let it stand, so both
+  roles now say the plan ends with the last step that changes something.
+  **The inventory does not decide what belongs to the review**: it saw a real
+  structural defect in the reviewed file, judged it a different kind of problem
+  than the operator asked about, and wrote it in prose around the returned
+  document, where no later stage reads it — everything noticed now gets an id,
+  with the doubt written inside that entry. **And a claim the sources cannot
+  settle still gets a question**: the document asserted a measured per-call cost
+  no source can support, and it drew no question and no declared limit, so the
+  review reported ground it had never checked.
+
+- **`requirements-grill` lets its agents search, and ripgrep is no longer a
+  requirement of this package.** The workflow used to run one `rg` itself before
+  spawning anything: it picked up to five keywords out of the operator's request
+  against a hard-coded list of English stop words, searched a hard-coded ordering
+  of directory names, and handed the matching lines to three children that held
+  no tools at all. The keyword guess was worse than the search an agent performs
+  with `grep`, `find`, `read`, and `ast_index`; it silently returned the wrong
+  lines for a request written in any other language; and it was the only reason
+  `rg` had to be on `PATH` to install this package. That line is gone from the
+  requirements in `README.md`.
+  The participants are now declared once in a frozen `GRILL_AGENTS` roster —
+  `scout`, `challenger`, `synthesizer` — each entry carrying what the agent
+  receives, what it returns, and its capabilities. The first two hold the same
+  bounded read-only tools every `plan` stage already had, under host-enforced
+  `readOnly: true`; the third holds none, because it only composes the two texts
+  it was handed. No stage gains shell, write, or edit. What is given up is that
+  the search is no longer byte-for-byte reproducible: coverage now depends on the
+  model, and what compensates is that the challenger reopens the files the scout
+  named instead of trusting them. Nothing in this workflow loops or branches, so
+  no stage declares an answer shape — there is no decision for one to carry. The
+  new `requirements-grill-pipeline.svg` shows the three agents and the text that
+  passes between them.
+  The workflow also stops capping the request's length. It used to refuse
+  anything over 12,000 characters, while the run command and the workflow tool
+  both already refuse anything over the host's own input limit. A stricter second
+  number in the entry could not protect anything the host's bound did not already
+  cover — it could only turn away a request the operator was allowed to send. An
+  empty request is still refused before any child is spawned. `plan` lost the
+  same check for the same reason, with one difference: its number was a copy of
+  the host's rather than a stricter one, so nothing could ever reach it.
+
+- **`plan` is now three named agents and one loop, and it never stops to ask.**
+  The workflow's participants used to exist only as `agent()` calls inside async
+  functions, labelled with verb phrases; a reader could not list the cast without
+  following the control flow, and the names on its diagram matched no identifier
+  in the source. They are now declared once in a frozen `PLAN_AGENTS` roster —
+  `scout`, `planner`, `critic` — each entry carrying what the agent receives,
+  what it returns, and its capabilities, with the call sites spreading those
+  options and adding only the round label. The redrawn `plan-pipeline.svg` shows
+  the same three agents and the text that passes between them.
+  The operator-clarification round is gone with everything that supported it: no
+  clarifier stage, no operator pause, no continuation into a second run. When the
+  task leaves a real choice open the planner records it in the plan under
+  `## Assumptions` as "assumed X, because Y; wrong if Z" and plans on it, and the
+  critic counts a decision the plan depends on but never states as a defect while
+  a stated one is not. A halted run yields no plan at all; a written assumption is
+  visible when the run finishes and is corrected by replanning.
+  `plan-implement` no longer re-derives the host's continuation proof. It still
+  requires exactly one non-empty `plan.md` reference, but the digest, target,
+  stage, and terminal-result checks are gone. That trade is deliberate and it is a
+  real one: the removed check is what distinguished the accepted plan from a
+  same-named draft of an earlier round, so a run can now implement a plan the
+  critic had not accepted. The cost of the ceremony — on every reader of the
+  entry, and on every weaker model asked to author something like it — was judged
+  higher than a failure replanning repairs. The plan is no longer length-capped
+  either: a cap there could only reject a plan somebody had already accepted,
+  after the run that wrote it had finished, and the per-step budgets are what
+  actually keep one writer's prompt in hand.
+
 ### Added
+
+- **A shipped skill, so an agent can find the workflows the package already
+  installs.** The six Package workflows resolve out of the installed package and
+  need no copied files, but nothing in a fresh session said what a "workflow" is
+  here, which names exist, or how to read a finished run — so a weaker model
+  asked to run one went looking for a source repository that is not on the
+  machine. `skills/locus-pi-workflows/SKILL.md` is now declared through
+  `package.json#pi.skills`, which Pi discovers and enables automatically, so its
+  description sits in the system prompt from the first session and the full text
+  loads on demand or through `/skill:locus-pi-workflows`. It covers the catalog and
+  run commands, the result envelope and artifact locations, the four-step name
+  resolution order, every member of the handle a workflow is given, an authoring
+  template with a shaped stage and the rules that decide whether a new file runs
+  at all, and the trust boundary stated as it is: the package does not sandbox
+  workflow code. Two tables send the reader to the shipped examples by exact
+  path — one for what each workflow is for, one for the technique each entry
+  file is the smallest place to see — so an agent copies a working shape instead
+  of inventing one. A package-boundary test pins the
+  declaration to the shipped file and fails when the skill points at a document
+  the tarball does not contain, because a reader who arrived lost cannot afford
+  a dead link.
 
 - **Two Package workflows for planning and implementation: `plan` and
   `plan-implement`.** The

@@ -116,6 +116,7 @@
     "extensions/_shared/workflow-result.ts",
     "extensions/_shared/workflow-replay.ts",
     "extensions/_shared/workflow-resources.ts",
+    "extensions/_shared/workflow-run-report.ts",
     "extensions/_shared/workflow-runner.ts",
     "extensions/_shared/workflow-runtime.ts",
     "extensions/_shared/workflow-script-identity.ts",
@@ -236,6 +237,7 @@
     "extensions/workflows/workflow-command-launcher.ts",
     "extensions/workflows/workflow-tool.ts",
     "extensions/workflows/workflow-transcript.ts",
+    "skills/locus-pi-workflows/SKILL.md",
     "README.md"
   ],
   "bin": {
@@ -253,6 +255,9 @@
       "./extensions/security-gate/index.ts",
       "./extensions/todo-context/index.ts",
       "./extensions/workflows/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "scripts": {

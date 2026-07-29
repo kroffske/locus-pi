@@ -75,14 +75,14 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ## Curated Package workflows
 
-| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                      |
-| `requirements-grill` | Read-only **requirements refinement**: requires ripgrep (`rg`) on `PATH`. The trusted workflow script runs `rg` directly with fixed arguments, sanitized request keywords, a 10-second timeout, and 200-line/40,000-character result caps. Three no-tool default children then map, challenge, and synthesize exact text handoffs from that artifact. Empty input fails at `validate-input`; missing `rg` fails closed at `collect-context`; the final child text is retained in `result.json`.                                                                                    |
-| `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent. |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, terminal provenance, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                    |
-| `plan`               | **Task to accepted plan**: read-only throughout. A shaped clarifier either continues or persists exact `task.md` plus readable `clarification-questions.md` and stops, exactly like `review`. A recon stage then maps the repository, and a drafter/critic pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.                                                   |
-| `plan-implement`     | **Accepted plan to changes**: semantic text plus host continuation supplies one `plan.md` whose bytes must equal a successful Package `plan` run's terminal result — a same-named draft from an earlier round of that run's loop is refused. Deterministic code parses `### S<n>` blocks; a no-tool selector chooses which steps this run implements and the plan's own order is restored. One writer owns each step, then a read-only checker and a fresh reporter run. A failed writer skips the remaining steps and returns `partial: true`.                                    |
+| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
+| `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                      |
+| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, terminal provenance, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                         |
+| `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. The run never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.                                                                                                                                             |
+| `plan-implement`     | **Accepted plan to changes**: semantic text plus host continuation supplies exactly one non-empty `plan.md` reference, which the host verifies and copies before workflow code starts; the entry no longer re-derives that proof, so a same-named draft from an earlier round of the same run is no longer refused (2026-07-28 amendment). Deterministic code parses `### S<n>` blocks; a no-tool selector chooses which steps this run implements and the plan's own order is restored. One writer owns each step, then a read-only checker and a fresh reporter run. A failed writer skips the remaining steps and returns `partial: true`.                                                                           |
 
 `review` always receives a non-empty semantic string. A shaped read-only
 clarifier decides `continue` or `needs_operator`. Continue starts the five review
@@ -160,14 +160,8 @@ review order as its tie-break.
 
 One read-only scope resolver receives only the selected complete finding blocks.
 Exactly one sequential write-capable agent then owns each selected finding, so
-overlapping mutations have a visible order and one accountable writer. The host
-captures Git HEAD, index, status, and changed/untracked byte fingerprints before
-remediation, around each writer, around checks, and before re-review. Every
-initialized gitlink is enumerated independently of its parent modification
-state, then its submodule HEAD, index, status, and changed/untracked bytes are
-included. These
-artifacts distinguish declared writer-window changes from source drift; they do
-not lock the checkout. A separate host-enforced read-only child reopens the full
+overlapping mutations have a visible order and one accountable writer. A separate
+host-enforced read-only child reopens the full
 diff and may call `repository_check` with only a `package.json` script whose exact
 command was frozen when the workflow runner was created, before any writer. A
 script-map addition, removal, or modification is refused in both the launch checkout and the
@@ -175,8 +169,8 @@ materialized snapshot. The host, not the model, supplies argv, timeout, output b
 disposable external Git worktree containing the current tracked/untracked bytes;
 initialized submodule source is recursively materialized without copying Git
 administrative metadata. The operator checkout is never the command cwd. A fresh read-only re-review
-receives the immutable original review, bounded worker answers, check evidence,
-and source-state transitions; it reopens the source and reports every original
+receives the immutable original review, bounded worker answers, and check
+evidence; it reopens the source and reports every original
 finding, dependency, and regression. `agent({ artifact })` gives the automatic answers stable names:
 `scope.md`, `worker-F<n>.md`, `check-evidence.md`, and `re-review.md`. The final
 `re-review.md` answer is also the workflow result. No input helper, unit planner,
@@ -216,42 +210,39 @@ install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
 
 `plan` and `plan-implement` are the second curated pair, and the seam between
-them is the same shape as `review` → `review-fix` with one extra check. `plan`
-returns the accepted plan text, which the runtime retains as `plan.md`;
-`plan-implement` takes that artifact's complete
-`{ runId, artifactId, name, sha256 }` reference through host continuation and
-additionally requires those bytes to equal the source run's terminal result.
-That check is load-bearing rather than ceremonial: `plan` writes one `plan.md`
-per drafting round under the same logical name, so name, stage, and digest alone
-would happily bind a draft the critic rejected.
+them is the same shape as `review` → `review-fix`. `plan` returns the accepted
+plan text, which the runtime retains as `plan.md`; `plan-implement` takes that
+artifact's complete `{ runId, artifactId, name, sha256 }` reference through host
+continuation, and reads the bytes the host verified and copied, at any length.
+Entry code used
+to re-derive that proof and additionally require the bytes to equal the source
+run's terminal result — which distinguished the accepted plan from a same-named
+draft of an earlier round. That check was removed on 2026-07-28 as an accepted
+trade: it cost every reader of the entry, and the failure it prevented is a run
+implementing an unaccepted draft, which replanning corrects.
+
+`plan` declares its three participants in one frozen `PLAN_AGENTS` roster —
+`scout`, `planner`, `critic` — carrying each agent's capabilities beside what it
+receives and returns, so the cast is readable without following the control flow.
 
 Planning never writes. Every `plan` stage passes `readOnly: true`; in
 `plan-implement` only the per-step writers hold `write`, `edit`, and `bash`, the
 selector holds no tools at all, and the checker adds `repository_check` without
-edit tools. Both loops in `plan` — the clarification round and the drafting
-round — end on a declared enum rather than on a scan of model prose, and the run
-journal records whether the critic or the round cap stopped the loop.
+edit tools. `plan`'s one loop ends on a declared enum rather than on a scan of
+model prose, and the run journal records whether the critic or the round cap
+stopped it. The operator-clarification round it used to run first was removed on
+the same day: the run no longer stops to ask, and an open decision is recorded by
+the planner as a stated assumption the critic judges.
 
-Editable pipeline maps:
+Pipeline maps:
 
-- `live-smoke`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/live-smoke-pipeline.excalidraw)
-- `requirements-grill`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.excalidraw)
-- `review`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review/review-pipeline.excalidraw)
-- `review-fix`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/review-fix/review-fix-pipeline.excalidraw)
 - `plan`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.excalidraw)
-- `plan-implement`:
-  [PNG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan-implement/plan-implement-pipeline.png) ·
-  [Excalidraw](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan-implement/plan-implement-pipeline.excalidraw)
+  [SVG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
+
+The generated Excalidraw triple every curated workflow used to carry — a
+generator, an `.excalidraw` document, and an exported PNG — was removed on
+2026-07-28 together with its contract. The remaining five maps are being
+re-authored as hand-written SVG in the shape `plan` now sets.
 
 ## Authoring patterns
 
@@ -314,7 +305,7 @@ removing a valid file changes the next result and removing a shadow reveals the 
 source. The packaged examples directory is scanned the same way, so adding or
 removing a `<name>.workflow.mjs` there is the whole of adding or removing a
 Package workflow. The scan descends one directory level, which is how a workflow
-keeps prompt resources or a diagram triple beside its entry, and it accepts only
+keeps prompt resources or its diagram beside its entry, and it accepts only
 regular files, so a symlink never resolves out of the package. An already-open
 catalog selection is revalidated, so a precedence change fails explicitly instead of
 switching paths silently.
@@ -918,46 +909,43 @@ runtime import and does not change source-identity coverage.
 
 ### Workflow diagram contract
 
-Use `$pi-workflow-diagram` when a workflow has multiple execution steps, agents,
-branches, parallel groups, or persisted handoffs. Every
-curated Package workflow must keep three sibling artifacts beside
-`<name>.workflow.mjs`:
+A workflow with several stages, agents, branches, parallel groups, or persisted
+handoffs keeps a visual map beside its source: exactly one hand-authored
+`<name>-pipeline.svg`. It is edited directly. There is no generator, no
+rendering dependency, and no exported preview to keep in sync;
+[`extensions/workflows/examples/plan/plan-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
+is the reference shape.
 
-- `<name>-pipeline.diagram.mjs` — reproducible Excalidraw.js generator.
-- `<name>-pipeline.excalidraw` — editable diagram with embedded assets.
-- `<name>-pipeline.png` — visually reviewed preview.
+This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,
+its `.excalidraw` document, and a rendered PNG — on 2026-07-28. Three files had
+to agree, changing anything required a library this package does not depend on,
+and the only file a reader opened was the one nobody could review in a diff.
 
 The diagram is an ownership map, not a decorative code trace:
 
-- Prefix each executable or data node with exactly one real owner/type:
-  `Operator:`, `Workflow:`, `Agent:`, or `Artifact:`. (`Direct LLM:` was a fifth
-  owner before 0.2.x; the primitive and its diagram vocabulary are now removed.)
-- A branch must say who produced the decision and who routes it. A text-only
-  `agent()` result is not implicit decision data: show the exact text handoff,
-  and show a deterministic workflow check only when trusted workflow code
-  actually validates something. Do not use ownerless labels such as
-  `Target ready?`.
-- Name workflow control explicitly: `Workflow: launch Agents 2 + 3 in parallel`
-  and `Workflow: wait for both lane results`, not `fan-out` or `barrier` alone.
-- Label important edges with the actual handoff. For text-only agents, name the
-  exact string such as `targetText` or `implementationText`; for a schema-bearing
-  call (`agent({ schema })`), name the schema and inspected field.
-- Show the source `<name>.workflow.mjs`, the persisted
-  `.locus/runtime/workflows/<runId>/result.json`, `journal.ndjson`, and artifact
-  index when they record meaningful execution evidence. Draw runtime-owned
-  Markdown as a separate artifact when `publishArtifact()` or
-  `agent({ artifact })` really persists it. The review family therefore shows
-  `review.md`, per-finding answers, independent check evidence, and `re-review.md`
-  under the run artifact store rather than a task-local publication surface.
-- Include a legend that explains the visual types and any accent colors. A
-  reader must understand the graph without opening the workflow source.
+- Separate the deterministic script from the child agents visually, and give the
+  script one box per `phase()`. A reader must be able to see which decisions the
+  code makes and which a model makes without opening the source.
+- Every agent box says what it **receives** and what it **returns**. The handoffs
+  between stages are the pipeline; a box that names only a role explains nothing.
+- Say what constrains each child: host-enforced `readOnly: true`, its tool list,
+  a declared answer shape, an answer cap. A branch on a shaped answer is not the
+  same claim as a branch on prose, and the picture must not blur them.
+- Every branch and loop carries its real exit condition, including the ones that
+  end the run: an operator pause with `disposition: awaiting_operator`, a
+  fail-closed stop, and the terminal result a later run may consume.
+- Draw each persisted artifact under the exact name the code publishes it with,
+  so the picture and `.locus/runtime/workflows/<runId>/artifacts/` agree.
+- Include a legend explaining every visual type used.
 
-Generate through `@kroffske/excalidraw-diagrams`, keep a fixed `Scene` seed, run
-`assertDiagramHealthy(...)`, validate the serialized Excalidraw document, render
-the PNG, and inspect the image itself. Do not hand-write raw Excalidraw element
-JSON. Repository tests enforce the artifact trio and the minimum ownership /
-persistence vocabulary; visual inspection remains required because structural
-validation cannot prove that a diagram is readable.
+Keep the file self-contained and diffable: no `<script>`, no embedded or remote
+images, no remote fonts or stylesheets, and a `<title>`/`<desc>` pair so the
+diagram is readable without seeing it. `tests/extensions/workflows/workflow-diagram-artifacts.test.ts`
+pins those properties, refuses any resurrected generator or Excalidraw artifact
+under the examples directory, and checks the diagram against the workflow source
+so a renamed phase or a new artifact fails the suite instead of quietly leaving
+the picture wrong. Visual inspection is still required: no structural check
+proves that a diagram is readable.
 
 ### Minimal working example
 
@@ -1149,7 +1137,6 @@ agent(prompt, opts?)          // Run a catalog/local agent; returns exact child 
 agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
-captureSourceState(label)     // Persist host-owned Git HEAD/index/worktree fingerprint evidence
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle

@@ -1,9 +1,9 @@
 // plan-implement.workflow.mjs
 //
 // Executes one plan that a prior `plan` run produced and a critic accepted. The
-// plan arrives as host-verified continuation bytes, never as text pasted into
-// the input: the runtime proves which run wrote it, that the run succeeded, and
-// that these exact bytes were that run's final answer, before this module starts.
+// plan arrives as continuation bytes the host has already verified and copied,
+// never as text pasted into the input, so this module reads the plan and starts
+// working instead of re-proving where it came from.
 //
 // The shape is deliberate:
 //
@@ -86,7 +86,6 @@ const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
 
 const MAX_SELECTED_STEPS = 30;
 const MAX_INTENT_CHARS = 16_000;
-const MAX_PLAN_CHARS = 256_000;
 const MAX_STEP_BLOCK_CHARS = 32_000;
 const MAX_SELECTED_STEPS_CHARS = 128_000;
 const MAX_NOTE_CHARS = 4_000;
@@ -154,20 +153,32 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const { agent, captureSourceState, log, phase } = dsl;
+  const { agent, log, phase } = dsl;
   const intent = requireBoundedText(input, "intent", MAX_INTENT_CHARS);
 
   phase("select-steps");
   log("Binding the accepted plan and validating the selected steps.");
-  let expectedState = captureSourceState("before-implementation");
   const continuation = dsl.continuationArtifacts();
   if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "plan.md") {
     throw new Error('plan-implement continuation requires exactly one artifact named "plan.md"');
   }
   const planRef = continuation[0].sourceRef;
   const consumedPlan = continuation[0].consumedArtifact;
-  requireAcceptedPlanArtifact(consumedPlan, planRef);
-  const planText = requireBoundedText(consumedPlan.text, "consumed plan", MAX_PLAN_CHARS);
+  // The host verifies and copies the referenced bytes before this module starts,
+  // so the script reads them and gets on with the work. It used to re-derive
+  // that proof here — matching digests, the source run's target, its stage, and
+  // its terminal result — which is cognitive load in every reader's way for a
+  // risk the operator judged not worth it: the worst case is implementing a plan
+  // the critic had not accepted, which replanning fixes.
+  //
+  // The plan is not length-bounded either. A cap here could only reject a plan
+  // somebody already accepted, after the run that wrote it had finished; the
+  // runtime already bounds what a child may answer, and the per-step budgets
+  // below are what actually keep a stage's prompt in hand.
+  const planText = consumedPlan.text;
+  if (typeof planText !== "string" || planText.trim() === "") {
+    throw new Error("plan-implement requires a non-empty consumed plan");
+  }
   const steps = parseStepBlocks(planText);
 
   const selection = await agent(
@@ -253,17 +264,8 @@ ${selectedText}
   phase("apply-steps");
   log("Applying each selected step with one sequential write-capable agent.");
   const workerResults = [];
-  const transitions = [];
   let failure;
   for (const [index, step] of selected.entries()) {
-    const beforeWriter = captureSourceState(`before-${step.id.toLowerCase()}`);
-    transitions.push(
-      classifySourceTransition(
-        expectedState,
-        beforeWriter,
-        index === 0 ? "unexpected_pre_writer_drift" : "unexpected_inter_writer_drift",
-      ),
-    );
     try {
       const text = await agent(
         `${COMMON}
@@ -308,11 +310,7 @@ ${step.note || "(no operator note)"}
 
 --- BEGIN PREVIOUS STEP RESULTS ---
 ${renderWorkerResults(workerResults.slice(-3), MAX_PREDECESSOR_CONTEXT_CHARS)}
---- END PREVIOUS STEP RESULTS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, beforeWriter)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END PREVIOUS STEP RESULTS ---`,
         {
           ...IMPLEMENT_WRITE_OPTIONS,
           artifact: `worker-${step.id}.md`,
@@ -324,9 +322,6 @@ ${renderSourceProvenance(transitions, beforeWriter)}
     } catch (error) {
       failure = { id: step.id, message: error instanceof Error ? error.message : String(error) };
     }
-    const afterWriter = captureSourceState(`after-${step.id.toLowerCase()}`);
-    transitions.push(classifySourceTransition(beforeWriter, afterWriter, "writer_window_changed"));
-    expectedState = afterWriter;
     if (failure !== undefined) {
       // Plan steps are ordered because each one builds on the last. Running the
       // rest on top of a failed predecessor is how a plan half-lands; the
@@ -338,8 +333,6 @@ ${renderSourceProvenance(transitions, beforeWriter)}
 
   phase("collect-check-evidence");
   log("Collecting independent diff evidence and running bounded repository checks.");
-  const beforeCheck = captureSourceState("before-check");
-  transitions.push(classifySourceTransition(expectedState, beforeCheck, "unexpected_post_writer_drift"));
   const checkText = await agent(
     `${COMMON}
 
@@ -372,11 +365,7 @@ ${scopeText}
 
 --- BEGIN ALL STEP RESULTS ---
 ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
---- END ALL STEP RESULTS ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, beforeCheck)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END ALL STEP RESULTS ---`,
     {
       ...IMPLEMENT_CHECK_OPTIONS,
       artifact: "check-evidence.md",
@@ -384,8 +373,6 @@ ${renderSourceProvenance(transitions, beforeCheck)}
       maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
     },
   );
-  const afterCheck = captureSourceState("after-check");
-  transitions.push(classifySourceTransition(beforeCheck, afterCheck, "unexpected_check_window_drift"));
 
   phase("report-implementation");
   log("Reporting every planned step's outcome against the accepted plan.");
@@ -400,15 +387,9 @@ reviewer and you wrote none of the changes below.
 Start from the accepted plan and account for **every** step in it, including the
 ones this run did not select: each is done, partly done, blocked, or not
 attempted, and each verdict names the evidence you read rather than the claim you
-were given. Reopen the live diff and the affected files; the step results and the
-check evidence are leads, not proof. Say plainly what a reader must do next.
-
-Use the host-owned fingerprint transitions to separate two things: what the
-declared writer window changed, and change that appeared outside one. Treat any
-\`unexpected_*_drift\` classification as a provenance gap that may invalidate the
-worker or check evidence. A \`writer_window_changed\` classification records that
-files changed during that window; it does not prove the named writer was the only
-process that changed them.
+were given. Verify each implemented step against the plan with your own tools:
+reopen the live diff and the affected files; the step results and the check
+evidence are leads, not proof. Say plainly what a reader must do next.
 
 Return exact Markdown:
 
@@ -453,11 +434,7 @@ ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
 
 --- BEGIN CHECK EVIDENCE ---
 ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
---- END CHECK EVIDENCE ---
-
---- BEGIN HOST-OWNED SOURCE-STATE PROVENANCE ---
-${renderSourceProvenance(transitions, afterCheck)}
---- END HOST-OWNED SOURCE-STATE PROVENANCE ---`,
+--- END CHECK EVIDENCE ---`,
     {
       ...IMPLEMENT_READ_OPTIONS,
       artifact: "implementation-report.md",
@@ -542,75 +519,6 @@ function stepSelectionErrors(steps, value) {
 function orderStepSelection(steps, value) {
   const notesById = new Map(value.steps.map(({ id, note }) => [id, note]));
   return steps.filter((step) => notesById.has(step.id)).map((step) => ({ ...step, note: notesById.get(step.id) }));
-}
-
-/**
- * Host-owned provenance for the consumed plan. Every field is evidence about the
- * source run that no child of this run can produce or repair, which is why it
- * throws. `terminal.result === consumed.text` is the load-bearing one: it proves
- * these bytes were the accepted plan the run finished with, not merely a
- * same-named draft from an earlier round of its loop.
- */
-function requireAcceptedPlanArtifact(consumed, sourceRef) {
-  const source = consumed?.source;
-  const target = source?.target;
-  const projectedRefs = Array.isArray(source?.terminal?.artifactRefs) ? source.terminal.artifactRefs : [];
-  const namesPlanWorkflow =
-    (target?.kind === "name" && target.ref === "plan") ||
-    (target?.kind === "scriptPath" && /(^|[/\\])plan\.workflow\.mjs$/u.test(String(target.ref ?? "")));
-  if (
-    source?.runId !== sourceRef?.runId ||
-    !namesPlanWorkflow ||
-    source?.artifact?.kind !== "answer" ||
-    source?.artifact?.stage !== "draft-plan" ||
-    consumed?.ref?.name !== "plan.md" ||
-    source?.terminal?.result !== consumed?.text ||
-    !projectedRefs.some((ref) => sameArtifactRef(ref, sourceRef))
-  ) {
-    throw new Error(
-      'plan-implement planRef must be the accepted "plan.md" answer a successful plan draft-plan run returned',
-    );
-  }
-}
-
-function sameArtifactRef(left, right) {
-  return (
-    left?.runId === right?.runId &&
-    left?.artifactId === right?.artifactId &&
-    left?.name === right?.name &&
-    left?.sha256 === right?.sha256
-  );
-}
-
-function classifySourceTransition(expected, observed, changedClassification) {
-  const changed = expected.fingerprint !== observed.fingerprint;
-  return {
-    fromFingerprint: expected.fingerprint,
-    toFingerprint: observed.fingerprint,
-    changed,
-    classification: changed ? changedClassification : "stable",
-    fromHead: expected.head,
-    toHead: observed.head,
-  };
-}
-
-function renderSourceProvenance(transitions, current) {
-  const status = current.status.length === 0 ? ["(clean)"] : current.status.slice(0, 40);
-  return [
-    transitions.length === 0 ? "(none)" : JSON.stringify(transitions, null, 2),
-    "",
-    "Current host-owned source state:",
-    JSON.stringify(
-      {
-        fingerprint: current.fingerprint,
-        head: current.head,
-        status,
-        omittedStatusEntries: Math.max(0, current.status.length - status.length),
-      },
-      null,
-      2,
-    ),
-  ].join("\n");
 }
 
 function renderWorkerResults(results, maxChars) {

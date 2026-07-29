@@ -122,27 +122,14 @@ function completed(request: WorkflowAgentRequest, text: string): WorkflowAgentRe
   };
 }
 
-function sourceState(fingerprint = "a".repeat(64)) {
-  return {
-    schema: "locus.workflow-source-state.v1" as const,
-    fingerprint,
-    head: "1".repeat(40),
-    indexFingerprint: "2".repeat(64),
-    worktreeFingerprint: fingerprint,
-    status: [" M src/page.ts"],
-  };
-}
-
 let runtimeOrdinal = 0;
 
 function runtimeWith(
   root: string,
   reviewRef: WorkflowArtifactRef,
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
-  sourceStates: ReturnType<typeof sourceState>[] = [sourceState()],
 ) {
   const runId = `review-fix-test-${++runtimeOrdinal}`;
-  let sourceStateIndex = 0;
   const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
@@ -156,9 +143,6 @@ function runtimeWith(
       continuation: {
         originRunId: reviewRef.runId,
         artifacts: [{ sourceRef: reviewRef, consumedArtifact: consumedReview }],
-      },
-      sourceState: {
-        capture: () => sourceStates[Math.min(sourceStateIndex++, sourceStates.length - 1)] ?? sourceState(),
       },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner,
@@ -195,7 +179,11 @@ describe("curated review remediation workflow", () => {
     expect(source).toContain("artifact: `worker-${finding.id}.md`");
     expect(source).toContain('artifact: "check-evidence.md"');
     expect(source).toContain('artifact: "re-review.md"');
-    expect(source).toContain("captureSourceState");
+    // The worktree fingerprinting mechanism was removed 2026-07-29: a workflow
+    // runs on the operator's own checkout by guarantee, so per-finding evidence
+    // is the writer's answer plus what the read-only check stage observes
+    // itself, and the script publishes nothing of its own.
+    expect(source).not.toContain("publishArtifact");
     expect(source).toContain("MAX_SELECTED_FINDINGS");
     expect(source).toContain("MAX_PREDECESSOR_CONTEXT_CHARS");
     expect(source).not.toContain("publisher.prompt.md");
@@ -346,24 +334,10 @@ describe("curated review remediation workflow", () => {
       "collect check evidence": "# Check Evidence\n- npm test — passed",
       "re-review fixes": "# Re-review\n\nF1 and F2 are resolved; dependency coverage is present.\n",
     };
-    const { dsl, artifactStore } = runtimeWith(
-      fixture.root,
-      fixture.reviewRef,
-      async (agentRequest) => {
-        calls.push(agentRequest);
-        return completed(agentRequest, outputs[agentRequest.label!]!);
-      },
-      [
-        sourceState("a".repeat(64)),
-        sourceState("a".repeat(64)),
-        sourceState("b".repeat(64)),
-        sourceState("b".repeat(64)),
-        sourceState("c".repeat(64)),
-        sourceState("c".repeat(64)),
-        sourceState("c".repeat(64)),
-        sourceState("c".repeat(64)),
-      ],
-    );
+    const { dsl, artifactStore } = runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
+      calls.push(agentRequest);
+      return completed(agentRequest, outputs[agentRequest.label!]!);
+    });
     const intent = "  Fix only these findings; retain the cursor API exactly.  ";
 
     const result = await (await loadWorkflow())(dsl, intent);
@@ -406,23 +380,14 @@ describe("curated review remediation workflow", () => {
     expect(calls[5]?.prompt).toContain(fixture.reviewText);
     expect(calls[5]?.prompt).toContain(outputs["collect check evidence"]);
     expect(calls[5]?.prompt).toMatch(/callers, dependents, tests, configuration/iu);
-    expect(calls[5]?.prompt).toContain("writer_window_changed");
 
     expect(artifactStore.list().map(({ kind, name }) => `${kind}:${name}`)).toEqual([
       "input:review.md",
-      "published:source-state-before-remediation.json",
       "answer:finding-plan.json",
       "answer:scope.md",
-      "published:source-state-before-writer-f1.json",
       "answer:worker-F1.md",
-      "published:source-state-after-writer-f1.json",
-      "published:source-state-before-writer-f2.json",
       "answer:worker-F2.md",
-      "published:source-state-after-writer-f2.json",
-      "published:source-state-before-check.json",
       "answer:check-evidence.md",
-      "published:source-state-after-check.json",
-      "published:source-state-before-re-review.json",
       "answer:re-review.md",
     ]);
     expect(fixture.sourceStore.read(fixture.reviewRef).toString("utf8")).toBe(fixture.reviewText);
@@ -722,9 +687,8 @@ describe("curated review remediation workflow", () => {
       "apply finding F1",
       "apply finding F2",
     ]);
-    expect(artifactStore.list().map(({ kind, name }) => `${kind}:${name}`)).toContain(
-      "published:source-state-after-writer-f1.json",
-    );
+    // The independent writer's answer is retained even though the run fails.
+    expect(artifactStore.list().map(({ kind, name }) => `${kind}:${name}`)).toContain("answer:worker-F2.md");
   });
 
   it("rejects invalid review structure and duplicate ids before any agent runs", async () => {
@@ -757,7 +721,6 @@ describe("curated review remediation workflow", () => {
       runId,
       projectRoot: fixture.root,
       artifactPorts: artifactStore,
-      sourceState: { capture: () => sourceState() },
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner: async () => {
         throw new Error("should not run");

@@ -1,5 +1,10 @@
 # Authoring a pi-workflow — pointer
 
+> **Reading this as an agent?** [`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md)
+> is the shorter entry point Pi loads on demand: what a workflow is here, the
+> commands that list and run one, where a result lands, and the minimal template.
+> Come back here for the full contract.
+
 > **Canonical reference:** [`docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md)
 > is the single source of truth for the DSL, options, schema, trust model, name
 > resolution, run commands, result/journal layout, and the "what is NOT supported"
@@ -36,7 +41,6 @@ export default async function runWorkflow(dsl, input) {
     publishArtifact,
     consumeTextArtifact,
     continuationArtifacts,
-    captureSourceState,
     awaitOperator,
     phase,
     log,
@@ -82,7 +86,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      the same way as the directories above: every `<name>.workflow.mjs` in it is
      a Package workflow, and there is no second allowlist. The scan descends one
      directory level, so a workflow can keep prompt resources and its diagram
-     triple beside its entry. Adding one is adding a file — but it is still a
+     beside its entry. Adding one is adding a file — but it is still a
      public-surface change, and a package-boundary test fails until
      `package.json#files` ships it too, because a workflow that resolves in a
      checkout and vanishes after `npm i` is worse than one that never existed.
@@ -169,13 +173,6 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   The completed run envelope and model-callable workflow tool project the newest
   20 answer/published refs and an explicit omitted count, so a later call can
   carry a real ref without guessing the index. The full index remains canonical.
-- **Fingerprint mutable remediation:** `captureSourceState(label)` persists a
-  host-owned Git fingerprint under the current run. Use it around write-capable
-  stages and read-only checks to distinguish expected writer changes from drift
-  outside the declared window. Every initialized gitlink is enumerated
-  independently of its parent modification state and contributes the checked-out
-  submodule HEAD, index, status, and changed/untracked bytes. It records
-  evidence; it does not lock the checkout.
 - **Treat groups as fail-closed full barriers:** `parallel()` / `pipeline()` wait
   for scheduled siblings, then reject `WorkflowGroupFailureError` when an
   ordinary branch or stage throws or directly returns `ok:false` /
@@ -270,9 +267,12 @@ than a publisher child. Take the stage count from the requirement — two stages
 complete pipeline. For the full primitive table,
 schema/trust rules, and edge-cases, read the canonical doc linked above.
 
-For a non-trivial workflow visual map, use `$pi-workflow-diagram`. Every curated
-Package workflow must keep `<name>-pipeline.diagram.mjs`, editable
-`<name>-pipeline.excalidraw`, and `<name>-pipeline.png` beside its source. The
-diagram must distinguish operator input, workflow-owned routing, child agents,
-and persisted artifacts; every decision and branch names its real owner. The canonical diagram contract lives in the authoring section of
-the workflow documentation linked above.
+A non-trivial workflow keeps a visual map beside its source: one hand-authored
+`<name>-pipeline.svg`, edited directly, with no generator and no rendering
+dependency. [`examples/plan/plan-pipeline.svg`](./examples/plan/plan-pipeline.svg)
+is the reference shape. It must separate the deterministic script from the child
+agents, name what each agent receives and returns, show every persisted artifact
+under its published name, and give every branch and loop its real exit —
+including the operator pause, the fail-closed stop, and the terminal result. The
+generated Excalidraw triple this contract used to require was removed on
+2026-07-28.
