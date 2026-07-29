@@ -119,6 +119,18 @@ export interface AgentRunBoundaryOptions {
   signal?: AbortSignal;
   /** Explicit workflow-call-local destination for the result envelope. */
   resultArtifactsDir?: string;
+  /**
+   * Asked once, after the executor returns and BEFORE the envelope is written: does the
+   * CALLER's own fuse own this failure rather than the host's classification?
+   *
+   * A caller that aborts the child itself — the workflow bridge's per-call `timeoutMs` is
+   * the only one today — knows a fact the host cannot: the host sees a cancellation and
+   * says so honestly, while the caller knows it fired the fuse. Without this the envelope
+   * durably records the host's view and the caller's final classification lives only in
+   * the caller's own journal, so the two most durable records of one call disagree.
+   * Returning `undefined` (the default: no hook at all) leaves the host's cause untouched.
+   */
+  reclassifyFailureCause?: () => AgentFailureCause | undefined;
 }
 
 // T-119 PRE-CHECK: getBranch UNREACHABLE
@@ -183,7 +195,17 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
   }
 
   const result = await options.executor.run(request, options.signal ?? new AbortController().signal);
-  return writeAgentRunResultArtifact(projectRoot, request, result, options.resultArtifactsDir);
+  // Asked before the envelope is written, so the durable record carries the FINAL cause
+  // rather than one the caller immediately overrides in memory. Only a failure is
+  // reclassified: a completed run has no cause to correct, and a hook that could rewrite a
+  // success into a failure would be a second, undocumented status channel.
+  const reclassified = result.status === "completed" ? undefined : options.reclassifyFailureCause?.();
+  return writeAgentRunResultArtifact(
+    projectRoot,
+    request,
+    reclassified === undefined ? result : { ...result, failureCause: reclassified },
+    options.resultArtifactsDir,
+  );
 }
 
 export function validateRunPolicy(request: AgentRunRequest): string | undefined {
@@ -285,6 +307,12 @@ export function writeAgentRunResultArtifact(
     version: "locus.agent.run-result.v1",
     status: result.status,
     reason: result.reason,
+    // The machine-readable half of `reason`. Without it the only durable record of WHY a
+    // child failed is English prose, which is exactly the matching W1 exists to remove —
+    // and a consumer reading envelopes back (an operator, a report, a later run) would have
+    // to re-derive the classification the host already made. Undefined on success, and on
+    // envelopes written before the field existed; a reader treats absence as unclassified.
+    failureCause: result.failureCause,
     agentName: result.agentName,
     parentSessionId: request.parentSessionId,
     childSessionId: result.childSession?.id,

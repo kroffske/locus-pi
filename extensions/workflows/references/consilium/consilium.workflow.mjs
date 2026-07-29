@@ -86,6 +86,14 @@ synthesizer will read it as evidence that the obvious answer is safe.`,
 const MAX_BRIEF_CHARS = 4_000;
 const MAX_ADVICE_CHARS = 6_000;
 const MAX_CONSILIUM_CHARS = 12_000;
+/**
+ * The verdict stage is bounded too, and `schema` is not a substitute for it. Schema
+ * validation extracts a value from the child's raw answer, so a small valid object can
+ * arrive wrapped in an arbitrarily large reply — which is then persisted as this stage's
+ * answer artifact. The bound is what makes "every stage is bounded" true of the verifier
+ * rather than only of the stages whose answers are read as text.
+ */
+const MAX_VERDICT_CHARS = 2_000;
 
 /** The question itself. A run without one has nothing to advise on. */
 const MAX_QUESTION_CHARS = 4_000;
@@ -281,6 +289,7 @@ ${advisorSections}`,
       label: "verify the synthesis",
       artifact: "verification.json",
       schema: VERIFICATION_SCHEMA,
+      maxAnswerChars: MAX_VERDICT_CHARS,
     },
   );
 
@@ -296,7 +305,13 @@ ${advisorSections}`,
     };
   }
 
-  const consiliumRef = publishArtifact("consilium.md", synthesis.endsWith("\n") ? synthesis : `${synthesis}\n`);
+  // Published EXACTLY as validated. The previous line appended a trailing newline when the
+  // answer lacked one, which quietly moved the bound: a synthesis of exactly
+  // MAX_CONSILIUM_CHARS passed the runtime gate and then became a
+  // MAX_CONSILIUM_CHARS + 1 terminal document. It also made the script read the agent's
+  // own bytes to decide what to write. A bound the terminal artifact does not actually
+  // respect is worse than no bound, because every reader downstream trusts it.
+  const consiliumRef = publishArtifact("consilium.md", synthesis);
   return {
     ok: true,
     verdict: "accept",

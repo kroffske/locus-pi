@@ -82,8 +82,10 @@ terminal artifact" true rather than aspirational.
 
 A run is good when:
 
-- `consilium.md` exists as a published artifact, is non-empty, and is within the
-  declared 12,000-character bound;
+- `consilium.md` exists as a published artifact, is non-empty, and is **byte-for-byte**
+  the synthesis the 12,000-character bound approved — the script publishes the validated
+  answer unchanged, because appending even one character after the gate makes the declared
+  bound false for the one length where it matters;
 - the verifier's `verdict` is one of the two declared enum members;
 - and a `reject` verdict ends the run carrying that verdict's own `reason`, with no
   `consilium.md` published.

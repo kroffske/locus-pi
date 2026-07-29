@@ -226,6 +226,67 @@ describe("consilium reference workflow", () => {
     expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
   });
 
+  it("bounds the verifier too, so a valid verdict cannot arrive inside an unbounded reply", async () => {
+    // `schema` extracts a value; it does not bound the reply the value arrived in. So a
+    // verifier answering with a valid JSON block wrapped in a megabyte of prose used to
+    // succeed, and that megabyte became this stage's persisted answer artifact — while the
+    // source comment claimed every stage was bounded. The bound is the only thing that
+    // makes that claim true, and it must be provable by BEHAVIOUR, not by reading the file.
+    const verdict = JSON.stringify({ verdict: "accept", reason: "Every claim traces to an advisor." });
+    const padded = `${"filler prose. ".repeat(400)}\n\n\`\`\`json\n${verdict}\n\`\`\``;
+    expect(padded.length).toBeGreaterThan(2_000);
+    const answer = stageAnswers("accept", "Every claim traces to an advisor.");
+    const { dsl, artifactStore } = runtimeWith(async (request) =>
+      completed(request, request.label === "verify the synthesis" ? padded : answer(request)),
+    );
+
+    await expect((await loadWorkflow())(dsl, FIXTURE_QUESTION)).rejects.toThrow(
+      /Agent answer is \d+ characters; the call allows 2000\./u,
+    );
+    // Fails closed: an over-long verdict publishes nothing, exactly like a reject.
+    expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
+  });
+
+  it("publishes exactly the validated synthesis at the fencepost, and refuses one character past it", async () => {
+    // The bound is 12,000, and the terminal document used to be `synthesis + "\n"` whenever
+    // the answer lacked a trailing newline — so the one length that mattered, exactly
+    // 12,000, shipped a 12,001-character document through a gate that had just approved
+    // 12,000. A test with a short fixture asserting `<= 12_000` passes either way, which is
+    // why all three lengths are driven here.
+    const build = (length: number): string => {
+      const head = ["## Answer", "x", "", "## What is settled", "y", "", "## Where they disagree", ""].join("\n");
+      return head + "z".repeat(length - head.length);
+    };
+
+    for (const [length, published] of [
+      [11_999, true],
+      [12_000, true],
+      [12_001, false],
+    ] as const) {
+      const exact = build(length);
+      expect(exact.length).toBe(length);
+      // No trailing newline: this is precisely the answer the old code lengthened.
+      expect(exact.endsWith("\n")).toBe(false);
+      const answer = stageAnswers("accept", "Every claim traces to an advisor.");
+      const { dsl, artifactStore } = runtimeWith(async (request) =>
+        completed(request, request.label === "synthesize the document" ? exact : answer(request)),
+      );
+      const run = (await loadWorkflow())(dsl, FIXTURE_QUESTION);
+
+      if (!published) {
+        await expect(run).rejects.toThrow(`Agent answer is ${String(length)} characters; the call allows 12000.`);
+        expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
+        continue;
+      }
+      const result = (await run) as { consiliumRef: { artifactId: string; name: string } };
+      const text = artifactStore.read(result.consiliumRef as never).toString("utf8");
+      // Byte-for-byte the validated answer: not one character was added after the gate.
+      expect(text).toBe(exact);
+      expect(text.length).toBe(length);
+      expect(text.length).toBeLessThanOrEqual(12_000);
+    }
+  });
+
   it("refuses a run with no question before any child starts", async () => {
     let calls = 0;
     const { dsl } = runtimeWith(async () => {

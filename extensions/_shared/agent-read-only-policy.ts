@@ -51,9 +51,11 @@ export interface ReadOnlyAgentSessionCapabilityOptions {
   repositoryCheckScripts?: RepositoryCheckScripts;
 }
 
-/** Exported so a caller that must decide "can this child write?" without importing this
- *  host module's fs/child_process weight can prove its own copy is a subset of this one. */
-export const READ_ONLY_SAFE_TOOLS: ReadonlySet<string> = new Set([
+/** The host's own answer to "can this child write?". Deliberately NOT exported: the workflow
+ *  runtime keeps a copy because it may not import this module (fs + child_process), and the
+ *  copy is held to this list by a source-level subset assertion rather than by widening the
+ *  packaged surface for a test's convenience. */
+const READ_ONLY_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "read",
   "grep",
   "find",

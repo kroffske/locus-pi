@@ -59,14 +59,12 @@ const TRANSPORT_RETRYABLE_FAILURE_CAUSES: ReadonlySet<WorkflowAgentFailureCause>
 
 /** A result written before the cause field existed is `unclassified`, never retryable.
  *  Absence is read here, once, instead of being inferred at each call site. */
-export function workflowAgentFailureCause(
-  result: Pick<WorkflowAgentResult, "failureCause">,
-): WorkflowAgentFailureCause {
+function workflowAgentFailureCause(result: Pick<WorkflowAgentResult, "failureCause">): WorkflowAgentFailureCause {
   return result.failureCause ?? "unclassified";
 }
 
 /** True only for a named transport cause. */
-export function isTransportRetryableFailure(result: Pick<WorkflowAgentResult, "failureCause">): boolean {
+function isTransportRetryableFailure(result: Pick<WorkflowAgentResult, "failureCause">): boolean {
   return TRANSPORT_RETRYABLE_FAILURE_CAUSES.has(workflowAgentFailureCause(result));
 }
 
@@ -737,7 +735,7 @@ function normalizeMaxAnswerChars(maxAnswerChars: number): number {
  * budget rather than adding to it: the worst case for one shaped call is `attempts × 3`
  * children, each charged to the run's invocation cap.
  */
-export const MAX_AGENT_TRANSPORT_ATTEMPTS = 3;
+const MAX_AGENT_TRANSPORT_ATTEMPTS = 3;
 
 /** Default 1: a package-wide retry default is a budget decision nobody has taken yet. */
 function normalizeAgentAttempts(attempts: number | undefined): number {
@@ -757,7 +755,7 @@ function normalizeAgentAttempts(attempts: number | undefined): number {
  * asserts this list stays a SUBSET of the host's, so the copy cannot drift into permitting
  * something the host does not consider read-only.
  */
-export const AGENT_NO_WRITE_TOOLS: ReadonlySet<string> = new Set([
+const AGENT_NO_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "read",
   "grep",
   "find",
@@ -1918,6 +1916,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...attemptFields,
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        // The call already HAD a classification when adoption failed — this record is the
+        // only terminal line it gets, so dropping the cause here would turn a classified
+        // timeout into an unclassified store error and leave the operator matching prose.
+        ...(finalResult.status !== "completed" ? { failureCause: workflowAgentFailureCause(finalResult) } : {}),
         ...executedModelEvidence(finalResult),
         message: err instanceof Error ? err.message : String(err),
         durationMs,

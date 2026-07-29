@@ -408,6 +408,10 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         request,
         executor,
         signal: callAbort.signal,
+        // The fuse below is THIS module's, so the host can only report the cancellation it
+        // observed. Handing the classification down before the envelope is written keeps the
+        // durable per-call record and the run journal naming the same cause.
+        reclassifyFailureCause: () => (timedOut ? "call-timeout" : undefined),
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
       });
     } finally {
@@ -440,6 +444,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           : {}),
         ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
         ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
+        // Carried for the same reason the transcript is, and it is NOT cosmetic: a fresh
+        // child that reports a session id and no result envelope makes evidence adoption
+        // throw (`workflow-artifacts.ts`, "did not persist a result envelope"), which ends
+        // the call by THROWING — past the retry loop, which only ever sees a returned
+        // result. Dropping it here turned every artifact-backed timeout into an unretryable
+        // run death, silently disabling the very option `attempts` exists to provide.
+        ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
       };
     }
     if (req.workspaceHandle !== undefined) {

@@ -18,7 +18,6 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
 } from "../../../extensions/_shared/agent-sdk-host.js";
-import { READ_ONLY_SAFE_TOOLS } from "../../../extensions/_shared/agent-read-only-policy.js";
 import {
   createWorkflowAgentRunner,
   WorkflowAgentUnavailableError,
@@ -27,13 +26,8 @@ import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
 } from "../../../extensions/_shared/workflow-journal.js";
-import {
-  AGENT_NO_WRITE_TOOLS,
-  createWorkflowRuntime,
-  isTransportRetryableFailure,
-  workflowAgentFailureCause,
-  type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+import { createWorkflowRuntime, type WorkflowAgentResult } from "../../../extensions/_shared/workflow-runtime.js";
+import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
 import type { WorkflowReplayController } from "../../../extensions/_shared/workflow-replay.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
@@ -192,13 +186,38 @@ function completed(text: string): WorkflowAgentResult {
   return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: "default" };
 }
 
+let retryProbes = 0;
+
+/**
+ * Does the RUNTIME re-ask on this cause?
+ *
+ * Asked through the public DSL, never through a classifier helper: the retry policy is a
+ * BEHAVIOUR of the package, and an exported predicate a test can pin is not the same thing —
+ * it can keep answering correctly while the loop that was supposed to consult it stops
+ * doing so. Two children means the cause is in the transport class; one means it is not.
+ */
+async function retriesOn(cause: AgentFailureCause | undefined): Promise<boolean> {
+  retryProbes += 1;
+  const failure: WorkflowAgentResult = {
+    ok: false,
+    status: "failed",
+    summary: "scripted failure for the retry probe",
+    diagnostics: [],
+    agent: "default",
+    ...(cause === undefined ? {} : { failureCause: cause }),
+  };
+  const { dsl, requests } = scriptedRuntime(`retry-probe-${String(retryProbes)}`, [failure, completed("second")]);
+  await dsl.agent("work", { readOnly: true, attempts: 2 }).catch(() => undefined);
+  return requests.length > 1;
+}
+
 describe("agent failure cause — host", () => {
   it("names the host turn budget as a transport failure", async () => {
     const result = await runHost({ lastAssistantText: undefined, neverEnds: true }, { turnTimeoutMs: 5 });
 
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("host-turn-timeout");
-    expect(isTransportRetryableFailure(result)).toBe(true);
+    expect(await retriesOn(result.failureCause)).toBe(true);
   });
 
   it("names the tool-call budget, and it is not transport", async () => {
@@ -220,7 +239,7 @@ describe("agent failure cause — host", () => {
 
     expect(result.reason).toContain("tool-call budget");
     expect(result.failureCause).toBe("tool-call-budget");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("names a provider-side assistant failure", async () => {
@@ -233,7 +252,7 @@ describe("agent failure cause — host", () => {
 
       expect(result.reason).toBe("provider exploded");
       expect(result.failureCause).toBe("provider-error");
-      expect(isTransportRetryableFailure(result)).toBe(false);
+      expect(await retriesOn(result.failureCause)).toBe(false);
     } finally {
       agentLiveStore.reset();
     }
@@ -244,7 +263,7 @@ describe("agent failure cause — host", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("unparseable-answer");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("names operator cancellation, and never treats it as a dropped channel", async () => {
@@ -252,7 +271,7 @@ describe("agent failure cause — host", () => {
 
     expect(result.status).toBe("cancelled");
     expect(result.failureCause).toBe("cancelled");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("names a missing SDK substrate", async () => {
@@ -284,7 +303,7 @@ describe("agent failure cause — host", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("unclassified");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("leaves an unproven mid-turn throw unclassified", async () => {
@@ -293,7 +312,7 @@ describe("agent failure cause — host", () => {
     expect(result.status).toBe("failed");
     expect(result.reason).toContain("kaboom inside the turn");
     expect(result.failureCause).toBe("unclassified");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 });
 
@@ -343,7 +362,7 @@ describe("agent failure cause — bridge", () => {
 
     expect(result.summary).toContain("Unknown agent");
     expect(result.failureCause).toBe("unknown-agent");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("names a workspace that could not be resolved", async () => {
@@ -364,7 +383,7 @@ describe("agent failure cause — bridge", () => {
 
     expect(result.summary).toContain("workspace manager");
     expect(result.failureCause).toBe("workspace-allocation");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("names its own per-call fuse as a transport failure", async () => {
@@ -395,7 +414,7 @@ describe("agent failure cause — bridge", () => {
 
     expect(result.summary).toContain("timeout and was aborted");
     expect(result.failureCause).toBe("call-timeout");
-    expect(isTransportRetryableFailure(result)).toBe(true);
+    expect(await retriesOn(result.failureCause)).toBe(true);
   });
 
   it("carries sdk-unavailable from the real host through the bridge into the run journal", async () => {
@@ -502,8 +521,10 @@ describe("agent failure cause — bridge", () => {
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe("blocked");
-    expect(workflowAgentFailureCause(result)).toBe("unclassified");
-    expect(isTransportRetryableFailure(result)).toBe(false);
+    // No declared cause at all: absence is what makes it unclassified, and unclassified
+    // never retries.
+    expect(result.failureCause).toBeUndefined();
+    expect(await retriesOn(result.failureCause)).toBe(false);
   });
 
   it("puts no cause on an ordinary throw, rather than guessing one", async () => {
@@ -595,9 +616,8 @@ describe("agent failure cause — runtime", () => {
     };
 
     expect(legacy.failureCause).toBeUndefined();
-    expect(workflowAgentFailureCause(legacy)).toBe("unclassified");
-    // The prose says "timeout"; the machine-readable answer still refuses to retry.
-    expect(isTransportRetryableFailure(legacy)).toBe(false);
+    // The prose says "timeout"; with no declared cause the runtime still refuses to retry.
+    expect(await retriesOn(legacy.failureCause)).toBe(false);
 
     const { dsl, getJournal } = runtimeOver("transport-legacy", [legacy]);
     await expect(dsl.agent("work")).rejects.toThrow(/budget and was aborted/u);
@@ -625,9 +645,12 @@ describe("agent failure cause — the list is closed and covered", () => {
     expect(missing).toEqual([]);
   });
 
-  it("keeps the transport allowlist to the two causes the child never answered on", () => {
-    const transport = AGENT_FAILURE_CAUSES.filter((cause) => isTransportRetryableFailure({ failureCause: cause }));
+  it("keeps the transport allowlist to the two causes the child never answered on", async () => {
+    const transport: AgentFailureCause[] = [];
+    for (const cause of AGENT_FAILURE_CAUSES) if (await retriesOn(cause)) transport.push(cause);
     expect(transport).toEqual(["host-turn-timeout", "call-timeout"]);
+    // And the absent-cause case, which is not a member of the list at all.
+    expect(await retriesOn(undefined)).toBe(false);
   });
 });
 
@@ -770,9 +793,25 @@ describe("agent attempts — declaration", () => {
 
   it("keeps its no-write tool list a subset of the host's read-only allow-list", () => {
     // The runtime cannot import the host policy module (fs + child_process) and keeps a copy.
-    // This is the assertion that stops the copy from drifting into permitting a writer.
-    const drifted = [...AGENT_NO_WRITE_TOOLS].filter((tool) => !READ_ONLY_SAFE_TOOLS.has(tool));
-    expect(drifted).toEqual([]);
+    // This is the assertion that stops the copy from drifting into permitting a writer — and
+    // it is read from SOURCE rather than from two exported constants, because publishing an
+    // internal allow-list on the packaged surface for a test's convenience is a worse trade
+    // than reading the literal each list is actually written as.
+    const literal = (file: string, declaration: string): string[] => {
+      const source = readFileSync(path.join(process.cwd(), file), "utf8");
+      const start = source.indexOf(declaration);
+      expect(start, `${declaration} not found in ${file}`).toBeGreaterThanOrEqual(0);
+      const open = source.indexOf("[", start);
+      const close = source.indexOf("]", open);
+      expect(close, `${declaration} is not a literal array in ${file}`).toBeGreaterThan(open);
+      const tools = [...source.slice(open, close).matchAll(/"([^"]+)"/gu)].map((match) => match[1]!);
+      expect(tools.length, `${declaration} parsed as empty in ${file}`).toBeGreaterThan(0);
+      return tools;
+    };
+    const hostSafe = new Set(literal("extensions/_shared/agent-read-only-policy.ts", "const READ_ONLY_SAFE_TOOLS"));
+    const runtimeNoWrite = literal("extensions/_shared/workflow-runtime.ts", "const AGENT_NO_WRITE_TOOLS");
+
+    expect(runtimeNoWrite.filter((tool) => !hostSafe.has(tool))).toEqual([]);
   });
 });
 
@@ -1099,5 +1138,143 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     const transportBody = lines.slice(logicalStart, physicalStart).join("\n");
     expect(transportBody).not.toContain("SCHEMA_MAX_ATTEMPTS");
     expect(transportBody).not.toContain("checkAgentSchema(");
+  });
+});
+
+describe("agent attempts — a real call-timeout on an artifact-backed child", () => {
+  /**
+   * The retry loop only ever sees a RETURNED result. Anything that throws inside a physical
+   * attempt bypasses it, and evidence adoption throws by design when a fresh child reports a
+   * session id without a persisted result envelope.
+   *
+   * So the whole `attempts` option hung on one field survival: the bridge's per-call fuse
+   * built its own failure literal and dropped `boundary.resultArtifact`, which made adoption
+   * throw on exactly the failure class `attempts` exists to absorb. Every earlier test drove
+   * the bridge alone, declared no retry and adopted no evidence, so all of them passed while
+   * the real path could not retry once.
+   *
+   * This case is deliberately end to end — real workflow script, real bridge, real evidence
+   * adoption, real journal, real report — because every layer in that list is where the
+   * regression hid.
+   */
+  it("retries, keeps the discarded attempt's evidence, and persists call-timeout in the envelope", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-transport-timeout-e2e-"));
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "fused.workflow.mjs"),
+      [
+        "export default async function runWorkflow(dsl) {",
+        '  return await dsl.agent("answer", {',
+        '    artifact: "review.md",',
+        '    label: "scout",',
+        '    phase: "review",',
+        "    readOnly: true,",
+        "    attempts: 2,",
+        "    timeoutMs: 30,",
+        "  });",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "transport-timeout-e2e" });
+    let child = 0;
+    const createExecutor = (options: { reportsDir?: string }): AgentExecutor => ({
+      async run(request: AgentRunRequest, signal: AbortSignal) {
+        child += 1;
+        const childId = `child-${String(child)}`;
+        expect(options.reportsDir).toBeDefined();
+        mkdirSync(options.reportsDir!, { recursive: true });
+        const tracePath = path.join(options.reportsDir!, `${childId}.jsonl`);
+        writeFileSync(tracePath, `${JSON.stringify({ type: "session", id: childId })}\n`, "utf8");
+        const childEvidence = {
+          childSession: { id: childId, createdAt: "now", metadata: {} },
+          childTrace: { path: tracePath, format: "pi-session-jsonl" as const, childSessionId: childId },
+        };
+        // First child hangs until the CALL fuse aborts it — a real timeout, not a
+        // hand-written `failureCause`. It still exported a transcript and still had its
+        // envelope written, exactly like a real aborted child.
+        if (child === 1) {
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return {
+            status: "cancelled" as const,
+            agentName: request.agent.name,
+            reason: "aborted",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+            ...childEvidence,
+          };
+        }
+        return {
+          status: "completed" as const,
+          agentName: request.agent.name,
+          reason: "exact answer",
+          text: "exact answer",
+          diagnostics: [],
+          lifecycleEntryIds: [],
+          ...childEvidence,
+        };
+      },
+    });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "fused",
+      createExecutor,
+    });
+
+    // The run reached its answer, which it cannot do if adoption threw past the retry loop.
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBe(true);
+    expect(child).toBe(2);
+
+    // The discarded attempt's evidence was ADOPTED, not lost: transcript and result envelope
+    // for call-0001 are both in the run's own artifact index.
+    const index = JSON.parse(readFileSync(path.join(result.runDir, "artifacts", "index.json"), "utf8")) as {
+      artifacts: { kind: string; callId?: string; relativePath: string }[];
+    };
+    const firstAttempt = index.artifacts.filter((entry) => entry.callId === "call-0001");
+    expect(firstAttempt.map((entry) => entry.kind).sort()).toEqual(["result", "transcript"]);
+
+    // The DURABLE per-call record carries the machine-readable cause, and it is the FINAL
+    // one: the host saw a cancellation, the bridge's own fuse owns the classification.
+    const readEnvelope = (callId: string): { version: string; status: string; failureCause?: string } => {
+      const record = index.artifacts.find((entry) => entry.callId === callId && entry.kind === "result");
+      expect(record, `no result envelope adopted for ${callId}`).toBeDefined();
+      const wrapper = JSON.parse(readFileSync(path.join(result.runDir, "artifacts", record!.relativePath), "utf8")) as {
+        content: string;
+      };
+      return JSON.parse(wrapper.content) as { version: string; status: string; failureCause?: string };
+    };
+    const persisted = readEnvelope("call-0001");
+    expect(persisted.version).toBe("locus.agent.run-result.v1");
+    expect(persisted.failureCause).toBe("call-timeout");
+    // A completed attempt has no cause to persist, and must not invent one.
+    expect(readEnvelope("call-0002").failureCause).toBeUndefined();
+
+    // The journal agrees with the envelope, rather than the two disagreeing about one call.
+    const journal = readWorkflowRunJournalState(root, result.runId);
+    expect(journal.diagnostics).toEqual([]);
+    expect(
+      journal.lines
+        .filter((line) => line.kind === "agent_end")
+        .map((line) => [line.callId, line.attempt, line.attempts, line.status, line.failureCause]),
+    ).toEqual([
+      ["call-0001", 1, 2, "failed", "call-timeout"],
+      ["call-0002", 2, 2, "completed", undefined],
+    ]);
+
+    rmSync(root, { recursive: true, force: true });
   });
 });

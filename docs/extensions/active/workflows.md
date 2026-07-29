@@ -1372,6 +1372,13 @@ threw leaves exactly one `agent_end` behind, and a report built from `agent_end`
 would show a stage that ran twice and was billed twice as if it had never retried. A budget
 blind to its own retries is a gate that does not count what it gates.
 
+The per-call result envelope carries `failureCause` as well, so a reader who has only the
+persisted `locus.agent.run-result.v1` body still gets the machine-readable cause rather than
+the reason sentence. Where the workflow's own `timeoutMs` fuse ended the call, that is the
+cause written into the envelope: the host reports the cancellation it observed, which is
+true and is not the whole truth, and the caller that fired the fuse hands its classification
+down before the envelope is written so the two most durable records of one call agree.
+
 `logicalCallId` is what that section groups by, and it is not decoration: `parallel()`
 can run two calls that agree on agent, label, phase and group, and their attempts then
 interleave in the journal. A reader grouping by those descriptive fields would put one

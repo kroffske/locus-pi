@@ -254,6 +254,11 @@ This file records user-visible changes to the public package.
   call and every physical attempt inside it shares that one ordinal, so a retry cannot
   shift a later call's position, and `attempts` stays out of the canonical request so
   recordings written before it existed still replay.
+  The persisted `locus.agent.run-result.v1` envelope carries `failureCause` too, so the
+  durable per-call record and the run journal name the same cause instead of one of them
+  leaving a reader to match on English. Where the workflow's own per-call `timeoutMs`
+  fuse fired, that classification is the one written down: the host honestly reports the
+  cancellation it observed, and only the caller knows it pulled the trigger.
 
 - **A shipped skill, so an agent can find the workflows the package already
   installs.** The six Package workflows resolve out of the installed package and
