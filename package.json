@@ -262,7 +262,8 @@
     ]
   },
   "scripts": {
-    "check": "npm run typecheck && npm test && npm run audit:sources",
+    "check": "npm run check:layers && npm run typecheck && npm test && npm run audit:sources",
+    "check:layers": "tsx scripts/check-extension-layers.ts",
     "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
     "check:push": "npm run check && npm run check:repository && npm run check:release && npm run pack:json > /dev/null",
     "check:release": "tsx scripts/check-release-metadata.ts",

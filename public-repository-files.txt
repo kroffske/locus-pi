@@ -255,6 +255,7 @@ package.json
 public-repository-files.txt
 public-repository.json
 scripts/audit-sources.ts
+scripts/check-extension-layers.ts
 scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts

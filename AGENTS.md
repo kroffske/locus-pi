@@ -39,6 +39,18 @@ npm run check:push
 
 CI repeats source checks, tests, source-audit checks, public-repository inventory validation, dependency auditing, Pi diagnostics, and npm tarball inspection.
 
+## Extension ownership layers
+
+`extensions/_shared/` is being broken up into named ownership layers, so its modules are not interchangeable and its import direction is enforced, not conventional. `scripts/check-extension-layers.ts` (run by `npm run check:layers`, and inside `npm run check`) holds the ledger and the rules:
+
+- No module under `extensions/_shared/**` may import a feature directory under `extensions/**`. Invert the dependency, or move the module out of `_shared/`.
+- Every `_shared` module is declared exactly once — either in a shared layer or with the feature directory it is scheduled to move to. A new shared module with no declared owner fails the check.
+- Shared layers have a declared order (`host` first, then the provisional catch-all, `runtime`/`model`, `project`, `agent-runtime`); `operator` may reach only `host`. Type-only imports count, because they still encode ownership.
+- Versioned `globalThis` registries (`Symbol.for("locus-pi.…")`) have exactly one declared owning module. Two modules naming one slot is how a relocation splits process-wide live state.
+- Mutable module-level state that is not such a registry is declared separately, because it does not survive Pi loading two entrypoints with the module cache disabled.
+
+Read that script's header before moving anything under `extensions/`; when a move is legitimate, update the ledger in the same change rather than loosening a rule.
+
 ## Changelog and release metadata
 
 - User-visible package, runtime, manual, security, or support changes must update `CHANGELOG.md` in the same pull request.

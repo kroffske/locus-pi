@@ -210,6 +210,36 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **`extensions/_shared` now has a declared owner per module, and the import
+  direction is checked instead of assumed.** The directory had grown to 64 modules
+  with no stated boundary, so nothing distinguished a genuinely shared primitive
+  from a single-extension helper that landed there by habit — and nothing stopped
+  foundational shared code from importing a feature entrypoint, which is the edge
+  that makes a shared directory unsplittable. `npm run check:layers` (also inside
+  `npm run check`, so the existing push gate runs it) reads a ledger that classifies
+  every shared module exactly once, either into a named layer or with the extension
+  directory it is scheduled to move to, and fails on: an import that escapes
+  `_shared/` into a feature directory; an import that points up the declared layer
+  order, type-only imports included, since a type edge encodes ownership just as
+  much as a value edge; a new shared module with no declared owner; a module deleted
+  from `_shared/` without landing at its declared destination; and a module sitting
+  in a layer subdirectory that contradicts its declared layer.
+  **Two kinds of process-wide state are tracked separately, because only one of them
+  is findable.** Versioned `globalThis` slots (`Symbol.for("locus-pi.…")`) each get
+  exactly one declared owning module — two modules naming one slot is precisely how
+  a file move splits live state that separately loaded Pi entrypoints are supposed
+  to share. Mutable module-level state that is _not_ such a slot cannot be found by
+  that sweep at all, so it is declared by hand and the check also rejects a new
+  mutable exported container in `_shared/`; that state does not survive Pi loading
+  two entrypoints with the module cache disabled, and a relocation must not quietly
+  imply that it does.
+  **Two imports that already point the wrong way are named rather than tolerated.**
+  A host-layer module value-imports a constant from the provisional catch-all
+  module, and another host-layer module imports the runtime-layer session stores it
+  probes for. Both are recorded as declared exceptions with the slice that clears
+  each, and the check fails as _stale_ once an exception stops being needed — so the
+  rank order becomes real by subtraction instead of quietly staying loose.
+
 - **`agent({ attempts })` — a bounded retry for the failure where the child never
   got to answer.** A dropped child session or an expired turn budget ended the whole
   run, and an author's only recourse was to re-run the pipeline from the start. That
