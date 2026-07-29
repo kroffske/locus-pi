@@ -93,16 +93,19 @@ A run is good when:
 `tests/extensions/workflows/consilium-reference-workflow.test.ts` drives the file over
 both verdicts with a fake agent runner and asserts exactly that.
 
-## What is deliberately not here
+## Model tiers
 
-**Per-advisor `model:` tier pins.** The obvious showcase for a consilium is "three
-advisors on three tiers", and it is not built yet on purpose: `model:` does not
-currently reach the child — the resolver silently yields `undefined` and the child
-inherits the parent's model — while the journal records the _requested_ selector. A
-tier showcase whose journal records tiers that never executed would put a lie into the
-exact artifact a foreign author copies. The advisors differ by role, which is real.
-The pins land once the resolver is fail-loud and the journal records the executed
-model.
+The evidence and alternative advisors declare `modelRole: "smol"`; the risk advisor
+declares `modelRole: "slow"`. These are portable role names, not concrete
+`provider/id` selectors baked into the reference. The operator assigns them in the
+normal model-roles configuration. If a role is unassigned, the stage inherits the
+parent model and records that fallback explicitly.
+
+Run evidence distinguishes request from execution: `agent_start.modelRole` records the
+declared role, while `agent_end.executedModel` records the model the child session
+reported. A concrete `model:` selector would instead fail closed on an installation
+whose registry cannot resolve it, so this reference does not pin workstation-specific
+model ids.
 
 ## Stage shape is a hypothesis, not a settled requirement
 

@@ -189,6 +189,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       return {
         ok: false,
         status: "failed",
+        // Permanent configuration fault. Explicitly non-retryable; kept inside the
+        // closed cause set instead of widening it on no evidence of a new class.
+        failureCause: "unclassified",
         // The SUMMARY carries the whole reason, not a headline. `diagnostics` does not
         // reach `agent_end` or the result envelope — a live run proved the actionable
         // half ("provider X has no model Y", the pi/<role> migration hint) was being
@@ -389,15 +392,23 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // that only stops waiting would leave a child burning tokens with nothing left
     // to read its answer. The run-level signal still aborts everything.
     const callAbort = new AbortController();
-    const abortFromRun = (): void => callAbort.abort(signal.reason);
+    // Run cancellation and the per-call fuse share one child signal. Whichever source
+    // aborts it first owns the durable outcome; the other source must not relabel it
+    // while the executor unwinds.
+    let abortOwner: "run" | "timeout" | undefined;
+    const abortFromRun = (): void => {
+      if (abortOwner !== undefined) return;
+      abortOwner = "run";
+      callAbort.abort(signal.reason);
+    };
     if (signal.aborted) abortFromRun();
     else signal.addEventListener("abort", abortFromRun, { once: true });
-    let timedOut = false;
     const timer =
       req.timeoutMs === undefined
         ? undefined
         : setTimeout(() => {
-            timedOut = true;
+            if (abortOwner !== undefined) return;
+            abortOwner = "timeout";
             callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
           }, req.timeoutMs);
     let boundary;
@@ -408,17 +419,26 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         request,
         executor,
         signal: callAbort.signal,
-        // The fuse below is THIS module's, so the host can only report the cancellation it
-        // observed. Handing the classification down before the envelope is written keeps the
-        // durable per-call record and the run journal naming the same cause.
-        reclassifyFailureCause: () => (timedOut ? "call-timeout" : undefined),
+        // The fuse below is THIS module's, so the host can only report the cancellation
+        // it observed — or return a late success after the fuse already fired. Finalize
+        // both status and cause before the envelope is written.
+        finalizeResult: (result) => {
+          if (abortOwner !== "timeout") return result;
+          const { text: _lateText, ...resultWithoutText } = result;
+          return {
+            ...resultWithoutText,
+            status: "failed",
+            reason: `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`,
+            failureCause: "call-timeout",
+          };
+        },
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
       });
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       signal.removeEventListener("abort", abortFromRun);
     }
-    if (timedOut) {
+    if (abortOwner === "timeout") {
       // Name the fuse. Without this the operator reads only the host's generic
       // abort reason and cannot tell a timeout from an operator cancellation.
       const message = `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`;

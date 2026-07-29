@@ -121,16 +121,16 @@ export interface AgentRunBoundaryOptions {
   resultArtifactsDir?: string;
   /**
    * Asked once, after the executor returns and BEFORE the envelope is written: does the
-   * CALLER's own fuse own this failure rather than the host's classification?
+   * CALLER own a final transport outcome the host cannot observe?
    *
    * A caller that aborts the child itself — the workflow bridge's per-call `timeoutMs` is
    * the only one today — knows a fact the host cannot: the host sees a cancellation and
-   * says so honestly, while the caller knows it fired the fuse. Without this the envelope
-   * durably records the host's view and the caller's final classification lives only in
-   * the caller's own journal, so the two most durable records of one call disagree.
-   * Returning `undefined` (the default: no hook at all) leaves the host's cause untouched.
+   * says so honestly, while the caller knows it fired the fuse. A late executor can even
+   * return `completed` after that fuse fired. Without this finalizer the envelope can
+   * durably record a cancellation — or a success — while the caller's journal records a
+   * call timeout. The hook returns the exact result the envelope must persist.
    */
-  reclassifyFailureCause?: () => AgentFailureCause | undefined;
+  finalizeResult?: (result: AgentRunResult) => AgentRunResult;
 }
 
 // T-119 PRE-CHECK: getBranch UNREACHABLE
@@ -195,17 +195,10 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
   }
 
   const result = await options.executor.run(request, options.signal ?? new AbortController().signal);
-  // Asked before the envelope is written, so the durable record carries the FINAL cause
-  // rather than one the caller immediately overrides in memory. Only a failure is
-  // reclassified: a completed run has no cause to correct, and a hook that could rewrite a
-  // success into a failure would be a second, undocumented status channel.
-  const reclassified = result.status === "completed" ? undefined : options.reclassifyFailureCause?.();
-  return writeAgentRunResultArtifact(
-    projectRoot,
-    request,
-    reclassified === undefined ? result : { ...result, failureCause: reclassified },
-    options.resultArtifactsDir,
-  );
+  // Finalized before the envelope is written, so the durable record and the caller's
+  // journal cannot disagree about one transport outcome.
+  const finalized = options.finalizeResult?.(result) ?? result;
+  return writeAgentRunResultArtifact(projectRoot, request, finalized, options.resultArtifactsDir);
 }
 
 export function validateRunPolicy(request: AgentRunRequest): string | undefined {

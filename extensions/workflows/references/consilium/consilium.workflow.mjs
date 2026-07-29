@@ -21,13 +21,10 @@
 // `fixture-question.md` beside this file is the committed input its test and its
 // weak-model run both use, so "it worked" always means the same thing.
 //
-// What is deliberately NOT here: per-advisor `model:` tier pins. `model:` does not
-// reach the child today (the resolver silently yields `undefined` and the child
-// inherits the parent's model) while the journal records the REQUESTED selector. A
-// tier showcase whose journal records tiers that never executed would put a lie into
-// the exact artifact a foreign author copies. The advisors differ by ROLE, which is
-// real. Tier pins land when the resolver is fail-loud and the journal records the
-// executed model.
+// Advisors declare portable `modelRole` tiers rather than workstation-specific
+// `provider/id` selectors. An assigned role routes to that model; an unassigned role
+// inherits the parent with an explicit `modelRoleFallback` record. `agent_end` carries
+// the host readback as `executedModel`, so the run evidence names what actually ran.
 
 export const meta = {
   name: "consilium",
@@ -40,6 +37,7 @@ const ADVISORS = Object.freeze([
   Object.freeze({
     label: "evidence advisor",
     artifact: "advisor-evidence.md",
+    modelRole: "smol",
     charter: `You are the EVIDENCE advisor. Your one job is to say what is actually known.
 
 Write, in this order:
@@ -55,6 +53,7 @@ Do not recommend anything. Do not weigh options. Another advisor does that.`,
   Object.freeze({
     label: "risk advisor",
     artifact: "advisor-risk.md",
+    modelRole: "slow",
     charter: `You are the RISK advisor. Your one job is to say what goes wrong.
 
 Write, in this order:
@@ -68,6 +67,7 @@ alternative — say what breaks, and let the reader weigh it.`,
   Object.freeze({
     label: "alternative advisor",
     artifact: "advisor-alternative.md",
+    modelRole: "smol",
     charter: `You are the ALTERNATIVE advisor. Your one job is to make the strongest
 possible case for a DIFFERENT answer than the obvious one.
 
@@ -198,6 +198,7 @@ ${brief}
               ...ADVISORY_OPTIONS,
               label: advisor.label,
               artifact: advisor.artifact,
+              modelRole: advisor.modelRole,
               maxAnswerChars: MAX_ADVICE_CHARS,
             },
           ),

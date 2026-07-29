@@ -21,6 +21,8 @@ import {
 
 const workflowDir = path.join(process.cwd(), "extensions/workflows/references/consilium");
 const workflowPath = path.join(workflowDir, "consilium.workflow.mjs");
+const readmePath = path.join(workflowDir, "README.md");
+const patternsPath = path.join(process.cwd(), "extensions/workflows/references/patterns.md");
 const FIXTURE_QUESTION = readFileSync(path.join(workflowDir, "fixture-question.md"), "utf8").trim();
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
@@ -136,6 +138,7 @@ describe("consilium reference workflow", () => {
     expect(advisorCalls[0]?.prompt).toContain("EVIDENCE advisor");
     expect(advisorCalls[1]?.prompt).toContain("RISK advisor");
     expect(advisorCalls[2]?.prompt).toContain("ALTERNATIVE advisor");
+    expect(advisorCalls.map((call) => call.modelRole)).toEqual(["smol", "slow", "smol"]);
 
     // The advisor group really is a parallel group inside a nested workflow — the
     // documented caller for `dsl.workflow()`, which nothing else in the package uses.
@@ -309,9 +312,23 @@ describe("consilium reference workflow", () => {
     expect(source).toContain('verification.verdict === "reject"');
     expect(source).not.toMatch(/verification\.reason\s*\.\s*(includes|match|test)/u);
     expect(source).not.toContain("JSON.parse");
-    // No tier pins until the resolver is fail-loud and the journal records the
-    // executed model; a showcase whose journal lies is worse than no showcase.
+    // Portable tiers, not concrete workstation-specific selectors.
     expect(source).not.toMatch(/^\s*model:/mu);
+    expect(source).toContain('modelRole: "smol"');
+    expect(source).toContain('modelRole: "slow"');
+  });
+
+  it("keeps the shipped skeleton bounded and the reference docs on the executed-model contract", () => {
+    const patterns = readFileSync(patternsPath, "utf8");
+    const consilium = patterns.slice(patterns.indexOf("## Consilium"));
+    expect(consilium).toContain("maxAnswerChars: 12_000");
+    expect(consilium).toContain("maxAnswerChars: 2_000");
+
+    const readme = readFileSync(readmePath, "utf8");
+    expect(readme).toContain('modelRole: "smol"');
+    expect(readme).toContain('modelRole: "slow"');
+    expect(readme).toContain("agent_end.executedModel");
+    expect(readme).not.toContain("resolver silently yields");
   });
 
   it("stays out of the Package registry by placement, and still loads by path", async () => {

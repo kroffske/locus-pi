@@ -875,6 +875,7 @@ const synthesis = await agent(synthesizeTask(brief, advice), {
   readOnly: true,
   tools: [],
   artifact: "synthesis-draft.md", // NOT the terminal name — see below
+  maxAnswerChars: 12_000,
 });
 const check = await agent(verifyTask(synthesis, advice), {
   readOnly: true,
@@ -887,6 +888,7 @@ const check = await agent(verifyTask(synthesis, advice), {
       reason: { type: "string", nonBlank: true, maxLength: 600 },
     },
   },
+  maxAnswerChars: 2_000,
 });
 if (check.verdict === "reject") return { ok: false, verdict: "reject", reason: check.reason };
 return { ok: true, consiliumRef: publishArtifact("consilium.md", synthesis) };

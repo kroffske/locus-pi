@@ -13,6 +13,8 @@ import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js"
 import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
+  createWorkflowJournalSink,
+  readWorkflowRunJournalState,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
 } from "../../../extensions/_shared/workflow-journal.js";
@@ -653,6 +655,7 @@ describe("an unassigned role degrades and records the degradation", () => {
     const result = await runner({ prompt: "work", agent: "bare", modelRole: "test/fast" });
 
     expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("unclassified");
     expect(result.summary).toContain("test/fast");
     expect(result.summary).toContain("modelRole");
     // The actionable half: which option to use instead.
@@ -706,6 +709,38 @@ describe("executed-model evidence", () => {
     expect(start?.modelRole).toBe("smol");
     expect(start?.executedModel).toBeUndefined();
     expect(end?.executedModel).toBe("test/fast");
+  });
+
+  it("round-trips requested, role, executed, and fallback model evidence through the persisted reader", async () => {
+    const root = tieredProject();
+    const h = createHarness(root, { sessionId: "tier-persisted-journal" });
+    h.ctx.model = STRONG;
+    await h.ctx.settings?.set("modelRoles", {});
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const runId = "tier-persisted-journal";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      agentRunner: runner,
+      journal: createWorkflowJournalSink(root, runId),
+    });
+
+    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+    await expect(dsl.agent("pinned work", { agent: "bare", model: "test/strong" })).resolves.toBe("tier answer");
+
+    const persisted = readWorkflowRunJournalState(root, runId);
+    expect(persisted.diagnostics).toEqual([]);
+    const starts = persisted.lines.filter((line) => line.kind === "agent_start");
+    const end = persisted.lines.find((line) => line.kind === "agent_end");
+    expect(starts[0]?.modelRole).toBe("smol");
+    expect(starts[1]?.requestedModel).toBe("test/strong");
+    expect(end?.executedModel).toBe("test/strong");
+    expect(end?.modelRoleFallback).toContain('"smol"');
   });
 
   it("carries the requested selector under a name that says requested", async () => {

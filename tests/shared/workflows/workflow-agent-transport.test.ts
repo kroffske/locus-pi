@@ -417,6 +417,77 @@ describe("agent failure cause — bridge", () => {
     expect(await retriesOn(result.failureCause)).toBe(true);
   });
 
+  it("keeps an earlier run cancellation when the call deadline passes during executor unwind", async () => {
+    const root = bridgeProject();
+    const harness = createHarness(root, { sessionId: "transport-run-cancel-first" });
+    const controller = new AbortController();
+    let children = 0;
+    const runner = createWorkflowAgentRunner({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: controller.signal,
+      createExecutor: (): AgentExecutor => ({
+        async run(request, signal) {
+          children += 1;
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          // Cross the still-armed call deadline while the host unwinds the earlier
+          // run cancellation. The later timer must not acquire ownership.
+          await new Promise<void>((resolve) => setTimeout(resolve, 35));
+          return {
+            status: "cancelled" as const,
+            failureCause: "cancelled" as const,
+            agentName: request.agent.name,
+            reason: "run cancelled by operator",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    const runId = "transport-run-cancel-first";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      projectRoot: root,
+      agentRunner: runner,
+      journal: createWorkflowJournalSink(root, runId),
+    });
+
+    const pending = dsl.agent("work", {
+      agent: "default",
+      readOnly: true,
+      attempts: 2,
+      timeoutMs: 20,
+    });
+    setTimeout(() => controller.abort({ kind: "operator_stop" }), 5);
+
+    await expect(pending).rejects.toThrow(/run cancelled by operator/u);
+    expect(children).toBe(1);
+
+    const journal = readWorkflowRunJournalState(root, runId);
+    expect(journal.diagnostics).toEqual([]);
+    const end = journal.lines.find((line) => line.kind === "agent_end");
+    expect(end).toMatchObject({
+      status: "cancelled",
+      failureCause: "cancelled",
+      attempt: 1,
+      attempts: 2,
+    });
+    expect(end?.resultArtifact).toBeDefined();
+    const wrapper = JSON.parse(readFileSync(end!.resultArtifact!, "utf8")) as { content: string };
+    const envelope = JSON.parse(wrapper.content) as {
+      status: string;
+      failureCause?: AgentFailureCause;
+    };
+    expect(envelope.status).toBe("cancelled");
+    expect(envelope.failureCause).toBe("cancelled");
+    expect(await retriesOn(envelope.failureCause)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("carries sdk-unavailable from the real host through the bridge into the run journal", async () => {
     // The one cause that never becomes a result. The bridge fails the whole run closed —
     // a run whose children cannot be spawned must end, not be re-asked — so it THROWS
@@ -1157,7 +1228,24 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
    * adoption, real journal, real report — because every layer in that list is where the
    * regression hid.
    */
-  it("retries, keeps the discarded attempt's evidence, and persists call-timeout in the envelope", async () => {
+  it.each([
+    {
+      caseName: "the host reports cancellation",
+      firstResult: {
+        status: "cancelled" as const,
+        reason: "aborted",
+        failureCause: "cancelled" as const,
+      },
+    },
+    {
+      caseName: "the child completes after the fuse fired",
+      firstResult: {
+        status: "completed" as const,
+        reason: "late answer",
+        text: "late answer",
+      },
+    },
+  ])("retries $caseName and persists one final timeout outcome", async ({ firstResult }) => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-transport-timeout-e2e-"));
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
     writeFileSync(
@@ -1206,9 +1294,8 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
             else signal.addEventListener("abort", () => resolve(), { once: true });
           });
           return {
-            status: "cancelled" as const,
+            ...firstResult,
             agentName: request.agent.name,
-            reason: "aborted",
             diagnostics: [],
             lifecycleEntryIds: [],
             ...childEvidence,
@@ -1259,6 +1346,7 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
     };
     const persisted = readEnvelope("call-0001");
     expect(persisted.version).toBe("locus.agent.run-result.v1");
+    expect(persisted.status).toBe("failed");
     expect(persisted.failureCause).toBe("call-timeout");
     // A completed attempt has no cause to persist, and must not invent one.
     expect(readEnvelope("call-0002").failureCause).toBeUndefined();
