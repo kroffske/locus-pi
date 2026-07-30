@@ -1,15 +1,15 @@
 /**
  * extensions/agents/catalog.ts — the agent catalog.
  *
- * Owns discovery refresh into `sharedState.agents`, the `TaskParams` schema whose
+ * Owns discovery refresh into `catalog-state.ts`, the `TaskParams` schema whose
  * `agent` parameter description IS the published catalog (see writeAgentCatalogHint),
  * name resolution with the built-in aliases, and the flat catalog projections the
  * unknown-agent report reads.
  */
 import { Type } from "@sinclair/typebox";
 import { discoverAgentDefinitions, formatAgentCatalogHint } from "../_shared/agent-runtime/agents.js";
-import { sharedState } from "../_shared/state.js";
-import type { AgentDefinition } from "../_shared/types.js";
+import { agentCatalog } from "./catalog-state.js";
+import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
 
 const AGENT_PARAM_BASE_DESCRIPTION =
   "Agent catalog name. Omit, use default, or use general to run task unless a project/user definition with that name exists.";
@@ -44,9 +44,9 @@ export interface AgentResolution {
 
 export function refreshAgents(projectRoot: string) {
   const discovered = discoverAgentDefinitions(projectRoot);
-  sharedState.agents.clear();
+  agentCatalog.clear();
   for (const agent of discovered.definitions) {
-    sharedState.agents.set(agent.name, agent);
+    agentCatalog.set(agent.name, agent);
   }
   writeAgentCatalogHint(discovered.definitions);
   return discovered;
@@ -74,18 +74,18 @@ function writeAgentCatalogHint(definitions: readonly AgentDefinition[]): void {
 export function resolveAgentSelection(agentName: string | undefined): AgentResolution | undefined {
   const requestedAgent = normalizeRequestedAgentName(agentName);
   if (requestedAgent === "default") {
-    const aliased = sharedState.agents.get(DEFAULT_TASK_AGENT_NAME);
+    const aliased = agentCatalog.get(DEFAULT_TASK_AGENT_NAME);
     if (aliased !== undefined)
       return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
     return undefined;
   }
-  const exact = sharedState.agents.get(requestedAgent);
+  const exact = agentCatalog.get(requestedAgent);
   if (exact !== undefined && (!isBuiltInAgentAlias(requestedAgent) || isProjectOrUserAgent(exact))) {
     return { requestedAgent, resolvedAgent: exact.name, agent: exact };
   }
   const aliasTarget = builtInAliasTarget(requestedAgent);
   if (aliasTarget !== undefined) {
-    const aliased = sharedState.agents.get(aliasTarget);
+    const aliased = agentCatalog.get(aliasTarget);
     if (aliased !== undefined)
       return { requestedAgent, resolvedAgent: aliased.name, agent: aliased, aliasApplied: requestedAgent };
   }
@@ -111,7 +111,7 @@ function builtInAliasTarget(name: string): string | undefined {
 }
 
 export function listAvailableAgents(): Array<{ name: string; source: string; description: string }> {
-  return [...sharedState.agents.values()]
+  return [...agentCatalog.values()]
     .map((agent) => ({ name: agent.name, source: agent.source ?? "unknown", description: agent.description }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

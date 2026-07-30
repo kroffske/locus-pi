@@ -1,7 +1,47 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentDefinition, AgentEvidencePolicy, AgentSource, PermissionMode } from "../types.js";
+
+/**
+ * The agent-definition contract lives here because this module is where every instance is
+ * minted: `parseAgentMarkdown` is the only thing in the package that turns a `.agents/agents/`
+ * file into an `AgentDefinition`, and the normalizers below own each field's accepted values.
+ * Its consumers — the agent envelope, the `agents` extension, and the workflows bridge — all
+ * take it type-only, so nothing pays for this module's `node:fs` at runtime.
+ */
+export type AgentSource = "bundled" | "project" | "user" | "workflow";
+export type PermissionMode = "inherit-parent" | "agent-defined" | "restricted";
+
+/** Fields of `AgentEvidencePolicy`; not named anywhere else, so they stay module-private. */
+type AgentEvidenceMode = "none" | "warn" | "require";
+type AgentClaimsWithoutEvidence = "off" | "warn";
+
+export interface AgentEvidencePolicy {
+  mode: AgentEvidenceMode;
+  requireAnyToolCall?: boolean;
+  requireAnyOf?: string[];
+  claimsWithoutEvidence?: AgentClaimsWithoutEvidence;
+}
+
+export interface AgentDefinition {
+  name: string;
+  description: string;
+  systemPrompt?: string;
+  allowedTools: string[];
+  tools?: string[];
+  spawns?: string[] | "*";
+  model?: string[];
+  thinkingLevel?: string;
+  output?: unknown;
+  evidence?: AgentEvidencePolicy;
+  blocking?: boolean;
+  parentContextDefault?: boolean;
+  risk: "low" | "medium" | "high";
+  readOnly: boolean;
+  permissionMode?: PermissionMode;
+  source?: AgentSource;
+  filePath?: string;
+}
 
 export interface AgentDiagnostic {
   filePath: string;

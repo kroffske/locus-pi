@@ -13,7 +13,7 @@ import {
   type AgentExecutor,
 } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/host/pi-api.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 
 const agent: AgentDefinition = {
   name: "reviewer",

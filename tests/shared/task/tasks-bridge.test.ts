@@ -14,7 +14,7 @@ import {
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
 } from "../../../extensions/_shared/project/task-bridge.js";
-import { sharedState } from "../../../extensions/_shared/state.js";
+import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness } from "../../test-harness.js";
 
 const tempRoots: string[] = [];
@@ -297,19 +297,19 @@ describe("task bridge", () => {
       },
     ]);
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
-    sharedState.todos = [
+    todoStateCache.phases = [
       {
         name: "Execution",
         tasks: [{ content: "Session-only active todo", status: "in_progress" }],
       },
     ];
-    const beforeTodos = JSON.parse(JSON.stringify(sharedState.todos));
+    const beforeTodos = JSON.parse(JSON.stringify(todoStateCache.phases));
 
     const resolution = resolveCurrentProjectTask(root);
 
     expect(resolution).toMatchObject({ ok: false, code: "no-current-task" });
     expect(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")).toBe(beforeIndex);
-    expect(sharedState.todos).toEqual(beforeTodos);
+    expect(todoStateCache.phases).toEqual(beforeTodos);
   });
 
   it("creates a project task only from an approved prompt artifact", () => {
@@ -395,20 +395,20 @@ describe("task bridge", () => {
     writeFileSync(runtimeFile, "before\n");
     const beforeIndex = readFileSync(indexPath, "utf8");
     const beforeRuntime = readFileSync(runtimeFile, "utf8");
-    sharedState.todos = [
+    todoStateCache.phases = [
       {
         name: "Execution",
         tasks: [{ content: "Existing todo", status: "pending" }],
       },
     ];
-    const beforeTodos = JSON.parse(JSON.stringify(sharedState.todos));
+    const beforeTodos = JSON.parse(JSON.stringify(todoStateCache.phases));
 
     const plan = planTaskLifecycleTransition(root, "T-1", "review");
 
     expect(plan).toMatchObject({ ok: true, taskId: "T-1", targetStatus: "review" });
     expect(readFileSync(indexPath, "utf8")).toBe(beforeIndex);
     expect(readFileSync(runtimeFile, "utf8")).toBe(beforeRuntime);
-    expect(sharedState.todos).toEqual(beforeTodos);
+    expect(todoStateCache.phases).toEqual(beforeTodos);
   });
 
   it("plans allowed lifecycle transitions and keeps task files unchanged", () => {

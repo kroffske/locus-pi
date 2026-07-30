@@ -6,6 +6,55 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The two catch-all files are gone, and `extensions/_shared/` is now nothing but its six
+  named layers.** `types.ts` and `state.ts` held unrelated contracts and one shared mutable
+  object between them; each export moved to the module that owns its lifecycle and both files
+  were deleted. The agent-definition contract now lives beside the parser that mints it, the
+  evidence-evaluation contract beside the evaluator that produces it, the output bounds beside
+  the truncation that applies them, and the permission and audit shapes inside the security
+  gate that is their only reader. Their package paths changed accordingly; nothing about their
+  behavior did.
+  **These two were split by domain rather than moved, because they never had one owner.** A
+  file named `types.ts` invites the next unrelated contract, and every reader of one export
+  had to scroll past nine others belonging to somebody else. Removing an export from it meant
+  checking ten extensions, which is the same problem the shared directory itself had, one
+  level down. There is now no file in the package whose name describes its shape instead of
+  its subject.
+  **The one constant that could not go where it reads like it belongs got its own module.**
+  The closed agent failure-cause list reads like it belongs to the agent envelope, and the
+  envelope re-exports it, but the envelope imports `node:crypto` and the host-agnostic
+  workflow core reads the list as a value — so defining it there would have pulled a host
+  dependency into the core. It is now a module with no imports at all, which is the property
+  the core actually depends on, stated where a reader will find it instead of inferred from
+  the absence of import lines.
+  **Seven exports had no consumers and were deleted rather than relocated.** The extracted-plan
+  and plan-task shapes, the whole catalog-entry family, and a second goal-state interface with
+  its context formatter — shadowing the live goal state in the project layer that every real
+  consumer imports — were reachable only from each other or from fields of the deleted state
+  object, along with three of that object's own fields. Four more union types stayed,
+  un-exported, next to the one interface that names each: they were never imported from
+  outside their own file, and an export nobody imports is a promise the package was making
+  for no one.
+  **The mutable object became two caches, one per owning extension, and the ledger says so.**
+  Its `agents` map was read and written only by the agents extension and its todo fields only
+  by the todo extension, so one shared object was hiding two unrelated single-owner caches.
+  Neither survives Pi's cache-disabled entrypoint loading — each loaded entrypoint gets its
+  own copy — so the todo cache keeps its documented role as a last-resort fallback in front of
+  the durable session store, never a source of truth, and the ownership ledger now names both
+  bindings where a reviewer will see them.
+  **The last declared exception to the layer order is gone.** The ownership guardrail carried
+  one named upward edge, from the host-layer output truncation to the provisional catch-all it
+  read its defaults from. Those defaults now sit in the host module that applies them, the
+  exemption is deleted, and the rank order is enforced for real on every shared edge with no
+  provisional classification left anywhere in the ledger.
+  **The hazard that broke three earlier slices was swept for and was absent again.** Every
+  file created or moved was checked for `import.meta.url`, `__dirname`, `fileURLToPath` and
+  any path anchored on the module's own location — the failure that three times silently
+  repointed a moved module at a directory that no longer existed. There was none: the two
+  deleted files built no paths at all, and the one module in the package that does count
+  directory levels from its own location, the bundled agent catalog loader, only gained type
+  declarations and did not move.
+
 - **Six modules that only ever had one consumer now live in the extension that owns
   them.** The AST engine moved to `extensions/ast-structural-edit/`, the extension
   inventory to `extensions/devext-doctor/`, the human-decision journal to

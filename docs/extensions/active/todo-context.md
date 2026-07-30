@@ -65,5 +65,5 @@ shows deterministic Markdown but does not create a separate export file.
 - Tools: `todo_write`
 - Hooks: `agent_settled`
 - Permissions: fs.read=`.tasks/index.json`, fs.write=`.tasks/**/artifacts/completion-note.md`, subprocess=none, network=none, browser=false, models=true, ui=`editor`, `setWidget`
-- State: latest phases, queue context, and autonomous mode restore from session-core JSONL when enabled, then from Pi custom `todo_write` entries via `ctx.sessionManager`, then from shared memory as fallback. Explicit task bridges read `.tasks/index.json` and write only `.tasks/<task>/artifacts/completion-note.md`.
+- State: latest phases, queue context, and autonomous mode restore from session-core JSONL when enabled, then from Pi custom `todo_write` entries via `ctx.sessionManager`, then from this extension's own in-memory cache (`todo-state-cache.ts`) as fallback. Explicit task bridges read `.tasks/index.json` and write only `.tasks/<task>/artifacts/completion-note.md`.
 - Review: status=reviewed, source=copy-after-audit, reviewedBy=locus-pi, reviewedAt=2026-07-19, risk=high

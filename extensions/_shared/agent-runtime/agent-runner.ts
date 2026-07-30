@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
 import { getProjectRoot, getSessionId, getWorkingDirectory } from "../host/pi-api.js";
-import type { AgentDefinition, AgentFailureCause, EvidenceEvaluation } from "../types.js";
+import type { AgentDefinition } from "./agents.js";
+import type { AgentFailureCause } from "./agent-failure-cause.js";
+import type { EvidenceEvaluation } from "./agent-evidence-evaluator.js";
 import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "../runtime/session-core.js";
 import { createSessionStore, type SessionStore } from "../runtime/runtime-capabilities.js";
 import type { ModelRoleResolution } from "../model/model-settings.js";
@@ -15,12 +17,12 @@ export type ApprovalTier = "allow" | "prompt" | "deny";
 
 /**
  * The closed failure-cause list, owned by this envelope and defined in the zero-import
- * `types.ts` so the host-agnostic workflow core can validate against the same value
- * without importing a module that reaches for `node:fs`. Re-exported here because this
- * is the envelope that first carries it.
+ * `agent-failure-cause.ts` so the host-agnostic workflow core can validate against the same
+ * value without importing a module that reaches for `node:crypto` or `node:fs`. Re-exported
+ * here because this is the envelope that first carries it.
  */
-export { AGENT_FAILURE_CAUSES } from "../types.js";
-export type { AgentFailureCause } from "../types.js";
+export { AGENT_FAILURE_CAUSES } from "./agent-failure-cause.js";
+export type { AgentFailureCause } from "./agent-failure-cause.js";
 
 export interface AgentParentContext {
   inline?: string;

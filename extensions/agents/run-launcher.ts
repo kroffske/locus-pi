@@ -26,7 +26,7 @@ import {
 } from "../_shared/model/model-settings.js";
 import { resolveWorkflowModel } from "../_shared/model/workflow-model-resolve.js";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import type { AgentDefinition } from "../_shared/types.js";
+import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";

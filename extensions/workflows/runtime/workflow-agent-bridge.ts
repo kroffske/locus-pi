@@ -41,10 +41,12 @@ import type {
   WorkflowAgentRequest,
   WorkflowAgentResult,
   WorkflowUsage,
+  WorkspaceMode,
 } from "./workflow-runtime.js";
 import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
-import type { AgentDefinition, AgentFailureCause, PermissionMode, WorkspaceMode } from "../../_shared/types.js";
+import type { AgentDefinition, PermissionMode } from "../../_shared/agent-runtime/agents.js";
+import type { AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent-read-only-policy.js";
 

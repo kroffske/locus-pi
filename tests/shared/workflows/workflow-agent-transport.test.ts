@@ -32,7 +32,7 @@ import {
 } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowReplayController } from "../../../extensions/workflows/runtime/workflow-replay.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 import { createHarness } from "../../test-harness.js";
 
 /**

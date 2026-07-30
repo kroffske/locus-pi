@@ -14,7 +14,7 @@ import {
   type AgentRunRequest,
   type AgentRunResult,
 } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 
 const baseAgent: AgentDefinition = {
   name: "reviewer",

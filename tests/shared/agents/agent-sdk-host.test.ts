@@ -16,7 +16,7 @@ import {
 import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-runtime/agent-system-prompt.js";
 import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 
 /**
  * INSURANCE, NOT PROOF.

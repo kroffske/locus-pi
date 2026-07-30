@@ -1,5 +1,20 @@
-import { OUTPUT_DEFAULTS } from "../types.js";
 import { redactSecrets } from "./redaction.js";
+
+/**
+ * The package-wide bounds on text handed back to a model. They live in the host layer beside
+ * the truncation that applies them: `maxBytes` and `maxLines` are this module's own defaults,
+ * and `subagentSummaryBytes` is the same bound applied by `agent-runtime/agent-execution-prompt`
+ * to a child's summary. A consumer at any layer may read them, which is why they may not sit
+ * anywhere higher than `host`.
+ */
+export const OUTPUT_DEFAULTS = {
+  maxBytes: 64 * 1024,
+  maxLines: 2000,
+  astMatches: 500,
+  astMaxBytes: 50 * 1024,
+  browserSnapshotBytes: 100 * 1024,
+  subagentSummaryBytes: 16 * 1024,
+} as const;
 
 export interface TruncateResult {
   truncated: boolean;

@@ -87,19 +87,17 @@ import ts from "typescript";
 // Ledger: shared layers
 // ---------------------------------------------------------------------------
 
-type SharedLayer = "host" | "mixed" | "operator" | "runtime" | "model" | "project" | "agent-runtime";
+type SharedLayer = "host" | "operator" | "runtime" | "model" | "project" | "agent-runtime";
 
 /**
  * Rank is the only thing rule 2 compares, EXCEPT for `operator`, which is
  * narrowed by name in `layerImportAllowed` in both directions: it may reach only
  * `host` and itself, and no other layer may reach it. Operator UI is a leaf
  * consumer — a shared layer that depended on it would drag command registration
- * and rendering into foundational code. `mixed` shares rank 1 only because it is
- * provisional; nothing may point at it that `host` could not.
+ * and rendering into foundational code.
  */
 const LAYER_RANK: Record<SharedLayer, number> = {
   host: 0,
-  mixed: 1,
   operator: 1,
   runtime: 2,
   model: 2,
@@ -108,15 +106,16 @@ const LAYER_RANK: Record<SharedLayer, number> = {
 };
 
 /**
- * `mixed` is not a destination. It holds the two catch-all files (`types.ts`,
- * `state.ts`) that W7 shreds by domain; when W7 lands, this layer and both its
- * members disappear from the ledger.
+ * Empty since W7. It held one entry, `mixed`, for the two catch-all files (`types.ts`,
+ * `state.ts`) that W7 shredded by domain; both are gone and so is the layer. The
+ * machinery stays because the rule-4 branch it drives — retire the entry, do not demand
+ * a destination — is the correct handling for any future provisional classification, and
+ * because a reviewer reading the ledger should see that the concept exists and is unused.
  */
-const PROVISIONAL_LAYERS: readonly SharedLayer[] = ["mixed"];
+const PROVISIONAL_LAYERS: readonly SharedLayer[] = [];
 
 const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
   host: ["pi-api", "error-text", "files", "validation", "redaction", "safe-output"],
-  mixed: ["types", "state"],
   operator: [
     "command-ui",
     "widget-render",
@@ -146,6 +145,14 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "agent-evidence-evaluator",
     "agent-execution-prompt",
     "agent-executor-host",
+    /**
+     * W7 landed the closed failure-cause list here rather than in `agent-runner`, the
+     * envelope that carries it and re-exports it. `agent-runner` imports `node:crypto`,
+     * and `extensions/workflows/runtime/workflow-runtime.ts` — the host-agnostic
+     * workflow core — reads the list as a VALUE, so it must come from a module with no
+     * imports at all. This one has none; keep it that way.
+     */
+    "agent-failure-cause",
     "agent-live-panel",
     "agent-live-transcript",
     "agent-names",
@@ -252,24 +259,19 @@ interface ProvisionalUpwardEdge {
 }
 
 /**
- * One edge in the pre-refactor tree still points up the declared rank order. It is
- * named here rather than papered over by loosening a rank, because a loosened rank
- * would silently permit edges nobody reviewed. Each entry is asserted to STILL
- * EXIST: once its slice removes the edge, this list fails as stale and must shrink.
+ * Empty since W7: no edge in the tree points up the declared rank order any more, so the
+ * rank order is enforced for real on every shared edge. An entry here names an edge rather
+ * than papering over it by loosening a rank, because a loosened rank would silently permit
+ * edges nobody reviewed. Each entry is asserted to STILL EXIST: once its slice removes the
+ * edge, this list fails as stale and must shrink.
  *
- * The `runtime-capabilities -> session-core` entry is gone: W5 reclassified
- * `runtime-capabilities` into the `runtime` layer, so the edge is runtime -> runtime
- * and needs no exemption. See the note on SHARED_LAYER_MEMBERS.runtime.
+ * The `runtime-capabilities -> session-core` entry went in W5, which reclassified
+ * `runtime-capabilities` into the `runtime` layer (see the note on
+ * SHARED_LAYER_MEMBERS.runtime). The `safe-output -> types` entry went in W7: the
+ * `OUTPUT_DEFAULTS` constant `safe-output` value-imported now lives in `safe-output`
+ * itself, so what was host -> mixed is host-internal.
  */
-const PROVISIONAL_UPWARD_EDGES: readonly ProvisionalUpwardEdge[] = [
-  {
-    from: "safe-output",
-    to: "types",
-    reason:
-      "host-layer safe-output value-imports OUTPUT_DEFAULTS from the provisional `mixed` catch-all; W7 moves that constant into the host layer, after which the edge is host -> host.",
-    clearedBy: "W7",
-  },
-];
+const PROVISIONAL_UPWARD_EDGES: readonly ProvisionalUpwardEdge[] = [];
 
 // ---------------------------------------------------------------------------
 // Ledger: process-global registries (rule 7)
@@ -323,15 +325,28 @@ interface MutableStateEntry {
 /**
  * Process-visible mutable module state that the rule-7 sweep structurally cannot
  * find, because it is a plain module binding rather than a `globalThis` slot.
- * Neither entry survives Pi's cache-disabled entrypoint loading — each loaded
+ * No entry here survives Pi's cache-disabled entrypoint loading — each loaded
  * entrypoint gets its own copy — so relocation must not quietly imply otherwise.
  */
 const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
+  /**
+   * These two are what W7 made of `_shared/state.ts#sharedState`. That object's live fields
+   * had two different owners, so it was split at field granularity into one cache per owning
+   * extension rather than relocated as a unit: `agents` became the map below, and `todos` /
+   * `todoContext` / `todoAutoContinue` became the three fields of the todo cache. The old
+   * binding no longer exists anywhere, which is why the single entry became two.
+   */
   {
-    file: "extensions/_shared/state.ts",
-    binding: "sharedState",
-    note: "one mutable object whose live fields have two different owners; W7 splits it at field granularity.",
-    destinations: ["extensions/agents/catalog-state.ts", "extensions/todo-context/todo-state-cache.ts"],
+    file: "extensions/agents/catalog-state.ts",
+    binding: "agentCatalog",
+    note: "the resolved agent catalog; `agents/catalog.ts#refreshAgents` is the only writer and rebuilds it from disk on every discovery pass.",
+    destinations: [],
+  },
+  {
+    file: "extensions/todo-context/todo-state-cache.ts",
+    binding: "todoStateCache",
+    note: "a cache and last-resort fallback in front of the durable session store owned by `_shared/project/todo-state`, never a source of truth; `todo-context/phase-store.ts` is the only writer.",
+    destinations: [],
   },
   {
     file: "extensions/_shared/ast-engine.ts",

@@ -1,6 +1,52 @@
 import path from "node:path";
-import type { AuditEvent, PermissionManifest } from "../_shared/types.js";
 import { redactSecrets } from "../_shared/host/redaction.js";
+
+/**
+ * The extension manifest shape this gate grades a capability request against. It lives here
+ * rather than in a shared directory because the security gate is its only reader: nothing
+ * else in the package asks whether a manifest grants a capability.
+ */
+export interface PermissionManifest {
+  id: string;
+  name: string;
+  version: string;
+  tier: "core-owned" | "audited-fork" | "local-experimental" | "blocked";
+  provides: { tools: string[]; commands: string[]; hooks: string[] };
+  permissions: {
+    filesystem: { read: string[]; write: string[] };
+    subprocess: string[];
+    network: string[];
+    browser: boolean;
+    models: boolean;
+    ui: string[];
+  };
+  risk: "low" | "medium" | "high" | "critical";
+  review: {
+    status: "draft" | "in-review" | "reviewed" | "blocked";
+    source: "write-from-scratch" | "rewrite-first" | "fork-after-audit" | "wrapper-first" | "copy-after-audit";
+    reviewedBy: string | null;
+    reviewedAt: string | null;
+  };
+}
+
+/** The verdict field of `AuditEvent`; not named anywhere else, so it stays module-private. */
+type AuditDecision = "allow" | "block" | "ask";
+
+/**
+ * One row of the audit ring below. The gate entrypoint renders it; `auditEvent` is the only
+ * writer.
+ */
+export interface AuditEvent {
+  timestamp: string;
+  extensionId: string;
+  actionType: string;
+  toolOrCommand: string;
+  target: string;
+  decision: AuditDecision;
+  userDecision?: string;
+  enforcement?: string;
+  args?: string;
+}
 
 const auditEvents: AuditEvent[] = [];
 

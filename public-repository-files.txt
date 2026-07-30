@@ -63,6 +63,7 @@ extensions/_shared/agent-runtime/agent-context-extras.ts
 extensions/_shared/agent-runtime/agent-evidence-evaluator.ts
 extensions/_shared/agent-runtime/agent-execution-prompt.ts
 extensions/_shared/agent-runtime/agent-executor-host.ts
+extensions/_shared/agent-runtime/agent-failure-cause.ts
 extensions/_shared/agent-runtime/agent-live-panel.ts
 extensions/_shared/agent-runtime/agent-live-transcript.ts
 extensions/_shared/agent-runtime/agent-names.ts
@@ -101,8 +102,7 @@ extensions/_shared/runtime/artifacts.ts
 extensions/_shared/runtime/event-bus.ts
 extensions/_shared/runtime/runtime-capabilities.ts
 extensions/_shared/runtime/session-core.ts
-extensions/_shared/state.ts
-extensions/_shared/types.ts
+extensions/agents/catalog-state.ts
 extensions/agents/catalog.ts
 extensions/agents/command-parser.ts
 extensions/agents/command-router.ts
@@ -192,6 +192,7 @@ extensions/todo-context/phase-store.ts
 extensions/todo-context/queue-controller.ts
 extensions/todo-context/state-commands.ts
 extensions/todo-context/task-bridge-commands.ts
+extensions/todo-context/todo-state-cache.ts
 extensions/todo-context/todo-write-tool.ts
 extensions/workflows/AUTHORING.md
 extensions/workflows/background-run-registry.ts

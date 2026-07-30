@@ -16,7 +16,7 @@ import type {
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
 } from "../../../extensions/_shared/host/pi-api.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 import { createHarness } from "../../test-harness.js";
 
 const reviewer: AgentDefinition = {

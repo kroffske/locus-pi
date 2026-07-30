@@ -37,13 +37,21 @@ import {
   type WorkflowOperatorHandoffDeclaration,
   type WorkflowOperatorQuestion,
 } from "./workflow-handoff.js";
-import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "../../_shared/types.js";
+import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
+import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
-// `types.ts`, a module with no imports at all. Reading it as a value here keeps this core
-// host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the runtime
-// — while still validating against one list rather than a second copy of it.
-import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "../../_shared/types.js";
-export type { PermissionMode, WorkspaceMode } from "../../_shared/types.js";
+// `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
+// this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
+// runtime — while still validating against one list rather than a second copy of it.
+import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
+export type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
+
+/**
+ * Workspace intent for one agent call. Declared here rather than shared with the host because
+ * the DSL is its only author and the bridge below is its only reader: the host request carries
+ * the resolved mode as journal metadata, never as a typed field.
+ */
+export type WorkspaceMode = "project" | "worktree" | "temporary-worktree";
 export type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowOperatorHandoffDeclaration,

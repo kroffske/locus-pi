@@ -15,7 +15,7 @@ import {
   type AgentLiveStatus,
 } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import { runtimeStateDir } from "../../_shared/host/files.js";
-import { AGENT_FAILURE_CAUSES } from "../../_shared/types.js";
+import { AGENT_FAILURE_CAUSES } from "../../_shared/agent-runtime/agent-failure-cause.js";
 import type {
   WorkflowAgentFailureCause,
   WorkflowJournalLine,

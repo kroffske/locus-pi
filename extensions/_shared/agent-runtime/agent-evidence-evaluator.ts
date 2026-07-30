@@ -1,4 +1,33 @@
-import type { EvidenceEvaluation, EvidenceEvaluationInput } from "../types.js";
+import type { AgentEvidencePolicy } from "./agents.js";
+
+/**
+ * The evaluation contract lives here because `evaluateEvidence` below is the only producer
+ * of an `EvidenceEvaluation` in the package, and the only consumer of the input shape. The
+ * policy it grades against is parsed from agent frontmatter and therefore owned by
+ * `agents.ts`; taking it type-only keeps this module free of that module's `node:fs`, which
+ * is what lets the workflow core name the result type without pulling a host dependency in.
+ */
+
+/** The verdict values of `EvidenceEvaluation`; not named anywhere else, so module-private. */
+type CompletionEvidence =
+  "reasoning_only" | "evidence_backed" | "missing_expected_evidence" | "claims_without_evidence";
+
+export interface EvidenceEvaluation {
+  evidence: CompletionEvidence;
+  warnings: string[];
+  missingRequiredTools: string[];
+  observedTools: string[];
+}
+
+export interface EvidenceEvaluationInput {
+  agentName: string;
+  policy: AgentEvidencePolicy;
+  toolCallCount: number;
+  toolResultCount: number;
+  observedToolNames: string[];
+  outputText: string;
+  status: "blocked" | "running" | "completed" | "failed" | "cancelled";
+}
 
 const ANY_TOOL_CALL = "<any tool call>";
 // Child agents are prompted in English, so this honesty check only matches English claims.

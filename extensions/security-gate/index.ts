@@ -3,9 +3,8 @@ import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { getCommandText } from "../_shared/host/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
-import { auditEvent, classifyToolCall, getAuditEvents } from "./permissions.js";
+import { auditEvent, classifyToolCall, getAuditEvents, type AuditEvent } from "./permissions.js";
 import { redactSecrets } from "../_shared/host/redaction.js";
-import type { AuditEvent } from "../_shared/types.js";
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 
