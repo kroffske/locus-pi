@@ -177,6 +177,88 @@ function review(verdict: "accept" | "repair" | "blocked", summary: string, issue
   return JSON.stringify({ verdict, summary, issues });
 }
 
+type ImplementationStatus = "done" | "partial" | "blocked" | "not-attempted";
+
+interface ImplementationGrade {
+  outcome: "complete" | "partial" | "blocked";
+  summary: string;
+  steps: Array<{
+    id: string;
+    status: ImplementationStatus;
+    files: string[];
+    evidence: string;
+    remaining: string;
+  }>;
+  checks: string[];
+  unexpectedChanges: string[];
+  nextStep: string;
+}
+
+function grade(
+  outcome: ImplementationGrade["outcome"],
+  rows: Array<{ id: string; status: ImplementationStatus; remaining?: string }>,
+  summary = "The live evidence supports this grade.",
+): string {
+  return JSON.stringify({
+    outcome,
+    summary,
+    steps: rows.map(({ id, status, remaining }) => ({
+      id,
+      status,
+      files: status === "not-attempted" ? [] : [id === "S1" ? "src/page.ts" : "tests/page.test.ts"],
+      evidence: `${id} evidence was independently checked.`,
+      remaining: status === "done" ? "none" : (remaining ?? `${id} still needs work.`),
+    })),
+    checks: ["npm test -- page — passed"],
+    unexpectedChanges: [],
+    nextStep: outcome === "complete" ? "Review the implementation report." : "Resolve the named remaining work.",
+  } satisfies ImplementationGrade);
+}
+
+function renderedReport(gradeText: string): string {
+  const value = JSON.parse(gradeText) as ImplementationGrade;
+  const outcome = {
+    complete: "Plan implemented",
+    partial: "Partly implemented",
+    blocked: "Blocked",
+  }[value.outcome];
+  const statuses: Record<ImplementationStatus, string> = {
+    done: "Done",
+    partial: "Partial",
+    blocked: "Blocked",
+    "not-attempted": "Not attempted",
+  };
+  const steps = value.steps.flatMap((row) => [
+    `### ${row.id} — ${statuses[row.status]}`,
+    `Files: ${row.files.length === 0 ? "none" : row.files.map((file) => `\`${file}\``).join(", ")}`,
+    `Evidence: ${row.evidence}`,
+    `Remaining: ${row.remaining}`,
+    "",
+  ]);
+  return [
+    "# Implementation Report",
+    "",
+    "## Outcome",
+    "",
+    `${outcome} — ${value.summary}`,
+    "",
+    "## Steps",
+    "",
+    ...steps,
+    "## Checks",
+    "",
+    ...value.checks.map((check) => `- ${check}`),
+    "",
+    "## Unexpected changes",
+    "",
+    "none",
+    "",
+    "## Next step for the operator",
+    "",
+    value.nextStep,
+  ].join("\n");
+}
+
 describe("workflow example: plan-implement.workflow.mjs", () => {
   it("pins every implementation stage to Luna at medium reasoning effort", () => {
     const source = readFileSync(workflowPath, "utf8");
@@ -198,7 +280,10 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("validate: (value) => stepSelectionErrors(steps, value)");
     expect(source).toContain("STEP_REVIEW_SCHEMA");
     expect(source).toContain("validate: stepReviewErrors");
+    expect(source).toContain("IMPLEMENTATION_REVIEW_SCHEMA");
+    expect(source).toContain("implementationReviewErrors");
     expect(source).toContain('publishArtifact("implementation-tasks.md"');
+    expect(source).toContain('publishArtifact("implementation-report.md", reportText)');
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
@@ -207,7 +292,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source.match(/readOnly: true/gu)).toHaveLength(3);
     expect(source.match(/"write", "edit"/gu)).toHaveLength(1);
 
-    for (const name of ["step-selection.json", "scope.md", "check-evidence.md", "implementation-report.md"]) {
+    for (const name of ["step-selection.json", "scope.md", "check-evidence.md", "implementation-verdict.json"]) {
       expect(source, name).toContain(`artifact: "${name}"`);
     }
     expect(source).toContain("artifact: `worker-${step.id}-attempt-${attempt}.md`");
@@ -217,7 +302,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "maxAnswerChars: MAX_WORKER_RESULT_CHARS",
       "maxAnswerChars: MAX_REVIEW_RESULT_CHARS",
       "maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS",
-      "maxAnswerChars: MAX_REPORT_CHARS",
+      "maxAnswerChars: MAX_REPORT_RESULT_CHARS",
     ]) {
       expect(source, bound).toContain(bound);
     }
@@ -226,7 +311,11 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   it("lists tasks, then writes and reviews each one in plan order before returning the report", async () => {
     const fixture = createPlanFixture();
     const calls: WorkflowAgentRequest[] = [];
-    const report = "# Implementation Report\n## Outcome\nPlan implemented — both steps landed.";
+    const terminalGrade = grade("complete", [
+      { id: "S1", status: "done" },
+      { id: "S2", status: "done" },
+    ]);
+    const report = renderedReport(terminalGrade);
     const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
       calls.push(request);
       switch (request.label) {
@@ -240,8 +329,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
           return completed(request, review("accept", `${request.label} passed.`));
         case "collect check evidence":
           return completed(request, "# Checks\n`npm test -- page` passed.");
-        case "report implementation":
-          return completed(request, report);
+        case "grade implementation":
+          return completed(request, terminalGrade);
         default:
           return completed(request, `# ${request.label}\nDone.`);
       }
@@ -258,7 +347,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "implement step S2 attempt 1",
       "review step S2 attempt 1",
       "collect check evidence",
-      "report implementation",
+      "grade implementation",
     ]);
     expect(calls.map((call) => call.phase)).toEqual([
       "select-steps",
@@ -295,19 +384,25 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "worker-S2-attempt-1.md",
       "review-S2-attempt-1.json",
       "check-evidence.md",
-      "implementation-report.md",
+      "implementation-verdict.json",
     ]);
     expect(namedPublished(artifactStore)).toEqual([
       "implementation-tasks.md",
       "implementation-tasks.md",
       "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-report.md",
     ]);
   });
 
   it("repairs the current task from review feedback before starting the next task", async () => {
     const fixture = createPlanFixture();
     const calls: WorkflowAgentRequest[] = [];
-    const report = "# Implementation Report\n## Outcome\nPlan implemented — repair accepted.";
+    const terminalGrade = grade("complete", [
+      { id: "S1", status: "done" },
+      { id: "S2", status: "not-attempted" },
+    ]);
+    const report = renderedReport(terminalGrade);
     const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
       calls.push(request);
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
@@ -317,7 +412,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       if (request.label === "review step S1 attempt 2") {
         return completed(request, review("accept", "S1 now passes its verification."));
       }
-      if (request.label === "report implementation") return completed(request, report);
+      if (request.label === "grade implementation") return completed(request, terminalGrade);
       return completed(request, `# ${request.label}\nDone.`);
     });
 
@@ -330,7 +425,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "implement step S1 attempt 2",
       "review step S1 attempt 2",
       "collect check evidence",
-      "report implementation",
+      "grade implementation",
     ]);
     expect(calls[4]?.prompt).toContain("1. Fix the S1 assertion.");
     expect(calls[4]?.prompt).toContain("| S1 | Advance the offset | in-progress | 2 |");
@@ -344,50 +439,40 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "worker-S1-attempt-2.md",
       "review-S1-attempt-2.json",
       "check-evidence.md",
-      "implementation-report.md",
+      "implementation-verdict.json",
     ]);
   });
 
   it("reconciles a final partial report once and gates success on the fresh report", async () => {
     const fixture = createPlanFixture({ steps: [STEP_S1] });
     const calls: WorkflowAgentRequest[] = [];
-    const partialReport = [
-      "# Implementation Report",
-      "## Outcome",
-      "Partly implemented — the final evidence still uses the wrong assertion.",
-      "",
-      "## Steps",
-      "### S1 — Partial",
-      "Files: `src/page.ts`",
-      "Evidence: The live file still has the old assertion.",
-      "Remaining: Replace it and rerun the focused check.",
-    ].join("\n");
-    const completeReport = [
-      "# Implementation Report",
-      "## Outcome",
-      "Plan implemented — the reconciliation closed the final evidence gap.",
-      "",
-      "## Steps",
-      "### S1 — Done",
-      "Files: `src/page.ts`",
-      "Evidence: The focused check passes.",
-      "Remaining: none.",
-    ].join("\n");
+    const partialGrade = grade(
+      "partial",
+      [{ id: "S1", status: "partial", remaining: "Replace the assertion and rerun the focused check." }],
+      "The final evidence still uses the wrong assertion.",
+    );
+    const completeGrade = grade(
+      "complete",
+      [{ id: "S1", status: "done" }],
+      "The reconciliation closed the final evidence gap.",
+    );
+    const completeReport = renderedReport(completeGrade);
     const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
       calls.push(request);
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
       if (request.label === "review step S1 attempt 1") {
         return completed(request, review("accept", "The isolated step review passed."));
       }
-      if (request.label === "report implementation") return completed(request, partialReport);
+      if (request.label === "grade implementation") return completed(request, partialGrade);
       if (request.label === "reconcile implementation") {
-        expect(request.prompt).toContain(partialReport);
+        expect(request.prompt).toContain('"status": "partial"');
+        expect(request.prompt).toContain("Replace the assertion");
         return completed(request, "# Reconciliation\nCorrected the assertion and reran the focused check.");
       }
-      if (request.label === "report implementation after reconciliation") {
-        expect(request.prompt).toContain(partialReport);
+      if (request.label === "grade reconciliation") {
+        expect(request.prompt).toContain('"status": "partial"');
         expect(request.prompt).toContain("# Reconciliation");
-        return completed(request, completeReport);
+        return completed(request, completeGrade);
       }
       return completed(request, `# ${request.label}\nDone.`);
     });
@@ -399,10 +484,10 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "implement step S1 attempt 1",
       "review step S1 attempt 1",
       "collect check evidence",
-      "report implementation",
+      "grade implementation",
       "reconcile implementation",
-      "collect check evidence after reconciliation",
-      "report implementation after reconciliation",
+      "collect reconciliation evidence",
+      "grade reconciliation",
     ]);
     expect(calls.map((call) => call.phase)).toEqual([
       "select-steps",
@@ -412,8 +497,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "collect-check-evidence",
       "report-implementation",
       "reconcile-implementation",
-      "collect-check-evidence",
-      "report-implementation",
+      "collect-reconciliation-evidence",
+      "report-reconciliation",
     ]);
     expect(calls[6]?.readOnly).toBeUndefined();
     expect(calls[7]?.readOnly).toBe(true);
@@ -424,32 +509,33 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "worker-S1-attempt-1.md",
       "review-S1-attempt-1.json",
       "check-evidence.md",
-      "implementation-report.md",
+      "implementation-verdict.json",
       "reconciliation.md",
-      "check-evidence.md",
+      "reconciliation-check-evidence.md",
+      "reconciliation-verdict.json",
+    ]);
+    expect(namedPublished(artifactStore)).toEqual([
+      "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-tasks.md",
       "implementation-report.md",
     ]);
   });
 
   it("returns non-success when the final report stays partial after reconciliation", async () => {
     const fixture = createPlanFixture({ steps: [STEP_S1] });
-    const partialReport = [
-      "# Implementation Report",
-      "## Outcome",
-      "Partly implemented — S1 remains incomplete.",
-      "",
-      "## Steps",
-      "### S1 — Partial",
-      "Files: `src/page.ts`",
-      "Evidence: The focused check still fails.",
-      "Remaining: Operator direction is required.",
-    ].join("\n");
+    const partialGrade = grade(
+      "partial",
+      [{ id: "S1", status: "partial", remaining: "Operator direction is required." }],
+      "S1 remains incomplete.",
+    );
     const { dsl } = runtimeWith(fixture, async (request) => {
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
       if (request.label === "review step S1 attempt 1")
         return completed(request, review("accept", "Locally complete."));
-      if (request.label === "report implementation" || request.label === "report implementation after reconciliation") {
-        return completed(request, partialReport);
+      if (request.label === "grade implementation" || request.label === "grade reconciliation") {
+        return completed(request, partialGrade);
       }
       return completed(request, `# ${request.label}\nDone.`);
     });
@@ -457,9 +543,76 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toMatchObject({
       ok: false,
       partial: true,
-      appliedSteps: ["S1"],
+      appliedSteps: [],
       unresolvedRows: ["S1"],
     });
+  });
+
+  it("re-asks a contradictory complete grade instead of accepting Markdown-like control claims", async () => {
+    const fixture = createPlanFixture({ steps: [STEP_S1] });
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") return completed(request, review("accept", "S1 passed."));
+      if (request.label === "grade implementation") {
+        return completed(
+          request,
+          grade("complete", [{ id: "S1", status: "partial", remaining: "The check still fails." }]),
+        );
+      }
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    const rejection = (await loadWorkflow())(dsl, DEFAULT_INTENT);
+    await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
+    await expect(rejection).rejects.toThrow("outcome complete requires every selected step to be done");
+    expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
+  });
+
+  it("rejects terminal rows that are unknown, out of order, or credit an unselected step", async () => {
+    const fixture = createPlanFixture();
+    const calls: WorkflowAgentRequest[] = [];
+    let gradeAttempt = 0;
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") return completed(request, review("accept", "S1 passed."));
+      if (request.label === "grade implementation") {
+        gradeAttempt += 1;
+        if (gradeAttempt === 1) {
+          return completed(
+            request,
+            grade("complete", [
+              { id: "S1", status: "done" },
+              { id: "S9", status: "not-attempted" },
+            ]),
+          );
+        }
+        if (gradeAttempt === 2) {
+          return completed(
+            request,
+            grade("complete", [
+              { id: "S2", status: "not-attempted" },
+              { id: "S1", status: "done" },
+            ]),
+          );
+        }
+        return completed(
+          request,
+          grade("complete", [
+            { id: "S1", status: "done" },
+            { id: "S2", status: "done" },
+          ]),
+        );
+      }
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
+      "unselected step S2 must be not-attempted",
+    );
+    expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
   });
 
   it("skips the steps after a failed writer but still checks and reports what landed", async () => {
@@ -472,6 +625,15 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       calls.push(request);
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }, { id: "S2" }]));
       if (request.label === "implement step S1 attempt 1") return failed(request, "writer failed");
+      if (request.label === "grade implementation") {
+        return completed(
+          request,
+          grade("blocked", [
+            { id: "S1", status: "blocked", remaining: "The writer failed." },
+            { id: "S2", status: "not-attempted", remaining: "S1 must finish first." },
+          ]),
+        );
+      }
       return completed(request, `# ${request.label}\nDone.`);
     });
 
@@ -490,14 +652,14 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "resolve implementation scope",
       "implement step S1 attempt 1",
       "collect check evidence",
-      "report implementation",
+      "grade implementation",
     ]);
     // The report is still retained: the operator's tree may have changed already.
     expect(namedAnswers(artifactStore)).toEqual([
       "step-selection.json",
       "scope.md",
       "check-evidence.md",
-      "implementation-report.md",
+      "implementation-verdict.json",
     ]);
   });
 
@@ -514,6 +676,15 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
         return completed(
           request,
           review("blocked", "S2 names a removed API.", ["The accepted plan must be revised before S2 can continue."]),
+        );
+      }
+      if (request.label === "grade implementation") {
+        return completed(
+          request,
+          grade("blocked", [
+            { id: "S1", status: "done" },
+            { id: "S2", status: "blocked", remaining: "The accepted plan names a removed API." },
+          ]),
         );
       }
       return completed(request, `# ${request.label}\nDone.`);
@@ -536,12 +707,14 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "implement step S2 attempt 1",
       "review step S2 attempt 1",
       "collect check evidence",
-      "report implementation",
+      "grade implementation",
     ]);
     expect(namedPublished(artifactStore)).toEqual([
       "implementation-tasks.md",
       "implementation-tasks.md",
       "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-report.md",
     ]);
   });
 
@@ -623,15 +796,22 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const fixture = createPlanFixture({ steps });
     expect(fixture.planText.length).toBeGreaterThan(256_000);
 
-    const report = "# Implementation Report\n## Outcome\nPlan implemented — the requested S1 subset landed.";
+    const terminalGrade = grade("complete", [
+      { id: "S1", status: "done" },
+      ...Array.from({ length: 11 }, (_unused, index) => ({
+        id: `S${index + 2}`,
+        status: "not-attempted" as const,
+      })),
+    ]);
+    const report = renderedReport(terminalGrade);
     const { dsl } = runtimeWith(fixture, async (request) => {
       switch (request.label) {
         case "select plan steps":
           return completed(request, selection([{ id: "S1" }]));
         case "review step S1 attempt 1":
           return completed(request, review("accept", "S1 passed."));
-        case "report implementation":
-          return completed(request, report);
+        case "grade implementation":
+          return completed(request, terminalGrade);
         default:
           return completed(request, `# ${request.label}\nDone.`);
       }

@@ -13,11 +13,12 @@ This file records user-visible changes to the public package.
   instead of silently substituting the parent session. The planning safety cap
   is now six rounds after a real external inventory plan exhausted four while
   still carrying two repairable verification defects. The same live run exposed
-  a second boundary: all per-step reviews could pass while the final report
-  correctly found the combined result partial. That report is now a completion
-  gate; it triggers one bounded reconciliation followed by fresh checks and a
-  fresh report, and any remaining partial or blocked verdict is returned as
-  non-success rather than `completed`.
+  a second boundary: all per-step reviews could pass while the combined result
+  remained partial. A validated structured grade now accounts for every plan
+  step, drives one bounded reconciliation of only the partial rows, and becomes
+  the source of truth for the final task ledger, reader-facing report, and
+  disjoint completed/unresolved result rows. Any remaining partial or blocked
+  grade is returned as non-success rather than `completed`.
 
 - **The shipped `plan` → `plan-implement` pair now carries an explicit,
   resumable task lifecycle.** `plan` still produces the accepted ordered
