@@ -4,6 +4,25 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Fixed
+
+- **A stale agent catalog no longer fails every workflow step closed.** Before
+  model tiers were executed, the shipped agents wrote their tier as
+  `pi/<role>` — `pi` was never a provider and nothing read the value. Once a
+  slash started meaning a real provider, any copy of that catalog still on disk
+  (a user-level `~/.agents/agents/`, a project `.agents/` vendored from an older
+  release) turned every child call into
+  `Agent "default" frontmatter model "pi/task" could not be used`, with no child
+  created. An agent's frontmatter tier in that namespace is now read as the role
+  it always named, so it resolves through the model-roles table like any bare
+  tier: assigned, it runs the assigned model; unassigned, it inherits the
+  session model and the recorded degradation carries the extra sentence naming
+  the spelling to fix. The repair is bounded to package history and does not
+  weaken the fail-closed rule: `pi/<not-a-role>` is still an unresolvable
+  provider and still refuses by name, and a per-call `model` / `modelRole`
+  written today against the current grammar refuses with the migration hint
+  rather than being silently rewritten.
+
 ### Changed
 
 - **Workflow model effort is now executed, not merely displayed.** A concrete

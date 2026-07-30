@@ -309,7 +309,13 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run
   report; a ROLE whose assignment exists but does not parse as a selector fails
   the call by name rather than degrading, because a typo is a config error and
-  not an unassigned tier. `modelRoleResolution` continues to travel in the request capsule and
+  not an unassigned tier. An agent FRONTMATTER tier written in the pre-tier
+  `pi/<role>` namespace is read as that role by
+  `resolveAgentModelPreference` before the slash rule applies, so a catalog
+  copied from an older release resolves through the table instead of refusing as
+  an unresolvable provider; the bound is a KNOWN role name and the frontmatter
+  path only, leaving `pi/<not-a-role>` and per-call selectors fail-closed.
+  `modelRoleResolution` continues to travel in the request capsule and
   live/artifact metadata. The model the child SESSION reports is read back after
   `createSession` and carried as `executedModel`; a readback that contradicts the
   resolved request fails the call with both values quoted. The bridge fails

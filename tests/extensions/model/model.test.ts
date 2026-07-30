@@ -18,10 +18,12 @@ import { buildEffortOperatorBlock, type EffortCommandOutcome } from "../../../ex
 import {
   buildModelRolesState,
   getModelRolesConfigPaths,
+  legacyNamespacedRoleToken,
   loadModelRolesState,
   resolveAgentModelPreference,
   resolvePromptPlanningModelRole,
   resolveSummaryModelRole,
+  unassignedAgentTierNote,
 } from "../../../extensions/_shared/model/model-settings.js";
 import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
 import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
@@ -449,6 +451,69 @@ describe("model extension", () => {
       source: "agent",
       assignment: { model: "test/fast", thinking: "xhigh" },
       fallback: false,
+    });
+  });
+
+  /**
+   * The pre-tier namespace this package itself shipped.
+   *
+   * `pi` was never a provider, so `pi/<role>` in a catalog copied from an older
+   * release is package history, not an operator's provider choice. Reading it as the
+   * role is a deliberate exception to "a slash means a real provider", and it is
+   * bounded twice — to a KNOWN role, and to agent frontmatter.
+   */
+  describe("pre-tier pi/<role> frontmatter tiers", () => {
+    const rolesState = (roles: Record<string, string> = {}) =>
+      buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, { roles }, {}, {});
+
+    it("reads pi/<role> as the role and keeps the text as written for the evidence", () => {
+      const resolution = resolveAgentModelPreference(rolesState(), ["pi/smol"]);
+
+      expect(resolution).toMatchObject({ role: "smol", source: "unset", fallback: false });
+      expect(resolution.assignment).toBeUndefined();
+      // The raw spelling survives so the degradation note can point at the file to
+      // edit rather than at a role name that appears nowhere in the catalog.
+      expect(resolution.requestedRoles).toEqual(["pi/smol"]);
+    });
+
+    it("executes the role's assignment, suffix included", () => {
+      expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol"])).toMatchObject({
+        role: "smol",
+        source: "settings",
+        assignment: { model: "test/fast" },
+      });
+      expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol:high"])).toMatchObject({
+        assignment: { model: "test/fast", thinking: "high" },
+      });
+    });
+
+    it("leaves pi/<not-a-role> a concrete selector, to fail by name downstream", () => {
+      // `gpt-5` names no role, so the only reading left is provider `pi`. Repairing
+      // it would invent a tier; the registry lookup refuses it instead.
+      expect(resolveAgentModelPreference(rolesState(), ["pi/gpt-5"])).toMatchObject({
+        source: "agent",
+        assignment: { model: "pi/gpt-5" },
+      });
+      // Two segments after the prefix is a real id, not a role under an old prefix.
+      expect(resolveAgentModelPreference(rolesState(), ["pi/openai/gpt-5"])).toMatchObject({
+        source: "agent",
+        assignment: { model: "pi/openai/gpt-5" },
+      });
+      expect(legacyNamespacedRoleToken(rolesState(), "pi/gpt-5")).toBeUndefined();
+      expect(legacyNamespacedRoleToken(rolesState(), "pi/smol:high")).toBe("smol:high");
+    });
+
+    it("adds the migration sentence to the degradation note, and only there", () => {
+      const state = rolesState();
+      const stale = unassignedAgentTierNote("stale", "pi/smol", resolveAgentModelPreference(state, ["pi/smol"]), state);
+      const bare = unassignedAgentTierNote("roled", "smol", resolveAgentModelPreference(state, ["smol"]), state);
+
+      expect(stale).toContain("inherited the parent session model");
+      expect(stale).toContain("`model: smol`");
+      // A bare tier has nothing to migrate; the note must not grow a sentence
+      // telling an operator to fix a spelling they already use.
+      expect(bare).toContain("inherited the parent session model");
+      expect(bare).not.toContain("pre-tier");
     });
   });
 

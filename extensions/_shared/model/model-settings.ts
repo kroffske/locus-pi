@@ -280,6 +280,76 @@ export function resolveDeclaredModelRole(state: ModelRolesState, role: string): 
 }
 
 /**
+ * The pre-tier role namespace, `pi/<role>`.
+ *
+ * Before tiers were executed, every bundled agent wrote its tier as `pi/<role>` and
+ * nothing read it — `pi` was never a provider. Now that a slash means a real
+ * provider, that spelling parses as a concrete selector no registry can resolve, so
+ * an install still carrying a copy of the old catalog (a user-level
+ * `~/.agents/agents/*.md`, a project catalog cloned from an older release, a
+ * `.agents/` directory vendored into someone's own repository) fails EVERY workflow
+ * step closed before a child is created.
+ *
+ * That is the one case the fail-closed rule gets wrong, and it gets it wrong against
+ * the package's own promise: the operator did not write `pi/task`, this package did,
+ * and "a bundled agent must not fail closed just because nobody has configured a tier
+ * yet" is exactly what D3b already guarantees for an unassigned role. So a tier in
+ * this namespace is read as the role it always meant, and the degradation note says
+ * where to fix the spelling.
+ *
+ * Scoped to a KNOWN role on purpose: `pi/task` is package history, `pi/gpt-5` is an
+ * operator naming a provider that does not exist, and only the first is safe to
+ * reinterpret. Scoped to agent FRONTMATTER on purpose too: a per-call `model:` or
+ * `modelRole:` in a workflow script is code being authored today against the current
+ * grammar, so it keeps refusing with the migration hint rather than being repaired.
+ */
+const LEGACY_ROLE_NAMESPACE_PREFIX = "pi/";
+
+/**
+ * The role token behind a pre-tier selector, or `undefined` when the selector is not
+ * one. The token keeps any `:<level>` suffix, because the level is the author's and
+ * survives the namespace: `pi/smol:high` means the role `smol` at `high`.
+ */
+export function legacyNamespacedRoleToken(state: ModelRolesState, selector: string): string | undefined {
+  const trimmed = selector.trim();
+  if (!trimmed.startsWith(LEGACY_ROLE_NAMESPACE_PREFIX)) return undefined;
+  const token = trimmed.slice(LEGACY_ROLE_NAMESPACE_PREFIX.length).trim();
+  // A second slash is a real two-segment id, not a role that happens to sit under
+  // the old prefix; leave it to the registry so it fails by its own name.
+  if (token === "" || token.includes("/")) return undefined;
+  const { role } = splitRoleSelector(token);
+  return state.effective.has(role) ? token : undefined;
+}
+
+/** The migration sentence appended wherever a pre-tier tier was read as a role. */
+export function legacyRoleNamespaceNote(declared: string, role: string): string {
+  return (
+    ` ${JSON.stringify(declared)} is the pre-tier role namespace and was read as the role ` +
+    `${JSON.stringify(role)}; write the tier bare (\`model: ${role}\`), because a slash now means a ` +
+    `real provider.`
+  );
+}
+
+/**
+ * The note for an agent whose FRONTMATTER tier resolved to nothing.
+ *
+ * One owner, because the workflow bridge, `/agent run` and `spawn_agent` must degrade
+ * with the same recorded sentence (OD2) — including the extra sentence a pre-tier
+ * spelling earns, which is the only place an operator learns their catalog is stale
+ * now that the spelling no longer fails the run.
+ */
+export function unassignedAgentTierNote(
+  agentName: string,
+  declared: string,
+  resolution: ModelRoleResolution,
+  state: ModelRolesState,
+): string {
+  const note = unassignedRoleNote(declared, `agent "${agentName}" frontmatter model`, state);
+  const role = legacyNamespacedRoleToken(state, declared) === undefined ? undefined : resolution.role;
+  return role === undefined ? note : `${note}${legacyRoleNamespaceNote(declared, role)}`;
+}
+
+/**
  * The layers a role lookup read, named so a degradation notice is actionable.
  *
  * A message saying "role unassigned" leaves the operator guessing which file to
@@ -335,6 +405,14 @@ export function resolveSummaryModelRole(state: ModelRolesState): ModelRoleResolu
 export function resolveAgentModelPreference(state: ModelRolesState, agentModels: string[] = []): ModelRoleResolution {
   const first = agentModels[0];
   if (first) {
+    // `pi/<role>` is this package's own pre-tier spelling, not a provider. Read it as
+    // the role BEFORE the slash rule turns it into a concrete selector no registry
+    // can resolve — otherwise a stale catalog refuses every call. `requestedRoles`
+    // keeps the text as written so the evidence still points at the file to edit.
+    const legacyToken = legacyNamespacedRoleToken(state, first);
+    if (legacyToken !== undefined) {
+      return { ...resolveDeclaredModelRole(state, legacyToken), requestedRoles: [first] };
+    }
     const direct = parseModelSelector(first);
     if (direct) {
       return {
