@@ -4,7 +4,61 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Changed
+
+- **The run report is a document-update cycle, not a pile of numbered copies.**
+  `.locus-pi/<runId>/` used to hold one `NN-<author>-<name>` file per artifact
+  write, so a six-round plan run ended with six `plan.md` copies under six
+  different names, and the current plan was a filename guess. An artifact name is
+  one document now: the report writes ONE file per name holding its newest
+  revision (`plan.md` is the plan as the run left it, including on a stalled or
+  failed run), and the README's `## Documents` list shows every revision — who
+  wrote it, at which stage, on which model — each linking the verbatim bytes in
+  the machine store, so no history is lost and none of it is duplicated. A
+  revision transferred from a previous run (a continuation input) is part of the
+  same chain, which is what keeps a continuation's questions and answers from
+  reappearing as fresh documents. The README also grows a `## Logs` section:
+  the run's `journal.ndjson` — one line per event, tagged with its agent, stage
+  and round — and every child transcript linked by its stage label, so the raw
+  ndjson evidence is one click away instead of a directory dive.
+  `README.md`, `task.md` and `result.md` stay runner-owned names; a document
+  that would collide with them (or with another document's sanitized filename)
+  takes a `-2` suffix instead of overwriting.
+
+- **`plan`'s round cap hands the stall to the operator instead of burning the
+  run, and its critic ratchets instead of relitigating.** A live run showed the
+  failure this fixes: a critic on a weak model returned a different set of
+  plausible objections every round, hit the cap, and the operator was left with
+  a dead `ok:false` run — no plan, no reusable state, restart from nothing.
+  Two changes close it. Each round's critic now receives the defects it reported
+  on the previous draft and judges those first — closed, or answered under
+  `## Critique responses` with evidence — and a NEW defect must meet the
+  existing implementer-would-go-wrong bar; reopening an unflagged aspect of an
+  unchanged draft is named in the prompt as the way the loop fails without
+  producing a plan. And reaching `MAX_PLAN_ROUNDS` without an acceptance now
+  retains the stalled state (`task.md`, `context.md`, the last `plan.md`,
+  `unresolved-defects.md`) and declares an operator handoff with one text
+  question: answer `accept last draft` to take the retained draft as the plan —
+  the operator overruling the critic, recorded as such — or answer with drafting
+  guidance and the continuation run redrafts from the retained state without
+  re-scouting, with the guidance outranking earlier defects for planner and
+  critic alike. A draft nobody accepted still never flows onward on its own;
+  what changed is who ends the stall.
+
 ### Fixed
+
+- **Answered handoff questions are not re-asked unprompted after their
+  continuation fails.** When a continuation run consumed an operator's answers
+  and then failed or was cancelled, the handoff became actionable again and the
+  idle pump reopened the same questions in the editor automatically — on top of
+  the failure the operator actually needed to read, and swallowing the keyboard
+  (a mounted question owns the single editor slot, so `/ps` and every other
+  command cannot even be typed until Escape). Such a `retryable` handoff now
+  opens only on an explicit ask — bare `/workflows` or
+  `/workflow-continue <runId>` — and the unprompted pump instead shows a
+  one-line notice (once per session) naming the run and how to reopen it.
+  Never-answered handoffs keep their existing behavior: the oldest pending
+  question still opens by itself when Pi is idle.
 
 - **A stale agent catalog no longer fails every workflow step closed.** Before
   model tiers were executed, the shipped agents wrote their tier as

@@ -39,8 +39,17 @@ export interface ActionableWorkflowHandoff {
 export type WorkflowHandoffLaunchResult =
   { status: "started"; runId?: string } | { status: "busy" | "invalid" | "failed"; message: string };
 
+/**
+ * `pending` — the questions were never answered; the pump may open them
+ * unprompted. `retryable` — a continuation already consumed an answer and then
+ * failed or was cancelled, so reopening is an operator decision: the same
+ * questions asked again unprompted read as the run forgetting the answers it
+ * already had. Absent means `pending` (older scan sources).
+ */
+export type WorkflowHandoffActionableState = "pending" | "retryable";
+
 export type WorkflowHandoffScanItem =
-  | { status: "actionable"; handoff: ActionableWorkflowHandoff }
+  | { status: "actionable"; handoff: ActionableWorkflowHandoff; state?: WorkflowHandoffActionableState }
   | { status: "nonactionable"; runId: string; message: string }
   | { status: "invalid"; runId: string; message: string };
 
@@ -67,7 +76,12 @@ export type WorkflowHandoffPumpResult =
   | { status: "stale" }
   | { status: "invalid"; message: string; runId?: string }
   | { status: "started"; sourceRunId: string; runId?: string }
-  | { status: "failed"; message: string; runId: string };
+  | { status: "failed"; message: string; runId: string }
+  /** An unprompted pump found only retryable handoffs and opened nothing; the
+   *  named run is reachable through an explicit `/workflows`. Reported once per
+   *  session so the notice lands beside the failed continuation, not on every
+   *  later idle moment. */
+  | { status: "deferred"; runId: string };
 
 interface PumpOptions {
   explicit?: boolean;
@@ -86,6 +100,7 @@ interface PumpOptions {
 export class WorkflowOperatorHandoffController {
   readonly #ports: WorkflowHandoffControllerPorts;
   #snoozed = false;
+  #retryableNoticeShown = false;
   #activePump: Promise<WorkflowHandoffPumpResult> | undefined;
 
   constructor(ports: WorkflowHandoffControllerPorts) {
@@ -94,6 +109,7 @@ export class WorkflowOperatorHandoffController {
 
   startSession(): void {
     this.#snoozed = false;
+    this.#retryableNoticeShown = false;
   }
 
   shutdown(): void {
@@ -133,10 +149,27 @@ export class WorkflowOperatorHandoffController {
   async #pumpOnce(ctx: ExtensionContext, options: PumpOptions): Promise<WorkflowHandoffPumpResult> {
     const projectRoot = getProjectRoot(ctx);
     const scan = orderedScan(this.#ports.scan(projectRoot));
-    const actionable = scan.flatMap((item) => (item.status === "actionable" ? [item.handoff] : []));
+    const actionableItems = scan.flatMap((item) => (item.status === "actionable" ? [item] : []));
+    // Unprompted pumps open only never-answered handoffs. A retryable one — its
+    // continuation consumed an answer and then failed — must not re-take the
+    // editor with questions the operator already answered; it stays reachable
+    // through an explicit /workflows or /workflow-continue.
+    const unprompted = options.explicit !== true && options.runId === undefined;
+    const candidates = unprompted
+      ? actionableItems.filter((item) => (item.state ?? "pending") === "pending")
+      : actionableItems;
+    const actionable = candidates.map((item) => item.handoff);
     const firstInvalid = scan.find(
       (item): item is Extract<WorkflowHandoffScanItem, { status: "invalid" }> => item.status === "invalid",
     );
+    if (unprompted && actionable.length === 0 && firstInvalid === undefined) {
+      const retryable = actionableItems.find((item) => item.state === "retryable");
+      if (retryable !== undefined && !this.#retryableNoticeShown) {
+        this.#retryableNoticeShown = true;
+        return { status: "deferred", runId: retryable.handoff.runId };
+      }
+      return { status: "none" };
+    }
     const selection =
       options.runId === undefined
         ? actionable[0] === undefined

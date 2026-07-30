@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  bindWorkflowHandoffClaim,
+  claimWorkflowOperatorHandoff,
   createWorkflowOperatorHandoffEnvelope,
   readCurrentWorkflowScriptIdentity,
   readWorkflowHandoffClaim,
+  type WorkflowOperatorHandoffEnvelope,
 } from "../../../extensions/workflows/runtime/workflow-handoff.js";
 import { resolveWorkflowTarget } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { WorkflowOperatorHandoffController } from "../../../extensions/workflows/operator-handoff-controller.js";
@@ -164,7 +167,7 @@ describe("workflow operator handoff service", () => {
       message: "Workflow continuation launch failed before start: launcher exploded",
     });
     expect(readWorkflowHandoffClaim(root, item.handoff.value)).toEqual({ status: "absent" });
-    expect(service.scan(root)).toContainEqual({ status: "actionable", handoff: item.handoff });
+    expect(service.scan(root)).toContainEqual({ status: "actionable", handoff: item.handoff, state: "pending" });
   });
 
   it("reports both launch and claim-release failures without hiding the durable claim", async () => {
@@ -186,6 +189,40 @@ describe("workflow operator handoff service", () => {
         "Workflow continuation launch failed before start: launcher exploded Its unbound claim could not be released: Workflow handoff claim transition is active.",
     });
     expect(readWorkflowHandoffClaim(root, item.handoff.value)).toMatchObject({ status: "ready" });
+  });
+
+  it("distinguishes a never-answered handoff from one whose continuation failed", () => {
+    const runId = "20260725-145000-retry-state";
+    const childRunId = "20260725-145100-failed-child";
+    const root = projectWithHandoff(runId);
+    const service = createWorkflowOperatorHandoffService({ launch: vi.fn() });
+
+    expect(service.scan(root)).toContainEqual(expect.objectContaining({ status: "actionable", state: "pending" }));
+
+    const claimed = claimWorkflowOperatorHandoff(
+      root,
+      (service.scan(root)[0] as { handoff: { value: WorkflowOperatorHandoffEnvelope } }).handoff.value,
+    );
+    if (claimed.status !== "claimed") throw new Error("expected a claimed handoff");
+    bindWorkflowHandoffClaim(claimed.claim, childRunId);
+    const childRunDir = path.join(root, ".locus", "runtime", "workflows", childRunId);
+    mkdirSync(childRunDir, { recursive: true });
+    writeFileSync(
+      path.join(childRunDir, "result.json"),
+      `${JSON.stringify({
+        runId: childRunId,
+        ok: false,
+        disposition: { status: "failed" },
+        journal: [],
+        resultPersistence: { ok: true, path: path.join(childRunDir, "result.json") },
+        error: "plan was not accepted",
+      })}\n`,
+      "utf8",
+    );
+
+    const items = service.scan(root).filter((entry) => entry.status === "actionable");
+    expect(items).toContainEqual(expect.objectContaining({ status: "actionable", state: "retryable" }));
+    expect(items).not.toContainEqual(expect.objectContaining({ state: "pending" }));
   });
 
   it("rejects target script drift before claiming or launching", async () => {

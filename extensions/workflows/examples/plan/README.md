@@ -54,7 +54,9 @@ flowchart LR
     D -->|"the plan under review"| K{"agent critic: accept or revise?"}
     K -->|"revise + defects, verbatim"| D
     K -->|"accept"| O["runtime plan.md + exact return text"]
-    K -->|"round cap"| F["ok:false, unresolved defects"]
+    K -->|"round cap"| H["operator handoff: retained draft + open defects"]
+    H -->|"accept last draft"| O
+    H -->|"guidance"| D
 ```
 
 The cast is declared once, in the frozen `PLAN_AGENTS` roster at the top of the
@@ -78,31 +80,63 @@ what is actually there, and returns the shaped `{verdict, defects}`. Script code
 branches on the enum and hands the defect sentences to the next round verbatim,
 numbered. It never greps the draft's Markdown.
 
-### The run never stops to ask
+**Each round ratchets instead of relitigating.** The critic receives the defects
+it reported on the previous draft and judges in that order: is each one closed
+or answered under `## Critique responses` with evidence, and does any NEW defect
+meet the bar of making an implementer stop, guess, or do the wrong thing? A
+critic that finds a different complaint each round on a part that did not change
+is the way this loop fails without producing a plan, so the prompt names that
+failure and forbids it.
 
-There is no operator pause and no clarification round. When the task leaves a
-real choice open, the planner takes the most defensible option and records it in
-the plan under `## Assumptions`, in the form "assumed X, because Y; wrong if Z";
-the critic treats a decision the plan depends on but never states as a defect,
-and a choice recorded with its reason as not a defect even when it would have
-chosen differently.
+### The loop never stops to ask
+
+There is no operator pause mid-loop and no clarification round. When the task
+leaves a real choice open, the planner takes the most defensible option and
+records it in the plan under `## Assumptions`, in the form "assumed X, because
+Y; wrong if Z"; the critic treats a decision the plan depends on but never
+states as a defect, and a choice recorded with its reason as not a defect even
+when it would have chosen differently.
 
 That is a deliberate trade. A run that halts to ask has to be resumed, and until
 it is there is no plan at all; an assumption written down is visible to the
 operator the moment the run finishes, and correcting it means replanning — which
 this workflow is cheap enough to do.
 
-The measured exit is the critic. `MAX_PLAN_ROUNDS` (6) is only the safety net, and
-reaching it is a failure — `{ ok: false, stoppedBy: "round-cap", unresolvedRows }`
-carrying the critic's last defects. That is deliberate: a draft nobody accepted is
-not a plan, and a failed run projects no terminal artifact, so an unaccepted draft
-cannot be handed to a writer.
+### The round cap hands the decision to the operator
+
+The measured exit is the critic. `MAX_PLAN_ROUNDS` (6) is the safety net, and
+reaching it means the loop stalled: a draft nobody accepted is not a plan, and
+the run returns none. What it no longer does is burn the run. The scout's map
+and six rounds of drafting are paid for, so the run publishes the exact stalled
+state — `task.md`, `context.md`, the last `plan.md`, `unresolved-defects.md` —
+and declares an operator handoff with one text question. The oldest pending
+question opens in the editor when Pi is idle; `/workflows` reopens it.
+
+The operator has exactly two moves, and both are recorded:
+
+- **`accept last draft`** (case-insensitive) — the retained draft becomes the
+  accepted plan. That is the operator overruling the critic, which is their
+  authority; the continuation run logs the override, republishes the plan as its
+  own, and returns the draft text like any accepted plan.
+- **anything else is drafting guidance** — the continuation run re-enters the
+  drafting loop seeded with the retained draft and its open defects, without
+  re-scouting. Both roles receive the guidance verbatim and are told it outranks
+  earlier defects where they conflict: the planner follows it, and the critic may
+  not count a choice the guidance made as a defect. A continuation that stalls
+  again declares the same handoff again.
+
+A dead `ok:false` run at the cap used to be the outcome, and it forced the
+operator to start over from nothing — replan, re-scout, re-answer. The handoff
+keeps the gate (nothing unaccepted flows onward on its own) while making the
+stall a state the operator can steer out of.
 
 ### What the run retains
 
 - `task.md` — the exact operator task, byte for byte;
 - `context.md` — the scout's map;
 - one `plan.md` and one `plan-critique.json` per drafting round;
+- on a stalled cap: published `task.md`, `context.md`, `plan.md`, and
+  `unresolved-defects.md` — the continuation's exact inputs;
 - the returned text, equal to the accepted `plan.md`.
 
 ## `plan-implement`: one reviewed task at a time

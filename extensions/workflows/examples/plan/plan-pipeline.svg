@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 1000" width="1120" height="1000" role="img" aria-label="The plan workflow as three named agents: a scout hands the repository context to a planner, the planner hands a complete plan to a critic, and the critic either accepts it or hands defects back for another round.">
   <title>plan workflow — three agents and what each one hands to the next</title>
-  <desc>A scout reads the repository and returns context.md. A planner receives the task, that context, its own previous draft and the critic's defects, and returns the complete plan every round. A critic receives the plan under review with the same evidence and returns accept or revise with up to twelve defects. Revise starts another round, up to six; accept ends the run with the plan text, which the plan-implement workflow consumes. A sixth revise fails the run. The run never pauses for a human: an open decision is recorded as a stated assumption and planned on.</desc>
+  <desc>A scout reads the repository and returns context.md. A planner receives the task, that context, its own previous draft and the critic's defects, and returns the complete plan every round. A critic receives the plan under review, the same evidence, and the defects the previous round reported, and returns accept or revise with up to twelve defects. Revise starts another round, up to six; accept ends the run with the plan text, which the plan-implement workflow consumes. A sixth revise retains the draft with its open defects and hands the decision to the operator, who accepts the last draft or answers with guidance that a continuation run redrafts under. The loop never pauses mid-round for a human: an open decision is recorded as a stated assumption and planned on.</desc>
 
   <style>
     .bg { fill: #ffffff; }
@@ -54,7 +54,7 @@
   <rect class="bg" x="0" y="0" width="1120" height="1000"/>
 
   <text class="h1" x="50" y="40">plan — three agents, and what each hands to the next</text>
-  <text class="h2" x="50" y="62">The run never stops to ask a human. An open decision is written down as a stated assumption and planned on; if it turns out wrong, replanning is cheaper than a halted run.</text>
+  <text class="h2" x="50" y="62">The loop never stops mid-round to ask. An open decision is written down as a stated assumption and planned on; only a stalled round cap hands the decision to the operator.</text>
 
   <text class="lane" x="50" y="92">SCRIPT PHASE</text>
   <text class="lane" x="330" y="92">AGENTS</text>
@@ -100,7 +100,7 @@
 
   <!-- drafting loop -->
   <rect class="loop-frame" x="272" y="386" width="820" height="418" rx="16"/>
-  <text class="lane" x="290" y="410">DRAFTING LOOP · AT MOST 4 ROUNDS · THE CRITIC IS THE EXIT</text>
+  <text class="lane" x="290" y="410">DRAFTING LOOP · AT MOST 6 ROUNDS · THE CRITIC IS THE EXIT</text>
 
   <!-- planner -->
   <g class="phase">
@@ -134,8 +134,8 @@
     <rect x="330" y="634" width="440" height="144" rx="12"/>
     <text class="name" x="352" y="666">critic</text>
     <text class="role" x="352" y="686">Judges this plan. Does not write its own.</text>
-    <text class="line" x="352" y="710">receives — the plan, plus the same task and context the</text>
-    <text class="line" x="352" y="728">planner had</text>
+    <text class="line" x="352" y="710">receives — the plan, the same task and context the planner</text>
+    <text class="line" x="352" y="728">had, and the defects the previous round reported</text>
     <text class="line" x="352" y="747">returns — accept, or revise with up to 12 concrete defects</text>
     <text class="chip" x="352" y="767">read-only · reopens the files the plan names · declared shape</text>
   </g>
@@ -164,9 +164,10 @@
   <text class="edge-label" x="768" y="806" text-anchor="middle">a 6th revise instead of an accept</text>
   <g class="stop">
     <rect x="610" y="850" width="460" height="94" rx="12"/>
-    <text class="name" x="632" y="878">No plan was accepted — the run fails</text>
-    <text class="line" x="632" y="900">The last draft is kept but never accepted, so nothing reaches an</text>
-    <text class="line" x="632" y="919">implementer. The open defects are what the operator sees.</text>
+    <text class="name" x="632" y="878">No draft accepted — the operator decides</text>
+    <text class="line" x="632" y="900">task.md, context.md, the draft plan.md and unresolved-defects.md are</text>
+    <text class="line" x="632" y="919">retained; one text question (plan-guidance) asks: accept last draft, or</text>
+    <text class="line" x="632" y="936">answer with guidance a continuation run redrafts under.</text>
   </g>
 
   <!-- legend -->
@@ -183,6 +184,6 @@
     <g class="done"><rect x="672" y="-12" width="16" height="16" rx="4"/></g>
     <text class="edge-label" x="696" y="0">terminal result</text>
     <g class="stop"><rect x="806" y="-12" width="16" height="16" rx="4"/></g>
-    <text class="edge-label" x="830" y="0">run fails closed</text>
+    <text class="edge-label" x="830" y="0">operator handoff</text>
   </g>
 </svg>
