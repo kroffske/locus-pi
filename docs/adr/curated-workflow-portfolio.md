@@ -270,14 +270,16 @@ text; `plan-implement` takes one semantic string plus exactly one digest-bound
 and consumed artifact is bounded, and every agent answer is bounded by its own
 call's `maxAnswerChars`. _Inspectable evidence_: the runtime owns `task.md`,
 `context.md`, one `plan.md` and one `plan-critique.json` per drafting round, then
-`step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
+`step-selection.json`, `scope.md`, a current `implementation-tasks.md` ledger,
+one `worker-S<n>-attempt-<n>.md` and `review-S<n>-attempt-<n>.json` per attempt,
 `check-evidence.md`, and `implementation-report.md`. _Fails closed_: a plan the critic never accepted
 ends the run `ok:false`, which is also what keeps it out of implementation, since
 continuation consumes only a successful run's projected artifacts; a failed writer
-returns `partial: true`, which is projected as non-success. _Supportable permission
-posture_: every `plan` stage is `readOnly: true`, and in `plan-implement` only the
-per-step writers hold `write`/`edit`/`bash` while the selector holds no tools at
-all.
+or a reviewer-blocked task returns `partial: true`, which is projected as
+non-success. _Supportable permission posture_: every `plan` stage is
+`readOnly: true`, and in `plan-implement` only the per-step writers hold
+`write`/`edit`/`bash`; task reviewers are read-only and the selector holds no
+tools at all.
 
 The seam between them is the same one `review` → `review-fix` established, with
 one check added. `plan-implement` requires the consumed bytes to equal the source

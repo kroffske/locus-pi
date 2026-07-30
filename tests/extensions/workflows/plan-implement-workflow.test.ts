@@ -160,14 +160,25 @@ function namedAnswers(store: ReturnType<typeof createWorkflowArtifactStore>): st
     .map((record) => record.name);
 }
 
+function namedPublished(store: ReturnType<typeof createWorkflowArtifactStore>): string[] {
+  return store
+    .list()
+    .filter((record) => record.kind === "published")
+    .map((record) => record.name);
+}
+
 const DEFAULT_INTENT = "Implement the accepted plan.";
 
 function selection(steps: Array<{ id: string; note?: string }>): string {
   return JSON.stringify({ steps: steps.map(({ id, note = "" }) => ({ id, note })) });
 }
 
+function review(verdict: "accept" | "repair" | "blocked", summary: string, issues: string[] = []): string {
+  return JSON.stringify({ verdict, summary, issues });
+}
+
 describe("workflow example: plan-implement.workflow.mjs", () => {
-  it("puts every read-only stage before the one write-capable role and lets the runtime own artifacts", () => {
+  it("keeps one write-capable role and persists workflow-owned task state plus runtime-owned agent evidence", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain("continuationArtifacts()");
@@ -178,11 +189,9 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("function stepSelectionErrors");
     expect(source).toContain("function orderStepSelection");
     expect(source).toContain("validate: (value) => stepSelectionErrors(steps, value)");
-    // The worktree fingerprinting mechanism was removed 2026-07-29: a workflow
-    // runs on the operator's own checkout by guarantee, so per-step evidence is
-    // the writer's answer plus what the read-only check stage observes itself,
-    // and the script publishes nothing of its own.
-    expect(source).not.toContain("publishArtifact");
+    expect(source).toContain("STEP_REVIEW_SCHEMA");
+    expect(source).toContain("validate: stepReviewErrors");
+    expect(source).toContain('publishArtifact("implementation-tasks.md"');
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
@@ -194,10 +203,12 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     for (const name of ["step-selection.json", "scope.md", "check-evidence.md", "implementation-report.md"]) {
       expect(source, name).toContain(`artifact: "${name}"`);
     }
-    expect(source).toContain("artifact: `worker-${step.id}.md`");
+    expect(source).toContain("artifact: `worker-${step.id}-attempt-${attempt}.md`");
+    expect(source).toContain("artifact: `review-${step.id}-attempt-${attempt}.json`");
     for (const bound of [
       "maxAnswerChars: MAX_SCOPE_CHARS",
       "maxAnswerChars: MAX_WORKER_RESULT_CHARS",
+      "maxAnswerChars: MAX_REVIEW_RESULT_CHARS",
       "maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS",
       "maxAnswerChars: MAX_REPORT_CHARS",
     ]) {
@@ -205,7 +216,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     }
   });
 
-  it("runs one writer per selected step, in the plan's order, and returns the report", async () => {
+  it("lists tasks, then writes and reviews each one in plan order before returning the report", async () => {
     const fixture = createPlanFixture();
     const calls: WorkflowAgentRequest[] = [];
     const report = "# Implementation Report\n## Outcome\nPlan implemented — both steps landed.";
@@ -217,6 +228,9 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
           return completed(request, selection([{ id: "S2" }, { id: "S1", note: "keep the signature" }]));
         case "resolve implementation scope":
           return completed(request, "# Scope\nS1 touches `src/page.ts`.");
+        case "review step S1 attempt 1":
+        case "review step S2 attempt 1":
+          return completed(request, review("accept", `${request.label} passed.`));
         case "collect check evidence":
           return completed(request, "# Checks\n`npm test -- page` passed.");
         case "report implementation":
@@ -232,14 +246,18 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls.map((call) => call.label)).toEqual([
       "select plan steps",
       "resolve implementation scope",
-      "implement step S1",
-      "implement step S2",
+      "implement step S1 attempt 1",
+      "review step S1 attempt 1",
+      "implement step S2 attempt 1",
+      "review step S2 attempt 1",
       "collect check evidence",
       "report implementation",
     ]);
     expect(calls.map((call) => call.phase)).toEqual([
       "select-steps",
       "resolve-implementation-scope",
+      "apply-steps",
+      "apply-steps",
       "apply-steps",
       "apply-steps",
       "collect-check-evidence",
@@ -249,22 +267,75 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls[0]?.tools).toEqual([]);
     expect(calls[0]?.readOnly).toBe(true);
     expect(calls[2]?.readOnly).toBeUndefined();
-    expect(calls[3]?.readOnly).toBeUndefined();
-    expect(calls[4]?.readOnly).toBe(true);
+    expect(calls[3]?.readOnly).toBe(true);
+    expect(calls[4]?.readOnly).toBeUndefined();
     expect(calls[5]?.readOnly).toBe(true);
+    expect(calls[6]?.readOnly).toBe(true);
+    expect(calls[7]?.readOnly).toBe(true);
     // Each writer receives exactly its own step block plus the operator note.
     expect(calls[2]?.prompt).toContain(STEP_S1);
     expect(calls[2]?.prompt).not.toContain("### S2 — Cover the final page");
     expect(calls[2]?.prompt).toContain("keep the signature");
-    expect(calls[3]?.prompt).toContain(STEP_S2);
-    expect(calls[3]?.prompt).toContain("## Step S1");
+    expect(calls[4]?.prompt).toContain(STEP_S2);
+    expect(calls[4]?.prompt).toContain("| S1 | Advance the offset | done | 1 |");
     // The report answers against the whole plan, including steps nobody selected.
-    expect(calls[5]?.prompt).toContain(fixture.planText);
+    expect(calls[7]?.prompt).toContain(fixture.planText);
     expect(namedAnswers(artifactStore)).toEqual([
       "step-selection.json",
       "scope.md",
-      "worker-S1.md",
-      "worker-S2.md",
+      "worker-S1-attempt-1.md",
+      "review-S1-attempt-1.json",
+      "worker-S2-attempt-1.md",
+      "review-S2-attempt-1.json",
+      "check-evidence.md",
+      "implementation-report.md",
+    ]);
+    expect(namedPublished(artifactStore)).toEqual([
+      "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-tasks.md",
+    ]);
+  });
+
+  it("repairs the current task from review feedback before starting the next task", async () => {
+    const fixture = createPlanFixture();
+    const calls: WorkflowAgentRequest[] = [];
+    const report = "# Implementation Report\n## Outcome\nPlan implemented — repair accepted.";
+    const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") {
+        return completed(request, review("repair", "The final-page assertion still fails.", ["Fix the S1 assertion."]));
+      }
+      if (request.label === "review step S1 attempt 2") {
+        return completed(request, review("accept", "S1 now passes its verification."));
+      }
+      if (request.label === "report implementation") return completed(request, report);
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(report);
+    expect(calls.map((call) => call.label)).toEqual([
+      "select plan steps",
+      "resolve implementation scope",
+      "implement step S1 attempt 1",
+      "review step S1 attempt 1",
+      "implement step S1 attempt 2",
+      "review step S1 attempt 2",
+      "collect check evidence",
+      "report implementation",
+    ]);
+    expect(calls[4]?.prompt).toContain("1. Fix the S1 assertion.");
+    expect(calls[4]?.prompt).toContain("| S1 | Advance the offset | in-progress | 2 |");
+    expect(calls[4]?.prompt).toContain("The final-page assertion still fails.");
+    expect(calls.some((call) => call.label?.includes("S2"))).toBe(false);
+    expect(namedAnswers(artifactStore)).toEqual([
+      "step-selection.json",
+      "scope.md",
+      "worker-S1-attempt-1.md",
+      "review-S1-attempt-1.json",
+      "worker-S1-attempt-2.md",
+      "review-S1-attempt-2.json",
       "check-evidence.md",
       "implementation-report.md",
     ]);
@@ -279,7 +350,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
       calls.push(request);
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }, { id: "S2" }]));
-      if (request.label === "implement step S1") return failed(request, "writer failed");
+      if (request.label === "implement step S1 attempt 1") return failed(request, "writer failed");
       return completed(request, `# ${request.label}\nDone.`);
     });
 
@@ -296,7 +367,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls.map((call) => call.label)).toEqual([
       "select plan steps",
       "resolve implementation scope",
-      "implement step S1",
+      "implement step S1 attempt 1",
       "collect check evidence",
       "report implementation",
     ]);
@@ -306,6 +377,50 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "scope.md",
       "check-evidence.md",
       "implementation-report.md",
+    ]);
+  });
+
+  it("stops after a reviewer blocks a task and preserves earlier accepted tasks", async () => {
+    const fixture = createPlanFixture();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }, { id: "S2" }]));
+      if (request.label === "review step S1 attempt 1") {
+        return completed(request, review("accept", "S1 is complete."));
+      }
+      if (request.label === "review step S2 attempt 1") {
+        return completed(
+          request,
+          review("blocked", "S2 names a removed API.", ["The accepted plan must be revised before S2 can continue."]),
+        );
+      }
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    const result = await (await loadWorkflow())(dsl, DEFAULT_INTENT);
+
+    expect(result).toMatchObject({
+      ok: false,
+      partial: true,
+      appliedSteps: ["S1"],
+      failedStep: "S2",
+      unresolvedRows: ["S2"],
+    });
+    expect(calls.map((call) => call.label)).toEqual([
+      "select plan steps",
+      "resolve implementation scope",
+      "implement step S1 attempt 1",
+      "review step S1 attempt 1",
+      "implement step S2 attempt 1",
+      "review step S2 attempt 1",
+      "collect check evidence",
+      "report implementation",
+    ]);
+    expect(namedPublished(artifactStore)).toEqual([
+      "implementation-tasks.md",
+      "implementation-tasks.md",
+      "implementation-tasks.md",
     ]);
   });
 
@@ -392,6 +507,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       switch (request.label) {
         case "select plan steps":
           return completed(request, selection([{ id: "S1" }]));
+        case "review step S1 attempt 1":
+          return completed(request, review("accept", "S1 passed."));
         case "report implementation":
           return completed(request, report);
         default:

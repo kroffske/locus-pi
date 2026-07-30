@@ -98,17 +98,21 @@ cannot be handed to a writer.
 - one `plan.md` and one `plan-critique.json` per drafting round;
 - the returned text, equal to the accepted `plan.md`.
 
-## `plan-implement`: one writer per step
+## `plan-implement`: one reviewed task at a time
 
 ```mermaid
 flowchart LR
     P["verified plan.md reference"] --> S["host: parse ## Steps blocks"]
     S --> L["no-tool selector: which steps, with notes"]
-    L --> V["workflow: validate ids, restore plan order"]
+    L --> V["workflow: validate ids, restore plan order, publish task ledger"]
     V --> R["resolve implementation scope (read-only)"]
-    R --> W1["writer: step S1"]
-    W1 --> W2["writer: step S2"]
-    W2 --> E["collect check evidence (read-only + repository_check)"]
+    R --> W["writer: current task"]
+    W --> K{"independent reviewer"}
+    K -->|"repair, once"| W
+    K -->|"accepted"| N{"another task?"}
+    K -->|"blocked"| E
+    N -->|"yes"| W
+    N -->|"no"| E["collect check evidence (read-only + repository_check)"]
     E --> Q["fresh reporter (read-only)"]
     Q --> O["runtime implementation-report.md"]
 ```
@@ -135,20 +139,38 @@ choosing ids that exist, staying inside the note budget — is a schema keyword 
 
 The selector may implement a subset when the operator asked for one, but the
 **plan's own order is authority**: `orderStepSelection` restores it regardless of
-the order the selector listed. Each writer receives exactly one step block, its
-operator note, the shared scope, and its predecessors' results.
+the order the selector listed. Before any writer starts, deterministic code
+publishes every plan step and its current status as `implementation-tasks.md`.
+The newest artifact with that name is the current task list; unselected steps
+remain visible as `not-selected`.
 
-A failing writer stops the remaining steps — plan steps are ordered because each
-builds on the last, and running the rest on top of a failure is how a plan
-half-lands — but it does not stop the run. The checker and the reporter still run,
-because the operator's working tree has already changed and needs describing, and
-the run returns `{ ok: false, partial: true, appliedSteps, failedStep,
-unresolvedRows }`. The runner projects a deliberate partial as a non-success.
+Each selected task runs in the plan's order. One write-capable implementer
+receives exactly that step, the shared scope, and the latest ledger. A separate
+host-enforced read-only reviewer reopens the live diff and returns a shaped
+`accept`, `repair`, or `blocked` verdict. `repair` gives the same task one bounded
+incremental attempt with the exact issues, rather than restarting the task or
+advancing to the next one. Every verdict republishes the ledger, and the next
+task starts only after the current one is accepted.
+
+Stable attempt labels and deterministic ledger updates keep the workflow
+replay-safe: `/workflow-run plan-implement --resume <runId>` replays completed
+agent answers instead of running those tasks again.
+
+A failed or still-rejected task stops the remaining tasks — plan steps are
+ordered because each builds on the last, and running the rest on top of a failure
+is how a plan half-lands — but it does not stop the evidence stages. The checker
+and reporter still run because the operator's working tree has already changed
+and needs describing. The run returns `{ ok: false, partial: true, appliedSteps,
+failedStep, unresolvedRows }`, and the runner projects that deliberate partial as
+a non-success.
 
 ### What the run retains
 
-- `step-selection.json`, `scope.md`, one `worker-S<n>.md` per attempted step,
-  `check-evidence.md`, and `implementation-report.md`;
+- `step-selection.json`, `scope.md`, and repeated `implementation-tasks.md`
+  snapshots whose newest entry is the current task ledger;
+- `worker-S<n>-attempt-<n>.md` and `review-S<n>-attempt-<n>.json` for every
+  implementation/review attempt;
+- `check-evidence.md` and `implementation-report.md`;
 - the returned text, equal to `implementation-report.md`, unless the run was
   partial — then the returned value is the structured envelope above and the
   report is still retained.

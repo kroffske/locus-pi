@@ -6,6 +6,15 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The shipped `plan` → `plan-implement` pair now carries an explicit,
+  resumable task lifecycle.** `plan` still produces the accepted ordered
+  `S<n>` plan; `plan-implement` turns the selected steps into a persisted
+  `implementation-tasks.md` ledger, then runs one writer and one independent
+  reviewer at a time. A reviewer can request one bounded repair attempt before
+  the workflow advances, while a blocked task stops later work and preserves the
+  completed-task evidence. Stable labels keep `--resume` replayable instead of
+  applying finished tasks again.
+
 - **Packed Markdown links are now checked against the actual npm tarball.**
   Relative links in shipped documentation must resolve to packed files, while
   repository-only references are labeled as paths instead of dead links. The

@@ -653,6 +653,9 @@ return { ok: false, stoppedBy: "round-cap", error: "Completion was not proven" }
 
 ## Plan, build, review
 
+This small one-run form is appropriate only when the plan is an internal
+handoff and the whole build is one task:
+
 ```js
 const plan = await agent(`Plan: ${input}`, { agent: "plan", label: "plan" });
 
@@ -668,6 +671,13 @@ const review = await agent(`Review the implementation:\n${build}`, {
 });
 return review;
 ```
+
+When the operator must inspect or reuse the plan, use the shipped `plan` →
+`plan-implement` pair instead. `plan` returns an accepted ordered `plan.md`;
+`plan-implement` consumes that verified artifact, publishes
+`implementation-tasks.md`, and advances one task only after an independent
+review accepts it. A repair verdict retries the same task once, and stable
+labels let `--resume` replay completed calls rather than applying them again.
 
 ## Ordered pipeline
 
