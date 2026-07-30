@@ -116,11 +116,18 @@ const PLAN_DRAFT = [
 const SCOUT_CONTEXT = "# Task Context\n## Existing behavior\n- `src/page.ts` — paginates.";
 
 describe("workflow example: plan.workflow.mjs", () => {
-  it("pins every planning stage to Luna at medium reasoning effort", () => {
+  it("routes every planning stage through the agent tier and names no provider", () => {
     const source = readFileSync(workflowPath, "utf8");
 
-    expect(source).toContain('model: "openai-codex/gpt-5.6-luna:medium"');
-    expect(source.match(/openai-codex\/gpt-5\.6-luna:medium/gu)).toHaveLength(1);
+    // One declaration, shared by all three stages, so a stage cannot drift onto
+    // another route without this failing.
+    expect(source).toContain('modelRole: "agent"');
+    expect(source.match(/modelRole:/gu)).toHaveLength(1);
+    // The reason the tier replaced a concrete pin: a packaged workflow that names a
+    // provider fails by name for every operator who does not have that provider.
+    // The package decides no vendor; the roles table does, and until it does the
+    // stage runs on the session model.
+    expect(source).not.toMatch(/model:\s*"[^"]*\//u);
   });
 
   it("keeps every planning stage read-only and lets the runtime own every artifact", () => {

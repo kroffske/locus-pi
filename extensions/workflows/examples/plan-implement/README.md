@@ -32,6 +32,8 @@ read it before running this one. Two things matter most:
   deterministic task-ledger updates let
   `/workflow-run plan-implement --resume <runId> "<request>"` replay recorded
   agent answers before continuing from the unfinished task.
-- **Every stage uses the same concrete runtime.**
-  `openai-codex/gpt-5.6-luna:medium` pins both the model and child reasoning
-  effort; the workflow fails closed if this Pi installation cannot resolve it.
+- **Every stage uses the same route, and the route is yours.**
+  `modelRole: "agent"` names a tier instead of a provider, so the pair runs on any
+  Pi installation: assign `AGENT` in `/model-roles` to choose the model and its
+  reasoning effort, or assign nothing and every stage runs on the current session
+  model with the degradation recorded in the run evidence.

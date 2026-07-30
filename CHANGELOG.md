@@ -25,11 +25,24 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The packaged `plan` → `plan-implement` pair no longer names a provider.**
+  Every stage in both workflows pinned the concrete model
+  `openai-codex/gpt-5.6-luna:medium`, which fails the stage by name — with no
+  child created — on every host that does not have that exact model, so the only
+  runnable curated pair in the package was runnable for one vendor's customers.
+  Both now declare `modelRole: "agent"`: assign `AGENT` in `/model-roles` to
+  choose the model and its reasoning effort, or assign nothing and every stage
+  runs on the current session model with the degradation recorded in the run
+  evidence, the same as any other unassigned tier. Concrete pins remain the right
+  option for a workflow you keep to yourself, and the fail-closed behavior of a
+  concrete selector is unchanged. Recorded runs of either workflow are not
+  replayable across this change: the tier is part of the request key, so a
+  `--resume` of a run recorded before it re-runs its calls for real.
+
 - **Workflow model effort is now executed, not merely displayed.** A concrete
   `provider/id:level` selector passes both the resolved model and `level` to the
-  Pi child session. The packaged `plan` → `plan-implement` pair now pins every
-  stage to `openai-codex/gpt-5.6-luna:medium`, so a missing model fails by name
-  instead of silently substituting the parent session. The planning safety cap
+  Pi child session, and a missing model fails by name instead of silently
+  substituting the parent session. The planning safety cap
   is now six rounds after a real external inventory plan exhausted four while
   still carrying two repairable verification defects. The same live run exposed
   a second boundary: all per-step reviews could pass while the combined result

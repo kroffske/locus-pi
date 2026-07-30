@@ -13,9 +13,13 @@ both ship in `package.json#files` and `public-repository.json`. Workflow
 JavaScript is trusted local code with full Node.js host access; it is not
 sandboxed. `plan` is read-only end to end, `plan-implement` writes to the launch
 checkout, and that difference is why they are two workflows rather than one.
-Every stage in this pair pins `openai-codex/gpt-5.6-luna:medium`; a host without
-that concrete model fails the stage by name instead of substituting another
-model or effort.
+Every stage in this pair declares `modelRole: "agent"` and names no provider.
+A packaged workflow must run on the host it lands on, and a concrete
+`provider/id` fails the stage by name for everyone who does not have that exact
+model — so the pair names the tier and the operator answers it: `/model-roles` →
+`AGENT` assigns the model and its effort. Until something assigns it, the stage
+runs on the current session model and the run evidence records the degradation.
+Pin a concrete model only in a workflow you keep to yourself.
 
 ```text
 plan/

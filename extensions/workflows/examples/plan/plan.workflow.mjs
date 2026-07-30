@@ -54,8 +54,22 @@ index. If the tool is unavailable, the file type is unsupported, or a command
 fails, continue with \`grep\`, \`find\`, and direct reads and say so. A missing AST
 Index never blocks planning.`;
 
+/**
+ * Every stage names the `agent` TIER, not a concrete model.
+ *
+ * A workflow that ships with the package cannot name a provider: a concrete
+ * `provider/id` fails the call by name on any host that does not have it, which
+ * made this pair unrunnable for anyone outside one vendor. A role is the option
+ * that lets the operator answer instead — `/model-roles` → AGENT assigns it — and
+ * an unassigned role degrades to the session model with the degradation recorded,
+ * so a stranger who has configured nothing still gets a real run on whatever
+ * `/model` currently points at.
+ *
+ * Naming the tier rather than omitting it keeps the routing visible in the script
+ * and independent of whichever catalog agent answers the call.
+ */
 const PLAN_STAGE_OPTIONS = Object.freeze({
-  model: "openai-codex/gpt-5.6-luna:medium",
+  modelRole: "agent",
   permissionMode: "agent-defined",
   workspaceMode: "project",
   readOnly: true,
