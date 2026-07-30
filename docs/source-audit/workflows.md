@@ -309,7 +309,13 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run
   report; a ROLE whose assignment exists but does not parse as a selector fails
   the call by name rather than degrading, because a typo is a config error and
-  not an unassigned tier. `modelRoleResolution` continues to travel in the request capsule and
+  not an unassigned tier. An agent FRONTMATTER tier written in the pre-tier
+  `pi/<role>` namespace is read as that role by
+  `resolveAgentModelPreference` before the slash rule applies, so a catalog
+  copied from an older release resolves through the table instead of refusing as
+  an unresolvable provider; the bound is a KNOWN role name and the frontmatter
+  path only, leaving `pi/<not-a-role>` and per-call selectors fail-closed.
+  `modelRoleResolution` continues to travel in the request capsule and
   live/artifact metadata. The model the child SESSION reports is read back after
   `createSession` and carried as `executedModel`; a readback that contradicts the
   resolved request fails the call with both values quoted. The bridge fails
@@ -344,11 +350,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
   end and declares its three participants in one frozen `PLAN_AGENTS` roster:
   `scout` maps the repository once, then a `planner`/`critic` pair loops on a
   declared `accept`/`revise` enum with the critic's exact defects forwarded to the
-  next round. It never pauses for an operator; an undecided choice is recorded by
+  next round, and the previous round's defects handed back to the critic so each
+  round converges on closing them. The loop never pauses for an operator; an
+  undecided choice is recorded by
   the planner under `## Assumptions` and judged by the critic, so an unstated
   assumption is a defect and a stated one is not. Reaching the round cap without
-  an acceptance returns `ok:false`, which is also what keeps an unaccepted draft
-  out of implementation. `plan-implement` accepts semantic text plus host
+  an acceptance retains the stalled state (`task.md`, `context.md`, `plan.md`,
+  `unresolved-defects.md`) and declares an operator handoff — `accept last draft`
+  takes the retained draft on operator authority, any other answer is guidance a
+  continuation redrafts under without re-scouting. An unaccepted draft still
+  reaches implementation only through an explicit operator decision. `plan-implement` accepts semantic text plus host
   continuation containing one complete `plan.md` ref, and reads the bytes the host
   already verified and copied — at any length — rather than re-deriving that proof
   or capping a plan somebody has already accepted. Deterministic code parses `### S<n>` blocks, a no-tool

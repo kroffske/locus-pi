@@ -30,6 +30,7 @@ import {
   resolveAgentModelPreference,
   malformedRoleAssignmentNote,
   resolveDeclaredModelRole,
+  unassignedAgentTierNote,
   unassignedRoleNote,
   type ModelRolesState,
 } from "../../_shared/model/model-settings.js";
@@ -759,7 +760,7 @@ async function resolveWorkflowTier(input: {
       kind: "inherit",
       roleResolution: frontmatterResolution,
       ...(frontmatterSelector !== undefined
-        ? { fallback: unassignedRoleNote(frontmatterSelector, `agent "${agent.name}" frontmatter model`, modelRoles) }
+        ? { fallback: unassignedAgentTierNote(agent.name, frontmatterSelector, frontmatterResolution, modelRoles) }
         : {}),
     };
   }
@@ -791,16 +792,20 @@ function refusal(message: string, selector?: string): WorkflowTier {
  * The one predictable way this refusal fires on an upgrade.
  *
  * Before tiers, the bundled agents wrote their tier as `pi/<role>`, and nothing read
- * it — `pi` was never a provider. Now that a slash means a real provider, a catalog
- * that still says `pi/smol` fails closed, which is right, but "provider pi has no
- * model smol" tells the operator nothing about what to edit. So the refusal says it.
+ * it — `pi` was never a provider. An agent's FRONTMATTER in that namespace is now
+ * repaired in `resolveAgentModelPreference`, because that spelling is the package's
+ * own history and refusing it makes a stale catalog unusable. Everything else still
+ * fails closed and reaches here: a per-call `model` / `modelRole` written today, a
+ * roles-table entry the operator assigned by hand, or `pi/<not-a-role>`, where
+ * "provider pi has no model X" alone tells them nothing about what to edit.
  */
 function legacyRoleNamespaceHint(selector: string | undefined): string {
   if (selector === undefined || !selector.startsWith("pi/")) return "";
   const role = selector.slice("pi/".length);
   return (
-    ` "pi/<role>" was the pre-tier role namespace and is no longer read as a role: write the role bare ` +
-    `(\`model: ${role}\`), because a slash now means a real provider.`
+    ` "pi/<role>" was the pre-tier role namespace and a slash now means a real provider: name the role ` +
+    `where a role is accepted (\`modelRole: ${JSON.stringify(role)}\`, or an agent's frontmatter ` +
+    `\`model: ${role}\`), or write a real provider/id here.`
   );
 }
 

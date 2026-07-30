@@ -81,7 +81,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. The run never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim — and the critic also receives the previous round's defects, so each round ratchets toward closing them instead of relitigating the plan. The loop never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance still ships no plan — instead of failing, the run retains `task.md`, `context.md`, the last `plan.md` and `unresolved-defects.md` and declares an operator handoff: answer `accept last draft` to take the retained draft on operator authority, or answer with guidance that a continuation run redrafts under, without re-scouting.                                                                                                                                                                                                                                                                                                                                      |
 | `plan-implement`     | **Accepted plan to reviewed changes**: semantic text plus host continuation supplies exactly one non-empty `plan.md` reference, which the host verifies and copies before workflow code starts. Deterministic code parses `### S<n>` blocks, validates the selected subset, restores plan order, and publishes `implementation-tasks.md`. Each selected task gets one write-capable implementer followed immediately by a shaped independent read-only review. `repair` permits one incremental attempt on the same task; `accept` advances the ledger; `blocked`, a failed call, or a second rejected attempt skips later tasks and returns `partial: true`. A final read-only grader accounts for every selected step in validated JSON; deterministic code combines it with the full ledger to render all plan rows in `implementation-report.md`, updates authoritative selected-task state, and derives disjoint completed/unresolved result rows. A `partial` grade triggers one bounded reconciliation of only the partial selected rows plus fresh checks and grading; a second partial or any blocked grade returns non-success. The grader applies only the operator request and accepted-plan criteria; inability to rerun an otherwise evidenced command is recorded as a check gap, not promoted into a new requirement. |
 
 `review` always receives a non-empty semantic string. A shaped read-only
@@ -250,8 +250,12 @@ decision; stable attempt labels let `--resume` replay completed calls instead of
 applying accepted tasks again. `plan`'s one loop ends on a declared enum rather
 than on a scan of model prose, and the run journal records whether the critic or
 the round cap stopped it. The operator-clarification round it used to run first
-was removed on the same day: the run no longer stops to ask, and an open decision
-is recorded by the planner as a stated assumption the critic judges.
+was removed on the same day: the loop no longer stops to ask, and an open decision
+is recorded by the planner as a stated assumption the critic judges. The round
+cap is the one operator pause left, added 2026-07-30: a stalled loop retains the
+draft with its open defects and declares a handoff, so the operator accepts the
+last draft or steers a continuation with guidance instead of restarting from
+nothing.
 
 Pipeline maps:
 
@@ -383,6 +387,15 @@ truncated. Structured (non-text) results stay in `result.json`, which already
 pretty-prints them; a run recorded before `result.md` existed is recovered from the
 persisted envelope, so older runs still open.
 
+A run that ends badly and produced **no** prose result — a script returning a
+structured `{ ok: false }` is the common case — gets the same treatment against a
+different command. Its verdict line carries the failure summary and is clipped
+like any other, so the digest and the panel add
+`read the full reason: /workflows status <runId>`, which prints the structured
+result the reason actually lives in. `/workflows result` is deliberately not
+offered there: it refuses a non-prose result, so pointing at it would send the
+operator to a dead end.
+
 `/workflows result` and `/workflows status` accept the short run suffix every
 surface prints (`run #98cc` → `/workflows result 98cc`), `last` for the newest run,
 or a full run id. A short suffix matching more than one run is refused with the real
@@ -417,12 +430,18 @@ invocation therefore blocks for the whole run and there is no concurrent
 `/workflow-stop`; cancel it with the host's own interrupt.
 
 An actionable `awaiting_operator` handoff opens directly in the primary editor
-after Pi becomes idle. There is no workflow/run picker. Multiple handoffs are
-oldest-first and show `Question 1 of N`; answering launches one
-integrity-checked continuation before the next item opens. Escape only closes
-and snoozes the question for the current session. The source run stays waiting,
-and bare `/workflows` reopens it. Only `/workflow-stop` (or its compatibility
-form) cancels a workflow.
+after Pi becomes idle — automatically only for runs this session launched,
+their continuations included. A question left by an earlier session stays in
+its run's evidence until asked for: bare `/workflows` opens the oldest pending
+one project-wide, `/workflow-continue <runId>` a named one. There is no
+workflow/run picker. Multiple handoffs are oldest-first and show
+`Question 1 of N`; answering launches one integrity-checked continuation before
+the next item opens. Escape is an answer, not a postponement: the continuation
+receives the question list with an operator-declined note, keeping any answers
+given before the refusal. A retryable handoff — one whose continuation consumed
+an answer and then failed — never reopens unprompted; the idle pump prints a
+one-line notice (once per session) naming the run, and `/workflows` reopens it.
+Only `/workflow-stop` (or its compatibility form) cancels a workflow.
 
 `/workflow-continue <runId>` collects answers interactively in TUI and RPC.
 `--answer` is the explicit non-interactive path and accepts exactly one
@@ -809,9 +828,10 @@ delivery.
 Static passive workflow `VIEW` closes with `Esc` from the ordinary editor. This
 removes only the last passive help/status/fallback view; active workflow `LIVE`
 stays pinned until terminal state, and persistent/shared status is not cleared.
-Escape inside an operator question similarly dismisses only that question: it
-does not abort an agent, cancel a workflow, mutate source evidence, or consume
-the queue item.
+Escape inside an operator question is an answer, not a dismissal: the run
+continues with a plain-text refusal naming its questions, keeping any answers
+typed before it. It does not abort an agent or cancel a workflow —
+`/workflow-stop` remains the only cancellation path.
 The focused catalog owns the source-to-catalog and catalog-to-close lifecycle
 described above. The shared TUI adapter requests a full host redraw for passive
 open/close, so stale border or bracket glyphs do not remain after
@@ -2025,6 +2045,28 @@ Pi settings → project config → user config, falling back across `agent`, `ta
 then `default`; a per-call `modelRole` does **not** use that purpose fallback,
 because an author who named a tier asked about that tier. `modelRoleResolution`
 continues to be recorded in the request capsule, artifacts, and live display.
+
+**The pre-tier `pi/<role>` namespace.** Before tiers were executed the shipped
+agents wrote their tier as `pi/<role>`; `pi` was never a provider and nothing
+read the value. An agent's **frontmatter** tier in that namespace is read as the
+role it always named, so a catalog copied from an older release resolves through
+the roles table instead of refusing every call as an unresolvable provider. The
+degradation note for an unassigned one carries an extra sentence naming the
+spelling to fix. This is package history being repaired, not a hole in the
+grammar, and it is bounded on both sides: `pi/<token>` where the token names no
+role is an ordinary concrete selector and still fails by name, and a per-call
+`model` / `modelRole` — code written today against the current grammar — still
+refuses with the migration hint rather than being rewritten.
+
+**Running a workflow on your own local model.** The package assigns no role, so
+the shortest path is to change nothing: every bundled agent names a role,
+nothing assigns it, and the child therefore inherits the parent session's model —
+whatever `/model` currently points at, local provider included. Each such child
+records the degradation, which is a statement of fact rather than a fault. To
+make the choice explicit instead of inherited, assign the roles the catalog
+names — `task` and `agent` cover the bundled agents — to your own
+`provider/id` with `/model-roles`, and the resolved model is what `createSession`
+receives.
 
 **Selector grammar.** A token containing `/` is a concrete `provider/id`; a
 slash-free token is a role name looked up in the roles table. A trailing

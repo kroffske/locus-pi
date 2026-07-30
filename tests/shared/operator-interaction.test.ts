@@ -283,6 +283,92 @@ describe("inline operator interaction slot", () => {
     expect(mounted).toEqual([]);
   });
 
+  it("fails the caller when its mounted component is disposed without ever reporting", async () => {
+    // The session-wedge defect. Pi resolves `custom()` only from its own close,
+    // so a component torn down by its owner — the fleet menu's session-scoped
+    // `invalidate()` — used to leave this promise pending forever. The awaiting
+    // caller is a slash-command handler, and Pi's interactive loop awaits the
+    // handler before it re-arms the editor callback, so one stranded request
+    // stopped EVERY later command in the session from being dispatched.
+    const { ui, mounted } = hostWithSingleEditorSlot();
+    const ctx = contextFor(ui, "session-wedge");
+
+    const opening = requestInlineOperatorInteraction<string>(ctx, async () => component());
+    await flush(() => mounted.length === 1);
+
+    mounted[0]?.dispose?.();
+
+    await expect(opening).rejects.toBeInstanceOf(StaleInlineOperatorInteractionError);
+    await expect(opening).rejects.toThrow("disposed before it reported a result");
+
+    // And the slot is usable again: the next command opens normally rather than
+    // queueing behind a request that can never settle.
+    const next = requestInlineOperatorInteraction<string>(ctx, async (_tui, _theme, _keys, done) => {
+      queueMicrotask(() => done("next interaction"));
+      return component();
+    });
+    await expect(next).resolves.toBe("next interaction");
+  });
+
+  it("does not abandon a caller that disposes its own component and then reports", async () => {
+    // The agent viewer's Escape does exactly this, synchronously, and the answer
+    // it reports afterwards must still reach the caller.
+    const { ui, mounted } = hostWithSingleEditorSlot();
+    const ctx = contextFor(ui, "session-dispose-then-report");
+
+    const opening = requestInlineOperatorInteraction<string>(ctx, async (_tui, _theme, _keys, done) => {
+      const self: CustomUiComponent = {
+        render: () => [],
+        invalidate: () => {},
+        handleInput: () => {
+          self.dispose?.();
+          done("reported after disposing");
+        },
+      };
+      return self;
+    });
+    await flush(() => mounted.length === 1);
+    mounted[0]?.handleInput?.("escape");
+
+    await expect(opening).resolves.toBe("reported after disposing");
+  });
+
+  it("does not abandon a caller whose factory replaces its own component mid-mount", async () => {
+    // One `custom()` call may run its factory more than once; the first component
+    // is disposed while the second is still being built. That is a replacement,
+    // not a lost surface, and it must not fail the request.
+    const ui = {
+      notify() {},
+      async custom<T>(factory: CustomUiFactory<T>): Promise<T> {
+        return await new Promise<T>((resolve) => {
+          const done = (value: T): void => resolve(value);
+          void Promise.resolve(factory({ requestRender() {} } as never, {} as never, {} as never, done)).then(
+            () => void Promise.resolve(factory({ requestRender() {} } as never, {} as never, {} as never, done)),
+          );
+        });
+      },
+    };
+    const ctx = contextFor(ui, "session-remount");
+
+    let previous: CustomUiComponent | undefined;
+    const opening = requestInlineOperatorInteraction<string>(ctx, async (_tui, _theme, _keys, done) => {
+      previous?.dispose?.();
+      const self: CustomUiComponent = {
+        render: () => [],
+        invalidate: () => {},
+        handleInput: () => done("answered on the second mount"),
+      };
+      previous = self;
+      return self;
+    });
+
+    await flush(() => previous?.handleInput !== undefined);
+    await Promise.resolve();
+    previous?.handleInput?.("enter");
+
+    await expect(opening).resolves.toBe("answered on the second mount");
+  });
+
   it("keeps ordinary sequential interactions unchanged", async () => {
     const { ui } = hostWithSingleEditorSlot();
     const ctx = contextFor(ui, "session-3");

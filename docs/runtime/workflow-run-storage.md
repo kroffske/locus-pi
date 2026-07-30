@@ -43,33 +43,58 @@ machine records beside it.
 .locus/runtime/workflows/<runId>/logs/
   README.md            table of contents: workflow, status, task, result,
                        the budget this run was held to beside the spend its
-                       evidence can measure, the document list in creation
-                       order, and pointers to `../files/` and the machine records
+                       evidence can measure, the document list with each
+                       document's revision chain, the Logs section, and
+                       pointers to `../files/` and the machine records
   task.md              the operator task, verbatim as the workflow received it
   result.md            the run's terminal text (present when the result is prose)
-  01-scout-context.md              captured texts, in creation order:
-  02-planner-round-1-plan.md       <NN>-<author>-<artifact name>, where the
-  03-critic-round-1-plan-critique.md     author is the workflow's own stage
-                                   label ("planner round 1") and the artifact
-                                   extension is preserved — `.md` is appended
-                                   only when the name carries none
+  context.md           one file PER DOCUMENT — an artifact name is one document,
+  plan.md              and the file holds its NEWEST revision. A plan redrafted
+  plan-critique.md     six times is one `plan.md`, not six numbered copies; the
+                       artifact extension is preserved and `.md` is appended
+                       only when the name carries none
 ```
 
-The ordinal prefix lives here and only here: order and time are properties of a
-journal, not of a file an author named. What is captured is every agent's final
-ANSWER, every text the script published, and every text a continuation consumed
-— never the files under `files/`.
+An artifact name is a document identity, and a run that writes the same name
+again is updating that document, not creating a new one. The report projects
+that cycle: the file under the name carries the last revision, and the README's
+`## Documents` list shows every revision — who wrote it, at which stage, on
+which model — each linking the verbatim bytes in the machine store. Nothing is
+lost and nothing is duplicated: round 2 of a six-round plan is one click away,
+but only the current plan occupies a file. The README's `## Logs` section links
+the run's `journal.ndjson` — one line per event, tagged with its agent, stage
+and round — and every child transcript by its stage label.
+
+What becomes a document is every agent's final ANSWER, every text the script
+published, and every text a continuation consumed — never the files under
+`files/`, which already exist under the names their authors gave them.
 
 A JSON document (a critic's verdict, any schema-shaped answer) is rendered as
 Markdown here — a flat object becomes a key list with numbered items, anything
 nested stays pretty-printed inside a fence — because this folder is for
 reading. The verbatim JSON bytes remain in the artifact store below.
 
-Documents published by the script itself use the author `workflow`; documents
-consumed from a previous run (continuations) use `input`. Both directories are
-held to the artifact store's path discipline: the run id must be a safe
-component and no element of the chain below the physical project root may be a
-symlink, checked before anything — including the directory itself — is created.
+The list also says which document is the run's answer. The one whose newest
+revision equals the run's terminal text is marked **final result**; a run that
+returned none — a failed or stalled one — says so in place of that marker,
+because its last draft is working material and reading it as a result is the
+mistake the marker exists to prevent. A run that did not complete additionally
+carries a `## Why this run ended` section with the full failure reason rendered
+from the structured result, since every live surface clips that text.
+
+Documents published by the script itself use the author `workflow`; revisions
+consumed from a previous run (continuations) read `transferred from run <id>`.
+`README.md`, `task.md` and `result.md` are runner-owned names, but each is
+reserved only when the report actually writes it — a workflow that publishes its
+own `result.md` while returning a structured result keeps that name. Every
+record carrying the task's name folds into `task.md`, the transferred copy a
+continuation consumed included, so a continuation cannot grow a second
+byte-identical task document. A document that still collides with a claimed name
+takes a `-2` suffix instead of overwriting. Both run directories are held to
+the artifact store's path discipline by `workflow-run-layout.ts`: the run id
+must be a safe component and no element of the chain below the physical project
+root — `files/` and `logs/` alike — may be a symlink, checked before anything,
+including the directory itself, is created.
 
 The `## Budget` section lists all seven axes of the applied
 `DEFAULT_WORKFLOW_BUDGET` beside what this run actually spent. Only some of that

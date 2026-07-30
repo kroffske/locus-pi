@@ -104,9 +104,10 @@ describe("workflow run working directory", () => {
     assert.deepEqual(readdirSync(filesDir), ["plan.md"]);
     assert.equal(readFileSync(path.join(filesDir, "plan.md"), "utf8"), "the plan body");
 
-    // Auto-captured material is numbered, and it is somewhere else.
+    // Auto-captured material is somewhere else, one document per artifact name;
+    // the file the agent wrote is never projected into it.
     const logNames = readdirSync(workflowRunLogsDir(root, result.runId)).sort();
-    assert.deepEqual(logNames, ["01-scout-review.md", "README.md", "result.md"]);
+    assert.deepEqual(logNames, ["README.md", "result.md", "review.md"]);
     assert.ok(!logNames.includes("plan.md"));
   });
 

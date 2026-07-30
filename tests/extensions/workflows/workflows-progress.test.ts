@@ -864,6 +864,29 @@ describe("workflow progress widget", () => {
     );
   });
 
+  it("points a failed run with no prose result at the command that prints the reason", () => {
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 60 } };
+    const component = new WorkflowProgressComponent(tui, {}, "plan", "20260730-162453-000e");
+
+    component.finish({
+      ok: false,
+      result: {
+        ok: false,
+        stoppedBy: "round-cap",
+        summary: "plan was not accepted within 4 drafting round(s)",
+        unresolvedRows: [`S1: ${"the find command pattern may miss files. ".repeat(5)}`],
+      },
+      runDir: ".locus/runtime/workflows/20260730-162453-000e",
+    });
+
+    const narrow = component.render(60).join("\n");
+    // The verdict line is clipped to the terminal, so the panel has to name where
+    // the whole reason is. Without this the operator's only lead was `saved:`.
+    expect(narrow).toContain("read the full reason: /workflows status 000e");
+    expect(narrow).not.toContain("/workflows result");
+    for (const line of narrow.split("\n")) expect(line.length).toBeLessThanOrEqual(60);
+  });
+
   it("chooses a deterministic semantic completion without exposing arbitrary JSON", () => {
     const cases: Array<{ result: unknown; expected: string }> = [
       {

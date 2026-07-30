@@ -190,9 +190,19 @@ filesystem access.
 
 ## Model
 
-Every stage pins `openai-codex/gpt-5.6-luna` (`STAGE_MODEL` in the entry file). A
-correctly decomposed pipeline finishes on a weak model; the pin keeps that claim
-testable instead of leaning on whichever model the session happens to use.
+No stage names a provider. The section authoring and repair stages run on the
+`agent` tier (`AUTHOR_MODEL_ROLE` in the entry file) and the draft stage on
+`smol` (`DRAFT_MODEL_ROLE`), so `/model-roles` decides what each one means; a
+role nothing assigns runs on the current session model and the run evidence
+records the degradation.
+
+The claim this pipeline exists to demonstrate — a correctly decomposed workflow
+finishes on a weak model — is a claim about a run, not about a constant in a
+file. The run that established it used `openai-codex/gpt-5.6-luna` for the
+authoring stages. To reproduce it rather than simply execute the pipeline,
+assign `AGENT` to that model; to test the claim against your own weak model,
+assign it there instead. The former spelling froze one vendor into the script
+and refused the call by name for every reader who did not have it.
 
 ## Known sharp edges
 

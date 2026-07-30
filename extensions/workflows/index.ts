@@ -73,7 +73,7 @@ export default function workflows(pi: ExtensionAPI): void {
     void Promise.resolve()
       .then(start)
       .then((result) => {
-        if (result.status === "invalid" || result.status === "failed") {
+        if (result.status === "invalid" || result.status === "failed" || result.status === "deferred") {
           presentWorkflowHandoffPumpResult(ctx, result);
         }
       })

@@ -89,6 +89,18 @@ export function presentWorkflowHandoffPumpResult(ctx: ExtensionContext, result: 
         ),
       );
       return;
+    case "deferred":
+      // Not a warning: the pump deliberately opened nothing. The previous
+      // continuation consumed an answer and failed, so re-asking is the
+      // operator's call, and this line says where that call lives.
+      setOperatorWidget(ctx, "workflows", {
+        type: "VIEW",
+        subject: "Workflow handoff",
+        primary: `Run ${result.runId} still awaits an operator answer; its previous continuation failed.`,
+        metadata: ["The question is not reopened automatically after a failed continuation."],
+        controls: [`Reopen: /workflows · or /workflow-continue ${result.runId} --answer <text>`],
+      });
+      return;
     case "invalid":
     case "failed":
       setOperatorWidget(

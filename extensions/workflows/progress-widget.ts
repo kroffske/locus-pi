@@ -338,6 +338,12 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       const command = `read the full result: /workflows result ${shortWorkflowRunId(this.runId)}`;
       lines.push(this.#fg("dim", truncate(command, width)));
       lines.push(this.#fg("dim", truncate(`result: ${this.done.resultTextPath}`, width)));
+    } else if (this.done.status !== "completed") {
+      // Same rule for the run that ended badly with no prose result: the clipped
+      // verdict line above is all the operator got, and the reason lives in the
+      // structured result that only this command prints.
+      const command = `read the full reason: /workflows status ${shortWorkflowRunId(this.runId)}`;
+      lines.push(this.#fg("dim", truncate(command, width)));
     }
     // Honest pointer to the saved run on disk (T-188 W5, fix-candidate #8).
     if (this.done.runDir !== undefined) lines.push(this.#fg("dim", truncate(`saved: ${this.done.runDir}`, width)));

@@ -34,7 +34,11 @@ export function createAgentFleetMenuController(agentSessionAuthority: AgentSessi
   const invalidateFleetMenuOwnership = (): void => {
     fleetMenuEpoch += 1;
     currentFleetMenuOwner = undefined;
-    for (const component of fleetFocusComponents) component.dispose();
+    // `close()`, not `dispose()`: a session reset that only disposed the live
+    // menu left Pi holding a dead surface in its single editor slot and the
+    // `/ps` handler awaiting a promise nobody could settle — which stopped Pi's
+    // input loop from dispatching any later command for the rest of the session.
+    for (const component of fleetFocusComponents) component.close();
     fleetFocusComponents.clear();
     fleetMenuState.setFocused(false);
     fleetMenuState.setVisibleRows([]);

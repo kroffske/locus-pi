@@ -44,6 +44,24 @@ export class SupersededInlineOperatorInteractionError extends StaleInlineOperato
   }
 }
 
+/**
+ * The component was disposed by its owner and never reported a result.
+ *
+ * Pi resolves a `custom()` call only from its own `close`, so a component torn
+ * down any other way — a session-scoped `invalidate()`, a re-entrant open —
+ * leaves that promise pending forever. The awaiting caller is a slash-command
+ * handler, and Pi's interactive loop awaits the handler before it re-arms the
+ * editor callback, so one stranded request stops EVERY later command in the
+ * session from being dispatched at all. Failing the caller here is what keeps a
+ * dropped surface costing its own command instead of the session's keyboard.
+ */
+export class AbandonedInlineOperatorInteractionError extends StaleInlineOperatorInteractionError {
+  constructor() {
+    super("Inline operator interaction was disposed before it reported a result.");
+    this.name = "AbandonedInlineOperatorInteractionError";
+  }
+}
+
 const queuesByOwner = new WeakMap<object, Map<string, InlineInteractionQueue>>();
 
 /**
@@ -96,16 +114,20 @@ export async function requestInlineOperatorInteraction<T>(
       queues.delete(generation.id);
     }
   };
-  let supersede!: () => void;
-  const superseded = new Promise<never>((_resolve, reject) => {
-    supersede = () => {
+  // One failure channel with two causes. Both end this request's ownership of
+  // the slot and both reject the caller; only the wording differs.
+  let failRequest!: (error: StaleInlineOperatorInteractionError) => void;
+  const failed = new Promise<never>((_resolve, reject) => {
+    failRequest = (error) => {
       ownsSlot = false;
-      reject(new SupersededInlineOperatorInteractionError());
+      reject(error);
     };
   });
   // Nothing observes this until the race below, and an unobserved rejection
   // would surface as an unhandled promise.
-  superseded.catch(() => {});
+  failed.catch(() => {});
+  const supersede = (): void => failRequest(new SupersededInlineOperatorInteractionError());
+  const abandon = (): void => failRequest(new AbandonedInlineOperatorInteractionError());
   queue.pending += 1;
 
   // Waiting for the slot stays bounded by the previous holder's own lifetime,
@@ -154,14 +176,15 @@ export async function requestInlineOperatorInteraction<T>(
     // close path would restore the editor over whatever replaced it. So the
     // superseded caller is failed here instead, and the stale host promise is
     // left pending.
+    const mount: { current?: object; inFlight: number } = { inFlight: 0 };
     try {
       return await Promise.race([
         custom.call(
           ctx.ui,
-          wrapFactoryDisposal(factory, releaseSlot, takeSlot, () => ownsSlot),
+          wrapFactoryDisposal(factory, releaseSlot, takeSlot, () => ownsSlot, abandon, mount),
           INLINE_OPERATOR_INTERACTION_OPTIONS,
         ) as Promise<T>,
-        superseded,
+        failed,
       ]);
     } catch (error) {
       // A factory that rejects never mounts, but the host still runs its own
@@ -279,10 +302,20 @@ function wrapFactoryDisposal<T>(
   releaseSlot: () => void,
   takeSlot: () => void,
   ownsSlot: () => boolean,
+  abandon: () => void,
+  /** What this request currently has on screen, and whether a replacement is on
+   *  its way. One `custom()` call can run its factory more than once — the host
+   *  retries a mount, and a caller may replace its own component — so only the
+   *  disposal of the LAST mounted component, with no further mount in flight,
+   *  means the request has lost its surface. */
+  mount: { current?: object; inFlight: number },
 ): CustomUiFactory<T> {
   return async (tui, theme, keybindings, done) => {
+    mount.inFlight += 1;
     let mounted: { dispose?: () => void } | undefined;
+    let reported = false;
     const fencedDone = (value: T): void => {
+      reported = true;
       if (!ownsSlot()) {
         // Nothing is retained beyond this point: the component's own timers and
         // listeners are exactly what would call back again.
@@ -291,7 +324,16 @@ function wrapFactoryDisposal<T>(
       }
       done(value);
     };
-    const component = await factory(tui, theme, keybindings, fencedDone);
+    let component: Awaited<ReturnType<CustomUiFactory<T>>>;
+    try {
+      component = await factory(tui, theme, keybindings, fencedDone);
+    } catch (error) {
+      // A factory that never produced a component leaves nothing on screen, and
+      // an in-flight count that is never cleared would disable the abandon guard
+      // for the rest of this request.
+      mount.inFlight -= 1;
+      throw error;
+    }
     const dispose = component.dispose?.bind(component);
     let disposed = false;
     component.dispose = () => {
@@ -303,9 +345,21 @@ function wrapFactoryDisposal<T>(
         // Pi can dispose a replaced session component without resolving the
         // old custom() promise. Once disposed, it no longer owns editor focus.
         releaseSlot();
+        // Releasing the slot is not the same as ending the request, and a
+        // component is allowed to dispose itself and then report — the agent
+        // viewer's Escape does exactly that, synchronously. One microtask later
+        // a silent disposal is no longer a report that is on its way; it is a
+        // request nobody can ever settle, so the caller is failed instead of
+        // left awaiting a surface that is already gone.
+        queueMicrotask(() => {
+          if (reported || mount.inFlight > 0 || mount.current !== component) return;
+          abandon();
+        });
       }
     };
     mounted = component;
+    mount.current = component;
+    mount.inFlight -= 1;
     takeSlot();
     return component;
   };

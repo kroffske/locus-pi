@@ -43,8 +43,16 @@ export function createWorkflowOperatorHandoffService(
           const state = projectWorkflowHandoffState(projectRoot, read.handoff);
           switch (state.status) {
             case "pending":
+              items.push({ status: "actionable", handoff: actionableWorkflowHandoff(read.handoff), state: "pending" });
+              break;
             case "retryable":
-              items.push({ status: "actionable", handoff: actionableWorkflowHandoff(read.handoff) });
+              // Answerable again, but only on an explicit operator ask: its previous
+              // continuation consumed an answer and then failed or was cancelled.
+              items.push({
+                status: "actionable",
+                handoff: actionableWorkflowHandoff(read.handoff),
+                state: "retryable",
+              });
               break;
             case "running":
               items.push({

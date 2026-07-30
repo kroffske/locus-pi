@@ -34,12 +34,12 @@ this workflow's questions.` — through the same continuation a typed reply
   there, so a path a workflow prints in a question is a path that can be opened.
   A read-only child is told where the directory is and is not asked to create
   anything in it.
-  Auto-captured material moved with it: the run's ordered journal — the task,
-  every agent answer, published and consumed texts, the budget-versus-spend
-  table — is now written to `.locus/runtime/workflows/<runId>/logs/` instead of
-  the numbered mirror under `<project root>/.locus-pi/<runId>/`, which is no
-  longer written or read. Ordinal prefixes live in that journal only, because
-  order is a property of a journal and not of a file an author named.
+  Auto-captured material moved with it: the run report — `task.md`,
+  `result.md`, the current revision of every published document, and the
+  `README.md` that indexes revisions, budget and logs — is now written to
+  `.locus/runtime/workflows/<runId>/logs/`, and the mirror under
+  `<project root>/.locus-pi/<runId>/` is no longer written or read. Write order
+  and revision history are recorded in the README, not in file names.
 
 - **Every child agent session is now saved as a readable HTML render beside its
   JSONL transcript**, under the same base name in the call's transcript
@@ -51,11 +51,161 @@ this workflow's questions.` — through the same continuation a typed reply
   same envelope. `pi --export <transcript>.jsonl <out>.html` re-renders any saved
   transcript afterwards.
 
+- **The run report is a document-update cycle, not a pile of numbered copies.**
+  `.locus-pi/<runId>/` used to hold one `NN-<author>-<name>` file per artifact
+  write, so a six-round plan run ended with six `plan.md` copies under six
+  different names, and the current plan was a filename guess. An artifact name is
+  one document now: the report writes ONE file per name holding its newest
+  revision (`plan.md` is the plan as the run left it, including on a stalled or
+  failed run), and the README's `## Documents` list shows every revision — who
+  wrote it, at which stage, on which model — each linking the verbatim bytes in
+  the machine store, so no history is lost and none of it is duplicated. A
+  revision transferred from a previous run (a continuation input) is part of the
+  same chain, which is what keeps a continuation's questions and answers from
+  reappearing as fresh documents. The README also grows a `## Logs` section:
+  the run's `journal.ndjson` — one line per event, tagged with its agent, stage
+  and round — and every child transcript linked by its stage label, so the raw
+  ndjson evidence is one click away instead of a directory dive.
+  The report also says which document is the answer: the one whose newest
+  revision is the run's terminal text is marked **final result**, and a run that
+  produced none says so plainly rather than leaving a rejected draft to be read
+  as one. `README.md`, `task.md` and `result.md` stay runner-owned names — but
+  only when the report actually writes them, so a workflow that publishes its own
+  `result.md` keeps the name; a document that still collides takes a `-2` suffix
+  instead of overwriting. Every copy of the operator task folds into `task.md`,
+  including the transferred one a continuation consumes, which retires the
+  byte-identical `task-2.md` that used to lead a continuation's document list.
+  A run that did not complete gets a `## Why this run ended` section carrying
+  the full failure reason — the structured result rendered as Markdown — because
+  every live surface clips that text and a structured result otherwise left the
+  defects readable only inside `result.json`.
+
+- **`plan`'s round cap hands the stall to the operator instead of burning the
+  run, and its critic ratchets instead of relitigating.** A live run showed the
+  failure this fixes: a critic on a weak model returned a different set of
+  plausible objections every round, hit the cap, and the operator was left with
+  a dead `ok:false` run — no plan, no reusable state, restart from nothing.
+  Two changes close it. Each round's critic now receives the defects it reported
+  on the previous draft and judges those first — closed, or answered under
+  `## Critique responses` with evidence — and a NEW defect must meet the
+  existing implementer-would-go-wrong bar; reopening an unflagged aspect of an
+  unchanged draft is named in the prompt as the way the loop fails without
+  producing a plan. And reaching `MAX_PLAN_ROUNDS` without an acceptance now
+  retains the stalled state (`task.md`, `context.md`, the last `plan.md`,
+  `unresolved-defects.md`) and declares an operator handoff with one text
+  question — a select offering `accept last draft` with free text allowed, so a
+  near-miss on a typed phrase cannot silently become drafting guidance. All four
+  refs are published together immediately before the handoff, the task included
+  even though the run already published it: the terminal artifact projection
+  keeps only the newest 20 outputs, and a stage re-asked on a schema rejection
+  writes an artifact per attempt, so a ref published at the start could be
+  evicted and fail the run on its last step after paying for every round.
+  Answering `accept last draft` takes the retained draft as the plan —
+  the operator overruling the critic, recorded as such — or answer with drafting
+  guidance and the continuation run redrafts from the retained state without
+  re-scouting, with the guidance outranking earlier defects for planner and
+  critic alike. A draft nobody accepted still never flows onward on its own;
+  what changed is who ends the stall.
+
+### Fixed
+
+- **The `plan` run report no longer credits the critique stage with documents it
+  never produced.** The round-cap handoff republishes the task, the scout's map,
+  the last draft and the open defects so all four are the run's newest outputs,
+  and `publishArtifact` tags whichever stage happens to be current — which filed
+  the scout's map in the reader's copy as `workflow · critique-plan`. The
+  continuation's accept path was worse: it publishes outside the drafting loop
+  entirely, so the accepted plan read as an anonymous workflow document rather
+  than the operator's recorded decision. Both publish sites now name their own
+  stage, `await-operator` and `accept-draft`, and both are declared in
+  `meta.phases` and drawn on the pipeline diagram. Neither is on the path of a
+  run that ends normally.
+
+- **Answered handoff questions are not re-asked unprompted after their
+  continuation fails.** When a continuation run consumed an operator's answers
+  and then failed or was cancelled, the handoff became actionable again and the
+  idle pump reopened the same questions in the editor automatically — on top of
+  the failure the operator actually needed to read, and swallowing the keyboard
+  (a mounted question owns the single editor slot, so `/ps` and every other
+  command cannot even be typed until Escape). Such a `retryable` handoff now
+  opens only on an explicit ask — bare `/workflows` or
+  `/workflow-continue <runId>` — and the unprompted pump instead shows a
+  one-line notice (once per session) naming the run and how to reopen it.
+  Never-answered handoffs keep their existing behavior: the oldest pending
+  question still opens by itself when Pi is idle.
+
+- **One dropped surface no longer takes the session's keyboard with it.** Pi
+  resolves a `custom()` interaction only from its own close callback, so a
+  component torn down any other way — the agent fleet's session-scoped
+  `invalidate()`, which runs on every session start, shutdown and reload — left
+  that promise pending forever. The awaiting caller is a slash-command handler,
+  and Pi's interactive loop awaits the handler before it re-arms the editor
+  callback, so one stranded `/ps` stopped **every** later command in the session
+  from being dispatched: the editor still accepted text and Enter still cleared
+  it, and nothing ran. A question mounting over the dead surface restored the
+  editor and made the session look healthy again, which is why this read as
+  "`/ps` stops working after the clarification questions". Two changes close it:
+  a component disposed without ever reporting now fails its caller with a stale
+  interaction instead of leaving it awaiting, and the fleet menu is closed
+  through its own `done` — the way Escape closes it — so Pi hands the editor
+  back. A component that disposes itself and then reports, which the agent
+  viewer's Escape does, is unaffected.
+
+- **A failed run now says which command prints the reason it failed.** Both
+  finished-run surfaces cap what they print — the chat digest at 160 characters
+  because it enters model context, the panel at the terminal width — and both
+  already named `/workflows result` for a run whose result is prose. A run that
+  ended badly with a structured `{ ok: false }` result had no such line: the
+  operator was left with a sentence fragment ending in `...` and a journal path,
+  and the defects that explain the failure were only in `result.json`. Both
+  surfaces now add `read the full reason: /workflows status <runId>` for any run
+  that did not complete without prose to open. `/workflows result` is not
+  offered there, because it refuses a non-prose result and would be a dead end.
+
+- **A stale agent catalog no longer fails every workflow step closed.** Before
+  model tiers were executed, the shipped agents wrote their tier as
+  `pi/<role>` — `pi` was never a provider and nothing read the value. Once a
+  slash started meaning a real provider, any copy of that catalog still on disk
+  (a user-level `~/.agents/agents/`, a project `.agents/` vendored from an older
+  release) turned every child call into
+  `Agent "default" frontmatter model "pi/task" could not be used`, with no child
+  created. An agent's frontmatter tier in that namespace is now read as the role
+  it always named, so it resolves through the model-roles table like any bare
+  tier: assigned, it runs the assigned model; unassigned, it inherits the
+  session model and the recorded degradation carries the extra sentence naming
+  the spelling to fix. The repair is bounded to package history and does not
+  weaken the fail-closed rule: `pi/<not-a-role>` is still an unresolvable
+  provider and still refuses by name, and a per-call `model` / `modelRole`
+  written today against the current grammar refuses with the migration hint
+  rather than being silently rewritten.
+
+### Changed
+
+- **The packaged `plan` → `plan-implement` pair no longer names a provider.**
+  Every stage in both workflows pinned the concrete model
+  `openai-codex/gpt-5.6-luna:medium`, which fails the stage by name — with no
+  child created — on every host that does not have that exact model, so the only
+  runnable curated pair in the package was runnable for one vendor's customers.
+  Both now declare `modelRole: "agent"`: assign `AGENT` in `/model-roles` to
+  choose the model and its reasoning effort, or assign nothing and every stage
+  runs on the current session model with the degradation recorded in the run
+  evidence, the same as any other unassigned tier. Concrete pins remain the right
+  option for a workflow you keep to yourself, and the fail-closed behavior of a
+  concrete selector is unchanged. Recorded runs of either workflow are not
+  replayable across this change: the tier is part of the request key, so a
+  `--resume` of a run recorded before it re-runs its calls for real.
+
+  The repository-only `excalidraw-pipeline` reference is converted the same way —
+  its authoring and repair stages move from `openai-codex/gpt-5.6-luna` to the
+  `agent` tier, joining the draft stage already on `smol`, so no shipped or
+  referenced workflow names a provider. The acceptance claim that pin carried is
+  a claim about a run, so it moves to that reference's README, which now names
+  the model the recorded run used and how to assign it.
+
 - **Workflow model effort is now executed, not merely displayed.** A concrete
   `provider/id:level` selector passes both the resolved model and `level` to the
-  Pi child session. The packaged `plan` → `plan-implement` pair now pins every
-  stage to `openai-codex/gpt-5.6-luna:medium`, so a missing model fails by name
-  instead of silently substituting the parent session. The planning safety cap
+  Pi child session, and a missing model fails by name instead of silently
+  substituting the parent session. The planning safety cap
   is now six rounds after a real external inventory plan exhausted four while
   still carrying two repairable verification defects. The same live run exposed
   a second boundary: all per-step reviews could pass while the combined result
