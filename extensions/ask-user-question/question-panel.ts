@@ -9,8 +9,8 @@
  */
 
 import { Input } from "@earendil-works/pi-tui";
-import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
+import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import {
   CHECKED_PREFIX,
   DONE_OPTION,
@@ -32,7 +32,7 @@ import {
   isRight,
   isSpace,
   isUp,
-} from "../_shared/operator-keys.js";
+} from "../_shared/operator/operator-keys.js";
 
 export interface AskQuestionComponentArgs {
   tui: CustomUiTui;

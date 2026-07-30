@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderOperatorBlock, type OperatorBlock } from "../../../extensions/_shared/operator-ui.js";
+import { renderOperatorBlock, type OperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "../../../extensions/workflows/catalog-viewer.js";
 import {

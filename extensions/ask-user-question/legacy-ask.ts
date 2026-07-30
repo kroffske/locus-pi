@@ -7,13 +7,13 @@
  * declared sensitivity, and recorded as a decision exactly once.
  */
 
-import { emitDevEvent } from "../_shared/event-bus.js";
-import { recordDecision, stableDecisionId } from "../_shared/human-control.js";
-import { requestOperatorInput } from "../_shared/operator-input.js";
-import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/pi-api.js";
-import { errorResult, textResult } from "../_shared/pi-api.js";
-import { redactForSensitivity } from "../_shared/redaction.js";
-import { errorMessage } from "../_shared/error-text.js";
+import { emitDevEvent } from "../_shared/runtime/event-bus.js";
+import { recordDecision, stableDecisionId } from "./human-control.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../_shared/host/pi-api.js";
+import { redactForSensitivity } from "../_shared/host/redaction.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import type { LegacyAskParams, OmpAskParams } from "./ask-tool.js";
 import { inputTitle } from "./prompt-text.js";
 import type { OmpQuestion } from "./question-prompt.js";

@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 /**
  * The tracked `plan-implement` example. The plan arrives as bytes the host

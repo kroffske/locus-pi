@@ -8,7 +8,7 @@ import {
   resolveWorkflowTarget,
   runWorkflowScript,
   WorkflowNameNotFoundError,
-} from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createHarness } from "../../test-harness.js";
 
 describe("workflow target physical confinement", () => {

@@ -14,7 +14,7 @@ import {
   projectWorkflowDisposition,
   workflowDispositionForCompletion,
   writeWorkflowResultJson,
-} from "../../../extensions/_shared/workflow-result.js";
+} from "../../../extensions/workflows/runtime/workflow-result.js";
 
 describe("workflow result JSON boundary", () => {
   it("projects new dispositions strictly while preserving only absent legacy envelopes", () => {

@@ -6,17 +6,17 @@
  * the `-ui` modules.
  */
 
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator-status.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator/operator-status.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import {
   type ModeState,
   isInPlanMode,
   makeModeAwareEditorClass,
   modeStatusLabel,
   PLAN_MODE_COLOR,
-} from "../_shared/mode-state.js";
+} from "./mode-state.js";
 import type { PromptShelfKind } from "./command-parser.js";
 
 export function setPlanOperatorBlock(

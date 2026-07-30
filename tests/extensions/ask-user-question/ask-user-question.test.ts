@@ -6,9 +6,9 @@ import askUserQuestion from "../../../extensions/ask-user-question/index.js";
 import {
   StaleInlineOperatorInteractionError,
   SupersededInlineOperatorInteractionError,
-} from "../../../extensions/_shared/operator-interaction.js";
-import { sessionJsonlPath } from "../../../extensions/_shared/files.js";
-import { JsonlSessionStore } from "../../../extensions/_shared/session-core.js";
+} from "../../../extensions/_shared/operator/operator-interaction.js";
+import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
+import { JsonlSessionStore } from "../../../extensions/_shared/runtime/session-core.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 describe("ask-user-question decision journal", () => {

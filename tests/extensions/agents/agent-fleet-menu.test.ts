@@ -7,16 +7,16 @@ import {
   renderFleetMenuRows,
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
-} from "../../../extensions/_shared/fleet-menu.js";
-import { agentLiveStore, type AgentLiveStatus } from "../../../extensions/_shared/agent-sdk-host.js";
+} from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { agentLiveStore, type AgentLiveStatus } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveChildRowId,
   workflowAgentLiveRowId,
   workflowGroupLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
-import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
 import {
   installWorkflowProgress,
   type WorkflowProgressComponent,

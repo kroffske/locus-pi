@@ -4,11 +4,18 @@
  * plus the `/agent run` slash wrapper that installs the progress panel around it.
  * The `task`/`spawn_agent` tool is the other client (see task-tool.ts).
  */
-import { createAgentRunRequest, executeAgentRunBoundary, type ApprovalTier } from "../_shared/agent-runner.js";
-import { agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-sdk-host.js";
-import { formatAgentFinishedEventLine, formatAgentStartedEventLine } from "../_shared/agent-live-panel.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/command-ui.js";
-import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
+import {
+  createAgentRunRequest,
+  executeAgentRunBoundary,
+  type ApprovalTier,
+} from "../_shared/agent-runtime/agent-runner.js";
+import { agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-runtime/agent-sdk-host.js";
+import {
+  formatAgentFinishedEventLine,
+  formatAgentStartedEventLine,
+} from "../_shared/agent-runtime/agent-live-panel.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
+import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
 import {
   formatAssignment,
   loadModelRolesState,
@@ -16,12 +23,12 @@ import {
   malformedRoleAssignmentNote,
   unassignedRoleNote,
   type ModelRoleResolution,
-} from "../_shared/model-settings.js";
-import { resolveWorkflowModel } from "../_shared/workflow-model-resolve.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import type { AgentDefinition } from "../_shared/types.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
-import { errorMessage } from "../_shared/error-text.js";
+} from "../_shared/model/model-settings.js";
+import { resolveWorkflowModel } from "../_shared/model/workflow-model-resolve.js";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
 import { resolveAgentSelection } from "./catalog.js";
 import type { CommandApprovalTier } from "./command-parser.js";

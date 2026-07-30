@@ -5,14 +5,14 @@
  * block construction in `prompt-shelf-ui.ts`.
  */
 
-import type { CommandArgs, ExtensionContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
+import type { CommandArgs, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import {
   PromptCommandTargetError,
   readPromptCommand,
   resolvePromptCommandTarget,
   writePromptCommand,
-} from "../_shared/prompt-command-store.js";
+} from "../_shared/project/prompt-command-store.js";
 import { parsePromptShelfCommand, type PromptShelfKind, type PromptShelfTarget } from "./command-parser.js";
 import { setPromptShelfOperatorBlock } from "./operator-surface.js";
 import {

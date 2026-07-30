@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import todoContext from "../../../extensions/todo-context/index.js";
-import { sharedState } from "../../../extensions/_shared/state.js";
+import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 /**
@@ -19,9 +19,9 @@ describe("todo-context command surfaces and op errors", () => {
   const tempRoots: string[] = [];
 
   beforeEach(() => {
-    sharedState.todos = [];
-    sharedState.todoContext = null;
-    sharedState.todoAutoContinue = false;
+    todoStateCache.phases = [];
+    todoStateCache.context = null;
+    todoStateCache.autoContinue = false;
     delete process.env.LOCUS_PI_SESSION_STORE;
   });
 

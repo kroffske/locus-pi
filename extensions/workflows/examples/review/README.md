@@ -15,15 +15,20 @@ that was dismissed with Escape.
 A continuation supplies the operator's answers as ordinary text and attaches
 exactly `intent.md` plus `clarification-questions.md` through the workflow
 host's closed `continuation` field. The runtime verifies and copies both
-same-origin refs before workflow code starts. The entry then proves that their
-persisted source target was the Package workflow named `review` in
-`prepare-clarification`, persists the answers, and runs the review.
+same-origin refs — projection membership, digest and size — before workflow code
+starts. Since 2026-07-29 the entry no longer re-derives that proof, and no longer
+asserts that their persisted source target was the Package workflow named `review`
+in `prepare-clarification`: it requires exactly the two named references and reads
+them. The accepted cost is that a run can start from clarification artifacts a
+different run produced; the operator picks the source run through the closed
+`continuation` control, the host verifies what they picked, and re-running with the
+right source fixes it.
 
 Continuation never locates an artifact by run id plus a conventional filename.
 The caller supplies the complete `{ runId, artifactId, name, sha256 }`
-references returned by the paused call. Matching names and a successful source run
-are insufficient: runtime-verified source target, artifact kind, and stage must
-also match the prepare contract. The workflow declares question content, while
+references returned by the paused call, and a reference the source run never
+projected — or bytes whose digest no longer matches — is refused by the host
+before the module starts. The workflow declares question content, while
 the generic host owns UI, FIFO ordering, claim state, and continuation launch;
 there is no review-specific UI or result protocol.
 

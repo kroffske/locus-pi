@@ -8,10 +8,10 @@
  * pump outcome gets. Pure block construction stays in `operator-ui.ts`.
  */
 
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator-status.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator/operator-status.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import type { WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";
 import { assertNever, workflowWarningBlock } from "./operator-ui.js";
 import { renderMainWorkflowStatus } from "./workflow-transcript.js";

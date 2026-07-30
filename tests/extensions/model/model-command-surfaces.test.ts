@@ -9,7 +9,7 @@ import {
   buildModelRolesState,
   getModelRolesConfigPaths,
   loadModelRolesState,
-} from "../../../extensions/_shared/model-settings.js";
+} from "../../../extensions/_shared/model/model-settings.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const ENTER = "\r";

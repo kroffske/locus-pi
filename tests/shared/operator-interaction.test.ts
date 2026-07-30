@@ -4,8 +4,8 @@ import {
   requestInlineOperatorInteraction,
   StaleInlineOperatorInteractionError,
   SupersededInlineOperatorInteractionError,
-} from "../../extensions/_shared/operator-interaction.js";
-import type { CustomUiComponent, CustomUiFactory, ExtensionContext } from "../../extensions/_shared/pi-api.js";
+} from "../../extensions/_shared/operator/operator-interaction.js";
+import type { CustomUiComponent, CustomUiFactory, ExtensionContext } from "../../extensions/_shared/host/pi-api.js";
 
 /**
  * Models Pi's interactive host faithfully in the one respect that matters here:

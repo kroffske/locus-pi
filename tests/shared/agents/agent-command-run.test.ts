@@ -2,9 +2,12 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentLivePanel } from "../../../extensions/_shared/agent-live-panel.js";
-import type { AgentLiveRow, SdkAgentSessionEventLike } from "../../../extensions/_shared/agent-sdk-host.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import { AgentLivePanel } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
+import type {
+  AgentLiveRow,
+  SdkAgentSessionEventLike,
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, runTool, type Harness } from "../../test-harness.js";
 
 // T-188 W2: `/agent run` no longer uses a replacement session. It is a client of
@@ -109,7 +112,7 @@ function mockSdkSession(
 // assertions and production code share one agentLiveStore instance.
 async function loadAgents() {
   const { default: agents } = await import("../../../extensions/agents/index.js");
-  const { agentLiveStore } = await import("../../../extensions/_shared/agent-sdk-host.js");
+  const { agentLiveStore } = await import("../../../extensions/_shared/agent-runtime/agent-sdk-host.js");
   // The production store is intentionally process-shared across fresh jiti
   // entrypoints. Reset explicitly between isolated unit cases; resetModules no
   // longer implies a new store (that implication caused the live Pi bug).

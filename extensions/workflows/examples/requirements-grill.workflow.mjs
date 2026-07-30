@@ -65,7 +65,6 @@ fails, continue with \`grep\`, \`find\`, and direct reads and say so.`;
 
 /** The two stages that open the repository. Read-only is host-enforced. */
 const INSPECT_OPTIONS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
   readOnly: true,
@@ -138,7 +137,7 @@ export const meta = {
 
 /**
  * IDE-only type link: no runtime import is executed.
- * @param {import("../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {import("../runtime/workflow-runtime.ts").WorkflowDsl} dsl
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {

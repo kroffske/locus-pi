@@ -11,8 +11,8 @@ import {
   renderOperatorStatus,
   setOperatorStatus,
   type OperatorStatusContribution,
-} from "../../extensions/_shared/operator-status.js";
-import type { ExtensionCommandContext } from "../../extensions/_shared/pi-api.js";
+} from "../../extensions/_shared/operator/operator-status.js";
+import type { ExtensionCommandContext } from "../../extensions/_shared/host/pi-api.js";
 import { createHarness } from "../test-harness.js";
 
 describe("operator status projection", () => {

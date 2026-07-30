@@ -7,7 +7,7 @@
  * this file owns nothing but the registration.
  */
 
-import type { ExtensionAPI } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { registerAskTools } from "./ask-tool.js";
 
 export default function askUserQuestion(pi: ExtensionAPI): void {

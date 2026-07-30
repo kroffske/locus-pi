@@ -8,11 +8,11 @@
  * queue state this tool moves is owned by `queue-controller.ts`.
  */
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { errorResult, textResult } from "../_shared/pi-api.js";
-import { sharedState } from "../_shared/state.js";
-import type { TodoPhase } from "../_shared/todo-state.js";
-import { validateParams } from "../_shared/validation.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../_shared/host/pi-api.js";
+import { todoStateCache } from "./todo-state-cache.js";
+import type { TodoPhase } from "../_shared/project/todo-state.js";
+import { validateParams } from "../_shared/host/validation.js";
 import { applyTodoOps, findActiveTask, getCompletionTransitions, type TodoOp } from "./phase-ops.js";
 import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "./phase-store.js";
 import type { TodoQueueController } from "./queue-controller.js";
@@ -82,7 +82,7 @@ export function registerTodoWriteTool(pi: ExtensionAPI, queue: TodoQueueControll
         queue.setContinuationArmed(true);
       }
       const details = {
-        phases: sharedState.todos,
+        phases: todoStateCache.phases,
         storage: "session",
         storageBackend: commit.backend,
         todoStateSource: previous.backend,
@@ -92,10 +92,10 @@ export function registerTodoWriteTool(pi: ExtensionAPI, queue: TodoQueueControll
         ...(commit.diagnostics.length > 0 || previous.diagnostics.length > 0
           ? { storageDiagnostics: [...previous.diagnostics, ...commit.diagnostics] }
           : {}),
-        activeTask: findActiveTask(sharedState.todos),
+        activeTask: findActiveTask(todoStateCache.phases),
         ...(completedTasks.length > 0 ? { completedTasks } : {}),
       };
-      const summary = renderTodos(sharedState.todos, errors);
+      const summary = renderTodos(todoStateCache.phases, errors);
       return errors.length > 0 ? errorResult(summary, details) : textResult(summary, details);
     },
   });

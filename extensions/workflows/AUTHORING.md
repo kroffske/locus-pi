@@ -203,6 +203,17 @@ through `promptFile()` only for a role charter long enough to bury the routing
 Capability limits (`readOnly`, `tools`, `workspaceMode`, `maxToolCalls`) stay DSL
 options either way — never prompt claims.
 
+**Do not restate a package default.** Every run already applies
+`DEFAULT_WORKFLOW_BUDGET` — global agent concurrency, total agent invocations, run
+wall clock, and the per-call `timeoutMs`, `maxToolCalls`, `maxTurns` and
+`maxAnswerChars` — so a script that declares nothing is still bounded on all seven
+axes. Write a limit only where the stage genuinely needs a different one: a check
+stage narrowed to `maxToolCalls: 40`, a composing stage at `maxToolCalls: 0`, a
+per-stage `maxAnswerChars` sized to what the next prompt can hold. A stage that
+repeats the package number gains nothing and will silently disagree with it the
+day the default moves. A value ABOVE the default is allowed and is journalled as a
+raise, so it stays visible in the run evidence.
+
 One `COMMON` constant holds what every stage shares; the per-stage task sits next
 to the `agent()` call it belongs to, and the previous stage's exact text is
 interpolated between `--- BEGIN <NAME> ---` / `--- END <NAME> ---` markers. From
@@ -325,7 +336,10 @@ models depending on how it was started.
 patterns, enums, uniqueness (`uniqueItems`, `uniqueBy`, `uniqueTrimmedItems`) and
 non-blankness (`nonBlank`) in `agent({ schema })`, where a violation is re-asked
 by the runtime's retry, and bound an agent's free text with that call's
-`maxAnswerChars`. What no keyword can express — cross-field agreement,
+`maxAnswerChars`. That retry is the **value** one; a child that never got to answer
+because the transport dropped is the other, and it is `attempts` (1-3, transport-only,
+read-only calls only) — the canonical doc's "The two retries" section says which
+failure each one owns. What no keyword can express — cross-field agreement,
 referential integrity, budgets summed across items, graph shape — goes in
 `validate` on the same call: a `(value) => string[]` callback the runtime runs
 after schema validation succeeds and whose non-empty return re-asks the child in
@@ -343,8 +357,11 @@ shape each example demonstrates, and which examples are curated, packaged, or
 tracked only.
 
 For _which shape to pick_ (single-agent, shaped `agent({ schema })` gate, staged text pipeline,
-loop+judge, plan→build→review, adaptive owner-local, pipeline, fan-out+merge,
-judge-panel, loop-until-dry), use the inline skeletons in the pattern catalog
+loop+judge, plan→build→review, adaptive owner-local, pipeline, judge-panel,
+loop-until-dry, plus the composition shapes — **human gate** (`awaitOperator`, two
+runs), **plain-JS loop** (with `dsl.now()`), **fan-out/fan-in**, **nested
+`dsl.workflow()`**, and **consilium** — each with its skeleton and the cost of the
+shape), use the inline skeletons in the pattern catalog
 [`references/patterns.md`](./references/patterns.md). Multi-step work on one
 subject defaults to the staged text pipeline used by the curated `review` and
 `review-fix` workflows: sequential `agent()` stages with one cognitive job each,

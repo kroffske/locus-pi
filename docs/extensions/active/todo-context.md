@@ -24,7 +24,7 @@
 - Bare `/todo`, `show`, and `list` render a typed `VIEW` named `Session todos`; an empty state is a `WARN` with one add action. This is intentionally different from `/todos`, whose label is `Todos prompt shelf` and whose storage is a project/task artifact.
 - State views show bounded checklist rows, counts, active task, and `storageBackend`. Long content uses the shared hidden-count budget; `/todo export` is the explicit Markdown body view.
 - `append`, `start`, `done`, `drop`, `rm`, editor submit, `from-task`, and completion-note return short typed changes. Mutation receipts do not repeat the whole list.
-- `/todo edit` uses Pi's official `editor(title, prefill) -> string | undefined` contract through `_shared/operator-input.ts`. Escape is a no-write `RESULT`; malformed Markdown is a no-write `WARN`; unexpected dialog failures are `ERROR` and do not claim success.
+- `/todo edit` uses Pi's official `editor(title, prefill) -> string | undefined` contract through `_shared/operator/operator-input.ts`. Escape is a no-write `RESULT`; malformed Markdown is a no-write `WARN`; unexpected dialog failures are `ERROR` and do not claim success.
 - Task bridges remain explicit. Missing/ambiguous task ids show the chosen target and never fall back or infer the current task from session todos.
 - Autonomous mode is opt-in. After a successful progress mutation,
   `agent_settled` may trigger one hidden custom follow-up for the next active
@@ -46,7 +46,7 @@ the current session todos into task-artifact Markdown, and
 performs an explicit filesystem write — the only gate is the host
 filesystem-write approval layer; `approvalTier` (`--yes → allow`, bare →
 `prompt`) is parsed but does not affect whether the write happens. `tasksRoot(...)`
-and the resolved project task path from `extensions/_shared/tasks-store.ts` set the
+and the resolved project task path from `extensions/_shared/project/tasks-store.ts` set the
 workspace for the artifact. The bridge does not guess the current task from todo/session state,
 does not mutate `.tasks/index.json`, and does not auto-sync task status.
 
@@ -65,5 +65,5 @@ shows deterministic Markdown but does not create a separate export file.
 - Tools: `todo_write`
 - Hooks: `agent_settled`
 - Permissions: fs.read=`.tasks/index.json`, fs.write=`.tasks/**/artifacts/completion-note.md`, subprocess=none, network=none, browser=false, models=true, ui=`editor`, `setWidget`
-- State: latest phases, queue context, and autonomous mode restore from session-core JSONL when enabled, then from Pi custom `todo_write` entries via `ctx.sessionManager`, then from shared memory as fallback. Explicit task bridges read `.tasks/index.json` and write only `.tasks/<task>/artifacts/completion-note.md`.
+- State: latest phases, queue context, and autonomous mode restore from session-core JSONL when enabled, then from Pi custom `todo_write` entries via `ctx.sessionManager`, then from this extension's own in-memory cache (`todo-state-cache.ts`) as fallback. Explicit task bridges read `.tasks/index.json` and write only `.tasks/<task>/artifacts/completion-note.md`.
 - Review: status=reviewed, source=copy-after-audit, reviewedBy=locus-pi, reviewedAt=2026-07-19, risk=high

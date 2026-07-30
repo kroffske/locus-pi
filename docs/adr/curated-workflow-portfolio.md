@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x2)
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29
 
 ## Decision
 
@@ -47,9 +47,10 @@ child whether operator input is required, and returns both complete artifact
 references only when it pauses. A continuation run receives those refs through
 the host-owned continuation field plus the operator's non-empty text answers; it
 verifies/copies both and persists the answers before starting the same five-stage
-review. The source run's terminal result must name both complete refs, and both
-must appear in its validated artifact projection; mutable index stage metadata
-alone is insufficient. The workflow runtime publishes every
+review. Both refs must appear in the source run's validated artifact projection,
+which the host checks. ~~The source run's terminal result must also name both
+complete refs; mutable index stage metadata alone is insufficient.~~ (See the
+2026-07-29 amendment: that script-side check is gone.) The workflow runtime publishes every
 durable handoff and the verifier's exact final answer as `review.md`. There is no
 publisher agent, task-local report, model-written status envelope, or inferred
 lossy intent.
@@ -66,10 +67,11 @@ than creating a provider-specific integration.
 exact semantic request; closed host continuation supplies one complete immutable
 `{runId, artifactId, name, sha256}` reference to `review.md`. Runtime consumption verifies
 the successful source run, full reference, digest, confinement, media type, and
-bytes, then copies the review into the new run with source lineage. Deterministic
-entry code additionally requires the referenced bytes to equal the successful
-source run's terminal string result and the exact ref to be its last projected
-output. A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units.
+bytes, then copies the review into the new run with source lineage.
+~~Deterministic entry code additionally requires the referenced bytes to equal the
+successful source run's terminal string result and the exact ref to be its last
+projected output.~~ (See the 2026-07-29 amendment: both script-side checks are
+gone.) A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units.
 Deterministic code bounds every handoff, selects complete `### F<n>` blocks,
 rejects invalid ids, edges and cycles, and computes stable topological order
 before any writer starts.
@@ -569,6 +571,36 @@ Not changed, and deliberately: the verifier's `Confirmed`/`Rejected`/`Unresolved
 vocabulary reads backwards to a human when a positively phrased question is
 answered `Rejected`, but it is a readability defect rather than a decomposition
 one, and it is left for its own change.
+
+## Amendment 2026-07-29 — `review` and `review-fix` stop re-deriving provenance
+
+**The owner confirmed on 2026-07-29** that both halves of the script-side
+review-artifact proof go, completing for this pair what the 2026-07-28 amendment
+did for `plan-implement`.
+
+The **digest half** — re-deriving `{runId, artifactId, name, sha256}` against the
+source run's terminal projection — duplicated a check the artifact owner already
+refuses to skip: an unprojected reference, or bytes whose digest no longer matches,
+fails while the continuation is bound, before the module is evaluated. Two owners
+for one rule is one owner too many, and the script's copy was the one no test could
+prove was reached in production.
+
+The **semantic half** asserted more than the host can: that the consumed bytes were
+the terminal answer of a Package workflow named `review` in its `verify-review`
+stage, and — in `review` itself — that clarification artifacts came from a
+`prepare-clarification` run of the same workflow. The host records a source run's
+target and stage as metadata; it does not certify them, and no agent can. The
+operator names the source run through the closed `continuation` control and the
+host verifies exactly the reference they named.
+
+The cost is stated rather than hidden: a run can now remediate against a review, or
+answer clarification questions from, a different run than the operator intended.
+That is repaired by re-running with the right source, and nothing about it is
+irreversible — the same weighing the 2026-07-28 `plan-implement` amendment made.
+`review-fix` still requires exactly one non-empty continuation artifact named
+`review.md`, and `review` still requires exactly `intent.md` plus
+`clarification-questions.md`; those are shape gates on what arrived, not claims
+about where it came from.
 
 ## Consequences
 

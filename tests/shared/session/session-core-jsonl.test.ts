@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import devextDoctor from "../../../extensions/devext-doctor/index.js";
-import { sessionJsonlPath } from "../../../extensions/_shared/files.js";
+import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
 import {
   createSessionStore,
   formatRuntimeCapabilityReport,
   getRuntimeCapabilityReport,
-} from "../../../extensions/_shared/runtime-capabilities.js";
+} from "../../../extensions/_shared/runtime/runtime-capabilities.js";
 import {
   JsonlSessionStore,
   MemorySessionStore,
   createDeterministicSessionIdFactory,
-} from "../../../extensions/_shared/session-core.js";
+} from "../../../extensions/_shared/runtime/session-core.js";
 import { createHarness } from "../../test-harness.js";
 
 const now = () => "2026-06-02T00:00:00.000Z";

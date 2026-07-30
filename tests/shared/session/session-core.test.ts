@@ -5,7 +5,7 @@ import {
   sessionEntryInputFromPiCustomEntry,
   sessionEntryToPiCustomEntry,
   validateSessionEntryInput,
-} from "../../../extensions/_shared/session-core.js";
+} from "../../../extensions/_shared/runtime/session-core.js";
 
 const now = () => "2026-06-02T00:00:00.000Z";
 
@@ -91,16 +91,24 @@ describe("MemorySessionStore", () => {
     const store = new MemorySessionStore({ idFactory: createDeterministicSessionIdFactory("m1"), now });
     const session = store.createSession();
     store.appendEntry(session.id, { type: "message", payload: { role: "user", content: "Need a prompt" } });
-    store.appendEntry(session.id, { type: "decision", payload: { status: "answered", question: "Proceed?", answer: "yes" } });
-    store.appendEntry(session.id, { type: "artifact", payload: { path: ".tasks/T-104/artifacts/draft.md", kind: "markdown" } });
+    store.appendEntry(session.id, {
+      type: "decision",
+      payload: { status: "answered", question: "Proceed?", answer: "yes" },
+    });
+    store.appendEntry(session.id, {
+      type: "artifact",
+      payload: { path: ".tasks/T-104/artifacts/draft.md", kind: "markdown" },
+    });
 
-    expect(store.summarizeForHandoff(session.id, { includeTypes: ["message", "decision", "artifact"] })).toBe([
-      "Session: m1-session-1",
-      "Entries: 3",
-      "- 2 message: Need a prompt",
-      "- 3 decision: {\"status\":\"answered\",\"question\":\"Proceed?\",\"answer\":\"yes\"}",
-      "- 4 artifact: .tasks/T-104/artifacts/draft.md",
-    ].join("\n"));
+    expect(store.summarizeForHandoff(session.id, { includeTypes: ["message", "decision", "artifact"] })).toBe(
+      [
+        "Session: m1-session-1",
+        "Entries: 3",
+        "- 2 message: Need a prompt",
+        '- 3 decision: {"status":"answered","question":"Proceed?","answer":"yes"}',
+        "- 4 artifact: .tasks/T-104/artifacts/draft.md",
+      ].join("\n"),
+    );
   });
 
   it("validates invalid entry payloads before append", () => {
@@ -111,9 +119,9 @@ describe("MemorySessionStore", () => {
       ok: false,
       errors: ["payload.content must be a non-empty string"],
     });
-    expect(() => store.appendEntry(session.id, { type: "todo_write", payload: { phases: "not-list" } as never })).toThrow(
-      "payload.phases must be an array",
-    );
+    expect(() =>
+      store.appendEntry(session.id, { type: "todo_write", payload: { phases: "not-list" } as never }),
+    ).toThrow("payload.phases must be an array");
   });
 
   it("converts Pi custom entries into session entries and back", () => {

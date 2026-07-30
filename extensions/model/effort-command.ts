@@ -6,8 +6,8 @@
  * The block wording itself lives in `operator-ui.ts`.
  */
 
-import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { effortLevelsForModel, modelEffortCapability, modelSelector, THINKING_LEVELS } from "./model-role-selector.js";
 import { buildEffortOperatorBlock, type EffortCommandOutcome } from "./operator-ui.js";
 

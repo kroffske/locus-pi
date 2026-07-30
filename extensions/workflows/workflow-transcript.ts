@@ -1,11 +1,16 @@
 import path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionMessage } from "../_shared/pi-api.js";
-import { formatDuration } from "../_shared/agent-live-panel.js";
-import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
-import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "../_shared/workflow-result.js";
-import { notifyOperator } from "../_shared/operator-notify.js";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+  ExtensionMessage,
+} from "../_shared/host/pi-api.js";
+import { formatDuration } from "../_shared/agent-runtime/agent-live-panel.js";
+import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
+import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
+import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "./runtime/workflow-result.js";
+import { notifyOperator } from "../_shared/operator/operator-notify.js";
 
 /**
  * One custom message type carries both run-boundary records. The name says what

@@ -1,15 +1,20 @@
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
-import { expandPaths } from "../_shared/files.js";
-import { AST_LANGUAGES, astErrorMessage, astSearch } from "../_shared/ast-engine.js";
-import { safeToolText } from "../_shared/safe-output.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
+import { expandPaths } from "../_shared/host/files.js";
+import { AST_LANGUAGES, astErrorMessage, astSearch } from "./ast-engine.js";
+import { safeToolText } from "../_shared/host/safe-output.js";
 
 const AstGrepParams = Type.Object({
   pat: Type.String({ description: "AST pattern to match", maxLength: 2000 }),
   paths: Type.Array(Type.String({ description: "Files, directories, or globs" }), { maxItems: 50 }),
-  language: Type.Optional(Type.Union(AST_LANGUAGES.map((language) => Type.Literal(language)), { default: "auto", description: "Language override" })),
+  language: Type.Optional(
+    Type.Union(
+      AST_LANGUAGES.map((language) => Type.Literal(language)),
+      { default: "auto", description: "Language override" },
+    ),
+  ),
 });
 
 export default function astGrepTool(pi: ExtensionAPI): void {
@@ -28,8 +33,17 @@ export default function astGrepTool(pi: ExtensionAPI): void {
       } catch (error) {
         return errorResult(astErrorMessage(error));
       }
-      const text = safeToolText(matches.map((m) => `${m.file}:${m.line}:${m.column}: ${m.text}`).join("\n") || "No matches", 50 * 1024);
-      return textResult(text.text, { matches, totalMatches: matches.length, filesWithMatches: new Set(matches.map((m) => m.file)).size, filesSearched: files.length, truncated: text.truncated });
+      const text = safeToolText(
+        matches.map((m) => `${m.file}:${m.line}:${m.column}: ${m.text}`).join("\n") || "No matches",
+        50 * 1024,
+      );
+      return textResult(text.text, {
+        matches,
+        totalMatches: matches.length,
+        filesWithMatches: new Set(matches.map((m) => m.file)).size,
+        filesSearched: files.length,
+        truncated: text.truncated,
+      });
     },
   });
 }

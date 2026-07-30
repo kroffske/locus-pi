@@ -10,10 +10,10 @@
  * lives in `question-panel.ts`.
  */
 
-import { requestInlineOperatorInteraction } from "../_shared/operator-interaction.js";
-import { requestOperatorQuestion } from "../_shared/operator-question.js";
-import type { OperatorThemeLike } from "../_shared/operator-ui.js";
-import type { ExtensionContext } from "../_shared/pi-api.js";
+import { requestInlineOperatorInteraction } from "../_shared/operator/operator-interaction.js";
+import { requestOperatorQuestion } from "../_shared/operator/operator-question.js";
+import type { OperatorThemeLike } from "../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
 import { OTHER_OPTION } from "./option-labels.js";
 import { AskQuestionComponent } from "./question-panel.js";
 import { askMultiQuestion, askSingleSelectQuestion } from "./select-fallback.js";

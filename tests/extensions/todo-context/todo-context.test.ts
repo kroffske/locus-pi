@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import todoContext from "../../../extensions/todo-context/index.js";
-import { exportTodosToProjectTask } from "../../../extensions/_shared/task-bridge.js";
-import { sharedState } from "../../../extensions/_shared/state.js";
+import { exportTodosToProjectTask } from "../../../extensions/_shared/project/task-bridge.js";
+import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 describe("todo-context OMP-compatible todo_write", () => {
   const tempRoots: string[] = [];
 
   beforeEach(() => {
-    sharedState.todos = [];
-    sharedState.todoContext = null;
-    sharedState.todoAutoContinue = false;
+    todoStateCache.phases = [];
+    todoStateCache.context = null;
+    todoStateCache.autoContinue = false;
     delete process.env.LOCUS_PI_SESSION_STORE;
   });
 
@@ -311,7 +311,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
-    sharedState.todos = [];
+    todoStateCache.phases = [];
 
     const result = await runTool(h, "todo_write", { ops: [{ op: "done", task: "Inspect contract" }] });
 
@@ -348,9 +348,9 @@ describe("todo-context OMP-compatible todo_write", () => {
       autoContinue: true,
     });
 
-    sharedState.todos = [];
-    sharedState.todoContext = null;
-    sharedState.todoAutoContinue = false;
+    todoStateCache.phases = [];
+    todoStateCache.context = null;
+    todoStateCache.autoContinue = false;
     const second = createHarness(root, { sessionId: "todo-jsonl-session" });
     todoContext(second.pi);
     const restored = await runTool(second, "todo_write", { ops: [{ op: "done", task: "Inspect contract" }] });
@@ -385,7 +385,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     });
 
     expect(result.isError).toBe(true);
-    sharedState.todos = [];
+    todoStateCache.phases = [];
     const restored = await runTool(h, "todo_write", {
       ops: [{ op: "append", phase: "Execution", items: ["Patch wrapper"] }],
     });
@@ -755,7 +755,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     await runTool(h, "todo_write", {
       ops: [{ op: "note", task: "Inspect contract", text: "Keep source evidence.\nPreserve local limits." }],
     });
-    sharedState.todos = [];
+    todoStateCache.phases = [];
 
     await runCommand(h, "todo", "export");
 
@@ -777,7 +777,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(h.widgets.get("todo")).toContain("[CHANGE] Session todos");
     expect(h.widgets.get("todo")).toContain("Cleared all todos.");
     expect(h.entries[0]?.data).toMatchObject({ phases: [] });
-    sharedState.todos = [{ name: "Stale", tasks: [{ content: "Should not reappear", status: "pending" }] }];
+    todoStateCache.phases = [{ name: "Stale", tasks: [{ content: "Should not reappear", status: "pending" }] }];
     await runCommand(h, "todo", "show");
     expect(h.widgets.get("todo")).toContain("No todos. Use /todo append <task> to start one.");
   });

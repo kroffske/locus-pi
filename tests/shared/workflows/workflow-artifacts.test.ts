@@ -3,20 +3,20 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
   readWorkflowArtifactIndex,
   readWorkflowArtifactRecord,
   type WorkflowArtifactIndex,
   type WorkflowArtifactPorts,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];

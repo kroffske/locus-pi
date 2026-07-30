@@ -1,5 +1,5 @@
-import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/pi-api.js";
-import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-sdk-host.js";
+import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/host/pi-api.js";
+import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,
@@ -9,18 +9,18 @@ import {
   orderAgentLiveRows,
   selectAgentLiveRowsForParents,
   truncate,
-} from "../_shared/agent-live-panel.js";
-import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
-import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "../_shared/workflow-failure.js";
-import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../_shared/workflow-journal.js";
+} from "../_shared/agent-runtime/agent-live-panel.js";
+import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/agent-runtime/fleet-menu.js";
+import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "./runtime/workflow-failure.js";
+import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "./runtime/workflow-journal.js";
 import {
   projectWorkflowDisposition,
   type WorkflowDisposition,
   type WorkflowProjectedStatus,
   type WorkflowResultPersistence,
-} from "../_shared/workflow-result.js";
-import { FLEET_MENU_PLACEMENT } from "../_shared/widget-render.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+} from "./runtime/workflow-result.js";
+import { FLEET_MENU_PLACEMENT } from "../_shared/operator/widget-render.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 
 export interface ThemeLike {
   fg?: (color: string, text: string) => string;

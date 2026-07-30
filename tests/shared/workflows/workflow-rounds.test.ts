@@ -20,25 +20,25 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type AgentLiveRow,
-} from "../../../extensions/_shared/agent-sdk-host.js";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
-import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
   workflowSlotKey,
   type WorkflowAgentRequest,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
   workflowRunDir,
-} from "../../../extensions/_shared/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   formatAgentLiveRowLine,
   formatRoundBadge,
   orderAgentLiveRows,
-} from "../../../extensions/_shared/agent-live-panel.js";
+} from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 
 afterEach(() => {
   agentLiveStore.reset();

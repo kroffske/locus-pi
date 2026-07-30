@@ -8,8 +8,9 @@ import {
   AGENT_CATALOG_HINT_MAX_ENTRIES,
   discoverAgentDefinitions,
   formatAgentCatalogHint,
-} from "../../../extensions/_shared/agents.js";
-import type { AgentDefinition, AgentSource } from "../../../extensions/_shared/types.js";
+  type AgentDefinition,
+  type AgentSource,
+} from "../../../extensions/_shared/agent-runtime/agents.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 // The catalog hint is a schema/description contract; no child session is spawned

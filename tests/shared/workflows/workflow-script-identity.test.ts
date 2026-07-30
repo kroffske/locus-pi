@@ -18,13 +18,13 @@ import {
   packagedWorkflowPath,
   runWorkflowScript,
   type RunWorkflowScriptResult,
-} from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   assessWorkflowSourceIdentity,
   createWorkflowScriptSnapshot,
   workflowScriptExecutionPath,
-} from "../../../extensions/_shared/workflow-script-identity.js";
-import { readWorkflowRunResult, workflowRunDir } from "../../../extensions/_shared/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-script-identity.js";
+import { readWorkflowRunResult, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { createHarness } from "../../test-harness.js";
 
 async function runScript(root: string, scriptPath: string, sessionId: string): Promise<RunWorkflowScriptResult> {

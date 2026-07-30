@@ -163,11 +163,11 @@ stays discoverable in the selector.
   `/effort` outcomes and the read-only `/model-roles` fallback.
 - `extensions/model/model-role-selector.ts` — role capability catalog,
   responsive model rows, provider filters and continuous keyboard state.
-- `extensions/_shared/model-settings.ts` — parsing, precedence, persistence and
+- `extensions/_shared/model/model-settings.ts` — parsing, precedence, persistence and
   purpose resolvers.
-- `extensions/_shared/operator-ui.ts` — typed selector and command-result
+- `extensions/_shared/operator/operator-ui.ts` — typed selector and command-result
   rendering (`SELECT`, `CHANGE`, `WARN`, `ERROR`).
-- `extensions/_shared/operator-status.ts` — bounded shared status registry.
+- `extensions/_shared/operator/operator-status.ts` — bounded shared status registry.
 
 Pi contracts:
 

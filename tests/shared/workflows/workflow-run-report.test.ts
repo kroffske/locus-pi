@@ -12,15 +12,21 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import type { WorkflowArtifactRecord } from "../../../extensions/_shared/workflow-artifacts.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import type { WorkflowArtifactRecord } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   workflowReportDir,
   writeWorkflowRunReport,
   type WorkflowRunReportEvidenceSource,
-} from "../../../extensions/_shared/workflow-run-report.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+  type WorkflowRunReportInput,
+} from "../../../extensions/workflows/runtime/workflow-run-report.js";
+import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -401,5 +407,670 @@ describe("workflow run report", () => {
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
     assert.match(readme, /- Workflow: `report` \(project\)/u);
     assert.match(readme, /01-scout-review\.md/u);
+  });
+
+  it("names every discarded transport attempt, its callId and its class", async () => {
+    // A retried stage looks like one clean answer in the documents list. The second child
+    // really ran, burned an invocation and left its own transcript, so the reader's copy has
+    // to say so — otherwise the only trace of the second bill is a machine file.
+    const root = project();
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "retried.workflow.mjs"),
+      [
+        "export default async function runWorkflow(dsl) {",
+        '  return await dsl.agent("answer", {',
+        '    artifact: "review.md",',
+        '    label: "scout",',
+        '    phase: "review",',
+        "    readOnly: true,",
+        "    attempts: 2,",
+        "  });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness(root, { sessionId: "report-retry-parent" });
+    let child = 0;
+    const createExecutor = (): AgentExecutor => ({
+      async run(request: AgentRunRequest) {
+        child += 1;
+        // First child: the host turn budget expired mid-answer. Second: a real answer.
+        if (child === 1) {
+          return {
+            status: "failed",
+            agentName: request.agent.name,
+            reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
+            failureCause: "host-turn-timeout",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        }
+        return {
+          status: "completed",
+          agentName: request.agent.name,
+          reason: "exact answer",
+          text: "exact answer",
+          diagnostics: [],
+          lifecycleEntryIds: [],
+        };
+      },
+    });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "retried",
+      createExecutor,
+    });
+
+    assert.equal(result.ok, true, result.error);
+    assert.equal(child, 2, "the transport failure must have cost a second real child");
+
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /## Retried agent calls/u);
+    // BOTH attempts, each by its own callId, and the discarded one by its class.
+    assert.match(readme, /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)/u);
+    assert.match(readme, /- attempt 2 of 2 — `call-0002` — completed/u);
+    assert.match(readme, /- scout · review/u);
+
+    // The same two attempts are readable in the journal the report was projected from,
+    // and the journal a reader loads back reports no structural problem.
+    const journal = readWorkflowRunJournalState(root, result.runId);
+    assert.deepEqual(journal.diagnostics, []);
+    const ends = journal.lines.filter((line) => line.kind === "agent_end");
+    assert.deepEqual(
+      ends.map((line) => [line.callId, line.attempt, line.attempts, line.status, line.failureCause]),
+      [
+        ["call-0001", 1, 2, "failed", "host-turn-timeout"],
+        ["call-0002", 2, 2, "completed", undefined],
+      ],
+    );
+    assert.equal(
+      journal.lines.filter((line) => line.message?.startsWith("[workflow:retry]") === true).length,
+      1,
+      "the boundary between the two attempts is named in the journal",
+    );
+  });
+
+  it("names a retry whose second attempt threw, which leaves only one agent_end behind", async () => {
+    // The failure path that hides a retry: attempt 1 times out and IS re-run, attempt 2
+    // throws. A thrown attempt never reaches an `agent_end`, so a report built from
+    // `agent_end` alone sees one attempt, drops the group, and renders a stage that ran
+    // twice and cost twice as if it never retried — while the run's own error message
+    // names only the throw. The terminal `error` line is that attempt's record and has to
+    // carry the same attempt identity.
+    const root = project();
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "threw.workflow.mjs"),
+      [
+        "export default async function runWorkflow(dsl) {",
+        '  return await dsl.agent("answer", {',
+        '    artifact: "review.md",',
+        '    label: "scout",',
+        '    phase: "review",',
+        "    readOnly: true,",
+        "    attempts: 2,",
+        "  });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness(root, { sessionId: "report-threw-parent" });
+    let child = 0;
+    const createExecutor = (): AgentExecutor => ({
+      async run(request: AgentRunRequest) {
+        child += 1;
+        if (child === 1) {
+          return {
+            status: "failed",
+            agentName: request.agent.name,
+            reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
+            failureCause: "host-turn-timeout",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        }
+        throw new Error("the child host vanished mid-turn");
+      },
+    });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "threw",
+      createExecutor,
+    });
+
+    assert.equal(result.ok, false, "a thrown attempt ends the run");
+    assert.equal(child, 2, "the transport failure must have cost a second real child");
+
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /## Retried agent calls/u);
+    assert.match(readme, /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)/u);
+    // The thrown attempt is named as itself — not "failed", and not silently absent.
+    assert.match(readme, /- attempt 2 of 2 — `call-0002` — threw/u);
+
+    // The journal the report was projected from: one agent_end, one error line, the same
+    // logical call named on both, and no structural problem when a reader loads it back.
+    const journal = readWorkflowRunJournalState(root, result.runId);
+    assert.deepEqual(journal.diagnostics, []);
+    const ends = journal.lines.filter((line) => line.kind === "agent_end");
+    const errors = journal.lines.filter((line) => line.kind === "error" && line.callId !== undefined);
+    assert.deepEqual(
+      ends.map((line) => [line.callId, line.attempt, line.attempts]),
+      [["call-0001", 1, 2]],
+    );
+    assert.deepEqual(
+      errors.map((line) => [line.callId, line.attempt, line.attempts]),
+      [["call-0002", 2, 2]],
+    );
+    assert.equal(errors[0]?.logicalCallId, ends[0]?.logicalCallId);
+    assert.notEqual(errors[0]?.logicalCallId, undefined);
+  });
+
+  it("says nothing about retries when a call needed only one attempt", () => {
+    // The section is evidence, not decoration: a call that declared a budget and did not
+    // spend it must not grow a "Retried agent calls" heading.
+    const root = project();
+    const outcome = writeWorkflowRunReport(
+      {
+        projectRoot: root,
+        runId: RUN_ID,
+        status: "completed",
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            logicalCallId: "logical-0001",
+            attempt: 1,
+            attempts: 3,
+            status: "completed",
+          },
+        ] as WorkflowJournalLine[],
+      },
+      evidenceFrom([], {}),
+    );
+
+    assert.equal(outcome.ok, true);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    assert.doesNotMatch(readme, /Retried agent calls/u);
+  });
+
+  it("keeps two interleaved calls apart when agent, label, phase and group all agree", () => {
+    // `parallel()` can run two calls that agree on every descriptive field, and their
+    // attempts then interleave in the journal. Grouping by those fields would put three of
+    // these four attempts in one group and leave the other looking like it never retried —
+    // a section that reads as evidence while attributing one stage's second bill to another.
+    // Only the runtime's own logical-call identity separates them.
+    const root = project();
+    const shared = { runId: RUN_ID, kind: "agent_end" as const, agent: "default", label: "advise", phase: "advise" };
+    const outcome = writeWorkflowRunReport(
+      {
+        projectRoot: root,
+        runId: RUN_ID,
+        status: "completed",
+        journal: [
+          // A's first attempt, then B's first attempt, then A's second, then B's second.
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:01.000Z",
+            groupId: "group-1",
+            callId: "call-0001",
+            logicalCallId: "logical-0001",
+            attempt: 1,
+            attempts: 2,
+            status: "failed",
+            failureCause: "host-turn-timeout",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:02.000Z",
+            groupId: "group-1",
+            callId: "call-0002",
+            logicalCallId: "logical-0002",
+            attempt: 1,
+            attempts: 2,
+            status: "failed",
+            failureCause: "call-timeout",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:03.000Z",
+            groupId: "group-1",
+            callId: "call-0003",
+            logicalCallId: "logical-0001",
+            attempt: 2,
+            attempts: 2,
+            status: "completed",
+          },
+          {
+            ...shared,
+            ts: "2026-07-28T19:00:04.000Z",
+            groupId: "group-1",
+            callId: "call-0004",
+            logicalCallId: "logical-0002",
+            attempt: 2,
+            attempts: 2,
+            status: "completed",
+          },
+        ] as WorkflowJournalLine[],
+      },
+      evidenceFrom([], {}),
+    );
+
+    assert.equal(outcome.ok, true);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    const section = readme.slice(readme.indexOf("## Retried agent calls"));
+    // Two calls, each with exactly its OWN two attempts. Grouping by the descriptive fields
+    // produces one bullet with three attempt lines instead, so this fails on that shape.
+    assert.equal(section.split("\n").filter((line) => line === "- advise · advise").length, 2);
+    assert.match(
+      section,
+      /- attempt 1 of 2 — `call-0001` — failed \(host-turn-timeout\)\n {2}- attempt 2 of 2 — `call-0003` — completed/u,
+    );
+    assert.match(
+      section,
+      /- attempt 1 of 2 — `call-0002` — failed \(call-timeout\)\n {2}- attempt 2 of 2 — `call-0004` — completed/u,
+    );
+  });
+});
+
+/**
+ * T-131 W8 — the report answers "what was this run allowed to spend, and what did
+ * it spend", and is explicit about the axes it cannot measure.
+ */
+describe("workflow run report budget section", () => {
+  function budgetInput(overrides: Partial<WorkflowRunReportInput> = {}): WorkflowRunReportInput {
+    return {
+      projectRoot: project(),
+      runId: RUN_ID,
+      status: "completed",
+      journal: [],
+      budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 0 },
+      ...overrides,
+    };
+  }
+
+  function readmeOf(input: WorkflowRunReportInput): string {
+    const outcome = writeWorkflowRunReport(input, evidenceFrom([], {}));
+    assert.equal(outcome.ok, true, outcome.ok ? "" : outcome.message);
+    return readFileSync(path.join(workflowReportDir(input.projectRoot, input.runId), "README.md"), "utf8");
+  }
+
+  it("prints every axis with its applied value", () => {
+    const readme = readmeOf(budgetInput());
+
+    assert.match(readme, /## Budget/u);
+    assert.match(readme, /\| `concurrency` \| 4 \|/u);
+    assert.match(readme, /\| `totalAgents` \| 200 \|/u);
+    assert.match(readme, /\| `runtimeMs` \| 7200000 ms \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \|/u);
+    assert.match(readme, /\| `toolCalls` \| 1000 \|/u);
+    assert.match(readme, /\| `turns` \| 5 \|/u);
+    assert.match(readme, /\| `answerChars` \| 500000 \|/u);
+  });
+
+  it("prints the axes nobody counts as not recorded, never as zero", () => {
+    const readme = readmeOf(budgetInput());
+
+    for (const axis of ["toolCalls", "turns", "answerChars"]) {
+      const row = readme.split("\n").find((line) => line.startsWith(`| \`${axis}\``));
+      assert.ok(row !== undefined, `missing row for ${axis}`);
+      assert.match(row, /not recorded/u);
+      assert.doesNotMatch(row, /\| 0 \|/u);
+    }
+    // Cost is a hardcoded zero in the bridge; the report says so instead of "$0".
+    assert.match(readme, /\| cost \| not enforced \| not available \|/u);
+  });
+
+  it("reports measured spend where the journal really carries it", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          { ts: "2026-07-28T19:00:00.000Z", runId: RUN_ID, kind: "log", source: "runtime", message: "budget" },
+          { ts: "2026-07-28T19:00:00.000Z", runId: RUN_ID, kind: "agent_start", agent: "default", callId: "call-0001" },
+          {
+            ts: "2026-07-28T19:00:04.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            status: "completed",
+            durationMs: 4_000,
+            usage: { input: 100, output: 40, totalTokens: 140, costTotal: 0 },
+          },
+          { ts: "2026-07-28T19:00:04.000Z", runId: RUN_ID, kind: "agent_start", agent: "default", callId: "call-0002" },
+          {
+            ts: "2026-07-28T19:00:11.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0002",
+            status: "completed",
+            durationMs: 7_000,
+            usage: { input: 10, output: 5, totalTokens: 15, costTotal: 0 },
+          },
+        ] as WorkflowJournalLine[],
+        budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 2 },
+      }),
+    );
+
+    assert.match(readme, /\| `totalAgents` \| 200 \| 2 invocations \|/u);
+    assert.match(readme, /\| `runtimeMs` \| 7200000 ms \| 11000 ms over the journal \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 7000 ms longest child \|/u);
+    assert.match(readme, /\| `concurrency` \| 4 \| 2 peak \(gate-owned\) \|/u);
+    assert.match(readme, /\| tokens \| not enforced \| 155 observed \|/u);
+  });
+
+  it("counts post-child error evidence when no agent_end exists", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          { ts: "2026-07-28T19:00:00.000Z", runId: RUN_ID, kind: "agent_start", agent: "default", callId: "call-0001" },
+          {
+            ts: "2026-07-28T19:00:30.000Z",
+            runId: RUN_ID,
+            kind: "error",
+            source: "script",
+            message: "validator threw after the child answered",
+            agent: "default",
+            callId: "call-0001",
+            executedModel: "test/model",
+            durationMs: 30_000,
+            usage: { input: 80, output: 20, totalTokens: 100, costTotal: 0 },
+          },
+        ] as WorkflowJournalLine[],
+      }),
+    );
+
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 30000 ms longest child \|/u);
+    assert.match(readme, /\| tokens \| not enforced \| 100 observed \|/u);
+  });
+
+  it("counts a replayed call as an invocation but never as a child that ran", () => {
+    // A replayed attempt spends the totalAgents cap — the runtime counts it before the
+    // replay lookup — while starting no child. Its durationMs measures projecting a
+    // recorded answer, so folding it into "longest child" would compare a lookup
+    // against a ten-minute per-child fuse.
+    //
+    // The replayed attempt is deliberately the LONGER of the two, so the assertion
+    // below cannot pass by accident: with the replay filter removed the row reads
+    // 9000. That ordering is not contrived — a replayed attempt's measured window
+    // still covers artifact recording, schema validation and the script's `validate`
+    // callback, any of which can outlast a fast fresh child.
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_start",
+            agent: "default",
+            callId: "call-0001",
+            replayed: true,
+          },
+          {
+            ts: "2026-07-28T19:00:09.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            status: "completed",
+            durationMs: 9_000,
+            replayed: true,
+          },
+          { ts: "2026-07-28T19:00:09.000Z", runId: RUN_ID, kind: "agent_start", agent: "default", callId: "call-0002" },
+          {
+            ts: "2026-07-28T19:00:15.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0002",
+            status: "completed",
+            durationMs: 6_000,
+            usage: { input: 10, output: 5, totalTokens: 15, costTotal: 0 },
+          },
+        ] as WorkflowJournalLine[],
+      }),
+    );
+
+    assert.match(readme, /\| `totalAgents` \| 200 \| 2 invocations \(1 replayed, no child ran\) \|/u);
+    // The FRESH child's 6000 ms, not the longer replay projection.
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 6000 ms longest child \|/u);
+    // A replayed call reports no usage, so only the fresh child's tokens are observed.
+    assert.match(readme, /\| tokens \| not enforced \| 15 observed \|/u);
+  });
+
+  it("reports no longest child at all when the whole run was served from records", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_start",
+            agent: "default",
+            callId: "call-0001",
+            replayed: true,
+          },
+          {
+            ts: "2026-07-28T19:00:00.003Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            status: "completed",
+            durationMs: 3,
+            replayed: true,
+          },
+        ] as WorkflowJournalLine[],
+      }),
+    );
+
+    assert.match(readme, /\| `totalAgents` \| 200 \| 1 invocations \(1 replayed, no child ran\) \|/u);
+    // "3 ms longest child" would claim a child ran for 3 ms when none ran at all.
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| not recorded \|/u);
+  });
+
+  it("says tokens are not recorded when the host reported none, rather than 0", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          { ts: "2026-07-28T19:00:00.000Z", runId: RUN_ID, kind: "agent_start", agent: "default", callId: "call-0001" },
+          {
+            ts: "2026-07-28T19:00:01.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            callId: "call-0001",
+            status: "completed",
+            durationMs: 1_000,
+          },
+        ] as WorkflowJournalLine[],
+      }),
+    );
+
+    assert.match(readme, /\| tokens \| not enforced \| not recorded \|/u);
+  });
+
+  it("omits the section entirely for a caller that supplies no budget", () => {
+    const input = budgetInput();
+    delete (input as { budget?: unknown }).budget;
+
+    assert.doesNotMatch(readmeOf(input), /## Budget/u);
+  });
+
+  it("reports the GATE peak, not the count of overlapping journal intervals", async () => {
+    // Six children through a runtime bounded at 2. `agent_start` is written before
+    // the gate is acquired, so counting overlapping start/end intervals would say
+    // 6 — a limit breach that never happened.
+    const runtime = createWorkflowRuntime({
+      runId: RUN_ID,
+      maxConcurrentAgents: 2,
+      agentRunner: async (request) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        return {
+          ok: true as const,
+          status: "completed" as const,
+          summary: "done",
+          text: "answer",
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    await runtime.dsl.parallel([
+      () => runtime.dsl.parallel([() => runtime.dsl.agent("a"), () => runtime.dsl.agent("b")]),
+      () => runtime.dsl.parallel([() => runtime.dsl.agent("c"), () => runtime.dsl.agent("d")]),
+      () => runtime.dsl.parallel([() => runtime.dsl.agent("e"), () => runtime.dsl.agent("f")]),
+    ]);
+
+    const journal = runtime.getJournal();
+    assert.equal(journal.filter((line) => line.kind === "agent_start").length, 6);
+    assert.equal(runtime.peakAgentConcurrency(), 2);
+
+    const readme = readmeOf(budgetInput({ journal, budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 2 } }));
+    assert.match(readme, /\| `concurrency` \| 4 \| 2 peak \(gate-owned\) \|/u);
+    assert.doesNotMatch(readme, /6 peak/u);
+  });
+
+  it("shows the applied contract in a REAL run's report, for a script that declares no limit", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-report-budget-"));
+    roots.push(root);
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "unbounded.workflow.mjs"),
+      'export const meta = { name: "unbounded", description: "declares no limit of any kind" };\n' +
+        "export default async function runWorkflow(dsl) {\n" +
+        '  return await dsl.agent("answer");\n' +
+        "}\n",
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "report-budget" });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "unbounded",
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "answered",
+            text: "answer",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    assert.equal(result.ok, true, result.error);
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /## Budget/u);
+    assert.match(readme, /\| `concurrency` \| 4 \| 1 peak \(gate-owned\) \|/u);
+    assert.match(readme, /\| `totalAgents` \| 200 \| 1 invocations \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 600000 ms \|/u);
+    assert.match(readme, /\| `toolCalls` \| 1000 \| not recorded \|/u);
+    assert.match(readme, /\| `turns` \| 5 \| not recorded \|/u);
+  });
+
+  it("journals a failed report write instead of letting the budget evidence vanish silently", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-report-blocked-"));
+    roots.push(root);
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "report-fail.workflow.mjs"),
+      'export const meta = { name: "report-fail", description: "one stage" };\n' +
+        "export default async function runWorkflow(dsl) {\n" +
+        '  return await dsl.agent("answer");\n' +
+        "}\n",
+      "utf8",
+    );
+    // A regular FILE where the report root must be a directory: the write fails
+    // and the module returns { ok: false } instead of throwing, exactly as documented.
+    writeFileSync(path.join(root, ".locus-pi"), "not a directory", "utf8");
+
+    const harness = createHarness(root, { sessionId: "report-blocked" });
+    const events: WorkflowJournalLine[] = [];
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "report-fail",
+      onEvent: (line) => events.push(line),
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "answered",
+            text: "answer",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    // The run disposition is unchanged: a report failure never fails the run.
+    assert.equal(result.ok, true, result.error);
+    const failure = result.journal.find(
+      (line) => line.kind === "error" && (line.message ?? "").includes("Workflow run report was not written"),
+    );
+    assert.ok(failure !== undefined, "the failed report write must leave a trace in the journal");
+    assert.equal(failure.source, "runtime");
+    assert.ok(
+      events.some((line) => (line.message ?? "").includes("Workflow run report was not written")),
+      "and reach the live surface too",
+    );
+    // The durable journal on disk carries it, not only the returned envelope.
+    const persisted = readFileSync(path.join(result.runDir, "journal.ndjson"), "utf8");
+    assert.match(persisted, /Workflow run report was not written/u);
+    // And so does result.json, which is the point of writing the report BEFORE it.
+    // journal.ndjson alone would not carry the guarantee — its sink swallows its own
+    // write failures so it can never throw into a running workflow — whereas
+    // result.json reports its own persistence outcome, so losing the line everywhere
+    // takes a second, separately reported, failure.
+    assert.equal(result.resultPersistence.ok, true);
+    const envelope = JSON.parse(readFileSync(path.join(result.runDir, "result.json"), "utf8")) as {
+      journal?: { message?: string }[];
+    };
+    assert.ok(
+      (envelope.journal ?? []).some((line) => (line.message ?? "").includes("Workflow run report was not written")),
+      "result.json must carry the failure line independently of the best-effort journal sink",
+    );
   });
 });

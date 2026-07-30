@@ -17,10 +17,10 @@ import {
   workflowContinuationForHandoff,
   type WorkflowHandoffClaimOptions,
   type WorkflowOperatorHandoffEnvelope,
-} from "../../../extensions/_shared/workflow-handoff.js";
-import { workflowRunDir } from "../../../extensions/_shared/workflow-journal.js";
-import { resolveWorkflowTarget, runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import { createWorkflowRuntime } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-handoff.js";
+import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { resolveWorkflowTarget, runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -520,7 +520,7 @@ function claimInChildProcess(
   projectRoot: string,
   handoff: WorkflowOperatorHandoffEnvelope,
 ): Promise<ReturnType<typeof claimWorkflowOperatorHandoff>> {
-  const moduleUrl = pathToFileURL(path.resolve("extensions/_shared/workflow-handoff.ts")).href;
+  const moduleUrl = pathToFileURL(path.resolve("extensions/workflows/runtime/workflow-handoff.ts")).href;
   const script = [
     `import { claimWorkflowOperatorHandoff } from ${JSON.stringify(moduleUrl)};`,
     "const input = JSON.parse(process.env.WORKFLOW_HANDOFF_TEST_INPUT);",

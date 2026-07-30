@@ -7,8 +7,8 @@
  * blocks they render are built in the `-ui` modules.
  */
 
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
 import type { PromptShelfKind } from "./command-parser.js";
 import { goalErrorBlock } from "./goal-operator-ui.js";
 import { setGoalOperatorBlock } from "./operator-surface.js";

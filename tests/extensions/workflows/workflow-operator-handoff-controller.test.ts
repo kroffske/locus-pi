@@ -4,8 +4,8 @@ import {
   type ActionableWorkflowHandoff,
   type WorkflowHandoffControllerPorts,
 } from "../../../extensions/workflows/operator-handoff-controller.js";
-import { requestInlineOperatorInteraction } from "../../../extensions/_shared/operator-interaction.js";
-import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
+import { requestInlineOperatorInteraction } from "../../../extensions/_shared/operator/operator-interaction.js";
+import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness } from "../../test-harness.js";
 
 function handoff(runId: string, overrides: Partial<ActionableWorkflowHandoff> = {}): ActionableWorkflowHandoff {

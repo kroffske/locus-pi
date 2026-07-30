@@ -6,9 +6,12 @@ import {
   type OperatorBlock,
   type OperatorSurfaceType,
   type OperatorThemeLike,
-} from "../../../extensions/_shared/operator-ui.js";
-import { HOST_STRING_ARRAY_WIDGET_LINES, setOperatorWidget } from "../../../extensions/_shared/widget-render.js";
-import type { CustomUiComponent } from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/_shared/operator/operator-ui.js";
+import {
+  HOST_STRING_ARRAY_WIDGET_LINES,
+  setOperatorWidget,
+} from "../../../extensions/_shared/operator/widget-render.js";
+import type { CustomUiComponent } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness } from "../../test-harness.js";
 
 const block: OperatorBlock = {

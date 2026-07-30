@@ -6,9 +6,9 @@
  * facts they already read. Context-bound writes stay in `operator-surface.ts`.
  */
 
-import { formatAssignment } from "../_shared/model-settings.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import type { ThinkingLevel } from "../_shared/pi-api.js";
+import { formatAssignment } from "../_shared/model/model-settings.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import type { ThinkingLevel } from "../_shared/host/pi-api.js";
 import type { RoleSummary } from "./model-role-selector.js";
 
 export type EffortCommandOutcome =

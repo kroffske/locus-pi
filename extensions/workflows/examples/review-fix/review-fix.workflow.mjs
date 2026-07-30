@@ -39,7 +39,6 @@ live checkout before you rely on any claim in a handoff.`;
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
 const REVIEW_FIX_AGENT_DEFAULTS = Object.freeze({
-  maxToolCalls: 1_000,
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });
@@ -118,6 +117,8 @@ const FIX_READ_OPTIONS = Object.freeze({
   tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
+/** A check stage runs the repository's own commands and reads what they print;
+ *  forty tool calls is a deliberate narrowing, not a restatement of the default. */
 const FIX_CHECK_OPTIONS = Object.freeze({
   ...REVIEW_FIX_AGENT_DEFAULTS,
   readOnly: true,
@@ -140,7 +141,7 @@ export const meta = {
 
 /**
  * IDE-only type link: no runtime import is executed.
- * @param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {import("../../runtime/workflow-runtime.ts").WorkflowDsl} dsl
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
@@ -153,9 +154,15 @@ export default async function runWorkflow(dsl, input) {
   if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "review.md") {
     throw new Error('review-fix continuation requires exactly one artifact named "review.md"');
   }
-  const reviewRef = continuation[0].sourceRef;
   const consumedReview = continuation[0].consumedArtifact;
-  requireReviewArtifact(consumedReview, reviewRef);
+  // The host verifies the referenced bytes — projection membership, digest and size —
+  // and copies them in before this module starts, so the script reads them and gets on
+  // with the work. It used to re-derive that proof here, and then assert provenance the
+  // host cannot check: that the bytes were the terminal answer of a Package `review`
+  // `verify-review` stage. Both are gone. The operator picks the source run through the
+  // closed `continuation` control and the host verifies what they picked; the residual
+  // risk is remediating against a review from some other run, which re-running with the
+  // right source fixes.
   const reviewText = requireBoundedText(consumedReview.text, "consumed review", MAX_REVIEW_CHARS);
   const findings = parseFindingBlocks(reviewText);
 
@@ -394,39 +401,6 @@ ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
       label: "re-review fixes",
       maxAnswerChars: MAX_RE_REVIEW_CHARS,
     },
-  );
-}
-
-function requireReviewArtifact(consumed, sourceRef) {
-  const source = consumed?.source;
-  const target = source?.target;
-  const artifact = source?.artifact;
-  const terminal = source?.terminal;
-  const projectedRefs = Array.isArray(terminal?.artifactRefs) ? terminal.artifactRefs : [];
-  const projectedRef = projectedRefs.find((ref) => sameArtifactRef(ref, sourceRef));
-  const terminalRef = projectedRefs.at(-1);
-  if (
-    source?.runId !== sourceRef?.runId ||
-    target?.kind !== "name" ||
-    target?.ref !== "review" ||
-    target?.source !== "package" ||
-    artifact?.kind !== "answer" ||
-    artifact?.stage !== "verify-review" ||
-    consumed?.ref?.name !== "review.md" ||
-    terminal?.result !== consumed?.text ||
-    projectedRef === undefined ||
-    !sameArtifactRef(terminalRef, sourceRef)
-  ) {
-    throw new Error('review-fix reviewRef must be the terminal Package review verify-review answer named "review.md"');
-  }
-}
-
-function sameArtifactRef(left, right) {
-  return (
-    left?.runId === right?.runId &&
-    left?.artifactId === right?.artifactId &&
-    left?.name === right?.name &&
-    left?.sha256 === right?.sha256
   );
 }
 

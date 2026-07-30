@@ -5,13 +5,13 @@ import {
   persistCommandWorkflowTranscript,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../extensions/workflows/workflow-transcript.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import type { RunWorkflowScriptResult } from "../../../extensions/_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { RunWorkflowScriptResult } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { compactWorkflowParentRows } from "../../../extensions/workflows/progress-widget.js";
 import { createHarness } from "../../test-harness.js";
 

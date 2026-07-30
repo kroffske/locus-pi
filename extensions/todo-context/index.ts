@@ -17,7 +17,7 @@
  * backend is enabled, keeps Pi `todo_write` custom entries for compatibility,
  * and falls back to shared in-process state only when no session entry exists.
  */
-import type { ExtensionAPI } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { registerTodoCommand } from "./command-router.js";
 import { createTodoQueueController } from "./queue-controller.js";
 import { registerTodoWriteTool } from "./todo-write-tool.js";

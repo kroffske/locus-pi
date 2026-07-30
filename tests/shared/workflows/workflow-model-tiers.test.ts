@@ -8,21 +8,28 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type SdkCreateSessionOptionsLike,
-} from "../../../extensions/_shared/agent-sdk-host.js";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
-import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
+  createWorkflowJournalSink,
+  readWorkflowRunJournalState,
+  readWorkflowRunSummary,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import { createWorkflowRuntime, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowAgentResult,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import {
   parseModelSelector,
   resolveWorkflowModel,
   type WorkflowModelRegistrySource,
-} from "../../../extensions/_shared/workflow-model-resolve.js";
-import type { ModelLike } from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/_shared/model/workflow-model-resolve.js";
+import type { ModelLike } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, type Harness } from "../../test-harness.js";
 
 /**
@@ -653,6 +660,7 @@ describe("an unassigned role degrades and records the degradation", () => {
     const result = await runner({ prompt: "work", agent: "bare", modelRole: "test/fast" });
 
     expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("unclassified");
     expect(result.summary).toContain("test/fast");
     expect(result.summary).toContain("modelRole");
     // The actionable half: which option to use instead.
@@ -706,6 +714,38 @@ describe("executed-model evidence", () => {
     expect(start?.modelRole).toBe("smol");
     expect(start?.executedModel).toBeUndefined();
     expect(end?.executedModel).toBe("test/fast");
+  });
+
+  it("round-trips requested, role, executed, and fallback model evidence through the persisted reader", async () => {
+    const root = tieredProject();
+    const h = createHarness(root, { sessionId: "tier-persisted-journal" });
+    h.ctx.model = STRONG;
+    await h.ctx.settings?.set("modelRoles", {});
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const runId = "tier-persisted-journal";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      agentRunner: runner,
+      journal: createWorkflowJournalSink(root, runId),
+    });
+
+    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+    await expect(dsl.agent("pinned work", { agent: "bare", model: "test/strong" })).resolves.toBe("tier answer");
+
+    const persisted = readWorkflowRunJournalState(root, runId);
+    expect(persisted.diagnostics).toEqual([]);
+    const starts = persisted.lines.filter((line) => line.kind === "agent_start");
+    const end = persisted.lines.find((line) => line.kind === "agent_end");
+    expect(starts[0]?.modelRole).toBe("smol");
+    expect(starts[1]?.requestedModel).toBe("test/strong");
+    expect(end?.executedModel).toBe("test/strong");
+    expect(end?.modelRoleFallback).toContain('"smol"');
   });
 
   it("carries the requested selector under a name that says requested", async () => {
@@ -807,6 +847,46 @@ describe("executed-model evidence", () => {
     const row = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
     expect(row?.status).toBe("error");
     expect(row?.model).toBe("test/fast");
+  });
+
+  it("round-trips usage on the sole error line when a validator throws after execution", async () => {
+    const root = tieredProject();
+    const runId = "tier-validator-usage";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      journal: createWorkflowJournalSink(root, runId),
+      agentRunner: async (request): Promise<WorkflowAgentResult> => ({
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text: '{"count":3}',
+        diagnostics: [],
+        agent: request.agent,
+        executedModel: "test/fast",
+        usage: { input: 20, output: 10, totalTokens: 30, costTotal: 0 },
+      }),
+    });
+
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("cheap work", {
+        schema: COUNT_SCHEMA,
+        validate: () => {
+          throw new Error("validator exploded after measured execution");
+        },
+      }),
+    ).rejects.toThrow(/measured execution/u);
+
+    const persisted = readWorkflowRunJournalState(root, runId);
+    expect(persisted.diagnostics).toEqual([]);
+    const failure = persisted.lines.find((line) => line.kind === "error");
+    expect(failure?.executedModel).toBe("test/fast");
+    expect(failure?.usage).toEqual({ input: 20, output: 10, totalTokens: 30, costTotal: 0 });
+    expect(readWorkflowRunSummary(root, runId).usage).toEqual({
+      input: 20,
+      output: 10,
+      totalTokens: 30,
+      costTotal: 0,
+    });
   });
 
   it("keeps the readback on the error line when the artifact writer fails after the child ran", async () => {

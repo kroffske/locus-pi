@@ -4,22 +4,18 @@
  * a group summary, or ambiguous, and open the native session viewer on it with
  * the loop-round submenu the run journal supports.
  */
-import { agentLiveStore } from "../_shared/agent-sdk-host.js";
-import type { AgentLiveRow } from "../_shared/agent-sdk-host.js";
-import { agentLiveShortId, formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
-import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
+import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveShortId, formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
+import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/agent-runtime/fleet-menu.js";
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import type { ExtensionCommandContext } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
-import {
-  listWorkflowRoundsForSlot,
-  readWorkflowRoundBody,
-  workflowRunIdFromRowId,
-} from "../_shared/workflow-journal.js";
+} from "../_shared/operator/operator-interaction.js";
+import type { ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../workflows/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "./operator-surface.js";
 import { AgentSessionViewer, loadAgentViewerCapability } from "./session-viewer.js";

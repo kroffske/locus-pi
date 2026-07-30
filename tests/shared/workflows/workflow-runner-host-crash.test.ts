@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHarness } from "../../test-harness.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 
 /**
  * Iskhod-1 regression: a workflow failure must be CONTAINED as ok:false with an

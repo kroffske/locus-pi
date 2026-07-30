@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
-import { renderOperatorBlock } from "../../../extensions/_shared/operator-ui.js";
+import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
+import { renderOperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
 import {
   buildWorkflowActionPrompt,
   buildWorkflowCatalogBlock,
@@ -14,7 +14,7 @@ import {
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
-import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/workflows/runtime/workflow-runner.js";
 
 describe("workflow operator catalog", () => {
   it("keeps every curated Package workflow description concise and purpose-first", () => {

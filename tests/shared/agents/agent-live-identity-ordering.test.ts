@@ -4,8 +4,8 @@ import {
   formatAgentIdentity,
   formatDuration,
   orderAgentLiveRows,
-} from "../../../extensions/_shared/agent-live-panel.js";
-import type { AgentLiveRow } from "../../../extensions/_shared/agent-sdk-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 
 function makeRow(id: string, over: Partial<AgentLiveRow> = {}): AgentLiveRow {
   const base: AgentLiveRow = {
@@ -24,7 +24,10 @@ function makeRow(id: string, over: Partial<AgentLiveRow> = {}): AgentLiveRow {
 
 describe("agent identity (T-188 W3)", () => {
   it("prefers the child-session id and shows the last 6 alphanumerics", () => {
-    const row = makeRow("run:reviewer:1", { agentName: "reviewer", childSessionId: "550e8400-e29b-41d4-a716-446655440000" });
+    const row = makeRow("run:reviewer:1", {
+      agentName: "reviewer",
+      childSessionId: "550e8400-e29b-41d4-a716-446655440000",
+    });
     expect(agentLiveShortId(row)).toBe("440000");
     expect(formatAgentIdentity(row)).toBe("reviewer#440000");
   });
@@ -52,18 +55,18 @@ describe("row ordering invariant (T-188 W4)", () => {
   });
 
   it("keeps a row in place when it transitions to done", () => {
-    const before = [makeRow("a", { status: "working" }), makeRow("b", { status: "working" }), makeRow("c", { status: "working" })];
+    const before = [
+      makeRow("a", { status: "working" }),
+      makeRow("b", { status: "working" }),
+      makeRow("c", { status: "working" }),
+    ];
     const beforeOrder = orderAgentLiveRows(before).map((r) => r.id);
     const after = [before[0]!, makeRow("b", { status: "done" }), before[2]!];
     expect(orderAgentLiveRows(after).map((r) => r.id)).toEqual(beforeOrder);
   });
 
   it("nests children under their parent while roots keep insertion order", () => {
-    const rows = [
-      makeRow("p"),
-      makeRow("u"),
-      makeRow("c", { parentRowId: "p" }),
-    ];
+    const rows = [makeRow("p"), makeRow("u"), makeRow("c", { parentRowId: "p" })];
     expect(orderAgentLiveRows(rows).map((r) => r.id)).toEqual(["p", "c", "u"]);
   });
 });

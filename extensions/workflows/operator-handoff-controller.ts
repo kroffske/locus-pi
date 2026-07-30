@@ -1,16 +1,16 @@
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
-import type { WorkflowOperatorHandoffEnvelope } from "../_shared/workflow-handoff.js";
-import { errorMessage } from "../_shared/error-text.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
+import type { WorkflowOperatorHandoffEnvelope } from "./runtime/workflow-handoff.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import {
   isStaleInlineOperatorInteractionError,
   type StaleInlineOperatorInteractionError,
-} from "../_shared/operator-interaction.js";
+} from "../_shared/operator/operator-interaction.js";
 import {
   requestOperatorQuestion,
   type OperatorQuestionResult,
   type OperatorQuestionSpec,
-} from "../_shared/operator-question.js";
+} from "../_shared/operator/operator-question.js";
 
 export interface WorkflowHandoffSelectQuestion {
   kind: "select";

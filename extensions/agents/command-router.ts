@@ -4,11 +4,11 @@
  * the fleet menu and the session authority arrive as injected dependencies so the
  * router owns no session state of its own.
  */
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
-import { sharedState } from "../_shared/state.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
+import { agentCatalog } from "./catalog-state.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { renderAgentObserverText } from "../workflows/progress-widget.js";
 import { refreshAgents } from "./catalog.js";
 import {
@@ -89,7 +89,7 @@ export function registerAgentCommands(pi: ExtensionAPI, deps: AgentCommandDepend
         clearAgentsStatus(ctx);
         const text = getCommandText(args).trim();
         if (text === "list" || text === "") {
-          const catalog = [...sharedState.agents.values()];
+          const catalog = [...agentCatalog.values()];
           const fullBlock = agentCatalogBlock(catalog, discovery.diagnostics);
           if (await renderAgentBlockInteraction(ctx as ExtensionCommandContext, fullBlock)) return;
           setOperatorWidget(
@@ -101,7 +101,7 @@ export function registerAgentCommands(pi: ExtensionAPI, deps: AgentCommandDepend
         }
         const inspectMatch = /^inspect\s+(\S+)/.exec(text);
         if (inspectMatch) {
-          const agent = sharedState.agents.get(inspectMatch[1]!);
+          const agent = agentCatalog.get(inspectMatch[1]!);
           if (agent !== undefined) {
             const fullBlock = agentInspectBlock(agent);
             if (await renderAgentBlockInteraction(ctx as ExtensionCommandContext, fullBlock)) return;

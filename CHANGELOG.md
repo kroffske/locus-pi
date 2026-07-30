@@ -6,6 +6,232 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The packaged `live-smoke` workflow now enforces the read-only contract its
+  public description already promised.** Both child calls are confined to the
+  project workspace with `readOnly: true` and only the `find` tool, so the
+  write-capable `quick_task` profile cannot edit files or run shell commands.
+  The prompt no longer asks the read-only `explore` profile to use a `bash` tool
+  it does not have.
+
+- **The two catch-all files are gone, and `extensions/_shared/` is now nothing but its six
+  named layers.** `types.ts` and `state.ts` held unrelated contracts and one shared mutable
+  object between them; each export moved to the module that owns its lifecycle and both files
+  were deleted. The agent-definition contract now lives beside the parser that mints it, the
+  evidence-evaluation contract beside the evaluator that produces it, the output bounds beside
+  the truncation that applies them, and the permission and audit shapes inside the security
+  gate that is their only reader. Their package paths changed accordingly; nothing about their
+  behavior did.
+  **These two were split by domain rather than moved, because they never had one owner.** A
+  file named `types.ts` invites the next unrelated contract, and every reader of one export
+  had to scroll past nine others belonging to somebody else. Removing an export from it meant
+  checking ten extensions, which is the same problem the shared directory itself had, one
+  level down. There is now no file in the package whose name describes its shape instead of
+  its subject.
+  **The one constant that could not go where it reads like it belongs got its own module.**
+  The closed agent failure-cause list reads like it belongs to the agent envelope, and the
+  envelope re-exports it, but the envelope imports `node:crypto` and the host-agnostic
+  workflow core reads the list as a value — so defining it there would have pulled a host
+  dependency into the core. It is now a module with no imports at all, which is the property
+  the core actually depends on, stated where a reader will find it instead of inferred from
+  the absence of import lines.
+  **Seven exports had no consumers and were deleted rather than relocated.** The extracted-plan
+  and plan-task shapes, the whole catalog-entry family, and a second goal-state interface with
+  its context formatter — shadowing the live goal state in the project layer that every real
+  consumer imports — were reachable only from each other or from fields of the deleted state
+  object, along with three of that object's own fields. Four more union types stayed,
+  un-exported, next to the one interface that names each: they were never imported from
+  outside their own file, and an export nobody imports is a promise the package was making
+  for no one.
+  **The mutable object became two caches, one per owning extension, and the ledger says so.**
+  Its `agents` map was read and written only by the agents extension and its todo fields only
+  by the todo extension, so one shared object was hiding two unrelated single-owner caches.
+  Neither survives Pi's cache-disabled entrypoint loading — each loaded entrypoint gets its
+  own copy — so the todo cache keeps its documented role as a last-resort fallback in front of
+  the durable session store, never a source of truth, and the ownership ledger now names both
+  bindings where a reviewer will see them.
+  **The last declared exception to the layer order is gone.** The ownership guardrail carried
+  one named upward edge, from the host-layer output truncation to the provisional catch-all it
+  read its defaults from. Those defaults now sit in the host module that applies them, the
+  exemption is deleted, and the rank order is enforced for real on every shared edge with no
+  provisional classification left anywhere in the ledger.
+  **The hazard that broke two earlier slices was swept for and was absent again.** Every
+  file created or moved was checked for `import.meta.url`, `__dirname`, `fileURLToPath` and
+  any path anchored on the module's own location — the failure that twice silently
+  repointed a moved module at a directory that no longer existed. There was none: the two
+  deleted files built no paths at all, and the one module in the package that does count
+  directory levels from its own location, the bundled agent catalog loader, only gained type
+  declarations and did not move.
+
+- **Six modules that only ever had one consumer now live in the extension that owns
+  them.** The AST engine moved to `extensions/ast-structural-edit/`, the extension
+  inventory to `extensions/devext-doctor/`, the human-decision journal to
+  `extensions/ask-user-question/`, the tool classifier and audit ring to
+  `extensions/security-gate/`, and the draft-session runner and behavioral mode state to
+  `extensions/plan/`. Their package paths changed accordingly; nothing about their
+  behavior did.
+  **`_shared` is for code more than one extension needs, and these were not that.** A
+  single-owner module sitting in the shared directory told every reader that any of ten
+  extensions might depend on it, so removing an export meant checking all of them; it
+  also gave a second extension a shared-looking place to reach for logic that was really
+  one extension's implementation. Each of the six is now behind the boundary of the
+  extension that uses it, and `_shared` is down to the code that is genuinely shared.
+  **The one module that looked shared was checked before it moved, not after.** A test
+  under `tests/extensions/ast-structural-edit/` imports the tool classifier, which reads
+  like the AST extension depending on it. It is not: that test loads the security gate
+  itself to assert what the gate audits when an AST edit passes through it, and no
+  production file under `extensions/ast-structural-edit/` reaches the classifier
+  directly or through anything it imports. The classifier has exactly one production
+  consumer, the security-gate entrypoint, so it moved with the rest.
+  **Only the two catch-all files are left flat.** `types.ts` and `state.ts` still sit in
+  the shared root, and they stay there until they are split by domain: their contents
+  have several different owners, so filing them under one layer would assert an owner
+  none of them has. Every other module under `extensions/_shared/` now names its layer
+  in its path, and no module is waiting to leave.
+  **The hazard that broke two earlier slices was swept for and was absent again.** All
+  six modules were checked for `import.meta.url`, `__dirname`, `fileURLToPath` and any
+  path anchored on the module's own location — the failure that twice silently repointed
+  a moved module at a directory that no longer existed. There was none: every path these
+  modules build starts from a caller-supplied project root, an environment override, or
+  the home directory. The AST engine loads its Python grammar by package name rather
+  than by file path, so its dynamic grammar registration resolves from the new directory
+  exactly as it did from the old one, which the Python search, rewrite and
+  language-override tests continue to prove.
+
+- **The five remaining shared layers are now real directories.** Twenty-eight modules
+  moved out of the flat `extensions/_shared/` into the layer that owns them: the host
+  facade and its primitives into `host/`, the ten operator-UI modules into `operator/`,
+  the session store, artifact store and event bus into `runtime/`, model selection and
+  display into `model/`, and goal, prompt, task and todo state into `project/`. Their
+  package paths changed accordingly; nothing about their behavior did. With the
+  agent-runtime layer that landed before it, every declared layer now exists in the tree,
+  so the owner of a module is legible from its path instead of from a table in a script.
+  **One module was filed under the wrong layer, and the check had said so in advance.**
+  `runtime-capabilities.ts` was classified `host` but imported the runtime-layer session
+  store — a rank inversion the ownership ledger carried as a named, temporary exemption
+  rather than papering over by loosening a rank. The recorded choice was to either move
+  the module or split the store construction out of it; the evidence decided it. Every
+  consumer imports `createSessionStore`, so the store-construction half is the module's
+  whole reason to exist, and the capability report reports on that same store; nothing in
+  `host` or `operator` imports the module at all, so it owed nothing to a lower rank. It
+  is now a `runtime` module and the exemption is deleted, which means the rank order is
+  enforced for real on that edge instead of being waived.
+  **The two catch-all files stayed where they are, deliberately.** `types.ts` and
+  `state.ts` hold constants and mutable state with several different owners, so they are
+  split by domain rather than moved as units; filing them under a layer now would assert
+  an owner none of them has. They remain flat until that split happens.
+  **The hazard that broke the previous two slices was checked and was absent.** Twice
+  before, a module that derived a path from its own location silently repointed at a
+  directory that no longer existed once it moved one level deeper — the workflow example
+  registry, then the bundled agent catalog. All twenty-eight modules were swept for
+  `import.meta.url`, `__dirname`, `fileURLToPath` and any path anchored on the module's
+  own location; every path they build is anchored on a caller-supplied project root
+  instead, so there was nothing to repair. The two module-cache-disabled proofs for the
+  process-global command-UI and operator-status registries continue to pass across their
+  moves.
+
+- **The agent execution stack now lives in a named layer.** Thirteen modules — agent
+  discovery, the run boundary, the SDK host, the read-only tool policy, live rows, the
+  live transcript, petnames, the system prompt and its context extras, evidence
+  evaluation, workload proof and the fleet menu — moved from `extensions/_shared/` to
+  `extensions/_shared/agent-runtime/`. Their package paths changed accordingly; nothing
+  else about them did.
+  **`_shared` was flat, so its declared layers did not exist as anything.** The
+  ownership check had already assigned every module a layer and a rank, and enforced the
+  import direction between them, but all forty-nine files still sat in one directory —
+  so the layer a file belonged to was invisible in the tree and knowable only by reading
+  a table in a script. This is the first layer to become a real directory, which also
+  turns on the rule that a file's directory must equal its declared layer: from here a
+  module cannot be filed under the wrong owner without the check saying so.
+  **A path-only move would have silently emptied the bundled agent catalog.**
+  `agents.ts` derives the package's bundled `.agents/agents` directory from its own
+  `import.meta.url`, two levels up. One directory deeper, that walk resolves to
+  `extensions/.agents/agents`, which does not exist — and agent discovery does not treat
+  a missing bundled directory as an error, so `/agent list` would have quietly dropped to
+  project and user catalogs with the ten shipped agents gone and nothing reported. The
+  derivation now goes three levels up and resolves to the same directory it always did;
+  a sweep of all thirteen modules for self-referential paths found this one and no other.
+  **The agent executor was two things in one file, and only one of them runs.**
+  `agent-executor-host.ts` held both the prompt capsule and text-result layer that every
+  live agent execution goes through, and the superseded replacement-session executor that
+  the source audit records as retained provenance. The live half — the exact three symbols
+  the SDK host imports, plus the parent-context assembly they reach — is now
+  `agent-execution-prompt.ts`, and the historical module imports it rather than exporting
+  to it. So the production surface is the whole content of one file instead of a third of
+  a large one.
+  **The historical half was not deleted, and that was a judgement call.** Nothing
+  registered reaches it: no entrypoint, and no source outside the module itself. On reach
+  alone it could go. But retaining it is a written decision in the source audit rather
+  than an oversight, and overturning a standing decision is not what a relocation is for
+  — so this change made the boundary visible and left the decision to be taken on its own
+  merits. One consequence is recorded rather than acted on: the only reason
+  `agent-workload-proof.ts` is shared at all is a single read from inside that historical
+  path, so retiring it would free that module to move into the agents extension, which is
+  its only other consumer.
+  **The fleet menu's process-global state now has the proof it never had.**
+  `fleet-menu.ts` owns a versioned `globalThis` slot holding the menu's focus and cursor,
+  and moving a module that owns such a slot is how live state gets duplicated: Pi loads
+  every registered entrypoint with the module cache disabled, so the agents and workflows
+  entrypoints each hold their own instance and only the slot makes them agree. The
+  ownership check verifies statically that one module names the slot — a source-level
+  count that cannot see the failure that matters. With two copies, a menu focused through
+  one entrypoint is invisible to the interrupt guard living in the other, and a close
+  performed by a peer is a silent no-op that leaves the first side believing it still
+  holds focus. A new test loads two entrypoints through the real loader, has each
+  subscribe before either mutates, and then has one open and focus the menu and the
+  _other_ release it — confirmed by duplicating the registry and watching the slot-level
+  assertions stay green while every cross-entrypoint one failed.
+
+- **The workflow runtime now lives in the extension that owns it.** Fourteen
+  `workflow-*` modules — the DSL core, the script loader, the journal, the agent
+  bridge, replay, artifacts, budget, worktrees, results, run reports, resources,
+  handoff, failure diagnostics and script identity — moved from
+  `extensions/_shared/` to `extensions/workflows/runtime/`. Their package paths
+  changed accordingly; nothing else about them did.
+  **They were never shared.** `_shared` had grown into a flat bag of 63 modules,
+  and these fourteen were the largest thing in it that only one extension used:
+  they import each other densely, and the only thing any other extension reads from
+  them is workflow run persistence, which already goes through the read-only door
+  added alongside. So "shared" described where the files sat rather than who
+  depended on them. Moving them one at a time would have meant a slice whose module
+  imports its own siblings across a directory boundary, so they moved as the one
+  subsystem they are.
+  **A path-only move would have broken the workflow registry.** The Package
+  workflow registry is discovered by walking a directory derived from the loader
+  module's own `import.meta.url`, two levels up and back down into
+  `workflows/examples/`. Relocating the loader repoints that walk at a directory
+  that does not exist, and every shipped example disappears from `/workflows` with
+  no error raised anywhere. What catches it is the public-registration test that
+  asserts the exact six shipped names — confirmed by leaving the derivation
+  unfixed and watching it report an empty registry. The derivation now goes one
+  level up, and the registry resolves to the same directory it always did.
+  **The journal's process-global registry now has the proof it was missing.**
+  `workflow-journal.ts` owns the versioned `globalThis` slot that holds workflow
+  journal writers, and moving a module that owns such a slot is exactly how live
+  state gets duplicated: Pi loads every registered entrypoint with the module cache
+  disabled, so each entrypoint holds its own instance of the journal and only the
+  `globalThis` slot makes them agree. The ownership check verifies statically that
+  one module names the slot, which is a source-level count and cannot see the
+  failure that matters — with two copies of the map, a terminal journal line from a
+  second entrypoint finds no writer for its key and returns early, leaving the live
+  row stuck at `working` and the writer entry never cleared. Nothing proved that
+  did not happen. A new test loads two entrypoints through the real loader and has
+  each one close the writer the _other_ opened, in both directions, which only
+  works on one shared registry.
+  **Model resolution turned out not to be workflow-owned, so it stayed shared
+  instead of moving.** Fourteen of the fifteen modules were workflow internals. The
+  fifteenth — "which concrete model does this selector name" — is called by the
+  workflow agent bridge and by the agents extension's interactive `/agent run`, and
+  that sharing is the point: it is what keeps one agent name from running on two
+  different models with nothing in the evidence to explain why. Its own
+  dependencies are the host facade and the shared model-settings grammar, nothing
+  workflow-specific. A module with a first-class consumer in each of two extensions
+  is what the shared directory is for, so it now sits in the shared model layer
+  beside the model-settings and live-display modules that are shared for exactly
+  the same reason. Moving it into one of its two consumers and punching a door
+  through for the other would have dressed a genuinely shared dependency up as a
+  borrowed one — the failure mode this whole refactor exists to end, since ownership
+  here follows real consumers rather than a `workflow-` filename prefix.
+
 - **A workflow stage can now say which model it runs on, and the evidence names
   the model that actually ran.** Per-call model selection was written down in
   three evidence surfaces and reached the child in none of them: the resolver
@@ -209,6 +435,201 @@ This file records user-visible changes to the public package.
   actually keep one writer's prompt in hand.
 
 ### Added
+
+- **The package now ships an architecture decision record for the six ownership
+  layers under `extensions/_shared/`.** `AGENTS.md` already stated the rules a
+  contributor must obey and `scripts/check-extension-layers.ts` already enforced
+  them, but nothing said in prose what the six layers are for, which modules live in
+  each, or why the declared order is the order it is.
+  `docs/adr/extension-ownership-layers.md` records all three: the forty-three shared
+  modules by layer, the rank order and the operator layer's narrowing in both
+  directions, the one sanctioned read-only door into workflow run persistence with
+  the two modules outside the workflows extension that use it, and the alternatives
+  that were considered and rejected.
+  **It also records the two failure modes the static check structurally cannot
+  see,** which is the reason the boundary is a script rather than a convention. A
+  path a module derives from its own file location silently repointed at a
+  directory that does not exist twice during this breakup, and the check reported
+  zero violations both times. A process-global registry that becomes
+  per-module-instance state stays typecheck-clean and statically green, because Pi
+  loads each registered entrypoint with the module cache disabled — only a test
+  that loads two entrypoints in one process can see it. Six of the seven declared
+  registries carry such a proof today, and the ADR names the seventh as still
+  lacking one rather than implying the set is complete. No source module moved and
+  no guardrail rule changed.
+  **Writing it down found two statements this breakup had already shipped that were
+  no longer true.** The read-only door's own header justified keeping one path
+  derivation in place because three modules that use it were still in
+  `extensions/_shared/`; a later slice moved all three into the workflows extension,
+  which makes that edge ordinary, so the header now says the ownership objection has
+  lapsed and gives the cohesion reason that still holds. And an entry above
+  overstated how often the self-derived-path hazard had struck, counting three
+  occurrences where there were two. Both are corrected here rather than left for a
+  reader to trip over, because a boundary is only as good as the description someone
+  reads instead of the code.
+
+- **Reading a workflow run from outside the workflows extension now goes through
+  one read-only door, and nothing can reach past it.** The module that owns
+  `.locus/runtime/workflows/<runId>/` also owns the append sink, the
+  journal-to-live-row projection and the live-row retention bound. Two consumers
+  only ever needed to _read_ a run — the agent drill's round submenu and the
+  loop's continuation source — and both imported that module directly, so both
+  held its write side as well. `extensions/workflows/run-read.ts` is the surface
+  they get instead: the read operations and the one type those return, and nothing
+  else.
+  **Nothing was reimplemented behind it, and that was the evidenced choice rather
+  than the lazy one.** A read operation is worth relocating only when it is
+  self-contained, and none of these is. The live-row id parser is called by the
+  journal's own retention pass, which then clears the retired runs' writer entries
+  from a process-global map; the run-directory path builder is still used by three
+  sibling modules inside `_shared/`. Relocating either would have made
+  foundational shared code import a feature directory — the one edge the ownership
+  refactor exists to remove. The run listing, the journal read, the run summary and
+  the two round readers all resolve through private journal internals: the
+  start-timestamp proof that orders runs, the per-line structural validator that
+  separates valid rows from diagnostics, and the persisted-result disposition
+  projection. Copying any of them across would have forked a parser away from the
+  format it parses, and splitting a function from the global state it reads is how a
+  relocation silently ends up with two live-state slots. Facade purity was worth
+  less than either.
+  **A ninth check keeps the door from becoming decorative.** `npm run check:layers`
+  now accepts a declaration that a module is internal to one extension plus the one
+  facade file that stands in for it everywhere else, and rejects any import of that
+  module from another extension directory. The existing no-upward-import rule was
+  about direction — shared code may not reach up into a feature — and said nothing
+  about two features being peers, so without this the next edit could import the
+  journal from `extensions/agents/` again and the facade would sit there unused.
+  Tests are deliberately out of scope: a test of the journal has to import the
+  journal, or it is testing the facade while the internals go uncovered.
+  **The loop's continuation helper moved to the extension that owns it.**
+  `extensions/_shared/loop-continuation.ts` is now
+  `extensions/loop/loop-continuation.ts`. Its only importers were three files in
+  `extensions/loop/`, and it read the workflow journal — so had it stayed in
+  `_shared` while the facade landed, a shared module would have been importing a
+  feature directory, which is exactly what the new check forbids. Moved, the same
+  dependency is a legal edge from one extension to another's declared facade.
+  Behavior is unchanged throughout: run listing, round lookup, continuation
+  creation and the refusal for an absent run all do what they did before.
+
+- **`extensions/_shared` now has a declared owner per module, and the import
+  direction is checked instead of assumed.** The directory had grown to 64 modules
+  with no stated boundary, so nothing distinguished a genuinely shared primitive
+  from a single-extension helper that landed there by habit — and nothing stopped
+  foundational shared code from importing a feature entrypoint, which is the edge
+  that makes a shared directory unsplittable. `npm run check:layers` (also inside
+  `npm run check`, so the existing push gate runs it) reads a ledger that classifies
+  every shared module exactly once, either into a named layer or with the extension
+  directory it is scheduled to move to, and fails on: an import that escapes
+  `_shared/` into a feature directory; an import that points up the declared layer
+  order, type-only imports included, since a type edge encodes ownership just as
+  much as a value edge; a new shared module with no declared owner; a module deleted
+  from `_shared/` without landing at its declared destination; and a module sitting
+  in a layer subdirectory that contradicts its declared layer. The operator UI layer
+  is a leaf in both directions — it may reach only the host layer, and no other
+  shared layer may reach it, because a foundational module that depended on it would
+  drag command registration and rendering down into the base of the tree.
+  **Two kinds of process-wide state are tracked separately, because only one of them
+  is findable.** Versioned `globalThis` slots (`Symbol.for("locus-pi.…")`) each get
+  exactly one declared owning module — two modules naming one slot is precisely how
+  a file move splits live state that separately loaded Pi entrypoints are supposed
+  to share. Mutable module-level state that is _not_ such a slot cannot be found by
+  that sweep at all, so it is declared by hand and the check also rejects a new
+  mutable exported container in `_shared/`; that state does not survive Pi loading
+  two entrypoints with the module cache disabled, and a relocation must not quietly
+  imply that it does.
+  **Two imports that already point the wrong way are named rather than tolerated.**
+  A host-layer module value-imports a constant from the provisional catch-all
+  module, and another host-layer module imports the runtime-layer session stores it
+  probes for. Both are recorded as declared exceptions with the slice that clears
+  each, and the check fails as _stale_ once an exception stops being needed — so the
+  rank order becomes real by subtraction instead of quietly staying loose.
+
+- **`agent({ attempts })` — a bounded retry for the failure where the child never
+  got to answer.** A dropped child session or an expired turn budget ended the whole
+  run, and an author's only recourse was to re-run the pipeline from the start. That
+  is now a declared, bounded, evidenced retry — and it is deliberately the narrow
+  one. It re-sends the **identical** prompt, because there is nothing to repair: it
+  never re-asks a child because its prose was thin, and it never touches the
+  pre-existing value repair (`schema` plus `validate`), which owns the opposite case
+  — the child answered, off-shape. The canonical doc now carries both loops in one
+  table with the failures each one owns.
+  The retry keys on a **machine-readable cause**, not on the wording of an error
+  message. `status` was a four-way split in which a turn timeout, a tool-call budget
+  breach, a provider error and any mid-turn throw all arrived as one `failed` plus an
+  English sentence, so a predicate over that sentence would have started retrying a
+  reworded string's worth of causes the day someone edited one. Every non-completed
+  child run now carries a closed, exhaustive cause set where the cause is known,
+  through the run envelope and the bridge onto `agent_end`. Exactly two members are
+  retryable — the host turn budget and the call's own `timeoutMs` fuse — and a cause
+  nothing has shown to be transient reads as `unclassified` and fails closed. A
+  result written before the field existed reads as `unclassified` too, so nothing
+  starts retrying by accident.
+  `attempts` defaults to 1, is capped at 3, and is **refused rather than clamped**
+  outside that range, before any child starts. It is also refused unless the call can
+  provably not have written — `readOnly: true`, or a `tools` allow-list drawn only
+  from the host's read-only set — because a child that timed out mid-edit may already
+  have changed the repository, and a second attempt would double-apply. Replay
+  eligibility alone is not that proof: `workspaceMode` defaults to `"project"` and a
+  catalog agent stays write-capable unless the call says otherwise.
+  Every physical attempt is a real agent call and is billed as one: its own `callId`,
+  its own transcript and result envelope, its own charge against
+  `maxTotalAgentInvocations`, and its own `agent_start`/`agent_end` pair carrying
+  `attempt`, `attempts` and the `logicalCallId` of the call they belong to. The
+  reader's copy under `.locus-pi/<runId>/` grows a `## Retried agent calls` section
+  naming every attempt and the discarded one's cause, grouped by that logical call —
+  `parallel()` can run two calls that agree on agent, label, phase and group, and a
+  report grouping by those would put one call's discarded attempt under the other.
+  An attempt that **throws** has no `agent_end` at all — an unavailable agent SDK
+  substrate leaves no channel to re-ask on, so the call throws and the run ends. Its
+  typed cause and its attempt fields travel on the terminal `error` line instead, and
+  the report reads that line too, so a retry already spent stays visible when the next
+  attempt is the one that ends the run.
+  Resume is unaffected by construction: the replay envelope opens once per **logical**
+  call and every physical attempt inside it shares that one ordinal, so a retry cannot
+  shift a later call's position, and `attempts` stays out of the canonical request so
+  recordings written before it existed still replay.
+  The persisted `locus.agent.run-result.v1` envelope carries `failureCause` too, so the
+  durable per-call record and the run journal name the same cause instead of one of them
+  leaving a reader to match on English. Where the workflow's own per-call `timeoutMs`
+  fuse fired, that classification is the one written down: the host honestly reports the
+  cancellation it observed, and only the caller knows it pulled the trigger.
+
+- **One package budget contract, so a workflow run is bounded on every axis the
+  host can enforce without the script saying anything.**
+  `DEFAULT_WORKFLOW_BUDGET` in `extensions/workflows/runtime/workflow-budget.ts` is now the
+  single source for global agent concurrency (4), total agent invocations per run
+  (200), run wall clock over the agent chain (2 h), per-child wall clock (10 min),
+  per-child tool calls (1000), per-child turns (5) and answer characters
+  (500 000). Before it, two of those numbers lived 580 lines apart in the runtime
+  with no cross-reference, global concurrency had no default at all — a nested
+  fan-out of four branches of three really did run twelve children at once — and
+  no run had a wall clock. The runner applies the whole contract to every run, so
+  a script that declares nothing is still bounded; a stage may still narrow any
+  per-call axis, and a raise is written to the journal naming the axis, the
+  default and the requested value rather than applying in silence. Two axes are
+  reported and deliberately not enforced: token counts are printed when the host
+  supplies them, and cost is printed as unavailable, because `costTotal` is still
+  a hardcoded `0` and a limit over a stub reports "under budget" forever.
+  `maxTurns` becomes an ordinary `agent()` option within the host clamp of 1..20,
+  and `timeoutMs` is capped at 2,147,383,628 ms so neither the workflow fuse nor
+  its derived SDK backstop crosses Node's timer limit and collapses to an
+  approximately one-millisecond delay. The run's
+  `.locus-pi/<runId>/README.md` gains a `## Budget` section showing
+  every axis with its applied value beside the spend the run evidence can actually
+  measure — the axes it cannot measure print as "not recorded", never as `0`.
+  **Two consequences worth knowing before upgrading.** Recorded runs made before
+  this release are no longer replayed: `timeoutMs` is part of the canonical
+  request by design, so a record written while the axis had no default describes a
+  different call once it has one. Those children were not unbounded — the SDK host
+  has always stopped one at its per-turn timeout times `maxTurns`, which with the
+  values in force was the same ten minutes — but the bound was the host's, not a
+  declared workflow fuse, so it never named the axis and was never part of the
+  replay key. Reusing such a record would serve text produced under an implicit
+  host ceiling as though the declared fuse had been in force. Records live in
+  ignored per-workstation state, so the cost is a re-run, not lost work. And the
+  run wall clock is checked when a child starts, which bounds the agent chain: a
+  run is bounded by `runtimeMs` plus at most one child's own `timeoutMs`, and
+  script code that calls no further agent is not bounded by it at all.
 
 - **A shipped skill, so an agent can find the workflows the package already
   installs.** The six Package workflows resolve out of the installed package and

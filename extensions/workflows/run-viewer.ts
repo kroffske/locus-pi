@@ -1,22 +1,22 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import {
   readWorkflowArtifactIndex,
   readWorkflowArtifactRecord,
   type WorkflowArtifactRecord,
-} from "../_shared/workflow-artifacts.js";
+} from "./runtime/workflow-artifacts.js";
 import {
   listWorkflowRunIds,
   readWorkflowRunJournalState,
   readWorkflowRunSummary,
   type WorkflowJournalDiagnostic,
   type WorkflowRunStatus,
-} from "../_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { errorMessage } from "../_shared/error-text.js";
-import { clamp } from "../_shared/viewer-geometry.js";
-import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
+} from "./runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
+import { errorMessage } from "../_shared/host/error-text.js";
+import { clamp } from "../_shared/operator/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 const PI_HOST_FOOTER_ROWS = 3;

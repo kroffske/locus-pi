@@ -126,7 +126,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   It bounds status/detail rows and leaves complete evidence in `result.json`.
   The existing live progress, resolver, journal, approval, and execution owners
   are not reimplemented by this presentation layer.
-- `extensions/_shared/command-ui.ts` owns generic transient-key pinning and cleanup
+- `extensions/_shared/operator/command-ui.ts` owns generic transient-key pinning and cleanup
   callbacks. The workflow extension removes completed large widget/status/transient
   presentation on the next input, registered command cleanup, or `turn_end`, then
   delegates row retention to store-owned cleanup: the newest five fully terminal
@@ -139,7 +139,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   markers. `/ps` remains the shared fleet/viewer entrypoint rather than a second
   workflow renderer; the workflow event adapter verifies replay answer artifacts
   before it projects their text into the generic viewer row.
-- `extensions/_shared/workflow-runtime.ts` owns the DSL primitives:
+- `extensions/workflows/runtime/workflow-runtime.ts` owns the DSL primitives:
   `agent`, `publishArtifact`, `consumeTextArtifact`,
   `awaitOperator`, `promptFile`, `workspace`,
   `projectRoot`, `parallel`, `pipeline`, `phase`, `log`, `now`, and `random`.
@@ -157,7 +157,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   object. It distinguishes valid recovery from exhausted parser/validator
   mismatch, records actual fresh attempts, and mirrors the outcome to terminal
   journal lines; it is protocol accounting, not a domain-quality verdict.
-- `extensions/_shared/workflow-artifacts.ts` owns the canonical per-run artifact
+- `extensions/workflows/runtime/workflow-artifacts.ts` owns the canonical per-run artifact
   store at `.locus/runtime/workflows/<runId>/artifacts/index.json`. Every record
   binds `{runId, artifactId, name, sha256}` to media type, size, relative path,
   stage, provenance, and optional source lineage. It assigns confined
@@ -174,7 +174,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   artifact kind/stage, structured terminal result, and terminal artifact refs so
   compositions can bind a handoff to the producer's result rather than mutable
   index metadata. Self-reference and partial/tampered refs fail closed.
-- `extensions/_shared/workflow-runner.ts` owns final disposition after every
+- `extensions/workflows/runtime/workflow-runner.ts` owns final disposition after every
   evidence owner has settled: controlling abort, failure, declared operator
   handoff, then completion. It persists closed cancellation reasons and a
   runtime cancellation journal line, so trusted script catches cannot turn an
@@ -184,12 +184,12 @@ or borrowed runtime implementation was identified for this source-audit slice.
   into native workflow tool details and text so the calling model can pass a
   complete ref to a later run without inventing an artifact id. The canonical
   full inventory remains the per-run artifact index.
-- `extensions/_shared/workflow-worktree.ts` owns disposable linked-worktree
+- `extensions/workflows/runtime/workflow-worktree.ts` owns disposable linked-worktree
   creation and the retained workflow workspace manager: detached worktrees at
   exact refs under the run directory, verification of the original checkout and
   of each workspace's HEAD and realpath on every resolve, and workspace
   evidence for the run envelope.
-- `extensions/_shared/workflow-journal.ts` owns run discovery/order and
+- `extensions/workflows/runtime/workflow-journal.ts` owns run discovery/order and
   immutable executed-snapshot reads as well as journal-to-live status mapping.
   Status/catalog consumers see only evidenced directories with a canonical UTC
   id prefix or persisted journal timestamp; legacy ids sort by that timestamp
@@ -206,20 +206,20 @@ or borrowed runtime implementation was identified for this source-audit slice.
   absent legacy disposition falls back to `ok`, while malformed future values
   remain `unknown`. `cancelled` is a distinct terminal live state; terminal
   mapping clears active tool state so the progress panel and shared fleet agree.
-- `extensions/_shared/agent-live-panel.ts` owns status markers and short event
+- `extensions/_shared/agent-runtime/agent-live-panel.ts` owns status markers and short event
   grammar: success only for `done`, distinct cancelled and failed variants.
-- `extensions/_shared/fleet-menu.ts` uses explicit `workflowRunId` provenance
+- `extensions/_shared/agent-runtime/fleet-menu.ts` uses explicit `workflowRunId` provenance
   to keep workflow rows inspectable while suppressing both the `x stop` hint and
   handler. Escape is consumed without host abort while workflow work is active;
   `/workflows stop` remains the only workflow cancellation entrypoint.
-- `extensions/_shared/agent-sdk-host.ts` settles the canonical SDK child row to
+- `extensions/_shared/agent-runtime/agent-sdk-host.ts` settles the canonical SDK child row to
   `cancelled` on an abort before returning the child result; the journal mapping
   settles the workflow parent to the same state. `AgentLiveStore.patch` owns the
   shared terminal invariant for `done`/`cancelled`/`error`: remove all three live
   tool fields and freeze elapsed time once. Turn cancellation waits only a
   bounded interval for the SDK `abort()` acknowledgement, then continues trace,
   result, and disposal work even if that promise never settles.
-- `extensions/_shared/agent-read-only-policy.ts` owns the optional
+- `extensions/_shared/agent-runtime/agent-read-only-policy.ts` owns the optional
   `repository_check` capability for read-only children. The workflow bridge
   freezes the exact package script map before any child can write. The model can
   name only a baseline script while the entire current map still equals that
@@ -235,7 +235,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   operator-owned code; this is checkout isolation, not an OS/network sandbox,
   and a script that writes inside a borrowed dependency root reaches the
   project's real install tree.
-- `extensions/_shared/workflow-script-identity.ts` owns versioned exact-entry
+- `extensions/workflows/runtime/workflow-script-identity.ts` owns versioned exact-entry
   identity, static source-policy analysis, read-only snapshots and final snapshot
   verification. Default `self-contained-static` permits only direct static
   `node:` imports/re-exports and executes the snapshot. Literal
@@ -250,7 +250,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   is machine-derived on purpose — there is no author-asserted `meta` field,
   because an assertion would fail open. It reads syntax, not behavior, so an
   aliased root or an imported module is outside it.
-- `extensions/_shared/workflow-replay.ts` owns the recorded-call store behind
+- `extensions/workflows/runtime/workflow-replay.ts` owns the recorded-call store behind
   `--resume`: the `replay.ndjson` record inside the existing run directory, the
   sha-256 call key, the per-kind read cursors, and the single divergence latch
   that makes replay a strict prefix. Every unresolved lookup is an explicit miss
@@ -260,7 +260,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   carries the `replayed` marker only, so bounded status/digest surfaces never
   receive unbounded child text. Write failures are swallowed like the journal
   sink's — they cost a future resume, never the current run.
-- `extensions/_shared/workflow-runner.ts` owns target resolution and load order.
+- `extensions/workflows/runtime/workflow-runner.ts` owns target resolution and load order.
   It imports the snapshot for strict coverage or the hash-keyed source URL for
   explicit entry-only coverage, with a per-run cache key and pre/post byte checks. At resolution time,
   explicit and saved-name project targets pass lexical
@@ -272,7 +272,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   installed/local modules, so reviewed scripts retain host filesystem,
   subprocess, network and other module capabilities. `dsl`, worktrees and
   approval metadata do not narrow that power; this is not a sandbox.
-- `extensions/_shared/workflow-runner.ts` also owns the unhandled group-failure
+- `extensions/workflows/runtime/workflow-runner.ts` also owns the unhandled group-failure
   projection. It removes potentially non-JSON-safe branch values, persists a
   typed `workflow_group_failure` result envelope, and keeps the outer run
   `ok:false` with the group error text and failed journal/status evidence.
@@ -281,7 +281,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   hooks `input` plus `turn_end`. `browser: true` records that trusted imported
   modules may drive browser-capable code when present; it does not expose a new DSL
   browser primitive.
-- `extensions/_shared/workflow-result.ts` owns JSON-safe result normalization,
+- `extensions/workflows/runtime/workflow-result.ts` owns JSON-safe result normalization,
   semantic main projection, bounded status detail, and honest `result.json`
   persistence diagnostics. A diagnostic sentinel for a non-JSON-safe script
   result forces the outer envelope to `ok:false`. Failure to persist the mandatory
@@ -296,7 +296,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   The same owner formats semantic failure summary and stable unresolved row ids
   for transcript, tool/command result block, and live progress. It is local
   boundary code, not borrowed behavior.
-- `extensions/_shared/workflow-agent-bridge.ts` routes workflow `agent()` calls
+- `extensions/workflows/runtime/workflow-agent-bridge.ts` routes workflow `agent()` calls
   through the same agent boundary and host SDK child-session path used by the
   `task` tool. Catalog definitions resolve project → user → bundled, first-wins
   by agent name; a missing role is an explicit failed result. The executor model
@@ -361,10 +361,15 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner
-  verifies the successful source run, full reference, and digest before copying
-  bytes into the new run; entry code additionally requires the bytes to equal
-  the source terminal result, the exact ref to be its last projected output, and
-  the final `verify-review` answer to come from the curated Package workflow named `review`.
+  verifies the successful source run, full reference, digest and terminal-projection
+  membership before copying bytes into the new run; since 2026-07-29 (owner decision 6)
+  entry code checks only that exactly one reference named `review.md` arrived and reads
+  the verified bytes. The digest re-derivation duplicated the host, and the assertion
+  that the bytes were the terminal `verify-review` answer of a Package `review` run
+  asserted provenance the host does not check and no agent can. The operator picks the
+  source run through the closed `continuation` control, the host verifies that choice,
+  and the accepted residual risk — remediating against another run's review — is fixed
+  by re-running with the right source.
   A no-tool read-only selector returns 1–20 `{id,note,dependsOn}` units through
   the shaped-agent boundary. Deterministic entry code then parses complete
   `### F<n>` blocks inside `## Findings`, rejects invalid ids, notes, edges and

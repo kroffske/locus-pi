@@ -64,12 +64,12 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ### PENDING SEAMS
 
-| Seam                                | Location                                                                                          | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bounded concurrency                 | `extensions/_shared/workflow-runtime.ts` `runScheduled()`                                         | DONE (per-call). `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering. Width bounds each `runScheduled` call, not globally. A **global limiter** + width tuning remains a future scheduler task.                                                                                                                                                                                                                                                                                                                                   |
-| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                |
-| Trusted script execution            | `extensions/_shared/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
-| Owner-default agent + model routing | `extensions/_shared/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
+| Seam                                | Location                                                                                                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bounded concurrency                 | `extensions/workflows/runtime/workflow-runtime.ts` `runScheduled()`                                         | DONE. `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering; width bounds each `runScheduled` call, not globally, so nested fan-out used to multiply. The **global limiter** now exists: every run applies `DEFAULT_WORKFLOW_BUDGET.concurrency` to the leaf `AgentConcurrencyGate` (see "Run budget"). `SCHEDULER_WIDTH` tuning and worktree-isolated real concurrency remain a future scheduler task.                                                                                                                             |
+| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                |
+| Trusted script execution            | `extensions/workflows/runtime/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
+| Owner-default agent + model routing | `extensions/workflows/runtime/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
 
 ---
 
@@ -80,7 +80,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
 | `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                      |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, terminal provenance, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                         |
+| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                              |
 | `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim. The run never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance fails the run rather than shipping a plan nobody accepted.                                                                                                                                             |
 | `plan-implement`     | **Accepted plan to changes**: semantic text plus host continuation supplies exactly one non-empty `plan.md` reference, which the host verifies and copies before workflow code starts; the entry no longer re-derives that proof, so a same-named draft from an earlier round of the same run is no longer refused (2026-07-28 amendment). Deterministic code parses `### S<n>` blocks; a no-tool selector chooses which steps this run implements and the plan's own order is restored. One writer owns each step, then a read-only checker and a fresh reporter run. A failed writer skips the remaining steps and returns `partial: true`.                                                                           |
 
@@ -143,14 +143,18 @@ The remediation call keeps operator meaning and host state separate:
 }
 ```
 
-The continuation must contain exactly one complete immutable `review.md`
-reference from the `verify-review` stage of a successful Package workflow named
-`review`; a same-name artifact from another workflow or stage is refused. The
-host verifies all four fields and the bytes, then copies the review into the new
-run with source lineage before workflow code starts. The entry additionally
-requires those bytes to equal the source
-`result.json.result` and the exact reference to be the terminal projected output;
-editing only artifact-index kind/stage metadata cannot promote another file.
+The continuation must contain exactly one complete immutable reference named
+`review.md`. The host verifies all four fields, that the source run succeeded,
+and that the reference is present in that run's terminal projection, then copies
+the bytes into the new run with source lineage before workflow code starts. Since
+2026-07-29 the entry checks the count and the name and reads those verified bytes:
+it no longer re-derives the host's proof, and no longer asserts that the bytes
+came from the `verify-review` stage of a Package workflow named `review` —
+provenance the host does not check and no agent can. The operator picks the source
+run through the closed `continuation` control and the host verifies what they
+picked; the accepted residual risk is remediating against a review from some other
+run, which re-running with the right source fixes. See `## Curated Package
+workflows` below for the same trade in `plan` → `plan-implement`.
 A no-tool read-only selector receives the operator text and immutable review,
 then returns 1–20 `{id,note,dependsOn}` units through the fail-closed shaped
 agent boundary. Deterministic code bounds all notes and handoffs, parses complete
@@ -210,7 +214,8 @@ install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
 
 `plan` and `plan-implement` are the second curated pair, and the seam between
-them is the same shape as `review` → `review-fix`. `plan` returns the accepted
+them is the same shape as `review` → `review-fix`, which since 2026-07-29 makes
+the same trade described below. `plan` returns the accepted
 plan text, which the runtime retains as `plan.md`; `plan-implement` takes that
 artifact's complete `{ runId, artifactId, name, sha256 }` reference through host
 continuation, and reads the bytes the host verified and copied, at any length.
@@ -220,6 +225,17 @@ run's terminal result — which distinguished the accepted plan from a same-name
 draft of an earlier round. That check was removed on 2026-07-28 as an accepted
 trade: it cost every reader of the entry, and the failure it prevented is a run
 implementing an unaccepted draft, which replanning corrects.
+
+`review` and `review-fix` carried the same duplicate and one further check on top
+of it: that the consumed bytes were the terminal answer of a Package `review`
+stage of a named phase. Both were removed on 2026-07-29 by owner decision. The
+digest half was the host's job already — an unprojected reference, or bytes whose
+digest no longer matches, is refused while the continuation is bound, before the
+module starts. The semantic half asserted provenance the host does not check and
+no agent can; the operator picks the source run through the closed `continuation`
+control and the host verifies what they picked. The accepted cost is a run that
+remediates against a review, or answers clarification questions from, some other
+run — which re-running with the right source corrects.
 
 `plan` declares its three participants in one frozen `PLAN_AGENTS` roster —
 `scout`, `planner`, `critic` — carrying each agent's capabilities beside what it
@@ -250,6 +266,18 @@ The clean release contains no uncurated Package examples. The pattern catalog
 `extensions/workflows/references/patterns.md` provides inline skeletons that an
 operator may save under a reviewed project or user workflow directory. Saving a
 local workflow does not add it to the Package registry.
+
+It carries the composition shapes as well as the single-stage ones: **human gate**
+(`awaitOperator` plus a verifier agent, across two runs), **plain-JS loop** (with
+`dsl.now()` for a resumable clock), **fan-out/fan-in** (`parallel()` then merge),
+**nested `dsl.workflow()`** (a journal-readable boundary around a group), and
+**consilium** (role-separated advisors, a synthesizer, and a fresh reader that checks
+the document against the advisor texts). Each entry is a skeleton plus the cost of the
+shape, so an author picks one without reading runtime source. The consilium's runnable
+reference lives beside the catalog at
+`extensions/workflows/references/consilium/consilium.workflow.mjs`; like
+`excalidraw-pipeline` it sits outside the scanned `examples/` directory, so it runs by
+path only and is not in the npm artifact.
 
 This repository dogfoods that boundary with ignored project files under
 `.pi/workflows/`: `locus-plan.workflow.mjs` exercises clarification, planning,
@@ -624,7 +652,7 @@ events still uses the same semantic completion grammar in TUI, RPC, and no-UI mo
 
 Workflow `agent()` steps still create source-backed workflow parent rows and pass `live.parentRowId` to SDK child sessions, but the live renderer collapses a workflow parent row once its real SDK child row exists. The visible running view therefore avoids duplicate `Working` lines such as `quick_task (label)` plus child `label`; it shows the group row, then the actual child agent row (`agent[model /effort=level] on task "label"`) and a compact current-task line with the task label plus active tool/args when available. The final summary appears in place, so the live view is never replaced by a truncated text widget.
 
-The row renderer is the shared local `AgentLivePanel` (`extensions/_shared/agent-live-panel.ts`),
+The row renderer is the shared local `AgentLivePanel` (`extensions/_shared/agent-runtime/agent-live-panel.ts`),
 not copied `pi-subagents` UI code. It renders source-backed optional fields only:
 concrete runtime model plus `/effort` thinking level, activity state, current tools,
 bounded current-task args, `steps=<n>(events)`, `turns=<n>(model turns)`, token counts,
@@ -896,7 +924,7 @@ declaration target with an import type in JSDoc:
 
 ```js
 /**
- * @param {import("../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {import("../runtime/workflow-runtime.ts").WorkflowDsl} dsl
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
@@ -1228,9 +1256,11 @@ contract, not an enforcement or security boundary.
 | `agent`           | string                    | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `readOnly`        | `true`                    | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `tools`           | string[]                  | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                                                                                                                                                                                                                                                                                                                                                              |
-| `maxToolCalls`    | non-negative safe integer | `1000`                                                                 | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                 |
-| `timeoutMs`       | positive safe integer     | none                                                                   | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                                                      |
-| `maxAnswerChars`  | positive safe integer     | none                                                                   | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
+| `maxToolCalls`    | non-negative safe integer | budget `toolCalls` (`1000`)                                            | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                 |
+| `timeoutMs`       | integer 1..2147383628     | budget `timeoutMs` (`600000`)                                          | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. The upper bound reserves room for the SDK backstop at 20 turns while keeping both delays within Node's real timer range; larger delays would be clamped to roughly 1 ms.                                                                                                                                             |
+| `maxTurns`        | integer 1..20             | budget `turns` (`5`)                                                   | Assistant turns for one child attempt. A value outside the host clamp is refused before any child starts. It was a hidden constant that multiplied the child's whole wall clock; it is now a declared budget axis.                                                                                                                                                                                                                                                                                                  |
+| `maxAnswerChars`  | positive safe integer     | budget `answerChars` (`500000`)                                        | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
+| `attempts`        | safe integer 1–3          | `1`                                                                    | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3, and refused unless the call is both replay-eligible and provably unable to write. Never re-asks an answer the child did produce.                                                                                                                                                                                                 |
 | `label`           | string                    | —                                                                      | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `artifact`        | string                    | safe label or agent name                                               | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
 | `phase`           | string                    | current phase                                                          | Overrides the active phase tag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -1249,19 +1279,136 @@ and result envelope. Child metadata and diagnostics stay in journal/result
 evidence; model text is never parsed as status or JSON unless the call opted into
 `schema`.
 
-The host may replace the default agent fuse through
-`WorkflowRuntimeOptions.defaultMaxToolCalls`; an explicit per-call value wins.
-There is no small authoring ceiling such as the former 100-call cap.
+Every default above comes from ONE object — `DEFAULT_WORKFLOW_BUDGET` in
+`extensions/workflows/runtime/workflow-budget.ts` — which the runner applies to every run.
+An explicit per-call value always wins: below the default it applies silently,
+above it the runtime writes a journal line naming the axis, the default and the
+requested value. There is no small authoring ceiling such as the former 100-call cap.
+See "Run budget" for the run-level axes and for what the report shows.
 
-**Replay policy for the two bounds.** `timeoutMs` is part of the canonical
-request, exactly like `maxToolCalls`: it shapes execution, so changing it makes a
-different call and the earlier record is not reused. `maxAnswerChars` is
+**Replay policy for the bounds.** `timeoutMs` and `maxTurns` are part of the
+canonical request, exactly like `maxToolCalls`: they shape execution, so changing
+one makes a different call and the earlier record is not reused. Because
+`timeoutMs` and `maxTurns` gained package defaults, records written before those
+defaults existed are no longer replayed — reusing them would serve text produced
+by an unbounded child as if a fuse had been in force. `maxAnswerChars` is
 deliberately _not_ part of the request — it is a runtime gate applied to whatever
 answer arrives, fresh or replayed, so an old recording stays replayable and a
 tightened bound fails the run loudly instead of passing text the next stage
 cannot hold.
 
+`attempts` follows `maxAnswerChars`, not `timeoutMs`: it never joins the canonical
+request, so a recording written before the option existed still replays, and a call
+that adds a retry budget keeps the key it already had. The retry itself is invisible
+to replay by construction — the replay envelope opens once per **logical** `agent()`
+call, and every physical attempt inside it shares that one ordinal. Recording a
+discarded attempt at its own ordinal would shift every later call on `--resume`, trip
+the one-way divergence latch, and re-run the recorded suffix live.
+
+### The two retries, and which failure each one owns
+
+The runtime has exactly two retry loops, and they answer different questions. Neither
+re-asks a child because its prose was thin: when an answer needs judging, the answer is
+another agent whose job is that judgement.
+
+| Loop                             | Question it answers                                      | Declared by               | Bound                                     | On exhaustion                                   |
+| -------------------------------- | -------------------------------------------------------- | ------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| **Value repair** (pre-existing)  | "The child answered — is the answer the declared shape?" | `schema`, plus `validate` | 2 attempts, 3 when `validate` is declared | `SchemaValidationError`                         |
+| **Transport retry** (`attempts`) | "Did the child get to answer at all?"                    | `attempts`                | the declared 1–3                          | the call fails closed with the last cause named |
+
+The value repair is described under [Opt-in shaped answers](#opt-in-shaped-answers--agent-schema)
+below; it is unchanged. It re-sends a **different** prompt — the previous validator errors
+come back to the child in a labelled repair block — so each of its attempts is its own
+logical call with its own replay ordinal. The transport retry re-sends the **identical**
+prompt, because there is nothing to repair: the child never answered.
+
+The two multiply rather than add. A shaped call declaring `validate` and `attempts: 2`
+can run up to `2 x 3 = 6` children, and every one of them is charged to
+`maxTotalAgentInvocations` and writes its own transcript and result envelope. A transport
+budget exhausted inside a shape attempt ends the run there rather than handing the shape
+loop a rejected answer — there is no answer to reject.
+
+**Which failures the transport retry owns.** An allowlist of two named causes, not
+"everything the never-retry list forgot":
+
+| Cause                                                                      | Retried | Why                                                                                                   |
+| -------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `host-turn-timeout`                                                        | yes     | the host's turn budget expired and the child was aborted                                              |
+| `call-timeout`                                                             | yes     | the call's own `timeoutMs` fuse expired and the child was aborted                                     |
+| `sdk-unavailable`                                                          | no      | there is no channel to re-ask on                                                                      |
+| `cancelled`                                                                | no      | re-asking would override the operator                                                                 |
+| `tool-call-budget`                                                         | no      | a fuse that re-arms is not a fuse                                                                     |
+| `provider-error`                                                           | no      | provider-side, not a lost channel; classified, never guessed at                                       |
+| `unparseable-answer`, `empty-answer`, `answer-too-long`, `script-rejected` | no      | the child **answered**; an empty or oversized answer is a decomposition signal, not a dropped channel |
+| `unknown-agent`, `workspace-allocation`, `run-policy-blocked`              | no      | author or environment errors a retry would hide                                                       |
+| `unclassified`                                                             | no      | nothing has shown this cause to be transient                                                          |
+
+The cause is a machine-readable field on `agent_end`, set where each cause is known and
+carried unchanged through the host, the run envelope and the bridge — and on the terminal
+`error` line for `sdk-unavailable`, which never reaches an `agent_end` because it throws.
+A result written
+before the field existed reads as `unclassified` and never retries. Promoting a cause out
+of `unclassified` is its own evidenced change, never a widening of the default.
+
+**Which calls may declare it.** Two conditions, and replay eligibility alone is not one of
+them. Replay asks "may a recorded answer be substituted for this call"; the retry asks "may
+this call be repeated". They coincide for a worktree call and diverge for a
+project-workspace writer: `workspaceMode` defaults to `"project"` and a catalog agent stays
+write-capable unless the call asks otherwise, so a default-options writer is replay-eligible
+while a second attempt could double-apply its edits. So `attempts > 1` requires:
+
+1. a project-workspace call with no `workspaceHandle`, **and**
+2. proof it cannot write — `readOnly: true`, or a `tools` allow-list drawn only from the
+   host's read-only set (`read`, `grep`, `find`, `ls`, `git_read`, `ast_index`,
+   `repository_check`, `yield`).
+
+Anything else is refused at declaration time with the reason named and **zero** children
+spawned — never silently downgraded to one attempt. Retrying a write stage safely needs a
+fresh worktree per attempt, which is a separate feature and is not built.
+
+**What the evidence shows.** Every physical attempt is a real agent call: its own `callId`,
+its own `agent_start` and its own terminal record — an `agent_end`, or an `error` line when
+the attempt **threw** instead of answering — both carrying `attempt`, `attempts` and the
+`logicalCallId` of the one call they belong to, its own transcript
+and result directories, and its own charge against `maxTotalAgentInvocations`. A
+`[workflow:retry]` line names the boundary between attempts, and the reader's copy under
+`.locus-pi/<runId>/` grows a `## Retried agent calls` section listing every attempt by
+`callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
+section reads both terminal kinds on purpose: a call that timed out, was re-run and then
+threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
+would show a stage that ran twice and was billed twice as if it had never retried. A budget
+blind to its own retries is a gate that does not count what it gates.
+
+The per-call result envelope carries `failureCause` as well, so a reader who has only the
+persisted `locus.agent.run-result.v1` body still gets the machine-readable cause rather than
+the reason sentence. Where the workflow's own `timeoutMs` fuse ended the call, that is the
+cause written into the envelope: the host reports the cancellation it observed, which is
+true and is not the whole truth, and the caller that fired the fuse hands its classification
+down before the envelope is written so the two most durable records of one call agree.
+
+`logicalCallId` is what that section groups by, and it is not decoration: `parallel()`
+can run two calls that agree on agent, label, phase and group, and their attempts then
+interleave in the journal. A reader grouping by those descriptive fields would put one
+call's discarded attempt under the other — a section that reads as evidence while being
+wrong. The three fields travel together and the journal reader refuses a line carrying
+one without the others.
+
+**When the transport failure never becomes a result.** One cause cannot be retried and
+cannot be reported as a failed call either: if the agent SDK substrate is unavailable
+there is no channel to re-ask on, so the call **throws** and the run ends. There is no
+`agent_end` for it. The terminal journal record is the `error` line, which carries
+`failureCause: "sdk-unavailable"` for exactly that reason — so a reader never has to
+tell that case apart from any other by reading the message text. The same line carries the
+attempt trio whenever the call declared a budget, so an attempt already spent stays visible
+even when the next one ends the run. The bridge decides to throw on that typed cause and
+never on the diagnostic prose beside it.
+
 ### Opt-in shaped answers — `agent({ schema })`
+
+This is the **value** half of [the two retries](#the-two-retries-and-which-failure-each-one-owns)
+above: the repair loop for a child that answered off-shape. The transport half
+(`attempts`) never reaches this code, and this loop never re-asks a child that failed
+to answer.
 
 The default above is the contract for every stage that hands work to the next
 stage as prose. `schema` is the explicit exception, for the stages that need a
@@ -1463,6 +1610,68 @@ absolute path in a message is a replay defect, not a cosmetic one.
 
 ---
 
+## Run budget
+
+Every run is bounded on seven axes without the script saying anything.
+`DEFAULT_WORKFLOW_BUDGET` (`extensions/workflows/runtime/workflow-budget.ts`) is the single
+source, and `runWorkflowScript` applies it to the runtime on every run:
+
+| Axis          | Default           | What it bounds                                                                                                                                                                                                                    |
+| ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concurrency` | `4`               | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
+| `totalAgents` | `200`             | Total `agent()` invocations, nested and retried ones included. Exceeding it throws `WorkflowInvocationCapError` and exits the run.                                                                                                |
+| `runtimeMs`   | `7200000` (2 h)   | Wall clock over the agent chain. Exceeding it throws `WorkflowRunDeadlineError` and exits the run.                                                                                                                                |
+| `timeoutMs`   | `600000` (10 min) | One child attempt. The SDK host's own child deadline is derived from this, so the workflow-level failure always wins; both timers remain within Node's maximum real delay.                                                        |
+| `toolCalls`   | `1000`            | Tool calls per child attempt.                                                                                                                                                                                                     |
+| `turns`       | `5`               | Assistant turns per child attempt, within the host clamp of 1..20.                                                                                                                                                                |
+| `answerChars` | `500000`          | Characters in one child answer.                                                                                                                                                                                                   |
+
+**What `runtimeMs` does and does not bound.** It is a deadline check performed
+after a child acquires the run-wide concurrency slot and immediately before the
+child starts — not a timer that
+aborts a child mid-flight, because two abort paths for one child is the same
+defect the single per-child deadline removes. So a run is bounded by `runtimeMs`
+plus at most one child's own `timeoutMs`, and three cases are outside it: a script
+that stops calling `agent()` (a `while (true)` of pure script code is not bounded
+at all), script work after the last child returns, and that last in-flight child.
+Nothing in the runtime bounds workflow script code today either; this is a
+pre-existing limit stated rather than a new one introduced. "Bounded on every
+axis" therefore means **the agent chain**.
+
+**Narrowing versus raising.** A per-call value below the default applies silently.
+A value above it applies too — a down-only rule would make a legitimately long
+stage unauthorable, and the operator would answer by raising the package default
+for everyone — but never silently: the runtime writes a `[workflow:budget] call
+raised …` journal line naming the axis, the default and the requested value.
+
+**Which axes a script can override.** The four per-call axes — `maxToolCalls`,
+`timeoutMs`, `maxTurns`, `maxAnswerChars` — are ordinary `agent()` options. The
+three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — are **host-side
+only**: they are overridable through `RunWorkflowScriptOptions.budget`, which
+embedders and tests pass, and through nothing a `*.workflow.mjs` can reach.
+Neither production entrypoint passes it, so in practice every real run uses the
+package values. Giving scripts a run-level surface means deciding where
+operator-changeable knobs live, which is an open owner decision.
+
+**Evidence.** Every run's journal opens with one runtime-source line listing the
+applied budget, and `.locus-pi/<runId>/README.md` carries a `## Budget` section
+with each axis, its applied value, and the spend the run evidence can measure:
+agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
+concurrency. The peak comes from the concurrency gate rather than from journal
+intervals, because `agent_start` is written before the gate is acquired — counting
+overlapping intervals would report queued children as concurrent. Replayed calls
+are counted only where they really spend: one invocation against `totalAgents`,
+but no child, so the row reads `N invocations (M replayed, no child ran)` and
+their durations and tokens are excluded — a run served entirely from records
+reports its longest child as "not recorded". Per-child tool
+calls, turns and answer characters are enforced but counted by nobody, so they
+print as "not recorded" rather than `0`. Tokens are printed when the host reports
+them; cost prints as unavailable because `costTotal` is a hardcoded `0`, and a
+limit over a stub reports "under budget" forever. Neither tokens nor cost is
+enforced.
+
+---
+
 ## Cheap one-shot decisions without a second primitive
 
 There is no direct model-call node. `llm(prompt, opts?)` — one pi-ai
@@ -1495,9 +1704,12 @@ manifest filesystem, subprocess, network and browser fields are conservative
 `*`/enabled declarations. Those fields describe possible host capability; they do not
 add a DSL primitive.
 
-**Budget.** Each child run records token/cost `usage` on its `agent_end` journal line;
-`/workflows status` sums it per run (`tokens=… cost=$…`). Observational only — there
-is no hard cap.
+**Budget.** Each child run normally records token/cost `usage` on its `agent_end`
+journal line. If script validation or artifact adoption throws after the child
+answered, the sole terminal `error` line carries the same usage; transport errors
+that never produced an answer carry none. `/workflows status` sums both executed
+terminal shapes per run (`tokens=… cost=$…`). Observational only — there is no
+hard cap.
 
 ---
 
@@ -1540,8 +1752,8 @@ is no hard cap.
 
 When the Pi SDK host cannot spawn a child agent session:
 
-1. `createAgentSdkSessionExecutor` returns `status: "blocked"` with `diagnostics` containing `AGENT_SDK_UNAVAILABLE_DIAGNOSTIC`.
-2. `workflow-agent-bridge.ts` detects that token and throws `WorkflowAgentUnavailableError` with the honest `AGENT_SDK_UNAVAILABLE_HINT` ("Pi SDK host") reason.
+1. `createAgentSdkSessionExecutor` returns `status: "blocked"` with `failureCause: "sdk-unavailable"`, and `diagnostics` containing `AGENT_SDK_UNAVAILABLE_DIAGNOSTIC` for a human reader.
+2. `workflow-agent-bridge.ts` branches on that typed cause — never on the diagnostic text — and throws `WorkflowAgentUnavailableError`, carrying the same `failureCause` and the honest `AGENT_SDK_UNAVAILABLE_HINT` ("Pi SDK host") reason. Re-wording the diagnostic therefore cannot turn a run-ending failure into a blocked result a script might read as an answer.
 3. A bare `agent()` call rejects (propagates the error to the script).
 4. Inside `parallel()` / `pipeline()`, the branch is marked failed; scheduled siblings finish, then the group rejects `WorkflowGroupFailureError` instead of returning a normal `null` slot.
 5. If the script does not deliberately catch that stable typed error, `runWorkflowScript` writes a JSON-safe group-failure `result`, persists outer `ok:false`, and returns the group error text. A deliberate typed catch must return `partial:true`, which also remains non-success.

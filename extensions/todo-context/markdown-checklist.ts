@@ -7,7 +7,7 @@
  * Pure text in, pure phase data out. The blocks this Markdown is rendered into
  * are built in `operator-ui.ts`.
  */
-import type { TodoPhase, TodoStatus, TodoTask } from "../_shared/todo-state.js";
+import type { TodoPhase, TodoStatus, TodoTask } from "../_shared/project/todo-state.js";
 import { normalizeInProgressTask } from "./phase-ops.js";
 
 const STATUS_TO_MARKER: Record<TodoStatus, string> = {

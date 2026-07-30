@@ -18,11 +18,11 @@
 
 ## How it works
 
-Entrypoint `extensions/security-gate/index.ts` calls shared `_shared/permissions.classifyToolCall` on every `tool_call` event. If the call is classified dangerous, the hook writes an audit event with `userDecision: "delegated-to-pi"` and returns without a block result. If the call is safe, the hook writes an allow audit event and lets execution continue. The active code path is audit-only by design and does not claim full OMP approval parity.
+Entrypoint `extensions/security-gate/index.ts` calls its own `security-gate/permissions.classifyToolCall` on every `tool_call` event. If the call is classified dangerous, the hook writes an audit event with `userDecision: "delegated-to-pi"` and returns without a block result. If the call is safe, the hook writes an allow audit event and lets execution continue. The active code path is audit-only by design and does not claim full OMP approval parity.
 
 Enforcement is delegated to Pi original; this extension records observations and never blocks tool execution itself.
 
-`/security-audit [limit]` reads the in-memory audit ring from `_shared/permissions.getAuditEvents()` and renders typed `VIEW` chrome with `audit-only` and `Pi enforcement` badges. By default the TUI selects up to 20 newest observations, and an explicit limit is capped at 50; the RPC passive projection shows the three newest rows plus an honest `+N hidden`, so recovery stays within the host `string[]` budget. Rows have the columns time, severity, decision, action, tool and target; output is newest-first. `WARN` means only a recorded `delegated-to-pi`; an ordinary observed allow stays `INFO`. The target is stripped of terminal controls, redacts known secret forms and is width-bounded. This is a local review surface only, not OMP approval UI parity and not durable enforcement proof.
+`/security-audit [limit]` reads the in-memory audit ring from `security-gate/permissions.getAuditEvents()` and renders typed `VIEW` chrome with `audit-only` and `Pi enforcement` badges. By default the TUI selects up to 20 newest observations, and an explicit limit is capped at 50; the RPC passive projection shows the three newest rows plus an honest `+N hidden`, so recovery stays within the host `string[]` budget. Rows have the columns time, severity, decision, action, tool and target; output is newest-first. `WARN` means only a recorded `delegated-to-pi`; an ordinary observed allow stays `INFO`. The target is stripped of terminal controls, redacts known secret forms and is width-bounded. This is a local review surface only, not OMP approval UI parity and not durable enforcement proof.
 
 ## Limitations
 

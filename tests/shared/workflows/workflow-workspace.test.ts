@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createWorkflowWorkspaceManager } from "../../../extensions/_shared/workflow-worktree.js";
+import { createWorkflowWorkspaceManager } from "../../../extensions/workflows/runtime/workflow-worktree.js";
 
 function repository() {
   const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-workspace-"));

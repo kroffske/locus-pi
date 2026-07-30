@@ -1,5 +1,5 @@
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../_shared/pi-api.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory } from "../_shared/host/pi-api.js";
 import {
   assertWorkflowHandoffContinuationEligibility,
   claimWorkflowOperatorHandoff,
@@ -9,10 +9,10 @@ import {
   releaseWorkflowHandoffClaim,
   workflowContinuationForHandoff,
   type WorkflowOperatorHandoffEnvelope,
-} from "../_shared/workflow-handoff.js";
-import { listWorkflowRunIds } from "../_shared/workflow-journal.js";
-import { resolveWorkflowTarget } from "../_shared/workflow-runner.js";
-import { errorMessage } from "../_shared/error-text.js";
+} from "./runtime/workflow-handoff.js";
+import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
+import { resolveWorkflowTarget } from "./runtime/workflow-runner.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import type {
   ActionableWorkflowHandoff,
   WorkflowHandoffLaunchResult,

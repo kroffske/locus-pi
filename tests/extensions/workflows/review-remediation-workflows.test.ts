@@ -5,15 +5,15 @@ import { describe, expect, it } from "vitest";
 import {
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review-fix/review-fix.workflow.mjs");
 
@@ -166,7 +166,12 @@ describe("curated review remediation workflow", () => {
     expect(source).toContain('identityCoverage: "self-contained-static"');
     expect(source).toContain("function parseFindingBlocks");
     expect(source).toContain("continuationArtifacts()");
-    expect(source).toContain("requireReviewArtifact(consumedReview, reviewRef)");
+    // Removed 2026-07-29 (owner decision 6): the script re-derived the digest and
+    // projection membership the host enforces before this module starts, and then
+    // asserted provenance the host cannot check. Neither may come back as script code.
+    expect(source).not.toContain("requireReviewArtifact");
+    expect(source).not.toContain("sameArtifactRef");
+    expect(source).not.toContain("sha256");
     expect(source).toContain("FINDING_SELECTOR_SCHEMA");
     // Split on 2026-07-26: one half decides and never throws, the other merges and
     // orders and never rejects. Both names are pinned so neither can absorb the
@@ -228,62 +233,145 @@ describe("curated review remediation workflow", () => {
     expect(source).not.toContain("function isRecord");
   });
 
-  it("refuses a same-name report that did not come from the Package review verifier", async () => {
-    const fixture = createReviewFixture(undefined, "lookalike-review");
-    const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) =>
-      completed(agentRequest, "unused"),
+  it("lets the HOST refuse a ref the source run never projected, before any workflow code runs", async () => {
+    // The script used to re-derive this. It is the host's job and always was: the
+    // reference is verified against the source run's terminal projection while the
+    // continuation is bound, so an unprojected ref never reaches the module at all.
+    const fixture = createReviewFixture();
+    const sourceRunDir = path.join(fixture.root, ".locus", "runtime", "workflows", fixture.reviewRef.runId);
+    writeFileSync(
+      path.join(sourceRunDir, "result.json"),
+      `${JSON.stringify({
+        ok: true,
+        result: fixture.reviewText,
+        artifactRefs: [],
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
     );
 
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      'Package review verify-review answer named "review.md"',
-    );
-  });
-
-  it("rejects metadata-only provenance forgery and a terminal result that omits the exact ref", async () => {
-    const workflow = await loadWorkflow();
-    for (const mode of ["different-result", "missing-ref"] as const) {
-      const fixture = createReviewFixture(
-        undefined,
-        "review",
-        mode === "different-result" ? "resolve-scope" : "verify-review",
-      );
-      const sourceRunDir = path.join(fixture.root, ".locus", "runtime", "workflows", fixture.reviewRef.runId);
-      if (mode === "different-result") {
-        const indexPath = path.join(sourceRunDir, "artifacts", "index.json");
-        const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
-          artifacts: Array<{ artifactId: string; stage?: string }>;
-        };
-        index.artifacts.find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId)!.stage = "verify-review";
-        writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
-      }
-      writeFileSync(
-        path.join(sourceRunDir, "result.json"),
-        `${JSON.stringify({
-          ok: true,
-          result: mode === "different-result" ? "an unrelated terminal answer" : fixture.reviewText,
-          artifactRefs: mode === "missing-ref" ? [] : [fixture.reviewRef],
-          target: { kind: "name", ref: "review", source: "package" },
-        })}\n`,
-      );
-      let agentCalls = 0;
-      if (mode === "missing-ref") {
-        expect(() =>
-          runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
-            agentCalls += 1;
-            return completed(agentRequest, "unused");
-          }),
-        ).toThrow("not present in the source run terminal projection");
-        expect(agentCalls).toBe(0);
-        continue;
-      }
-      const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
+    let agentCalls = 0;
+    expect(() =>
+      runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
         agentCalls += 1;
         return completed(agentRequest, "unused");
-      });
+      }),
+    ).toThrow("not present in the source run terminal projection");
+    expect(agentCalls).toBe(0);
+  });
 
-      await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow("terminal Package review verify-review answer");
-      expect(agentCalls).toBe(0);
+  it("lets the HOST refuse bytes whose digest no longer matches the reference", async () => {
+    // The other half of what the script used to re-derive: the stored bytes are
+    // digest-bound, and rewriting them under a valid reference is refused on consume.
+    const fixture = createReviewFixture();
+    const stored = fixture.sourceStore.list().find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId);
+    expect(stored, "the fixture must have persisted the review artifact").toBeDefined();
+    const storedPath = path.join(
+      fixture.root,
+      ".locus",
+      "runtime",
+      "workflows",
+      fixture.reviewRef.runId,
+      "artifacts",
+      stored!.relativePath,
+    );
+    expect(existsSync(storedPath)).toBe(true);
+    writeFileSync(storedPath, `${fixture.reviewText}\ntampered`, "utf8");
+
+    let agentCalls = 0;
+    expect(() =>
+      runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
+        agentCalls += 1;
+        return completed(agentRequest, "unused");
+      }),
+    ).toThrow(/digest|sha256|size/iu);
+    expect(agentCalls).toBe(0);
+  });
+
+  it("accepts a host-verified review from a differently-targeted run — the recorded residual risk", async () => {
+    // Owner decision 6, 2026-07-29: the script no longer asserts that the consumed bytes
+    // are the terminal answer of a Package `review` `verify-review` stage. That is
+    // provenance the host does not check and no agent can. The operator picks the source
+    // run through the closed `continuation` control and the host verifies what they
+    // picked; the residual risk is remediating against a review from some other run,
+    // which re-running with the right source fixes. This asserts the trade as taken —
+    // it fails loudly if the semantic half is quietly restored.
+    const fixture = createReviewFixture(undefined, "lookalike-review", "resolve-scope");
+    const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) =>
+      completed(agentRequest, agentRequest.label === "plan finding graph" ? plan([{ id: "F1" }]) : "done"),
+    );
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe("done");
+  });
+
+  it("keeps the public contracts describing what is actually enforced", () => {
+    // The code was corrected on 2026-07-29 and four shipped documents went on promising
+    // the deleted checks for a day — a package whose own contract advertises a guarantee it
+    // does not implement, which is worse than the duplicated check ever was. Each file
+    // below is read by somebody deciding whether to trust `review-fix` with a review:
+    // the canonical doc, the audit note, the extension manifest, and the ADR. This pins
+    // all four against a quiet restoration of the claim.
+    const contracts = [
+      "docs/extensions/active/workflows.md",
+      "docs/source-audit/workflows.md",
+      "extensions/workflows/manifest.json",
+      "docs/adr/curated-workflow-portfolio.md",
+    ];
+    // Each phrase is a promise that the SCRIPT re-derives host evidence or certifies where
+    // the bytes came from.
+    const withdrawnClaims = [
+      /\bentry code additionally requires\b/u,
+      /bytes equal the Package review terminal result/u,
+      /reference from the `verify-review` stage of a successful Package workflow/u,
+      /terminal result must (also )?name both complete refs/u,
+      /The entry additionally\s+requires those bytes to equal/u,
+    ];
+    for (const relative of contracts) {
+      const raw = readFileSync(path.join(process.cwd(), relative), "utf8");
+      // Struck-through ADR history is allowed: `~~...~~` is labelled as no longer true and
+      // is the convention this repository's ADRs already use to retire a sentence.
+      const text = raw.replace(/~~[\s\S]*?~~/gu, "");
+      for (const claim of withdrawnClaims) {
+        expect(text, `${relative} restores a withdrawn claim: ${String(claim)}`).not.toMatch(claim);
+      }
+      // And each one says who does verify, positively, so the correction cannot be a
+      // deletion that leaves the reader with no account of the boundary at all.
+      expect(text, `${relative} must name the host as the verifier`).toMatch(
+        /host verifies|the host checks|artifact owner\s+verifies|Runtime consumption verifies/u,
+      );
     }
+  });
+
+  it("refuses a forged index entry: the host reads membership from the terminal projection", async () => {
+    // Rewriting the artifact index's own metadata does not make an unprojected ref
+    // consumable — the host checks the SOURCE RUN's terminal projection, which the
+    // index cannot speak for. This is the exact case the deleted script check claimed
+    // to own, asserted against the authority that actually owns it.
+    const fixture = createReviewFixture(undefined, "review", "resolve-scope");
+    const sourceRunDir = path.join(fixture.root, ".locus", "runtime", "workflows", fixture.reviewRef.runId);
+    const indexPath = path.join(sourceRunDir, "artifacts", "index.json");
+    const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
+      artifacts: Array<{ artifactId: string; stage?: string }>;
+    };
+    index.artifacts.find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId)!.stage = "verify-review";
+    writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
+    writeFileSync(
+      path.join(sourceRunDir, "result.json"),
+      `${JSON.stringify({
+        ok: true,
+        result: "an unrelated terminal answer",
+        artifactRefs: [],
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
+    );
+
+    let agentCalls = 0;
+    expect(() =>
+      runtimeWith(fixture.root, fixture.reviewRef, async (agentRequest) => {
+        agentCalls += 1;
+        return completed(agentRequest, "unused");
+      }),
+    ).toThrow("not present in the source run terminal projection");
+    expect(agentCalls).toBe(0);
   });
 
   it("keeps host-owned provenance and prior-run text out of the retry loop entirely", async () => {
@@ -296,17 +384,23 @@ describe("curated review remediation workflow", () => {
     // run with the selector given no second chance, and most with no child at all.
     const workflow = await loadWorkflow();
 
-    // Host-owned continuation shape and reviewRef provenance: refused before the
-    // selector even runs, so the child is never asked to fix a run-shape problem.
-    for (const targetRef of ["lookalike-review"]) {
-      const fixture = createReviewFixture(undefined, targetRef);
+    // Host-owned continuation SHAPE is still refused before the selector runs, so the
+    // child is never asked to fix a run-shape problem. (The reference's provenance is
+    // no longer a script check at all — see the residual-risk case above.)
+    {
+      const fixture = createReviewFixture();
       let calls = 0;
       const { dsl } = runtimeWith(fixture.root, fixture.reviewRef, async (request) => {
         calls += 1;
         return completed(request, plan([{ id: "F1" }]));
       });
-      await expect(workflow(dsl, DEFAULT_INTENT)).rejects.toThrow(
-        'Package review verify-review answer named "review.md"',
+      // A second continuation artifact breaks the declared one-artifact shape.
+      const twoArtifacts = {
+        ...dsl,
+        continuationArtifacts: () => [...dsl.continuationArtifacts(), ...dsl.continuationArtifacts()],
+      };
+      await expect(workflow(twoArtifacts, DEFAULT_INTENT)).rejects.toThrow(
+        'review-fix continuation requires exactly one artifact named "review.md"',
       );
       expect(calls).toBe(0);
     }

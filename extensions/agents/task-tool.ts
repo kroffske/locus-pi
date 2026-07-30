@@ -4,14 +4,14 @@
  * Both route through the same createAgentSession host + honesty-gate and report
  * requestedSurface:"task" internally, so only the registered tool name differs.
  */
-import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-sdk-host.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/command-ui.js";
-import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
-import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model-settings.js";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
-import { errorMessage } from "../_shared/error-text.js";
+import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
+import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
+import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model/model-settings.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
 import {
   DEFAULT_TASK_AGENT_NAME,

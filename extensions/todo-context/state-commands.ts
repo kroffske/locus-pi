@@ -9,9 +9,9 @@
  * bodies is `command-router.ts`; the explicit project-task verbs are in
  * `task-bridge-commands.ts`.
  */
-import { requestOperatorInput } from "../_shared/operator-input.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../_shared/todo-state.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../_shared/project/todo-state.js";
 import { titleCaseSentence, titleCaseWords, tokenize } from "./command-parser.js";
 import { markdownToPhases, phasesToMarkdown } from "./markdown-checklist.js";
 import { setTodoBlock } from "./operator-surface.js";

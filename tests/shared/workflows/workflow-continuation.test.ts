@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Value } from "@sinclair/typebox/value";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   assertWorkflowContinuation,
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
   type WorkflowContinuation,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { readWorkflowRunJournalState } from "../../../extensions/_shared/workflow-journal.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import { createWorkflowRuntime } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -142,13 +142,17 @@ describe("workflow continuation", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.journal[0]).toMatchObject({
+    // Found by message, not by index: every run now opens with the applied budget
+    // line, and pinning this one to position 0 would make an unrelated prelude
+    // addition look like a continuation defect.
+    const continuationLine = result.journal.find((line) => line.message === "[workflow:continuation]");
+    expect(continuationLine).toMatchObject({
       kind: "log",
       source: "runtime",
       message: "[workflow:continuation]",
       continuation: { originRunId: "source-run" },
     });
-    const binding = result.journal[0]?.continuation;
+    const binding = continuationLine?.continuation;
     expect(binding?.artifacts.map((entry) => entry.sourceRef)).toEqual(refs);
     expect(binding?.artifacts.every((entry) => entry.consumedRef.runId === result.runId)).toBe(true);
     expect(result.result).toMatchObject({

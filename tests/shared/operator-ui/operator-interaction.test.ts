@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
+import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
 import {
   requestInlineOperatorInteraction,
   StaleInlineOperatorInteractionError,
   SupersededInlineOperatorInteractionError,
-} from "../../../extensions/_shared/operator-interaction.js";
+} from "../../../extensions/_shared/operator/operator-interaction.js";
 import { createHarness } from "../../test-harness.js";
 
 describe("inline operator interaction ownership", () => {

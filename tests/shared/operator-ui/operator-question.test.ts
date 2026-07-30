@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   renderOperatorQuestionAnswer,
   requestOperatorQuestion,
-} from "../../../extensions/_shared/operator-question.js";
+} from "../../../extensions/_shared/operator/operator-question.js";
 import { createHarness } from "../../test-harness.js";
 
 describe("operator question", () => {

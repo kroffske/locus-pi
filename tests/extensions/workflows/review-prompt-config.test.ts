@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-resources-"));

@@ -13,8 +13,8 @@ import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
-} from "../../extensions/_shared/pi-api.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/command-ui.js";
+} from "../../extensions/_shared/host/pi-api.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/operator/command-ui.js";
 import { createHarness, emit, type Harness } from "../test-harness.js";
 
 function stubPlanSession(

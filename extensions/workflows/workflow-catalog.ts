@@ -8,13 +8,13 @@ import {
   readWorkflowRunScriptSnapshot,
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
-} from "../_shared/workflow-journal.js";
+} from "./runtime/workflow-journal.js";
 import {
   packagedWorkflowNames,
   listWorkflowCatalogTargets,
   type ResolvedWorkflowTarget,
-} from "../_shared/workflow-runner.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
+} from "./runtime/workflow-runner.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 
 const RECENT_WORKFLOW_LIMIT = 5;
 const WORKFLOW_METADATA_SCAN_BYTES = 64 * 1024;

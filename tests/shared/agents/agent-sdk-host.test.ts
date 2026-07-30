@@ -12,11 +12,11 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type SdkCreateSessionOptionsLike,
-} from "../../../extensions/_shared/agent-sdk-host.js";
-import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/agent-live-panel.js";
-import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-system-prompt.js";
-import type { AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
+import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-runtime/agent-system-prompt.js";
+import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 
 /**
  * INSURANCE, NOT PROOF.

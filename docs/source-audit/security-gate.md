@@ -6,7 +6,7 @@ Local source paths:
 
 - `extensions/security-gate/index.ts`
 - `extensions/security-gate/manifest.json`
-- `extensions/_shared/permissions.ts`
+- `extensions/security-gate/permissions.ts`
 - `tests/shared/security/security.test.ts`
 - `docs/extensions/active/security-gate.md`
 

@@ -2,16 +2,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import { readWorkflowRunSummary } from "../../../extensions/_shared/workflow-journal.js";
-import { readWorkflowReplayLog } from "../../../extensions/_shared/workflow-replay.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
+import {
+  createWorkflowReplayController,
+  readWorkflowReplayLog,
+  workflowReplayFile,
+  type WorkflowReplayController,
+  type WorkflowReplayEntry,
+} from "../../../extensions/workflows/runtime/workflow-replay.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
   runWorkflowScript,
-} from "../../../extensions/_shared/workflow-runner.js";
-import { assessWorkflowReplaySafety } from "../../../extensions/_shared/workflow-script-identity.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { assessWorkflowReplaySafety } from "../../../extensions/workflows/runtime/workflow-script-identity.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import type { WorkflowTextComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createWorkflowTranscript } from "../../../extensions/workflows/workflow-transcript.js";
@@ -797,5 +807,161 @@ export default async function runWorkflow(dsl) {
     const resumed = await runWorkflow(root, "bypass", { resumeFromRunId: first.runId });
     expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "replay-unsafe-script" });
     expect(resumed.executedPrompts).toEqual(["stage-1"]);
+  });
+});
+
+/**
+ * T-131 W4 — the accepted consequence of giving `timeoutMs` a package default.
+ *
+ * `canonicalAgentRequest` is deliberately built from the RESOLVED request, so a
+ * default that later changes value cannot silently reuse a record made under the
+ * old one. Giving the axis a default for the FIRST time is that same event: every
+ * record written while the field was absent describes a different call now.
+ * Hiding the default from the key to protect old recordings would be exactly the
+ * silent reuse that rule exists to prevent, so the invalidation is proven here
+ * rather than assumed, and `CHANGELOG.md` names it.
+ */
+describe("the default timeoutMs invalidates records written before it", () => {
+  function recordDir(): string {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-replay-timeout-"));
+    roots.push(root);
+    return root;
+  }
+
+  function answering(
+    runId: string,
+    options: { defaultTimeoutMs?: number; defaultMaxTurns?: number; replay: WorkflowReplayController },
+  ) {
+    const prompts: string[] = [];
+    const runtime = createWorkflowRuntime({
+      runId,
+      replay: options.replay,
+      ...(options.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: options.defaultTimeoutMs } : {}),
+      ...(options.defaultMaxTurns !== undefined ? { defaultMaxTurns: options.defaultMaxTurns } : {}),
+      agentRunner: async (request) => {
+        prompts.push(request.prompt);
+        return {
+          ok: true as const,
+          status: "completed" as const,
+          summary: "done",
+          text: `answer(${request.prompt})`,
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+    return { ...runtime, prompts };
+  }
+
+  /** One REAL record written by a runtime with no default fuse: the exact bytes
+   *  every run produced before this contract existed, not a hand-built key. */
+  async function preDefaultRecord(prompt: string): Promise<WorkflowReplayEntry[]> {
+    const runDir = recordDir();
+    const controller = createWorkflowReplayController({ runDir });
+    const source = answering("pre-default-run", { replay: controller });
+    await source.dsl.agent(prompt);
+    expect(source.prompts).toEqual([prompt]);
+    return readFileSync(workflowReplayFile(runDir), "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as WorkflowReplayEntry);
+  }
+
+  it("re-executes a pre-default record instead of serving it under the new key", async () => {
+    const recorded = await preDefaultRecord("stage-1");
+    expect(recorded).toHaveLength(1);
+
+    const afterController = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const after = answering("post-default-run", {
+      replay: afterController,
+      defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
+    });
+    await after.dsl.agent("stage-1");
+
+    // The child really ran again, and the run SAYS the prefix diverged at call 0
+    // instead of quietly serving text recorded under an unbounded child.
+    expect(after.prompts).toEqual(["stage-1"]);
+    expect(afterController.counts()).toEqual({ replayedCalls: 0, freshCalls: 1, divergedAtCall: 0 });
+    expect(after.getJournal().some((line) => line.replayed === true)).toBe(false);
+  });
+
+  it("still replays that record for a runtime without the default, so the case above is the default and not the record", async () => {
+    const recorded = await preDefaultRecord("stage-1");
+
+    const afterController = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const after = answering("control-resume", { replay: afterController });
+
+    await expect(after.dsl.agent("stage-1")).resolves.toBe("answer(stage-1)");
+    expect(after.prompts).toEqual([]);
+    expect(afterController.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
+  });
+});
+
+/**
+ * T-131 W5 — `maxTurns` joins the canonical request.
+ *
+ * A field added to `WorkflowAgentRequest` and NOT added to `canonicalAgentRequest`
+ * widens what counts as "the same call": two children with different turn budgets
+ * would share one record and the second would be served an answer the first
+ * produced under a different budget. Proven by whether a recorded answer is served,
+ * not by comparing request objects — that comparison passes either way.
+ */
+describe("maxTurns is part of the replay key", () => {
+  function recordDir(): string {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-replay-turns-"));
+    roots.push(root);
+    return root;
+  }
+
+  function answeringTurns(runId: string, maxTurns: number, replay: WorkflowReplayController) {
+    const prompts: string[] = [];
+    const runtime = createWorkflowRuntime({
+      runId,
+      replay,
+      defaultMaxTurns: maxTurns,
+      agentRunner: async (request) => {
+        prompts.push(request.prompt);
+        return {
+          ok: true as const,
+          status: "completed" as const,
+          summary: "done",
+          text: `answer(${request.prompt})`,
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+    return { ...runtime, prompts };
+  }
+
+  async function recordWith(maxTurns: number): Promise<WorkflowReplayEntry[]> {
+    const runDir = recordDir();
+    const source = answeringTurns("turns-source", maxTurns, createWorkflowReplayController({ runDir }));
+    await source.dsl.agent("stage-1");
+    return readFileSync(workflowReplayFile(runDir), "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as WorkflowReplayEntry);
+  }
+
+  it("refuses a record made under a different turn budget", async () => {
+    const recorded = await recordWith(5);
+    const controller = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const resumed = answeringTurns("turns-resume", 2, controller);
+
+    await resumed.dsl.agent("stage-1");
+
+    expect(resumed.prompts).toEqual(["stage-1"]);
+    expect(controller.counts()).toEqual({ replayedCalls: 0, freshCalls: 1, divergedAtCall: 0 });
+  });
+
+  it("serves the same record under the same turn budget, so the case above is the budget", async () => {
+    const recorded = await recordWith(5);
+    const controller = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const resumed = answeringTurns("turns-resume-same", 5, controller);
+
+    await expect(resumed.dsl.agent("stage-1")).resolves.toBe("answer(stage-1)");
+    expect(resumed.prompts).toEqual([]);
+    expect(controller.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
   });
 });

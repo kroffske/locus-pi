@@ -8,15 +8,15 @@ import type {
   WorkflowArtifactRef,
   WorkflowBoundContinuation,
   WorkflowConsumedTextArtifact,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review/review.workflow.mjs");
 
@@ -182,7 +182,9 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(source).toContain("validate: questionCoverageErrors");
     expect(source).toContain("const MAX_QUESTION_ROUNDS = 3");
     expect(source).toContain("const REVIEW_AGENT_DEFAULTS");
-    expect(source.match(/maxToolCalls:/gu)).toHaveLength(1);
+    // No `maxToolCalls` at all: the package budget contract supplies it, and a
+    // stage that restated the default would silently disagree with it the day it moves.
+    expect(source.match(/maxToolCalls:/gu)).toBeNull();
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
     expect(source.match(/readOnly: true/gu)).toHaveLength(2);
     expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
@@ -739,29 +741,34 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(calls[0]?.prompt).toContain("Include generated files only when tracked.");
   });
 
-  it.each([
-    [
-      "arbitrary successful workflow",
-      {
-        target: { kind: "scriptPath" as const, ref: "arbitrary.workflow.mjs", source: "project" as const },
-        artifact: { kind: "published" as const, stage: "prepare-clarification" },
-      },
-    ],
-    [
-      "wrong review phase",
-      {
-        target: { kind: "name" as const, ref: "review", source: "package" as const },
-        artifact: { kind: "published" as const, stage: "verify-review" },
-      },
-    ],
-    [
-      "automatic answer instead of prepare publication",
-      {
-        target: { kind: "name" as const, ref: "review", source: "package" as const },
-        artifact: { kind: "answer" as const, stage: "prepare-clarification" },
-      },
-    ],
-  ])("rejects same-name artifacts from %s", async (_caseName, sourceMetadata) => {
+  it("no longer re-derives the prepare run's provenance, and says so in the source", () => {
+    // Owner decision 6, 2026-07-29. Two checks wearing one name were deleted here.
+    //
+    // The DIGEST half — matching `{runId, artifactId, name, sha256}` against the source
+    // run's terminal projection — duplicated what the host refuses to skip before this
+    // module starts. Its replacement proof is a real artifact store refusing an
+    // unprojected ref and refusing tampered bytes, in
+    // `tests/extensions/workflows/review-remediation-workflows.test.ts`; the fake ports
+    // this file uses could never have proven it.
+    //
+    // The SEMANTIC half asserted that the consumed bytes were the terminal result of a
+    // Package `review` `prepare-clarification` run — provenance the host does not check
+    // and no agent can. The operator picks the source run through the closed
+    // `continuation` control and the host verifies what they picked.
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).not.toContain("requirePrepareArtifact");
+    expect(source).not.toContain("exactPrepareResult");
+    expect(source).not.toContain("sameArtifactRef");
+    expect(source).not.toContain("sha256");
+    // The continuation SHAPE gate is upstream of all of it and stays.
+    expect(source).toContain("review continuation requires exactly intent.md and clarification-questions.md");
+  });
+
+  it("accepts host-verified clarification artifacts from a differently-targeted run — the recorded residual risk", async () => {
+    // The accepted trade, asserted as taken: it fails loudly if the semantic half is
+    // quietly restored. The residual risk is answering questions from some other run,
+    // which re-running with the right source fixes.
     const runWorkflow = await loadWorkflow();
     const intentText = "review range A...B";
     const questionsText = "# Clarification Questions\n1. Which base?";
@@ -771,7 +778,8 @@ describe("workflow example: review.workflow.mjs", () => {
       ...prepareArtifact(ref, text, intentRef, questionsRef),
       source: {
         runId: ref.runId,
-        ...sourceMetadata,
+        target: { kind: "scriptPath" as const, ref: "arbitrary.workflow.mjs", source: "project" as const },
+        artifact: { kind: "published" as const, stage: "prepare-clarification" },
         terminal: prepareTerminal(intentRef, questionsRef),
       },
     });
@@ -783,86 +791,25 @@ describe("workflow example: review.workflow.mjs", () => {
     const { dsl, published } = runtimeWith(
       async (request) => {
         calls.push(request);
-        return completed(request, "unused");
+        const outputs: Record<string, string> = {
+          "resolve review scope": "# Review Scope\nTarget: A...B",
+          "inventory changes": "# Change Inventory\n## C1\nPath: `src/a.ts`\nChange: changed",
+          "plan review units": "# Review Units\n## U1\nCoverage: C1\nPath: `src/a.ts`",
+          "ask review questions round 1":
+            "# Review Questions\n## Coverage reconciliation\nC1: U1; No question needed: trivial change",
+          "assess question coverage round 1": '{"decision":"complete","gaps":[]}',
+          "verify and write review": "# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected",
+        };
+        return completed(request, outputs[request.label!]!);
       },
       { runId: "execute-run", consumed: prior },
     );
 
-    await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow("Package review prepare-clarification run");
-    expect(calls).toHaveLength(0);
-    expect(published).toHaveLength(0);
-  });
-
-  it.each([
-    [
-      "missing structured result",
-      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
-        artifact.source.terminal = { artifactRefs: [intentRef, questionsRef] };
-      },
-    ],
-    [
-      "mismatched intent reference",
-      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
-        artifact.source.terminal = {
-          result: { mode: "prepared", intentRef: { ...intentRef, sha256: "0".repeat(64) }, questionsRef },
-          artifactRefs: [intentRef, questionsRef],
-        };
-      },
-    ],
-    [
-      "wrong prepare mode",
-      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
-        artifact.source.terminal = {
-          result: { mode: "executed", intentRef, questionsRef },
-          artifactRefs: [intentRef, questionsRef],
-        };
-      },
-    ],
-    [
-      "missing projected reference",
-      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
-        artifact.source.terminal = {
-          ...prepareTerminal(intentRef, questionsRef),
-          artifactRefs: [questionsRef],
-        };
-      },
-    ],
-    [
-      "unexpected result field",
-      (artifact: WorkflowConsumedTextArtifact, intentRef: WorkflowArtifactRef, questionsRef: WorkflowArtifactRef) => {
-        artifact.source.terminal = {
-          result: { ...prepareTerminal(intentRef, questionsRef).result, accepted: true },
-          artifactRefs: [intentRef, questionsRef],
-        };
-      },
-    ],
-  ])("rejects prepare provenance with %s", async (_caseName, corrupt) => {
-    const runWorkflow = await loadWorkflow();
-    const intentText = "review range A...B";
-    const questionsText = "# Clarification Questions\n1. Which base?";
-    const intentRef = priorRef("prepare-run", "published-1", "intent.md", intentText);
-    const questionsRef = priorRef("prepare-run", "published-2", "clarification-questions.md", questionsText);
-    const intentArtifact = prepareArtifact(intentRef, intentText, intentRef, questionsRef);
-    corrupt(intentArtifact, intentRef, questionsRef);
-    const prior = new Map([
-      [`${intentRef.runId}:${intentRef.artifactId}`, intentArtifact],
-      [
-        `${questionsRef.runId}:${questionsRef.artifactId}`,
-        prepareArtifact(questionsRef, questionsText, intentRef, questionsRef),
-      ],
-    ]);
-    const calls: WorkflowAgentRequest[] = [];
-    const { dsl, published } = runtimeWith(
-      async (request) => {
-        calls.push(request);
-        return completed(request, "unused");
-      },
-      { runId: "execute-run", consumed: prior },
+    await expect(runWorkflow(dsl, "Use A as the base.")).resolves.toBe(
+      "# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected",
     );
-
-    await expect(runWorkflow(dsl, "Use A as the base.")).rejects.toThrow("verified terminal result");
-    expect(calls).toHaveLength(0);
-    expect(published).toHaveLength(0);
+    // The operator's answers were still persisted by the workflow, unchanged.
+    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md"]);
   });
 
   it("keeps host-owned continuation identity and provenance out of the retry loop entirely", async () => {
@@ -1229,7 +1176,7 @@ describe("workflow example: review.workflow.mjs", () => {
     await expect(runWorkflow(dsl, "x".repeat(16_001))).rejects.toThrow("16000-character context limit");
     expect(agentCalls).toBe(0);
     await expect(runWorkflow(dsl, "review current branch")).rejects.toThrow(
-      "Agent answer is 64001 characters; the call allows 64000.",
+      "Agent answer is 64001 characters; the call allows 64000. Budget axis: answerChars.",
     );
     expect(agentCalls).toBe(2);
   });

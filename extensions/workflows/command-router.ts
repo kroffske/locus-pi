@@ -8,16 +8,16 @@
  * context — arrives as injected dependencies, never as module state.
  */
 
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot, getWorkingDirectory } from "../_shared/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
+import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot, getWorkingDirectory } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
-import { readWorkflowRunResultText, resolveWorkflowRunId } from "../_shared/workflow-journal.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../_shared/workflow-runtime.js";
+} from "../_shared/operator/operator-interaction.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
+import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "./command-completions.js";
 import { parseContinueCommand, parseRunCommand } from "./command-parser.js";

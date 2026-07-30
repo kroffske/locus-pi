@@ -7,9 +7,9 @@
  * render these blocks stay in `operator-surface.ts`.
  */
 
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "../_shared/mode-state.js";
-import { errorMessage } from "../_shared/error-text.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "./mode-state.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import type { PlanExitAction } from "./plan-exit-handoff.js";
 
 export function cancelledInputBlock(subject: string, reopenCommand: string): OperatorBlock {

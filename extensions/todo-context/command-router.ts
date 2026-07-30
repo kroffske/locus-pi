@@ -9,9 +9,9 @@
  * verbs in `task-bridge-commands.ts`, the queue verbs in `queue-controller.ts`,
  * and the grammar in `command-parser.ts`.
  */
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { getCommandText } from "../_shared/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getCommandText } from "../_shared/host/pi-api.js";
 import { splitCommand } from "./command-parser.js";
 import { setTodoBlock } from "./operator-surface.js";
 import { todoErrorBlock, todoHelpBlock, todoWarningBlock } from "./operator-ui.js";

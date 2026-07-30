@@ -5,11 +5,11 @@
  * the `task`/`spawn_agent` tool, `/agent run`, and `/agent inspect`.
  */
 import { relative } from "node:path";
-import { createRuntimeArtifactStore } from "../_shared/artifacts.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot, getSessionId } from "../_shared/pi-api.js";
-import { errorMessage } from "../_shared/error-text.js";
+import { createRuntimeArtifactStore } from "../_shared/runtime/artifacts.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getSessionId } from "../_shared/host/pi-api.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import { listAvailableAgents, listBuiltInAliases, normalizeRequestedAgentName } from "./catalog.js";
 import { compactAgentCatalogLine } from "./operator-ui.js";
 

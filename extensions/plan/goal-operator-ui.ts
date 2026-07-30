@@ -1,8 +1,8 @@
 import path from "node:path";
-import type { GoalOperationResult, GoalState } from "../_shared/goal-mode.js";
-import type { OperatorBlock, OperatorBadge } from "../_shared/operator-ui.js";
-import { projectDisplayPath } from "../_shared/prompt-command-store.js";
-import { errorMessage } from "../_shared/error-text.js";
+import type { GoalOperationResult, GoalState } from "../_shared/project/goal-mode.js";
+import type { OperatorBlock, OperatorBadge } from "../_shared/operator/operator-ui.js";
+import { projectDisplayPath } from "../_shared/project/prompt-command-store.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 
 interface GoalBlockOptions {
   compact?: boolean;

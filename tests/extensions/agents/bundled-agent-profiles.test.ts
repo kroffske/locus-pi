@@ -2,16 +2,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { evaluateEvidence } from "../../../extensions/_shared/agent-evidence-evaluator.js";
-import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
+import { evaluateEvidence } from "../../../extensions/_shared/agent-runtime/agent-evidence-evaluator.js";
+import {
+  BUNDLED_AGENTS_DIR,
+  loadAgentsFromDir,
+  type AgentDefinition,
+} from "../../../extensions/_shared/agent-runtime/agents.js";
 import {
   buildModelRolesState,
   DEFAULT_MODEL_ROLES,
   loadModelRolesState,
   resolveAgentModelPreference,
   type ModelRolesState,
-} from "../../../extensions/_shared/model-settings.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+} from "../../../extensions/_shared/model/model-settings.js";
 import { createHarness } from "../../test-harness.js";
 
 function loadBundledAgent(name: string): AgentDefinition {

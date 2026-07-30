@@ -1,14 +1,23 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { errorMessage } from "../_shared/error-text.js";
-import { isDown, isEnter, isEscape, isLeft, isPageDown, isPageUp, isRight, isUp } from "../_shared/operator-keys.js";
-import type { CustomUiComponent, CustomUiTui, ModelLike, ThinkingLevel } from "../_shared/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
+import { errorMessage } from "../_shared/host/error-text.js";
+import {
+  isDown,
+  isEnter,
+  isEscape,
+  isLeft,
+  isPageDown,
+  isPageUp,
+  isRight,
+  isUp,
+} from "../_shared/operator/operator-keys.js";
+import type { CustomUiComponent, CustomUiTui, ModelLike, ThinkingLevel } from "../_shared/host/pi-api.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
 import {
   formatAssignment,
   type ModelRoleAssignment,
   type ModelRolesState,
   type ModelRoleSource,
-} from "../_shared/model-settings.js";
+} from "../_shared/model/model-settings.js";
 
 export type ModelRoleSupport = "active" | "fallback" | "dormant";
 

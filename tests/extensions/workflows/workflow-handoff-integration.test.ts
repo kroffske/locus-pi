@@ -6,10 +6,10 @@ import {
   bindWorkflowHandoffClaim,
   createWorkflowOperatorHandoffEnvelope,
   readCurrentWorkflowScriptIdentity,
-} from "../../../extensions/_shared/workflow-handoff.js";
-import type { CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
-import { resolveWorkflowTarget } from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-handoff.js";
+import type { CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, emit } from "../../test-harness.js";
 

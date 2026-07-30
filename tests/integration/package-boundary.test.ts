@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
 
 interface PackageJson {
   files: string[];
@@ -142,6 +142,25 @@ describe("npm public package boundary", () => {
     expect(packagedWorkflowNames().sort()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
     expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
+  });
+
+  it("keeps every pattern-catalog link resolvable inside the installed package", () => {
+    // The catalog is the one `references/` file an install ships (OD3, T-130: the
+    // consilium reference stays tracked in this repository and runs by path, exactly like
+    // `excalidraw-pipeline`). So a relative link from the catalog into a sibling under
+    // `references/` renders as a link in the npm tarball and resolves to nothing — for a
+    // reader who has only the tarball, which is the audience the catalog exists for.
+    // Naming the repository path in prose is the shape that stays honest in both places.
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+    const catalog = "extensions/workflows/references/patterns.md";
+    expect(packedPaths.has(catalog)).toBe(true);
+    const directory = path.posix.dirname(catalog);
+    const unresolvable: string[] = [];
+    for (const match of readFileSync(path.join(root, catalog), "utf8").matchAll(/\]\((\.[^)\s#]+)\)/gu)) {
+      const target = path.posix.normalize(path.posix.join(directory, match[1]!));
+      if (!packedPaths.has(target)) unresolvable.push(`${match[1]!} → ${target}`);
+    }
+    expect(unresolvable).toEqual([]);
   });
 
   it("ships every declared skill, and every document a skill sends the reader to", () => {

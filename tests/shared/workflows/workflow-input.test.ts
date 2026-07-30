@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Value } from "@sinclair/typebox/value";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 

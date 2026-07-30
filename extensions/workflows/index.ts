@@ -8,15 +8,15 @@
  * controller. Every surface it renders lives in a submodule.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot, getWorkingDirectory, setTextWidget } from "../_shared/pi-api.js";
-import { pinTransientUiKey, registerTransientUiCleanup, unpinTransientUiKey } from "../_shared/command-ui.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory, setTextWidget } from "../_shared/host/pi-api.js";
+import { pinTransientUiKey, registerTransientUiCleanup, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   pruneCompletedWorkflowRunLiveRows,
   resetWorkflowLiveExecutions,
-} from "../_shared/workflow-journal.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+} from "./runtime/workflow-journal.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { registerWorkflowCommands } from "./command-router.js";
 import { WorkflowOperatorHandoffController, type WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";
 import { createWorkflowOperatorHandoffService } from "./operator-handoff-service.js";

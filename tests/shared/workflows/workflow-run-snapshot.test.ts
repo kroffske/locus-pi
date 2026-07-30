@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readWorkflowRunScriptSnapshot } from "../../../extensions/_shared/workflow-journal.js";
+import { readWorkflowRunScriptSnapshot } from "../../../extensions/workflows/runtime/workflow-journal.js";
 
 const roots: string[] = [];
 
@@ -26,7 +26,7 @@ describe("persisted workflow run source snapshot", () => {
     });
   });
 
-  it.each(["../escape", "/tmp/escape", "nested/run"])('rejects non-simple run id %j', (runId) => {
+  it.each(["../escape", "/tmp/escape", "nested/run"])("rejects non-simple run id %j", (runId) => {
     const root = temporaryRoot();
     expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({ kind: "invalid", runId });
   });
@@ -36,9 +36,12 @@ describe("persisted workflow run source snapshot", () => {
     const runId = "20260713-010102-legacy";
     const runDir = workflowRunDirectory(root, runId);
     mkdirSync(runDir, { recursive: true });
-    writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-      target: { kind: "name", ref: "alpha", source: "project" },
-    }));
+    writeFileSync(
+      path.join(runDir, "result.json"),
+      JSON.stringify({
+        target: { kind: "name", ref: "alpha", source: "project" },
+      }),
+    );
     writeFileSync(path.join(root, "current-decoy.workflow.mjs"), "must not be read");
 
     expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({
@@ -49,10 +52,13 @@ describe("persisted workflow run source snapshot", () => {
 
   it("reports malformed persisted snapshot identity as invalid rather than legacy", () => {
     const fixture = writeSnapshotRun("20260713-010102-invalid-identity", "invalid identity\n");
-    writeFileSync(path.join(fixture.runDir, "result.json"), JSON.stringify({
-      target: { kind: "name", ref: "alpha", source: "project" },
-      scriptIdentity: { snapshotPath: fixture.snapshotPath, scriptSha256: "wrong" },
-    }));
+    writeFileSync(
+      path.join(fixture.runDir, "result.json"),
+      JSON.stringify({
+        target: { kind: "name", ref: "alpha", source: "project" },
+        scriptIdentity: { snapshotPath: fixture.snapshotPath, scriptSha256: "wrong" },
+      }),
+    );
 
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
   });
@@ -136,24 +142,27 @@ function writeSnapshotRun(runId: string, source: string) {
 }
 
 function writeResult(runDir: string, snapshotPath: string, sha256: string): void {
-  writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-    ok: true,
-    target: { kind: "name", ref: "alpha", source: "project" },
-    scriptIdentity: {
-      schemaVersion: 2,
-      identityPolicy: "static-node-only-v1",
-      sourcePath: path.join(path.dirname(runDir), "alpha.workflow.mjs"),
-      snapshotPath,
-      scriptSha256: sha256,
-      identityCoverage: "self-contained-static",
-      executionSource: "snapshot",
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      builtinImports: [],
-      unboundDependencies: [],
-    },
-  }));
+  writeFileSync(
+    path.join(runDir, "result.json"),
+    JSON.stringify({
+      ok: true,
+      target: { kind: "name", ref: "alpha", source: "project" },
+      scriptIdentity: {
+        schemaVersion: 2,
+        identityPolicy: "static-node-only-v1",
+        sourcePath: path.join(path.dirname(runDir), "alpha.workflow.mjs"),
+        snapshotPath,
+        scriptSha256: sha256,
+        identityCoverage: "self-contained-static",
+        executionSource: "snapshot",
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        builtinImports: [],
+        unboundDependencies: [],
+      },
+    }),
+  );
 }
 
 function workflowRunDirectory(root: string, runId: string): string {

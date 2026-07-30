@@ -3,16 +3,16 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
   DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
   type WorkflowJournalLine,
-} from "../../../extensions/_shared/workflow-runtime.js";
-import type { EvidenceEvaluation } from "../../../extensions/_shared/types.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import type { EvidenceEvaluation } from "../../../extensions/_shared/agent-runtime/agent-evidence-evaluator.js";
 import { WorkflowProgressComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createHarness } from "../../test-harness.js";
 

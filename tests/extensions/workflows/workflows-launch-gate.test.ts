@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHarness } from "../../test-harness.js";
 import workflows from "../../../extensions/workflows/index.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 
 function registerHarness() {
   const h = createHarness();
