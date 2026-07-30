@@ -21,7 +21,7 @@ import {
   type WorkflowRunReportEvidenceSource,
   type WorkflowRunReportInput,
 } from "../../../extensions/workflows/runtime/workflow-run-report.js";
-import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunJournalState, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
@@ -177,7 +177,10 @@ describe("workflow run report", () => {
     assert.match(readme, /- Status: completed/u);
     assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
     assert.match(readme, /- Result: \[result\.md\]\(result\.md\)/u);
-    assert.match(readme, new RegExp(`\\.locus/runtime/workflows/${RUN_ID}/`, "u"));
+    // The journal sits inside the run directory, so it points at its siblings.
+    assert.match(readme, /- Files this run's agents wrote: `\.\.\/files\/`/u);
+    assert.match(readme, /- Machine records: `\.\.`/u);
+    assert.equal(reportDir, path.join(workflowRunDir(root, RUN_ID), "logs"));
     // Grouped by origin: agent answers first, then continuation inputs naming
     // their source run, then workflow-published documents.
     const agentHeading = readme.indexOf("## Agent documents, in creation order");
@@ -313,7 +316,7 @@ describe("workflow run report", () => {
     assert.match(readme, /- Error: plan was not accepted/u);
   });
 
-  it("refuses an unsafe run id and a symlinked report root", () => {
+  it("refuses an unsafe run id and a symlinked logs directory", () => {
     const root = project();
     const unsafe = writeWorkflowRunReport(
       { projectRoot: root, runId: "../escape", status: "completed", journal: [] },
@@ -323,7 +326,8 @@ describe("workflow run report", () => {
 
     const elsewhere = path.join(root, "elsewhere");
     mkdirSync(elsewhere);
-    symlinkSync(elsewhere, path.join(root, ".locus-pi"));
+    mkdirSync(workflowRunDir(root, RUN_ID), { recursive: true });
+    symlinkSync(elsewhere, path.join(workflowRunDir(root, RUN_ID), "logs"));
     const symlinked = writeWorkflowRunReport(
       { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
       evidenceFrom([], {}),
@@ -1019,10 +1023,6 @@ describe("workflow run report budget section", () => {
         "}\n",
       "utf8",
     );
-    // A regular FILE where the report root must be a directory: the write fails
-    // and the module returns { ok: false } instead of throwing, exactly as documented.
-    writeFileSync(path.join(root, ".locus-pi"), "not a directory", "utf8");
-
     const harness = createHarness(root, { sessionId: "report-blocked" });
     const events: WorkflowJournalLine[] = [];
     const result = await runWorkflowScript({
@@ -1030,6 +1030,13 @@ describe("workflow run report budget section", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       name: "report-fail",
+      // A regular FILE where the logs directory must be: the write fails and the
+      // module returns { ok: false } instead of throwing, exactly as documented.
+      // Planted once the run id exists and long before the report is written.
+      onRunStart: ({ runDir }) => {
+        mkdirSync(runDir, { recursive: true });
+        writeFileSync(path.join(runDir, "logs"), "not a directory", "utf8");
+      },
       onEvent: (line) => events.push(line),
       createExecutor: (): AgentExecutor => ({
         async run(request: AgentRunRequest) {

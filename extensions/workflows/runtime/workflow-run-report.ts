@@ -1,44 +1,36 @@
 /**
- * workflow-run-report.ts — the reader's copy of one workflow run, under
- * `<projectRoot>/.locus-pi/<runId>/`.
+ * workflow-run-report.ts — the ordered execution journal of one workflow run,
+ * under `<projectRoot>/.locus/runtime/workflows/<runId>/logs/`.
  *
- * The state directory (`.locus/runtime/workflows/<runId>/`) stays machine-owned:
- * journal, replay record, result envelope, script snapshot, transcripts, and the
- * hash-verified artifact store that replay and continuations depend on. This
- * module projects the human-facing part of that evidence — the task, the final
- * result, and every document in creation order under a name that says who wrote
- * it, with the README grouping them by origin (agent documents, transferred
- * inputs, workflow-published) — so that opening the report folder answers "what
- * happened here" without opening a single machine file.
+ * Everything here is AUTO-CAPTURED: the task the run received, the texts the
+ * script published or parsed out of answers, each agent's final answer, and the
+ * table of contents over them. That is why the ordinal prefix lives here — order
+ * and time are properties of a journal. Files an agent wrote itself are not
+ * projected into this folder at all; they stay under their own names in the run
+ * working directory (`../files/`, see `workflow-run-layout.ts`).
  *
- * Best-effort by contract, like result.md: a failed report write costs the
- * reader's copy, never the run or its durable evidence.
+ * The rest of the run directory stays machine-owned: journal.ndjson, the replay
+ * record, the result envelope, the script snapshot, and the hash-verified
+ * artifact store that replay and continuations depend on. Nothing in the runtime
+ * reads this folder back; deleting it loses no evidence.
+ *
+ * Best-effort by contract, like result.md: a failed write costs the journal
+ * folder, never the run or its durable evidence.
  */
 
-import { lstatSync, realpathSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
-import {
-  ensureWorkflowDirectoryNoSymlink,
-  WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
-  type WorkflowArtifactRecord,
-  type WorkflowArtifactRef,
-} from "./workflow-artifacts.js";
+import type { WorkflowArtifactRecord, WorkflowArtifactRef } from "./workflow-artifacts.js";
+import { ensureWorkflowRunLogsDir, workflowRunLogsDir, WORKFLOW_RUN_FILES_DIRNAME } from "./workflow-run-layout.js";
 import type { WorkflowBudget } from "./workflow-budget.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
 
-export const WORKFLOW_REPORT_ROOT_DIRNAME = ".locus-pi";
-
-const WORKFLOW_REPORT_COMPONENT_REGEX = new RegExp(WORKFLOW_ARTIFACT_COMPONENT_PATTERN, "u");
 /** Extensions worth preserving verbatim; anything else becomes readable Markdown. */
 const WORKFLOW_REPORT_EXTENSION_REGEX = /\.[A-Za-z0-9]{1,8}$/u;
 
-export function workflowReportRootDir(projectRoot: string): string {
-  return path.join(projectRoot, WORKFLOW_REPORT_ROOT_DIRNAME);
-}
-
 export function workflowReportDir(projectRoot: string, runId: string): string {
-  return path.join(workflowReportRootDir(projectRoot), runId);
+  return workflowRunLogsDir(projectRoot, runId);
 }
 
 export interface WorkflowRunReportInput {
@@ -89,13 +81,13 @@ interface WorkflowReportDocument {
   unavailable?: string;
 }
 
-/** Write the whole report folder for one finished run. Never throws. */
+/** Write the whole `logs/` journal folder for one finished run. Never throws. */
 export function writeWorkflowRunReport(
   input: WorkflowRunReportInput,
   evidence: WorkflowRunReportEvidenceSource,
 ): WorkflowRunReportOutcome {
   try {
-    const reportDir = canonicalReportDir(input.projectRoot, input.runId);
+    const reportDir = ensureWorkflowRunLogsDir(input.projectRoot, input.runId);
 
     let records: WorkflowArtifactRecord[] = [];
     let indexUnavailable: string | undefined;
@@ -176,41 +168,6 @@ export function writeWorkflowRunReport(
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
-
-/**
- * The report root mirrors the artifact store's path discipline: the directory
- * is created below the physical project root and every component down to the
- * run folder must be a regular, non-symlink directory. A symlinked `.locus-pi`
- * must not redirect run results outside the project.
- */
-function canonicalReportDir(projectRoot: string, runId: string): string {
-  if (!WORKFLOW_REPORT_COMPONENT_REGEX.test(runId)) {
-    throw new Error(`Invalid workflow run id for report: ${JSON.stringify(runId)}`);
-  }
-  const physicalProjectRoot = realpathSync(path.resolve(projectRoot));
-  const rootStat = lstatSync(physicalProjectRoot);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-    throw new Error("Workflow report project root is not a regular directory.");
-  }
-  const reportDir = path.join(physicalProjectRoot, WORKFLOW_REPORT_ROOT_DIRNAME, runId);
-  // Check the existing chain BEFORE mkdir: a symlinked `.locus-pi` must not have
-  // even an empty run directory created through it.
-  let current = physicalProjectRoot;
-  for (const part of [WORKFLOW_REPORT_ROOT_DIRNAME, runId]) {
-    current = path.join(current, part);
-    let stat;
-    try {
-      stat = lstatSync(current);
-    } catch {
-      break; // Missing components are created below, inside the same guard.
-    }
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new Error(`Workflow report path is unsafe: ${current}`);
-    }
-  }
-  ensureWorkflowDirectoryNoSymlink(physicalProjectRoot, reportDir);
-  return reportDir;
-}
 
 /**
  * `NN-<author>-<name>` with the artifact's own extension preserved and `.md`
@@ -366,8 +323,10 @@ function reportReadme(options: {
     lines.push(`- Error: ${singleLine(input.error)}`);
   }
   lines.push(
-    `- Machine records: \`.locus/runtime/workflows/${input.runId}/\` — journal, replay record, ` +
-      `result envelope, script snapshot, transcripts and call envelopes`,
+    `- Files this run's agents wrote: \`../${WORKFLOW_RUN_FILES_DIRNAME}/\` — under their own names, ` +
+      `never renamed or numbered`,
+    "- Machine records: `..` — journal.ndjson, replay record, result envelope, script snapshot, " +
+      "transcripts and call envelopes",
   );
   lines.push(...budgetSection(input));
   const retryLines = retriedCallLines(input.journal);
@@ -406,7 +365,7 @@ function reportReadme(options: {
  * One logical `agent()` call that had to run more than one child.
  *
  * A discarded attempt is a real agent call: it burned an invocation of the run cap and left
- * its own transcript. Without this section the reader's copy shows the stage as one clean
+ * its own transcript. Without this section the journal shows the stage as one clean
  * answer and the second bill appears nowhere they would look.
  */
 interface WorkflowReportRetriedCall {

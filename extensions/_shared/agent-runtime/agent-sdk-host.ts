@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import type {
   AgentChildOutputStats,
   AgentChildTrace,
@@ -92,6 +92,19 @@ export interface SdkAgentSessionLike {
   getSessionStats(): SdkSessionStatsLike;
   getLastAssistantText(): string | undefined;
   exportToJsonl(outputPath?: string): string; // SYNC
+  /**
+   * Full readable render of the same session (`AgentSession.exportToHtml`,
+   * present in `@earendil-works/pi-coding-agent` 0.82.0). Optional here because
+   * an older peer or a structural mock may not have it — and its absence is
+   * RECORDED as a named warning beside the transcript, never skipped silently.
+   * The package's export map blocks a deep import of the renderer, so this
+   * method and the `pi --export in.jsonl out.html` CLI are the only two doors.
+   *
+   * ASYNC on the real peer (`Promise<string>`), unlike `exportToJsonl` right
+   * above it. The call site awaits, so a peer that ever returns the path
+   * directly is handled by the same code rather than by a second branch.
+   */
+  exportToHtml?(outputPath?: string): Promise<string> | string;
   dispose(): void;
   abort?(): Promise<void>;
 }
@@ -990,10 +1003,10 @@ async function runChildSession(
   let childOutputStats: AgentChildOutputStats | undefined;
   let childTrace: AgentChildTrace | undefined;
   let childTraceAttempted = false;
-  const preserveChildTrace = (): AgentChildTrace | undefined => {
+  const preserveChildTrace = async (): Promise<AgentChildTrace | undefined> => {
     if (!childTraceAttempted) {
       childTraceAttempted = true;
-      childTrace = exportEvidence(session, request, now, reportsDirOverride, diagnostics);
+      childTrace = await exportEvidence(session, request, now, reportsDirOverride, diagnostics);
     }
     return childTrace;
   };
@@ -1038,7 +1051,7 @@ async function runChildSession(
       // BUILT on that model and never prompted, so a terminal row naming it claims an
       // execution that did not happen — the same conflation as echoing the request.
       agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
-      const preservedTrace = preserveChildTrace();
+      const preservedTrace = await preserveChildTrace();
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), preservedTrace);
     }
 
@@ -1063,7 +1076,7 @@ async function runChildSession(
         errors: [reason],
         finalAnswer: reason,
       });
-      preserveChildTrace();
+      await preserveChildTrace();
       // A host that ignored the resolved selector is a permanent configuration fault, not a
       // dropped channel: re-asking would land on the same wrong model. It stays `unclassified`
       // rather than earning its own member, because D1 promotes a cause out of `unclassified`
@@ -1094,7 +1107,7 @@ async function runChildSession(
     if (turn.settlement === "aborted" || turn.settlement === "timed_out" || turn.settlement === "tool_limit") {
       // Stop the child, then still export evidence and dispose (finally below).
       await abortChild(session, abortTimeoutMs);
-      preserveChildTrace();
+      await preserveChildTrace();
       if (turn.settlement === "timed_out") {
         const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
         patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
@@ -1122,7 +1135,7 @@ async function runChildSession(
     agentLiveStore.applyExecutionStats(execution, stats);
     if (session.messages !== undefined) agentLiveStore.replaceExecutionTranscript(execution, session.messages);
     const text = session.getLastAssistantText();
-    preserveChildTrace();
+    await preserveChildTrace();
 
     childOutputStats = {
       // The SDK exposes aggregate counters, not an entry list, in this context.
@@ -1213,7 +1226,7 @@ async function runChildSession(
       errors: unique([...currentErrors, reason]),
       finalAnswer: reason,
     });
-    const preservedTrace = preserveChildTrace();
+    const preservedTrace = await preserveChildTrace();
     return withChildTrace(
       // Catch-all around the whole turn — parseAgentText, evidence evaluation, trace export
       // included. Nothing here proves the throw was transient, so it never retries.
@@ -1408,13 +1421,13 @@ async function materializeSdkSessionOptions(
   return { ...sessionOptions, resourceLoader: loader };
 }
 
-function exportEvidence(
+async function exportEvidence(
   session: SdkAgentSessionLike,
   request: AgentRunRequest,
   now: () => string,
   reportsDirOverride: string | undefined,
   diagnostics: string[],
-): AgentChildTrace | undefined {
+): Promise<AgentChildTrace | undefined> {
   const reportsDir = reportsDirOverride ?? path.join(runtimeStateDir(request.projectRoot ?? process.cwd()), "reports");
   const stamp = sanitizeStamp(now());
   try {
@@ -1436,15 +1449,63 @@ function exportEvidence(
     if (!isRecord(header) || header.type !== "session" || header.id !== session.sessionId) {
       throw new Error(`exported JSONL session header does not match child ${session.sessionId}`);
     }
-    const childTrace: AgentChildTrace = {
+    diagnostics.push(`JSONL evidence exported: ${realExportedPath}`);
+    const htmlPath = await exportHtmlRender(session, realReportsDir, realExportedPath, diagnostics);
+    return {
       path: realExportedPath,
       format: "pi-session-jsonl",
       childSessionId: session.sessionId,
+      ...(htmlPath === undefined ? {} : { htmlPath }),
     };
-    diagnostics.push(`JSONL evidence exported: ${realExportedPath}`);
-    return childTrace;
   } catch (error) {
     diagnostics.push(`JSONL export failed: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+/** Named warning prefix for every reason a session has no readable render. */
+const HTML_RENDER_WARNING = "HTML transcript render";
+
+/**
+ * The readable half of one child's evidence, beside its JSONL and named after it.
+ *
+ * Additive: the TUI reader stays the required surface and a missing render never
+ * fails a run. It is not, however, allowed to be quiet — every reason lands in
+ * `diagnostics`, which the per-call result envelope persists, and the path is
+ * returned only after the file has been verified on disk. A host with no
+ * `exportToHtml` is one of those reasons; `pi --export <transcript>.jsonl
+ * <out>.html` re-renders any saved transcript afterwards.
+ */
+async function exportHtmlRender(
+  session: SdkAgentSessionLike,
+  realReportsDir: string,
+  realExportedPath: string,
+  diagnostics: string[],
+): Promise<string | undefined> {
+  if (typeof session.exportToHtml !== "function") {
+    diagnostics.push(`${HTML_RENDER_WARNING} unavailable: the installed Pi host exposes no AgentSession.exportToHtml`);
+    return undefined;
+  }
+  const target = `${realExportedPath.slice(0, -path.extname(realExportedPath).length)}.html`;
+  try {
+    // Awaited, not fired and forgotten: the run may finish the instant this
+    // returns, and a render still in flight would leave the evidence claiming a
+    // file that is not there yet.
+    const written = await session.exportToHtml(target);
+    if (typeof written !== "string" || written.trim() === "") {
+      throw new Error("exportToHtml returned no path");
+    }
+    const realWritten = realpathSync(written);
+    const relativePath = path.relative(realReportsDir, realWritten);
+    if (relativePath === "" || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+      throw new Error(`rendered path escaped reports root: ${realWritten}`);
+    }
+    if (path.extname(realWritten) !== ".html") throw new Error(`rendered path is not HTML: ${realWritten}`);
+    if (statSync(realWritten).size === 0) throw new Error(`rendered file is empty: ${realWritten}`);
+    diagnostics.push(`${HTML_RENDER_WARNING} exported: ${realWritten}`);
+    return realWritten;
+  } catch (error) {
+    diagnostics.push(`${HTML_RENDER_WARNING} failed: ${errorMessage(error)}`);
     return undefined;
   }
 }

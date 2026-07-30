@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { WORKFLOW_RUN_FILES_PROMPT_SEPARATOR } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {
@@ -82,6 +83,12 @@ function digestFor(root: string, outcome: RunOutcome): string {
   return transcript.finish(outcome.raw).digest;
 }
 
+/** The workflow's own prompt, without the run working-directory note the bridge prepends. */
+function workflowPrompt(task: string): string {
+  const at = task.indexOf(WORKFLOW_RUN_FILES_PROMPT_SEPARATOR);
+  return at === -1 ? task : task.slice(at + WORKFLOW_RUN_FILES_PROMPT_SEPARATOR.length);
+}
+
 /**
  * Run one saved workflow with a scripted child. The child answer is a pure
  * function of the prompt, so a difference between two runs can only come from
@@ -97,12 +104,16 @@ async function runWorkflow(
   const executedPrompts: string[] = [];
   const createExecutor = (): AgentExecutor => ({
     async run(request: AgentRunRequest) {
-      executedPrompts.push(request.task);
+      // The bridge prepends this run's working-directory note, whose path carries
+      // the run id. The scripted child answers on the workflow's own prompt so a
+      // recorded answer stays comparable across runs.
+      const prompt = workflowPrompt(request.task);
+      executedPrompts.push(prompt);
       return {
         status: "completed" as const,
         agentName: request.agent.name,
         reason: "answered",
-        text: `answer(${request.task})`,
+        text: `answer(${prompt})`,
         diagnostics: [],
         lifecycleEntryIds: [],
       };

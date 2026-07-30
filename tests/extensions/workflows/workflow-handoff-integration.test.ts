@@ -134,26 +134,55 @@ function completedResult(runId: string): runner.RunWorkflowScriptResult {
   };
 }
 
+/**
+ * Report each launch under a run id the test chooses, newest first.
+ *
+ * The automatic pump only raises questions belonging to runs THIS session
+ * launched, so a test that wants one raised has to make the session launch the
+ * run whose durable evidence carries it: the first (continuation-less) launch
+ * reports `runIds[0]`, and every continuation reports the next id.
+ */
+function mockRuns(
+  requests: runner.RunWorkflowScriptOptions[],
+  runIds: string[],
+  onLaunch?: (request: runner.RunWorkflowScriptOptions, runId: string) => void,
+): void {
+  vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
+    const runId = runIds[requests.length] ?? `spare-${String(requests.length)}`;
+    requests.push(request);
+    onLaunch?.(request, runId);
+    request.onRunStart?.({ runId, runDir: `/tmp/${runId}` });
+    return completedResult(runId);
+  });
+}
+
+/** The continuations a pumped question launched, without the run that opened it. */
+function continuations(requests: runner.RunWorkflowScriptOptions[]): runner.RunWorkflowScriptOptions[] {
+  return requests.filter((request) => request.continuation !== undefined);
+}
+
+/** Start `alpha` through the ordinary `/workflows run` path, so this session owns the run. */
+async function runAlphaInSession(harness: ReturnType<typeof createHarness>): Promise<void> {
+  await harness.commands.get("workflows")!.handler("run alpha", harness.ctx);
+}
+
 describe("workflow actionable handoff integration", () => {
-  it("recovers on session start, claims, and launches through the ordinary background runner", async () => {
+  it("claims and launches a continuation for a run this session started, as soon as it settles", async () => {
     const sourceRunId = "20260725-120000-source";
     const root = projectWithHandoff(sourceRunId);
     const harness = createHarness(root, { sessionId: `handoff-${Date.now()}` });
     harness.customInputQueue.push("\r");
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      request.onRunStart?.({ runId: "20260725-120100-child", runDir: "/tmp/20260725-120100-child" });
-      return completedResult("20260725-120100-child");
-    });
+    mockRuns(requests, [sourceRunId, "20260725-120100-child"]);
 
     workflows(harness.pi);
     await emit(harness, "session_start");
-    await waitFor(() => requests.length === 1);
-    await waitFor(() => harness.waitForIdleCalls === 2);
+    // The split-run gate: a run this session started ends awaiting an operator,
+    // and its question opens the moment the run settles — no command needed.
+    await runAlphaInSession(harness);
+    await waitFor(() => continuations(requests).length === 1);
 
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({
+    expect(continuations(requests)[0]).toMatchObject({
       script: "alpha",
       input: "Current changes",
       continuation: {
@@ -166,38 +195,79 @@ describe("workflow actionable handoff integration", () => {
     });
     expect(harness.customRenderFrames[0]?.join("\n")).toContain("Question 1 of 1");
     expect(harness.customOptions[0]).toEqual({ overlay: false });
-    expect(harness.waitForIdleCalls).toBe(2);
+    // The question never reaches the model as a steered turn.
+    expect(harness.waitForIdleCalls).toBeGreaterThan(0);
     expect(harness.sentUserMessages).toEqual([]);
   });
 
-  it("does not reopen a snoozed question on agent_settled and bare /workflows recovers it", async () => {
+  it("starts a session without picking up an unanswered question from an earlier run", async () => {
     const sourceRunId = "20260725-121000-source";
     const root = projectWithHandoff(sourceRunId);
-    const harness = createHarness(root, { sessionId: `handoff-snooze-${Date.now()}` });
+    const harness = createHarness(root, { sessionId: `handoff-startup-${Date.now()}` });
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      request.onRunStart?.({ runId: "20260725-121100-child", runDir: "/tmp/20260725-121100-child" });
-      return completedResult("20260725-121100-child");
-    });
+    mockRuns(requests, ["20260725-121100-child"]);
     workflows(harness.pi);
 
-    harness.customInputQueue.push("\x1b");
     await emit(harness, "session_start");
-    await waitFor(() => harness.customComponents.length === 1);
+    await flushBackground();
+    expect(harness.customComponents).toEqual([]);
+    expect(harness.widgets.get("workflows")).toBeUndefined();
     expect(requests).toEqual([]);
-    expect(harness.customComponents).toHaveLength(1);
 
+    // Still reachable, but only because the operator asked for it.
+    harness.customInputQueue.push("\r");
+    await harness.commands.get("workflows")!.handler("", harness.ctx);
+    await waitFor(() => requests.length === 1);
+    expect(harness.customComponents).toHaveLength(1);
+  });
+
+  it("never pumps a question from a run this session did not launch, and still opens it on request", async () => {
+    const sourceRunId = "20260725-121200-foreign";
+    const root = projectWithHandoff(sourceRunId);
+    const harness = createHarness(root, { sessionId: `handoff-foreign-${Date.now()}` });
+    const requests: runner.RunWorkflowScriptOptions[] = [];
+    mockRuns(requests, ["20260725-121300-child"]);
+    workflows(harness.pi);
+
+    await emit(harness, "session_start");
+    // The turn after a clean start is where the removed session-start modal used
+    // to reappear under another name. The scope, not the trigger, is what stops it.
+    await emit(harness, "agent_settled");
     await emit(harness, "agent_settled");
     await flushBackground();
-    expect(harness.customComponents).toHaveLength(1);
+    expect(harness.customComponents).toEqual([]);
     expect(requests).toEqual([]);
 
     harness.customInputQueue.push("\r");
     await harness.commands.get("workflows")!.handler("", harness.ctx);
     await waitFor(() => requests.length === 1);
-    expect(requests).toHaveLength(1);
-    expect(harness.customComponents).toHaveLength(2);
+    expect(requests[0]?.continuation?.originRunId).toBe(sourceRunId);
+    expect(harness.customComponents).toHaveLength(1);
+  });
+
+  it("delivers an escaped question to the workflow as a refusal answer", async () => {
+    const sourceRunId = "20260725-121500-source";
+    const root = projectWithHandoff(sourceRunId);
+    const harness = createHarness(root, { sessionId: `handoff-refusal-${Date.now()}` });
+    const requests: runner.RunWorkflowScriptOptions[] = [];
+    mockRuns(requests, [sourceRunId, "20260725-121600-child"]);
+    workflows(harness.pi);
+
+    harness.customInputQueue.push("\x1b");
+    await emit(harness, "session_start");
+    await runAlphaInSession(harness);
+    await waitFor(() => continuations(requests).length === 1);
+
+    expect(continuations(requests)[0]?.input).toBe(
+      [
+        "The operator declined to answer this workflow's questions.",
+        "",
+        "1. Choose review scope",
+        "   id: scope",
+        "   answer: none — the operator declined",
+      ].join("\n"),
+    );
+    expect(continuations(requests)[0]?.continuation?.originRunId).toBe(sourceRunId);
   });
 
   it("does not mount a tool-origin question on turn_end and uses the fresh agent_settled context", async () => {
@@ -205,50 +275,40 @@ describe("workflow actionable handoff integration", () => {
     const root = projectWithHandoff(sourceRunId);
     const resultPath = path.join(root, ".locus", "runtime", "workflows", sourceRunId, "result.json");
     const deferredPath = `${resultPath}.deferred`;
+    // Hidden while the run settles, so the terminal pump finds nothing and the
+    // question can only arrive through the lifecycle event under test.
     renameSync(resultPath, deferredPath);
     const harness = createHarness(root, { sessionId: `handoff-settled-${Date.now()}` });
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      request.onRunStart?.({ runId: "20260725-122100-child", runDir: "/tmp/20260725-122100-child" });
-      return completedResult("20260725-122100-child");
-    });
+    mockRuns(requests, [sourceRunId, "20260725-122100-child"]);
     workflows(harness.pi);
     await emit(harness, "session_start");
+    await runAlphaInSession(harness);
     await flushBackground();
     renameSync(deferredPath, resultPath);
 
     await emit(harness, "turn_end");
     expect(harness.customComponents).toEqual([]);
-    expect(requests).toEqual([]);
+    expect(continuations(requests)).toEqual([]);
 
     harness.customInputQueue.push("\r");
     await emit(harness, "agent_settled");
-    await waitFor(() => requests.length === 1);
+    await waitFor(() => continuations(requests).length === 1);
     expect(harness.customComponents).toHaveLength(1);
-    expect(requests).toHaveLength(1);
   });
 
   it("continues one explicit answer in JSON mode through the flat command without interactive UI", async () => {
     const sourceRunId = "20260725-123000-source";
     const root = projectWithHandoff(sourceRunId);
-    const resultPath = path.join(root, ".locus", "runtime", "workflows", sourceRunId, "result.json");
-    const deferredPath = `${resultPath}.deferred`;
-    renameSync(resultPath, deferredPath);
     const harness = createHarness(root, {
       sessionId: `handoff-json-${Date.now()}`,
       mode: "json",
     });
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      request.onRunStart?.({ runId: "20260725-123100-child", runDir: "/tmp/20260725-123100-child" });
-      return completedResult("20260725-123100-child");
-    });
+    mockRuns(requests, ["20260725-123100-child"]);
     workflows(harness.pi);
     await emit(harness, "session_start");
     await flushBackground();
-    renameSync(deferredPath, resultPath);
 
     expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.(`${sourceRunId} `)).toEqual([
       expect.objectContaining({ value: `${sourceRunId} --answer `, label: "--answer" }),
@@ -265,8 +325,11 @@ describe("workflow actionable handoff integration", () => {
   });
 
   it("does not let a never-resolving question starve later lifecycle handlers", async () => {
-    const root = projectWithHandoff("20260725-124000-source");
+    const sourceRunId = "20260725-124000-source";
+    const root = projectWithHandoff(sourceRunId);
     const harness = createHarness(root, { sessionId: `handoff-never-${Date.now()}` });
+    const requests: runner.RunWorkflowScriptOptions[] = [];
+    mockRuns(requests, [sourceRunId]);
     let mounted = 0;
     harness.ctx.ui.custom = vi.fn(
       async <T>(factory: CustomUiFactory<T>) =>
@@ -278,8 +341,9 @@ describe("workflow actionable handoff integration", () => {
     workflows(harness.pi);
 
     await emit(harness, "session_start");
+    await runAlphaInSession(harness);
     await waitFor(() => mounted === 1);
-    await emit(harness, "session_start");
+    await emit(harness, "agent_settled");
     await emit(harness, "agent_settled");
 
     expect(mounted).toBe(1);
@@ -287,21 +351,27 @@ describe("workflow actionable handoff integration", () => {
   });
 
   it("surfaces a rejected question pump as a warning without rejecting the lifecycle handler", async () => {
-    const root = projectWithHandoff("20260725-125000-source");
+    const sourceRunId = "20260725-125000-source";
+    const root = projectWithHandoff(sourceRunId);
     const harness = createHarness(root, { sessionId: `handoff-reject-${Date.now()}` });
+    const requests: runner.RunWorkflowScriptOptions[] = [];
+    mockRuns(requests, [sourceRunId]);
     harness.ctx.ui.custom = vi.fn(async () => {
       throw new Error("question mount exploded");
     });
     workflows(harness.pi);
 
-    await expect(emit(harness, "session_start")).resolves.toEqual([undefined]);
+    await emit(harness, "session_start");
+    await runAlphaInSession(harness);
     await waitFor(() => (harness.widgets.get("workflows") ?? "").includes("question mount exploded"));
+    // A later lifecycle event still settles normally rather than rejecting.
+    await expect(emit(harness, "agent_settled")).resolves.toEqual([undefined]);
 
     expect(harness.widgets.get("workflows")).toContain("question mount exploded");
     expect(harness.widgets.get("workflows")).toContain("No workflow execution was started.");
   });
 
-  it("pumps the next FIFO handoff after the answered child reaches a terminal result", async () => {
+  it("pumps the next handoff when a continuation is itself a run that ends awaiting an operator", async () => {
     const firstRunId = "20260725-130000-first";
     const secondRunId = "20260725-131000-second";
     const root = projectWithHandoff(firstRunId);
@@ -309,20 +379,23 @@ describe("workflow actionable handoff integration", () => {
     const harness = createHarness(root, { sessionId: `handoff-fifo-${Date.now()}` });
     harness.customInputQueue.push("\r", "\r");
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      const childRunId = `20260725-13200${requests.length}-child`;
-      bindWorkflowHandoffClaim(request.operatorHandoffClaim!, childRunId);
-      persistCompletedChild(root, childRunId);
-      request.onRunStart?.({ runId: childRunId, runDir: `/tmp/${childRunId}` });
-      return completedResult(childRunId);
+    // The split-run chain, all inside one session: run one asks, its continuation
+    // IS run two, and run two asks again. Both are this session's, so both pump.
+    mockRuns(requests, [firstRunId, secondRunId, "20260725-132000-child"], (request, runId) => {
+      if (request.operatorHandoffClaim === undefined) return;
+      bindWorkflowHandoffClaim(request.operatorHandoffClaim, runId);
+      if (runId !== secondRunId) persistCompletedChild(root, runId);
     });
     workflows(harness.pi);
 
     await emit(harness, "session_start");
-    await waitFor(() => requests.length === 2);
+    await runAlphaInSession(harness);
+    await waitFor(() => continuations(requests).length === 2);
 
-    expect(requests.map((request) => request.continuation?.originRunId)).toEqual([firstRunId, secondRunId]);
+    expect(continuations(requests).map((request) => request.continuation?.originRunId)).toEqual([
+      firstRunId,
+      secondRunId,
+    ]);
     expect(harness.customComponents).toHaveLength(2);
   });
 
@@ -334,6 +407,13 @@ describe("workflow actionable handoff integration", () => {
     workflows(harness.pi);
 
     await emit(harness, "session_start");
+    // Unreadable evidence from a run this session never launched is not raised on
+    // its own; bare /workflows is where the operator asks and is told.
+    await emit(harness, "agent_settled");
+    await flushBackground();
+    expect(harness.widgets.get("workflows")).toBeUndefined();
+
+    await harness.commands.get("workflows")!.handler("", harness.ctx);
     await waitFor(() => (harness.widgets.get("workflows") ?? "").includes("operatorHandoff title"));
 
     expect(harness.widgets.get("workflows")).toContain("operatorHandoff title");
@@ -350,18 +430,14 @@ describe("workflow actionable handoff integration", () => {
     const harness = createHarness(root, { sessionId: `handoff-valid-wins-${Date.now()}` });
     harness.customInputQueue.push("\r");
     const requests: runner.RunWorkflowScriptOptions[] = [];
-    vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (request) => {
-      requests.push(request);
-      request.onRunStart?.({ runId: "20260725-135100-child", runDir: "/tmp/20260725-135100-child" });
-      return completedResult("20260725-135100-child");
-    });
+    mockRuns(requests, ["20260725-135100-child"]);
     workflows(harness.pi);
     await harness.commands.get("workflows")!.handler("unexpected", harness.ctx);
     expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260725")).toEqual([
       expect.objectContaining({ value: actionableRunId }),
     ]);
 
-    await emit(harness, "session_start");
+    await harness.commands.get("workflows")!.handler("", harness.ctx);
     await waitFor(() => requests.length === 1);
 
     expect(requests[0]?.continuation?.originRunId).toBe(actionableRunId);

@@ -52,7 +52,9 @@ These paths are local or internal and must stay ignored unless a separate
 promotion decision says otherwise:
 
 - `.locus/**` — runtime state, generated reports, task-local evidence.
-- `.locus-pi/**` — generated reader copies of workflow run reports.
+- `.locus-pi/**` — retired location of workflow run reports, which now live inside
+  the run directory (`.locus/runtime/workflows/<runId>/logs/`). Still ignored so a
+  checkout that predates the move stays clean.
 - `.tasks/**` — local task state.
 - `.pi/**` — project-local Pi settings and workflow scratch.
 - `.planning/**` — planning export and historical planning state.

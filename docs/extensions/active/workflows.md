@@ -1172,6 +1172,7 @@ awaitOperator({reason})       // Declare a successful operator handoff without c
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
 projectRoot()                 // Absolute launch project root
+runFilesDir()                 // Absolute working directory for this run's files; agent file names kept verbatim
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
 phase(name)                   // Progress grouping + journal line
@@ -1185,6 +1186,32 @@ characters. It is a control declaration, not model output and not a thrown
 pause. Call it only after durable handoff artifacts exist, immediately before
 returning the unchanged handoff payload. An abort or semantic/infrastructure
 failure still wins at finalization.
+
+If the operator answers the question, the workflow's continuation run receives
+their answer text. If they press Escape, it receives a plain-text refusal
+instead — the same questions, each with whatever was answered before the
+refusal, under the line `The operator declined to answer this workflow's
+questions.` — delivered through the same channel and the same continuation. It
+is not a status and the runtime attaches no handling contract to it: what a
+declined question means is the workflow author's decision, exactly as it would
+be for any other answer text.
+
+A question opens on its own only for a run the current Pi session started, or a
+continuation that run spawned. Nothing an earlier session left unanswered
+interrupts a new one — not at session start and not on its first settled turn.
+Those questions stay in their run's evidence and reopen on request: bare
+`/workflows` takes the oldest pending one project-wide, `/workflow-continue
+<runId>` takes a named run.
+
+`runFilesDir()` is the absolute path of this run's working directory
+(`.locus/runtime/workflows/<runId>/files/`), created before the script starts.
+Every child agent's prompt opens by naming the same directory and telling it to
+create the run's files there under their exact names; a `readOnly` call is told
+where the directory is and is not asked to create anything in it. Nothing in the
+runtime renames, numbers or moves what an agent writes, so a path a workflow
+prints in a question is a path that exists. Auto-captured material — agent answers,
+published texts, transcripts — goes to the run's `logs/` and `artifacts/`
+directories instead; see `docs/runtime/workflow-run-storage.md`.
 
 `now()` and `random()` exist so a workflow can be nondeterministic AND replayable.
 They return exactly what `Date.now()` / `Math.random()` would, and the runtime
@@ -1374,8 +1401,8 @@ its own `agent_start` and its own terminal record — an `agent_end`, or an `err
 the attempt **threw** instead of answering — both carrying `attempt`, `attempts` and the
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
-`[workflow:retry]` line names the boundary between attempts, and the reader's copy under
-`.locus-pi/<runId>/` grows a `## Retried agent calls` section listing every attempt by
+`[workflow:retry]` line names the boundary between attempts, and the run's journal folder
+`.locus/runtime/workflows/<runId>/logs/` grows a `## Retried agent calls` section listing every attempt by
 `callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
@@ -1657,7 +1684,7 @@ package values. Giving scripts a run-level surface means deciding where
 operator-changeable knobs live, which is an open owner decision.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.locus-pi/<runId>/README.md` carries a `## Budget` section
+applied budget, and `.locus/runtime/workflows/<runId>/logs/README.md` carries a `## Budget` section
 with each axis, its applied value, and the spend the run evidence can measure:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal

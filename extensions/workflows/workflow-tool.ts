@@ -94,6 +94,8 @@ function workflowApprovalDetails(args: unknown): string[] {
 
 export interface WorkflowToolDependencies {
   commandLauncher: WorkflowCommandLauncher;
+  /** Records a started run id so this session owns the questions that run publishes. */
+  onRunStarted: (runId: string) => void;
   /** Records a settled run id so the session can prune its live rows later. */
   onRunCompleted: (runId: string) => void;
 }
@@ -139,6 +141,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
           onRunStart: ({ runId }) => {
             background.setRunId(runId);
+            deps.onRunStarted(runId);
             transcript.start(runId);
           },
           onEvent: (line: WorkflowJournalLine) => {

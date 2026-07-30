@@ -6,6 +6,51 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Declining a workflow question is now an answer, not a postponement.**
+  Pressing Escape on a workflow's operator question used to set a session-local
+  snooze the running workflow never heard about, leaving the run parked. It now
+  continues the workflow with plain text — the questions that were asked, each
+  marked answered or declined, under the line `The operator declined to answer
+this workflow's questions.` — through the same continuation a typed reply
+  takes. The runtime attaches no handling contract to that text: what a declined
+  question means is the workflow author's decision.
+
+- **A workflow question is raised automatically only by a run of the current Pi
+  session.** The extension's session-start scan over every project run, and the
+  blocking modal it raised, are gone; so is the same question arriving one turn
+  later, because the automatic pump now considers only runs this session started
+  — its own launches and the continuations they spawn. The split-run gate is
+  unchanged: a run started here that ends awaiting an operator still opens its
+  question the moment it settles. A question published by an earlier session
+  remains in its run's evidence and is reopened only when the operator asks:
+  `/workflows` for the oldest pending one, `/workflow-continue <runId>` for a
+  named run — both still project-wide.
+
+- **A file a workflow agent writes now exists under the name the agent gave
+  it.** Each run gets a working directory,
+  `.locus/runtime/workflows/<runId>/files/`, created before the script starts,
+  handed to the script as `dsl.runFilesDir()` and named at the top of every
+  child agent's prompt. Nothing renames, numbers or moves what an agent writes
+  there, so a path a workflow prints in a question is a path that can be opened.
+  A read-only child is told where the directory is and is not asked to create
+  anything in it.
+  Auto-captured material moved with it: the run's ordered journal — the task,
+  every agent answer, published and consumed texts, the budget-versus-spend
+  table — is now written to `.locus/runtime/workflows/<runId>/logs/` instead of
+  the numbered mirror under `<project root>/.locus-pi/<runId>/`, which is no
+  longer written or read. Ordinal prefixes live in that journal only, because
+  order is a property of a journal and not of a file an author named.
+
+- **Every child agent session is now saved as a readable HTML render beside its
+  JSONL transcript**, under the same base name in the call's transcript
+  directory. The render is additive — the Pi TUI reader stays the required
+  surface — and it is never silently skipped: the verified path is recorded on
+  `childTrace.htmlPath` in the call's result envelope, and every reason a render
+  is missing (a host without `AgentSession.exportToHtml`, a renderer that threw,
+  an unusable output) is recorded as an `HTML transcript render …` warning in the
+  same envelope. `pi --export <transcript>.jsonl <out>.html` re-renders any saved
+  transcript afterwards.
+
 - **Workflow model effort is now executed, not merely displayed.** A concrete
   `provider/id:level` selector passes both the resolved model and `level` to the
   Pi child session. The packaged `plan` → `plan-implement` pair now pins every

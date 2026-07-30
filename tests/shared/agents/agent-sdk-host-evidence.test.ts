@@ -52,6 +52,11 @@ function fakeSession(config: {
   exportRawHeader?: string;
   exportOutsideReports?: boolean;
   exportError?: string;
+  /** Absent = a host without `exportToHtml`, which must be RECORDED, not skipped. */
+  exportsHtml?: boolean;
+  htmlExportError?: string;
+  htmlOutsideReports?: boolean;
+  htmlEmpty?: boolean;
   promptError?: string;
   neverEnds?: boolean;
   abortNeverSettles?: boolean;
@@ -89,6 +94,20 @@ function fakeSession(config: {
       writeFileSync(target, `${header}\n`, "utf8");
       return target;
     },
+    ...(config.exportsHtml === true
+      ? {
+          // Async, like the real peer's `AgentSession.exportToHtml`.
+          async exportToHtml(outputPath?: string) {
+            await Promise.resolve();
+            if (config.htmlExportError !== undefined) throw new Error(config.htmlExportError);
+            const target = config.htmlOutsideReports
+              ? path.join(exportDir, "escaped.html")
+              : (outputPath ?? path.join(exportDir, "session.html"));
+            writeFileSync(target, config.htmlEmpty === true ? "" : "<html><body>session</body></html>", "utf8");
+            return target;
+          },
+        }
+      : {}),
     dispose() {},
     abort: config.abortNeverSettles === true ? () => new Promise<void>(() => {}) : async () => {},
   };
@@ -429,6 +448,60 @@ describe("agent SDK evidence surfacing", () => {
     assert.notEqual(withArtifact.resultArtifact.path, result.childTrace?.path);
     const body = JSON.parse(withArtifact.resultArtifact.content) as Record<string, unknown>;
     assert.deepEqual(body.childTrace, result.childTrace);
+  });
+
+  it("renders the session to HTML beside its JSONL and names the verified file in the run evidence", async () => {
+    const req = request();
+    const reportsDir = path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports");
+    const executor = createAgentSdkSessionExecutor({
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed."), exportsHtml: true }),
+      })) as CreateAgentSessionFactory,
+      reportsDir,
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(req, new AbortController().signal);
+    const htmlPath = realpathSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.html"));
+    assert.deepEqual(result.childTrace, {
+      path: realpathSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl")),
+      format: "pi-session-jsonl",
+      childSessionId: "sdk-child",
+      htmlPath,
+    });
+    assert.equal(readFileSync(htmlPath, "utf8"), "<html><body>session</body></html>");
+    assert.ok(result.diagnostics.some((line) => line === `HTML transcript render exported: ${htmlPath}`));
+
+    // Durable: the per-call result envelope is where a reader finds it later.
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    const body = JSON.parse(withArtifact.resultArtifact!.content) as Record<string, unknown>;
+    assert.deepEqual(body.childTrace, result.childTrace);
+  });
+
+  it.each([
+    ["a host without the method", {}, "unavailable: the installed Pi host exposes no AgentSession.exportToHtml"],
+    ["a renderer that throws", { exportsHtml: true, htmlExportError: "renderer refused" }, "failed: renderer refused"],
+    ["a render outside the reports root", { exportsHtml: true, htmlOutsideReports: true }, "escaped reports root"],
+    ["an empty render", { exportsHtml: true, htmlEmpty: true }, "rendered file is empty"],
+  ])("names %s as a warning and claims no HTML path", async (_name, htmlConfig, diagnostic) => {
+    const req = request();
+    const executor = createAgentSdkSessionExecutor({
+      createSession: (async () => ({
+        session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed."), ...htmlConfig }),
+      })) as CreateAgentSessionFactory,
+      reportsDir: path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports"),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(req, new AbortController().signal);
+
+    // The run is unaffected and the JSONL still stands; only the render is missing.
+    assert.equal(result.status, "completed");
+    assert.equal(result.childTrace?.htmlPath, undefined);
+    assert.ok(
+      result.diagnostics.some((line) => line.startsWith("HTML transcript render") && line.includes(diagnostic)),
+      `expected a named HTML warning containing ${diagnostic}, got ${JSON.stringify(result.diagnostics)}`,
+    );
   });
 
   it.each([

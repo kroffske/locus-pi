@@ -235,6 +235,7 @@
     "extensions/workflows/runtime/workflow-replay.ts",
     "extensions/workflows/runtime/workflow-resources.ts",
     "extensions/workflows/runtime/workflow-result.ts",
+    "extensions/workflows/runtime/workflow-run-layout.ts",
     "extensions/workflows/runtime/workflow-run-report.ts",
     "extensions/workflows/runtime/workflow-runner.ts",
     "extensions/workflows/runtime/workflow-runtime.ts",

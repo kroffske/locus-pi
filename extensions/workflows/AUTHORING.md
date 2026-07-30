@@ -42,6 +42,7 @@ export default async function runWorkflow(dsl, input) {
     consumeTextArtifact,
     continuationArtifacts,
     awaitOperator,
+    runFilesDir,
     phase,
     log,
     promptFile,
@@ -131,8 +132,16 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   succeeds; an abort or failure takes precedence. The last declaration wins.
   The host can reopen the oldest actionable question through `/workflows` or
   `/workflow-continue <runId>`, verifies artifacts and identity again, atomically
-  claims one continuation, and never rewrites source `result.json`. Escape
-  snoozes; `/workflow-stop` is the explicit cancellation path. Top-level
+  claims one continuation, and never rewrites source `result.json`. Escape is an
+  ANSWER, not a postponement: the continuation receives the question list with
+  the line `The operator declined to answer this workflow's questions.` and each
+  question marked answered or declined, through the same channel a typed reply
+  uses. The runtime attaches no handling contract to it — decide in the script
+  what a declined question means. A question is raised automatically only for a
+  run the current Pi session started (and the continuations it spawns), so
+  nothing from an earlier session interrupts a new one — at start or later;
+  `/workflows` and `/workflow-continue <runId>` are the ways back to an
+  unanswered question, and `/workflow-stop` is the explicit cancellation path. Top-level
   boolean `result.ok` is reserved as the script's run outcome: `false` makes the
   outer run fail even without a technical `error`; missing, nested, or
   non-boolean `ok` keeps legacy execution-success semantics. A top-level
@@ -143,6 +152,18 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   value or failure to persist this mandatory envelope is an infrastructure
   failure and makes the outer run `ok:false`; there is no successful
   result-unavailable or write-warning-only state.
+- **Write this run's files where they are findable:** `runFilesDir()` returns the
+  absolute working directory of the current run,
+  `.locus/runtime/workflows/<runId>/files/`, created before your script starts.
+  Every child agent's prompt opens by naming that same directory, so a file an
+  agent writes as `plan.md` is on disk as `plan.md` — nothing renames, numbers or
+  moves it, and a path you print in an `awaitOperator` question is a path the
+  operator can open. A `readOnly` call is told where the directory is and is not
+  asked to create anything in it. Auto-captured material goes elsewhere on purpose: agent
+  answers, published texts and consumed inputs are projected in creation order
+  into `.locus/runtime/workflows/<runId>/logs/`, where the ordinal prefix lives,
+  and child transcripts (`.jsonl` plus an `.html` render) stay under
+  `artifacts/transcripts/`.
 - **Keep evidence under the run owner:**
   `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical
   artifact inventory. Every `agent()` attempt automatically persists its exact

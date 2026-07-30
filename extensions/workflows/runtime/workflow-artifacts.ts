@@ -757,8 +757,8 @@ function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId:
 }
 
 /** Create `directory` below `root` and prove no component of the chain is a symlink.
- *  Shared by the artifact store and the run report writer, which mirrors this
- *  path discipline for its own `.locus-pi` root. */
+ *  Shared by the artifact store and `workflow-run-layout.ts`, which holds the run's
+ *  `files/` and `logs/` directories to the same path discipline. */
 export function ensureWorkflowDirectoryNoSymlink(root: string, directory: string): void {
   const lexicalRoot = path.resolve(root);
   const lexicalDirectory = path.resolve(directory);

@@ -234,6 +234,13 @@ export interface WorkflowDsl {
   workspace(label: string, ref: string): Promise<string>;
   /** Absolute project root captured by the workflow runner. */
   projectRoot(): string;
+  /**
+   * Absolute working directory for THIS run's files, created before the script
+   * starts. Every child agent is told the same path, and a file written there
+   * keeps the exact name its author chose — the runtime never renames or
+   * numbers it. Auto-captured evidence goes elsewhere (`logs/`, `artifacts/`).
+   */
+  runFilesDir(): string;
   /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
   publishArtifact(name: string, text: string): WorkflowArtifactRef;
   /** Verify and copy one complete prior-run text reference into this run. */
@@ -582,6 +589,8 @@ export interface WorkflowRuntimeOptions {
   /** Already consumed and digest-bound by the runner before workflow code starts. */
   continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
+  /** Absolute working directory for this run's files; the runner creates it before the script starts. */
+  runFilesDir?: string;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
   maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
@@ -2492,6 +2501,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.projectRoot;
   }
 
+  function runFilesDir(): string {
+    if (options.runFilesDir === undefined || options.runFilesDir.trim() === "") {
+      throw new Error("workflow run files directory is not configured");
+    }
+    return options.runFilesDir;
+  }
+
   function publishArtifact(name: string, text: string): WorkflowArtifactRef {
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
     return options.artifactPorts.publishText(name, text, _currentPhase);
@@ -2525,6 +2541,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     promptFile,
     workspace,
     projectRoot,
+    runFilesDir,
     publishArtifact,
     consumeTextArtifact,
     continuationArtifacts,

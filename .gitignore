@@ -9,6 +9,8 @@ test-results/
 .cache/
 .tasks/
 .locus/
+# Retired: workflow run reports moved into .locus/runtime/workflows/<runId>/logs/.
+# Kept so a checkout that predates the move stays clean.
 .locus-pi/
 .locus/_archive/.hermes/
 .omp/
