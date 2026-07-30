@@ -41,6 +41,7 @@ Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast
 | Package/runtime boundary                               | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                          |
 | Agent execution trust model                            | [adr/agent-execution-trust-model.md](adr/agent-execution-trust-model.md).                                                                          |
 | Curated workflow portfolio                             | [adr/curated-workflow-portfolio.md](adr/curated-workflow-portfolio.md).                                                                            |
+| Extension ownership layers under `extensions/_shared/` | [adr/extension-ownership-layers.md](adr/extension-ownership-layers.md).                                                                            |
 | Source attribution and borrowed behavior               | [Repository-only source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit) named by active manifests.                  |
 | Bundled agent catalog used by `agents` and `workflows` | [../.agents/agents/](../.agents/agents/). This is package runtime surface, not private planning material.                                          |
 | Shipped skill an agent loads to use workflows          | [../skills/locus-pi-workflows/SKILL.md](../skills/locus-pi-workflows/SKILL.md), declared by `package.json#pi.skills`.                              |

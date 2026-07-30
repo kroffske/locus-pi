@@ -30,6 +30,7 @@ bin/locus-pi
 docs/README.md
 docs/adr/agent-execution-trust-model.md
 docs/adr/curated-workflow-portfolio.md
+docs/adr/extension-ownership-layers.md
 docs/adr/text-agent-results-and-prompt-resources.md
 docs/extension-index.md
 docs/extension-ownership-matrix.md

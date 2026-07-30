@@ -19,6 +19,7 @@
     "SUPPORT.md",
     "docs/adr/agent-execution-trust-model.md",
     "docs/adr/curated-workflow-portfolio.md",
+    "docs/adr/extension-ownership-layers.md",
     "docs/adr/text-agent-results-and-prompt-resources.md",
     "docs/milestones.md",
     "docs/prd/todo-session-auto-continuation.md",

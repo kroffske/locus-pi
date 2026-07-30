@@ -42,6 +42,7 @@
     "docs/README.md",
     "docs/adr/agent-execution-trust-model.md",
     "docs/adr/curated-workflow-portfolio.md",
+    "docs/adr/extension-ownership-layers.md",
     "docs/extension-index.md",
     "docs/extension-ownership-matrix.md",
     "docs/extensions/README.md",

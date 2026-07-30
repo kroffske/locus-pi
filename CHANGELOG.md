@@ -47,9 +47,9 @@ This file records user-visible changes to the public package.
   read its defaults from. Those defaults now sit in the host module that applies them, the
   exemption is deleted, and the rank order is enforced for real on every shared edge with no
   provisional classification left anywhere in the ledger.
-  **The hazard that broke three earlier slices was swept for and was absent again.** Every
+  **The hazard that broke two earlier slices was swept for and was absent again.** Every
   file created or moved was checked for `import.meta.url`, `__dirname`, `fileURLToPath` and
-  any path anchored on the module's own location — the failure that three times silently
+  any path anchored on the module's own location — the failure that twice silently
   repointed a moved module at a directory that no longer existed. There was none: the two
   deleted files built no paths at all, and the one module in the package that does count
   directory levels from its own location, the bundled agent catalog loader, only gained type
@@ -428,6 +428,38 @@ This file records user-visible changes to the public package.
   actually keep one writer's prompt in hand.
 
 ### Added
+
+- **The package now ships an architecture decision record for the six ownership
+  layers under `extensions/_shared/`.** `AGENTS.md` already stated the rules a
+  contributor must obey and `scripts/check-extension-layers.ts` already enforced
+  them, but nothing said in prose what the six layers are for, which modules live in
+  each, or why the declared order is the order it is.
+  `docs/adr/extension-ownership-layers.md` records all three: the forty-three shared
+  modules by layer, the rank order and the operator layer's narrowing in both
+  directions, the one sanctioned read-only door into workflow run persistence with
+  the two modules outside the workflows extension that use it, and the alternatives
+  that were considered and rejected.
+  **It also records the two failure modes the static check structurally cannot
+  see,** which is the reason the boundary is a script rather than a convention. A
+  path a module derives from its own file location silently repointed at a
+  directory that does not exist twice during this breakup, and the check reported
+  zero violations both times. A process-global registry that becomes
+  per-module-instance state stays typecheck-clean and statically green, because Pi
+  loads each registered entrypoint with the module cache disabled — only a test
+  that loads two entrypoints in one process can see it. Six of the seven declared
+  registries carry such a proof today, and the ADR names the seventh as still
+  lacking one rather than implying the set is complete. No source module moved and
+  no guardrail rule changed.
+  **Writing it down found two statements this breakup had already shipped that were
+  no longer true.** The read-only door's own header justified keeping one path
+  derivation in place because three modules that use it were still in
+  `extensions/_shared/`; a later slice moved all three into the workflows extension,
+  which makes that edge ordinary, so the header now says the ownership objection has
+  lapsed and gives the cohesion reason that still holds. And an entry above
+  overstated how often the self-derived-path hazard had struck, counting three
+  occurrences where there were two. Both are corrected here rather than left for a
+  reader to trip over, because a boundary is only as good as the description someone
+  reads instead of the code.
 
 - **Reading a workflow run from outside the workflows extension now goes through
   one read-only door, and nothing can reach past it.** The module that owns

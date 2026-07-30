@@ -28,9 +28,18 @@
  *     it would make the journal import this file, i.e. make foundational code
  *     import a feature directory, which is the exact edge the ownership refactor
  *     exists to remove.
- *   - `workflowRunDir` is pure path derivation, but three sibling modules still in
- *     `extensions/_shared/` (handoff, runner, replay) build run paths with it.
- *     Moving the implementation would give each of them the same illegal edge.
+ *   - `workflowRunDir` is pure path derivation, and the ownership reason for leaving
+ *     it in the journal has lapsed: the handoff, runner and replay modules that
+ *     build run paths with it were in `extensions/_shared/` when this file was
+ *     written, so relocating it here would have given each of them an upward edge
+ *     into a feature directory. They now live beside the journal in
+ *     `extensions/workflows/runtime/`, so that edge would be an ordinary
+ *     same-extension import. What still argues against moving it is cohesion, not
+ *     legality: the journal defines the run directory layout and calls the
+ *     derivation at seven of its own call sites, and four further modules in this
+ *     extension take it from the journal rather than from here. Moving it into the
+ *     read door would put the layout definition in the facade and leave its owner
+ *     importing its own contract back.
  *   - `listWorkflowRunIds`, `readWorkflowRunJournal`, `readWorkflowRunSummary`,
  *     `listWorkflowRoundsForSlot`, and `readWorkflowRoundBody` all resolve through
  *     private journal internals — the start-timestamp proof that orders runs, the
