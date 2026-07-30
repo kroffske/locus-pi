@@ -200,6 +200,23 @@ describe("npm public package boundary", () => {
     }
   });
 
+  it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+
+    // Packed documentation is read from inside `node_modules`, where the
+    // repository around it does not exist. A relative link that resolves in this
+    // checkout and not in the tarball is dead for everyone who installed the
+    // package, and they cannot tell a broken link from a document we forgot to
+    // ship. A link to a directory counts as dead too: `package.json#files` is
+    // file-granular, and a folder is not a document a reader can open.
+    //
+    // Three fixes are legitimate: retarget the link at a file that is already
+    // packed, demote it to a backticked repository path that admits the target
+    // is repository-only, or drop it. Adding the target to `package.json#files`
+    // is an owner decision about public surface, not a way to quiet this test.
+    expect(deadPackagedMarkdownLinks(packedPaths)).toEqual([]);
+  });
+
   it("loads every declared entrypoint from an unpacked real tarball", () => {
     const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-pack-boundary-"));
     try {
@@ -257,6 +274,72 @@ function supportsPiVersion(range: string, version: string): boolean {
     if (candidate[index]! < floor[index]!) return false;
   }
   return true;
+}
+
+function deadPackagedMarkdownLinks(packedPaths: ReadonlySet<string>): string[] {
+  const dead: string[] = [];
+  const packedMarkdown = [...packedPaths].filter((packed) => packed.endsWith(".md")).sort();
+
+  for (const file of packedMarkdown) {
+    const directory = path.posix.dirname(file);
+    const lines = withoutFencedCode(readFileSync(path.join(root, file), "utf8")).split("\n");
+
+    lines.forEach((line, index) => {
+      for (const target of markdownLinkTargets(line)) {
+        // A same-document anchor and anything carrying a scheme or authority
+        // (`https:`, `mailto:`, `//host`) leaves the package, so the tarball
+        // cannot be wrong about it.
+        if (target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) continue;
+
+        const [linkPath] = target.split(/[#?]/u);
+        if (linkPath === undefined || linkPath === "") continue;
+        if (linkPath.startsWith("/")) {
+          dead.push(`${file}:${index + 1} -> ${target} (absolute path, resolvable nowhere)`);
+          continue;
+        }
+
+        const resolved = path.posix.normalize(path.posix.join(directory, linkPath)).replace(/\/$/u, "");
+        if (packedPaths.has(resolved)) continue;
+
+        const absolute = path.join(root, resolved);
+        const reason = !existsSync(absolute)
+          ? "missing from the repository too"
+          : statSync(absolute).isDirectory()
+            ? "a directory, not a packed file"
+            : "in the repository but not packed";
+        dead.push(`${file}:${index + 1} -> ${target} (${resolved} is ${reason})`);
+      }
+    });
+  }
+
+  return dead;
+}
+
+function markdownLinkTargets(line: string): string[] {
+  const targets: string[] = [];
+  // Inline links and image embeds share one syntax; an optional title may follow
+  // the destination, and the destination itself may be angle-bracketed.
+  for (const match of line.matchAll(/\]\(\s*(<[^>]*>|[^()\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/gu))
+    targets.push(match[1]!.replace(/^<|>$/gu, ""));
+  // Reference definitions carry a destination the inline form never shows.
+  const reference = /^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)/u.exec(line);
+  if (reference) targets.push(reference[1]!.replace(/^<|>$/gu, ""));
+  return targets;
+}
+
+/** Blanks fenced code without moving any line, so reported line numbers stay true. */
+function withoutFencedCode(source: string): string {
+  let inside = false;
+  return source
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(?:```|~~~)/u.test(line)) {
+        inside = !inside;
+        return "";
+      }
+      return inside ? "" : line;
+    })
+    .join("\n");
 }
 
 function localImportClosure(entrypoints: readonly string[]): string[] {

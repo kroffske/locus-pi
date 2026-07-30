@@ -1,7 +1,7 @@
 # Planning and implementation, as two workflows
 
 `plan` turns one operator task into an accepted implementation plan.
-[`plan-implement`](../plan-implement/) carries that plan out. They are two
+[`plan-implement`](../plan-implement/README.md) carries that plan out. They are two
 workflows on purpose: planning is read-only and cheap to repeat, implementation
 writes to the operator's checkout, and the operator decides — by launching the
 second one — whether a plan is worth executing.

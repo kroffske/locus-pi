@@ -25,8 +25,8 @@ The accepted Package portfolio is:
 | `plan-implement`     | Accepted plan to changes    | It executes one host-verified plan with a writer per step in the plan's own order, then checks and reports independently of the writers.                                          |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
-evidence adapter. Since the 2026-07-26 amendment to
-[the prompt-resource ADR](./text-agent-results-and-prompt-resources.md), each
+evidence adapter. Since the 2026-07-26 amendment to the prompt-resource ADR
+(`docs/adr/text-agent-results-and-prompt-resources.md`, which is not packed), each
 stage's prompt is written inline in the entry file under one shared `COMMON`
 contract, and a neighboring `resources/*.prompt.md` survives only for a role
 charter too long to inline — `review` keeps two, `review-fix` keeps none. Every

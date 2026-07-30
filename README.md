@@ -28,7 +28,7 @@ contains exactly these ten entrypoints:
 | `workflows`           | Provides `/workflows`, first-class `/workflow-*` commands, and the `workflow` tool for reviewed trusted JavaScript workflows, child-agent orchestration, and actionable operator handoffs.                                                             |
 
 Each retained extension also has a manifest and a manual under
-[`docs/extensions/active/`](docs/extensions/active/). Maintainer source-audit
+[`docs/extensions/active/`](docs/extensions/active/README.md). Maintainer source-audit
 evidence remains in the public GitHub repository rather than the npm artifact.
 
 ## Curated Package workflows

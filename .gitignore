@@ -9,6 +9,7 @@ test-results/
 .cache/
 .tasks/
 .locus/
+.locus-pi/
 .locus/_archive/.hermes/
 .omp/
 .test_pi/

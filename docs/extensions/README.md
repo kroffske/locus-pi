@@ -6,7 +6,7 @@ runtime status, not the convenience of the implementation layout.
 ## Read order
 
 1. Check `package.json#pi.extensions` as the default-load list.
-2. Read [active/](active/) for the default extensions.
+2. Read [active/](active/README.md) for the default extensions.
 3. Beta, fixture and future-design docs stay repository-only and are not part of
    the npm v1 package.
 4. Use [../extension-index.md](../extension-index.md) and
