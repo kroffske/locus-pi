@@ -55,6 +55,7 @@ fails, continue with \`grep\`, \`find\`, and direct reads and say so. A missing 
 Index never blocks planning.`;
 
 const PLAN_STAGE_OPTIONS = Object.freeze({
+  model: "openai-codex/gpt-5.6-luna:medium",
   permissionMode: "agent-defined",
   workspaceMode: "project",
   readOnly: true,
@@ -62,7 +63,7 @@ const PLAN_STAGE_OPTIONS = Object.freeze({
 });
 
 /** The drafting loop's safety net. The critic is the exit condition. */
-const MAX_PLAN_ROUNDS = 4;
+const MAX_PLAN_ROUNDS = 6;
 const MAX_PLAN_DEFECTS = 12;
 const MAX_PLAN_DEFECT_CHARS = 600;
 const MAX_ALL_PLAN_DEFECTS_CHARS = 4_000;

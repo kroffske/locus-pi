@@ -9,9 +9,8 @@
  *    ROLE name and is never seen by this module — the bridge resolves roles
  *    against the roles table first and hands this module the assignment it found.
  *  - An optional trailing `:<thinking level>` (`off|minimal|low|medium|high|xhigh`)
- *    is stripped before the registry lookup and kept for display only. It does
- *    NOT change the child's reasoning effort today: `sessionOptions` never sets
- *    `thinking`, so a suffix affects the label and nothing else.
+ *    is stripped before the registry lookup and preserved for the workflow
+ *    bridge, which passes it to the child session as `thinkingLevel`.
  *
  * The grammar owner is `model-settings.parseModelSelector` — this module delegates
  * to it rather than keeping a second, subtly different parser. The two used to
@@ -28,13 +27,13 @@
 import type { ExtensionContext, ModelLike, ThinkingLevel } from "../host/pi-api.js";
 import { parseModelSelector as parseModelRoleAssignment } from "./model-settings.js";
 
-/** Levels accepted as a display-only suffix, quoted verbatim in refusal text. */
+/** Levels accepted as a child reasoning-effort suffix, quoted verbatim in refusal text. */
 const THINKING_LEVEL_LIST = "off|minimal|low|medium|high|xhigh";
 
 export interface ParsedModelSelector {
   provider: string;
   id: string;
-  /** Display-only; never reaches the child session (see the module header). */
+  /** Requested child reasoning effort. */
   thinking?: ThinkingLevel;
 }
 
@@ -98,7 +97,7 @@ export async function resolveWorkflowModel(
       reason: "unparseable-selector",
       message:
         `model selector ${JSON.stringify(selector)} is not a "provider/id" selector ` +
-        `(an optional ":${THINKING_LEVEL_LIST}" suffix is allowed and is display-only).`,
+        `(an optional ":${THINKING_LEVEL_LIST}" child reasoning-effort suffix is allowed).`,
     };
   }
   const registry = source?.modelRegistry;

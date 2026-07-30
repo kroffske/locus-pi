@@ -269,9 +269,10 @@ export interface WorkflowAgentOptions {
   /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. 0 requires no tools. */
   maxToolCalls?: number;
   /**
-   * Concrete model for this call, always `provider/id` with an optional display-only
-   * `:off|minimal|low|medium|high|xhigh` suffix. A selector no configured provider
-   * can serve fails the call by name; it never silently runs on the session model.
+   * Concrete model for this call, always `provider/id` with an optional
+   * `:off|minimal|low|medium|high|xhigh` child reasoning-effort suffix. A selector
+   * no configured provider can serve fails the call by name; it never silently
+   * runs on the session model.
    */
   model?: string;
   /**

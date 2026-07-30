@@ -116,6 +116,13 @@ const PLAN_DRAFT = [
 const SCOUT_CONTEXT = "# Task Context\n## Existing behavior\n- `src/page.ts` — paginates.";
 
 describe("workflow example: plan.workflow.mjs", () => {
+  it("pins every planning stage to Luna at medium reasoning effort", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain('model: "openai-codex/gpt-5.6-luna:medium"');
+    expect(source.match(/openai-codex\/gpt-5\.6-luna:medium/gu)).toHaveLength(1);
+  });
+
   it("keeps every planning stage read-only and lets the runtime own every artifact", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -139,7 +146,7 @@ describe("workflow example: plan.workflow.mjs", () => {
     // a regex over the model's Markdown.
     expect(source).toContain("PLAN_VERDICT_SCHEMA");
     expect(source).toContain("validate: planVerdictErrors");
-    expect(source).toContain("const MAX_PLAN_ROUNDS = 4");
+    expect(source).toContain("const MAX_PLAN_ROUNDS = 6");
     expect(source).not.toContain("JSON.parse");
 
     for (const name of ["context.md", "plan.md", "plan-critique.json"]) {
@@ -347,12 +354,12 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(await runWorkflow(dsl, "advance pagination")).toEqual({
       ok: false,
       stoppedBy: "round-cap",
-      rounds: 4,
-      summary: "plan was not accepted within 4 drafting round(s)",
+      rounds: 6,
+      summary: "plan was not accepted within 6 drafting round(s)",
       unresolvedRows: ["S1: still unverifiable"],
     });
-    expect(calls.filter((call) => call.label!.startsWith("planner"))).toHaveLength(4);
-    expect(calls.at(-1)?.label).toBe("critic round 4");
+    expect(calls.filter((call) => call.label!.startsWith("planner"))).toHaveLength(6);
+    expect(calls.at(-1)?.label).toBe("critic round 6");
   });
 
   it.each([

@@ -253,7 +253,7 @@ one of two options, and each has exactly one meaning:
 await dsl.agent(prompt, { agent: "explore", modelRole: "smol", label: "scout" });
 
 // A CONCRETE model — always provider/id. This host must have it, or the call fails.
-await dsl.agent(prompt, { agent: "reviewer", model: "openai-codex/gpt-5.6-luna" });
+await dsl.agent(prompt, { agent: "reviewer", model: "openai-codex/gpt-5.6-luna:medium" });
 ```
 
 The rule that separates them is one sentence: **a slash means a real provider, no
@@ -282,10 +282,11 @@ and the two failure modes are deliberately different:
   name `smol` and tell you the role was "not assigned in any model-roles layer" —
   a statement your own config file contradicts.
 
-An optional `:off|minimal|low|medium|high|xhigh` suffix on a concrete selector is
-**display only**. It changes the label on the live row and nothing else — the
-child's reasoning effort is not plumbed through yet. Do not write `model:
-"provider/id:high"` and expect a harder-thinking child.
+An optional `:off|minimal|low|medium|high|xhigh` suffix on a concrete selector
+sets the child session's reasoning effort and is recorded on the live row. The
+host validates the concrete model first and passes the selected level to Pi's
+`createAgentSession`; unsupported combinations fail at that boundary rather
+than silently changing effort.
 
 **Making a tier mean something.** Roles resolve through `session` → Pi settings →
 project config → user config. The project layer is a local, git-ignored file:

@@ -13,6 +13,9 @@ both ship in `package.json#files` and `public-repository.json`. Workflow
 JavaScript is trusted local code with full Node.js host access; it is not
 sandboxed. `plan` is read-only end to end, `plan-implement` writes to the launch
 checkout, and that difference is why they are two workflows rather than one.
+Every stage in this pair pins `openai-codex/gpt-5.6-luna:medium`; a host without
+that concrete model fails the stage by name instead of substituting another
+model or effort.
 
 ```text
 plan/
@@ -85,7 +88,7 @@ it is there is no plan at all; an assumption written down is visible to the
 operator the moment the run finishes, and correcting it means replanning — which
 this workflow is cheap enough to do.
 
-The measured exit is the critic. `MAX_PLAN_ROUNDS` (4) is only the safety net, and
+The measured exit is the critic. `MAX_PLAN_ROUNDS` (6) is only the safety net, and
 reaching it is a failure — `{ ok: false, stoppedBy: "round-cap", unresolvedRows }`
 carrying the critic's last defects. That is deliberate: a draft nobody accepted is
 not a plan, and a failed run projects no terminal artifact, so an unaccepted draft

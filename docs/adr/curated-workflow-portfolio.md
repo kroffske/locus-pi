@@ -272,7 +272,11 @@ call's `maxAnswerChars`. _Inspectable evidence_: the runtime owns `task.md`,
 `context.md`, one `plan.md` and one `plan-critique.json` per drafting round, then
 `step-selection.json`, `scope.md`, a current `implementation-tasks.md` ledger,
 one `worker-S<n>-attempt-<n>.md` and `review-S<n>-attempt-<n>.json` per attempt,
-`check-evidence.md`, and `implementation-report.md`. _Fails closed_: a plan the critic never accepted
+`check-evidence.md`, `implementation-verdict.json`, and the deterministic
+`implementation-report.md`; reconciliation additionally retains
+`reconciliation.md`, `reconciliation-check-evidence.md`, and
+`reconciliation-verdict.json`. The validated terminal grade, not report prose,
+updates the final ledger and controls success. _Fails closed_: a plan the critic never accepted
 ends the run `ok:false`, which is also what keeps it out of implementation, since
 continuation consumes only a successful run's projected artifacts; a failed writer
 or a reviewer-blocked task returns `partial: true`, which is projected as
