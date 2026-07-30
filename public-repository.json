@@ -158,6 +158,7 @@
     "tests/shared/workflows/workflow-replay.test.ts",
     "tests/shared/workflows/workflow-result.test.ts",
     "tests/shared/workflows/workflow-rounds.test.ts",
+    "tests/shared/workflows/workflow-run-layout.test.ts",
     "tests/shared/workflows/workflow-run-report.test.ts",
     "tests/shared/workflows/workflow-run-snapshot.test.ts",
     "tests/shared/workflows/workflow-runner-host-crash.test.ts",

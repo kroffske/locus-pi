@@ -92,6 +92,13 @@ export interface AgentChildTrace {
   path: string;
   format: "pi-session-jsonl";
   childSessionId: string;
+  /**
+   * Readable render of the same session, written beside the JSONL and VERIFIED
+   * before it is named here. Absent means no render exists — the reason is a
+   * named warning in `diagnostics`, so absence is never a silent skip and this
+   * field is never a claim nobody checked.
+   */
+  htmlPath?: string;
 }
 
 export interface AgentChildOutputStats {

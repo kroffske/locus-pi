@@ -100,25 +100,53 @@ describe("workflow operator handoff controller", () => {
     expect(launch).toHaveBeenCalledWith(older, "Current changes", harness.ctx);
   });
 
-  it("treats Escape as a session snooze and lets explicit recovery reopen the same question", async () => {
+  it("delivers Escape as a refusal answer through the ordinary launch path", async () => {
     const item = handoff("20260725-120000-pending");
     const { controller: queue, launch } = controller([item]);
     const harness = createHarness();
     harness.customInputQueue.push("\x1b");
 
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({
-      status: "cancelled",
-      runId: item.runId,
-    });
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "snoozed" });
-    expect(launch).not.toHaveBeenCalled();
-
-    harness.customInputQueue.push("\x1b[B", "\x1b[B", "\r", "custom scope", "\r");
-    await expect(queue.pump(harness.ctx, { explicit: true })).resolves.toMatchObject({
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({
       status: "started",
       sourceRunId: item.runId,
     });
-    expect(launch).toHaveBeenCalledWith(item, "custom scope", harness.ctx);
+    expect(launch).toHaveBeenCalledWith(
+      item,
+      [
+        "The operator declined to answer this workflow's questions.",
+        "",
+        "1. Choose scope",
+        "   id: scope",
+        "   answer: none — the operator declined",
+      ].join("\n"),
+      harness.ctx,
+    );
+  });
+
+  it("keeps answers given before the refusal and marks only the declined questions", async () => {
+    const item = handoff("20260725-120000-partial", {
+      questions: [
+        { kind: "select", id: "scope", prompt: "Choose scope", options: [{ label: "Current changes" }] },
+        { kind: "text", id: "note", prompt: "Add a note" },
+      ],
+    });
+    const { controller: queue, launch } = controller([item]);
+    const harness = createHarness();
+    harness.customInputQueue.push("\r", "\x1b");
+
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({ status: "started" });
+    expect(launch.mock.calls[0]?.[1]).toBe(
+      [
+        "The operator declined to answer this workflow's questions.",
+        "",
+        "1. Choose scope",
+        "   id: scope",
+        "   answer: Current changes",
+        "2. Add a note",
+        "   id: note",
+        "   answer: none — the operator declined",
+      ].join("\n"),
+    );
   });
 
   it("collects multiple questions in one component at a time and renders one deterministic input", async () => {
@@ -180,15 +208,13 @@ describe("workflow operator handoff controller", () => {
     const { controller: queue, launch } = controller([item]);
     const harness = createHarness(process.cwd(), { mode: "json" });
 
-    await expect(
-      queue.pump(harness.ctx, { explicit: true, runId: item.runId, answer: "Unknown scope" }),
-    ).resolves.toMatchObject({
+    await expect(queue.pump(harness.ctx, { runId: item.runId, answer: "Unknown scope" })).resolves.toMatchObject({
       status: "invalid",
       message: expect.stringContaining("exactly match"),
     });
-    await expect(
-      queue.pump(harness.ctx, { explicit: true, runId: item.runId, answer: "Last commit" }),
-    ).resolves.toMatchObject({ status: "started" });
+    await expect(queue.pump(harness.ctx, { runId: item.runId, answer: "Last commit" })).resolves.toMatchObject({
+      status: "started",
+    });
     expect(launch).toHaveBeenCalledTimes(1);
     expect(harness.customComponents).toEqual([]);
   });
@@ -198,12 +224,12 @@ describe("workflow operator handoff controller", () => {
     const { controller: queue, launch } = controller([item]);
     const jsonHarness = createHarness(process.cwd(), { mode: "json" });
 
-    await expect(queue.pump(jsonHarness.ctx, { explicit: true, runId: item.runId })).resolves.toEqual({
+    await expect(queue.pump(jsonHarness.ctx, { runId: item.runId })).resolves.toEqual({
       status: "unavailable",
       runId: item.runId,
     });
     const tuiHarness = createHarness();
-    await expect(queue.pump(tuiHarness.ctx, { explicit: true, isCurrent: () => false })).resolves.toEqual({
+    await expect(queue.pump(tuiHarness.ctx, { isCurrent: () => false })).resolves.toEqual({
       status: "stale",
     });
     expect(launch).not.toHaveBeenCalled();
@@ -271,15 +297,20 @@ describe("workflow operator handoff controller", () => {
     };
     const queue = new WorkflowOperatorHandoffController(ports);
     const harness = createHarness();
+    // The unprompted pump carries the session scope; this session owns the run.
+    const originRunIds = new Set([item.runId]);
 
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({
+      status: "deferred",
+      runId: item.runId,
+    });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({ status: "none" });
     expect(harness.customComponents).toEqual([]);
     expect(launch).not.toHaveBeenCalled();
 
     // An explicit /workflows still opens the same handoff with its questions.
     harness.customInputQueue.push("\r");
-    await expect(queue.pump(harness.ctx, { explicit: true })).resolves.toMatchObject({
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({
       status: "started",
       sourceRunId: item.runId,
     });
@@ -299,16 +330,23 @@ describe("workflow operator handoff controller", () => {
     };
     const queue = new WorkflowOperatorHandoffController(ports);
     const harness = createHarness();
+    const originRunIds = new Set([item.runId]);
 
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({
+      status: "deferred",
+      runId: item.runId,
+    });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({ status: "none" });
 
     // The operator answers explicitly; that continuation fails too.
     harness.customInputQueue.push("\r");
-    await expect(queue.pump(harness.ctx, { explicit: true })).resolves.toMatchObject({ status: "started" });
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({ status: "started" });
 
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
-    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({
+      status: "deferred",
+      runId: item.runId,
+    });
+    await expect(queue.pump(harness.ctx, { originRunIds })).resolves.toEqual({ status: "none" });
   });
 
   it("still opens pending handoffs unprompted while a retryable one waits behind them", async () => {
@@ -327,7 +365,9 @@ describe("workflow operator handoff controller", () => {
     const harness = createHarness();
     harness.customInputQueue.push("\r");
 
-    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({
+    await expect(
+      queue.pump(harness.ctx, { originRunIds: new Set([pending.runId, retryable.runId]) }),
+    ).resolves.toMatchObject({
       status: "started",
       sourceRunId: pending.runId,
     });

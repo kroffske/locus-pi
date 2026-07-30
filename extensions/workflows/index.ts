@@ -44,6 +44,15 @@ import {
 
 export default function workflows(pi: ExtensionAPI): void {
   const completedRunIds = new Set<string>();
+  /**
+   * Runs THIS Pi session launched — command, tool, and continuations alike.
+   *
+   * The automatic pump answers only for these. A question published by an
+   * earlier session is durable evidence the operator can open on request; it is
+   * not an interruption a fresh session gets to raise on its own, whether at
+   * session start or at the first `agent_settled` after it.
+   */
+  const sessionRunIds = new Set<string>();
   const sessionPanels = new Set<WorkflowProgressComponent>();
   let completionProjectRoot = process.cwd();
   let completionWorkingDirectory = completionProjectRoot;
@@ -90,6 +99,7 @@ export default function workflows(pi: ExtensionAPI): void {
       });
       return {
         onRunStart(runId) {
+          sessionRunIds.add(runId);
           const announcement = transcript.start(runId);
           // The run boundary is published while the session is still idle from
           // the launch check; a busy session gets no banner rather than a
@@ -142,7 +152,7 @@ export default function workflows(pi: ExtensionAPI): void {
         } catch {
           return { status: "busy" };
         }
-        return handoffController.pumpAfterActive(request.ctx, { isCurrent });
+        return handoffController.pumpAfterActive(request.ctx, { isCurrent, originRunIds: sessionRunIds });
       });
     },
   });
@@ -168,9 +178,10 @@ export default function workflows(pi: ExtensionAPI): void {
     cleanupCompletedRuns(ctx);
     clearWorkflowRunStatus(ctx);
   };
+  /** Explicit operator surfaces: project-wide, exactly as before. */
   const pumpCurrentHandoffs = (
     ctx: ExtensionContext,
-    options: { explicit?: boolean; runId?: string; answer?: string } = {},
+    options: { runId?: string; answer?: string } = {},
   ): Promise<WorkflowHandoffPumpResult> => {
     const lease = commandLauncher.currentLease(ctx);
     if (lease === undefined) return Promise.resolve({ status: "stale" });
@@ -179,23 +190,35 @@ export default function workflows(pi: ExtensionAPI): void {
       isCurrent: () => commandLauncher.isCurrent(lease),
     });
   };
+  /** Lifecycle surfaces: only the runs this session launched may open a question. */
+  const pumpSessionHandoffs = (ctx: ExtensionContext): Promise<WorkflowHandoffPumpResult> => {
+    const lease = commandLauncher.currentLease(ctx);
+    if (lease === undefined) return Promise.resolve({ status: "stale" });
+    return handoffController.pump(ctx, {
+      isCurrent: () => commandLauncher.isCurrent(lease),
+      originRunIds: sessionRunIds,
+    });
+  };
   registerTransientUiCleanup(pi, "workflows", cleanupTransientSurface);
   registerTransientUiCleanup(pi, WORKFLOW_LIVE_WIDGET_KEY, cleanupTransientSurface);
   pi.on("turn_end", (_event, ctx) => cleanupCompletedSurface(ctx));
   pi.on("agent_settled", (_event, ctx) => {
-    observeHandoffPump(ctx, () => pumpCurrentHandoffs(ctx));
+    observeHandoffPump(ctx, () => pumpSessionHandoffs(ctx));
   });
+  // No handoff pump here on purpose, and the run scope resets to empty: a session
+  // opens on the operator's terms. An unanswered question from an earlier session
+  // stays readable in its run's evidence and is reopened only when the operator
+  // asks (`/workflows`, `/workflow-continue <runId>`) — never as a modal the new
+  // session starts with, and never on its first settled turn either.
   pi.on("session_start", (_event, ctx) => {
     resetWorkflowLiveExecutions();
     disposeSessionPanels();
+    sessionRunIds.clear();
     rememberCompletionContext(ctx);
     commandLauncher.startSession(ctx);
-    handoffController.startSession();
-    observeHandoffPump(ctx, () => pumpCurrentHandoffs(ctx));
   });
   pi.on("session_shutdown", (_event, _ctx) => {
     resetWorkflowLiveExecutions();
-    handoffController.shutdown();
     disposeSessionPanels();
     commandLauncher.shutdown();
     unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
@@ -203,6 +226,7 @@ export default function workflows(pi: ExtensionAPI): void {
 
   registerWorkflowTool(pi, {
     commandLauncher,
+    onRunStarted: (runId) => sessionRunIds.add(runId),
     onRunCompleted: (runId) => completedRunIds.add(runId),
   });
 

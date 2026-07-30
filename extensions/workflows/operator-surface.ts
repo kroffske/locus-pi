@@ -57,8 +57,6 @@ export function setWorkflowEventStatus(ctx: ExtensionContext, line: WorkflowJour
 export function presentWorkflowHandoffPumpResult(ctx: ExtensionContext, result: WorkflowHandoffPumpResult): void {
   switch (result.status) {
     case "none":
-    case "cancelled":
-    case "snoozed":
     case "started":
       return;
     case "busy":

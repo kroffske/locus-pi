@@ -102,6 +102,58 @@ export interface WorkflowAgentBridgeOptions {
   defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
   workspaceManager?: WorkflowWorkspaceManager;
   evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
+  /**
+   * This run's working directory, named to every child so a file it writes is
+   * findable afterwards. Injected HERE and not in the runtime, because the
+   * runtime's prompt is part of the replay key: a run-specific absolute path in
+   * it would make every recorded call miss on the next resume.
+   */
+  runFilesDir?: string;
+}
+
+/**
+ * Rule between this run's working-directory note and the workflow's own prompt.
+ *
+ * A stable, single boundary: the note never contains it, so the FIRST occurrence
+ * in a composed child task always marks where the author's prompt begins.
+ */
+export const WORKFLOW_RUN_FILES_PROMPT_SEPARATOR = "\n\n---\n\n";
+
+/**
+ * The child task as the model receives it: this run's working-directory note,
+ * then the workflow's own prompt.
+ *
+ * The note goes FIRST so the schema contract and any retry-repair block a shaped
+ * call appends stay the last thing the child reads. Without a configured
+ * directory the author's prompt travels alone.
+ *
+ * A read-only child is told where the directory is and NOT told to create
+ * anything in it. The host enforces the boundary either way, so the instruction
+ * would not produce a file — it would only ask for work the child cannot do and
+ * invite it to report a file it never wrote.
+ */
+export function composeWorkflowChildTask(
+  prompt: string,
+  runFilesDir: string | undefined,
+  options: { readOnly?: boolean } = {},
+): string {
+  if (runFilesDir === undefined || runFilesDir.trim() === "") return prompt;
+  const note = [
+    "## This workflow run's working directory",
+    "",
+    runFilesDir,
+    "",
+    ...(options.readOnly === true
+      ? [
+          "Files earlier stages of this run wrote are there, under the names their authors chose.",
+          "This call is read-only: read from it, and expect to add nothing to it.",
+        ]
+      : [
+          "Create any file this run should leave behind there, under the exact name it should have.",
+          "Names are kept verbatim: nothing renames, numbers or moves what you write.",
+        ]),
+  ].join("\n");
+  return `${note}${WORKFLOW_RUN_FILES_PROMPT_SEPARATOR}${prompt}`;
 }
 
 export function resolvePermissionMode(input: {
@@ -296,7 +348,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // a literal `5` invisible to authors while the child's whole wall clock is
     // computed from it.
     const maxTurns = req.maxTurns ?? DEFAULT_WORKFLOW_BUDGET.turns;
-    const request = createAgentRunRequest(agent, req.prompt, {
+    // `agent` here is the EFFECTIVE definition, after the per-call `readOnly`
+    // narrowing above — so a call that read-only-ed a writable catalog agent
+    // gets the read-only note too.
+    const childTask = composeWorkflowChildTask(req.prompt, options.runFilesDir, { readOnly: agent.readOnly === true });
+    const request = createAgentRunRequest(agent, childTask, {
       maxTurns,
       approvalTier,
       ...(req.tools !== undefined ? { allowedTools: req.tools } : {}),

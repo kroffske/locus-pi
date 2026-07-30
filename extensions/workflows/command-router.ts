@@ -65,7 +65,7 @@ export interface WorkflowCommandRouterDependencies {
   /** Open, answer, or advance the oldest actionable handoff for this session. */
   pumpCurrentHandoffs: (
     ctx: ExtensionCommandContext,
-    options?: { explicit?: boolean; runId?: string; answer?: string },
+    options?: { runId?: string; answer?: string },
   ) => Promise<WorkflowHandoffPumpResult>;
   /** Latch the roots a later completion callback has to answer from. */
   rememberCompletionContext: (ctx: ExtensionCommandContext) => void;
@@ -84,7 +84,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
     // Bare `/workflows` reopens the oldest question; home is the no-attention fallback.
     if (text === "") {
       clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
-      const pending = await pumpCurrentHandoffs(ctx, { explicit: true });
+      const pending = await pumpCurrentHandoffs(ctx);
       if (pending.status !== "none") {
         presentWorkflowHandoffPumpResult(ctx, pending);
         return;
@@ -302,7 +302,6 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
         return;
       }
       const result = await pumpCurrentHandoffs(ctx, {
-        explicit: true,
         runId: parsedContinue.runId,
         ...(parsedContinue.answer === undefined ? {} : { answer: parsedContinue.answer }),
       });

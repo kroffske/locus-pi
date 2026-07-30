@@ -36,6 +36,13 @@ export interface ActionableWorkflowHandoff {
   value: WorkflowOperatorHandoffEnvelope;
 }
 
+/** One operator reply, kept beside the question it answered so a refusal can name both. */
+interface WorkflowCollectedAnswer {
+  id: string;
+  prompt: string;
+  answer: string;
+}
+
 export type WorkflowHandoffLaunchResult =
   { status: "started"; runId?: string } | { status: "busy" | "invalid" | "failed"; message: string };
 
@@ -70,8 +77,6 @@ export interface WorkflowHandoffControllerPorts {
 export type WorkflowHandoffPumpResult =
   | { status: "none" }
   | { status: "busy" }
-  | { status: "snoozed" }
-  | { status: "cancelled"; runId: string }
   | { status: "unavailable"; runId: string }
   | { status: "stale" }
   | { status: "invalid"; message: string; runId?: string }
@@ -84,22 +89,31 @@ export type WorkflowHandoffPumpResult =
   | { status: "deferred"; runId: string };
 
 interface PumpOptions {
-  explicit?: boolean;
   runId?: string;
   answer?: string;
   isCurrent?: () => boolean;
+  /**
+   * Restrict selection to handoffs published by these runs.
+   *
+   * An AUTOMATIC pump passes the runs the current Pi session launched, so a
+   * question a previous session left behind is evidence rather than a modal
+   * nobody asked for. An EXPLICIT operator command passes nothing and keeps the
+   * project-wide reach it always had.
+   */
+  originRunIds?: ReadonlySet<string>;
 }
 
 /**
  * Session-local projection over durable handoff truth.
  *
  * Persistence, eligibility, claims, and continuation launch stay behind the
- * ports. This owner serializes one visible prompt, remembers Escape snooze for
- * the current session, and never stores an answer after handing it to launch.
+ * ports. This owner serializes one visible prompt and never stores an answer
+ * after handing it to launch. It holds no postponement state: Escape is an
+ * answer (see `renderWorkflowRefusal`), so a pumped handoff always leaves this
+ * owner resolved rather than parked for a later session to re-raise.
  */
 export class WorkflowOperatorHandoffController {
   readonly #ports: WorkflowHandoffControllerPorts;
-  #snoozed = false;
   /** Runs whose retryable state has already been reported once. Keyed by run so
    *  a SECOND failed continuation — of the same handoff or another one — still
    *  reaches the operator; a session-wide flag made every failure after the
@@ -111,15 +125,6 @@ export class WorkflowOperatorHandoffController {
     this.#ports = ports;
   }
 
-  startSession(): void {
-    this.#snoozed = false;
-    this.#deferredNotices.clear();
-  }
-
-  shutdown(): void {
-    this.#snoozed = true;
-  }
-
   eligibleRunIds(projectRoot: string): string[] {
     return orderedScan(this.#ports.scan(projectRoot)).flatMap((item) =>
       item.status === "actionable" ? [item.handoff.runId] : [],
@@ -127,11 +132,9 @@ export class WorkflowOperatorHandoffController {
   }
 
   pump(ctx: ExtensionContext, options: PumpOptions = {}): Promise<WorkflowHandoffPumpResult> {
-    if (options.explicit === true) this.#snoozed = false;
     const guard = pumpGuard(ctx, options.isCurrent);
     if (guard !== "ready") return Promise.resolve({ status: guard });
     if (this.#activePump !== undefined) return Promise.resolve({ status: "busy" });
-    if (this.#snoozed && options.explicit !== true) return Promise.resolve({ status: "snoozed" });
 
     const active = this.#pumpOnce(ctx, options)
       .catch((error): WorkflowHandoffPumpResult => ({
@@ -152,13 +155,15 @@ export class WorkflowOperatorHandoffController {
 
   async #pumpOnce(ctx: ExtensionContext, options: PumpOptions): Promise<WorkflowHandoffPumpResult> {
     const projectRoot = getProjectRoot(ctx);
-    const scan = orderedScan(this.#ports.scan(projectRoot));
+    const scan = inScopeScan(orderedScan(this.#ports.scan(projectRoot)), options.originRunIds);
     const actionableItems = scan.flatMap((item) => (item.status === "actionable" ? [item] : []));
     // Unprompted pumps open only never-answered handoffs. A retryable one — its
     // continuation consumed an answer and then failed — must not re-take the
     // editor with questions the operator already answered; it stays reachable
-    // through an explicit /workflows or /workflow-continue.
-    const unprompted = options.explicit !== true && options.runId === undefined;
+    // through an explicit /workflows or /workflow-continue. An unprompted pump
+    // is recognized by the session scope it carries (`originRunIds`); explicit
+    // operator commands pass none and keep project-wide reach.
+    const unprompted = options.originRunIds !== undefined && options.runId === undefined;
     const candidates = unprompted
       ? actionableItems.filter((item) => (item.state ?? "pending") === "pending")
       : actionableItems;
@@ -203,8 +208,11 @@ export class WorkflowOperatorHandoffController {
       const collected = await this.#collectAnswers(ctx, selected, Math.max(1, actionable.length), options.isCurrent);
       switch (collected.status) {
         case "cancelled":
-          this.#snoozed = true;
-          return { status: "cancelled", runId: selected.runId };
+          // Escape is an ANSWER, not a postponement. The workflow is told what it
+          // asked and that the operator declined, through the same launch path a
+          // typed reply takes; what to do with that text is the script's call.
+          answer = renderWorkflowRefusal(selected, collected.answers);
+          break;
         case "unavailable":
           return { status: "unavailable", runId: selected.runId };
         case "stale":
@@ -255,10 +263,13 @@ export class WorkflowOperatorHandoffController {
     isCurrent: (() => boolean) | undefined,
   ): Promise<
     | { status: "answered"; answer: string }
-    | { status: "busy" | "cancelled" | "unavailable" | "stale" }
+    // Whatever the operator did answer before declining travels with the refusal:
+    // dropping it would throw away input they already gave.
+    | { status: "cancelled"; answers: WorkflowCollectedAnswer[] }
+    | { status: "busy" | "unavailable" | "stale" }
     | { status: "invalid"; message: string }
   > {
-    const answers: Array<{ id: string; prompt: string; answer: string }> = [];
+    const answers: WorkflowCollectedAnswer[] = [];
     for (let index = 0; index < handoff.questions.length; index += 1) {
       const question = handoff.questions[index];
       if (question === undefined) {
@@ -279,7 +290,7 @@ export class WorkflowOperatorHandoffController {
           message: errorMessage(error),
         };
       }
-      if (result.status === "cancelled") return { status: "cancelled" };
+      if (result.status === "cancelled") return { status: "cancelled", answers };
       if (result.status === "unavailable") return { status: "unavailable" };
       if (result.status !== "answered") {
         return { status: "invalid", message: "Workflow handoff question returned an unsupported navigation result." };
@@ -359,7 +370,7 @@ function explicitWorkflowAnswer(
   return { ok: true, answer };
 }
 
-function renderWorkflowAnswers(answers: Array<{ id: string; prompt: string; answer: string }>): string {
+function renderWorkflowAnswers(answers: readonly WorkflowCollectedAnswer[]): string {
   const only = answers[0];
   if (answers.length === 1 && only !== undefined) return only.answer;
   return answers
@@ -369,6 +380,35 @@ function renderWorkflowAnswers(answers: Array<{ id: string; prompt: string; answ
       `   answer: ${answer.answer}`,
     ])
     .join("\n");
+}
+
+/**
+ * What the workflow receives when the operator presses Escape.
+ *
+ * Plain text on the ordinary answer channel, never a status the runtime acts on:
+ * the questions this run asked, each with whatever answer arrived before the
+ * refusal, plus one sentence saying the operator declined. The script decides
+ * what that means — the engine only transports it.
+ *
+ * The single-question case is NOT collapsed to a bare value the way an answered
+ * handoff is: a refusal whose question text was dropped would reach the next
+ * stage as an unattributed sentence.
+ */
+function renderWorkflowRefusal(
+  handoff: ActionableWorkflowHandoff,
+  answered: readonly WorkflowCollectedAnswer[],
+): string {
+  const byId = new Map(answered.map((answer) => [answer.id, answer.answer]));
+  const lines = ["The operator declined to answer this workflow's questions.", ""];
+  for (const [index, question] of handoff.questions.entries()) {
+    const answer = byId.get(question.id);
+    lines.push(
+      `${index + 1}. ${question.prompt}`,
+      `   id: ${question.id}`,
+      `   answer: ${answer ?? "none — the operator declined"}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 function contextIsIdle(ctx: ExtensionContext): boolean {
@@ -390,6 +430,22 @@ function pumpGuard(ctx: ExtensionContext, isCurrent: (() => boolean) | undefined
 
 function orderedScan(items: WorkflowHandoffScanItem[]): WorkflowHandoffScanItem[] {
   return [...items].reverse();
+}
+
+/**
+ * Narrow a project-wide scan to the runs an automatic pump is allowed to raise.
+ *
+ * Malformed evidence is filtered by the same rule as an actionable question: an
+ * unreadable envelope written by a run this session never launched is somebody
+ * else's history, and reporting it would put the removed session-start
+ * interruption back under a different name.
+ */
+function inScopeScan(
+  items: WorkflowHandoffScanItem[],
+  originRunIds: ReadonlySet<string> | undefined,
+): WorkflowHandoffScanItem[] {
+  if (originRunIds === undefined) return items;
+  return items.filter((item) => originRunIds.has(item.status === "actionable" ? item.handoff.runId : item.runId));
 }
 
 function selectedScanItem(

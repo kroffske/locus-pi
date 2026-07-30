@@ -21,7 +21,7 @@ import {
   type WorkflowRunReportEvidenceSource,
   type WorkflowRunReportInput,
 } from "../../../extensions/workflows/runtime/workflow-run-report.js";
-import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunJournalState, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
@@ -197,14 +197,17 @@ describe("workflow run report", () => {
     assert.match(readme, /- Status: completed/u);
     assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
     assert.match(readme, /- Result: \[result\.md\]\(result\.md\)/u);
-    assert.match(readme, new RegExp(`\\.locus/runtime/workflows/${RUN_ID}/`, "u"));
+    // The report sits inside the run directory, so it points at its siblings.
+    assert.match(readme, /- Files this run's agents wrote: `\.\.\/files\/`/u);
+    assert.match(readme, /- Machine records: `\.\.`/u);
+    assert.equal(reportDir, path.join(workflowRunDir(root, RUN_ID), "logs"));
     // One Documents list ordered by first write; the revised document names its
     // newest author and lists every revision with a machine-bytes link.
     assert.match(readme, /## Documents/u);
     assert.match(readme, /\[plan\.md\]\(plan\.md\) — planner round 2 · draft-plan — 3 revisions:/u);
     assert.match(
       readme,
-      /1\. transferred from run 20260728-180000-prev — \[machine copy\]\(\.\.\/\.\.\/\.locus\/runtime\/workflows\/20260728-190000-abcd\/artifacts\/inputs\/input-0001-plan\.md\)/u,
+      /1\. transferred from run 20260728-180000-prev — \[machine copy\]\(\.\.\/artifacts\/inputs\/input-0001-plan\.md\)/u,
     );
     assert.match(readme, /2\. planner round 1 · draft-plan — \[machine copy\]/u);
     assert.match(readme, /3\. planner round 2 · draft-plan — \[machine copy\]/u);
@@ -215,21 +218,13 @@ describe("workflow run report", () => {
     const planEntry = readme.indexOf("[plan.md](plan.md)");
     const contextEntry = readme.indexOf("[context.md](context.md)");
     assert.ok(planEntry > 0 && planEntry < contextEntry, "documents are ordered by first write");
-    // The Logs section names the combined journal and each child transcript.
+    // The Logs section names the combined journal and each child transcript,
+    // as run-directory siblings of the report.
     assert.match(readme, /## Logs/u);
+    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/journal\.ndjson\)/u);
     assert.match(
       readme,
-      new RegExp(
-        `\\[journal\\.ndjson\\]\\(\\.\\./\\.\\./\\.locus/runtime/workflows/${RUN_ID}/journal\\.ndjson\\)`,
-        "u",
-      ),
-    );
-    assert.match(
-      readme,
-      new RegExp(
-        `scout · scout-repository — \\[transcript\\]\\(\\.\\./\\.\\./\\.locus/runtime/workflows/${RUN_ID}/artifacts/transcripts/call-0001/trace\\.jsonl\\)`,
-        "u",
-      ),
+      /scout · scout-repository — \[transcript\]\(\.\.\/artifacts\/transcripts\/call-0001\/trace\.jsonl\)/u,
     );
   });
 
@@ -481,7 +476,7 @@ describe("workflow run report", () => {
     assert.match(readme, /- Error: plan was not accepted/u);
   });
 
-  it("refuses an unsafe run id and a symlinked report root", () => {
+  it("refuses an unsafe run id and a symlinked logs directory", () => {
     const root = project();
     const unsafe = writeWorkflowRunReport(
       { projectRoot: root, runId: "../escape", status: "completed", journal: [] },
@@ -491,7 +486,8 @@ describe("workflow run report", () => {
 
     const elsewhere = path.join(root, "elsewhere");
     mkdirSync(elsewhere);
-    symlinkSync(elsewhere, path.join(root, ".locus-pi"));
+    mkdirSync(workflowRunDir(root, RUN_ID), { recursive: true });
+    symlinkSync(elsewhere, path.join(workflowRunDir(root, RUN_ID), "logs"));
     const symlinked = writeWorkflowRunReport(
       { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
       evidenceFrom([], {}),
@@ -579,13 +575,7 @@ describe("workflow run report", () => {
     // The Logs section names the combined journal even when no child exported a
     // transcript (this harness executor returns answers without one).
     assert.match(readme, /## Logs/u);
-    assert.match(
-      readme,
-      new RegExp(
-        `\\[journal\\.ndjson\\]\\(\\.\\./\\.\\./\\.locus/runtime/workflows/${result.runId}/journal\\.ndjson\\)`,
-        "u",
-      ),
-    );
+    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/journal\.ndjson\)/u);
   });
 
   it("names every discarded transport attempt, its callId and its class", async () => {
@@ -1198,10 +1188,6 @@ describe("workflow run report budget section", () => {
         "}\n",
       "utf8",
     );
-    // A regular FILE where the report root must be a directory: the write fails
-    // and the module returns { ok: false } instead of throwing, exactly as documented.
-    writeFileSync(path.join(root, ".locus-pi"), "not a directory", "utf8");
-
     const harness = createHarness(root, { sessionId: "report-blocked" });
     const events: WorkflowJournalLine[] = [];
     const result = await runWorkflowScript({
@@ -1209,6 +1195,13 @@ describe("workflow run report budget section", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       name: "report-fail",
+      // A regular FILE where the logs directory must be: the write fails and the
+      // module returns { ok: false } instead of throwing, exactly as documented.
+      // Planted once the run id exists and long before the report is written.
+      onRunStart: ({ runDir }) => {
+        mkdirSync(runDir, { recursive: true });
+        writeFileSync(path.join(runDir, "logs"), "not a directory", "utf8");
+      },
       onEvent: (line) => events.push(line),
       createExecutor: (): AgentExecutor => ({
         async run(request: AgentRunRequest) {

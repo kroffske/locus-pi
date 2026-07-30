@@ -101,6 +101,7 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
+import { ensureWorkflowRunFilesDir } from "./workflow-run-layout.js";
 import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
@@ -724,10 +725,11 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // funnels here, so the operator gets the same stage/script/evidence pointer
     // whether the trusted script threw or the runtime around it did.
     enrichedFields = withFailureDiagnostic(enrichedFields);
-    // The reader's copy of the run under <projectRoot>/.locus-pi/<runId>/:
-    // table of contents, task, result, budget-versus-spend, and the agent
-    // documents with author-and-step names. Best-effort like result.md — the
-    // envelope below stays the durable truth, and a report failure never fails
+    // The run's ordered journal under <runDir>/logs/: table of contents, task,
+    // result, budget-versus-spend, and every captured text under an author-and-
+    // step name. Files the agents wrote themselves are NOT projected here — they
+    // stay under their own names in <runDir>/files/. Best-effort like result.md —
+    // the envelope below stays the durable truth, and a report failure never fails
     // the run. It runs BEFORE result.json so a failed write can still be recorded
     // in the journal that result.json persists.
     if (artifactStore !== undefined) {
@@ -975,8 +977,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     runId,
   });
+  let runFilesDir: string;
   try {
     artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
+    // The run's working directory exists BEFORE any child starts: its path is
+    // named in every agent prompt, and a prompt that points at a missing
+    // directory is the defect this layout replaced.
+    runFilesDir = ensureWorkflowRunFilesDir(projectRoot, runId);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -1041,6 +1048,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     workflowRunId: runId,
     workspaceManager,
     evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
+    runFilesDir,
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
@@ -1050,6 +1058,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     agentRunner,
     journal,
     projectRoot,
+    runFilesDir,
     resourceLoader,
     workspaceManager,
     artifactPorts: artifactStore,

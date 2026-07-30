@@ -147,7 +147,7 @@ none of the limits above is still bounded: global agent concurrency, total agent
 invocations, a run wall clock over the agent chain, and per child a wall-clock
 fuse, tool calls, turns and answer characters. Declare an option only where the
 stage needs a different number than the package default; the run's
-`.locus-pi/<runId>/README.md` prints every axis with the value that applied,
+`.locus/runtime/workflows/<runId>/logs/README.md` prints every axis with the value that applied,
 beside the spend evidence that actually exists. Per-child tool calls, turns and
 answer characters are enforced but counted by nobody, so they print as "not
 recorded" rather than as a number — as does cost, which the host reports as a
