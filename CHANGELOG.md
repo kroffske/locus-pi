@@ -4,13 +4,52 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Fixed
+
+- **A stale agent catalog no longer fails every workflow step closed.** Before
+  model tiers were executed, the shipped agents wrote their tier as
+  `pi/<role>` — `pi` was never a provider and nothing read the value. Once a
+  slash started meaning a real provider, any copy of that catalog still on disk
+  (a user-level `~/.agents/agents/`, a project `.agents/` vendored from an older
+  release) turned every child call into
+  `Agent "default" frontmatter model "pi/task" could not be used`, with no child
+  created. An agent's frontmatter tier in that namespace is now read as the role
+  it always named, so it resolves through the model-roles table like any bare
+  tier: assigned, it runs the assigned model; unassigned, it inherits the
+  session model and the recorded degradation carries the extra sentence naming
+  the spelling to fix. The repair is bounded to package history and does not
+  weaken the fail-closed rule: `pi/<not-a-role>` is still an unresolvable
+  provider and still refuses by name, and a per-call `model` / `modelRole`
+  written today against the current grammar refuses with the migration hint
+  rather than being silently rewritten.
+
 ### Changed
+
+- **The packaged `plan` → `plan-implement` pair no longer names a provider.**
+  Every stage in both workflows pinned the concrete model
+  `openai-codex/gpt-5.6-luna:medium`, which fails the stage by name — with no
+  child created — on every host that does not have that exact model, so the only
+  runnable curated pair in the package was runnable for one vendor's customers.
+  Both now declare `modelRole: "agent"`: assign `AGENT` in `/model-roles` to
+  choose the model and its reasoning effort, or assign nothing and every stage
+  runs on the current session model with the degradation recorded in the run
+  evidence, the same as any other unassigned tier. Concrete pins remain the right
+  option for a workflow you keep to yourself, and the fail-closed behavior of a
+  concrete selector is unchanged. Recorded runs of either workflow are not
+  replayable across this change: the tier is part of the request key, so a
+  `--resume` of a run recorded before it re-runs its calls for real.
+
+  The repository-only `excalidraw-pipeline` reference is converted the same way —
+  its authoring and repair stages move from `openai-codex/gpt-5.6-luna` to the
+  `agent` tier, joining the draft stage already on `smol`, so no shipped or
+  referenced workflow names a provider. The acceptance claim that pin carried is
+  a claim about a run, so it moves to that reference's README, which now names
+  the model the recorded run used and how to assign it.
 
 - **Workflow model effort is now executed, not merely displayed.** A concrete
   `provider/id:level` selector passes both the resolved model and `level` to the
-  Pi child session. The packaged `plan` → `plan-implement` pair now pins every
-  stage to `openai-codex/gpt-5.6-luna:medium`, so a missing model fails by name
-  instead of silently substituting the parent session. The planning safety cap
+  Pi child session, and a missing model fails by name instead of silently
+  substituting the parent session. The planning safety cap
   is now six rounds after a real external inventory plan exhausted four while
   still carrying two repairable verification defects. The same live run exposed
   a second boundary: all per-step reviews could pass while the combined result

@@ -62,8 +62,14 @@ relationships, falling back to \`grep\`, \`find\`, and direct reads.`;
 /** Every stage but the last writes for the next stage, not for a person. */
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
+/**
+ * Every stage names the `agent` TIER, not a concrete model — the same reason as
+ * its `plan` sibling: a packaged workflow that names a provider fails by name for
+ * every operator who does not have that provider, while a role lets them answer
+ * with `/model-roles` → AGENT and still runs on the session model until they do.
+ */
 const IMPLEMENT_AGENT_DEFAULTS = Object.freeze({
-  model: "openai-codex/gpt-5.6-luna:medium",
+  modelRole: "agent",
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });

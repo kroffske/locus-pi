@@ -21,7 +21,7 @@ import {
   loadModelRolesState,
   resolveAgentModelPreference,
   malformedRoleAssignmentNote,
-  unassignedRoleNote,
+  unassignedAgentTierNote,
   type ModelRoleResolution,
 } from "../_shared/model/model-settings.js";
 import { resolveWorkflowModel } from "../_shared/model/workflow-model-resolve.js";
@@ -185,7 +185,7 @@ async function resolveAgentExecutorModel(
     const declared = agent.model?.[0];
     if (declared === undefined) return {};
     return {
-      fallback: unassignedRoleNote(declared, `agent "${agent.name}" frontmatter model`, await loadModelRolesState(ctx)),
+      fallback: unassignedAgentTierNote(agent.name, declared, resolution, await loadModelRolesState(ctx)),
     };
   }
   const resolved = await resolveWorkflowModel(formatAssignment(resolution.assignment), ctx);

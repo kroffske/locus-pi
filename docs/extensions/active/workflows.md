@@ -1999,6 +1999,28 @@ then `default`; a per-call `modelRole` does **not** use that purpose fallback,
 because an author who named a tier asked about that tier. `modelRoleResolution`
 continues to be recorded in the request capsule, artifacts, and live display.
 
+**The pre-tier `pi/<role>` namespace.** Before tiers were executed the shipped
+agents wrote their tier as `pi/<role>`; `pi` was never a provider and nothing
+read the value. An agent's **frontmatter** tier in that namespace is read as the
+role it always named, so a catalog copied from an older release resolves through
+the roles table instead of refusing every call as an unresolvable provider. The
+degradation note for an unassigned one carries an extra sentence naming the
+spelling to fix. This is package history being repaired, not a hole in the
+grammar, and it is bounded on both sides: `pi/<token>` where the token names no
+role is an ordinary concrete selector and still fails by name, and a per-call
+`model` / `modelRole` — code written today against the current grammar — still
+refuses with the migration hint rather than being rewritten.
+
+**Running a workflow on your own local model.** The package assigns no role, so
+the shortest path is to change nothing: every bundled agent names a role,
+nothing assigns it, and the child therefore inherits the parent session's model —
+whatever `/model` currently points at, local provider included. Each such child
+records the degradation, which is a statement of fact rather than a fault. To
+make the choice explicit instead of inherited, assign the roles the catalog
+names — `task` and `agent` cover the bundled agents — to your own
+`provider/id` with `/model-roles`, and the resolved model is what `createSession`
+receives.
+
 **Selector grammar.** A token containing `/` is a concrete `provider/id`; a
 slash-free token is a role name looked up in the roles table. A trailing
 `:off|minimal|low|medium|high|xhigh` is stripped before the registry lookup,

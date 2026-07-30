@@ -76,6 +76,9 @@ function tieredProject(): string {
     ["pinned", "---\nname: pinned\ndescription: Agent pinned to one model\nmodel: test/strong\n---\nWork.\n"],
     ["bare", "---\nname: bare\ndescription: Agent with no model line\n---\nWork.\n"],
     ["stale", "---\nname: stale\ndescription: Agent on the pre-tier namespace\nmodel: pi/smol\n---\nWork.\n"],
+    // The half of `pi/<x>` that is NOT package history: an operator naming a
+    // provider this host does not have. It must keep failing closed.
+    ["ghost", "---\nname: ghost\ndescription: Agent on an absent provider\nmodel: pi/gpt-5\n---\nWork.\n"],
   ];
   for (const [name, body] of agents) writeFileSync(path.join(dir, `${name}.md`), body, "utf8");
   return root;
@@ -497,7 +500,10 @@ describe("an unresolvable concrete selector fails the call", () => {
     expect(probe.captured).toHaveLength(0);
   });
 
-  it("refuses the pre-tier pi/<role> namespace and says how to migrate it", async () => {
+  it("refuses pi/<not-a-role> — an absent provider is not package history", async () => {
+    // The prefix alone does not buy the repair. `gpt-5` names no role in the table,
+    // so the only reading left is "provider pi, model gpt-5", which this host cannot
+    // run: refuse by name rather than invent a tier the author never wrote.
     const h = await harnessWithRoles();
     const probe = sdkProbe();
     const runner = createWorkflowAgentRunner({
@@ -507,11 +513,111 @@ describe("an unresolvable concrete selector fails the call", () => {
       createExecutor: probe.createExecutor,
     });
 
-    const result = await runner({ prompt: "work", agent: "stale" });
+    const result = await runner({ prompt: "work", agent: "ghost" });
 
     expect(result.status).toBe("failed");
-    expect(result.diagnostics.join("\n")).toContain("`model: smol`");
+    const diagnostic = result.diagnostics.join("\n");
+    expect(diagnostic).toContain('"pi/gpt-5"');
+    // Still the migration hint, because that IS the likely mistake — it just cannot
+    // be applied for the author when the token names no role.
+    expect(diagnostic).toContain("pre-tier role namespace");
     expect(probe.captured).toHaveLength(0);
+  });
+
+  it("refuses a per-call pi/<role> model, which is code written against today's grammar", async () => {
+    // The frontmatter repair below is for a catalog this package shipped. A script
+    // author typing `model: "pi/smol"` now is writing new code, and silently reading
+    // it as a role would teach the dead spelling instead of the live one.
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe();
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "default", model: "pi/smol" });
+
+    expect(result.status).toBe("failed");
+    expect(result.diagnostics.join("\n")).toContain('modelRole: "smol"');
+    expect(probe.captured).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pre-tier `pi/<role>` namespace in agent FRONTMATTER is read as the role
+// ---------------------------------------------------------------------------
+
+describe("a frontmatter tier in the pre-tier pi/<role> namespace", () => {
+  it("degrades to the session model instead of failing a stale catalog closed", async () => {
+    // The upgrade case an operator actually hits: a `~/.agents/agents/` or vendored
+    // project catalog copied from a release that wrote `pi/<role>`. Refusing it
+    // fails EVERY workflow step before a child exists, which breaks the same promise
+    // D3b makes for an unassigned role — and the operator never wrote the spelling.
+    const h = await harnessWithRoles();
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "stale" });
+
+    expect(result.status).toBe("completed");
+    expect(probe.captured).toHaveLength(1);
+    expect(probe.captured[0]?.model).toEqual(STRONG);
+    // Degraded like any unassigned role — and the note carries the extra sentence,
+    // because this is now the only place the operator learns the catalog is stale.
+    expect(result.modelRoleFallback).toContain("inherited the parent session model");
+    expect(result.modelRoleFallback).toContain('"pi/smol"');
+    expect(result.modelRoleFallback).toContain("`model: smol`");
+  });
+
+  it("executes the role's assignment when the roles table has one", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "stale" });
+
+    expect(result.status).toBe("completed");
+    expect(probe.captured[0]?.model).toEqual(FAST);
+    // Resolved, not degraded: the repair routes through the roles table like any
+    // bare tier, so an assignment reaches `createSession` unchanged.
+    expect(result.modelRoleFallback).toBeUndefined();
+  });
+
+  it("keeps the author's thinking level across the namespace repair", async () => {
+    const root = tieredProject();
+    writeFileSync(
+      path.join(root, ".agents", "agents", "stale.md"),
+      "---\nname: stale\ndescription: Pre-tier tier with a level\nmodel: pi/smol:high\n---\nWork.\n",
+      "utf8",
+    );
+    const h = createHarness(root, { sessionId: "tier-parent" });
+    h.ctx.model = STRONG;
+    await h.ctx.settings?.set("modelRoles", { smol: "test/fast" });
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "stale" });
+
+    expect(result.status).toBe("completed");
+    expect(probe.captured[0]?.model).toEqual(FAST);
+    expect(probe.captured[0]?.thinkingLevel).toBe("high");
   });
 });
 

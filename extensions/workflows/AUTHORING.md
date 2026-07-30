@@ -282,6 +282,15 @@ and the two failure modes are deliberately different:
   name `smol` and tell you the role was "not assigned in any model-roles layer" —
   a statement your own config file contradicts.
 
+**Which one to reach for.** A concrete `provider/id` is right for a workflow you
+keep to yourself, where "this exact model or nothing" is the point. Name a
+**tier** in anything you share, ship, or commit for a team: a provider written
+into a shared script fails by name on every host that lacks it, and the operator
+has no way to answer except by editing your file. The packaged `plan` and
+`plan-implement` are the worked example — both declare `modelRole: "agent"`, so
+`/model-roles` decides the model and an operator who has configured nothing still
+gets a real run on their session model.
+
 An optional `:off|minimal|low|medium|high|xhigh` suffix on a concrete selector
 sets the child session's reasoning effort and is recorded on the live row. The
 host validates the concrete model first and passes the selected level to Pi's

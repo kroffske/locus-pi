@@ -54,6 +54,15 @@ role nothing assigns degrades to the session model and the degradation is
 recorded in the run evidence; a role assigned to a `provider/id` this host cannot
 resolve fails the call by name.
 
+Two consequences worth stating plainly. First, an unassigned table is a working
+configuration, not a broken one: children inherit the session model, so a local
+provider selected with `/model` is already what every workflow child runs on.
+Assign `task` and `agent` here to make that choice explicit and independent of
+the parent session. Second, an agent whose frontmatter still writes its tier in
+the pre-tier `pi/<role>` namespace is read as that role rather than as a provider
+named `pi`, so a catalog copied from an older release keeps working; the
+degradation note names the spelling to fix.
+
 ## Runtime capability of roles
 
 | Role      | Capability                           | Actual consumer                                                                                                              |

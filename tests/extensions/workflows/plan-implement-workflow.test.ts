@@ -271,11 +271,14 @@ function renderedReport(gradeText: string, planIds?: string[]): string {
 }
 
 describe("workflow example: plan-implement.workflow.mjs", () => {
-  it("pins every implementation stage to Luna at medium reasoning effort", () => {
+  it("routes every implementation stage through the agent tier and names no provider", () => {
     const source = readFileSync(workflowPath, "utf8");
 
-    expect(source).toContain('model: "openai-codex/gpt-5.6-luna:medium"');
-    expect(source.match(/openai-codex\/gpt-5\.6-luna:medium/gu)).toHaveLength(1);
+    expect(source).toContain('modelRole: "agent"');
+    expect(source.match(/modelRole:/gu)).toHaveLength(1);
+    // Same contract as the `plan` sibling: no concrete provider/id anywhere, so the
+    // pair runs on any host and the operator's roles table picks the model.
+    expect(source).not.toMatch(/model:\s*"[^"]*\//u);
   });
 
   it("keeps one write-capable role and persists workflow-owned task state plus runtime-owned agent evidence", () => {
