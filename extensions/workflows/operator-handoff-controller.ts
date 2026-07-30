@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "../_shared/pi-api.js";
 import { getProjectRoot } from "../_shared/pi-api.js";
-import type { WorkflowOperatorHandoffEnvelope } from "../_shared/workflow-handoff.js";
+import type { WorkflowOperatorHandoffEnvelope } from "./runtime/workflow-handoff.js";
 import { errorMessage } from "../_shared/error-text.js";
 import {
   isStaleInlineOperatorInteractionError,

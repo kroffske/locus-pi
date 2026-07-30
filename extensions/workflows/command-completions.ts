@@ -8,7 +8,7 @@
  */
 
 import type { CommandArgumentCompletion } from "../_shared/pi-api.js";
-import { listWorkflowRunIds } from "../_shared/workflow-journal.js";
+import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
 import type { FlatWorkflowCommand } from "./command-router.js";
 import { listExampleNames } from "./operator-ui.js";
 import { buildWorkflowCatalogModel } from "./workflow-catalog.js";

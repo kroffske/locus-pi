@@ -13,7 +13,7 @@ import {
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
   type ResolvedWorkflowTarget,
-} from "../_shared/workflow-runner.js";
+} from "./runtime/workflow-runner.js";
 
 const WORKFLOW_BUSY_MESSAGE =
   "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";

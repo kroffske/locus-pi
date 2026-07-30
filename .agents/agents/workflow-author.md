@@ -305,7 +305,7 @@ for.
    policy option, declare one frozen defaults object near the top of the workflow
    and spread it into each call instead of repeating literals.
 4. Confirm source identity policy before executing the module:
-   `node -e "import('./extensions/_shared/workflow-script-identity.ts').then(m=>console.log(m.assessWorkflowSourceIdentity(require('node:fs').readFileSync('./.pi/workflows/<name>.workflow.mjs','utf8')))).catch(e=>{console.error('IDENTITY_FAIL',e.message);process.exit(1)})"`.
+   `node -e "import('./extensions/workflows/runtime/workflow-script-identity.ts').then(m=>console.log(m.assessWorkflowSourceIdentity(require('node:fs').readFileSync('./.pi/workflows/<name>.workflow.mjs','utf8')))).catch(e=>{console.error('IDENTITY_FAIL',e.message);process.exit(1)})"`.
    Then confirm the module loads and exports the contract. Prefer a Node check:
    `node -e "import('./.pi/workflows/<name>.workflow.mjs').then(m=>{if(typeof m.default!=='function')throw new Error('no default export');if(!m.meta||!m.meta.name)throw new Error('no meta.name');console.log('OK',m.meta.name)}).catch(e=>{console.error('LOAD_FAIL',e.message);process.exit(1)})"`.
    Both commands are relative to the project root — run them from there — and the

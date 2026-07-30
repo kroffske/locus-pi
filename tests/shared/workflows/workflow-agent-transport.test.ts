@@ -21,14 +21,17 @@ import {
 import {
   createWorkflowAgentRunner,
   WorkflowAgentUnavailableError,
-} from "../../../extensions/_shared/workflow-agent-bridge.js";
+} from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
-} from "../../../extensions/_shared/workflow-journal.js";
-import { createWorkflowRuntime, type WorkflowAgentResult } from "../../../extensions/_shared/workflow-runtime.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import type { WorkflowReplayController } from "../../../extensions/_shared/workflow-replay.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowAgentResult,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import type { WorkflowReplayController } from "../../../extensions/workflows/runtime/workflow-replay.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -880,7 +883,7 @@ describe("agent attempts — declaration", () => {
       return tools;
     };
     const hostSafe = new Set(literal("extensions/_shared/agent-read-only-policy.ts", "const READ_ONLY_SAFE_TOOLS"));
-    const runtimeNoWrite = literal("extensions/_shared/workflow-runtime.ts", "const AGENT_NO_WRITE_TOOLS");
+    const runtimeNoWrite = literal("extensions/workflows/runtime/workflow-runtime.ts", "const AGENT_NO_WRITE_TOOLS");
 
     expect(runtimeNoWrite.filter((tool) => !hostSafe.has(tool))).toEqual([]);
   });
@@ -1180,7 +1183,10 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     // A transport retry that leaked into the shape budget would re-ask a child that
     // ANSWERED, which is the one thing the retry must never do. This pins WHERE the
     // option is read, by function, rather than by how the file happens to be laid out.
-    const source = readFileSync(path.join(process.cwd(), "extensions", "_shared", "workflow-runtime.ts"), "utf8");
+    const source = readFileSync(
+      path.join(process.cwd(), "extensions", "workflows", "runtime", "workflow-runtime.ts"),
+      "utf8",
+    );
     const lines = source.split("\n");
     const lineOf = (needle: string): number => {
       const index = lines.findIndex((line) => line.includes(needle));

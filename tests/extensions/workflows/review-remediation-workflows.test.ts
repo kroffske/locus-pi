@@ -5,15 +5,15 @@ import { describe, expect, it } from "vitest";
 import {
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review-fix/review-fix.workflow.mjs");
 

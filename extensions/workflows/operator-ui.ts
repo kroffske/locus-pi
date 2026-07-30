@@ -10,15 +10,15 @@
 
 import path from "node:path";
 import type { OperatorBlock, OperatorTone } from "../_shared/operator-ui.js";
-import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
-import type { WorkflowRunStatus } from "../_shared/workflow-journal.js";
+import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
+import type { WorkflowRunStatus } from "./runtime/workflow-journal.js";
 import {
   projectWorkflowDisposition,
   type WorkflowDispositionProjection,
   type WorkflowProjectedStatus,
-} from "../_shared/workflow-result.js";
-import { packagedWorkflowNames } from "../_shared/workflow-runner.js";
-import type { RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
+} from "./runtime/workflow-result.js";
+import { packagedWorkflowNames } from "./runtime/workflow-runner.js";
+import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowBackgroundStopResult } from "./background-run-registry.js";
 import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "./workflow-catalog.js";
 import { compactOperatorLine } from "../_shared/operator-ui.js";

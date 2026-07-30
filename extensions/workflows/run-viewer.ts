@@ -5,15 +5,15 @@ import {
   readWorkflowArtifactIndex,
   readWorkflowArtifactRecord,
   type WorkflowArtifactRecord,
-} from "../_shared/workflow-artifacts.js";
+} from "./runtime/workflow-artifacts.js";
 import {
   listWorkflowRunIds,
   readWorkflowRunJournalState,
   readWorkflowRunSummary,
   type WorkflowJournalDiagnostic,
   type WorkflowRunStatus,
-} from "../_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+} from "./runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { errorMessage } from "../_shared/error-text.js";
 import { clamp } from "../_shared/viewer-geometry.js";
 import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";

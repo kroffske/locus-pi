@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createWorkflowArtifactStore } from "../../../extensions/_shared/workflow-artifacts.js";
+import { createWorkflowArtifactStore } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 /**
  * T-130 W6/W7 — the consilium reference.
@@ -333,7 +333,7 @@ describe("consilium reference workflow", () => {
 
   it("stays out of the Package registry by placement, and still loads by path", async () => {
     const { packagedWorkflowNames, resolveWorkflowTarget } =
-      await import("../../../extensions/_shared/workflow-runner.js");
+      await import("../../../extensions/workflows/runtime/workflow-runner.js");
 
     // `references/` is a sibling of the scanned `examples/` directory and is never
     // visited, so this file is unreachable by name.

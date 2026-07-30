@@ -8,7 +8,7 @@
  */
 
 import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
+import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import {
   listWorkflowRunIds,
   readWorkflowRunJournalState,
@@ -16,14 +16,14 @@ import {
   readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
   workflowRunDir,
-} from "../_shared/workflow-journal.js";
-import type { WorkflowRunResultEnvelope } from "../_shared/workflow-journal.js";
+} from "./runtime/workflow-journal.js";
+import type { WorkflowRunResultEnvelope } from "./runtime/workflow-journal.js";
 import {
   formatWorkflowResultDetail,
   projectWorkflowDisposition,
   type WorkflowDispositionProjection,
-} from "../_shared/workflow-result.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+} from "./runtime/workflow-result.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { compactWorkflowLine, formatOperatorScriptIdentity, workflowStatusTone } from "./operator-ui.js";
 import {
   matchWorkflowPhaseGroups,

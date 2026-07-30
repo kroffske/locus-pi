@@ -6,10 +6,10 @@ import {
   buildWorkflowFailureDiagnostic,
   formatWorkflowFailureDiagnosticLines,
   parseWorkflowFailureDiagnostic,
-} from "../../../extensions/_shared/workflow-failure.js";
-import { readWorkflowRunResult } from "../../../extensions/_shared/workflow-journal.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-failure.js";
+import { readWorkflowRunResult } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 function journal(runId: string, phases: readonly string[]): WorkflowJournalLine[] {

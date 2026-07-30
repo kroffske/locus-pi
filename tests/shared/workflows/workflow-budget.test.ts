@@ -14,8 +14,8 @@ import {
   resolveWorkflowBudget,
   workflowSdkTurnTimeoutMs,
   type WorkflowBudget,
-} from "../../../extensions/_shared/workflow-budget.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-budget.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS,
   DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
@@ -24,7 +24,7 @@ import {
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
   type WorkflowJournalLine,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 /**

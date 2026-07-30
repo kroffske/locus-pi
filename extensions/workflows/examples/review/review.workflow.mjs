@@ -854,7 +854,7 @@ ${questionsText}
 
 /**
  * IDE-only type link: no runtime import is executed.
- * @param {import("../../../_shared/workflow-runtime.ts").WorkflowDsl} dsl
+ * @param {import("../../runtime/workflow-runtime.ts").WorkflowDsl} dsl
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import workflowsExt from "../../../extensions/workflows/index.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   WORKFLOW_LIVE_WIDGET_KEY,
   WorkflowProgressComponent,
@@ -17,8 +17,8 @@ import { fleetMenuState } from "../../../extensions/_shared/fleet-menu.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {

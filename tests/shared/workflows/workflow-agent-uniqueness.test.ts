@@ -3,7 +3,7 @@ import {
   createWorkflowRuntime,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 /**
  * `uniqueItems`, `uniqueTrimmedItems`, `uniqueBy` and `nonBlank` — the four

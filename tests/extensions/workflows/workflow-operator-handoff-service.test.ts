@@ -6,8 +6,8 @@ import {
   createWorkflowOperatorHandoffEnvelope,
   readCurrentWorkflowScriptIdentity,
   readWorkflowHandoffClaim,
-} from "../../../extensions/_shared/workflow-handoff.js";
-import { resolveWorkflowTarget } from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-handoff.js";
+import { resolveWorkflowTarget } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { WorkflowOperatorHandoffController } from "../../../extensions/workflows/operator-handoff-controller.js";
 import { createWorkflowOperatorHandoffService } from "../../../extensions/workflows/operator-handoff-service.js";
 import type { WorkflowCommandLaunchResult } from "../../../extensions/workflows/workflow-command-launcher.js";

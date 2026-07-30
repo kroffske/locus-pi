@@ -5,7 +5,7 @@ import {
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
   type WorkflowAgentSchemaOptions,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 /**
  * `validate` — the script-supplied half of the answer contract.

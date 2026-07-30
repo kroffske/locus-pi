@@ -12,9 +12,12 @@ import {
   workflowGroupLiveRowId,
   workflowLiveExecutionCount,
   workflowRunIdFromRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import { createWorkflowRuntime, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, emit } from "../../test-harness.js";
 

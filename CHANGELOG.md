@@ -6,6 +6,57 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The workflow runtime now lives in the extension that owns it.** Fourteen
+  `workflow-*` modules — the DSL core, the script loader, the journal, the agent
+  bridge, replay, artifacts, budget, worktrees, results, run reports, resources,
+  handoff, failure diagnostics and script identity — moved from
+  `extensions/_shared/` to `extensions/workflows/runtime/`. Their package paths
+  changed accordingly; nothing else about them did.
+  **They were never shared.** `_shared` had grown into a flat bag of 63 modules,
+  and these fourteen were the largest thing in it that only one extension used:
+  they import each other densely, and the only thing any other extension reads from
+  them is workflow run persistence, which already goes through the read-only door
+  added alongside. So "shared" described where the files sat rather than who
+  depended on them. Moving them one at a time would have meant a slice whose module
+  imports its own siblings across a directory boundary, so they moved as the one
+  subsystem they are.
+  **A path-only move would have broken the workflow registry.** The Package
+  workflow registry is discovered by walking a directory derived from the loader
+  module's own `import.meta.url`, two levels up and back down into
+  `workflows/examples/`. Relocating the loader repoints that walk at a directory
+  that does not exist, and every shipped example disappears from `/workflows` with
+  no error raised anywhere. What catches it is the public-registration test that
+  asserts the exact six shipped names — confirmed by leaving the derivation
+  unfixed and watching it report an empty registry. The derivation now goes one
+  level up, and the registry resolves to the same directory it always did.
+  **The journal's process-global registry now has the proof it was missing.**
+  `workflow-journal.ts` owns the versioned `globalThis` slot that holds workflow
+  journal writers, and moving a module that owns such a slot is exactly how live
+  state gets duplicated: Pi loads every registered entrypoint with the module cache
+  disabled, so each entrypoint holds its own instance of the journal and only the
+  `globalThis` slot makes them agree. The ownership check verifies statically that
+  one module names the slot, which is a source-level count and cannot see the
+  failure that matters — with two copies of the map, a terminal journal line from a
+  second entrypoint finds no writer for its key and returns early, leaving the live
+  row stuck at `working` and the writer entry never cleared. Nothing proved that
+  did not happen. A new test loads two entrypoints through the real loader and has
+  each one close the writer the _other_ opened, in both directions, which only
+  works on one shared registry.
+  **Model resolution turned out not to be workflow-owned, so it stayed shared
+  instead of moving.** Fourteen of the fifteen modules were workflow internals. The
+  fifteenth — "which concrete model does this selector name" — is called by the
+  workflow agent bridge and by the agents extension's interactive `/agent run`, and
+  that sharing is the point: it is what keeps one agent name from running on two
+  different models with nothing in the evidence to explain why. Its own
+  dependencies are the host facade and the shared model-settings grammar, nothing
+  workflow-specific. A module with a first-class consumer in each of two extensions
+  is what the shared directory is for, so it now sits in the shared model layer
+  beside the model-settings and live-display modules that are shared for exactly
+  the same reason. Moving it into one of its two consumers and punching a door
+  through for the other would have dressed a genuinely shared dependency up as a
+  borrowed one — the failure mode this whole refactor exists to end, since ownership
+  here follows real consumers rather than a `workflow-` filename prefix.
+
 - **A workflow stage can now say which model it runs on, and the evidence names
   the model that actually ran.** Per-call model selection was written down in
   three evidence surfaces and reached the child in none of them: the resolver

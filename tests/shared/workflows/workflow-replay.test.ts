@@ -3,22 +3,25 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import { readWorkflowRunSummary } from "../../../extensions/_shared/workflow-journal.js";
-import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/_shared/workflow-budget.js";
+import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   createWorkflowReplayController,
   readWorkflowReplayLog,
   workflowReplayFile,
   type WorkflowReplayController,
   type WorkflowReplayEntry,
-} from "../../../extensions/_shared/workflow-replay.js";
+} from "../../../extensions/workflows/runtime/workflow-replay.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
   runWorkflowScript,
-} from "../../../extensions/_shared/workflow-runner.js";
-import { assessWorkflowReplaySafety } from "../../../extensions/_shared/workflow-script-identity.js";
-import { createWorkflowRuntime, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { assessWorkflowReplaySafety } from "../../../extensions/workflows/runtime/workflow-script-identity.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import type { WorkflowTextComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createWorkflowTranscript } from "../../../extensions/workflows/workflow-transcript.js";

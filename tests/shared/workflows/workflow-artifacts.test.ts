@@ -10,13 +10,13 @@ import {
   readWorkflowArtifactRecord,
   type WorkflowArtifactIndex,
   type WorkflowArtifactPorts,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];

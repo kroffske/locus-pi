@@ -13,17 +13,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
-import type { WorkflowArtifactRecord } from "../../../extensions/_shared/workflow-artifacts.js";
-import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/_shared/workflow-budget.js";
+import type { WorkflowArtifactRecord } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   workflowReportDir,
   writeWorkflowRunReport,
   type WorkflowRunReportEvidenceSource,
   type WorkflowRunReportInput,
-} from "../../../extensions/_shared/workflow-run-report.js";
-import { readWorkflowRunJournalState } from "../../../extensions/_shared/workflow-journal.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import { createWorkflowRuntime, type WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-run-report.js";
+import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  createWorkflowRuntime,
+  type WorkflowJournalLine,
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];

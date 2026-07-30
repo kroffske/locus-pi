@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
 
 interface PackageJson {
   files: string[];

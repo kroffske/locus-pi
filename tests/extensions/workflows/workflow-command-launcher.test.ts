@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RunWorkflowScriptOptions, RunWorkflowScriptResult } from "../../../extensions/_shared/workflow-runner.js";
+import type {
+  RunWorkflowScriptOptions,
+  RunWorkflowScriptResult,
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createWorkflowCommandLauncher } from "../../../extensions/workflows/workflow-command-launcher.js";
 import { createHarness } from "../../test-harness.js";
 

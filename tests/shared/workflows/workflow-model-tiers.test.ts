@@ -10,7 +10,7 @@ import {
   type SdkCreateSessionOptionsLike,
 } from "../../../extensions/_shared/agent-sdk-host.js";
 import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
-import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
+import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   createWorkflowJournalSink,
@@ -18,12 +18,12 @@ import {
   readWorkflowRunSummary,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentResult,
   type WorkflowJournalLine,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import {
   parseModelSelector,
   resolveWorkflowModel,

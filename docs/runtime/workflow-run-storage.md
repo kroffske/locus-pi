@@ -7,7 +7,7 @@ split exists because a single mixed folder made the one file worth opening
 ## `.locus-pi/<runId>/` — the reader's copy
 
 Written once, at run finalization, by
-`extensions/_shared/workflow-run-report.ts`. Everything here is for a person;
+`extensions/workflows/runtime/workflow-run-report.ts`. Everything here is for a person;
 nothing in the runtime reads it back. Deleting this folder loses no evidence —
 every byte is a projection of the machine records below.
 

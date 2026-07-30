@@ -9,9 +9,9 @@ import {
   releaseWorkflowHandoffClaim,
   workflowContinuationForHandoff,
   type WorkflowOperatorHandoffEnvelope,
-} from "../_shared/workflow-handoff.js";
-import { listWorkflowRunIds } from "../_shared/workflow-journal.js";
-import { resolveWorkflowTarget } from "../_shared/workflow-runner.js";
+} from "./runtime/workflow-handoff.js";
+import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
+import { resolveWorkflowTarget } from "./runtime/workflow-runner.js";
 import { errorMessage } from "../_shared/error-text.js";
 import type {
   ActionableWorkflowHandoff,

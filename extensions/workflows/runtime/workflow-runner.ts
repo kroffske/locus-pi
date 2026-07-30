@@ -20,8 +20,8 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
-import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "./pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/pi-api.js";
+import { getProjectRoot, getWorkingDirectory } from "../../_shared/pi-api.js";
 import type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowDsl,
@@ -35,7 +35,7 @@ import {
   type WorkflowBudget,
 } from "./workflow-budget.js";
 import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
-import type { AgentExecutor } from "./agent-runner.js";
+import type { AgentExecutor } from "../../_shared/agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import {
   buildWorkflowFailureDiagnostic,
@@ -171,12 +171,12 @@ export interface RunWorkflowScriptOptions {
   budget?: Partial<WorkflowBudget>;
   createExecutor?: (o: {
     model?: unknown;
-    live?: import("./agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
+    live?: import("../../_shared/agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
     turnTimeoutMs?: number;
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
-  resolveModel?: import("./workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
+  resolveModel?: import("../../_shared/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
   /** Called once after run identity is allocated and before any journal event. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
   onEvent?: (line: WorkflowJournalLine) => void;
@@ -222,7 +222,7 @@ const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../workflows/examples/", import.meta.url));
+const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
 
 /** The one filename shape every saved and packaged workflow entry must have. */
 const WORKFLOW_ENTRY_SUFFIX = ".workflow.mjs";

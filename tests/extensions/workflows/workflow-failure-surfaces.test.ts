@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WorkflowFailureDiagnostic } from "../../../extensions/_shared/workflow-failure.js";
-import type { RunWorkflowScriptResult } from "../../../extensions/_shared/workflow-runner.js";
+import type { WorkflowFailureDiagnostic } from "../../../extensions/workflows/runtime/workflow-failure.js";
+import type { RunWorkflowScriptResult } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { WorkflowProgressComponent } from "../../../extensions/workflows/progress-widget.js";
 import { createWorkflowTranscript } from "../../../extensions/workflows/workflow-transcript.js";
 import { createHarness } from "../../test-harness.js";

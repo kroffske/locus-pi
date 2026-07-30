@@ -16,8 +16,8 @@ import {
   requestInlineOperatorInteraction,
 } from "../_shared/operator-interaction.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
-import { readWorkflowRunResultText, resolveWorkflowRunId } from "../_shared/workflow-journal.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../_shared/workflow-runtime.js";
+import { readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
+import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "./command-completions.js";
 import { parseContinueCommand, parseRunCommand } from "./command-parser.js";

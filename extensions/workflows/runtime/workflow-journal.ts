@@ -9,9 +9,9 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveStatus } from "./agent-sdk-host.js";
-import { runtimeStateDir } from "./files.js";
-import { AGENT_FAILURE_CAUSES } from "./types.js";
+import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveStatus } from "../../_shared/agent-sdk-host.js";
+import { runtimeStateDir } from "../../_shared/files.js";
+import { AGENT_FAILURE_CAUSES } from "../../_shared/types.js";
 import type {
   WorkflowAgentFailureCause,
   WorkflowJournalLine,

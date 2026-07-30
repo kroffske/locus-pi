@@ -37,13 +37,13 @@ import {
   type WorkflowOperatorHandoffDeclaration,
   type WorkflowOperatorQuestion,
 } from "./workflow-handoff.js";
-import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "./types.js";
+import type { EvidenceEvaluation, PermissionMode, WorkspaceMode } from "../../_shared/types.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `types.ts`, a module with no imports at all. Reading it as a value here keeps this core
 // host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the runtime
 // — while still validating against one list rather than a second copy of it.
-import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "./types.js";
-export type { PermissionMode, WorkspaceMode } from "./types.js";
+import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "../../_shared/types.js";
+export type { PermissionMode, WorkspaceMode } from "../../_shared/types.js";
 export type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowOperatorHandoffDeclaration,

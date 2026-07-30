@@ -9,11 +9,11 @@ import {
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
   type WorkflowContinuation,
-} from "../../../extensions/_shared/workflow-artifacts.js";
-import { readWorkflowRunJournalState } from "../../../extensions/_shared/workflow-journal.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import { createWorkflowRuntime } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 

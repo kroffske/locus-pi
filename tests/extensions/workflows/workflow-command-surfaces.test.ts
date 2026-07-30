@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { workflowRunDir } from "../../../extensions/_shared/workflow-journal.js";
+import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, type Harness } from "../../test-harness.js";
 

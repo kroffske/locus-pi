@@ -51,5 +51,5 @@ export {
   readWorkflowRunSummary,
   workflowRunDir,
   workflowRunIdFromRowId,
-} from "../_shared/workflow-journal.js";
-export type { WorkflowRunSummary } from "../_shared/workflow-journal.js";
+} from "./runtime/workflow-journal.js";
+export type { WorkflowRunSummary } from "./runtime/workflow-journal.js";

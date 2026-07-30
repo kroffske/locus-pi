@@ -15,7 +15,7 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   pruneCompletedWorkflowRunLiveRows,
   resetWorkflowLiveExecutions,
-} from "../_shared/workflow-journal.js";
+} from "./runtime/workflow-journal.js";
 import { setOperatorWidget } from "../_shared/widget-render.js";
 import { registerWorkflowCommands } from "./command-router.js";
 import { WorkflowOperatorHandoffController, type WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";

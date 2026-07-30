@@ -12,13 +12,13 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../_shared/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
 import { validateParams } from "../_shared/validation.js";
-import { WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "../_shared/workflow-artifacts.js";
-import { formatWorkflowFailureDiagnosticLines } from "../_shared/workflow-failure.js";
-import { applyWorkflowJournalLineToAgentLiveStore } from "../_shared/workflow-journal.js";
-import { runWorkflowScript } from "../_shared/workflow-runner.js";
-import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "../_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../_shared/workflow-runtime.js";
+import { WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "./runtime/workflow-artifacts.js";
+import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
+import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
+import { runWorkflowScript } from "./runtime/workflow-runner.js";
+import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
+import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
 import {
   formatOperatorScriptIdentity,
   safeOperatorSourceRef,

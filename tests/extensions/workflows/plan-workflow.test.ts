@@ -3,14 +3,17 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { WorkflowArtifactPorts, WorkflowArtifactRef } from "../../../extensions/_shared/workflow-artifacts.js";
-import { createWorkflowResourceLoader } from "../../../extensions/_shared/workflow-resources.js";
+import type {
+  WorkflowArtifactPorts,
+  WorkflowArtifactRef,
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 /**
  * The tracked `plan` example. One loop carries its "iteratively" claim, and it can

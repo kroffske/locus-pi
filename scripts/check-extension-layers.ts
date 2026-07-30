@@ -130,7 +130,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "viewer-geometry",
   ],
   runtime: ["session-core", "artifacts", "event-bus"],
-  model: ["model-settings", "live-model-display"],
+  model: ["model-settings", "live-model-display", "workflow-model-resolve"],
   project: ["goal-mode", "prompt-command-store", "tasks-store", "task-bridge", "todo-state"],
   "agent-runtime": [
     "agents",
@@ -160,7 +160,6 @@ const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
   "workflow-failure",
   "workflow-handoff",
   "workflow-journal",
-  "workflow-model-resolve",
   "workflow-replay",
   "workflow-resources",
   "workflow-result",
@@ -175,7 +174,8 @@ const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
  * Destination is the module's final file path. `workflow-journal` is listed like
  * every other workflow module: W2 routed its externally consumed READ EXPORTS
  * through `extensions/workflows/run-read.ts`, which is a facade file, not a new
- * home for the module — the journal itself still moves to the destination below.
+ * home for the module — W3 moved the journal itself to the destination below,
+ * alongside the other fourteen `workflow-*` modules of the same subsystem.
  */
 const FEATURE_DESTINATIONS: Record<string, string> = {
   ...Object.fromEntries(

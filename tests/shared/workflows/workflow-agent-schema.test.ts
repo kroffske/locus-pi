@@ -5,7 +5,7 @@ import {
   type WorkflowAgentRequest,
   type WorkflowAgentOptions,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const VERDICT_SCHEMA = {
   type: "object",

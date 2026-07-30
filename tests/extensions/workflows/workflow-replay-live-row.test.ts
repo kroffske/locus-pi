@@ -3,19 +3,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
-import * as runner from "../../../extensions/_shared/workflow-runner.js";
+import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowArtifactStore,
   readWorkflowArtifactRecord,
   type WorkflowArtifactRef,
-} from "../../../extensions/_shared/workflow-artifacts.js";
+} from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
   workflowLiveExecutionCount,
-} from "../../../extensions/_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 

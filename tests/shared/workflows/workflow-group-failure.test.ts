@@ -7,9 +7,9 @@ import {
   WorkflowGroupFailureError,
   createWorkflowRuntime,
   type WorkflowAgentRunner,
-} from "../../../extensions/_shared/workflow-runtime.js";
-import { runWorkflowScript } from "../../../extensions/_shared/workflow-runner.js";
-import { readWorkflowRunSummary } from "../../../extensions/_shared/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { createHarness } from "../../test-harness.js";
 
 const okRunner: WorkflowAgentRunner = async (request) => ({
@@ -43,9 +43,8 @@ describe("workflow group failure contract", () => {
     try {
       await dsl.pipeline(
         ["a", "b", "c"],
-        async (value) => value === "b"
-          ? { ok: false, status: "blocked", summary: "blocked at stage zero" }
-          : { ok: true, value },
+        async (value) =>
+          value === "b" ? { ok: false, status: "blocked", summary: "blocked at stage zero" } : { ok: true, value },
         async (value) => {
           const item = (value as { value: string }).value;
           stageTwoSeen.push(item);
@@ -75,7 +74,11 @@ describe("workflow group failure contract", () => {
       { index: 2, stageIndex: 1, kind: "thrown", message: "stage one exploded" },
     ]);
     expect(stageTwoSeen).toEqual(["a", "c"]);
-    expect(getJournal().filter((line) => line.kind === "group_end").at(-1)).toMatchObject({
+    expect(
+      getJournal()
+        .filter((line) => line.kind === "group_end")
+        .at(-1),
+    ).toMatchObject({
       groupKind: "pipeline",
       status: "failed",
       groupCompleted: 1,
@@ -87,16 +90,20 @@ describe("workflow group failure contract", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-group-unhandled-"));
     const harness = createHarness(root, { sessionId: "wf-group-unhandled" });
     try {
-      writeFileSync(path.join(root, "unhandled.workflow.mjs"), [
-        "export default async function run({ parallel }) {",
-        "  await parallel([",
-        "    async () => BigInt(1),",
-        "    async () => { throw new Error('branch exploded'); },",
-        "  ]);",
-        "  return { ok: true, summary: 'must not reach' };",
-        "}",
-        "",
-      ].join("\n"), "utf8");
+      writeFileSync(
+        path.join(root, "unhandled.workflow.mjs"),
+        [
+          "export default async function run({ parallel }) {",
+          "  await parallel([",
+          "    async () => BigInt(1),",
+          "    async () => { throw new Error('branch exploded'); },",
+          "  ]);",
+          "  return { ok: true, summary: 'must not reach' };",
+          "}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
       const result = await runWorkflowScript({
         pi: harness.pi,
@@ -132,27 +139,31 @@ describe("workflow group failure contract", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-group-acknowledged-"));
     const harness = createHarness(root, { sessionId: "wf-group-acknowledged" });
     try {
-      writeFileSync(path.join(root, "acknowledged.workflow.mjs"), [
-        "export default async function run({ parallel }) {",
-        "  try {",
-        "    await parallel([",
-        "      async () => ({ ok: true, value: 'kept' }),",
-        "      async () => ({ ok: false, status: 'cancelled', summary: 'operator stopped branch' }),",
-        "    ]);",
-        "  } catch (error) {",
-        `    if (!error || error.code !== ${JSON.stringify(WORKFLOW_GROUP_FAILURE)}) throw error;`,
-        "    return {",
-        "      partial: true,",
-        "      outcome: 'partial',",
-        "      completed: error.completed,",
-        "      failed: error.failed,",
-        "      kept: error.partialResults[0].value,",
-        "      failureStatus: error.failures[0].status,",
-        "    };",
-        "  }",
-        "}",
-        "",
-      ].join("\n"), "utf8");
+      writeFileSync(
+        path.join(root, "acknowledged.workflow.mjs"),
+        [
+          "export default async function run({ parallel }) {",
+          "  try {",
+          "    await parallel([",
+          "      async () => ({ ok: true, value: 'kept' }),",
+          "      async () => ({ ok: false, status: 'cancelled', summary: 'operator stopped branch' }),",
+          "    ]);",
+          "  } catch (error) {",
+          `    if (!error || error.code !== ${JSON.stringify(WORKFLOW_GROUP_FAILURE)}) throw error;`,
+          "    return {",
+          "      partial: true,",
+          "      outcome: 'partial',",
+          "      completed: error.completed,",
+          "      failed: error.failed,",
+          "      kept: error.partialResults[0].value,",
+          "      failureStatus: error.failures[0].status,",
+          "    };",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
       const result = await runWorkflowScript({
         pi: harness.pi,

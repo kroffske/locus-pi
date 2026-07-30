@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../extensions/_shared/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
 
 interface PackageJson {
   files: string[];

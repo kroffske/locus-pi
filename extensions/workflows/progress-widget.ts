@@ -11,16 +11,16 @@ import {
   truncate,
 } from "../_shared/agent-live-panel.js";
 import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
-import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "../_shared/workflow-failure.js";
-import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../_shared/workflow-journal.js";
+import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "./runtime/workflow-failure.js";
+import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "./runtime/workflow-journal.js";
 import {
   projectWorkflowDisposition,
   type WorkflowDisposition,
   type WorkflowProjectedStatus,
   type WorkflowResultPersistence,
-} from "../_shared/workflow-result.js";
+} from "./runtime/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../_shared/widget-render.js";
-import type { WorkflowJournalLine } from "../_shared/workflow-runtime.js";
+import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 
 export interface ThemeLike {
   fg?: (color: string, text: string) => string;

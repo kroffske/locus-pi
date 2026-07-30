@@ -14,8 +14,8 @@ import {
   workflowAgentLiveChildRowId,
   workflowAgentLiveRowId,
   workflowGroupLiveRowId,
-} from "../../../extensions/_shared/workflow-journal.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
 import {
   installWorkflowProgress,

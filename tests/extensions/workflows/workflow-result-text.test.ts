@@ -6,8 +6,8 @@ import {
   readWorkflowRunResultText,
   resolveWorkflowRunId,
   workflowRunDir,
-} from "../../../extensions/_shared/workflow-journal.js";
-import { writeWorkflowResultText } from "../../../extensions/_shared/workflow-result.js";
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { writeWorkflowResultText } from "../../../extensions/workflows/runtime/workflow-result.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 

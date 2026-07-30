@@ -7,13 +7,13 @@ import {
   DEFAULT_WORKFLOW_BUDGET,
   WORKFLOW_MAX_TIMEOUT_MS,
   workflowSdkTurnTimeoutMs,
-} from "../../../extensions/_shared/workflow-budget.js";
-import { createWorkflowAgentRunner } from "../../../extensions/_shared/workflow-agent-bridge.js";
+} from "../../../extensions/workflows/runtime/workflow-budget.js";
+import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
-} from "../../../extensions/_shared/workflow-runtime.js";
+} from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
 /**
