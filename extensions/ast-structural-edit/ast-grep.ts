@@ -3,7 +3,7 @@ import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
 import { expandPaths } from "../_shared/host/files.js";
-import { AST_LANGUAGES, astErrorMessage, astSearch } from "../_shared/ast-engine.js";
+import { AST_LANGUAGES, astErrorMessage, astSearch } from "./ast-engine.js";
 import { safeToolText } from "../_shared/host/safe-output.js";
 
 const AstGrepParams = Type.Object({

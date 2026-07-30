@@ -1,10 +1,10 @@
-import type { ExtensionAPI, ExtensionContext } from "./host/pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "./host/pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "../_shared/host/pi-api.js";
 import {
   createSessionStore,
   selectSessionStoreBackend,
   type SessionStoreBackend,
-} from "./runtime/runtime-capabilities.js";
+} from "../_shared/runtime/runtime-capabilities.js";
 
 export interface HumanDecisionInput {
   decisionId?: string;

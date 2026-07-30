@@ -8,7 +8,7 @@
  */
 
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "../_shared/mode-state.js";
+import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "./mode-state.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import type { PlanExitAction } from "./plan-exit-handoff.js";
 

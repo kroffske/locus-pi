@@ -16,7 +16,7 @@ import {
   makeModeAwareEditorClass,
   modeStatusLabel,
   PLAN_MODE_COLOR,
-} from "../_shared/mode-state.js";
+} from "./mode-state.js";
 import type { PromptShelfKind } from "./command-parser.js";
 
 export function setPlanOperatorBlock(

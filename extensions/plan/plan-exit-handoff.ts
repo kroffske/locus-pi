@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
 import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import { clearModeState, loadModeState } from "../_shared/mode-state.js";
+import { clearModeState, loadModeState } from "./mode-state.js";
 import { setModeStatus } from "./operator-surface.js";
 
 export type PlanExitAction = "plain-exit" | "kept" | "execute" | "execute-fresh" | "tweak-execute";

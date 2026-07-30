@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { AuditEvent, PermissionManifest } from "./types.js";
-import { redactSecrets } from "./host/redaction.js";
+import type { AuditEvent, PermissionManifest } from "../_shared/types.js";
+import { redactSecrets } from "../_shared/host/redaction.js";
 
 const auditEvents: AuditEvent[] = [];
 

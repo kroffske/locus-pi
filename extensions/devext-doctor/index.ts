@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
 import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
-import { idsByCurrentStatus, idsByOwnershipStatus } from "../_shared/extension-inventory.js";
+import { idsByCurrentStatus, idsByOwnershipStatus } from "./extension-inventory.js";
 import {
   planTaskLifecycleTransition,
   type TaskLifecyclePlan,

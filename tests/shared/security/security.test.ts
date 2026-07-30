@@ -8,7 +8,7 @@ import {
   classifyToolCall,
   clearAuditEvents,
   getAuditEvents,
-} from "../../../extensions/_shared/permissions.js";
+} from "../../../extensions/security-gate/permissions.js";
 import { redactSecrets } from "../../../extensions/_shared/host/redaction.js";
 import { truncateOutput } from "../../../extensions/_shared/host/safe-output.js";
 import securityGate from "../../../extensions/security-gate/index.js";

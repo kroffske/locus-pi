@@ -359,17 +359,22 @@ const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
  * fire on the ~60 legitimate frozen constants in `_shared` and be switched off
  * within a week, which is worth less than a narrow rule that is always right.
  *
- * The three entries below are the pre-existing structurally-mutable containers.
- * They are an ACKNOWLEDGED BASELINE, not a semantic ledger: each is populated once
- * at module init and never written again, so they carry no cross-entrypoint
- * meaning. They are listed so the detector starts at zero noise and any NEW
- * mutable export fails.
+ * Entries below are pre-existing structurally-mutable containers inside the
+ * detector's scope. They are an ACKNOWLEDGED BASELINE, not a semantic ledger: each
+ * is populated once at module init and never written again, so they carry no
+ * cross-entrypoint meaning. They are listed so the detector starts at zero noise
+ * and any NEW mutable export fails.
+ *
+ * KEYED BY FULL PATH, on purpose. An earlier version keyed on the basename, which
+ * meant an entry naming a module that had since left `_shared` kept granting an
+ * exemption to any future `_shared` file with the same basename — a rule silently
+ * switched off by a file that no longer exists. Every entry is now asserted to
+ * still match a detected binding, so a relocation that empties this map fails here
+ * instead of leaving a dead exemption behind. The map is currently empty: the three
+ * original entries named modules that moved out to their owning extensions, and
+ * outside `_shared` they are no longer the detector's business.
  */
-const BASELINE_MUTABLE_EXPORTS: Record<string, string> = {
-  "permissions.ts#SECRET_PATH_PATTERNS": "init-only RegExp lookup table; never written after module load.",
-  "permissions.ts#DESTRUCTIVE_COMMAND_PATTERNS": "init-only RegExp lookup table; never written after module load.",
-  "extension-inventory.ts#EXTENSION_INVENTORY": "init-only inventory rows; never written after module load.",
-};
+const BASELINE_MUTABLE_EXPORTS: Record<string, string> = {};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -463,6 +468,7 @@ export async function checkExtensionLayers(root: string): Promise<void> {
 
   // Rules 1, 2, 6 and the mutable-export detector need each file's parsed source.
   const seenUpwardEdges = new Set<string>();
+  const matchedBaselineExports = new Set<string>();
   for (const file of sharedSources) {
     const name = path.basename(file, ".ts");
     const classification = ledger.get(name);
@@ -537,12 +543,14 @@ export async function checkExtensionLayers(root: string): Promise<void> {
     // Rule 8, second half: undeclared mutable exported container.
     if (relativeToShared.length >= 1) {
       for (const binding of collectMutableExports(source)) {
-        const key = `${path.basename(file)}#${binding.name}`;
-        const declared =
-          key in BASELINE_MUTABLE_EXPORTS ||
-          MUTABLE_MODULE_STATE.some(
-            (entry) => path.basename(entry.file) === path.basename(file) && entry.binding === binding.name,
-          );
+        const key = `${file}#${binding.name}`;
+        if (key in BASELINE_MUTABLE_EXPORTS) {
+          matchedBaselineExports.add(key);
+          continue;
+        }
+        const declared = MUTABLE_MODULE_STATE.some(
+          (entry) => (entry.file === file || entry.destinations.includes(file)) && entry.binding === binding.name,
+        );
         if (declared) continue;
         failures.push(
           `rule 8 (mutable module state): ${file}:${binding.line} exports mutable module-level binding ` +
@@ -553,6 +561,15 @@ export async function checkExtensionLayers(root: string): Promise<void> {
         );
       }
     }
+  }
+
+  for (const key of Object.keys(BASELINE_MUTABLE_EXPORTS)) {
+    if (matchedBaselineExports.has(key)) continue;
+    failures.push(
+      `stale baseline: the acknowledged mutable export ${key} was not detected in ${SHARED_DIR}/. Either it became ` +
+        `immutable, or its module left the shared directory and the detector no longer covers it. Delete the entry — ` +
+        `a baseline keyed on a file that is no longer scanned is an exemption nobody reviews.`,
+    );
   }
 
   for (const exemption of PROVISIONAL_UPWARD_EDGES) {

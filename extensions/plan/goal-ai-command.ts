@@ -7,7 +7,7 @@
 
 import type { ExtensionCommandContext, ExtensionContext, CommandArgs } from "../_shared/host/pi-api.js";
 import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
-import { runGoalAiDraftSession } from "../_shared/goal-ai-draft.js";
+import { runGoalAiDraftSession } from "./goal-ai-draft.js";
 import { requestOperatorInput } from "../_shared/operator/operator-input.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { errorMessage } from "../_shared/host/error-text.js";

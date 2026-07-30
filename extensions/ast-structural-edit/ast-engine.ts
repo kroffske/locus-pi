@@ -6,11 +6,27 @@ import type { SgNode } from "@ast-grep/napi";
 import pythonLanguage from "@ast-grep/lang-python";
 
 export const AST_LANGUAGES = ["auto", "javascript", "typescript", "tsx", "python"] as const;
-export type AstLanguage = typeof AST_LANGUAGES[number];
+export type AstLanguage = (typeof AST_LANGUAGES)[number];
 
-export interface AstMatch { file: string; line: number; column: number; text: string; captures: Record<string, string> }
-export interface Replacement { file: string; before: string; after: string; replacements: number; beforeHash: string }
-export interface Preview { id: string; createdAt: string; replacements: Replacement[] }
+export interface AstMatch {
+  file: string;
+  line: number;
+  column: number;
+  text: string;
+  captures: Record<string, string>;
+}
+export interface Replacement {
+  file: string;
+  before: string;
+  after: string;
+  replacements: number;
+  beforeHash: string;
+}
+export interface Preview {
+  id: string;
+  createdAt: string;
+  replacements: Replacement[];
+}
 
 const previews = new Map<string, Preview>();
 let pythonRegistered = false;
@@ -35,7 +51,11 @@ export async function astSearch(pattern: string, files: string[], language: AstL
   return matches;
 }
 
-export async function astPreview(ops: Array<{ pat: string; out: string }>, files: string[], language: AstLanguage = "auto"): Promise<Preview> {
+export async function astPreview(
+  ops: Array<{ pat: string; out: string }>,
+  files: string[],
+  language: AstLanguage = "auto",
+): Promise<Preview> {
   const replacements: Replacement[] = [];
   for (const file of files) {
     let before = await readFile(file, "utf8");
@@ -44,14 +64,19 @@ export async function astPreview(ops: Array<{ pat: string; out: string }>, files
     for (const op of ops) {
       const captureNames = extractCaptureNames(op.pat);
       const root = parseFile(file, after, language);
-      const edits = findAllMatches(file, root.root(), op.pat).map((node) => node.replace(renderReplacement(op.out, node, captureNames)));
+      const edits = findAllMatches(file, root.root(), op.pat).map((node) =>
+        node.replace(renderReplacement(op.out, node, captureNames)),
+      );
       if (edits.length === 0) continue;
       after = root.root().commitEdits(edits);
       count += edits.length;
     }
     if (count > 0) replacements.push({ file, before, after, replacements: count, beforeHash: sha256(before) });
   }
-  const id = `ast_${Date.now().toString(36)}_${createHash("sha1").update(JSON.stringify(replacements.map((r) => [r.file, r.beforeHash, r.replacements]))).digest("hex").slice(0, 8)}`;
+  const id = `ast_${Date.now().toString(36)}_${createHash("sha1")
+    .update(JSON.stringify(replacements.map((r) => [r.file, r.beforeHash, r.replacements])))
+    .digest("hex")
+    .slice(0, 8)}`;
   const preview = { id, createdAt: new Date().toISOString(), replacements };
   previews.set(id, preview);
   return preview;
@@ -65,7 +90,11 @@ export function getLatestPendingPreview(projectRoot: string): Preview | undefine
   const root = path.resolve(projectRoot);
   return [...previews.values()]
     .reverse()
-    .find((preview) => preview.replacements.length > 0 && preview.replacements.every((replacement) => isWithin(path.resolve(replacement.file), root)));
+    .find(
+      (preview) =>
+        preview.replacements.length > 0 &&
+        preview.replacements.every((replacement) => isWithin(path.resolve(replacement.file), root)),
+    );
 }
 
 export function discardPreview(id: string): boolean {
@@ -78,7 +107,8 @@ export async function applyPreview(id: string, projectRoot: string): Promise<{ a
   const stale: string[] = [];
   for (const replacement of preview.replacements) {
     const resolved = path.resolve(replacement.file);
-    if (!isWithin(resolved, path.resolve(projectRoot))) throw new Error(`Refusing to write outside project root: ${replacement.file}`);
+    if (!isWithin(resolved, path.resolve(projectRoot)))
+      throw new Error(`Refusing to write outside project root: ${replacement.file}`);
     const live = await readFile(replacement.file, "utf8");
     if (sha256(live) !== replacement.beforeHash) stale.push(replacement.file);
   }
@@ -89,7 +119,9 @@ export async function applyPreview(id: string, projectRoot: string): Promise<{ a
 }
 
 export function astErrorMessage(error: unknown): string {
-  return error instanceof AstEngineError ? error.message : `AST operation failed: ${String(error instanceof Error ? error.message : error)}`;
+  return error instanceof AstEngineError
+    ? error.message
+    : `AST operation failed: ${String(error instanceof Error ? error.message : error)}`;
 }
 
 function parseFile(file: string, text: string, language: AstLanguage) {
@@ -97,7 +129,9 @@ function parseFile(file: string, text: string, language: AstLanguage) {
   try {
     return parse(lang, text);
   } catch (error) {
-    throw new AstEngineError(`Failed to parse ${file} as ${languageLabel(lang)}: ${String(error instanceof Error ? error.message : error)}`);
+    throw new AstEngineError(
+      `Failed to parse ${file} as ${languageLabel(lang)}: ${String(error instanceof Error ? error.message : error)}`,
+    );
   }
 }
 
@@ -114,15 +148,21 @@ function resolveLanguage(file: string, language: AstLanguage): Lang | "python" {
     registerPython();
     return "python";
   }
-  throw new AstEngineError(`Unsupported AST language for ${file}. Use one of: .js, .jsx, .mjs, .cjs, .ts, .tsx, .py, or pass a language override.`);
+  throw new AstEngineError(
+    `Unsupported AST language for ${file}. Use one of: .js, .jsx, .mjs, .cjs, .ts, .tsx, .py, or pass a language override.`,
+  );
 }
 
 function languageToAstGrep(language: Exclude<AstLanguage, "auto">): Lang | "python" {
   switch (language) {
-    case "javascript": return Lang.JavaScript;
-    case "typescript": return Lang.TypeScript;
-    case "tsx": return Lang.Tsx;
-    case "python": return "python";
+    case "javascript":
+      return Lang.JavaScript;
+    case "typescript":
+      return Lang.TypeScript;
+    case "tsx":
+      return Lang.Tsx;
+    case "python":
+      return "python";
   }
 }
 
@@ -139,7 +179,10 @@ function languageLabel(language: Lang | "python"): string {
 function renderReplacement(template: string, node: SgNode, captureNames: string[]): string {
   let output = template;
   for (const name of [...captureNames].sort((a, b) => b.length - a.length)) {
-    const multiple = node.getMultipleMatches(name).map((match) => match.text()).join("");
+    const multiple = node
+      .getMultipleMatches(name)
+      .map((match) => match.text())
+      .join("");
     const single = node.getMatch(name)?.text() ?? multiple;
     output = output.replaceAll(`$$$${name}`, multiple || single);
     output = output.replaceAll(`$${name}`, single);
@@ -151,7 +194,10 @@ function getCaptures(node: SgNode, captureNames: string[]): Record<string, strin
   const captures: Record<string, string> = {};
   for (const name of captureNames) {
     const multiple = node.getMultipleMatches(name);
-    captures[name] = multiple.length > 1 ? multiple.map((match) => match.text()).join("") : node.getMatch(name)?.text() ?? multiple[0]?.text() ?? "";
+    captures[name] =
+      multiple.length > 1
+        ? multiple.map((match) => match.text()).join("")
+        : (node.getMatch(name)?.text() ?? multiple[0]?.text() ?? "");
   }
   return captures;
 }
@@ -169,7 +215,9 @@ function findAllMatches(file: string, node: SgNode, pattern: string): SgNode[] {
   try {
     return node.findAll(pattern);
   } catch (error) {
-    throw new AstEngineError(`Invalid AST pattern for ${file}: ${String(error instanceof Error ? error.message : error)}`);
+    throw new AstEngineError(
+      `Invalid AST pattern for ${file}: ${String(error instanceof Error ? error.message : error)}`,
+    );
   }
 }
 

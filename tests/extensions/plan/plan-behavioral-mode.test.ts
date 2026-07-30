@@ -8,7 +8,7 @@ import {
   loadActiveModeState,
   modeStatePath,
   writeModeState,
-} from "../../../extensions/_shared/mode-state.js";
+} from "../../../extensions/plan/mode-state.js";
 import plan from "../../../extensions/plan/index.js";
 import {
   __resetModeUiStateForTests,

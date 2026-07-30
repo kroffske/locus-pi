@@ -8,7 +8,7 @@
  */
 
 import { emitDevEvent } from "../_shared/runtime/event-bus.js";
-import { recordDecision, stableDecisionId } from "../_shared/human-control.js";
+import { recordDecision, stableDecisionId } from "./human-control.js";
 import { requestOperatorInput } from "../_shared/operator/operator-input.js";
 import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/host/pi-api.js";
 import { errorResult, textResult } from "../_shared/host/pi-api.js";

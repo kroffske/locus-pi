@@ -8,7 +8,7 @@
  */
 
 import { emitDevEvent } from "../_shared/runtime/event-bus.js";
-import { recordDecision, stableDecisionId } from "../_shared/human-control.js";
+import { recordDecision, stableDecisionId } from "./human-control.js";
 import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,

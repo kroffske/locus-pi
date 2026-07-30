@@ -6,6 +6,41 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Six modules that only ever had one consumer now live in the extension that owns
+  them.** The AST engine moved to `extensions/ast-structural-edit/`, the extension
+  inventory to `extensions/devext-doctor/`, the human-decision journal to
+  `extensions/ask-user-question/`, the tool classifier and audit ring to
+  `extensions/security-gate/`, and the draft-session runner and behavioral mode state to
+  `extensions/plan/`. Their package paths changed accordingly; nothing about their
+  behavior did.
+  **`_shared` is for code more than one extension needs, and these were not that.** A
+  single-owner module sitting in the shared directory told every reader that any of ten
+  extensions might depend on it, so removing an export meant checking all of them; it
+  also gave a second extension a shared-looking place to reach for logic that was really
+  one extension's implementation. Each of the six is now behind the boundary of the
+  extension that uses it, and `_shared` is down to the code that is genuinely shared.
+  **The one module that looked shared was checked before it moved, not after.** A test
+  under `tests/extensions/ast-structural-edit/` imports the tool classifier, which reads
+  like the AST extension depending on it. It is not: that test loads the security gate
+  itself to assert what the gate audits when an AST edit passes through it, and no
+  production file under `extensions/ast-structural-edit/` reaches the classifier
+  directly or through anything it imports. The classifier has exactly one production
+  consumer, the security-gate entrypoint, so it moved with the rest.
+  **Only the two catch-all files are left flat.** `types.ts` and `state.ts` still sit in
+  the shared root, and they stay there until they are split by domain: their contents
+  have several different owners, so filing them under one layer would assert an owner
+  none of them has. Every other module under `extensions/_shared/` now names its layer
+  in its path, and no module is waiting to leave.
+  **The hazard that broke two earlier slices was swept for and was absent again.** All
+  six modules were checked for `import.meta.url`, `__dirname`, `fileURLToPath` and any
+  path anchored on the module's own location — the failure that twice silently repointed
+  a moved module at a directory that no longer existed. There was none: every path these
+  modules build starts from a caller-supplied project root, an environment override, or
+  the home directory. The AST engine loads its Python grammar by package name rather
+  than by file path, so its dynamic grammar registration resolves from the new directory
+  exactly as it did from the old one, which the Python search, rewrite and
+  language-override tests continue to prove.
+
 - **The five remaining shared layers are now real directories.** Twenty-eight modules
   moved out of the flat `extensions/_shared/` into the layer that owns them: the host
   facade and its primitives into `host/`, the ten operator-UI modules into `operator/`,

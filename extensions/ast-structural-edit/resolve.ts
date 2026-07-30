@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
 import { getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
-import { applyPreview, discardPreview, getLatestPendingPreview, getPreview } from "../_shared/ast-engine.js";
+import { applyPreview, discardPreview, getLatestPendingPreview, getPreview } from "./ast-engine.js";
 import { emitDevEvent } from "../_shared/runtime/event-bus.js";
 
 const AstApplyParams = Type.Object({

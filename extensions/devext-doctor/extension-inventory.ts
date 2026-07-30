@@ -1,8 +1,15 @@
 export const EXTENSION_CURRENT_STATUSES = ["active", "disabled", "deleted"] as const;
-export const EXTENSION_OWNERSHIP_STATUSES = ["compat-wrapper", "locus-specific", "omp-owned-to-import", "redesign-later", "split-required", "deleted"] as const;
+export const EXTENSION_OWNERSHIP_STATUSES = [
+  "compat-wrapper",
+  "locus-specific",
+  "omp-owned-to-import",
+  "redesign-later",
+  "split-required",
+  "deleted",
+] as const;
 
-export type ExtensionCurrentStatus = typeof EXTENSION_CURRENT_STATUSES[number];
-export type ExtensionOwnershipStatus = typeof EXTENSION_OWNERSHIP_STATUSES[number];
+export type ExtensionCurrentStatus = (typeof EXTENSION_CURRENT_STATUSES)[number];
+export type ExtensionOwnershipStatus = (typeof EXTENSION_OWNERSHIP_STATUSES)[number];
 
 export interface ExtensionInventoryRow {
   id: string;
@@ -55,10 +62,22 @@ export function deletedInventory(rows: ExtensionInventoryRow[] = EXTENSION_INVEN
   return rows.filter((row) => row.currentStatus === "deleted");
 }
 
-export function idsByCurrentStatus(status: ExtensionCurrentStatus, rows: ExtensionInventoryRow[] = EXTENSION_INVENTORY): string[] {
-  return rows.filter((row) => row.currentStatus === status).map((row) => row.id).sort();
+export function idsByCurrentStatus(
+  status: ExtensionCurrentStatus,
+  rows: ExtensionInventoryRow[] = EXTENSION_INVENTORY,
+): string[] {
+  return rows
+    .filter((row) => row.currentStatus === status)
+    .map((row) => row.id)
+    .sort();
 }
 
-export function idsByOwnershipStatus(status: ExtensionOwnershipStatus, rows: ExtensionInventoryRow[] = EXTENSION_INVENTORY): string[] {
-  return rows.filter((row) => row.ownershipStatus === status).map((row) => row.id).sort();
+export function idsByOwnershipStatus(
+  status: ExtensionOwnershipStatus,
+  rows: ExtensionInventoryRow[] = EXTENSION_INVENTORY,
+): string[] {
+  return rows
+    .filter((row) => row.ownershipStatus === status)
+    .map((row) => row.id)
+    .sort();
 }

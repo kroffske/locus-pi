@@ -8,14 +8,26 @@ import astApply from "../../../extensions/ast-structural-edit/resolve.js";
 import astStructuralEdit from "../../../extensions/ast-structural-edit/index.js";
 import securityGate from "../../../extensions/security-gate/index.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
-import { clearAuditEvents, getAuditEvents } from "../../../extensions/_shared/permissions.js";
+import { clearAuditEvents, getAuditEvents } from "../../../extensions/security-gate/permissions.js";
 
 async function fixtureRoot() {
   const dir = path.join(tmpdir(), `pi-dev-ext-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "sample.ts"), "function greet(name) { return name }\nconst value = greet('x')\n", "utf8");
-  await writeFile(path.join(dir, "sample.py"), "def greet(name):\n    return name\n\nvalue = greet('x')\ntext = \"greet('string')\"\n# greet('comment')\n", "utf8");
-  await writeFile(path.join(dir, "script.txt"), "def greet(name):\n    return name\n\nvalue = greet('override')\n", "utf8");
+  await writeFile(
+    path.join(dir, "sample.ts"),
+    "function greet(name) { return name }\nconst value = greet('x')\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(dir, "sample.py"),
+    "def greet(name):\n    return name\n\nvalue = greet('x')\ntext = \"greet('string')\"\n# greet('comment')\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(dir, "script.txt"),
+    "def greet(name):\n    return name\n\nvalue = greet('override')\n",
+    "utf8",
+  );
   return dir;
 }
 
@@ -23,10 +35,14 @@ describe("AST/LSP/dev tools", () => {
   it("finds, previews, applies, and rejects stale AST edits", async () => {
     clearAuditEvents();
     const root = await fixtureRoot();
-    const h = createHarness(root); astStructuralEdit(h.pi);
+    const h = createHarness(root);
+    astStructuralEdit(h.pi);
     const grep = await runTool(h, "ast_grep", { pat: "greet($A)", paths: ["sample.ts"] });
     expect(grep.details?.totalMatches).toBeGreaterThan(0);
-    const preview = await runTool(h, "ast_edit", { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] });
+    const preview = await runTool(h, "ast_edit", {
+      ops: [{ pat: "greet($A)", out: "hello($A)" }],
+      paths: ["sample.ts"],
+    });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("greet('x')");
     const previewId = String(preview.details?.previewId);
     const applied = await runTool(h, "resolve", { action: "apply", reason: "test apply" });
@@ -39,7 +55,11 @@ describe("AST/LSP/dev tools", () => {
     const stale = await runTool(h, "ast_edit", { ops: [{ pat: "hello($A)", out: "greet($A)" }], paths: ["sample.ts"] });
     const staleId = String(stale.details?.previewId);
     await writeFile(path.join(root, "sample.ts"), "changed()\n", "utf8");
-    const rejected = await runTool(h, "resolve", { action: "apply", reason: "test stale apply", extra: { previewId: staleId } });
+    const rejected = await runTool(h, "resolve", {
+      action: "apply",
+      reason: "test stale apply",
+      extra: { previewId: staleId },
+    });
     expect(rejected.isError).toBe(true);
     expect(rejected.details).toMatchObject({ stale: [path.join(root, "sample.ts")] });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toBe("changed()\n");
@@ -48,35 +68,70 @@ describe("AST/LSP/dev tools", () => {
   it("allows AST preview and apply through security-gate while delegating approval to Pi", async () => {
     clearAuditEvents();
     const root = await fixtureRoot();
-    const h = createHarness(root); securityGate(h.pi); astStructuralEdit(h.pi);
+    const h = createHarness(root);
+    securityGate(h.pi);
+    astStructuralEdit(h.pi);
     const previewParams = { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] };
 
-    const previewGate = (await emit(h, "tool_call", { toolName: "ast_edit", toolArgs: previewParams })).filter((entry) => entry !== undefined);
+    const previewGate = (await emit(h, "tool_call", { toolName: "ast_edit", toolArgs: previewParams })).filter(
+      (entry) => entry !== undefined,
+    );
     expect(previewGate).toEqual([]);
     const preview = await runTool(h, "ast_edit", previewParams);
     const previewId = String(preview.details?.previewId);
 
-    const applyGate = (await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "apply", reason: "test denied apply", extra: { previewId } } })).filter((entry) => entry !== undefined);
+    const applyGate = (
+      await emit(h, "tool_call", {
+        toolName: "resolve",
+        toolArgs: { action: "apply", reason: "test denied apply", extra: { previewId } },
+      })
+    ).filter((entry) => entry !== undefined);
     expect(applyGate).toEqual([]);
-    const applied = await runTool(h, "resolve", { action: "apply", reason: "test delegated apply", extra: { previewId } });
+    const applied = await runTool(h, "resolve", {
+      action: "apply",
+      reason: "test delegated apply",
+      extra: { previewId },
+    });
 
     expect(applied.isError).not.toBe(true);
     expect(applied.details).toMatchObject({ extra: { previewId }, filesApplied: 1 });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("hello('x')");
-    expect(getAuditEvents()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "preview", toolOrCommand: "ast_edit", target: "sample.ts" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "filesystem-write", toolOrCommand: "resolve", target: previewId }),
-    ]));
+    expect(getAuditEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "preview",
+          toolOrCommand: "ast_edit",
+          target: "sample.ts",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "filesystem-write",
+          toolOrCommand: "resolve",
+          target: previewId,
+        }),
+      ]),
+    );
   });
 
   it("discards the latest pending AST preview through security-gate without writing files", async () => {
     clearAuditEvents();
     const root = await fixtureRoot();
-    const h = createHarness(root); securityGate(h.pi); astEdit(h.pi); astApply(h.pi);
-    const preview = await runTool(h, "ast_edit", { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] });
+    const h = createHarness(root);
+    securityGate(h.pi);
+    astEdit(h.pi);
+    astApply(h.pi);
+    const preview = await runTool(h, "ast_edit", {
+      ops: [{ pat: "greet($A)", out: "hello($A)" }],
+      paths: ["sample.ts"],
+    });
     const previewId = String(preview.details?.previewId);
 
-    const discardGate = (await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "discard", reason: "not needed" } })).filter((entry) => entry !== undefined);
+    const discardGate = (
+      await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "discard", reason: "not needed" } })
+    ).filter((entry) => entry !== undefined);
     expect(discardGate).toEqual([]);
     const discarded = await runTool(h, "resolve", { action: "discard", reason: "not needed" });
 
@@ -84,9 +139,17 @@ describe("AST/LSP/dev tools", () => {
     expect(discarded.details).toMatchObject({ action: "discard", extra: { previewId } });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("greet('x')");
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).not.toContain("hello('x')");
-    expect(getAuditEvents()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "preview", toolOrCommand: "resolve", target: "resolve" }),
-    ]));
+    expect(getAuditEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "preview",
+          toolOrCommand: "resolve",
+          target: "resolve",
+        }),
+      ]),
+    );
     const retry = await runTool(h, "resolve", { action: "apply", reason: "should be gone" });
     expect(retry.isError).toBe(true);
     expect(retry.content[0]?.type === "text" ? retry.content[0].text : "").toContain("No pending action to resolve");
@@ -94,7 +157,10 @@ describe("AST/LSP/dev tools", () => {
 
   it("supports Python AST search, rewrite, language override, and stale rejection", async () => {
     const root = await fixtureRoot();
-    const h = createHarness(root); astGrep(h.pi); astEdit(h.pi); astApply(h.pi);
+    const h = createHarness(root);
+    astGrep(h.pi);
+    astEdit(h.pi);
+    astApply(h.pi);
 
     const grep = await runTool(h, "ast_grep", { pat: "greet($A)", paths: ["sample.py"] });
     expect(grep.details?.totalMatches).toBe(1);
@@ -106,7 +172,11 @@ describe("AST/LSP/dev tools", () => {
     expect(override.details?.totalMatches).toBe(1);
     expect((await runTool(h, "ast_grep", { pat: "greet($A)", paths: ["script.txt"] })).isError).toBe(true);
 
-    const preview = await runTool(h, "ast_edit", { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.py"], language: "python" });
+    const preview = await runTool(h, "ast_edit", {
+      ops: [{ pat: "greet($A)", out: "hello($A)" }],
+      paths: ["sample.py"],
+      language: "python",
+    });
     const previewId = String(preview.details?.previewId);
     const applied = await runTool(h, "resolve", { action: "apply", reason: "test python apply", extra: { previewId } });
     expect(applied.isError).not.toBe(true);
@@ -115,10 +185,13 @@ describe("AST/LSP/dev tools", () => {
     const stale = await runTool(h, "ast_edit", { ops: [{ pat: "hello($A)", out: "greet($A)" }], paths: ["sample.py"] });
     const staleId = String(stale.details?.previewId);
     await writeFile(path.join(root, "sample.py"), "changed()\n", "utf8");
-    const rejected = await runTool(h, "resolve", { action: "apply", reason: "test python stale apply", extra: { previewId: staleId } });
+    const rejected = await runTool(h, "resolve", {
+      action: "apply",
+      reason: "test python stale apply",
+      extra: { previewId: staleId },
+    });
     expect(rejected.isError).toBe(true);
     expect(rejected.details).toMatchObject({ stale: [path.join(root, "sample.py")] });
     expect(await readFile(path.join(root, "sample.py"), "utf8")).toBe("changed()\n");
   });
-
 });

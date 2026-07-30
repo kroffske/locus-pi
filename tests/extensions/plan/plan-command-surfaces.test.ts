@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GoalOperationResult } from "../../../extensions/_shared/project/goal-mode.js";
-import { isInPlanMode, loadModeState, writeModeState } from "../../../extensions/_shared/mode-state.js";
+import { isInPlanMode, loadModeState, writeModeState } from "../../../extensions/plan/mode-state.js";
 import { goalOperationBlock } from "../../../extensions/plan/goal-operator-ui.js";
 import plan from "../../../extensions/plan/index.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";

@@ -26,8 +26,8 @@ import {
   styleModeStatusLabel,
   userPlansDir,
   writeModeState,
-} from "../../../extensions/_shared/mode-state.js";
-import type { ModeState } from "../../../extensions/_shared/mode-state.js";
+} from "../../../extensions/plan/mode-state.js";
+import type { ModeState } from "../../../extensions/plan/mode-state.js";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure

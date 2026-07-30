@@ -25,7 +25,7 @@ Ported contract:
 - Multi-question results expose `details.results[]`.
 - Cancellation returns an error result locally and records a cancelled Locus `decision` entry.
 - Legacy `askUserQuestion` preserves old `sensitivity` / redaction behavior for compatibility.
-- Local Locus runtime records answers and cancellations as durable `decision` entries through `_shared/human-control.ts`.
+- Local Locus runtime records answers and cancellations as durable `decision` entries through `extensions/ask-user-question/human-control.ts`.
 - When `ctx.ui.custom` is unavailable, the extension falls back to `select` / `editor` and loses the bounded checklist/navigation UI.
 - Single-question TUI calls and workflow handoffs share one narrow select/text
   primitive plus the session-generation interaction queue. The question uses

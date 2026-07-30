@@ -14,7 +14,7 @@ import {
   MODE_CYCLE,
   modeStateForCycle,
   writeModeState,
-} from "../_shared/mode-state.js";
+} from "./mode-state.js";
 import { splitFirstWord } from "./command-parser.js";
 import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "./operator-surface.js";
 import { modeChangeBlock, modeViewBlock, planExitBlock } from "./operator-ui.js";
