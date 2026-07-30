@@ -82,7 +82,10 @@ function tieredProject(): string {
 }
 
 interface SdkProbe {
-  createExecutor: (o: { model?: unknown }) => AgentExecutor;
+  createExecutor: (o: {
+    model?: unknown;
+    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
+  }) => AgentExecutor;
   /** Every `createSession` call, in order. Length 0 proves no child was ever spawned. */
   captured: SdkCreateSessionOptionsLike[];
 }
@@ -97,9 +100,13 @@ interface SdkProbe {
 function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
   const captured: SdkCreateSessionOptionsLike[] = [];
   const reportsDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-reports-"));
-  const createExecutor = (o: { model?: unknown }): AgentExecutor =>
+  const createExecutor = (o: {
+    model?: unknown;
+    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
+  }): AgentExecutor =>
     createAgentSdkSessionExecutor({
       ...(o.model !== undefined ? { model: o.model } : {}),
+      ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
       createSession: async (options) => {
         captured.push(options);
         return { session: fakeSession(sessionModel, answer) };
@@ -286,12 +293,12 @@ describe("the declared tier reaches the child session", () => {
     expect(h.ctx.model).toEqual(STRONG);
   });
 
-  it("resolves a tier that carries a thinking suffix as that tier, not as a role of its own", async () => {
+  it("resolves a tier suffix and applies its reasoning effort to the child session", async () => {
     // The two grammars have to agree. `provider/id:high` names a model at a level;
     // `smol:high` names the SAME tier at a level. Looking the whole token up as a
     // role name finds nothing, and a role that resolves to nothing degrades to the
     // parent — so the author who spelled out the cheap tier would silently get the
-    // expensive one. The level itself is display-only and never reaches the child.
+    // expensive one. The level must reach createSession as real reasoning effort.
     const h = await harnessWithRoles({ smol: "test/fast" });
     const probe = sdkProbe(FAST);
     const runner = createWorkflowAgentRunner({
@@ -307,6 +314,7 @@ describe("the declared tier reaches the child session", () => {
     // By value: the parent is `test/strong`, so inheritance cannot satisfy this.
     expect(probe.captured).toHaveLength(1);
     expect(probe.captured[0]?.model).toEqual(FAST);
+    expect(probe.captured[0]?.thinkingLevel).toBe("high");
     // And it resolved rather than degraded — a degradation would have recorded one.
     expect(result.modelRoleFallback).toBeUndefined();
   });
@@ -326,6 +334,26 @@ describe("the declared tier reaches the child session", () => {
 
     expect(result.status).toBe("completed");
     expect(probe.captured[0]?.model).toEqual(STRONG);
+  });
+
+  it("applies a concrete selector's reasoning effort to the child session", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({
+      prompt: "pin it",
+      agent: "roled",
+      model: "test/strong:medium",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(probe.captured[0]).toMatchObject({ model: STRONG, thinkingLevel: "medium" });
   });
 
   it("routes an agent's own frontmatter role when the call declares nothing", async () => {

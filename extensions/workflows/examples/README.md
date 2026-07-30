@@ -5,7 +5,7 @@ This directory is the only place where a reader can see the authoring shape that
 teach, applied to code that actually runs. This file says what ships, what each
 example is for, which shape it demonstrates, and how far it travels.
 
-Measured 2026-07-28 against the files in this directory.
+Measured 2026-07-30 against the files in this directory.
 
 ## What ships
 
@@ -19,7 +19,7 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 |   915 |              2 |            2 |       5 | npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 |   696 |              0 |            1 |      10 | npm package · public repository |
 | [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   477 |              0 |            1 |       1 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |   615 |              0 |            1 |       7 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |  1044 |              0 |            2 |      10 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflow-run <name>`, discovered by existence on each call
@@ -56,15 +56,15 @@ so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                                                         | Read it for                                                                                                                                                                          |
-| --------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
-| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.         |
-| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
-| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
-| `plan`                | Task → accepted plan                                                 | A declared agent roster — `scout`, `planner`, `critic` — and a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                       |
-| `plan-implement`      | Accepted plan → reviewed changes                                     | The other end of a cross-run handoff: host-verified plan bytes, a persisted task ledger, and one sequential writer/reviewer repair loop per step.                                    |
-| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
+| Example               | Product role                                                         | Read it for                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                                                                        |
+| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                                  |
+| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                                          |
+| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                                         |
+| `plan`                | Task → accepted plan                                                 | Luna/medium `scout`, `planner`, and `critic`, plus a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                                                                          |
+| `plan-implement`      | Accepted plan → reviewed changes                                     | The Luna/medium end of a cross-run handoff: host-verified plan bytes, a persisted task ledger, one sequential writer/reviewer repair loop per step, and one final reconciliation when the report still finds unfinished work. |
+| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                                   |
 
 `plan` and `plan-implement` are a pair, and the seam between them is the point:
 `plan` ends by returning the accepted plan text, which the runtime retains as

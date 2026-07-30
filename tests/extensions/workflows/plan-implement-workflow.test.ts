@@ -178,6 +178,13 @@ function review(verdict: "accept" | "repair" | "blocked", summary: string, issue
 }
 
 describe("workflow example: plan-implement.workflow.mjs", () => {
+  it("pins every implementation stage to Luna at medium reasoning effort", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain('model: "openai-codex/gpt-5.6-luna:medium"');
+    expect(source.match(/openai-codex\/gpt-5\.6-luna:medium/gu)).toHaveLength(1);
+  });
+
   it("keeps one write-capable role and persists workflow-owned task state plus runtime-owned agent evidence", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -341,6 +348,120 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     ]);
   });
 
+  it("reconciles a final partial report once and gates success on the fresh report", async () => {
+    const fixture = createPlanFixture({ steps: [STEP_S1] });
+    const calls: WorkflowAgentRequest[] = [];
+    const partialReport = [
+      "# Implementation Report",
+      "## Outcome",
+      "Partly implemented — the final evidence still uses the wrong assertion.",
+      "",
+      "## Steps",
+      "### S1 — Partial",
+      "Files: `src/page.ts`",
+      "Evidence: The live file still has the old assertion.",
+      "Remaining: Replace it and rerun the focused check.",
+    ].join("\n");
+    const completeReport = [
+      "# Implementation Report",
+      "## Outcome",
+      "Plan implemented — the reconciliation closed the final evidence gap.",
+      "",
+      "## Steps",
+      "### S1 — Done",
+      "Files: `src/page.ts`",
+      "Evidence: The focused check passes.",
+      "Remaining: none.",
+    ].join("\n");
+    const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") {
+        return completed(request, review("accept", "The isolated step review passed."));
+      }
+      if (request.label === "report implementation") return completed(request, partialReport);
+      if (request.label === "reconcile implementation") {
+        expect(request.prompt).toContain(partialReport);
+        return completed(request, "# Reconciliation\nCorrected the assertion and reran the focused check.");
+      }
+      if (request.label === "report implementation after reconciliation") {
+        expect(request.prompt).toContain(partialReport);
+        expect(request.prompt).toContain("# Reconciliation");
+        return completed(request, completeReport);
+      }
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(completeReport);
+    expect(calls.map((call) => call.label)).toEqual([
+      "select plan steps",
+      "resolve implementation scope",
+      "implement step S1 attempt 1",
+      "review step S1 attempt 1",
+      "collect check evidence",
+      "report implementation",
+      "reconcile implementation",
+      "collect check evidence after reconciliation",
+      "report implementation after reconciliation",
+    ]);
+    expect(calls.map((call) => call.phase)).toEqual([
+      "select-steps",
+      "resolve-implementation-scope",
+      "apply-steps",
+      "apply-steps",
+      "collect-check-evidence",
+      "report-implementation",
+      "reconcile-implementation",
+      "collect-check-evidence",
+      "report-implementation",
+    ]);
+    expect(calls[6]?.readOnly).toBeUndefined();
+    expect(calls[7]?.readOnly).toBe(true);
+    expect(calls[8]?.readOnly).toBe(true);
+    expect(namedAnswers(artifactStore)).toEqual([
+      "step-selection.json",
+      "scope.md",
+      "worker-S1-attempt-1.md",
+      "review-S1-attempt-1.json",
+      "check-evidence.md",
+      "implementation-report.md",
+      "reconciliation.md",
+      "check-evidence.md",
+      "implementation-report.md",
+    ]);
+  });
+
+  it("returns non-success when the final report stays partial after reconciliation", async () => {
+    const fixture = createPlanFixture({ steps: [STEP_S1] });
+    const partialReport = [
+      "# Implementation Report",
+      "## Outcome",
+      "Partly implemented — S1 remains incomplete.",
+      "",
+      "## Steps",
+      "### S1 — Partial",
+      "Files: `src/page.ts`",
+      "Evidence: The focused check still fails.",
+      "Remaining: Operator direction is required.",
+    ].join("\n");
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1")
+        return completed(request, review("accept", "Locally complete."));
+      if (request.label === "report implementation" || request.label === "report implementation after reconciliation") {
+        return completed(request, partialReport);
+      }
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toMatchObject({
+      ok: false,
+      partial: true,
+      appliedSteps: ["S1"],
+      unresolvedRows: ["S1"],
+    });
+  });
+
   it("skips the steps after a failed writer but still checks and reports what landed", async () => {
     // A plan's steps are ordered because each one builds on the last, so running
     // the rest on top of a failure is how a plan half-lands. The run still has to
@@ -502,7 +623,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const fixture = createPlanFixture({ steps });
     expect(fixture.planText.length).toBeGreaterThan(256_000);
 
-    const report = "# Implementation Report\n## Outcome\nThe one step landed.";
+    const report = "# Implementation Report\n## Outcome\nPlan implemented — the requested S1 subset landed.";
     const { dsl } = runtimeWith(fixture, async (request) => {
       switch (request.label) {
         case "select plan steps":

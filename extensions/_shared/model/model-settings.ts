@@ -221,7 +221,7 @@ export function resolveModelRoleForPurpose(
 }
 
 /**
- * Split a display-only thinking suffix off a bare role token.
+ * Split a thinking-level suffix off a bare role token.
  *
  * `smol:high` names the role `smol` at the `high` level, exactly as
  * `provider/id:high` names a concrete model at that level in
@@ -230,11 +230,9 @@ export function resolveModelRoleForPurpose(
  * the parent model — so an author who spelled out a tier would silently get a
  * different model, which is the substitution the tier work exists to stop.
  *
- * The level does not route: it is stripped again before the registry lookup, and
- * the child session is created from the model half alone. It is not invisible to
- * the child either — the resolution record travels in the kickoff prompt, so the
- * child reads the level as text — but nothing acts on it. Plumbing effort into
- * the child for real is separate, deferred work.
+ * The model half selects the registry entry; the level is preserved in the
+ * assignment so workflow and agent execution owners can pass it to the child
+ * session as real reasoning effort.
  *
  * The `:<level>` space is reserved by this grammar: a role literally named
  * `foo:high` can no longer be addressed by that literal name. Six words are
@@ -263,8 +261,8 @@ export function resolveDeclaredModelRole(state: ModelRolesState, role: string): 
   const { role: declaredRole, thinking } = splitRoleSelector(role);
   const effective = state.effective.get(declaredRole);
   // A suffix the author wrote overrides the level the assignment carries, the same
-  // way it does on a concrete selector. It is a label, not a routing input: the
-  // model half is what the registry resolves.
+  // way it does on a concrete selector. The model half is what the registry
+  // resolves; the execution owner applies the preserved level.
   const assignment =
     effective?.assignment !== undefined && thinking !== undefined
       ? { ...effective.assignment, thinking }
@@ -320,7 +318,7 @@ export function malformedRoleAssignmentNote(role: string, origin: string, malfor
   return (
     `${origin} ${JSON.stringify(role)} is assigned ${JSON.stringify(malformed.value)} by the ` +
     `${malformed.layer} model-roles layer, but that is not a "provider/id" selector ` +
-    `(an optional ":off|minimal|low|medium|high|xhigh" suffix is allowed and is display-only). ` +
+    `(an optional ":off|minimal|low|medium|high|xhigh" reasoning-effort suffix is allowed). ` +
     `Fix or remove that assignment — a malformed assignment is a configuration error, not an ` +
     `unassigned role, so it is NOT degraded to the session model.`
   );

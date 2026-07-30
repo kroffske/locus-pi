@@ -23,6 +23,10 @@
 //     the checker and reporter still describe the already-changed working tree.
 //     That outcome returns `partial: true`, which the runner projects as a
 //     non-success.
+//   - The reader-facing report is also a completion gate. When it finds a
+//     cross-step gap that the per-step reviews missed, one bounded reconciliation
+//     writer receives that exact report, checks run again, and a fresh reporter
+//     decides the final outcome. A second partial/blocked report is non-success.
 //
 // This is a Package workflow: it lives in the shipped examples directory the
 // resolver scans, so `/workflow-run plan-implement "<request>"` resolves it
@@ -59,6 +63,7 @@ relationships, falling back to \`grep\`, \`find\`, and direct reads.`;
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
 const IMPLEMENT_AGENT_DEFAULTS = Object.freeze({
+  model: "openai-codex/gpt-5.6-luna:medium",
   permissionMode: "agent-defined",
   workspaceMode: "project",
 });
@@ -106,6 +111,7 @@ const MAX_REVIEW_RESULT_CHARS = 16_000;
 const MAX_CHECK_EVIDENCE_CHARS = 32_000;
 const MAX_RAW_CHECK_EVIDENCE_CHARS = 128_000;
 const MAX_REPORT_CHARS = 128_000;
+const MAX_RECONCILIATION_CHARS = 128_000;
 const MAX_STEP_ATTEMPTS = 2;
 
 const STEP_ID_PATTERN = "^S[1-9][0-9]*$";
@@ -177,6 +183,18 @@ export const meta = {
     },
     { title: "collect-check-evidence", detail: "Inspect the full diff and run repository checks without edit tools." },
     { title: "report-implementation", detail: "Independently report every step's outcome against the original plan." },
+    {
+      title: "reconcile-implementation",
+      detail: "Repair one final cross-step gap when the independent report proves the plan is still partial.",
+    },
+    {
+      title: "collect-check-evidence",
+      detail: "Recheck the reconciled working tree without edit tools.",
+    },
+    {
+      title: "report-implementation",
+      detail: "Issue the terminal report after bounded reconciliation.",
+    },
   ],
 };
 
@@ -542,7 +560,7 @@ ${renderReviewResults(reviewResults, MAX_CHECK_EVIDENCE_CHARS)}
 
   phase("report-implementation");
   log("Reporting every planned step's outcome against the accepted plan.");
-  const reportText = await agent(
+  let reportText = await agent(
     `${COMMON}
 
 ${READ_ONLY_NOTE}
@@ -557,6 +575,13 @@ were given. Verify each implemented step against the plan with your own tools:
 reopen the live diff and the affected files; the task ledger, step results,
 reviews, and check evidence are leads, not proof. Say plainly what a reader must
 do next.
+
+Judge only the operator intent and the accepted plan's explicit \`Change:\` and
+\`Verify:\` clauses. Do not invent a stronger schema, extra check, or quality bar.
+An unavailable independent rerun is an evidence gap under \`## Checks\`, not by
+itself unfinished implementation, when the live files, retained machine-readable
+result, and exact recorded command outcome agree. Mark a step partial or blocked
+only from concrete conflicting live evidence, and name that evidence precisely.
 
 Return exact Markdown:
 
@@ -618,7 +643,182 @@ ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
     },
   );
 
-  if (failure === undefined) return reportText;
+  let reportOutcome = failure === undefined ? parseImplementationReportOutcome(reportText) : "blocked";
+  if (failure === undefined && reportOutcome === "partial") {
+    phase("reconcile-implementation");
+    log("The final report found unfinished plan work; running one bounded reconciliation before deciding the run.");
+    const reconciliationText = await agent(
+      `${COMMON}
+
+TASK — reconcile only the unfinished work proved by the independent final
+report below. You are the one bounded continuation after all per-step reviews.
+
+Reopen the live checkout. Preserve every change that already satisfies the
+accepted plan. Fix each concrete \`Partial\` or \`Blocked\` item in the report,
+including any checker, tests, documentation, or evidence that must change with
+it. Do not redesign the accepted plan and do not repeat completed work. Run the
+focused verification needed for the repaired gaps.
+
+Return concise Markdown naming the files changed, the exact checks and outcomes,
+and anything still unresolved. Do not return JSON or a status token.
+${HANDOFF_NOTE}
+
+--- BEGIN EXACT OPERATOR INTENT ---
+${intent}
+--- END EXACT OPERATOR INTENT ---
+
+--- BEGIN ACCEPTED PLAN ---
+${planText}
+--- END ACCEPTED PLAN ---
+
+--- BEGIN FINAL REPORT THAT PROVED THE RUN PARTIAL ---
+${reportText}
+--- END FINAL REPORT THAT PROVED THE RUN PARTIAL ---
+
+--- BEGIN CHECK EVIDENCE ---
+${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
+--- END CHECK EVIDENCE ---`,
+      {
+        ...IMPLEMENT_WRITE_OPTIONS,
+        artifact: "reconciliation.md",
+        label: "reconcile implementation",
+        maxAnswerChars: MAX_RECONCILIATION_CHARS,
+      },
+    );
+
+    phase("collect-check-evidence");
+    log("Rechecking the reconciled working tree before the terminal report.");
+    const reconciledCheckText = await agent(
+      `${COMMON}
+
+${READ_ONLY_NOTE}
+
+You may additionally call \`repository_check\` to run an existing
+\`package.json\` script in a disposable host-created worktree. It accepts only a
+script name; the host owns argv, timeout, output bounds, current-source
+materialization, and cleanup.
+
+TASK — independently verify the working tree after the bounded reconciliation.
+Reopen the full affected files and diff. Run the focused and repository checks
+that can prove or disprove every claimed repair. Look specifically for the gaps
+named by the prior partial report. Do not edit and do not decide the outcome.
+
+Return readable Markdown with exact observed changes, commands and outcomes,
+unexpected changes, and remaining evidence gaps. ${HANDOFF_NOTE}
+
+--- BEGIN EXACT OPERATOR INTENT ---
+${intent}
+--- END EXACT OPERATOR INTENT ---
+
+--- BEGIN ACCEPTED PLAN ---
+${planText}
+--- END ACCEPTED PLAN ---
+
+--- BEGIN PRIOR PARTIAL REPORT ---
+${reportText}
+--- END PRIOR PARTIAL REPORT ---
+
+--- BEGIN RECONCILIATION RESULT ---
+${reconciliationText}
+--- END RECONCILIATION RESULT ---`,
+      {
+        ...IMPLEMENT_CHECK_OPTIONS,
+        artifact: "check-evidence.md",
+        label: "collect check evidence after reconciliation",
+        maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
+      },
+    );
+
+    phase("report-implementation");
+    log("Reporting the terminal outcome after bounded reconciliation.");
+    reportText = await agent(
+      `${COMMON}
+
+${READ_ONLY_NOTE}
+
+TASK — write the terminal reader-facing implementation report after the one
+bounded reconciliation. You are a fresh reviewer and wrote none of the changes.
+
+Account for every accepted-plan step from live evidence. \`Plan implemented\`
+means the requested scope is now complete with no known gap. Use \`Partly
+implemented\` or \`Blocked\` when anything remains; do not soften that verdict
+because the reconciliation already ran.
+
+Judge only the operator intent and the accepted plan's explicit \`Change:\` and
+\`Verify:\` clauses. Do not invent a stronger schema, extra check, or quality bar.
+An unavailable independent rerun is an evidence gap under \`## Checks\`, not by
+itself unfinished implementation, when the live files, retained machine-readable
+result, and exact recorded command outcome agree. Mark a step partial or blocked
+only from concrete conflicting live evidence, and name that evidence precisely.
+
+Return exact Markdown:
+
+\`\`\`text
+# Implementation Report
+## Outcome
+<Plan implemented | Partly implemented | Blocked> — one sentence.
+
+## Steps
+### S1 — Done | Partial | Blocked | Not attempted
+Files: \`path/to/file\`
+Evidence: What you read or ran, and what it showed.
+Remaining: What is still missing, or \`none\`.
+
+## Checks
+The commands that ran and their exact outcomes.
+
+## Unexpected changes
+Anything changed that no selected step called for, or \`none\`.
+
+## Next step for the operator
+One concrete action.
+\`\`\`
+
+--- BEGIN EXACT OPERATOR INTENT ---
+${intent}
+--- END EXACT OPERATOR INTENT ---
+
+--- BEGIN ACCEPTED PLAN ---
+${planText}
+--- END ACCEPTED PLAN ---
+
+--- BEGIN PRIOR PARTIAL REPORT ---
+${reportText}
+--- END PRIOR PARTIAL REPORT ---
+
+--- BEGIN RECONCILIATION RESULT ---
+${reconciliationText}
+--- END RECONCILIATION RESULT ---
+
+--- BEGIN RECONCILED CHECK EVIDENCE ---
+${truncateText(reconciledCheckText, MAX_CHECK_EVIDENCE_CHARS)}
+--- END RECONCILED CHECK EVIDENCE ---`,
+      {
+        ...IMPLEMENT_READ_OPTIONS,
+        artifact: "implementation-report.md",
+        label: "report implementation after reconciliation",
+        maxAnswerChars: MAX_REPORT_CHARS,
+      },
+    );
+    reportOutcome = parseImplementationReportOutcome(reportText);
+  }
+
+  if (failure === undefined && reportOutcome === "complete") return reportText;
+  if (failure === undefined) {
+    return {
+      ok: false,
+      partial: true,
+      summary:
+        reportOutcome === "blocked"
+          ? "plan-implement terminal report found blocked work"
+          : "plan-implement terminal report still found unfinished work after one bounded reconciliation",
+      appliedSteps: taskLedger.filter((task) => task.status === "done").map((task) => task.id),
+      unresolvedRows: unresolvedReportStepIds(
+        reportText,
+        selected.map((step) => step.id),
+      ),
+    };
+  }
   // A deliberate partial, and the runner projects it as a non-success. The report
   // is retained as `implementation-report.md`; this envelope is what the run
   // surfaces say, so it names the step that stopped the run and the ones nobody
@@ -632,6 +832,26 @@ ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
     failedStep: failure.id,
     unresolvedRows: taskLedger.filter((task) => task.selected && task.status !== "done").map((task) => task.id),
   };
+}
+
+function parseImplementationReportOutcome(reportText) {
+  const match = /^## Outcome[ \t]*\r?\n(Plan implemented|Partly implemented|Blocked)\b/mu.exec(reportText);
+  if (match === null) {
+    throw new Error(
+      "plan-implement implementation report must contain an exact Outcome verdict: " +
+        "Plan implemented, Partly implemented, or Blocked",
+    );
+  }
+  if (match[1] === "Plan implemented") return "complete";
+  if (match[1] === "Partly implemented") return "partial";
+  return "blocked";
+}
+
+function unresolvedReportStepIds(reportText, selectedIds) {
+  const unresolved = [...reportText.matchAll(/^### (S[1-9][0-9]*) — (?:Partial|Blocked|Not attempted)[ \t]*$/gmu)].map(
+    (match) => match[1],
+  );
+  return unresolved.length > 0 ? [...new Set(unresolved)] : selectedIds;
 }
 
 /**

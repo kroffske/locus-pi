@@ -7,7 +7,7 @@
  * so tests can mock createSession and prove the wiring.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runtime/agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
@@ -87,6 +87,7 @@ export interface WorkflowAgentBridgeOptions {
    */
   createExecutor?: (opts: {
     model?: unknown;
+    thinkingLevel?: ThinkingLevel;
     live?: AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
     /** SDK turn budget derived from the call's declared `timeoutMs` (D4), so the
@@ -331,6 +332,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       options.createExecutor ??
       ((o: {
         model?: unknown;
+        thinkingLevel?: ThinkingLevel;
         live?: AgentSdkSessionExecutorOptions["live"];
         maxToolCalls?: number;
         turnTimeoutMs?: number;
@@ -339,6 +341,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       }) =>
         createAgentSdkSessionExecutor({
           ...(o.model !== undefined ? { model: o.model } : {}),
+          ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
           ...(o.live !== undefined ? { live: o.live } : {}),
           ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
           ...(o.turnTimeoutMs !== undefined ? { turnTimeoutMs: o.turnTimeoutMs } : {}),
@@ -398,6 +401,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // through `kind: "inherit"` — i.e. the call declared no tier, or declared one
       // that no layer assigns and the degradation was recorded.
       model: tier.kind === "resolved" ? tier.model : (ctx as { model?: unknown }).model,
+      ...(tier.kind === "resolved" && tier.thinking !== undefined ? { thinkingLevel: tier.thinking } : {}),
       live,
       onLiveExecution: (execution) => {
         liveExecution = execution;
@@ -594,6 +598,7 @@ type WorkflowTier =
       origin: "call-model" | "call-role" | "frontmatter";
       selector: string;
       model: unknown;
+      thinking?: ThinkingLevel;
       roleResolution: ModelRoleResolution;
     }
   | { kind: "inherit"; roleResolution: ModelRoleResolution; fallback?: string }
@@ -621,6 +626,7 @@ async function resolveWorkflowTier(input: {
       origin: "call-model",
       selector: resolution.selector,
       model: resolution.model,
+      ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
       roleResolution: frontmatterResolution,
     };
   }
@@ -673,6 +679,7 @@ async function resolveWorkflowTier(input: {
       origin: "call-role",
       selector: resolution.selector,
       model: resolution.model,
+      ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
       roleResolution: declared,
     };
   }
@@ -715,6 +722,7 @@ async function resolveWorkflowTier(input: {
     origin: "frontmatter",
     selector: resolution.selector,
     model: resolution.model,
+    ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
     roleResolution: frontmatterResolution,
   };
 }

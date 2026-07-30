@@ -6,6 +6,19 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow model effort is now executed, not merely displayed.** A concrete
+  `provider/id:level` selector passes both the resolved model and `level` to the
+  Pi child session. The packaged `plan` → `plan-implement` pair now pins every
+  stage to `openai-codex/gpt-5.6-luna:medium`, so a missing model fails by name
+  instead of silently substituting the parent session. The planning safety cap
+  is now six rounds after a real external inventory plan exhausted four while
+  still carrying two repairable verification defects. The same live run exposed
+  a second boundary: all per-step reviews could pass while the final report
+  correctly found the combined result partial. That report is now a completion
+  gate; it triggers one bounded reconciliation followed by fresh checks and a
+  fresh report, and any remaining partial or blocked verdict is returned as
+  non-success rather than `completed`.
+
 - **The shipped `plan` → `plan-implement` pair now carries an explicit,
   resumable task lifecycle.** `plan` still produces the accepted ordered
   `S<n>` plan; `plan-implement` turns the selected steps into a persisted

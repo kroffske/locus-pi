@@ -22,6 +22,7 @@ import { evaluateEvidence, type EvidenceEvaluationInput } from "./agent-evidence
 import { PetnameRegistry } from "./agent-names.js";
 import { AgentLiveTranscript, type AgentLiveTranscriptSnapshot } from "./agent-live-transcript.js";
 import { createReadOnlyAgentSessionCapabilities, type ReadOnlyAgentCustomTool } from "./agent-read-only-policy.js";
+import type { ThinkingLevel } from "../host/pi-api.js";
 
 /**
  * The live agent executor: this is the one the product runs.
@@ -109,6 +110,8 @@ export interface SdkCreateSessionOptionsLike {
    *  caller's model rather than relying on settings (which may default to a weak or
    *  unauthenticated provider). */
   model?: unknown;
+  /** Requested reasoning effort for the child session. */
+  thinkingLevel?: ThinkingLevel;
   /** Additional child instructions generated from the selected catalog agent. The
    *  default host adapter appends this through DefaultResourceLoader so Pi keeps
    *  its normal base prompt, tool instructions, context files, and skills. */
@@ -721,6 +724,8 @@ export interface AgentSdkSessionExecutorOptions {
   /** Resolved parent `Model` to pass to the child session (e.g. `ctx.model`). When
    *  omitted, the child falls back to the host's default model resolution. */
   model?: unknown;
+  /** Requested reasoning effort to pass to the child session. */
+  thinkingLevel?: ThinkingLevel;
   /** Override the durable evidence directory (default .locus/runtime/reports). */
   reportsDir?: string;
   /** Deterministic timestamps in tests. */
@@ -772,6 +777,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
     throw new Error("maxToolCalls must be a non-negative integer when provided");
   }
   const model = options.model;
+  const thinkingLevel = options.thinkingLevel;
   return {
     async run(request, signal) {
       // A per-child controller lets the fleet menu stop exactly one selected row.
@@ -819,6 +825,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
           abortTimeoutMs,
           maxToolCalls,
           model,
+          thinkingLevel,
           execution,
           options.promptEnv,
         );
@@ -853,6 +860,7 @@ async function runWithSdkSession(
   abortTimeoutMs: number,
   maxToolCalls: number | undefined,
   model: unknown,
+  thinkingLevel: ThinkingLevel | undefined,
   execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
 ): Promise<AgentRunResult> {
@@ -867,6 +875,7 @@ async function runWithSdkSession(
     abortTimeoutMs,
     maxToolCalls,
     model,
+    thinkingLevel,
     execution,
     promptEnv,
     observed,
@@ -884,6 +893,7 @@ async function runChildSession(
   abortTimeoutMs: number,
   maxToolCalls: number | undefined,
   model: unknown,
+  thinkingLevel: ThinkingLevel | undefined,
   execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
   observed: ExecutedModelObservation,
@@ -931,6 +941,7 @@ async function runChildSession(
   if (effectiveTools !== undefined) sessionOptions.tools = effectiveTools;
   if (readOnlyCapabilities?.customTools !== undefined) sessionOptions.customTools = readOnlyCapabilities.customTools;
   if (model !== undefined && model !== null) sessionOptions.model = model;
+  if (thinkingLevel !== undefined) sessionOptions.thinkingLevel = thinkingLevel;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
   if (appendSystemPrompt !== undefined) sessionOptions.appendSystemPrompt = appendSystemPrompt;
   let created: SdkCreateSessionResultLike;
