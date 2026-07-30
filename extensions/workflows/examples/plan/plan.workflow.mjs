@@ -174,6 +174,12 @@ export const meta = {
     { title: "scout-repository", detail: "One read-only scout maps the surfaces the task depends on." },
     { title: "draft-plan", detail: "The planner writes the complete plan, revising against the previous critique." },
     { title: "critique-plan", detail: "The critic reopens the evidence and returns an accept/revise verdict." },
+    // The two operator-facing stages. Only a stalled run reaches the first and
+    // only its continuation reaches the second, but both publish documents, and
+    // a publish outside a named stage is filed in the run report under whatever
+    // stage happened to run last.
+    { title: "await-operator", detail: "The round cap retains the stalled state and asks the operator to decide." },
+    { title: "accept-draft", detail: "The operator took the retained draft as the plan; no agent runs." },
   ],
 };
 
@@ -272,7 +278,14 @@ async function draftAcceptedPlan(dsl, { taskText, contextText, seedPlanText, see
  * before. The sibling `review` workflow publishes its handoff refs the same way.
  */
 function declareRoundCapHandoff(dsl, { taskText, contextText, outcome }) {
-  const { log, publishArtifact, awaitOperator } = dsl;
+  const { log, phase, publishArtifact, awaitOperator } = dsl;
+  // Name the stage these copies are published under. `publishArtifact` tags the
+  // phase that happens to be current, so without this the scout's map is filed
+  // in the reader's report as "workflow · critique-plan" — the critique stage
+  // credited with a document it never produced. It is not declared in
+  // `meta.phases` on purpose: only a stalled run reaches it, and a stage listed
+  // as planned in every successful run would be noise.
+  phase("await-operator");
   const taskRef = publishArtifact("task.md", taskText);
   const contextRef = publishArtifact("context.md", contextText);
   const planRef = publishArtifact("plan.md", outcome.planText);
@@ -322,9 +335,13 @@ function declareRoundCapHandoff(dsl, { taskText, contextText, outcome }) {
  * draft and its open defects, without re-scouting the repository.
  */
 async function resumePlanning(dsl, continued, input) {
-  const { log, publishArtifact } = dsl;
+  const { log, phase, publishArtifact } = dsl;
   const answer = requireOperatorAnswer(input);
   if (answer.toLowerCase() === ACCEPT_LAST_DRAFT_ANSWER) {
+    // Same reason as the handoff's own phase: these copies are published outside
+    // the drafting loop, and an untagged publish reads as an anonymous workflow
+    // document in the report rather than the operator's recorded decision.
+    phase("accept-draft");
     log("Operator accepted the retained draft; the critic's round cap is overridden by that decision.");
     publishArtifact("task.md", continued.taskText);
     publishArtifact("plan.md", continued.planText);

@@ -64,6 +64,18 @@ This file records user-visible changes to the public package.
 
 ### Fixed
 
+- **The `plan` run report no longer credits the critique stage with documents it
+  never produced.** The round-cap handoff republishes the task, the scout's map,
+  the last draft and the open defects so all four are the run's newest outputs,
+  and `publishArtifact` tags whichever stage happens to be current — which filed
+  the scout's map in the reader's copy as `workflow · critique-plan`. The
+  continuation's accept path was worse: it publishes outside the drafting loop
+  entirely, so the accepted plan read as an anonymous workflow document rather
+  than the operator's recorded decision. Both publish sites now name their own
+  stage, `await-operator` and `accept-draft`, and both are declared in
+  `meta.phases` and drawn on the pipeline diagram. Neither is on the path of a
+  run that ends normally.
+
 - **Answered handoff questions are not re-asked unprompted after their
   continuation fails.** When a continuation run consumed an operator's answers
   and then failed or was cancelled, the handoff became actionable again and the

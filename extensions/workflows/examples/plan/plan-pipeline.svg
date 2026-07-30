@@ -162,12 +162,16 @@
   <!-- round cap -->
   <path class="edge" d="M 650 778 L 650 814 L 880 814 L 880 850" marker-end="url(#a)"/>
   <text class="edge-label" x="768" y="806" text-anchor="middle">a 6th revise instead of an accept</text>
+  <g class="phase">
+    <rect x="610" y="806" width="200" height="30" rx="8"/>
+    <text x="626" y="826">await-operator</text>
+  </g>
   <g class="stop">
     <rect x="610" y="850" width="460" height="94" rx="12"/>
     <text class="name" x="632" y="878">No draft accepted — the operator decides</text>
     <text class="line" x="632" y="900">task.md, context.md, the draft plan.md and unresolved-defects.md are</text>
-    <text class="line" x="632" y="919">retained; one text question (plan-guidance) asks: accept last draft, or</text>
-    <text class="line" x="632" y="936">answer with guidance a continuation run redrafts under.</text>
+    <text class="line" x="632" y="919">retained; one question (plan-guidance) offers: accept last draft, or</text>
+    <text class="line" x="632" y="936">guidance a continuation redrafts under. accept-draft returns the draft.</text>
   </g>
 
   <!-- legend -->
