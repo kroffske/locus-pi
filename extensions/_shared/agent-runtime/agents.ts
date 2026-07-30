@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentDefinition, AgentEvidencePolicy, AgentSource, PermissionMode } from "./types.js";
+import type { AgentDefinition, AgentEvidencePolicy, AgentSource, PermissionMode } from "../types.js";
 
 export interface AgentDiagnostic {
   filePath: string;
@@ -23,8 +23,15 @@ export interface AgentParseResult {
   diagnostics: AgentDiagnostic[];
 }
 
-const SHARED_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const BUNDLED_AGENTS_DIR = path.resolve(SHARED_DIR, "..", "..", ".agents", "agents");
+/**
+ * Resolved from this module's own location, so it must be re-counted whenever the module
+ * moves: `extensions/_shared/agent-runtime/` is three levels below the package root that
+ * owns the bundled `.agents/agents` catalog. Getting the count wrong points the bundled
+ * source at a directory that does not exist, and agent discovery then silently returns
+ * only the project and user catalogs.
+ */
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const BUNDLED_AGENTS_DIR = path.resolve(MODULE_DIR, "..", "..", "..", ".agents", "agents");
 
 export function discoverAgentDefinitions(
   projectRoot: string,

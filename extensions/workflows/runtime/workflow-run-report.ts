@@ -17,7 +17,7 @@
 
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runner.js";
+import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
 import {
   ensureWorkflowDirectoryNoSymlink,
   WORKFLOW_ARTIFACT_COMPONENT_PATTERN,

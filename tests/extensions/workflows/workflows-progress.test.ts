@@ -12,8 +12,8 @@ import {
   installWorkflowTextWidget,
   renderAgentLiveRowsText,
 } from "../../../extensions/workflows/progress-widget.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
-import { fleetMenuState } from "../../../extensions/_shared/fleet-menu.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {

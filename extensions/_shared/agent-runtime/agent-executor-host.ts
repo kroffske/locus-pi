@@ -1,41 +1,37 @@
-import { readFileSync } from "node:fs";
-import type {
-  AgentChildOutputStats,
-  AgentExecutor,
-  AgentParentContext,
-  AgentRunRequest,
-  AgentRunResult,
-} from "./agent-runner.js";
-import type { ModelRoleResolutionRecord } from "./model-settings.js";
-import { modelRoleResolutionRecord } from "./model-settings.js";
+import type { AgentChildOutputStats, AgentExecutor, AgentRunRequest, AgentRunResult } from "./agent-runner.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
   NewSessionResultLike,
-} from "./pi-api.js";
-import type { SessionRecord } from "./session-core.js";
+} from "../pi-api.js";
+import type { SessionRecord } from "../session-core.js";
 import { getAgentWorkloadProof } from "./agent-workload-proof.js";
-import { buildAgentSystemPrompt } from "./agent-system-prompt.js";
-import { OUTPUT_DEFAULTS } from "./types.js";
+import type { AgentExecutionPromptCapsule } from "./agent-execution-prompt.js";
+import {
+  createAgentExecutionPromptCapsule,
+  formatAgentKickoffPrompt,
+  parseAgentText,
+} from "./agent-execution-prompt.js";
 
-export interface AgentExecutionPromptCapsule {
-  version: "locus.agent.prompt.v1";
-  agentName: string;
-  agentDefinitionPath?: string;
-  task: string;
-  projectRoot: string;
-  workingDirectory: string;
-  allowedTools: string[];
-  maxTurns: number;
-  depth: number;
-  maxDepth: number;
-  modelRole?: ModelRoleResolutionRecord;
-  agentSystemPrompt?: string;
-  contextDiagnostics?: string[];
-  parentContext?: string;
-}
-
+/**
+ * The superseded replacement-session executor, retained as provenance.
+ *
+ * NOT A LIVE PATH. `docs/source-audit/agents.md` records that this module "retains the former
+ * replacement-session adapter and its parser/host tests, but it is not the current `/agent run`
+ * executor"; command execution is `runAgentLiveTask` -> `createAgentSdkSessionExecutor` ->
+ * `executeAgentRunBoundary`. No registered entrypoint imports anything below, and no production
+ * file outside this module does either — only `tests/shared/agents/agent-executor-host.test.ts`.
+ *
+ * This module used to also hold the prompt capsule and text-result layer that the live SDK path
+ * does use. Those moved to `agent-execution-prompt.js`, which this file now imports, so the one
+ * remaining direction of travel is historical -> live. Read that file for the production surface.
+ *
+ * The `getAgentWorkloadProof` import below is the ONLY edge that keeps
+ * `agent-workload-proof.ts` in the shared layer rather than inside `extensions/agents/`: it is
+ * reached from `summarizeReplacementSessionEntries`, on this historical path. Retiring this
+ * module would free that module to move to its only other consumer.
+ */
 export interface AgentReplacementSessionRunInput {
   request: AgentRunRequest;
   promptCapsule?: AgentExecutionPromptCapsule;
@@ -93,83 +89,6 @@ export function createAgentReplacementSessionExecutor(
       return mapReplacementSessionOutputToRunResult(request, output);
     },
   };
-}
-
-export function createAgentExecutionPromptCapsule(
-  request: AgentRunRequest,
-  diagnostics: string[] = [],
-  promptEnv: NodeJS.ProcessEnv | undefined = process.env,
-): AgentExecutionPromptCapsule {
-  const effectivePromptEnv = promptEnv ?? process.env;
-  const capsule: AgentExecutionPromptCapsule = {
-    version: "locus.agent.prompt.v1",
-    agentName: request.agent.name,
-    task: request.task,
-    projectRoot: request.projectRoot ?? "",
-    workingDirectory: request.workingDirectory ?? request.projectRoot ?? "",
-    allowedTools: [...request.allowedTools],
-    maxTurns: request.maxTurns,
-    depth: request.depth,
-    maxDepth: request.maxDepth,
-  };
-  if (request.agent.filePath !== undefined) capsule.agentDefinitionPath = request.agent.filePath;
-  if (request.modelRoleResolution !== undefined)
-    capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
-  const agentSystemPrompt = buildAgentSystemPrompt(request, { diagnostics, env: effectivePromptEnv });
-  if (agentSystemPrompt !== undefined) capsule.agentSystemPrompt = agentSystemPrompt;
-  if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
-  const parentContextText = assembleParentContext(request.parentContext);
-  if (parentContextText !== undefined) capsule.parentContext = parentContextText;
-  return capsule;
-}
-
-export function assembleParentContext(
-  parentContext: AgentParentContext | undefined,
-  readFile: (path: string) => string = (p) => readFileSync(p, "utf8"),
-): string | undefined {
-  if (parentContext === undefined) return undefined;
-  const parts: string[] = [];
-  if (parentContext.inline !== undefined && parentContext.inline.length > 0) parts.push(parentContext.inline);
-  if (parentContext.artifactPath !== undefined && parentContext.artifactPath.length > 0) {
-    try {
-      const artifactText = readFile(parentContext.artifactPath);
-      if (artifactText.length > 0) parts.push(artifactText);
-    } catch {
-      // Explicit parent context is optional; a missing artifact should not block the child run.
-    }
-  }
-  if (parts.length === 0) return undefined;
-  return clampParentContext(parts.join("\n---\n"));
-}
-
-function clampParentContext(text: string): string {
-  const suffix = "\n...[parent context truncated]";
-  const maxBytes = OUTPUT_DEFAULTS.subagentSummaryBytes;
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  const targetBytes = Math.max(0, maxBytes - Buffer.byteLength(suffix, "utf8"));
-  let end = text.length;
-  while (end > 0 && Buffer.byteLength(text.slice(0, end), "utf8") > targetBytes) end = Math.floor(end * 0.9);
-  while (end < text.length && Buffer.byteLength(text.slice(0, end + 1), "utf8") <= targetBytes) end += 1;
-  return `${text.slice(0, end)}${suffix}`;
-}
-
-export function formatAgentKickoffPrompt(capsule: AgentExecutionPromptCapsule): string {
-  const lines = [
-    "Run the requested Locus agent task in this replacement session.",
-    "",
-    "Prompt capsule:",
-    JSON.stringify(capsule, null, 2),
-  ];
-  if (capsule.parentContext !== undefined) {
-    lines.push("", "Parent-provided context (explicit, read-only):", capsule.parentContext);
-  }
-  lines.push(
-    "",
-    "Do the work, then reply to the parent runtime in plain text. Your exact final non-empty message is the result.",
-    "Do not wrap the result in JSON and do not add a machine-readable result envelope.",
-    "If the prompt capsule includes agentSystemPrompt, treat it as this child agent's operating instructions.",
-  );
-  return lines.join("\n");
 }
 
 export function createAgentReplacementSessionHost(ctx: ExtensionCommandContext): AgentReplacementSessionHost {
@@ -321,11 +240,6 @@ export function parseAgentTextFromEntries(
     if (parsed.reason !== "Agent result text is empty.") return parsed;
   }
   return { ok: false, reason: "Agent result text is empty." };
-}
-
-export function parseAgentText(text: string): { ok: true; text: string } | { ok: false; reason: string } {
-  if (text.trim() === "") return { ok: false, reason: "Agent result text is empty." };
-  return { ok: true, text };
 }
 
 function mergePromptDiagnostics(promptCapsule: AgentExecutionPromptCapsule, diagnostics: string[]): string[] {

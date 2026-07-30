@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "./pi-api.js";
-import type { AgentDefinition, AgentFailureCause, EvidenceEvaluation } from "./types.js";
-import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "./session-core.js";
-import { createSessionStore, type SessionStore } from "./runtime-capabilities.js";
-import type { ModelRoleResolution } from "./model-settings.js";
-import { modelRoleResolutionRecord } from "./model-settings.js";
-import type { RuntimeArtifact } from "./artifacts.js";
-import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "./artifacts.js";
+import type { ExtensionAPI, ExtensionContext } from "../pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "../pi-api.js";
+import type { AgentDefinition, AgentFailureCause, EvidenceEvaluation } from "../types.js";
+import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "../session-core.js";
+import { createSessionStore, type SessionStore } from "../runtime-capabilities.js";
+import type { ModelRoleResolution } from "../model-settings.js";
+import { modelRoleResolutionRecord } from "../model-settings.js";
+import type { RuntimeArtifact } from "../artifacts.js";
+import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "../artifacts.js";
 import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
@@ -19,8 +19,8 @@ export type ApprovalTier = "allow" | "prompt" | "deny";
  * without importing a module that reaches for `node:fs`. Re-exported here because this
  * is the envelope that first carries it.
  */
-export { AGENT_FAILURE_CAUSES } from "./types.js";
-export type { AgentFailureCause } from "./types.js";
+export { AGENT_FAILURE_CAUSES } from "../types.js";
+export type { AgentFailureCause } from "../types.js";
 
 export interface AgentParentContext {
   inline?: string;

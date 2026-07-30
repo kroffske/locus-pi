@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   DEFAULT_WORKFLOW_BUDGET,
   WORKFLOW_MAX_TIMEOUT_MS,

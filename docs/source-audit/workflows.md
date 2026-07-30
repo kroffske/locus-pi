@@ -206,20 +206,20 @@ or borrowed runtime implementation was identified for this source-audit slice.
   absent legacy disposition falls back to `ok`, while malformed future values
   remain `unknown`. `cancelled` is a distinct terminal live state; terminal
   mapping clears active tool state so the progress panel and shared fleet agree.
-- `extensions/_shared/agent-live-panel.ts` owns status markers and short event
+- `extensions/_shared/agent-runtime/agent-live-panel.ts` owns status markers and short event
   grammar: success only for `done`, distinct cancelled and failed variants.
-- `extensions/_shared/fleet-menu.ts` uses explicit `workflowRunId` provenance
+- `extensions/_shared/agent-runtime/fleet-menu.ts` uses explicit `workflowRunId` provenance
   to keep workflow rows inspectable while suppressing both the `x stop` hint and
   handler. Escape is consumed without host abort while workflow work is active;
   `/workflows stop` remains the only workflow cancellation entrypoint.
-- `extensions/_shared/agent-sdk-host.ts` settles the canonical SDK child row to
+- `extensions/_shared/agent-runtime/agent-sdk-host.ts` settles the canonical SDK child row to
   `cancelled` on an abort before returning the child result; the journal mapping
   settles the workflow parent to the same state. `AgentLiveStore.patch` owns the
   shared terminal invariant for `done`/`cancelled`/`error`: remove all three live
   tool fields and freeze elapsed time once. Turn cancellation waits only a
   bounded interval for the SDK `abort()` acknowledgement, then continues trace,
   result, and disposal work even if that promise never settles.
-- `extensions/_shared/agent-read-only-policy.ts` owns the optional
+- `extensions/_shared/agent-runtime/agent-read-only-policy.ts` owns the optional
   `repository_check` capability for read-only children. The workflow bridge
   freezes the exact package script map before any child can write. The model can
   name only a baseline script while the entire current map still equals that

@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentLiveStore, type SdkAgentSessionEventLike } from "../../../extensions/_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type SdkAgentSessionEventLike,
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const tempRoots: string[] = [];
@@ -11,7 +14,7 @@ afterEach(() => {
   agentLiveStore.reset();
   vi.resetModules();
   vi.doUnmock("@earendil-works/pi-coding-agent");
-  vi.doUnmock("../../../extensions/_shared/agent-runner.js");
+  vi.doUnmock("../../../extensions/_shared/agent-runtime/agent-runner.js");
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -143,9 +146,9 @@ describe("agent task tool execution", () => {
   });
 
   it("stops progress and surfaces an error when the run boundary throws", async () => {
-    vi.doMock("../../../extensions/_shared/agent-runner.js", async () => {
-      const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runner.js")>(
-        "../../../extensions/_shared/agent-runner.js",
+    vi.doMock("../../../extensions/_shared/agent-runtime/agent-runner.js", async () => {
+      const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-runner.js")>(
+        "../../../extensions/_shared/agent-runtime/agent-runner.js",
       );
       return {
         ...actual,

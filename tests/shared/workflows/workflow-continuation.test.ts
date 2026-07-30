@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Value } from "@sinclair/typebox/value";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   assertWorkflowContinuation,
   createWorkflowArtifactStore,

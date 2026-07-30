@@ -3,7 +3,7 @@
  * proves; this entrypoint opens the consumer-side writer and closes the producer's.
  */
 import type { ExtensionAPI } from "../../../extensions/_shared/pi-api.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,

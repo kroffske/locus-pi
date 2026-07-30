@@ -10,25 +10,31 @@ import type {
   AgentRunResult,
 } from "./agent-runner.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
-import { modelSelectorFromModel } from "./live-model-display.js";
-import { createAgentExecutionPromptCapsule, formatAgentKickoffPrompt, parseAgentText } from "./agent-executor-host.js";
-import type { SessionRecord } from "./session-core.js";
-import { runtimeStateDir } from "./files.js";
+import { modelSelectorFromModel } from "../live-model-display.js";
+import {
+  createAgentExecutionPromptCapsule,
+  formatAgentKickoffPrompt,
+  parseAgentText,
+} from "./agent-execution-prompt.js";
+import type { SessionRecord } from "../session-core.js";
+import { runtimeStateDir } from "../files.js";
 import { evaluateEvidence } from "./agent-evidence-evaluator.js";
-import type { EvidenceEvaluationInput } from "./types.js";
+import type { EvidenceEvaluationInput } from "../types.js";
 import { PetnameRegistry } from "./agent-names.js";
 import { AgentLiveTranscript, type AgentLiveTranscriptSnapshot } from "./agent-live-transcript.js";
 import { createReadOnlyAgentSessionCapabilities, type ReadOnlyAgentCustomTool } from "./agent-read-only-policy.js";
 
 /**
- * Tool-context sibling of `createAgentReplacementSessionExecutor`.
+ * The live agent executor: this is the one the product runs.
  *
- * The command-context executor (agent-executor-host.ts) is backed by
- * `ctx.newSession`, which is structurally unreachable from a tool `execute()`
- * context. This executor instead spawns a real HEADLESS child agent session via
- * the top-level public SDK `createAgentSession`, so the programmatic `task` tool
- * can run a genuine sub-agent. It reuses the same capsule + text-result layer as
- * the command path, and it does NOT touch the boundary/runner.
+ * Its superseded counterpart is the command-context executor in
+ * `agent-executor-host.ts`, backed by `ctx.newSession`, which is structurally
+ * unreachable from a tool `execute()` context and is retained only as provenance.
+ * This executor instead spawns a real HEADLESS child agent session via the
+ * top-level public SDK `createAgentSession`, so the programmatic `task` tool can
+ * run a genuine sub-agent. It shares the capsule + text-result layer with that
+ * historical path — both import `agent-execution-prompt.js` — and it does NOT
+ * touch the boundary/runner.
  */
 
 /** Diagnostic token stamped on blocked results when the SDK host is unavailable. */

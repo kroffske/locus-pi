@@ -8,12 +8,12 @@ import {
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
-} from "../../../extensions/_shared/agent-sdk-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   writeAgentRunResultArtifact,
   type AgentRunRequest,
   type AgentRunResult,
-} from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 
 const baseAgent: AgentDefinition = {

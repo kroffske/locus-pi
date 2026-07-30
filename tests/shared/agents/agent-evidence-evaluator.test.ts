@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateEvidence } from "../../../extensions/_shared/agent-evidence-evaluator.js";
+import { evaluateEvidence } from "../../../extensions/_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { EvidenceEvaluationInput } from "../../../extensions/_shared/types.js";
 
 const baseInput: EvidenceEvaluationInput = {

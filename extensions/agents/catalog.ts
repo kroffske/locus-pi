@@ -7,7 +7,7 @@
  * unknown-agent report reads.
  */
 import { Type } from "@sinclair/typebox";
-import { discoverAgentDefinitions, formatAgentCatalogHint } from "../_shared/agents.js";
+import { discoverAgentDefinitions, formatAgentCatalogHint } from "../_shared/agent-runtime/agents.js";
 import { sharedState } from "../_shared/state.js";
 import type { AgentDefinition } from "../_shared/types.js";
 

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   captureRepositoryCheckScripts,
   createReadOnlyAgentSessionCapabilities,
-} from "../../../extensions/_shared/agent-read-only-policy.js";
+} from "../../../extensions/_shared/agent-runtime/agent-read-only-policy.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();

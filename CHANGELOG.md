@@ -6,6 +6,58 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The agent execution stack now lives in a named layer.** Thirteen modules — agent
+  discovery, the run boundary, the SDK host, the read-only tool policy, live rows, the
+  live transcript, petnames, the system prompt and its context extras, evidence
+  evaluation, workload proof and the fleet menu — moved from `extensions/_shared/` to
+  `extensions/_shared/agent-runtime/`. Their package paths changed accordingly; nothing
+  else about them did.
+  **`_shared` was flat, so its declared layers did not exist as anything.** The
+  ownership check had already assigned every module a layer and a rank, and enforced the
+  import direction between them, but all forty-nine files still sat in one directory —
+  so the layer a file belonged to was invisible in the tree and knowable only by reading
+  a table in a script. This is the first layer to become a real directory, which also
+  turns on the rule that a file's directory must equal its declared layer: from here a
+  module cannot be filed under the wrong owner without the check saying so.
+  **A path-only move would have silently emptied the bundled agent catalog.**
+  `agents.ts` derives the package's bundled `.agents/agents` directory from its own
+  `import.meta.url`, two levels up. One directory deeper, that walk resolves to
+  `extensions/.agents/agents`, which does not exist — and agent discovery does not treat
+  a missing bundled directory as an error, so `/agent list` would have quietly dropped to
+  project and user catalogs with the ten shipped agents gone and nothing reported. The
+  derivation now goes three levels up and resolves to the same directory it always did;
+  a sweep of all thirteen modules for self-referential paths found this one and no other.
+  **The agent executor was two things in one file, and only one of them runs.**
+  `agent-executor-host.ts` held both the prompt capsule and text-result layer that every
+  live agent execution goes through, and the superseded replacement-session executor that
+  the source audit records as retained provenance. The live half — the exact three symbols
+  the SDK host imports, plus the parent-context assembly they reach — is now
+  `agent-execution-prompt.ts`, and the historical module imports it rather than exporting
+  to it. So the production surface is the whole content of one file instead of a third of
+  a large one.
+  **The historical half was not deleted, and that was a judgement call.** Nothing
+  registered reaches it: no entrypoint, and no source outside the module itself. On reach
+  alone it could go. But retaining it is a written decision in the source audit rather
+  than an oversight, and overturning a standing decision is not what a relocation is for
+  — so this change made the boundary visible and left the decision to be taken on its own
+  merits. One consequence is recorded rather than acted on: the only reason
+  `agent-workload-proof.ts` is shared at all is a single read from inside that historical
+  path, so retiring it would free that module to move into the agents extension, which is
+  its only other consumer.
+  **The fleet menu's process-global state now has the proof it never had.**
+  `fleet-menu.ts` owns a versioned `globalThis` slot holding the menu's focus and cursor,
+  and moving a module that owns such a slot is how live state gets duplicated: Pi loads
+  every registered entrypoint with the module cache disabled, so the agents and workflows
+  entrypoints each hold their own instance and only the slot makes them agree. The
+  ownership check verifies statically that one module names the slot — a source-level
+  count that cannot see the failure that matters. With two copies, a menu focused through
+  one entrypoint is invisible to the interrupt guard living in the other, and a close
+  performed by a peer is a silent no-op that leaves the first side believing it still
+  holds focus. A new test loads two entrypoints through the real loader, has each
+  subscribe before either mutates, and then has one open and focus the menu and the
+  _other_ release it — confirmed by duplicating the registry and watching the slot-level
+  assertions stay green while every cross-entrypoint one failed.
+
 - **The workflow runtime now lives in the extension that owns it.** Fourteen
   `workflow-*` modules — the DSL core, the script loader, the journal, the agent
   bridge, replay, artifacts, budget, worktrees, results, run reports, resources,

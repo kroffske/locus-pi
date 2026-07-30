@@ -8,7 +8,7 @@ import {
   AGENT_CATALOG_HINT_MAX_ENTRIES,
   discoverAgentDefinitions,
   formatAgentCatalogHint,
-} from "../../../extensions/_shared/agents.js";
+} from "../../../extensions/_shared/agent-runtime/agents.js";
 import type { AgentDefinition, AgentSource } from "../../../extensions/_shared/types.js";
 import { createHarness, emit } from "../../test-harness.js";
 

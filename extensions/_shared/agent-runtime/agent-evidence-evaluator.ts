@@ -1,4 +1,4 @@
-import type { EvidenceEvaluation, EvidenceEvaluationInput } from "./types.js";
+import type { EvidenceEvaluation, EvidenceEvaluationInput } from "../types.js";
 
 const ANY_TOOL_CALL = "<any tool call>";
 // Child agents are prompted in English, so this honesty check only matches English claims.

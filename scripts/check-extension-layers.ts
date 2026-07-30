@@ -136,6 +136,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "agents",
     "agent-context-extras",
     "agent-evidence-evaluator",
+    "agent-execution-prompt",
     "agent-executor-host",
     "agent-live-panel",
     "agent-live-transcript",

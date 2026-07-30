@@ -4,7 +4,7 @@ import {
   createAgentRunRequest,
   executeAgentRunBoundary,
   validateRunPolicy,
-} from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { MemorySessionStore, createDeterministicSessionIdFactory } from "../../../extensions/_shared/session-core.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
@@ -32,7 +32,10 @@ function fullRequest(input: Partial<AgentRunRequest>): AgentRunRequest {
 describe("agent runner contract", () => {
   it("blocks without an executor while recording child lifecycle entries", async () => {
     const h = createHarness("/repo", { sessionId: "parent-session" });
-    const store = new MemorySessionStore({ idFactory: createDeterministicSessionIdFactory("m10"), now: () => "2026-06-02T00:00:00.000Z" });
+    const store = new MemorySessionStore({
+      idFactory: createDeterministicSessionIdFactory("m10"),
+      now: () => "2026-06-02T00:00:00.000Z",
+    });
 
     const result = await executeAgentRunBoundary({
       pi: h.pi,
@@ -54,19 +57,26 @@ describe("agent runner contract", () => {
         status: "failed",
       },
     });
-    expect(store.latestEntry(result.childSession!.id, "message")?.payload.content).toContain("Agent run requested for reviewer.");
+    expect(store.latestEntry(result.childSession!.id, "message")?.payload.content).toContain(
+      "Agent run requested for reviewer.",
+    );
   });
 
   it("enforces budgets, depth, and allowed tools before creating a child run", () => {
     expect(validateRunPolicy(fullRequest({ maxTurns: 0 }))).toBe("maxTurns must be between 1 and 20.");
     expect(validateRunPolicy(fullRequest({ depth: 1, maxDepth: 1 }))).toBe("Agent run depth limit reached.");
-    expect(validateRunPolicy(fullRequest({ allowedTools: ["read", "bash"] }))).toBe("Requested tools exceed the agent definition allow-list.");
+    expect(validateRunPolicy(fullRequest({ allowedTools: ["read", "bash"] }))).toBe(
+      "Requested tools exceed the agent definition allow-list.",
+    );
   });
 
   it("does not run local approval prompts before creating a child run", async () => {
     const h = createHarness("/repo", { sessionId: "parent-session" });
     h.ctx.ui.confirm = async () => false;
-    const store = new MemorySessionStore({ idFactory: createDeterministicSessionIdFactory("m10"), now: () => "2026-06-02T00:00:00.000Z" });
+    const store = new MemorySessionStore({
+      idFactory: createDeterministicSessionIdFactory("m10"),
+      now: () => "2026-06-02T00:00:00.000Z",
+    });
 
     const result = await executeAgentRunBoundary({
       pi: h.pi,

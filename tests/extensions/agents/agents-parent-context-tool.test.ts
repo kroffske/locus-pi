@@ -6,15 +6,15 @@ import agents from "../../../extensions/agents/index.js";
 import {
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
-} from "../../../extensions/_shared/agent-executor-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const runSpy = vi.fn();
 const tempRoots: string[] = [];
 
-vi.mock("../../../extensions/_shared/agent-sdk-host.js", async () => {
-  const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-sdk-host.js")>(
-    "../../../extensions/_shared/agent-sdk-host.js",
+vi.mock("../../../extensions/_shared/agent-runtime/agent-sdk-host.js", async () => {
+  const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-sdk-host.js")>(
+    "../../../extensions/_shared/agent-runtime/agent-sdk-host.js",
   );
   return {
     ...actual,

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agents.js";
+import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agent-runtime/agents.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
 import { createHarness, runTool } from "../../test-harness.js";
 

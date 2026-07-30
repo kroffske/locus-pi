@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionMessage } from "../_shared/pi-api.js";
-import { formatDuration } from "../_shared/agent-live-panel.js";
+import { formatDuration } from "../_shared/agent-runtime/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";

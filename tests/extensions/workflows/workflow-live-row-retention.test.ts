@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   pruneCompletedWorkflowRunLiveRows,

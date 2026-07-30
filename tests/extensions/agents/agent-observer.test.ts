@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import devextDoctor from "../../../extensions/devext-doctor/index.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
 
@@ -37,11 +37,7 @@ describe("agent observer command", () => {
       elapsedMs: 42,
       currentTools: ["read", "yield"],
       stepCount: 3,
-      eventLines: [
-        "event type=tool_call tool=read",
-        "event type=tool_result tool=read",
-        "event type=turn_end",
-      ],
+      eventLines: ["event type=tool_call tool=read", "event type=tool_result tool=read", "event type=turn_end"],
     });
     agentLiveStore.begin({
       id: "row-queued",

@@ -6,12 +6,12 @@ import {
   assembleParentContext,
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
-} from "../../../extensions/_shared/agent-executor-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
 import {
   createAgentRunRequest,
   executeAgentRunBoundary,
   type AgentExecutor,
-} from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/pi-api.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 

@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { evaluateEvidence } from "../../../extensions/_shared/agent-evidence-evaluator.js";
-import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agents.js";
+import { evaluateEvidence } from "../../../extensions/_shared/agent-runtime/agent-evidence-evaluator.js";
+import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
 import {
   buildModelRolesState,
   DEFAULT_MODEL_ROLES,

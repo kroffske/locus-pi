@@ -8,7 +8,7 @@ import {
   type AgentExecutor,
   type AgentFailureCause,
   type AgentRunRequest,
-} from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
   AgentSdkUnavailableError,
@@ -17,7 +17,7 @@ import {
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
-} from "../../../extensions/_shared/agent-sdk-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   createWorkflowAgentRunner,
   WorkflowAgentUnavailableError,
@@ -882,7 +882,9 @@ describe("agent attempts — declaration", () => {
       expect(tools.length, `${declaration} parsed as empty in ${file}`).toBeGreaterThan(0);
       return tools;
     };
-    const hostSafe = new Set(literal("extensions/_shared/agent-read-only-policy.ts", "const READ_ONLY_SAFE_TOOLS"));
+    const hostSafe = new Set(
+      literal("extensions/_shared/agent-runtime/agent-read-only-policy.ts", "const READ_ONLY_SAFE_TOOLS"),
+    );
     const runtimeNoWrite = literal("extensions/workflows/runtime/workflow-runtime.ts", "const AGENT_NO_WRITE_TOOLS");
 
     expect(runtimeNoWrite.filter((tool) => !hostSafe.has(tool))).toEqual([]);

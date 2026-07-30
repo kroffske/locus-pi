@@ -71,10 +71,18 @@ export function formatAgentContextExtras(resolution: AgentContextExtrasResolutio
   if (resolution.memory !== undefined) sections.push(formatMemoryBlock(resolution.memory));
   for (const skill of resolution.skills) sections.push(formatSkillBlock(skill));
   if (sections.length === 0) return undefined;
-  return clampUtf8Text(["# Context extras", ...sections].join("\n\n"), MAX_TOTAL_EXTRAS_BYTES, "...[context extras truncated]");
+  return clampUtf8Text(
+    ["# Context extras", ...sections].join("\n\n"),
+    MAX_TOTAL_EXTRAS_BYTES,
+    "...[context extras truncated]",
+  );
 }
 
-export function buildAgentContextExtrasText(options: AgentContextExtrasOptions): { text: string | undefined; diagnostics: string[]; enabled: boolean } {
+export function buildAgentContextExtrasText(options: AgentContextExtrasOptions): {
+  text: string | undefined;
+  diagnostics: string[];
+  enabled: boolean;
+} {
   const resolution = resolveAgentContextExtras(options);
   return {
     text: formatAgentContextExtras(resolution),
@@ -159,13 +167,7 @@ function formatDiagnosticsSection(messages: string[]): string {
 }
 
 function formatMemoryBlock(block: AgentContextTextBlock): string {
-  const lines = [
-    "## Memory",
-    `Requested: ${block.requested}`,
-    `Source: ${block.source}`,
-    "",
-    block.content,
-  ];
+  const lines = ["## Memory", `Requested: ${block.requested}`, `Source: ${block.source}`, "", block.content];
   if (block.truncated) lines.push("First 200 lines kept.");
   return lines.join("\n");
 }
@@ -256,7 +258,11 @@ function defaultExists(filePath: string): boolean {
   }
 }
 
-function clampBoundedContent(text: string, maxLines: number, maxBytes: number): { content: string; truncated: boolean } {
+function clampBoundedContent(
+  text: string,
+  maxLines: number,
+  maxBytes: number,
+): { content: string; truncated: boolean } {
   const lines = text.split(/\r?\n/);
   const lineLimited = lines.slice(0, maxLines).join("\n");
   const truncated = lines.length > maxLines || Buffer.byteLength(lineLimited, "utf8") > maxBytes;
@@ -296,7 +302,13 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 }
 
 function looksLikePathSpec(value: string): boolean {
-  return value.includes("/") || value.includes("\\") || value.startsWith(".") || value.startsWith("~") || path.extname(value) !== "";
+  return (
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.startsWith(".") ||
+    value.startsWith("~") ||
+    path.extname(value) !== ""
+  );
 }
 
 function expandHome(value: string): string {

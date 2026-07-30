@@ -35,7 +35,7 @@ import {
   type WorkflowBudget,
 } from "./workflow-budget.js";
 import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
-import type { AgentExecutor } from "../../_shared/agent-runner.js";
+import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
 import {
   buildWorkflowFailureDiagnostic,
@@ -171,7 +171,7 @@ export interface RunWorkflowScriptOptions {
   budget?: Partial<WorkflowBudget>;
   createExecutor?: (o: {
     model?: unknown;
-    live?: import("../../_shared/agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
+    live?: import("../../_shared/agent-runtime/agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
     turnTimeoutMs?: number;
     reportsDir?: string;

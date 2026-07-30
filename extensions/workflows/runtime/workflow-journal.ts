@@ -9,7 +9,11 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveStatus } from "../../_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveExecutionHandle,
+  type AgentLiveStatus,
+} from "../../_shared/agent-runtime/agent-sdk-host.js";
 import { runtimeStateDir } from "../../_shared/files.js";
 import { AGENT_FAILURE_CAUSES } from "../../_shared/types.js";
 import type {

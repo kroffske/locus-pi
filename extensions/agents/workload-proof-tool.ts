@@ -4,7 +4,7 @@
  * only.
  */
 import { Type } from "@sinclair/typebox";
-import { writeAgentWorkloadProof } from "../_shared/agent-workload-proof.js";
+import { writeAgentWorkloadProof } from "../_shared/agent-runtime/agent-workload-proof.js";
 import type { ExtensionAPI } from "../_shared/pi-api.js";
 import { textResult } from "../_shared/pi-api.js";
 import { validateParams } from "../_shared/validation.js";

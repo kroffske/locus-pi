@@ -20,8 +20,8 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type AgentLiveRow,
-} from "../../../extensions/_shared/agent-sdk-host.js";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
@@ -38,7 +38,7 @@ import {
   formatAgentLiveRowLine,
   formatRoundBadge,
   orderAgentLiveRows,
-} from "../../../extensions/_shared/agent-live-panel.js";
+} from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 
 afterEach(() => {
   agentLiveStore.reset();

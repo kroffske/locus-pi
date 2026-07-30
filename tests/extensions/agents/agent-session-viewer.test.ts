@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { agentLiveStore, type AgentLiveExecutionHandle } from "../../../extensions/_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveExecutionHandle,
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import agents from "../../../extensions/agents/index.js";
 import { AgentSessionViewer, createAgentViewerCapability } from "../../../extensions/agents/session-viewer.js";
 import { createHarness, emit } from "../../test-harness.js";

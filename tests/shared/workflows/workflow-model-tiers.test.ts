@@ -8,8 +8,8 @@ import {
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type SdkCreateSessionOptionsLike,
-} from "../../../extensions/_shared/agent-sdk-host.js";
-import type { AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,

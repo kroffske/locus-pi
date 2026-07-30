@@ -7,7 +7,10 @@ export interface AgentSystemPromptOptions extends Pick<AgentContextExtrasOptions
   diagnostics?: string[];
 }
 
-export function buildAgentSystemPrompt(request: AgentRunRequest, options: AgentSystemPromptOptions = {}): string | undefined {
+export function buildAgentSystemPrompt(
+  request: AgentRunRequest,
+  options: AgentSystemPromptOptions = {},
+): string | undefined {
   const instructions = request.agent.systemPrompt?.trim();
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
   const extras = buildAgentContextExtrasText({
@@ -17,9 +20,11 @@ export function buildAgentSystemPrompt(request: AgentRunRequest, options: AgentS
     ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.exists === undefined ? {} : { exists: options.exists }),
   });
-  if (options.diagnostics !== undefined && extras.diagnostics.length > 0) options.diagnostics.push(...extras.diagnostics);
+  if (options.diagnostics !== undefined && extras.diagnostics.length > 0)
+    options.diagnostics.push(...extras.diagnostics);
 
-  if ((instructions === undefined || instructions === "") && extras.text === undefined && !extras.enabled) return undefined;
+  if ((instructions === undefined || instructions === "") && extras.text === undefined && !extras.enabled)
+    return undefined;
 
   const lines = [
     `<active_agent name="${escapeAttribute(request.agent.name)}"/>`,

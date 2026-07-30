@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  createAgentExecutionPromptCapsule,
   createAgentReplacementSessionExecutor,
   createAgentReplacementSessionHost,
+  parseAgentTextFromEntries,
+} from "../../../extensions/_shared/agent-runtime/agent-executor-host.js";
+import {
+  createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
   parseAgentText,
-  parseAgentTextFromEntries,
-} from "../../../extensions/_shared/agent-executor-host.js";
+} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
 import { buildModelRolesState, resolveAgentModelPreference } from "../../../extensions/_shared/model-settings.js";
-import type { AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,

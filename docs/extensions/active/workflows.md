@@ -652,7 +652,7 @@ events still uses the same semantic completion grammar in TUI, RPC, and no-UI mo
 
 Workflow `agent()` steps still create source-backed workflow parent rows and pass `live.parentRowId` to SDK child sessions, but the live renderer collapses a workflow parent row once its real SDK child row exists. The visible running view therefore avoids duplicate `Working` lines such as `quick_task (label)` plus child `label`; it shows the group row, then the actual child agent row (`agent[model /effort=level] on task "label"`) and a compact current-task line with the task label plus active tool/args when available. The final summary appears in place, so the live view is never replaced by a truncated text widget.
 
-The row renderer is the shared local `AgentLivePanel` (`extensions/_shared/agent-live-panel.ts`),
+The row renderer is the shared local `AgentLivePanel` (`extensions/_shared/agent-runtime/agent-live-panel.ts`),
 not copied `pi-subagents` UI code. It renders source-backed optional fields only:
 concrete runtime model plus `/effort` thinking level, activity state, current tools,
 bounded current-task args, `steps=<n>(events)`, `turns=<n>(model turns)`, token counts,

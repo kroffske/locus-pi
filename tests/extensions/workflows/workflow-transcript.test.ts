@@ -5,7 +5,7 @@ import {
   persistCommandWorkflowTranscript,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../extensions/workflows/workflow-transcript.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,

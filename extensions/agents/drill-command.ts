@@ -4,10 +4,10 @@
  * a group summary, or ambiguous, and open the native session viewer on it with
  * the loop-round submenu the run journal supports.
  */
-import { agentLiveStore } from "../_shared/agent-sdk-host.js";
-import type { AgentLiveRow } from "../_shared/agent-sdk-host.js";
-import { agentLiveShortId, formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
-import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/fleet-menu.js";
+import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveShortId, formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
+import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/agent-runtime/fleet-menu.js";
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,

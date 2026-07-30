@@ -4,9 +4,16 @@
  * plus the `/agent run` slash wrapper that installs the progress panel around it.
  * The `task`/`spawn_agent` tool is the other client (see task-tool.ts).
  */
-import { createAgentRunRequest, executeAgentRunBoundary, type ApprovalTier } from "../_shared/agent-runner.js";
-import { agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-sdk-host.js";
-import { formatAgentFinishedEventLine, formatAgentStartedEventLine } from "../_shared/agent-live-panel.js";
+import {
+  createAgentRunRequest,
+  executeAgentRunBoundary,
+  type ApprovalTier,
+} from "../_shared/agent-runtime/agent-runner.js";
+import { agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-runtime/agent-sdk-host.js";
+import {
+  formatAgentFinishedEventLine,
+  formatAgentStartedEventLine,
+} from "../_shared/agent-runtime/agent-live-panel.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/command-ui.js";
 import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
 import {

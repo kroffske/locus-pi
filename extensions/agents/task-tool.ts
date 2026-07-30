@@ -4,7 +4,7 @@
  * Both route through the same createAgentSession host + honesty-gate and report
  * requestedSurface:"task" internally, so only the registered tool name differs.
  */
-import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-sdk-host.js";
+import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/command-ui.js";
 import { resolveLiveModelDisplay } from "../_shared/live-model-display.js";
 import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model-settings.js";

@@ -1,12 +1,16 @@
 import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
-import { agentLiveStore, type AgentLiveExecutionHandle, type AgentLiveRow } from "../_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveExecutionHandle,
+  type AgentLiveRow,
+} from "../_shared/agent-runtime/agent-sdk-host.js";
 import type {
   AgentLiveTranscriptSnapshot,
   AgentTranscriptBlock,
   AgentTranscriptToolBlock,
-} from "../_shared/agent-live-transcript.js";
+} from "../_shared/agent-runtime/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
-import { formatAgentDrillTitle } from "../_shared/agent-live-panel.js";
+import { formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../_shared/error-text.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";

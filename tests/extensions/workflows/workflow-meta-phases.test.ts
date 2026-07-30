@@ -12,7 +12,7 @@ import {
   packagedWorkflowPath,
   runWorkflowScript,
 } from "../../../extensions/workflows/runtime/workflow-runner.js";
-import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runner.js";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 

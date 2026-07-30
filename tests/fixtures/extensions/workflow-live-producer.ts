@@ -10,7 +10,7 @@
  * directions rather than only the direction the writer happened to be created in.
  */
 import type { ExtensionAPI } from "../../../extensions/_shared/pi-api.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,

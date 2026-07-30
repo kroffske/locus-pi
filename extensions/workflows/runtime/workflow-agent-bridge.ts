@@ -9,19 +9,19 @@
 
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/pi-api.js";
-import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runner.js";
+import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runtime/agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
-import type { AgentExecutor } from "../../_shared/agent-runner.js";
+import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import {
   agentLiveStore,
   createAgentSdkSessionExecutor,
   AGENT_SDK_UNAVAILABLE_HINT,
   type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
-} from "../../_shared/agent-sdk-host.js";
-import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runner.js";
-import { discoverAgentDefinitions } from "../../_shared/agents.js";
+} from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
+import { discoverAgentDefinitions } from "../../_shared/agent-runtime/agents.js";
 import type { ModelRoleResolution } from "../../_shared/model-settings.js";
 import {
   DEFAULT_MODEL_ROLES,
@@ -46,7 +46,7 @@ import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-bu
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/workflow-model-resolve.js";
 import type { AgentDefinition, AgentFailureCause, PermissionMode, WorkspaceMode } from "../../_shared/types.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
-import { captureRepositoryCheckScripts } from "../../_shared/agent-read-only-policy.js";
+import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent-read-only-policy.js";
 
 // ---------------------------------------------------------------------------
 // Exported types

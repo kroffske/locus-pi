@@ -271,10 +271,11 @@ export class AgentLiveTranscript {
     while (this.#blocks.length > 0) {
       const budget = transcriptBudget(this.#blocks);
       if (
-        this.#blocks.length <= MAX_TRANSCRIPT_BLOCKS
-        && budget.bytes <= MAX_TRANSCRIPT_BYTES
-        && budget.nodes <= MAX_TRANSCRIPT_NODES
-      ) break;
+        this.#blocks.length <= MAX_TRANSCRIPT_BLOCKS &&
+        budget.bytes <= MAX_TRANSCRIPT_BYTES &&
+        budget.nodes <= MAX_TRANSCRIPT_NODES
+      )
+        break;
       this.#blocks.shift();
       removed += 1;
     }
@@ -325,16 +326,22 @@ function assistantMessage(value: Record<string, unknown>): AgentTranscriptAssist
 
 function assistantContent(value: unknown): AgentTranscriptContent[] {
   if (!isRecord(value)) return [];
-  if (value.type === "text") return [{ type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_ASSISTANT_TEXT_LENGTH) }];
-  if (value.type === "thinking") return [{ type: "thinking", thinking: boundedString(fieldMessage(value.thinking) ?? "", MAX_ASSISTANT_TEXT_LENGTH) }];
+  if (value.type === "text")
+    return [{ type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_ASSISTANT_TEXT_LENGTH) }];
+  if (value.type === "thinking")
+    return [
+      { type: "thinking", thinking: boundedString(fieldMessage(value.thinking) ?? "", MAX_ASSISTANT_TEXT_LENGTH) },
+    ];
   if (value.type !== "toolCall") return [];
   const id = fieldMessage(value.id);
-  return [{
-    type: "toolCall",
-    ...(id === undefined ? {} : { id }),
-    name: fieldMessage(value.name) ?? "tool",
-    arguments: boundedValue(value.arguments ?? {}),
-  }];
+  return [
+    {
+      type: "toolCall",
+      ...(id === undefined ? {} : { id }),
+      name: fieldMessage(value.name) ?? "tool",
+      arguments: boundedValue(value.arguments ?? {}),
+    },
+  ];
 }
 
 function toolResult(value: unknown, isError: boolean): AgentTranscriptToolResult | undefined {
@@ -361,7 +368,8 @@ function resultContentItem(value: unknown): AgentTranscriptToolResult["content"]
   if (value.type === "image") {
     return [{ type: "image", data: REDACTED, mimeType: fieldMessage(value.mimeType) ?? "application/octet-stream" }];
   }
-  if (value.type === "text") return [{ type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_TOOL_VALUE_LENGTH) }];
+  if (value.type === "text")
+    return [{ type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_TOOL_VALUE_LENGTH) }];
   if (value.content !== undefined) return resultContent(value.content);
   return [{ type: "text", text: boundedString(stringify(boundedValue(value)), MAX_TOOL_VALUE_LENGTH) }];
 }
@@ -384,7 +392,11 @@ function boundedValue(value: unknown, depth = 0): unknown {
 
 function transcriptBudget(blocks: readonly AgentTranscriptBlock[]): { bytes: number; nodes: number } {
   let serialized: string;
-  try { serialized = JSON.stringify(blocks); } catch { serialized = String(blocks); }
+  try {
+    serialized = JSON.stringify(blocks);
+  } catch {
+    serialized = String(blocks);
+  }
   return { bytes: Buffer.byteLength(serialized, "utf8"), nodes: countNodes(blocks) };
 }
 
@@ -428,15 +440,20 @@ function eventToolCallId(event: unknown): string | undefined {
 
 function eventToolName(event: unknown): string | undefined {
   if (!isRecord(event)) return undefined;
-  return fieldMessage(event.toolName) ?? fieldMessage(event.tool) ?? fieldMessage(event.name)
-    ?? (isRecord(event.toolCall) ? fieldMessage(event.toolCall.name ?? event.toolCall.toolName) : undefined);
+  return (
+    fieldMessage(event.toolName) ??
+    fieldMessage(event.tool) ??
+    fieldMessage(event.name) ??
+    (isRecord(event.toolCall) ? fieldMessage(event.toolCall.name ?? event.toolCall.toolName) : undefined)
+  );
 }
 
 function eventToolArgs(event: unknown): unknown {
   if (!isRecord(event)) return undefined;
   for (const key of ["args", "arguments", "input"] as const) if (event[key] !== undefined) return event[key];
   if (!isRecord(event.toolCall)) return undefined;
-  for (const key of ["args", "arguments", "input"] as const) if (event.toolCall[key] !== undefined) return event.toolCall[key];
+  for (const key of ["args", "arguments", "input"] as const)
+    if (event.toolCall[key] !== undefined) return event.toolCall[key];
   return undefined;
 }
 
@@ -454,7 +471,11 @@ function boundedString(value: string, max: number): string {
 }
 
 function stringify(value: unknown): string {
-  try { return JSON.stringify(value); } catch { return String(value); }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function fieldMessage(value: unknown): string | undefined {
@@ -468,7 +489,7 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 function eventType(event: unknown): string {
-  return isRecord(event) ? fieldMessage(event.type) ?? "unknown" : "unknown";
+  return isRecord(event) ? (fieldMessage(event.type) ?? "unknown") : "unknown";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

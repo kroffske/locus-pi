@@ -1,5 +1,8 @@
 import type { ExtensionAPI } from "../../../extensions/_shared/pi-api.js";
-import { agentLiveStore, type AgentLiveExecutionHandle } from "../../../extensions/_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveExecutionHandle,
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 
 const PRODUCER_EXECUTION_KEY = Symbol.for("locus-pi.test.shared-store-producer-execution");
 const CONSUMER_EXECUTION_KEY = Symbol.for("locus-pi.test.shared-store-consumer-execution");
