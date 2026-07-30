@@ -10,14 +10,14 @@ import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator-ui.js";
-import type { CustomUiComponent, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { setTextWidget } from "../_shared/pi-api.js";
+} from "../_shared/operator/operator-interaction.js";
+import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator/operator-ui.js";
+import type { CustomUiComponent, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { setTextWidget } from "../_shared/host/pi-api.js";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { ScrollableTextOverlay } from "./drill-overlay.js";
 import { AGENTS_WIDGET_FALLBACK_WIDTH } from "./operator-ui.js";
-import { notifyOperator } from "../_shared/operator-notify.js";
+import { notifyOperator } from "../_shared/operator/operator-notify.js";
 
 export const AGENTS_WIDGET_KEY = "agents";
 const AGENTS_WIDGET_MAX_LINES = 10;

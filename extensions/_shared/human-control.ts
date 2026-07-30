@@ -1,6 +1,10 @@
-import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "./pi-api.js";
-import { createSessionStore, selectSessionStoreBackend, type SessionStoreBackend } from "./runtime-capabilities.js";
+import type { ExtensionAPI, ExtensionContext } from "./host/pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "./host/pi-api.js";
+import {
+  createSessionStore,
+  selectSessionStoreBackend,
+  type SessionStoreBackend,
+} from "./runtime/runtime-capabilities.js";
 
 export interface HumanDecisionInput {
   decisionId?: string;
@@ -17,7 +21,11 @@ export interface HumanDecisionRecord {
   diagnostics: string[];
 }
 
-export async function recordDecision(pi: ExtensionAPI, ctx: ExtensionContext, input: HumanDecisionInput): Promise<HumanDecisionRecord> {
+export async function recordDecision(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  input: HumanDecisionInput,
+): Promise<HumanDecisionRecord> {
   const decisionId = input.decisionId ?? stableDecisionId(input.source, input.question ?? input.status);
   const metadata = {
     source: input.source,
@@ -49,7 +57,13 @@ export async function recordDecision(pi: ExtensionAPI, ctx: ExtensionContext, in
 }
 
 export function stableDecisionId(source: string, seed: string): string {
-  return `${source}-${seed}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "decision";
+  return (
+    `${source}-${seed}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80) || "decision"
+  );
 }
 
 function ensureRuntimeSession(store: ReturnType<typeof createSessionStore>, ctx: ExtensionContext): string {

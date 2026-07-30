@@ -6,14 +6,14 @@
  * failure. Applying a chosen route is `role-apply.ts`.
  */
 
-import { loadModelRolesState } from "../_shared/model-settings.js";
+import { loadModelRolesState } from "../_shared/model/model-settings.js";
 import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import type { ExtensionAPI, ExtensionContext, ModelLike } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+} from "../_shared/operator/operator-interaction.js";
+import type { ExtensionAPI, ExtensionContext, ModelLike } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import {
   buildModelRows,
   createModelRoleSelectorTheme,

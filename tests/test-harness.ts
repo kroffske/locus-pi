@@ -19,7 +19,7 @@ import type {
   ThemeLike,
   ThinkingLevel,
   ToolDefinition,
-} from "../extensions/_shared/pi-api.js";
+} from "../extensions/_shared/host/pi-api.js";
 
 const MAX_WIDGET_LINES = 10;
 

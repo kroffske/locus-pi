@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
 import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 
 /**

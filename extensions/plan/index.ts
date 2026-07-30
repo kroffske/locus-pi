@@ -9,8 +9,8 @@
  * submodule.
  */
 
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
 import { clearModeState } from "../_shared/mode-state.js";
 import { registerPlanCommands } from "./command-router.js";
 import { registerGoalTool } from "./goal-tool.js";

@@ -1,5 +1,5 @@
 /**
- * extensions/_shared/viewer-geometry.ts — Geometry every scrollable TUI viewer
+ * extensions/_shared/operator/viewer-geometry.ts — Geometry every scrollable TUI viewer
  * recomputes on each render.
  *
  * A `CustomUiComponent` renders into a terminal whose height it cannot trust:

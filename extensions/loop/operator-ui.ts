@@ -7,7 +7,7 @@
  * context-bound writes live in `operator-surface.ts`.
  */
 
-import type { OperatorBlock } from "../_shared/operator-ui.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 
 export function unsupportedLoopText(action: string): string {
   return [

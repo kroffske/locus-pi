@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { artifactStoreDir } from "./files.js";
+import { artifactStoreDir } from "../host/files.js";
 
 export type RuntimeArtifactKind = "prepared-task-draft" | "markdown" | "json" | "text";
 
@@ -118,11 +118,19 @@ export class FileRuntimeArtifactStore extends MemoryRuntimeArtifactStore {
   }
 }
 
-export function createRuntimeArtifactStore(projectRoot: string, options: RuntimeArtifactStoreOptions = {}): RuntimeArtifactStore {
+export function createRuntimeArtifactStore(
+  projectRoot: string,
+  options: RuntimeArtifactStoreOptions = {},
+): RuntimeArtifactStore {
   return new FileRuntimeArtifactStore({ rootDir: artifactStoreDir(projectRoot), ...options });
 }
 
-function buildArtifact(input: RuntimeArtifactWriteInput, id: string, artifactPath: string, createdAt: string): RuntimeArtifact {
+function buildArtifact(
+  input: RuntimeArtifactWriteInput,
+  id: string,
+  artifactPath: string,
+  createdAt: string,
+): RuntimeArtifact {
   const artifact: RuntimeArtifact = {
     id,
     path: artifactPath,
@@ -139,7 +147,8 @@ function buildArtifact(input: RuntimeArtifactWriteInput, id: string, artifactPat
 
 function parseRuntimeArtifact(value: unknown): RuntimeArtifact | undefined {
   if (!isRecord(value)) return undefined;
-  if (typeof value.id !== "string" || typeof value.path !== "string" || typeof value.content !== "string") return undefined;
+  if (typeof value.id !== "string" || typeof value.path !== "string" || typeof value.content !== "string")
+    return undefined;
   if (typeof value.createdAt !== "string" || !isRuntimeArtifactKind(value.kind)) return undefined;
   if (!isRecord(value.metadata)) return undefined;
   const artifact: RuntimeArtifact = {
@@ -168,7 +177,12 @@ function cloneArtifact(artifact: RuntimeArtifact): RuntimeArtifact {
 }
 
 function sanitizeArtifactId(id: string): string {
-  return id.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "") || "artifact";
+  return (
+    id
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-|-$/g, "") || "artifact"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

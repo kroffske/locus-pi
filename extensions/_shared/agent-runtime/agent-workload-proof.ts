@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { EventPayload, ExtensionAPI, ExtensionContext } from "../pi-api.js";
-import { getProjectRoot, getSessionId } from "../pi-api.js";
+import type { EventPayload, ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
+import { getProjectRoot, getSessionId } from "../host/pi-api.js";
 
 export interface AgentWorkloadProof {
   toolCallCount: number;

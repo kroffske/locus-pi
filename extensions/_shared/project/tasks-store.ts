@@ -1,8 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export const PROJECT_TASK_STATUSES = ["draft", "planned", "planning", "doing", "review", "blocked", "done", "wontdo"] as const;
-export type ProjectTaskStatus = typeof PROJECT_TASK_STATUSES[number];
+export const PROJECT_TASK_STATUSES = [
+  "draft",
+  "planned",
+  "planning",
+  "doing",
+  "review",
+  "blocked",
+  "done",
+  "wontdo",
+] as const;
+export type ProjectTaskStatus = (typeof PROJECT_TASK_STATUSES)[number];
 
 export interface ProjectTaskIndexEntry {
   id: string;
@@ -79,7 +88,10 @@ export function createProjectTaskWorkspace(root: string, input: ProjectTaskCreat
   const taskPath = path.join(dir, "task.md");
   const eventsPath = path.join(dir, "events.jsonl");
   writeFileSync(taskPath, renderTaskMarkdown(input, status, type, now));
-  writeFileSync(eventsPath, `${JSON.stringify({ ts: now, event: "created", actor: "task-bridge", data: { status, sourceArtifactPath: input.sourceArtifactPath } })}\n`);
+  writeFileSync(
+    eventsPath,
+    `${JSON.stringify({ ts: now, event: "created", actor: "task-bridge", data: { status, sourceArtifactPath: input.sourceArtifactPath } })}\n`,
+  );
   return { id: input.id, dir, taskPath, eventsPath };
 }
 
@@ -91,7 +103,12 @@ export function writeTaskArtifact(workspaceDir: string, fileName: string, conten
   return artifactPath;
 }
 
-function renderTaskMarkdown(input: ProjectTaskCreateInput, status: ProjectTaskStatus, type: string, now: string): string {
+function renderTaskMarkdown(
+  input: ProjectTaskCreateInput,
+  status: ProjectTaskStatus,
+  type: string,
+  now: string,
+): string {
   return [
     "---",
     "schema: task.v3",
@@ -132,7 +149,13 @@ function renderTaskMarkdown(input: ProjectTaskCreateInput, status: ProjectTaskSt
 }
 
 function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "task";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 64) || "task"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

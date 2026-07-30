@@ -5,7 +5,7 @@
  * planning framing, it does NOT block tools.
  */
 
-import { goalInjectionText, loadGoalState, shouldInjectGoalContext } from "../_shared/goal-mode.js";
+import { goalInjectionText, loadGoalState, shouldInjectGoalContext } from "../_shared/project/goal-mode.js";
 import { isInPlanMode, loadActiveModeState, planModeInjectionText } from "../_shared/mode-state.js";
 
 function appendSystemBlock(systemPrompt: string, block: string): string {

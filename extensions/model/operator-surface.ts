@@ -6,9 +6,13 @@
  * construction stays in `operator-ui.ts`.
  */
 
-import { loadModelRolesState } from "../_shared/model-settings.js";
-import { clearOperatorStatus, setOperatorStatus, type OperatorStatusContribution } from "../_shared/operator-status.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
+import { loadModelRolesState } from "../_shared/model/model-settings.js";
+import {
+  clearOperatorStatus,
+  setOperatorStatus,
+  type OperatorStatusContribution,
+} from "../_shared/operator/operator-status.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
 import { modelSelector, roleSummaries, type AppliedModelRoleState, type RoleSummary } from "./model-role-selector.js";
 
 export type CurrentModelRoleState = Omit<AppliedModelRoleState, "receipt">;

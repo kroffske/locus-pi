@@ -1,6 +1,10 @@
-import { safeToolText } from "./safe-output.js";
+import { safeToolText } from "../host/safe-output.js";
 
-export interface DevEvent { timestamp: string; type: string; payload: Record<string, unknown> }
+export interface DevEvent {
+  timestamp: string;
+  type: string;
+  payload: Record<string, unknown>;
+}
 
 const events: DevEvent[] = [];
 const MAX_EVENTS = 500;

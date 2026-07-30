@@ -7,9 +7,9 @@
  * evidence write lives in a submodule.
  */
 
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { getCommandText } from "../_shared/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { getCommandText } from "../_shared/host/pi-api.js";
 import { runEffortCommand } from "./effort-command.js";
 import { updateModelRoleStatus } from "./operator-surface.js";
 import { runModelUi } from "./role-command.js";

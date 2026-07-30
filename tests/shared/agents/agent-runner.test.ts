@@ -5,7 +5,10 @@ import {
   executeAgentRunBoundary,
   validateRunPolicy,
 } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { MemorySessionStore, createDeterministicSessionIdFactory } from "../../../extensions/_shared/session-core.js";
+import {
+  MemorySessionStore,
+  createDeterministicSessionIdFactory,
+} from "../../../extensions/_shared/runtime/session-core.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
 

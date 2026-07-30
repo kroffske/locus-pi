@@ -54,4 +54,4 @@ License note: OMP checkout is MIT-licensed. The listed files were used as source
 - No OMP-style autonomous continuation behavior.
 - Exact token usage accounting is tracked locally but not proven equivalent to OMP accounting internals yet.
 - Hidden-tool parity is incomplete when the Pi extension API surface cannot prove equivalent behavior end to end.
-- The local `_shared/pi-api.ts` dialog result still reflects an older object-shaped facade. `_shared/operator-input.ts` is the narrow official-signature adapter for this migration; full facade repair is deferred.
+- The local `_shared/host/pi-api.ts` dialog result still reflects an older object-shaped facade. `_shared/operator/operator-input.ts` is the narrow official-signature adapter for this migration; full facade repair is deferred.

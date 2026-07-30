@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "./pi-api.js";
+import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "../host/pi-api.js";
 import type { ModelRoleAssignment } from "./model-settings.js";
 import { parseModelSelector } from "./model-settings.js";
 

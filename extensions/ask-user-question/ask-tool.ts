@@ -9,8 +9,8 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
 import { askLegacy } from "./legacy-ask.js";
 import type { OmpQuestion } from "./question-prompt.js";
 import { askOmpCompatible } from "./question-runner.js";

@@ -6,6 +6,38 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The five remaining shared layers are now real directories.** Twenty-eight modules
+  moved out of the flat `extensions/_shared/` into the layer that owns them: the host
+  facade and its primitives into `host/`, the ten operator-UI modules into `operator/`,
+  the session store, artifact store and event bus into `runtime/`, model selection and
+  display into `model/`, and goal, prompt, task and todo state into `project/`. Their
+  package paths changed accordingly; nothing about their behavior did. With the
+  agent-runtime layer that landed before it, every declared layer now exists in the tree,
+  so the owner of a module is legible from its path instead of from a table in a script.
+  **One module was filed under the wrong layer, and the check had said so in advance.**
+  `runtime-capabilities.ts` was classified `host` but imported the runtime-layer session
+  store — a rank inversion the ownership ledger carried as a named, temporary exemption
+  rather than papering over by loosening a rank. The recorded choice was to either move
+  the module or split the store construction out of it; the evidence decided it. Every
+  consumer imports `createSessionStore`, so the store-construction half is the module's
+  whole reason to exist, and the capability report reports on that same store; nothing in
+  `host` or `operator` imports the module at all, so it owed nothing to a lower rank. It
+  is now a `runtime` module and the exemption is deleted, which means the rank order is
+  enforced for real on that edge instead of being waived.
+  **The two catch-all files stayed where they are, deliberately.** `types.ts` and
+  `state.ts` hold constants and mutable state with several different owners, so they are
+  split by domain rather than moved as units; filing them under a layer now would assert
+  an owner none of them has. They remain flat until that split happens.
+  **The hazard that broke the previous two slices was checked and was absent.** Twice
+  before, a module that derived a path from its own location silently repointed at a
+  directory that no longer existed once it moved one level deeper — the workflow example
+  registry, then the bundled agent catalog. All twenty-eight modules were swept for
+  `import.meta.url`, `__dirname`, `fileURLToPath` and any path anchored on the module's
+  own location; every path they build is anchored on a caller-supplied project root
+  instead, so there was nothing to repair. The two module-cache-disabled proofs for the
+  process-global command-UI and operator-status registries continue to pass across their
+  moves.
+
 - **The agent execution stack now lives in a named layer.** Thirteen modules — agent
   discovery, the run boundary, the SDK host, the read-only tool policy, live rows, the
   live transcript, petnames, the system prompt and its context extras, evidence

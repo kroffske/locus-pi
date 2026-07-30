@@ -8,7 +8,7 @@ import {
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
-import type { CustomUiComponent, CustomUiTui } from "../pi-api.js";
+import type { CustomUiComponent, CustomUiTui } from "../host/pi-api.js";
 
 export const FLEET_MENU_MAX_ROWS = 8;
 export const FLEET_FOCUS_FALLBACK_SHORTCUT = "shift+down";

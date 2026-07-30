@@ -1,33 +1,37 @@
 import { stripVTControlCharacters } from "node:util";
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { getCommandText } from "../_shared/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { getCommandText } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
 import { auditEvent, classifyToolCall, getAuditEvents } from "../_shared/permissions.js";
-import { redactSecrets } from "../_shared/redaction.js";
+import { redactSecrets } from "../_shared/host/redaction.js";
 import type { AuditEvent } from "../_shared/types.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 
 const DEFAULT_AUDIT_LIMIT = 20;
 const MAX_AUDIT_LIMIT = 50;
 const AUDIT_TARGET_WIDTH = 72;
 
 export default function securityGate(pi: ExtensionAPI): void {
-  registerCommandWithUiLifecycle(pi, {
-    command: "security-audit",
-    group: "security-audit",
-    surfaces: ["transient-widget"],
-    transientWidgets: ["security-audit"],
-  }, {
-    description: "Show audit-only security observations for local tool calls.",
-    handler: (args, ctx) => {
-      const allEvents = getAuditEvents();
-      const limit = auditLimit(getCommandText(args));
-      const events = allEvents.slice(-limit).reverse();
-      setOperatorWidget(ctx, "security-audit", securityAuditBlock(events, allEvents.length, ctx.mode !== "tui"));
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "security-audit",
+      group: "security-audit",
+      surfaces: ["transient-widget"],
+      transientWidgets: ["security-audit"],
     },
-  });
+    {
+      description: "Show audit-only security observations for local tool calls.",
+      handler: (args, ctx) => {
+        const allEvents = getAuditEvents();
+        const limit = auditLimit(getCommandText(args));
+        const events = allEvents.slice(-limit).reverse();
+        setOperatorWidget(ctx, "security-audit", securityAuditBlock(events, allEvents.length, ctx.mode !== "tui"));
+      },
+    },
+  );
 
   pi.on("tool_call", (event) => {
     const classification = classifyToolCall(event.toolName ?? "", event.input ?? event.toolArgs ?? {});
@@ -71,9 +75,10 @@ function securityAuditBlock(events: readonly AuditEvent[], total: number, compac
   return {
     type: "VIEW",
     subject: "Security audit",
-    primary: shownEvents.length === 0
-      ? "No historical local security audit events."
-      : `Showing ${shownEvents.length} newest of ${total} local observation(s).`,
+    primary:
+      shownEvents.length === 0
+        ? "No historical local security audit events."
+        : `Showing ${shownEvents.length} newest of ${total} local observation(s).`,
     badges: [
       { text: "audit-only", tone: "warning" },
       { text: "Pi enforcement", tone: "muted" },

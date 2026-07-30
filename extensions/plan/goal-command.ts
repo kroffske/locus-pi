@@ -6,9 +6,9 @@
  * inline warnings its own parsing produces.
  */
 
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
-import { SETTINGS_HELP_PLACEMENT } from "../_shared/widget-render.js";
+import type { CommandArgs, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
+import { SETTINGS_HELP_PLACEMENT } from "../_shared/operator/widget-render.js";
 import {
   type GoalOperationResult,
   completeGoalState,
@@ -22,7 +22,7 @@ import {
   setGoalBudget,
   writeGoalContinuationArtifact,
   writeGoalState,
-} from "../_shared/goal-mode.js";
+} from "../_shared/project/goal-mode.js";
 import { parseBudget, parseContinuationInput, splitFirstWord } from "./command-parser.js";
 import { setGoalOperatorBlock } from "./operator-surface.js";
 import { emptyGoalStateBlock, goalHelpBlock, goalOperationBlock, goalStateBlock } from "./goal-operator-ui.js";

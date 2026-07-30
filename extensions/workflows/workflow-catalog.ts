@@ -14,7 +14,7 @@ import {
   listWorkflowCatalogTargets,
   type ResolvedWorkflowTarget,
 } from "./runtime/workflow-runner.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 
 const RECENT_WORKFLOW_LIMIT = 5;
 const WORKFLOW_METADATA_SCAN_BYTES = 64 * 1024;

@@ -7,7 +7,7 @@
  * one way on one command and another way on the other.
  */
 
-import type { CommandArgumentCompletion } from "../_shared/pi-api.js";
+import type { CommandArgumentCompletion } from "../_shared/host/pi-api.js";
 import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
 import type { FlatWorkflowCommand } from "./command-router.js";
 import { listExampleNames } from "./operator-ui.js";

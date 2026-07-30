@@ -1,5 +1,5 @@
 import { Input } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui, ExtensionContext } from "./pi-api.js";
+import type { CustomUiComponent, CustomUiTui, ExtensionContext } from "../host/pi-api.js";
 import { requestInlineOperatorInteraction, type InlineOperatorInteractionRequest } from "./operator-interaction.js";
 import { renderOperatorBlock, type OperatorThemeLike } from "./operator-ui.js";
 import { isCtrlC, isDown, isEnd, isEnter, isEscape, isHome, isLeft, isRight, isSpace, isUp } from "./operator-keys.js";

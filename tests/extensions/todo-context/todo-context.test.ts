@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import todoContext from "../../../extensions/todo-context/index.js";
-import { exportTodosToProjectTask } from "../../../extensions/_shared/task-bridge.js";
+import { exportTodosToProjectTask } from "../../../extensions/_shared/project/task-bridge.js";
 import { sharedState } from "../../../extensions/_shared/state.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 

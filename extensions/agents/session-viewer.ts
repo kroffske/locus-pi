@@ -9,11 +9,11 @@ import type {
   AgentTranscriptBlock,
   AgentTranscriptToolBlock,
 } from "../_shared/agent-runtime/agent-live-transcript.js";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import { formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
-import { errorMessage } from "../_shared/error-text.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
-import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 

@@ -126,7 +126,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   It bounds status/detail rows and leaves complete evidence in `result.json`.
   The existing live progress, resolver, journal, approval, and execution owners
   are not reimplemented by this presentation layer.
-- `extensions/_shared/command-ui.ts` owns generic transient-key pinning and cleanup
+- `extensions/_shared/operator/command-ui.ts` owns generic transient-key pinning and cleanup
   callbacks. The workflow extension removes completed large widget/status/transient
   presentation on the next input, registered command cleanup, or `turn_end`, then
   delegates row retention to store-owned cleanup: the newest five fully terminal

@@ -115,7 +115,7 @@ const LAYER_RANK: Record<SharedLayer, number> = {
 const PROVISIONAL_LAYERS: readonly SharedLayer[] = ["mixed"];
 
 const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
-  host: ["pi-api", "error-text", "files", "validation", "redaction", "safe-output", "runtime-capabilities"],
+  host: ["pi-api", "error-text", "files", "validation", "redaction", "safe-output"],
   mixed: ["types", "state"],
   operator: [
     "command-ui",
@@ -129,7 +129,15 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "operator-notify",
     "viewer-geometry",
   ],
-  runtime: ["session-core", "artifacts", "event-bus"],
+  /**
+   * `runtime-capabilities` was provisionally classified `host` and carried a declared
+   * upward edge to `session-core`. W5 resolved it here rather than by splitting: every
+   * one of its consumers imports `createSessionStore`, so the store-construction half
+   * is the module's whole reason to exist, and `getRuntimeCapabilityReport` reports on
+   * that same session store. Nothing in `host` or `operator` imports it, so it owes
+   * nothing to a lower rank.
+   */
+  runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities"],
   model: ["model-settings", "live-model-display", "workflow-model-resolve"],
   project: ["goal-mode", "prompt-command-store", "tasks-store", "task-bridge", "todo-state"],
   "agent-runtime": [
@@ -244,10 +252,14 @@ interface ProvisionalUpwardEdge {
 }
 
 /**
- * Two edges in the pre-refactor tree point up the declared rank order. Both are
+ * One edge in the pre-refactor tree still points up the declared rank order. It is
  * named here rather than papered over by loosening a rank, because a loosened rank
  * would silently permit edges nobody reviewed. Each entry is asserted to STILL
  * EXIST: once its slice removes the edge, this list fails as stale and must shrink.
+ *
+ * The `runtime-capabilities -> session-core` entry is gone: W5 reclassified
+ * `runtime-capabilities` into the `runtime` layer, so the edge is runtime -> runtime
+ * and needs no exemption. See the note on SHARED_LAYER_MEMBERS.runtime.
  */
 const PROVISIONAL_UPWARD_EDGES: readonly ProvisionalUpwardEdge[] = [
   {
@@ -256,13 +268,6 @@ const PROVISIONAL_UPWARD_EDGES: readonly ProvisionalUpwardEdge[] = [
     reason:
       "host-layer safe-output value-imports OUTPUT_DEFAULTS from the provisional `mixed` catch-all; W7 moves that constant into the host layer, after which the edge is host -> host.",
     clearedBy: "W7",
-  },
-  {
-    from: "runtime-capabilities",
-    to: "session-core",
-    reason:
-      "host-layer runtime-capabilities constructs the runtime-layer session stores it probes for. Either the contract moves runtime-capabilities into the `runtime` layer or W5 splits the store construction out; the edge is a real inversion, not a formality.",
-    clearedBy: "W5",
   },
 ];
 

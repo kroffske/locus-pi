@@ -11,10 +11,10 @@ import {
   getModelRolesConfigPaths,
   setModelRoleSetting,
   type ModelRoleAssignment,
-} from "../_shared/model-settings.js";
-import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
-import { errorMessage } from "../_shared/error-text.js";
+} from "../_shared/model/model-settings.js";
+import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import {
   effortLevelsForModel,
   modelSelector,

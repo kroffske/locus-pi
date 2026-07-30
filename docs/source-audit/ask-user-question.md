@@ -46,4 +46,4 @@ Known gaps:
   owner for unrelated third-party extensions.
 - The fallback path is still the older `select` / `editor` surface for hosts without custom UI.
 - Decision journaling is Locus-owned runtime behavior, not copied OMP UI code.
-- Pi's official `input` / `editor` result is `string | undefined`; `_shared/operator-input.ts` normalizes that plus the known legacy object result. The broader local facade repair is deferred.
+- Pi's official `input` / `editor` result is `string | undefined`; `_shared/operator/operator-input.ts` normalizes that plus the known legacy object result. The broader local facade repair is deferred.

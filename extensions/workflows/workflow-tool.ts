@@ -9,9 +9,9 @@
 
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
 import { WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "./runtime/workflow-artifacts.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";

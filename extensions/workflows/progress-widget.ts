@@ -1,4 +1,4 @@
-import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/pi-api.js";
+import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/host/pi-api.js";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 import {
   AgentLivePanel,
@@ -19,7 +19,7 @@ import {
   type WorkflowProjectedStatus,
   type WorkflowResultPersistence,
 } from "./runtime/workflow-result.js";
-import { FLEET_MENU_PLACEMENT } from "../_shared/widget-render.js";
+import { FLEET_MENU_PLACEMENT } from "../_shared/operator/widget-render.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 
 export interface ThemeLike {

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { CustomEntry } from "./pi-api.js";
+import type { CustomEntry } from "../host/pi-api.js";
 
 export const SESSION_ENTRY_TYPES = [
   "session_init",
@@ -15,7 +15,7 @@ export const SESSION_ENTRY_TYPES = [
   "artifact",
 ] as const;
 
-export type SessionEntryType = typeof SESSION_ENTRY_TYPES[number];
+export type SessionEntryType = (typeof SESSION_ENTRY_TYPES)[number];
 export type SessionRole = "system" | "user" | "assistant" | "tool";
 
 export interface SessionRecord {
@@ -87,12 +87,14 @@ export type SessionEntryPayloadByType = {
 
 export type SessionEntryPayload<T extends SessionEntryType = SessionEntryType> = SessionEntryPayloadByType[T];
 
-export type SessionEntryInput<T extends SessionEntryType = SessionEntryType> = T extends SessionEntryType ? {
-  type: T;
-  payload: SessionEntryPayloadByType[T];
-  createdAt?: string;
-  id?: string;
-} : never;
+export type SessionEntryInput<T extends SessionEntryType = SessionEntryType> = T extends SessionEntryType
+  ? {
+      type: T;
+      payload: SessionEntryPayloadByType[T];
+      createdAt?: string;
+      id?: string;
+    }
+  : never;
 
 export interface SessionEntry<T extends SessionEntryType = SessionEntryType> {
   id: string;
@@ -142,8 +144,7 @@ export interface ValidationResult {
 }
 
 export type SessionStoreJsonlRecord =
-  | { kind: "session"; session: SessionRecord }
-  | { kind: "entry"; entry: SessionEntry };
+  { kind: "session"; session: SessionRecord } | { kind: "entry"; entry: SessionEntry };
 
 const ENTRY_TYPE_SET: ReadonlySet<string> = new Set(SESSION_ENTRY_TYPES);
 
@@ -157,7 +158,9 @@ export function createDeterministicSessionIdFactory(prefix = "test"): SessionIdF
   return {
     nextSessionId(parentSessionId) {
       sessionCount += 1;
-      return parentSessionId === undefined ? `${prefix}-session-${sessionCount}` : `${prefix}-session-${sessionCount}-child-of-${parentSessionId}`;
+      return parentSessionId === undefined
+        ? `${prefix}-session-${sessionCount}`
+        : `${prefix}-session-${sessionCount}-child-of-${parentSessionId}`;
     },
     nextEntryId(_sessionId, type) {
       entryCount += 1;
@@ -432,15 +435,19 @@ function parseJsonlRecord(value: unknown): SessionStoreJsonlRecord | undefined {
 }
 
 function isSessionRecord(value: unknown): value is SessionRecord {
-  return isRecord(value)
-    && typeof value.id === "string"
-    && typeof value.createdAt === "string"
-    && isRecord(value.metadata);
+  return (
+    isRecord(value) && typeof value.id === "string" && typeof value.createdAt === "string" && isRecord(value.metadata)
+  );
 }
 
 function isSessionEntry(value: unknown): value is SessionEntry {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.sessionId !== "string") return false;
-  if (!isSessionEntryType(String(value.type)) || typeof value.createdAt !== "string" || typeof value.sequence !== "number") return false;
+  if (
+    !isSessionEntryType(String(value.type)) ||
+    typeof value.createdAt !== "string" ||
+    typeof value.sequence !== "number"
+  )
+    return false;
   const input = { type: value.type, payload: value.payload } as SessionEntryInput;
   return validateSessionEntryInput(input).ok;
 }
@@ -450,7 +457,8 @@ function requireString(payload: Record<string, unknown>, key: string, errors: st
 }
 
 function requireOptionalString(payload: Record<string, unknown>, key: string, errors: string[]): void {
-  if (payload[key] !== undefined && typeof payload[key] !== "string") errors.push(`payload.${key} must be a string when provided`);
+  if (payload[key] !== undefined && typeof payload[key] !== "string")
+    errors.push(`payload.${key} must be a string when provided`);
 }
 
 function requireRole(payload: Record<string, unknown>, key: string, errors: string[], required: boolean): void {
@@ -460,7 +468,8 @@ function requireRole(payload: Record<string, unknown>, key: string, errors: stri
 
 function requireEnum(payload: Record<string, unknown>, key: string, allowed: string[], errors: string[]): void {
   const value = payload[key];
-  if (typeof value !== "string" || !allowed.includes(value)) errors.push(`payload.${key} must be one of: ${allowed.join(", ")}`);
+  if (typeof value !== "string" || !allowed.includes(value))
+    errors.push(`payload.${key} must be one of: ${allowed.join(", ")}`);
 }
 
 function summarizePayload(payload: unknown): string {
@@ -468,7 +477,8 @@ function summarizePayload(payload: unknown): string {
   if (typeof payload.content === "string") return payload.content;
   if (typeof payload.summary === "string") return payload.summary;
   if (typeof payload.path === "string") return payload.path;
-  if (typeof payload.childSessionId === "string") return `${payload.childSessionId} ${String(payload.status ?? "")}`.trim();
+  if (typeof payload.childSessionId === "string")
+    return `${payload.childSessionId} ${String(payload.status ?? "")}`.trim();
   if (typeof payload.type === "string") return payload.type;
   return JSON.stringify(payload);
 }

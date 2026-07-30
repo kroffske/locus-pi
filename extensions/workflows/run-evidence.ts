@@ -7,7 +7,7 @@
  * because every value it shows comes from disk, never from live state.
  */
 
-import type { OperatorBlock } from "../_shared/operator-ui.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import {
   listWorkflowRunIds,

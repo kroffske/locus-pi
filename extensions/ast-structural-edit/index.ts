@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import astEditTool from "./ast-edit.js";
 import astGrepTool from "./ast-grep.js";
 import astApplyTool from "./resolve.js";

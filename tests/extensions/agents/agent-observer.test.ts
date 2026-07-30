@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import devextDoctor from "../../../extensions/devext-doctor/index.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 afterEach(() => {

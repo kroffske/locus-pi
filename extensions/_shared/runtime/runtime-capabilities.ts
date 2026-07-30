@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { sessionJsonlPath } from "./files.js";
+import { sessionJsonlPath } from "../host/files.js";
 import {
   JsonlSessionStore,
   MemorySessionStore,

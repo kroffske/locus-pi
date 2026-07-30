@@ -7,8 +7,8 @@
  * Every surface those two render lives in a submodule.
  */
 
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { registerTransientUiCleanup } from "../_shared/command-ui.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { registerTransientUiCleanup } from "../_shared/operator/command-ui.js";
 import { registerLoopCommand } from "./command-router.js";
 import { registerLoopControlTool } from "./loop-control-tool.js";
 import { clearLoopOperatorStatus } from "./operator-surface.js";

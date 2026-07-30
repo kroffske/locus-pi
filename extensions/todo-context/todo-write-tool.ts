@@ -8,11 +8,11 @@
  * queue state this tool moves is owned by `queue-controller.ts`.
  */
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { errorResult, textResult } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../_shared/host/pi-api.js";
 import { sharedState } from "../_shared/state.js";
-import type { TodoPhase } from "../_shared/todo-state.js";
-import { validateParams } from "../_shared/validation.js";
+import type { TodoPhase } from "../_shared/project/todo-state.js";
+import { validateParams } from "../_shared/host/validation.js";
 import { applyTodoOps, findActiveTask, getCompletionTransitions, type TodoOp } from "./phase-ops.js";
 import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "./phase-store.js";
 import type { TodoQueueController } from "./queue-controller.js";

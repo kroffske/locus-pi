@@ -6,11 +6,11 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
+import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { runPlanDraftSession } from "../_shared/goal-ai-draft.js";
-import { requestOperatorInput } from "../_shared/operator-input.js";
-import { SETTINGS_HELP_PLACEMENT } from "../_shared/widget-render.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import { SETTINGS_HELP_PLACEMENT } from "../_shared/operator/widget-render.js";
 import {
   clearModeState,
   isInPlanMode,

@@ -7,7 +7,7 @@
  * render live in `prompt-shelf-ui.ts` and `operator-ui.ts`.
  */
 
-import type { PromptCommandTargetSelector } from "../_shared/prompt-command-store.js";
+import type { PromptCommandTargetSelector } from "../_shared/project/prompt-command-store.js";
 
 export function splitFirstWord(input: string): [string, string] {
   const trimmed = input.trim();

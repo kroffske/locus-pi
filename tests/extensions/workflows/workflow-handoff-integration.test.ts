@@ -7,7 +7,7 @@ import {
   createWorkflowOperatorHandoffEnvelope,
   readCurrentWorkflowScriptIdentity,
 } from "../../../extensions/workflows/runtime/workflow-handoff.js";
-import type { CustomUiFactory } from "../../../extensions/_shared/pi-api.js";
+import type { CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { resolveWorkflowTarget } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import workflows from "../../../extensions/workflows/index.js";

@@ -5,9 +5,9 @@
  */
 import { Type } from "@sinclair/typebox";
 import { writeAgentWorkloadProof } from "../_shared/agent-runtime/agent-workload-proof.js";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
-import { textResult } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { textResult } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
 
 const WorkloadProofParams = Type.Object({
   summary: Type.String({

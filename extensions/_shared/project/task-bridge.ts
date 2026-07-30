@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "./pi-api.js";
-import type { RuntimeArtifact } from "./artifacts.js";
+import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
+import type { RuntimeArtifact } from "../runtime/artifacts.js";
 import type { TodoPhase } from "./todo-state.js";
 import { cloneTodoPhases } from "./todo-state.js";
 import {
@@ -15,11 +15,24 @@ import {
   type ProjectTaskWorkspace,
 } from "./tasks-store.js";
 
-export const TASK_LIFECYCLE_TARGET_STATUSES = ["planned", "planning", "doing", "review", "blocked", "wontdo", "done"] as const;
-export type TaskLifecycleTargetStatus = typeof TASK_LIFECYCLE_TARGET_STATUSES[number];
+export const TASK_LIFECYCLE_TARGET_STATUSES = [
+  "planned",
+  "planning",
+  "doing",
+  "review",
+  "blocked",
+  "wontdo",
+  "done",
+] as const;
+export type TaskLifecycleTargetStatus = (typeof TASK_LIFECYCLE_TARGET_STATUSES)[number];
 
-export const CURRENT_PROJECT_TASK_STATUS_ORDER = ["doing", "review", "planning", "planned"] as const satisfies readonly ProjectTaskStatus[];
-export type CurrentProjectTaskStatus = typeof CURRENT_PROJECT_TASK_STATUS_ORDER[number];
+export const CURRENT_PROJECT_TASK_STATUS_ORDER = [
+  "doing",
+  "review",
+  "planning",
+  "planned",
+] as const satisfies readonly ProjectTaskStatus[];
+export type CurrentProjectTaskStatus = (typeof CURRENT_PROJECT_TASK_STATUS_ORDER)[number];
 
 const TASK_LIFECYCLE_TRANSITIONS: Record<ProjectTaskStatus, readonly TaskLifecycleTargetStatus[]> = {
   draft: ["planned", "planning", "blocked", "wontdo"],
@@ -147,11 +160,17 @@ export function resolveCurrentProjectTask(projectRoot: string): CurrentProjectTa
   try {
     snapshot = loadTaskBridgeSnapshot(projectRoot);
   } catch {
-    return unresolvedCurrentTask("missing-index", [], "Cannot resolve current project task because .tasks/index.json is missing or unsupported.");
+    return unresolvedCurrentTask(
+      "missing-index",
+      [],
+      "Cannot resolve current project task because .tasks/index.json is missing or unsupported.",
+    );
   }
 
   const candidates = snapshot.tasks
-    .filter((task): task is ProjectTaskIndexEntry & { status: CurrentProjectTaskStatus } => isCurrentProjectTaskStatus(task.status))
+    .filter((task): task is ProjectTaskIndexEntry & { status: CurrentProjectTaskStatus } =>
+      isCurrentProjectTaskStatus(task.status),
+    )
     .map(currentTaskCandidate);
   if (candidates.length === 0) {
     return unresolvedCurrentTask("no-current-task", [], "No current project task is available in .tasks/index.json.");
@@ -161,7 +180,11 @@ export function resolveCurrentProjectTask(projectRoot: string): CurrentProjectTa
     const statusCandidates = candidates.filter((candidate) => candidate.currentStatus === status);
     if (statusCandidates.length === 0) continue;
     if (statusCandidates.length > 1) {
-      return unresolvedCurrentTask("multiple-current-tasks", statusCandidates, `Multiple ${status} project tasks exist in .tasks/index.json.`);
+      return unresolvedCurrentTask(
+        "multiple-current-tasks",
+        statusCandidates,
+        `Multiple ${status} project tasks exist in .tasks/index.json.`,
+      );
     }
     const task = statusCandidates[0]!;
     return {
@@ -198,7 +221,11 @@ export function formatCurrentProjectTaskResolution(resolution: CurrentProjectTas
   return lines.join("\n");
 }
 
-export function planTaskLifecycleTransition(projectRoot: string, taskId: string, targetStatus: TaskLifecycleTargetStatus): TaskLifecyclePlan {
+export function planTaskLifecycleTransition(
+  projectRoot: string,
+  taskId: string,
+  targetStatus: TaskLifecycleTargetStatus,
+): TaskLifecyclePlan {
   let snapshot: TaskBridgeSnapshot;
   try {
     snapshot = loadTaskBridgeSnapshot(projectRoot);
@@ -287,11 +314,7 @@ export function formatTaskLifecyclePlan(plan: TaskLifecyclePlan): string {
 
   lines.push(`code: ${plan.code}`, `taskId: ${plan.taskId}`, `targetStatus: ${plan.targetStatus}`);
   if (plan.code !== "missing-task") {
-    lines.push(
-      `taskTitle: ${plan.taskTitle}`,
-      `taskPath: ${plan.taskPath}`,
-      `currentStatus: ${plan.currentStatus}`,
-    );
+    lines.push(`taskTitle: ${plan.taskTitle}`, `taskPath: ${plan.taskPath}`, `currentStatus: ${plan.currentStatus}`);
   }
   if (plan.code === "unsupported-transition") {
     lines.push(`allowedTargets: ${formatAllowedTargets(plan.allowedTargets)}`);
@@ -304,7 +327,8 @@ export function formatTaskLifecyclePlan(plan: TaskLifecyclePlan): string {
 }
 
 export function createTaskFromApprovedPrompt(input: CreateTaskFromPromptInput): ProjectTaskWorkspace {
-  if (input.artifact.kind !== "prepared-task-draft") throw new Error("Task bridge requires a prepared-task-draft artifact.");
+  if (input.artifact.kind !== "prepared-task-draft")
+    throw new Error("Task bridge requires a prepared-task-draft artifact.");
   if (input.artifact.metadata.status !== "approved" && input.artifact.metadata.status !== "handed_off") {
     throw new Error("Task bridge requires an approved prompt artifact.");
   }
@@ -326,18 +350,22 @@ export function createTaskFromApprovedPrompt(input: CreateTaskFromPromptInput): 
 // forward-compatibility and is advisory only; the "deny" tier is legacy and still writes
 // (see tests/shared/task/tasks-bridge.test.ts `legacyDenyTier`). Do not re-introduce an extension-level
 // gate here without also updating todo-context's advertised behavior and that test.
-export async function writeCompletionNoteWithApproval(input: CompletionNoteInput): Promise<{ approved: boolean; artifactPath?: string; reason: string }> {
+export async function writeCompletionNoteWithApproval(
+  input: CompletionNoteInput,
+): Promise<{ approved: boolean; artifactPath?: string; reason: string }> {
   const artifactPath = writeTaskArtifact(input.workspace.dir, "completion-note.md", input.note);
   return { approved: true, artifactPath, reason: "Pi approval owns filesystem write decisions." };
 }
 
 export function exportTodosToProjectTask(phases: TodoPhase[]): string {
-  return cloneTodoPhases(phases).flatMap((phase) => [
-    `## ${phase.name}`,
-    "",
-    ...phase.tasks.map((task) => `- [${task.status === "completed" ? "x" : " "}] ${task.content}`),
-    "",
-  ]).join("\n");
+  return cloneTodoPhases(phases)
+    .flatMap((phase) => [
+      `## ${phase.name}`,
+      "",
+      ...phase.tasks.map((task) => `- [${task.status === "completed" ? "x" : " "}] ${task.content}`),
+      "",
+    ])
+    .join("\n");
 }
 
 export function importTodosFromProjectTasks(tasks: ProjectTaskIndexEntry[]): TodoPhase[] {
@@ -358,7 +386,8 @@ function collectDonePreconditionFailures(projectRoot: string, task: ProjectTaskI
   const qaText = readTextIfExists(path.join(workspaceRoot, "qa.md"));
   if (qaText === undefined || !/\bACCEPTED\b/.test(qaText)) missing.push("qa.md missing ACCEPTED");
   const taskText = readTextIfExists(path.join(workspaceRoot, "task.md"));
-  if (taskText === undefined || !hasNonPlaceholderClosureText(taskText)) missing.push("task.md missing non-placeholder Closure text");
+  if (taskText === undefined || !hasNonPlaceholderClosureText(taskText))
+    missing.push("task.md missing non-placeholder Closure text");
   return missing;
 }
 
@@ -369,10 +398,16 @@ function readTextIfExists(filePath: string): string | undefined {
 function hasNonPlaceholderClosureText(markdown: string): boolean {
   const closureSection = extractSection(markdown, "Closure");
   if (closureSection === undefined) return false;
-  const lines = closureSection.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = closureSection
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (lines.length === 0) return false;
   return lines.some((line) => {
-    const normalized = line.replace(/^[-*>#\d.\s]+/, "").trim().toLowerCase();
+    const normalized = line
+      .replace(/^[-*>#\d.\s]+/, "")
+      .trim()
+      .toLowerCase();
     if (normalized.length === 0) return false;
     return !isPlaceholderClosureLine(normalized);
   });
@@ -415,7 +450,9 @@ function isCurrentProjectTaskStatus(status: ProjectTaskStatus): status is Curren
   return (CURRENT_PROJECT_TASK_STATUS_ORDER as readonly ProjectTaskStatus[]).includes(status);
 }
 
-function currentTaskCandidate(task: ProjectTaskIndexEntry & { status: CurrentProjectTaskStatus }): CurrentProjectTaskCandidate {
+function currentTaskCandidate(
+  task: ProjectTaskIndexEntry & { status: CurrentProjectTaskStatus },
+): CurrentProjectTaskCandidate {
   const parentId = normalizedParentId(task);
   return {
     taskId: task.id,

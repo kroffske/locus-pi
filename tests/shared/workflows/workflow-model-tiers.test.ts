@@ -28,8 +28,8 @@ import {
   parseModelSelector,
   resolveWorkflowModel,
   type WorkflowModelRegistrySource,
-} from "../../../extensions/_shared/workflow-model-resolve.js";
-import type { ModelLike } from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/_shared/model/workflow-model-resolve.js";
+import type { ModelLike } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, type Harness } from "../../test-harness.js";
 
 /**

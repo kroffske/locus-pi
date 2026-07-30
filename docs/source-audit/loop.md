@@ -37,7 +37,7 @@ Reviewed source paths:
 - `review` continuation is unsupported and fails closed.
 - Unsupported loop actions and sources fail closed with a clear reason.
 - This slice does not claim full OMP loop-mode parity.
-- The local Pi facade still carries the older object-shaped dialog result. `_shared/operator-input.ts` contains the narrow official-signature adapter; a repository-wide facade migration remains deferred.
+- The local Pi facade still carries the older object-shaped dialog result. `_shared/operator/operator-input.ts` contains the narrow official-signature adapter; a repository-wide facade migration remains deferred.
 
 ## License / attribution
 
@@ -49,6 +49,6 @@ OMP review sources were used as design evidence only. No OMP implementation code
 
 - `extensions/loop/index.ts`
 - `extensions/loop/loop-continuation.ts`
-- `extensions/_shared/goal-mode.ts`
+- `extensions/_shared/project/goal-mode.ts`
 - `tests/extensions/loop/loop.test.ts`
 - `tests/integration/public-registration.test.ts`

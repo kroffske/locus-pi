@@ -1,17 +1,17 @@
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
-import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
+import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
 import { idsByCurrentStatus, idsByOwnershipStatus } from "../_shared/extension-inventory.js";
 import {
   planTaskLifecycleTransition,
   type TaskLifecyclePlan,
   type TaskLifecycleTargetStatus,
-} from "../_shared/task-bridge.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
-import { errorMessage } from "../_shared/error-text.js";
-import { compactOperatorLine } from "../_shared/operator-ui.js";
+} from "../_shared/project/task-bridge.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { errorMessage } from "../_shared/host/error-text.js";
+import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
 
 const ReloadParams = Type.Object({});
 const DEVEXT_WIDGET_KEY = "devext-doctor";

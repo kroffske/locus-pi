@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot, getSessionId } from "../_shared/pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getSessionId } from "../_shared/host/pi-api.js";
 import type { WorkflowContinuation } from "./runtime/workflow-artifacts.js";
 import type { WorkflowHandoffClaimLease } from "./runtime/workflow-handoff.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";

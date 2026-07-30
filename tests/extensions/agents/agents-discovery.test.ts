@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agent-runtime/agents.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 // Force the SDK host absent so the `task` tool degrades deterministically to the

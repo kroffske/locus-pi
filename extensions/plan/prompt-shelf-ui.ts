@@ -7,8 +7,8 @@
  * ctx-bound writes happen in `operator-surface.ts`.
  */
 
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { errorMessage } from "../_shared/error-text.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import type { PromptShelfKind, PromptShelfTarget } from "./command-parser.js";
 
 export function promptShelfSummaryBlock(

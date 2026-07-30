@@ -1,5 +1,5 @@
 /**
- * extensions/_shared/error-text.ts — Coercion of an unknown thrown value to
+ * extensions/_shared/host/error-text.ts — Coercion of an unknown thrown value to
  * operator-readable text.
  *
  * `catch` binds `unknown`, so every surface that reports a failure to an

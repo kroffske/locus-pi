@@ -9,7 +9,7 @@
  * opened (`agent_end`). The peer does the mirror image, so authority is proven in both
  * directions rather than only the direction the writer happened to be created in.
  */
-import type { ExtensionAPI } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,

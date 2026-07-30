@@ -10,7 +10,7 @@ import {
   loadModelRolesState,
   resolveAgentModelPreference,
   type ModelRolesState,
-} from "../../../extensions/_shared/model-settings.js";
+} from "../../../extensions/_shared/model/model-settings.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
 

@@ -22,10 +22,10 @@ import {
   resolveAgentModelPreference,
   resolvePromptPlanningModelRole,
   resolveSummaryModelRole,
-} from "../../../extensions/_shared/model-settings.js";
-import { sessionJsonlPath } from "../../../extensions/_shared/files.js";
-import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator-ui.js";
-import type { CustomUiComponent } from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/_shared/model/model-settings.js";
+import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
+import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
+import type { CustomUiComponent } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const ENTER = "\r";

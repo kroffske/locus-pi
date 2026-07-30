@@ -12,7 +12,7 @@ import {
   executeAgentRunBoundary,
   type AgentExecutor,
 } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/host/pi-api.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 
 const agent: AgentDefinition = {

@@ -7,7 +7,7 @@ import type {
   AgentLiveRow,
   SdkAgentSessionEventLike,
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, runTool, type Harness } from "../../test-harness.js";
 
 // T-188 W2: `/agent run` no longer uses a replacement session. It is a client of

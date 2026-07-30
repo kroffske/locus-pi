@@ -25,7 +25,7 @@
  * was rewritten to remove.
  */
 
-import type { ExtensionContext, ModelLike, ThinkingLevel } from "./pi-api.js";
+import type { ExtensionContext, ModelLike, ThinkingLevel } from "../host/pi-api.js";
 import { parseModelSelector as parseModelRoleAssignment } from "./model-settings.js";
 
 /** Levels accepted as a display-only suffix, quoted verbatim in refusal text. */

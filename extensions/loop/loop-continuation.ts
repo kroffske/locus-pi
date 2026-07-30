@@ -13,13 +13,13 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "../_shared/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import {
   goalContinuationPath,
   loadGoalState,
   renderGoalContinuationArtifact,
   type GoalContinuationArtifact,
-} from "../_shared/goal-mode.js";
+} from "../_shared/project/goal-mode.js";
 import {
   listWorkflowRunIds,
   readWorkflowRunJournal,
@@ -27,7 +27,7 @@ import {
   workflowRunDir,
   type WorkflowRunSummary,
 } from "../workflows/run-read.js";
-import { runtimeStateDir } from "../_shared/files.js";
+import { runtimeStateDir } from "../_shared/host/files.js";
 
 export type LoopSourceKind = "goal" | "workflow" | "review";
 export type LoopSourceAvailability = "available" | "blocked" | "missing" | "unsupported";

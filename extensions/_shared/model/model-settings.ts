@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ExtensionContext, ThinkingLevel } from "./pi-api.js";
-import { getProjectRoot } from "./pi-api.js";
+import type { ExtensionContext, ThinkingLevel } from "../host/pi-api.js";
+import { getProjectRoot } from "../host/pi-api.js";
 
 const USER_HOME_ENV = "PI_MODEL_ROLES_HOME";
 export const DEFAULT_MODEL_ROLES = [

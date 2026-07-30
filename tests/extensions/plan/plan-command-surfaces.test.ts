@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { GoalOperationResult } from "../../../extensions/_shared/goal-mode.js";
+import type { GoalOperationResult } from "../../../extensions/_shared/project/goal-mode.js";
 import { isInPlanMode, loadModeState, writeModeState } from "../../../extensions/_shared/mode-state.js";
 import { goalOperationBlock } from "../../../extensions/plan/goal-operator-ui.js";
 import plan from "../../../extensions/plan/index.js";
@@ -419,7 +419,7 @@ describe("/goal-ai target resolution", () => {
  * continuation receipt. tests/shared/operator-ui/goal-operator-ui.test.ts only
  * covers the inside-the-root branch; the outside-the-root fallback had no test,
  * so both branches are pinned here before the formatter is deduplicated onto
- * the identical _shared/prompt-command-store.ts helper.
+ * the identical _shared/project/prompt-command-store.ts helper.
  */
 describe("goal continuation path formatting", () => {
   function continuationResult(filePath: string): GoalOperationResult {

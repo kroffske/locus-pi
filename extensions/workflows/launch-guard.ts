@@ -8,7 +8,7 @@
  * operator is told.
  */
 
-import type { ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
+import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
 import {
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,

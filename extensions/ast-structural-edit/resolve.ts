@@ -1,9 +1,9 @@
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { validateParams } from "../_shared/validation.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { validateParams } from "../_shared/host/validation.js";
 import { applyPreview, discardPreview, getLatestPendingPreview, getPreview } from "../_shared/ast-engine.js";
-import { emitDevEvent } from "../_shared/event-bus.js";
+import { emitDevEvent } from "../_shared/runtime/event-bus.js";
 
 const AstApplyParams = Type.Object({
   action: Type.Union([Type.Literal("apply"), Type.Literal("discard")], { description: "Preview lifecycle action" }),
@@ -12,11 +12,23 @@ const AstApplyParams = Type.Object({
 });
 
 const ResolveParams = Type.Object({
-  action: Type.Union([Type.Literal("apply"), Type.Literal("discard")], { description: "Whether to apply or discard the pending preview" }),
+  action: Type.Union([Type.Literal("apply"), Type.Literal("discard")], {
+    description: "Whether to apply or discard the pending preview",
+  }),
   reason: Type.String({ description: "Why applying or discarding the pending preview", maxLength: 500 }),
-  extra: Type.Optional(Type.Object({
-    previewId: Type.Optional(Type.String({ description: "Preview id returned by ast_edit. Optional; resolve defaults to the latest pending AST preview." })),
-  }, { additionalProperties: true, description: "Free-form resolve metadata" })),
+  extra: Type.Optional(
+    Type.Object(
+      {
+        previewId: Type.Optional(
+          Type.String({
+            description:
+              "Preview id returned by ast_edit. Optional; resolve defaults to the latest pending AST preview.",
+          }),
+        ),
+      },
+      { additionalProperties: true, description: "Free-form resolve metadata" },
+    ),
+  ),
 });
 
 export default function astApplyTool(pi: ExtensionAPI): void {
@@ -43,7 +55,11 @@ export default function astApplyTool(pi: ExtensionAPI): void {
       const valid = validateParams(ResolveParams, params);
       if (!valid.ok) return valid.result;
       const previewId = valid.value.extra?.previewId ?? getLatestPendingPreview(getProjectRoot(ctx))?.id;
-      if (!previewId) return { isError: true, content: [{ type: "text", text: "No pending action to resolve. Nothing to apply or discard." }] };
+      if (!previewId)
+        return {
+          isError: true,
+          content: [{ type: "text", text: "No pending action to resolve. Nothing to apply or discard." }],
+        };
       return finalizePreview(previewId, valid.value.action, valid.value.reason, ctx, "resolve");
     },
   });
@@ -68,7 +84,7 @@ async function finalizePreview(
     emitDevEvent(`${sourceToolName}:stale`, { previewId, files: result.stale.length });
     return {
       isError: true,
-    content: [{ type: "text" as const, text: `Preview is stale; refusing apply:\n${result.stale.join("\n")}` }],
+      content: [{ type: "text" as const, text: `Preview is stale; refusing apply:\n${result.stale.join("\n")}` }],
       details: { ...resolveDetails(action, reason, previewId, sourceToolName), stale: result.stale },
     };
   }
@@ -79,7 +95,12 @@ async function finalizePreview(
   });
 }
 
-function resolveDetails(action: "apply" | "discard", reason: string, previewId: string, sourceToolName: "resolve" | "ast_apply") {
+function resolveDetails(
+  action: "apply" | "discard",
+  reason: string,
+  previewId: string,
+  sourceToolName: "resolve" | "ast_apply",
+) {
   return {
     action,
     reason,
@@ -98,16 +119,14 @@ function previewFinalizerApproval(args: unknown) {
 
 function previewFinalizerApprovalDetails(args: unknown): string[] {
   const action = previewFinalizerAction(args);
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
-  const extra = record.extra !== null && typeof record.extra === "object" ? record.extra as Record<string, unknown> : undefined;
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const extra =
+    record.extra !== null && typeof record.extra === "object" ? (record.extra as Record<string, unknown>) : undefined;
   const previewId = String(record.previewId ?? extra?.previewId ?? "latest-pending-preview");
-  return [
-    `Action: ${action}`,
-    `Preview: ${previewId}`,
-  ];
+  return [`Action: ${action}`, `Preview: ${previewId}`];
 }
 
 function previewFinalizerAction(args: unknown): "apply" | "discard" {
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   return record.action === "apply" ? "apply" : "discard";
 }

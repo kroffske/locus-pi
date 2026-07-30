@@ -9,13 +9,13 @@ import {
   formatAgentKickoffPrompt,
   parseAgentText,
 } from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
-import { buildModelRolesState, resolveAgentModelPreference } from "../../../extensions/_shared/model-settings.js";
+import { buildModelRolesState, resolveAgentModelPreference } from "../../../extensions/_shared/model/model-settings.js";
 import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
-} from "../../../extensions/_shared/pi-api.js";
+} from "../../../extensions/_shared/host/pi-api.js";
 import type { AgentDefinition } from "../../../extensions/_shared/types.js";
 import { createHarness } from "../../test-harness.js";
 

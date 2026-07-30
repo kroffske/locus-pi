@@ -1,6 +1,10 @@
-import type { ExtensionAPI, ExtensionContext, ReplacementSessionEntryLike } from "./pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "./pi-api.js";
-import { createSessionStore, selectSessionStoreBackend, type SessionStoreBackend } from "./runtime-capabilities.js";
+import type { ExtensionAPI, ExtensionContext, ReplacementSessionEntryLike } from "../host/pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "../host/pi-api.js";
+import {
+  createSessionStore,
+  selectSessionStoreBackend,
+  type SessionStoreBackend,
+} from "../runtime/runtime-capabilities.js";
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned";
 

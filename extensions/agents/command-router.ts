@@ -4,11 +4,11 @@
  * the fleet menu and the session authority arrive as injected dependencies so the
  * router owns no session state of its own.
  */
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { sharedState } from "../_shared/state.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { renderAgentObserverText } from "../workflows/progress-widget.js";
 import { refreshAgents } from "./catalog.js";
 import {

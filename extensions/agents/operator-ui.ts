@@ -8,9 +8,9 @@ import type { AgentDiagnostic } from "../_shared/agent-runtime/agents.js";
 import { formatAgentListItem } from "../_shared/agent-runtime/agents.js";
 import { agentShortIdFromSource } from "../_shared/agent-runtime/agent-live-panel.js";
 import type { executeAgentRunBoundary } from "../_shared/agent-runtime/agent-runner.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import type { AgentDefinition } from "../_shared/types.js";
-import { compactOperatorLine } from "../_shared/operator-ui.js";
+import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
 
 export const AGENTS_WIDGET_FALLBACK_WIDTH = 80;
 

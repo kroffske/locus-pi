@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "../pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "../pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "../host/pi-api.js";
 import type { AgentDefinition, AgentFailureCause, EvidenceEvaluation } from "../types.js";
-import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "../session-core.js";
-import { createSessionStore, type SessionStore } from "../runtime-capabilities.js";
-import type { ModelRoleResolution } from "../model-settings.js";
-import { modelRoleResolutionRecord } from "../model-settings.js";
-import type { RuntimeArtifact } from "../artifacts.js";
-import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "../artifacts.js";
+import type { CreateSessionInput, MemorySessionStore, SessionRecord } from "../runtime/session-core.js";
+import { createSessionStore, type SessionStore } from "../runtime/runtime-capabilities.js";
+import type { ModelRoleResolution } from "../model/model-settings.js";
+import { modelRoleResolutionRecord } from "../model/model-settings.js";
+import type { RuntimeArtifact } from "../runtime/artifacts.js";
+import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "../runtime/artifacts.js";
 import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";

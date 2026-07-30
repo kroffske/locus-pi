@@ -13,9 +13,9 @@ import {
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import type { ExtensionCommandContext, ExtensionContext } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+} from "../_shared/operator/operator-interaction.js";
+import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { coerceTheme } from "../workflows/progress-widget.js";
 import { executeAgentDrillCommand, type AgentSessionAuthority } from "./drill-command.js";
 import { AGENTS_WIDGET_KEY, notifyActiveAgentsContinue, notifyInteractionEnded } from "./operator-surface.js";

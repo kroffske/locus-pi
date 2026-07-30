@@ -160,7 +160,7 @@ task lifecycle, or review outcome. Prompt storage is not execution proof.
 
 - `/goal prompt` and `/goal-ai` are prompt-writing surfaces, not goal execution.
 - Bare `/plan` and `/goal-ai` depend on interactive UI. In `json`/`print` or explicit no-UI hosts they take no action; callers must provide the request as a command argument.
-- Pi's official dialog result is `string | undefined`, while `_shared/pi-api.ts` still describes an older object result. These commands use the narrow `_shared/operator-input.ts` adapter; repository-wide facade repair is deferred.
+- Pi's official dialog result is `string | undefined`, while `_shared/host/pi-api.ts` still describes an older object result. These commands use the narrow `_shared/operator/operator-input.ts` adapter; repository-wide facade repair is deferred.
 - `/review`, `/todos`, `/goal prompt`, `/goal-ai`, and `/goal continue`
   are artifact-write surfaces. Bare shelf commands show metadata/path and are
   transient. Full prompt bodies remain hidden until explicit command verbs

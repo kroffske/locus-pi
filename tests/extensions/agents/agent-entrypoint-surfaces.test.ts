@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 const tempRoots: string[] = [];

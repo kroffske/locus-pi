@@ -43,7 +43,7 @@ The command and tool both return compact text plus machine-readable details. Com
 - No hidden endless loop.
 - No automatic dispatch after `once`.
 - No full OMP compaction/streaming parity.
-- Pi `ctx.ui.input` / `ctx.ui.editor` facade types in `_shared/pi-api.ts` still describe an older object result. This extension calls the official string/`undefined` signature through `_shared/operator-input.ts`; a repository-wide facade repair is deferred.
+- Pi `ctx.ui.input` / `ctx.ui.editor` facade types in `_shared/host/pi-api.ts` still describe an older object result. This extension calls the official string/`undefined` signature through `_shared/operator/operator-input.ts`; a repository-wide facade repair is deferred.
 - Review continuation is not implemented.
 - Workflow continuation only becomes available when persisted run metadata exists; missing integration fails closed and does not auto-create a continuation.
 - Historical beta shells are excluded from the clean release repository.

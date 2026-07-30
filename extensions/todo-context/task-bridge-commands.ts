@@ -9,9 +9,9 @@
  * `state-commands.ts`; the card wording is in `operator-ui.ts`.
  */
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
-import { projectDisplayPath } from "../_shared/prompt-command-store.js";
+import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
+import { projectDisplayPath } from "../_shared/project/prompt-command-store.js";
 import {
   exportTodosToProjectTask,
   importTodosFromProjectTasks,
@@ -19,9 +19,9 @@ import {
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
   type TaskBridgeSnapshot,
-} from "../_shared/task-bridge.js";
-import { tasksRoot, type ProjectTaskWorkspace } from "../_shared/tasks-store.js";
-import { errorMessage } from "../_shared/error-text.js";
+} from "../_shared/project/task-bridge.js";
+import { tasksRoot, type ProjectTaskWorkspace } from "../_shared/project/tasks-store.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import { parseCompletionNoteInput } from "./command-parser.js";
 import { setTodoBlock } from "./operator-surface.js";
 import {

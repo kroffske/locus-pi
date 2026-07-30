@@ -1,5 +1,5 @@
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "./pi-api.js";
+import type { ExtensionContext } from "../host/pi-api.js";
 
 export const OPERATOR_STATUS_KEY = "locus";
 

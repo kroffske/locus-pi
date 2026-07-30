@@ -3,7 +3,10 @@ import { Value } from "@sinclair/typebox/value";
 import type { ToolResult } from "./pi-api.js";
 import { errorResult } from "./pi-api.js";
 
-export function validateParams<T extends TSchema>(schema: T, params: unknown): { ok: true; value: Static<T> } | { ok: false; result: ToolResult } {
+export function validateParams<T extends TSchema>(
+  schema: T,
+  params: unknown,
+): { ok: true; value: Static<T> } | { ok: false; result: ToolResult } {
   const errors = [...Value.Errors(schema, params)];
   if (errors.length !== 0) {
     return {
@@ -18,5 +21,5 @@ export function validateParams<T extends TSchema>(schema: T, params: unknown): {
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }

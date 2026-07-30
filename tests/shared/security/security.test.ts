@@ -3,13 +3,23 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { auditEvent, classifyToolCall, clearAuditEvents, getAuditEvents } from "../../../extensions/_shared/permissions.js";
-import { redactSecrets } from "../../../extensions/_shared/redaction.js";
-import { truncateOutput } from "../../../extensions/_shared/safe-output.js";
+import {
+  auditEvent,
+  classifyToolCall,
+  clearAuditEvents,
+  getAuditEvents,
+} from "../../../extensions/_shared/permissions.js";
+import { redactSecrets } from "../../../extensions/_shared/host/redaction.js";
+import { truncateOutput } from "../../../extensions/_shared/host/safe-output.js";
 import securityGate from "../../../extensions/security-gate/index.js";
 import { createHarness, emit } from "../../test-harness.js";
 
-async function createDisposableDeleteFixture(): Promise<{ root: string; target: string; command: string; cleanup: () => Promise<void> }> {
+async function createDisposableDeleteFixture(): Promise<{
+  root: string;
+  target: string;
+  command: string;
+  cleanup: () => Promise<void>;
+}> {
   const root = await mkdtemp(path.join(tmpdir(), "locus-pi-security-"));
   const target = path.join(root, "delete-me");
   const siblingCanary = path.join(root, "sibling-canary.txt");
@@ -55,12 +65,36 @@ describe("security gate", () => {
     const h = createHarness();
     securityGate(h.pi);
 
-    const previewResults = (await emit(h, "tool_call", { toolName: "ast_edit", toolArgs: { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] } })).filter((entry) => entry !== undefined);
-    const discardResults = (await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "discard", reason: "not needed", extra: { previewId: "preview-1" } } })).filter((entry) => entry !== undefined);
-    const applyResults = (await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "apply", reason: "approved by resolve", extra: { previewId: "preview-1" } } })).filter((entry) => entry !== undefined);
-    const legacyApplyResults = (await emit(h, "tool_call", { toolName: "ast_apply", toolArgs: { action: "apply", previewId: "preview-1", reason: "legacy caller" } })).filter((entry) => entry !== undefined);
-    const genericEditResults = (await emit(h, "tool_call", { toolName: "edit", toolArgs: { path: "sample.ts" } })).filter((entry) => entry !== undefined);
-    const genericWriteResults = (await emit(h, "tool_call", { toolName: "write", toolArgs: { path: "sample.ts" } })).filter((entry) => entry !== undefined);
+    const previewResults = (
+      await emit(h, "tool_call", {
+        toolName: "ast_edit",
+        toolArgs: { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] },
+      })
+    ).filter((entry) => entry !== undefined);
+    const discardResults = (
+      await emit(h, "tool_call", {
+        toolName: "resolve",
+        toolArgs: { action: "discard", reason: "not needed", extra: { previewId: "preview-1" } },
+      })
+    ).filter((entry) => entry !== undefined);
+    const applyResults = (
+      await emit(h, "tool_call", {
+        toolName: "resolve",
+        toolArgs: { action: "apply", reason: "approved by resolve", extra: { previewId: "preview-1" } },
+      })
+    ).filter((entry) => entry !== undefined);
+    const legacyApplyResults = (
+      await emit(h, "tool_call", {
+        toolName: "ast_apply",
+        toolArgs: { action: "apply", previewId: "preview-1", reason: "legacy caller" },
+      })
+    ).filter((entry) => entry !== undefined);
+    const genericEditResults = (
+      await emit(h, "tool_call", { toolName: "edit", toolArgs: { path: "sample.ts" } })
+    ).filter((entry) => entry !== undefined);
+    const genericWriteResults = (
+      await emit(h, "tool_call", { toolName: "write", toolArgs: { path: "sample.ts" } })
+    ).filter((entry) => entry !== undefined);
 
     expect(previewResults).toEqual([]);
     expect(discardResults).toEqual([]);
@@ -68,14 +102,56 @@ describe("security gate", () => {
     expect(legacyApplyResults).toEqual([]);
     expect(genericEditResults).toEqual([]);
     expect(genericWriteResults).toEqual([]);
-    expect(getAuditEvents()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "preview", toolOrCommand: "ast_edit", target: "sample.ts" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "preview", toolOrCommand: "resolve", target: "preview-1" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "filesystem-write", toolOrCommand: "resolve", target: "preview-1" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", actionType: "filesystem-write", toolOrCommand: "ast_apply", target: "preview-1" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", userDecision: "delegated-to-pi", enforcement: "pi-original", actionType: "filesystem-write", toolOrCommand: "edit", target: "sample.ts" }),
-      expect.objectContaining({ extensionId: "security-gate", decision: "allow", userDecision: "delegated-to-pi", enforcement: "pi-original", actionType: "filesystem-write", toolOrCommand: "write", target: "sample.ts" }),
-    ]));
+    expect(getAuditEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "preview",
+          toolOrCommand: "ast_edit",
+          target: "sample.ts",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "preview",
+          toolOrCommand: "resolve",
+          target: "preview-1",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "filesystem-write",
+          toolOrCommand: "resolve",
+          target: "preview-1",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          actionType: "filesystem-write",
+          toolOrCommand: "ast_apply",
+          target: "preview-1",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          userDecision: "delegated-to-pi",
+          enforcement: "pi-original",
+          actionType: "filesystem-write",
+          toolOrCommand: "edit",
+          target: "sample.ts",
+        }),
+        expect.objectContaining({
+          extensionId: "security-gate",
+          decision: "allow",
+          userDecision: "delegated-to-pi",
+          enforcement: "pi-original",
+          actionType: "filesystem-write",
+          toolOrCommand: "write",
+          target: "sample.ts",
+        }),
+      ]),
+    );
   });
 
   it("audits dangerous tool calls, allows Pi to decide, and renders /security-audit output", async () => {
@@ -84,11 +160,15 @@ describe("security gate", () => {
     securityGate(h.pi);
     const fixture = await createDisposableDeleteFixture();
     try {
-      const safeResults = (await emit(h, "tool_call", { toolName: "read", toolArgs: { path: "README.md" } })).filter((entry) => entry !== undefined);
+      const safeResults = (await emit(h, "tool_call", { toolName: "read", toolArgs: { path: "README.md" } })).filter(
+        (entry) => entry !== undefined,
+      );
       expect(safeResults).toEqual([]);
 
       const classification = classifyToolCall("bash", { command: fixture.command });
-      const dangerousResults = (await emit(h, "tool_call", { toolName: "bash", toolArgs: { command: fixture.command } })).filter((entry) => entry !== undefined);
+      const dangerousResults = (
+        await emit(h, "tool_call", { toolName: "bash", toolArgs: { command: fixture.command } })
+      ).filter((entry) => entry !== undefined);
       expect(dangerousResults).toEqual([]);
 
       await h.commands.get("security-audit")!.handler("", h.ctx);

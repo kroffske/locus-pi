@@ -1,4 +1,11 @@
-import type { CommandArgs, CommandOptions, EventPayload, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "./pi-api.js";
+import type {
+  CommandArgs,
+  CommandOptions,
+  EventPayload,
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "../host/pi-api.js";
 
 export type CommandUiSurface =
   | "persistent-state"
@@ -59,7 +66,11 @@ export function unpinTransientUiKey(pi: ExtensionAPI, key: string): void {
  * cleared. This keeps non-visual state (for example live-store rows) aligned
  * with the widget lifecycle without teaching this generic module domain rules.
  */
-export function registerTransientUiCleanup(pi: ExtensionAPI, key: string, cleanup: (ctx: ExtensionContext) => void): void {
+export function registerTransientUiCleanup(
+  pi: ExtensionAPI,
+  key: string,
+  cleanup: (ctx: ExtensionContext) => void,
+): void {
   const registration = ownerRegistration(pi);
   const callbacks = registration.cleanupByKey.get(key) ?? new Set<(ctx: ExtensionContext) => void>();
   callbacks.add(cleanup);
@@ -94,7 +105,8 @@ export function clearTransientCommandUi(
   const transientWidgets = new Set<string>();
   for (const owner of scope.owners) {
     for (const spec of owner.specs.values()) {
-      if (options.preserveCurrentGroup === true && currentGroup !== undefined && commandGroup(spec) === currentGroup) continue;
+      if (options.preserveCurrentGroup === true && currentGroup !== undefined && commandGroup(spec) === currentGroup)
+        continue;
       for (const key of spec.transientStatuses ?? []) transientStatuses.add(key);
       for (const key of spec.transientWidgets ?? []) transientWidgets.add(key);
     }
@@ -321,7 +333,5 @@ function commandUiRegistry(): CommandUiRegistry {
 function isCommandUiRegistry(value: unknown): value is CommandUiRegistry {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<CommandUiRegistry>;
-  return candidate.version === 2
-    && candidate.pendingByPi instanceof WeakMap
-    && candidate.byUi instanceof WeakMap;
+  return candidate.version === 2 && candidate.pendingByPi instanceof WeakMap && candidate.byUi instanceof WeakMap;
 }

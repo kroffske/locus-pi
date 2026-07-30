@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "./pi-api.js";
+import type { ExtensionAPI } from "../host/pi-api.js";
 
 export type GoalStatus = "active" | "paused" | "budget-limited" | "complete" | "dropped";
 
@@ -85,7 +85,11 @@ export async function loadGoalState(projectRoot: string): Promise<GoalState | nu
   return null;
 }
 
-export async function writeGoalState(projectRoot: string, pi: ExtensionAPI | undefined, state: GoalState): Promise<GoalState> {
+export async function writeGoalState(
+  projectRoot: string,
+  pi: ExtensionAPI | undefined,
+  state: GoalState,
+): Promise<GoalState> {
   const filePath = goalStatePath(projectRoot);
   mkdirSync(path.dirname(filePath), { recursive: true });
   const normalized = normalizeState(state);
@@ -98,7 +102,11 @@ export async function writeGoalState(projectRoot: string, pi: ExtensionAPI | und
   return normalized;
 }
 
-export async function writeGoalCompletionAudit(projectRoot: string, pi: ExtensionAPI | undefined, audit: GoalCompletionAudit): Promise<GoalCompletionAudit> {
+export async function writeGoalCompletionAudit(
+  projectRoot: string,
+  pi: ExtensionAPI | undefined,
+  audit: GoalCompletionAudit,
+): Promise<GoalCompletionAudit> {
   const filePath = goalCompletionAuditPath(projectRoot);
   mkdirSync(path.dirname(filePath), { recursive: true });
   const normalized = normalizeGoalCompletionAudit(audit);
@@ -111,7 +119,11 @@ export async function writeGoalCompletionAudit(projectRoot: string, pi: Extensio
   return normalized;
 }
 
-export async function writeGoalContinuationArtifact(projectRoot: string, pi: ExtensionAPI | undefined, artifact: GoalContinuationArtifact): Promise<GoalContinuationArtifact> {
+export async function writeGoalContinuationArtifact(
+  projectRoot: string,
+  pi: ExtensionAPI | undefined,
+  artifact: GoalContinuationArtifact,
+): Promise<GoalContinuationArtifact> {
   const filePath = goalContinuationPath(projectRoot);
   mkdirSync(path.dirname(filePath), { recursive: true });
   const normalized = normalizeGoalContinuationArtifact(artifact);
@@ -131,7 +143,8 @@ export async function createOrReplaceGoalState(
   tokenBudget?: number,
 ): Promise<GoalOperationResult> {
   const trimmed = objective.trim();
-  if (trimmed.length === 0) return { state: null, changed: false, error: "Missing objective", message: "No objective provided." };
+  if (trimmed.length === 0)
+    return { state: null, changed: false, error: "Missing objective", message: "No objective provided." };
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -208,10 +221,14 @@ export async function resumeGoalState(projectRoot: string, pi: ExtensionAPI | un
   return { state: saved, changed: true, message: `Goal resumed: ${existing.goal.objective}` };
 }
 
-export async function completeGoalState(projectRoot: string, pi: ExtensionAPI | undefined): Promise<GoalOperationResult> {
+export async function completeGoalState(
+  projectRoot: string,
+  pi: ExtensionAPI | undefined,
+): Promise<GoalOperationResult> {
   const existing = await loadGoalState(projectRoot);
   if (!existing) return { state: null, changed: false, message: "No goal to complete." };
-  if (existing.goal.status === "complete") return { state: existing, changed: false, message: "Goal is already complete." };
+  if (existing.goal.status === "complete")
+    return { state: existing, changed: false, message: "Goal is already complete." };
 
   const now = new Date().toISOString();
   const { activeSince: _activeSince, ...goalWithoutActiveSince } = existing.goal;
@@ -241,7 +258,8 @@ export async function completeGoalState(projectRoot: string, pi: ExtensionAPI | 
 export async function dropGoalState(projectRoot: string, pi: ExtensionAPI | undefined): Promise<GoalOperationResult> {
   const existing = await loadGoalState(projectRoot);
   if (!existing) return { state: null, changed: false, message: "No goal to drop." };
-  if (existing.goal.status === "dropped") return { state: existing, changed: false, message: "Goal is already dropped." };
+  if (existing.goal.status === "dropped")
+    return { state: existing, changed: false, message: "Goal is already dropped." };
 
   const now = new Date().toISOString();
   const { activeSince: _activeSince, ...goalWithoutActiveSince } = existing.goal;
@@ -258,14 +276,18 @@ export async function dropGoalState(projectRoot: string, pi: ExtensionAPI | unde
   return { state: saved, changed: true, message: `Goal dropped: ${existing.goal.objective}` };
 }
 
-export async function setGoalBudget(projectRoot: string, pi: ExtensionAPI | undefined, rawBudget: string): Promise<GoalOperationResult> {
+export async function setGoalBudget(
+  projectRoot: string,
+  pi: ExtensionAPI | undefined,
+  rawBudget: string,
+): Promise<GoalOperationResult> {
   const existing = await loadGoalState(projectRoot);
   if (!existing) return { state: null, changed: false, message: "No goal to set budget." };
 
   if (rawBudget.toLowerCase() === "off") {
     const now = new Date().toISOString();
     const { tokenBudget: _tokenBudget, ...goalWithoutBudget } = existing.goal;
-    const status = existing.goal.status === "budget-limited" ? "active" as GoalStatus : existing.goal.status;
+    const status = existing.goal.status === "budget-limited" ? ("active" as GoalStatus) : existing.goal.status;
     const next: GoalState = {
       ...existing,
       goal: {
@@ -281,7 +303,12 @@ export async function setGoalBudget(projectRoot: string, pi: ExtensionAPI | unde
 
   const tokenBudget = Number.parseInt(rawBudget, 10);
   if (!Number.isInteger(tokenBudget) || tokenBudget <= 0) {
-    return { state: existing, changed: false, error: "Invalid budget", message: "Budget must be a positive integer or off." };
+    return {
+      state: existing,
+      changed: false,
+      error: "Invalid budget",
+      message: "Budget must be a positive integer or off.",
+    };
   }
 
   const now = new Date().toISOString();
@@ -371,9 +398,20 @@ export function renderGoalCompletionAudit(audit: GoalCompletionAudit): string {
   ].join("\n");
 }
 
-export function buildGoalContinuationArtifact(projectRoot: string, goalId: string, objective: string, raw: string): GoalContinuationArtifact {
+export function buildGoalContinuationArtifact(
+  projectRoot: string,
+  goalId: string,
+  objective: string,
+  raw: string,
+): GoalContinuationArtifact {
   const trimmed = raw.trim();
-  const parts = trimmed === "" ? [] : trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  const parts =
+    trimmed === ""
+      ? []
+      : trimmed
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
   const summary = parts[0];
   const nextStep = parts[1] ?? "Choose one bounded next action and stop.";
   const lines = [
@@ -444,7 +482,10 @@ export function decideStatusAfterResume(current: GoalPayload): GoalStatus {
 }
 
 export function isBudgetLimited(state: GoalState, current: GoalPayload = state.goal): boolean {
-  return current.status === "budget-limited" || (current.tokenBudget !== undefined && current.tokensUsed >= current.tokenBudget);
+  return (
+    current.status === "budget-limited" ||
+    (current.tokenBudget !== undefined && current.tokensUsed >= current.tokenBudget)
+  );
 }
 
 function chooseActiveOrBudgetLimited(current: GoalPayload): GoalStatus {
@@ -460,16 +501,16 @@ function isValidGoalState(candidate: GoalState): candidate is GoalState {
   if (candidate.version !== 1) return false;
   const goal = candidate.goal;
   return (
-    typeof goal?.id === "string"
-    && typeof goal.objective === "string"
-    && typeof goal.status === "string"
-    && ["active", "paused", "budget-limited", "complete", "dropped"].includes(goal.status)
-    && typeof goal.tokensUsed === "number"
-    && typeof goal.timeUsedSeconds === "number"
-    && Number.isFinite(goal.tokensUsed)
-    && Number.isFinite(goal.timeUsedSeconds)
-    && typeof goal.createdAt === "string"
-    && typeof goal.updatedAt === "string"
+    typeof goal?.id === "string" &&
+    typeof goal.objective === "string" &&
+    typeof goal.status === "string" &&
+    ["active", "paused", "budget-limited", "complete", "dropped"].includes(goal.status) &&
+    typeof goal.tokensUsed === "number" &&
+    typeof goal.timeUsedSeconds === "number" &&
+    Number.isFinite(goal.tokensUsed) &&
+    Number.isFinite(goal.timeUsedSeconds) &&
+    typeof goal.createdAt === "string" &&
+    typeof goal.updatedAt === "string"
   );
 }
 
@@ -512,6 +553,7 @@ function normalizeState(state: GoalState): GoalState {
 }
 
 function ensureStatus(goal: GoalPayload): GoalStatus {
-  if (goal.status === "budget-limited") return isBudgetLimited({ version: 1, goal }, goal) ? "budget-limited" : chooseActiveOrBudgetLimited(goal);
+  if (goal.status === "budget-limited")
+    return isBudgetLimited({ version: 1, goal }, goal) ? "budget-limited" : chooseActiveOrBudgetLimited(goal);
   return goal.status;
 }

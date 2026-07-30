@@ -1,4 +1,4 @@
-import type { CustomUiFactory, ExtensionContext } from "./pi-api.js";
+import type { CustomUiFactory, ExtensionContext } from "../host/pi-api.js";
 
 interface InlineInteractionQueue {
   tail: Promise<void>;

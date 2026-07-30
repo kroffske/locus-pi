@@ -4,8 +4,8 @@ import type {
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
   NewSessionResultLike,
-} from "../pi-api.js";
-import type { SessionRecord } from "../session-core.js";
+} from "../host/pi-api.js";
+import type { SessionRecord } from "../runtime/session-core.js";
 import { getAgentWorkloadProof } from "./agent-workload-proof.js";
 import type { AgentExecutionPromptCapsule } from "./agent-execution-prompt.js";
 import {

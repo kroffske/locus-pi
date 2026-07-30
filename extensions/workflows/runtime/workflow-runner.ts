@@ -20,8 +20,8 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { constants as vmConstants, Script } from "node:vm";
-import type { ExtensionAPI, ExtensionContext } from "../../_shared/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../../_shared/pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowDsl,
@@ -176,7 +176,7 @@ export interface RunWorkflowScriptOptions {
     turnTimeoutMs?: number;
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
-  resolveModel?: import("../../_shared/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
+  resolveModel?: import("../../_shared/model/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
   /** Called once after run identity is allocated and before any journal event. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
   onEvent?: (line: WorkflowJournalLine) => void;

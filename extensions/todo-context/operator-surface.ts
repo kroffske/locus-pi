@@ -6,9 +6,9 @@
  * Pure block construction stays in `operator-ui.ts`; nothing here decides
  * wording.
  */
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import type { ExtensionContext } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 
 export function setTodoBlock(ctx: ExtensionContext, block: OperatorBlock): void {
   setOperatorWidget(ctx, "todo", ctx.mode === "tui" ? block : compactTodoBlock(block));

@@ -1,5 +1,5 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "./pi-api.js";
+import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../host/pi-api.js";
 import { setDismissibleView } from "./command-ui.js";
 import {
   renderOperatorBlock,

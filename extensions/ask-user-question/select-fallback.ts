@@ -7,8 +7,8 @@
  * the operator picks Done. Both honour the ask timeout by racing the dialog.
  */
 
-import { requestOperatorInput } from "../_shared/operator-input.js";
-import type { ExtensionContext } from "../_shared/pi-api.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
 import {
   CHECKED_PREFIX,
   DONE_OPTION,

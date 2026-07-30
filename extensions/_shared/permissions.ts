@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { AuditEvent, PermissionManifest } from "./types.js";
-import { redactSecrets } from "./redaction.js";
+import { redactSecrets } from "./host/redaction.js";
 
 const auditEvents: AuditEvent[] = [];
 
@@ -44,10 +44,16 @@ export function requirePermission(manifest: PermissionManifest, capability: stri
   if (capability === "browser") return manifest.permissions.browser;
   if (capability === "models") return manifest.permissions.models;
   if (capability.startsWith("ui:")) return manifest.permissions.ui.includes(capability.slice(3));
-  if (capability.startsWith("subprocess:")) return manifest.permissions.subprocess.includes(capability.slice(11)) || manifest.permissions.subprocess.includes("*");
-  if (capability.startsWith("network:")) return manifest.permissions.network.includes(capability.slice(8)) || manifest.permissions.network.includes("*");
-  if (capability.startsWith("fs:read:")) return isPathAllowed(capability.slice(8), manifest.permissions.filesystem.read, []);
-  if (capability.startsWith("fs:write:")) return isPathAllowed(capability.slice(9), manifest.permissions.filesystem.write, []);
+  if (capability.startsWith("subprocess:"))
+    return (
+      manifest.permissions.subprocess.includes(capability.slice(11)) || manifest.permissions.subprocess.includes("*")
+    );
+  if (capability.startsWith("network:"))
+    return manifest.permissions.network.includes(capability.slice(8)) || manifest.permissions.network.includes("*");
+  if (capability.startsWith("fs:read:"))
+    return isPathAllowed(capability.slice(8), manifest.permissions.filesystem.read, []);
+  if (capability.startsWith("fs:write:"))
+    return isPathAllowed(capability.slice(9), manifest.permissions.filesystem.write, []);
   return false;
 }
 
@@ -79,7 +85,11 @@ function isWithin(candidate: string, root: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 
-export function isCommandAllowed(command: string, allowedCommands: string[] = [], deniedPatterns: RegExp[] = DESTRUCTIVE_COMMAND_PATTERNS): boolean {
+export function isCommandAllowed(
+  command: string,
+  allowedCommands: string[] = [],
+  deniedPatterns: RegExp[] = DESTRUCTIVE_COMMAND_PATTERNS,
+): boolean {
   if (deniedPatterns.some((pattern) => pattern.test(command))) return false;
   if (allowedCommands.includes("*")) return true;
   const trimmed = command.trim();
@@ -89,11 +99,27 @@ export function isCommandAllowed(command: string, allowedCommands: string[] = []
 type ToolCallClassification = { actionType: string; target: string; dangerous: boolean; reason?: string };
 
 export function classifyToolCall(toolName: string, args: unknown): ToolCallClassification {
-  const record = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+  const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   if (toolName === "bash") {
     const command = String(record.command ?? "");
-    const safe = isCommandAllowed(command, ["pwd", "date", "git status", "git diff", "git log", "node --version", "npm --version", "bun --version"]);
-    return safe ? { actionType: "subprocess", target: command, dangerous: false } : { actionType: "subprocess", target: command, dangerous: true, reason: "Command is not allowlisted or matches denylist" };
+    const safe = isCommandAllowed(command, [
+      "pwd",
+      "date",
+      "git status",
+      "git diff",
+      "git log",
+      "node --version",
+      "npm --version",
+      "bun --version",
+    ]);
+    return safe
+      ? { actionType: "subprocess", target: command, dangerous: false }
+      : {
+          actionType: "subprocess",
+          target: command,
+          dangerous: true,
+          reason: "Command is not allowlisted or matches denylist",
+        };
   }
   if (toolName === "ast_edit") {
     return { actionType: "preview", target: astEditTarget(record), dangerous: false };
@@ -102,23 +128,43 @@ export function classifyToolCall(toolName: string, args: unknown): ToolCallClass
     return classifyAstPreviewFinalizer(toolName, record);
   }
   if (["write", "edit"].includes(toolName)) {
-    return { actionType: "filesystem-write", target: String(record.path ?? toolName), dangerous: true, reason: "Mutation tools are delegated to Pi approval" };
+    return {
+      actionType: "filesystem-write",
+      target: String(record.path ?? toolName),
+      dangerous: true,
+      reason: "Mutation tools are delegated to Pi approval",
+    };
   }
   if (toolName === "browser" && ["doctor", "stop", "snapshot"].includes(String(record.action ?? ""))) {
     return { actionType: "browser", target: String(record.action), dangerous: false };
   }
   if (toolName.startsWith("browser")) {
-    return { actionType: "browser", target: String(record.url ?? toolName), dangerous: true, reason: "Browser/network tools are delegated to Pi approval and user policy" };
+    return {
+      actionType: "browser",
+      target: String(record.url ?? toolName),
+      dangerous: true,
+      reason: "Browser/network tools are delegated to Pi approval and user policy",
+    };
   }
   if (toolName === "read") {
     const target = String(record.path ?? "");
     const dangerous = SECRET_PATH_PATTERNS.some((pattern) => pattern.test(target));
-    return dangerous ? { actionType: "filesystem-read", target, dangerous, reason: "Secret-path reads are delegated to Pi approval and user policy" } : { actionType: "filesystem-read", target, dangerous };
+    return dangerous
+      ? {
+          actionType: "filesystem-read",
+          target,
+          dangerous,
+          reason: "Secret-path reads are delegated to Pi approval and user policy",
+        }
+      : { actionType: "filesystem-read", target, dangerous };
   }
   return { actionType: "tool", target: toolName, dangerous: false };
 }
 
-function classifyAstPreviewFinalizer(toolName: "resolve" | "ast_apply", record: Record<string, unknown>): ToolCallClassification {
+function classifyAstPreviewFinalizer(
+  toolName: "resolve" | "ast_apply",
+  record: Record<string, unknown>,
+): ToolCallClassification {
   const action = String(record.action ?? "");
   return {
     actionType: action === "apply" ? "filesystem-write" : "preview",
@@ -134,6 +180,7 @@ function astEditTarget(record: Record<string, unknown>): string {
 }
 
 function astPreviewTarget(record: Record<string, unknown>, fallback: string): string {
-  const extra = record.extra !== null && typeof record.extra === "object" ? record.extra as Record<string, unknown> : undefined;
+  const extra =
+    record.extra !== null && typeof record.extra === "object" ? (record.extra as Record<string, unknown>) : undefined;
   return String(record.previewId ?? extra?.previewId ?? fallback);
 }

@@ -8,8 +8,8 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
-import { requestOperatorInput } from "../_shared/operator-input.js";
+import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
 import { clearModeState, loadModeState } from "../_shared/mode-state.js";
 import { setModeStatus } from "./operator-surface.js";
 

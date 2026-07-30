@@ -8,9 +8,13 @@
  * refusal fails closed through `unsupportedOnce`.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, ToolResult } from "../_shared/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
-import { buildGoalContinuationArtifact, loadGoalState, writeGoalContinuationArtifact } from "../_shared/goal-mode.js";
+import type { ExtensionAPI, ExtensionCommandContext, ToolResult } from "../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import {
+  buildGoalContinuationArtifact,
+  loadGoalState,
+  writeGoalContinuationArtifact,
+} from "../_shared/project/goal-mode.js";
 import {
   createWorkflowLoopContinuation,
   renderGoalLoopContinuationResult,

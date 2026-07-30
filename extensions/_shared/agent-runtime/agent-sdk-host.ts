@@ -10,14 +10,14 @@ import type {
   AgentRunResult,
 } from "./agent-runner.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
-import { modelSelectorFromModel } from "../live-model-display.js";
+import { modelSelectorFromModel } from "../model/live-model-display.js";
 import {
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
   parseAgentText,
 } from "./agent-execution-prompt.js";
-import type { SessionRecord } from "../session-core.js";
-import { runtimeStateDir } from "../files.js";
+import type { SessionRecord } from "../runtime/session-core.js";
+import { runtimeStateDir } from "../host/files.js";
 import { evaluateEvidence } from "./agent-evidence-evaluator.js";
 import type { EvidenceEvaluationInput } from "../types.js";
 import { PetnameRegistry } from "./agent-names.js";

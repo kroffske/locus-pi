@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator-ui.js";
+import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
 import { parsePromptShelfCommand, type PromptShelfTarget } from "../../../extensions/plan/command-parser.js";
 import {
   promptShelfBodyBlock,

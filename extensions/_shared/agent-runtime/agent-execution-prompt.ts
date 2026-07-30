@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { AgentParentContext, AgentRunRequest } from "./agent-runner.js";
-import type { ModelRoleResolutionRecord } from "../model-settings.js";
-import { modelRoleResolutionRecord } from "../model-settings.js";
+import type { ModelRoleResolutionRecord } from "../model/model-settings.js";
+import { modelRoleResolutionRecord } from "../model/model-settings.js";
 import { buildAgentSystemPrompt } from "./agent-system-prompt.js";
 import { OUTPUT_DEFAULTS } from "../types.js";
 

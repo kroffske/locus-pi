@@ -1,7 +1,7 @@
 import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
-import { hasDismissibleCommandView } from "../_shared/command-ui.js";
+import { hasDismissibleCommandView } from "../_shared/operator/command-ui.js";
 import { fleetMenuState } from "../_shared/agent-runtime/fleet-menu.js";
-import { getProjectRoot, getSessionId, type ExtensionContext } from "../_shared/pi-api.js";
+import { getProjectRoot, getSessionId, type ExtensionContext } from "../_shared/host/pi-api.js";
 import { workflowBackgroundRunRegistry } from "../workflows/background-run-registry.js";
 import { hasActiveAgentSessionViewer } from "./session-viewer.js";
 

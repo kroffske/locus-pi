@@ -9,10 +9,13 @@
  * the values it is handed, which is what makes the `/todo` wording testable.
  * The ctx-bound write of these blocks lives in `operator-surface.ts`.
  */
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { formatCurrentProjectTaskResolution, type CurrentProjectTaskResolution } from "../_shared/task-bridge.js";
-import type { TodoPhase } from "../_shared/todo-state.js";
-import { errorMessage } from "../_shared/error-text.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import {
+  formatCurrentProjectTaskResolution,
+  type CurrentProjectTaskResolution,
+} from "../_shared/project/task-bridge.js";
+import type { TodoPhase } from "../_shared/project/todo-state.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import { phasesToMarkdown } from "./markdown-checklist.js";
 import { findActiveTask } from "./phase-ops.js";
 

@@ -1,9 +1,9 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
-import { clamp } from "../_shared/viewer-geometry.js";
-import { terminalRows as sharedTerminalRows } from "../_shared/viewer-geometry.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
+import { clamp } from "../_shared/operator/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
   workflowSourceBadge,

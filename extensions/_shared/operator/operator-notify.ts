@@ -1,5 +1,5 @@
 /**
- * extensions/_shared/operator-notify.ts — Best-effort operator notification.
+ * extensions/_shared/operator/operator-notify.ts — Best-effort operator notification.
  *
  * `ctx.ui.notify` is not available on every host: a headless session or a
  * partial UI surface throws, and a lifecycle line is never important enough to
@@ -11,7 +11,7 @@
  * never this call.
  */
 
-import type { ExtensionContext } from "./pi-api.js";
+import type { ExtensionContext } from "../host/pi-api.js";
 
 /** Notifies the operator when the host has a UI, and does nothing when it does not. */
 export function notifyOperator(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error"): void {

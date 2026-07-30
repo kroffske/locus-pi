@@ -8,7 +8,7 @@
  */
 
 import { Text } from "@earendil-works/pi-tui";
-import type { ToolResult } from "../_shared/pi-api.js";
+import type { ToolResult } from "../_shared/host/pi-api.js";
 import { singleLine } from "./prompt-text.js";
 import type { QuestionResult } from "./question-runner.js";
 

@@ -11,10 +11,10 @@ import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/agent-r
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator-interaction.js";
-import type { ExtensionCommandContext } from "../_shared/pi-api.js";
-import { getProjectRoot } from "../_shared/pi-api.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+} from "../_shared/operator/operator-interaction.js";
+import type { ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { getProjectRoot } from "../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../workflows/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "./operator-surface.js";

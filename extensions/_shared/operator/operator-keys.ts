@@ -1,5 +1,5 @@
 /**
- * extensions/_shared/operator-keys.ts — The raw terminal key vocabulary shared
+ * extensions/_shared/operator/operator-keys.ts — The raw terminal key vocabulary shared
  * by every operator-facing TUI component.
  *
  * Pi hands a component the raw input bytes, so each component has to decide for

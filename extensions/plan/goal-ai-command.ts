@@ -5,17 +5,17 @@
  * prompt. It never executes the draft.
  */
 
-import type { ExtensionCommandContext, ExtensionContext, CommandArgs } from "../_shared/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
+import type { ExtensionCommandContext, ExtensionContext, CommandArgs } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { runGoalAiDraftSession } from "../_shared/goal-ai-draft.js";
-import { requestOperatorInput } from "../_shared/operator-input.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
-import { errorMessage } from "../_shared/error-text.js";
+import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import {
   PromptCommandTargetError,
   resolvePromptCommandTarget,
   writePromptCommand,
-} from "../_shared/prompt-command-store.js";
+} from "../_shared/project/prompt-command-store.js";
 import { parsePromptCommandInput } from "./command-parser.js";
 import { setGoalOperatorBlock } from "./operator-surface.js";
 import { cancelledInputBlock, dialogFailureBlock } from "./operator-ui.js";

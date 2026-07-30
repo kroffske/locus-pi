@@ -1,13 +1,10 @@
-import type { ExtensionContext } from "./pi-api.js";
+import type { ExtensionContext } from "../host/pi-api.js";
 
 export type OperatorInputResult =
-  | { status: "submitted"; value: string }
-  | { status: "cancelled" }
-  | { status: "unavailable"; reason: "no-ui" };
+  { status: "submitted"; value: string } | { status: "cancelled" } | { status: "unavailable"; reason: "no-ui" };
 
 export type OperatorInputSpec =
-  | { kind: "input"; title: string; placeholder?: string }
-  | { kind: "editor"; title: string; prefill?: string };
+  { kind: "input"; title: string; placeholder?: string } | { kind: "editor"; title: string; prefill?: string };
 
 interface LegacyDialogResult {
   value: string;
@@ -31,9 +28,10 @@ export async function requestOperatorInput(
     return { status: "unavailable", reason: "no-ui" };
   }
 
-  const raw = spec.kind === "input"
-    ? await (ctx.ui.input as unknown as HostInput)(spec.title, spec.placeholder)
-    : await (ctx.ui.editor as unknown as HostEditor)(spec.title, spec.prefill);
+  const raw =
+    spec.kind === "input"
+      ? await (ctx.ui.input as unknown as HostInput)(spec.title, spec.placeholder)
+      : await (ctx.ui.editor as unknown as HostEditor)(spec.title, spec.prefill);
 
   return normalizeHostDialogResult(raw);
 }
@@ -51,6 +49,8 @@ function normalizeHostDialogResult(raw: HostDialogResult): OperatorInputResult {
 function isLegacyDialogResult(value: unknown): value is LegacyDialogResult {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as { value?: unknown; cancelled?: unknown };
-  return typeof candidate.value === "string"
-    && (candidate.cancelled === undefined || typeof candidate.cancelled === "boolean");
+  return (
+    typeof candidate.value === "string" &&
+    (candidate.cancelled === undefined || typeof candidate.cancelled === "boolean")
+  );
 }

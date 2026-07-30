@@ -1,5 +1,11 @@
-import type { ExtensionCommandContext, ExtensionContext, NewSessionResultLike, ReplacementSessionContext, ReplacementSessionEntryLike } from "./pi-api.js";
-import { getSessionId } from "./pi-api.js";
+import type {
+  ExtensionCommandContext,
+  ExtensionContext,
+  NewSessionResultLike,
+  ReplacementSessionContext,
+  ReplacementSessionEntryLike,
+} from "./host/pi-api.js";
+import { getSessionId } from "./host/pi-api.js";
 
 export interface GoalAiDraftResult {
   status: "blocked" | "failed" | "completed" | "cancelled";
@@ -167,17 +173,24 @@ async function runDraftInReplacementSession(
   };
 }
 
-async function runGoalAiDraftInReplacementSession(replacementCtx: ReplacementSessionContext, kickoffPrompt: string): Promise<GoalAiDraftResult> {
+async function runGoalAiDraftInReplacementSession(
+  replacementCtx: ReplacementSessionContext,
+  kickoffPrompt: string,
+): Promise<GoalAiDraftResult> {
   return runDraftInReplacementSession(replacementCtx, kickoffPrompt, findGoalDraft);
 }
 
-async function readReplacementEntries(ctx: ReplacementSessionContext): Promise<ReplacementSessionEntryLike[] | undefined> {
+async function readReplacementEntries(
+  ctx: ReplacementSessionContext,
+): Promise<ReplacementSessionEntryLike[] | undefined> {
   const entries = await ctx.sessionManager?.getEntries?.({ limit: 40 });
   return Array.isArray(entries) ? entries : undefined;
 }
 
 function findGoalDraft(entries: ReplacementSessionEntryLike[]): string | undefined {
-  const candidates = entries.slice().reverse()
+  const candidates = entries
+    .slice()
+    .reverse()
     .map(extractEntryText)
     .filter((text): text is string => text !== undefined)
     .map(stripCodeFence)
@@ -193,7 +206,9 @@ function findGoalDraft(entries: ReplacementSessionEntryLike[]): string | undefin
 }
 
 function findLatestAssistantDraft(entries: ReplacementSessionEntryLike[]): string | undefined {
-  return entries.slice().reverse()
+  return entries
+    .slice()
+    .reverse()
     .filter(isAssistantEntry)
     .map(extractEntryText)
     .filter((text): text is string => text !== undefined)

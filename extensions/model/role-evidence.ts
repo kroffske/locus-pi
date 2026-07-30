@@ -11,10 +11,10 @@ import {
   MODEL_ROLES_SESSION_ENTRY_TYPE,
   type ModelRoleAssignment,
   type ModelRoleSessionEntry,
-} from "../_shared/model-settings.js";
-import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../_shared/pi-api.js";
-import { getProjectRoot, getSessionId, getWorkingDirectory } from "../_shared/pi-api.js";
-import { createSessionStore, getRuntimeCapabilityReport } from "../_shared/runtime-capabilities.js";
+} from "../_shared/model/model-settings.js";
+import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../_shared/host/pi-api.js";
+import { getProjectRoot, getSessionId, getWorkingDirectory } from "../_shared/host/pi-api.js";
+import { createSessionStore, getRuntimeCapabilityReport } from "../_shared/runtime/runtime-capabilities.js";
 
 export interface ModelRoleRuntimeEvent {
   role: string;

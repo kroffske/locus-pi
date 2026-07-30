@@ -7,8 +7,8 @@
  * so tests can mock createSession and prove the wiring.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "../../_shared/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../../_shared/pi-api.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runtime/agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
@@ -22,7 +22,7 @@ import {
 } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
 import { discoverAgentDefinitions } from "../../_shared/agent-runtime/agents.js";
-import type { ModelRoleResolution } from "../../_shared/model-settings.js";
+import type { ModelRoleResolution } from "../../_shared/model/model-settings.js";
 import {
   DEFAULT_MODEL_ROLES,
   formatAssignment,
@@ -32,8 +32,8 @@ import {
   resolveDeclaredModelRole,
   unassignedRoleNote,
   type ModelRolesState,
-} from "../../_shared/model-settings.js";
-import { resolveLiveModelDisplay } from "../../_shared/live-model-display.js";
+} from "../../_shared/model/model-settings.js";
+import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
 import { DEFAULT_WORKFLOW_AGENT, workflowSlotKey } from "./workflow-runtime.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
 import type {
@@ -43,7 +43,7 @@ import type {
   WorkflowUsage,
 } from "./workflow-runtime.js";
 import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
-import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/workflow-model-resolve.js";
+import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
 import type { AgentDefinition, AgentFailureCause, PermissionMode, WorkspaceMode } from "../../_shared/types.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent-read-only-policy.js";
