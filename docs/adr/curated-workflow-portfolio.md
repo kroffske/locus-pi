@@ -633,8 +633,14 @@ replanning. That reasoning does not carry to the cap: there the run holds no
 accepted plan either way, and failing threw away the scout's map and every
 drafting round. The cap now publishes the stalled state — `task.md`,
 `context.md`, the last `plan.md`, `unresolved-defects.md` — and declares the
-same `awaitOperator` handoff shape `review` uses, with one text question
-(`plan-guidance`). The exact answer `accept last draft` takes the retained draft
+same `awaitOperator` handoff shape `review` uses, with one question
+(`plan-guidance`) — a select offering the accept answer with free text allowed,
+because the decision has one exact answer and a near-miss on a typed phrase
+would silently become drafting guidance. All four refs are published together
+immediately before the handoff, the task included even though the run already
+published it, because the terminal projection keeps only the newest 20 outputs
+and per-attempt answer artifacts from schema re-asks can otherwise evict a ref
+published at the start. The offered answer `accept last draft` takes the retained draft
 as the accepted plan — the operator overruling the critic is recorded, not
 hidden — and any other answer is guidance a continuation run redrafts under,
 seeded with the retained draft and defects, without re-scouting; the guidance

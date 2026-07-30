@@ -557,11 +557,15 @@ describe("agent fleet menu", () => {
     newRequestRender.mockClear();
 
     expect(oldComponent?.render(120)).toEqual([]);
+    // The session reset closed the old menu through its own `done` — that is what
+    // hands Pi's editor slot back and lets the awaiting `/ps` handler return.
+    // Its later input stays inert either way: the component is disposed, and the
+    // ownership epoch stops any result from acting on the new session.
+    expect(oldFactoryDone).toBe(true);
     oldComponent?.handleInput?.("down");
     oldComponent?.handleInput?.("enter");
     oldComponent?.handleInput?.("x");
     oldComponent?.handleInput?.("escape");
-    expect(oldFactoryDone).toBe(false);
     expect(oldRequestRender).not.toHaveBeenCalled();
     expect(newRequestRender).not.toHaveBeenCalled();
     expect(fleetMenuState.selectedRowId).toBe(reused.id);

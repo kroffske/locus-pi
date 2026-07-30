@@ -103,6 +103,8 @@ interface WorkflowReportDocument {
   fileName: string;
   name: string;
   revisions: WorkflowReportRevision[];
+  /** This document's newest revision IS the run's terminal text. */
+  isResult: boolean;
   unavailable?: string;
 }
 
@@ -135,8 +137,14 @@ export function writeWorkflowRunReport(
     const readable = records.filter(
       (record) => record.kind === "answer" || record.kind === "published" || record.kind === "input",
     );
-    const taskRecord = readable.find((record) => record.kind === "published" && isTaskName(record.name));
-    const chain = readable.filter((record) => record !== taskRecord);
+    // The operator task, whichever way this run received it. A fresh run publishes
+    // it; a CONTINUATION receives the same bytes as a transferred input, and
+    // matching only `published` left that run with no `task.md` at all and a
+    // document called `task-2.md` — the name it took after the runner-owned
+    // `task.md` slot stayed empty. Published wins when a run has both.
+    const taskRecord =
+      readable.find((record) => record.kind === "published" && isTaskName(record.name)) ??
+      readable.find((record) => record.kind === "input" && isTaskName(record.name));
 
     let taskWritten = false;
     if (taskRecord !== undefined) {
@@ -146,6 +154,13 @@ export function writeWorkflowRunReport(
         taskWritten = true;
       }
     }
+    // Once `task.md` is written, every record carrying that name is the same
+    // document and belongs to it. A continuation holds at least two — the
+    // transferred input it consumed and the copy it republished — and keeping
+    // the others in the document chain produced a byte-identical `task-2.md`
+    // leading the list under a name that says nothing. A task that could NOT be
+    // written stays in the chain instead, so its bytes are still reachable.
+    const chain = readable.filter((record) => (taskWritten ? !isTaskName(record.name) : record !== taskRecord));
 
     const revisionOf = (record: WorkflowArtifactRecord): WorkflowReportRevision => {
       const execution = record.callId !== undefined ? executions.get(record.callId) : undefined;
@@ -171,7 +186,20 @@ export function writeWorkflowRunReport(
       revisions.push(record);
       byName.set(record.name, revisions);
     }
-    const claimedFileNames = new Set(["readme.md", "task.md", "result.md"]);
+    // The run's terminal text, read before the documents so each one can say
+    // whether it IS that text. A document is otherwise indistinguishable from
+    // the run's answer: a stalled `plan` leaves `plan.md` holding a draft its own
+    // critic rejected, and nothing in the folder said so.
+    const resultText = typeof input.result === "string" && input.result.trim() !== "" ? input.result : undefined;
+    // Reserve only the names this report actually writes. Reserving all three
+    // unconditionally cost a document its own name — a workflow publishing
+    // `result.md` while returning a structured result got `result-2.md` beside
+    // no `result.md` at all.
+    const claimedFileNames = new Set([
+      "readme.md",
+      ...(taskWritten ? ["task.md"] : []),
+      ...(resultText !== undefined ? ["result.md"] : []),
+    ]);
     const documents: WorkflowReportDocument[] = [];
     for (const [name, revisionRecords] of byName) {
       const newest = revisionRecords[revisionRecords.length - 1]!;
@@ -184,6 +212,8 @@ export function writeWorkflowRunReport(
         fileName,
         name,
         revisions: revisionRecords.map(revisionOf),
+        isResult:
+          resultText !== undefined && bytes !== undefined && bytes.toString("utf8").trim() === resultText.trim(),
       };
       if (bytes === undefined) {
         document.unavailable = "the stored artifact could not be read back";
@@ -204,7 +234,6 @@ export function writeWorkflowRunReport(
         };
       });
 
-    const resultText = typeof input.result === "string" && input.result.trim() !== "" ? input.result : undefined;
     if (resultText !== undefined) {
       writeFileSync(path.join(reportDir, "result.md"), resultText.endsWith("\n") ? resultText : `${resultText}\n`);
     }
@@ -437,6 +466,7 @@ function reportReadme(options: {
     `- Machine records: \`.locus/runtime/workflows/${input.runId}/\` — journal, replay record, ` +
       `result envelope, script snapshot, transcripts and call envelopes`,
   );
+  lines.push(...failureSection(input));
   lines.push(...budgetSection(input));
   const retryLines = retriedCallLines(input.journal);
   lines.push("", "## Documents", "");
@@ -453,6 +483,15 @@ function reportReadme(options: {
         "machine bytes.",
       "",
     );
+    // Which of these is the answer, and which are the work that produced it. A
+    // run that ended without one says so instead of leaving its last draft to be
+    // read as a result.
+    lines.push(
+      documents.some((document) => document.isResult)
+        ? "The document marked **final result** is what the run returned; the rest are working documents."
+        : `This run returned no document as its result (status \`${input.status}\`), so every document below is working material.`,
+      "",
+    );
     for (const [position, document] of documents.entries()) {
       lines.push(`${position + 1}. ${documentEntry(document)}`);
       if (document.revisions.length > 1) {
@@ -466,6 +505,36 @@ function reportReadme(options: {
   lines.push(...retryLines);
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Why a run that did not complete did not complete, at full length.
+ *
+ * Every live surface bounds this text — the chat digest at 160 characters
+ * because it enters model context, the panel at the terminal width — so an
+ * operator whose run stopped saw a sentence fragment ending in `...` and had
+ * nowhere to read the rest. A structured result made it worse: the README said
+ * "see result.json" and the defects that explain the stop lived only there, in
+ * a machine file. This section renders that structured result as Markdown —
+ * the same flat-object rendering the JSON documents get — so the reason is in
+ * the reader's own folder, unabridged.
+ */
+function failureSection(input: WorkflowRunReportInput): string[] {
+  if (input.status === "completed") return [];
+  const technical = input.error !== undefined && input.error.trim() !== "" ? singleLine(input.error) : undefined;
+  // A prose result is already written verbatim to result.md and linked above;
+  // repeating it here would duplicate a document rather than explain a stop.
+  const structured =
+    typeof input.result === "string" || input.result === undefined ? undefined : flatObjectMarkdown(input.result);
+  if (technical === undefined && structured === undefined) return [];
+  return [
+    "",
+    `## Why this run ended \`${input.status}\``,
+    "",
+    ...(technical === undefined ? [] : [technical, ""]),
+    ...(structured === undefined ? [] : [structured, ""]),
+    "The live surfaces clip this text; these are the full values the run returned.",
+  ];
 }
 
 /**
@@ -727,10 +796,11 @@ function revisionDescription(revision: WorkflowReportRevision): string {
 function documentEntry(document: WorkflowReportDocument): string {
   const newest = document.revisions[document.revisions.length - 1];
   const description = newest === undefined ? "" : ` — ${revisionDescription(newest)}`;
+  const result = document.isResult ? " — **final result**" : "";
   const revisionCount = document.revisions.length > 1 ? ` — ${document.revisions.length} revisions:` : "";
   return document.unavailable !== undefined
     ? `${document.fileName}${description} — unavailable: ${document.unavailable}`
-    : `[${document.fileName}](${document.fileName})${description}${revisionCount}`;
+    : `[${document.fileName}](${document.fileName})${result}${description}${revisionCount}`;
 }
 
 function revisionEntry(revision: WorkflowReportRevision): string {

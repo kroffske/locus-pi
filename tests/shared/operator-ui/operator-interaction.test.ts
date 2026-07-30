@@ -106,14 +106,22 @@ describe("inline operator interaction ownership", () => {
     // Pi can dispose a replaced component without ever resolving its promise.
     mounted[0]!.dispose?.();
 
+    // That request is now unsettleable, so it is failed rather than left
+    // awaiting: its caller is a command handler, and Pi's interactive loop
+    // awaits the handler before it re-arms the editor, so one request that can
+    // never settle stops every later command in the session from running.
+    await expect(retired).rejects.toBeInstanceOf(StaleInlineOperatorInteractionError);
+
+    // The slot is free either way, which is what the next interaction needs.
     const next = requestInlineOperatorInteraction(harness.ctx, () => component("next"));
     await vi.waitFor(() => expect(mounted).toHaveLength(2));
     completions[1]!("next-result");
     await expect(next).resolves.toBe("next-result");
 
-    // The first host promise was still pending when the next component mounted.
+    // A late resolution of the retired promise changes nothing — the caller was
+    // told its surface was gone, which is the truth about a disposed component.
     completions[0]!("retired-result");
-    await expect(retired).resolves.toBe("retired-result");
+    await expect(retired).rejects.toBeInstanceOf(StaleInlineOperatorInteractionError);
   });
 });
 
