@@ -228,6 +228,36 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("journal: /tmp/run-98cc/journal.ndjson");
   });
 
+  it("names the command that prints the reason when a run fails with a structured result and no text", () => {
+    // The shape a `plan` round cap produced in a live run: `{ok:false}` with the
+    // defects in `unresolvedRows` and no prose result at all. The digest caps its
+    // verdict line at 160 characters, so the operator saw a sentence fragment
+    // ending in "..." and, below it, only a journal path — no way to read why.
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
+    transcript.start("20260730-162453-000e");
+
+    const completion = transcript.finish({
+      runId: "20260730-162453-000e",
+      runDir: "/tmp/run-000e",
+      ok: false,
+      result: {
+        ok: false,
+        stoppedBy: "round-cap",
+        summary: "plan was not accepted within 4 drafting round(s)",
+        unresolvedRows: [`S1: ${"the find command pattern is not properly executed and may miss files. ".repeat(4)}`],
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-000e/result.json" },
+    });
+
+    for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
+    expect(completion.digest).toContain("read the full reason: /workflows status 000e");
+    // `/workflows result` refuses a non-prose result, so it must not be offered here.
+    expect(completion.digest).not.toContain("/workflows result");
+    expect(completion.digest).toContain("journal: /tmp/run-000e/journal.ndjson");
+  });
+
   it("buffers a bounded tool digest without calling sendMessage and always retains workflow_end", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "bounded", "tool");
@@ -256,7 +286,9 @@ describe("workflow persistent transcript", () => {
       });
 
       expect(harness.sentMessages).toEqual([]);
-      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 22 });
+      // 22 bounded body lines plus the failed run's one recovery pointer.
+      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 23 });
+      expect(completion.digest).toContain("read the full reason: /workflows status");
       expect(completion.digest.match(/final failure/g)).toHaveLength(1);
       expect(completion.digest).not.toContain("intermediate journal failure");
       expect(

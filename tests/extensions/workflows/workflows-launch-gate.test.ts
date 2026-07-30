@@ -274,7 +274,10 @@ describe("/workflows run launch gate", () => {
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
       expect(text).toContain("── workflow live-smoke · run #run2 · failed ");
       expect(text.match(/same failure/g)).toHaveLength(1);
-      expect(result.details?.transcript).toEqual({ surface: "tool", eventKind: "workflow_end", lineCount: 2 });
+      // Three lines, not two: a failed run also names the command that prints
+      // the reason, which its clipped verdict line cannot carry.
+      expect(text).toContain("read the full reason: /workflows status");
+      expect(result.details?.transcript).toEqual({ surface: "tool", eventKind: "workflow_end", lineCount: 3 });
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       spy.mockRestore();

@@ -387,6 +387,15 @@ truncated. Structured (non-text) results stay in `result.json`, which already
 pretty-prints them; a run recorded before `result.md` existed is recovered from the
 persisted envelope, so older runs still open.
 
+A run that ends badly and produced **no** prose result — a script returning a
+structured `{ ok: false }` is the common case — gets the same treatment against a
+different command. Its verdict line carries the failure summary and is clipped
+like any other, so the digest and the panel add
+`read the full reason: /workflows status <runId>`, which prints the structured
+result the reason actually lives in. `/workflows result` is deliberately not
+offered there: it refuses a non-prose result, so pointing at it would send the
+operator to a dead end.
+
 `/workflows result` and `/workflows status` accept the short run suffix every
 surface prints (`run #98cc` → `/workflows result 98cc`), `last` for the newest run,
 or a full run id. A short suffix matching more than one run is refused with the real

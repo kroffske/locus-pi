@@ -100,7 +100,11 @@ interface PumpOptions {
 export class WorkflowOperatorHandoffController {
   readonly #ports: WorkflowHandoffControllerPorts;
   #snoozed = false;
-  #retryableNoticeShown = false;
+  /** Runs whose retryable state has already been reported once. Keyed by run so
+   *  a SECOND failed continuation — of the same handoff or another one — still
+   *  reaches the operator; a session-wide flag made every failure after the
+   *  first one silent. */
+  readonly #deferredNotices = new Set<string>();
   #activePump: Promise<WorkflowHandoffPumpResult> | undefined;
 
   constructor(ports: WorkflowHandoffControllerPorts) {
@@ -109,7 +113,7 @@ export class WorkflowOperatorHandoffController {
 
   startSession(): void {
     this.#snoozed = false;
-    this.#retryableNoticeShown = false;
+    this.#deferredNotices.clear();
   }
 
   shutdown(): void {
@@ -163,9 +167,11 @@ export class WorkflowOperatorHandoffController {
       (item): item is Extract<WorkflowHandoffScanItem, { status: "invalid" }> => item.status === "invalid",
     );
     if (unprompted && actionable.length === 0 && firstInvalid === undefined) {
-      const retryable = actionableItems.find((item) => item.state === "retryable");
-      if (retryable !== undefined && !this.#retryableNoticeShown) {
-        this.#retryableNoticeShown = true;
+      const retryable = actionableItems.find(
+        (item) => item.state === "retryable" && !this.#deferredNotices.has(item.handoff.runId),
+      );
+      if (retryable !== undefined) {
+        this.#deferredNotices.add(retryable.handoff.runId);
         return { status: "deferred", runId: retryable.handoff.runId };
       }
       return { status: "none" };
@@ -220,6 +226,10 @@ export class WorkflowOperatorHandoffController {
 
     const launched = await this.#ports.launch(selected, answer, ctx);
     if (launched.status === "started") {
+      // A fresh continuation is under way, so this run has earned a fresh notice
+      // if THAT one also fails. Without this, only the first failed continuation
+      // of a run was ever reported and every retry failed silently.
+      this.#deferredNotices.delete(selected.runId);
       return {
         status: "started",
         sourceRunId: selected.runId,

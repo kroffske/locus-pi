@@ -59,6 +59,18 @@ function digest(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+/** A finished child answer, for the tests that go through the real runner. */
+function completedChild(request: AgentRunRequest, text: string) {
+  return {
+    status: "completed" as const,
+    agentName: request.agent.name,
+    reason: text,
+    text,
+    diagnostics: [],
+    lifecycleEntryIds: [],
+  };
+}
+
 function priorRef(runId: string, artifactId: string, name: string, text: string): WorkflowArtifactRef {
   return { runId, artifactId, name, sha256: digest(text) };
 }
@@ -452,20 +464,30 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(calls.filter((call) => call.label!.startsWith("planner"))).toHaveLength(6);
     expect(calls.at(-1)?.label).toBe("critic round 6");
     // The stalled state is retained under its own names, ready for continuation.
+    // The task is published twice on purpose: once at the start of the run, and
+    // again with the other three refs so all four are the run's NEWEST outputs
+    // and no amount of schema re-asking can push one out of the terminal
+    // projection window the handoff requires them to be inside.
     expect(published.map((item) => item.ref.name)).toEqual([
+      "task.md",
       "task.md",
       "context.md",
       "plan.md",
       "unresolved-defects.md",
     ]);
-    expect(published[2]?.text).toBe(PLAN_DRAFT);
-    expect(published[3]?.text).toBe("1. S1: still unverifiable");
+    expect(published[3]?.text).toBe(PLAN_DRAFT);
+    expect(published[4]?.text).toBe("1. S1: still unverifiable");
     expect(awaiting).toHaveLength(1);
     expect(awaiting[0]).toMatchObject({
       reason: "plan round cap without acceptance",
       operatorHandoff: {
         title: "Plan drafting stalled",
-        questions: [{ kind: "text", id: "plan-guidance" }],
+        // A select with one exact option plus free text: the accept decision has
+        // to be unambiguous, and a near-miss on a typed phrase would silently
+        // become drafting guidance.
+        questions: [
+          { kind: "select", id: "plan-guidance", options: [{ label: "accept last draft" }], allowCustom: true },
+        ],
       },
     });
     const refs = (awaiting[0]?.operatorHandoff as { continuationArtifactRefs: WorkflowArtifactRef[] })
@@ -632,6 +654,75 @@ describe("workflow example: plan.workflow.mjs", () => {
 
       expect(accepted.ok, accepted.error).toBe(true);
       expect(accepted.disposition).toMatchObject({ status: "completed" });
+      expect(accepted.result).toBe(PLAN_DRAFT);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps its handoff refs inside the terminal projection even when the critic is re-asked all round", async () => {
+    // The projection keeps only the newest 20 answer+published outputs, and a
+    // schema re-ask writes an answer artifact per ATTEMPT — so a run whose critic
+    // needs its extra attempts produces far more outputs than its round count
+    // suggests. When the task ref was published once at the start, that was
+    // enough to evict it, and the run died on its very last step with a message
+    // about artifact projection after paying for every round.
+    const root = mkdtempSync(path.join(tmpdir(), "locus-plan-projection-"));
+    try {
+      mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+      writeFileSync(
+        path.join(root, ".agents", "agents", "default.md"),
+        "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+      );
+      const harness = createHarness(root, { sessionId: "plan-projection-parent" });
+      let criticCalls = 0;
+      const createExecutor = (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          if (request.task.includes("map the repository facts")) {
+            return completedChild(request, SCOUT_CONTEXT);
+          }
+          if (request.task.includes("write the complete implementation plan")) {
+            return completedChild(request, PLAN_DRAFT);
+          }
+          criticCalls += 1;
+          // Every critic round burns one rejected attempt before answering, which
+          // is inside its own re-ask budget and doubles its artifact output.
+          return completedChild(
+            request,
+            criticCalls % 2 === 1
+              ? '{"verdict":"accept","defects":["a defect nobody will read"]}'
+              : '{"verdict":"revise","defects":["S1: still unverifiable"]}',
+          );
+        },
+      });
+
+      const stalled = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "plan",
+        input: "advance pagination",
+        createExecutor,
+      });
+
+      expect(stalled.ok, stalled.error).toBe(true);
+      expect(stalled.disposition).toMatchObject({ status: "awaiting_operator" });
+      // The run really did overflow the window — otherwise this proves nothing.
+      expect(stalled.artifactRefsOmitted ?? 0).toBeGreaterThan(0);
+      const refs = stalled.operatorHandoff?.continuationArtifactRefs ?? [];
+      expect(refs.map((ref) => ref.name)).toEqual(["task.md", "context.md", "plan.md", "unresolved-defects.md"]);
+      // And the operator can actually act on it: the continuation is accepted by
+      // the host, which re-verifies every ref against that projection.
+      const accepted = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "plan",
+        input: "accept last draft",
+        continuation: workflowContinuationForHandoff(stalled.operatorHandoff!),
+        createExecutor,
+      });
+      expect(accepted.ok, accepted.error).toBe(true);
       expect(accepted.result).toBe(PLAN_DRAFT);
     } finally {
       rmSync(root, { recursive: true, force: true });

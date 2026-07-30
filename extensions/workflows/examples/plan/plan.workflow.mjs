@@ -189,7 +189,7 @@ export default async function runWorkflow(dsl, input) {
   const taskText = requireTask(input);
   const { agent, phase, log, publishArtifact } = dsl;
 
-  const taskRef = publishArtifact("task.md", taskText);
+  publishArtifact("task.md", taskText);
 
   phase("scout-repository");
   log(`Agent ${PLAN_AGENTS.scout.id}: mapping the repository surfaces this task depends on.`);
@@ -200,7 +200,7 @@ export default async function runWorkflow(dsl, input) {
 
   const outcome = await draftAcceptedPlan(dsl, { taskText, contextText });
   if (outcome.accepted) return outcome.planText;
-  return declareRoundCapHandoff(dsl, { taskRef, contextText, outcome });
+  return declareRoundCapHandoff(dsl, { taskText, contextText, outcome });
 }
 
 /**
@@ -259,16 +259,21 @@ async function draftAcceptedPlan(dsl, { taskText, contextText, seedPlanText, see
  * and asks the operator the one question only they can answer: accept the
  * retained draft on their own authority, or send the loop back with guidance.
  *
- * Four continuation refs, all published here at the end of the run, plus the
- * task published at the start. The handoff requires each ref to appear in the
- * terminal artifact projection, which keeps the NEWEST 20 outputs: at 6 rounds
- * a fresh run ends with 17 outputs (task + context + 6×2 round answers + the 3
- * published below), so all four refs sit inside it. Raising `MAX_PLAN_ROUNDS`
- * past 7 breaks that arithmetic for the task ref — republish the task here too
- * if the cap ever grows.
+ * All four continuation refs are published HERE, immediately before the handoff,
+ * including a fresh copy of the task the run already published at its start.
+ * That is not redundancy: the handoff requires every ref to be present in the
+ * terminal artifact projection, which keeps only the newest 20 outputs, and the
+ * run's own output count is not knowable in advance — a stage that re-asks a
+ * child on a schema rejection writes an answer artifact per attempt, so a few
+ * re-asks are enough to push a ref published at the start out of the window. A
+ * run that spent everything and then failed on the LAST step, with a message
+ * about artifact projection, is the outcome this handoff exists to prevent.
+ * Publishing the four together makes them the newest four, whatever the run did
+ * before. The sibling `review` workflow publishes its handoff refs the same way.
  */
-function declareRoundCapHandoff(dsl, { taskRef, contextText, outcome }) {
+function declareRoundCapHandoff(dsl, { taskText, contextText, outcome }) {
   const { log, publishArtifact, awaitOperator } = dsl;
+  const taskRef = publishArtifact("task.md", taskText);
   const contextRef = publishArtifact("context.md", contextText);
   const planRef = publishArtifact("plan.md", outcome.planText);
   const defectsRef = publishArtifact("unresolved-defects.md", outcome.defectsText);
@@ -281,12 +286,19 @@ function declareRoundCapHandoff(dsl, { taskRef, contextText, outcome }) {
       title: "Plan drafting stalled",
       questions: [
         {
-          kind: "text",
+          // A select, not free text. The decision has exactly one exact answer
+          // and one open-ended one, and a free-text prompt that quotes the exact
+          // phrase invites a near-miss — "accept the last draft", a trailing
+          // period, the quotes themselves — which would silently become drafting
+          // guidance and spend another twelve agent calls.
+          kind: "select",
           id: "plan-guidance",
           prompt:
-            `No draft was accepted within ${outcome.rounds} rounds; the retained draft and its open defects are in the ` +
-            `run report (plan.md, unresolved-defects.md). Answer "${ACCEPT_LAST_DRAFT_ANSWER}" to take the retained ` +
-            "draft as the plan, or answer with drafting guidance for further rounds.",
+            `No draft was accepted within ${outcome.rounds} rounds. The retained draft and its open defects are in ` +
+            "the run report (plan.md, unresolved-defects.md). Take the retained draft as the plan, or answer with " +
+            "drafting guidance for further rounds.",
+          options: [{ label: ACCEPT_LAST_DRAFT_ANSWER }],
+          allowCustom: true,
         },
       ],
       continuationArtifactRefs: [taskRef, contextRef, planRef, defectsRef],
@@ -312,9 +324,9 @@ function declareRoundCapHandoff(dsl, { taskRef, contextText, outcome }) {
 async function resumePlanning(dsl, continued, input) {
   const { log, publishArtifact } = dsl;
   const answer = requireOperatorAnswer(input);
-  const taskRef = publishArtifact("task.md", continued.taskText);
   if (answer.toLowerCase() === ACCEPT_LAST_DRAFT_ANSWER) {
     log("Operator accepted the retained draft; the critic's round cap is overridden by that decision.");
+    publishArtifact("task.md", continued.taskText);
     publishArtifact("plan.md", continued.planText);
     return continued.planText;
   }
@@ -325,8 +337,14 @@ async function resumePlanning(dsl, continued, input) {
     seedDefectsText: continued.defectsText,
     guidanceText: answer,
   });
-  if (outcome.accepted) return outcome.planText;
-  return declareRoundCapHandoff(dsl, { taskRef, contextText: continued.contextText, outcome });
+  if (outcome.accepted) {
+    publishArtifact("task.md", continued.taskText);
+    return outcome.planText;
+  }
+  // The stalled state is republished by the handoff itself, task included, so a
+  // continuation that stalls again hands on refs that are its four newest
+  // outputs — the same guarantee a fresh run's cap gets.
+  return declareRoundCapHandoff(dsl, { taskText: continued.taskText, contextText: continued.contextText, outcome });
 }
 
 /** The retained state of a stalled run, or undefined for a fresh one. */
@@ -458,9 +476,9 @@ believe a defect is wrong, keep your approach and answer it explicitly under
 \`## Critique responses\` with the evidence you read — do not silently ignore it,
 and do not change the plan you still believe in just to end the loop.`
 }${
-  guidanceText === undefined
-    ? ""
-    : `
+    guidanceText === undefined
+      ? ""
+      : `
 
 The operator answered the stalled run with the guidance below. It is the
 operator speaking, so it outranks the critic's earlier defects where they
@@ -470,7 +488,7 @@ conflict: follow it even where a defect pulls the other way, and record under
 --- BEGIN OPERATOR GUIDANCE ---
 ${guidanceText}
 --- END OPERATOR GUIDANCE ---`
-}
+  }
 
 Return exactly this structure, and return the whole plan every round:
 

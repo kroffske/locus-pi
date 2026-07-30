@@ -286,6 +286,31 @@ describe("workflow operator handoff controller", () => {
     expect(launch).toHaveBeenCalledWith(item, "Current changes", harness.ctx);
   });
 
+  it("reports every failed continuation of a run, not only the first one", async () => {
+    // A session-wide "already told them" flag meant the operator was warned about
+    // the first failed continuation and about nothing after it — every later retry
+    // of the same handoff failed in silence.
+    const item = handoff("20260725-120000-repeat");
+    const launch = vi.fn(async () => ({ status: "started" as const }));
+    const ports: WorkflowHandoffControllerPorts = {
+      scan: () => [{ status: "actionable", handoff: item, state: "retryable" }],
+      read: () => item,
+      launch,
+    };
+    const queue = new WorkflowOperatorHandoffController(ports);
+    const harness = createHarness();
+
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+
+    // The operator answers explicitly; that continuation fails too.
+    harness.customInputQueue.push("\r");
+    await expect(queue.pump(harness.ctx, { explicit: true })).resolves.toMatchObject({ status: "started" });
+
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+  });
+
   it("still opens pending handoffs unprompted while a retryable one waits behind them", async () => {
     const pending = handoff("20260725-121000-pending");
     const retryable = handoff("20260725-120000-retryable");

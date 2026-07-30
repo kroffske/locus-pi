@@ -288,6 +288,7 @@ function renderProjectedFleetMenuRows(
 /** Focused selector: the agents extension supplies global rows; this owns cursor projection and keys. */
 export class FleetFocusComponent implements CustomUiComponent {
   #disposed = false;
+  #closed = false;
   readonly #requestRender: () => void;
 
   constructor(
@@ -351,6 +352,22 @@ export class FleetFocusComponent implements CustomUiComponent {
   invalidate(): void {
     if (this.#disposed) return;
     // Projection is read lazily from the shared store; no render cache to clear.
+  }
+
+  /**
+   * Hand the editor back through the host's own close path, the way Escape does.
+   *
+   * An owner that only calls `dispose()` leaves Pi's `custom()` promise pending
+   * — Pi resolves it from its close callback and nowhere else — so the editor
+   * container keeps a dead surface and the command awaiting this menu never
+   * returns. Reporting the same `close` action the operator's Escape reports is
+   * what makes a session-scoped teardown survivable.
+   */
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.dispose();
+    this.done({ kind: "close" });
   }
 
   dispose(): void {

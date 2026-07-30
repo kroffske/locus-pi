@@ -109,15 +109,31 @@ reaching it means the loop stalled: a draft nobody accepted is not a plan, and
 the run returns none. What it no longer does is burn the run. The scout's map
 and six rounds of drafting are paid for, so the run publishes the exact stalled
 state — `task.md`, `context.md`, the last `plan.md`, `unresolved-defects.md` —
-and declares an operator handoff with one text question. The oldest pending
-question opens in the editor when Pi is idle; `/workflows` reopens it.
+and declares an operator handoff with one question. The oldest pending question
+opens in the editor when Pi is idle; `/workflows` reopens it.
+
+All four refs are published together, immediately before the handoff — including
+a second copy of the task the run already published at its start. The handoff
+requires every ref to be inside the run's terminal artifact projection, which
+keeps only the newest 20 outputs, and a stage that re-asks a child on a schema
+rejection writes an artifact per attempt: a few re-asks were enough to evict a
+ref published at the start and fail the run on its very last step, after paying
+for every round. Publishing them together makes them the newest four whatever
+the run did before.
+
+The question is a **select with one option and free text allowed**, not a plain
+text prompt: the accept decision has exactly one exact answer, and a prompt that
+merely quoted the phrase invited a near-miss — "accept the last draft", a
+trailing period, the quotes themselves — which would have become drafting
+guidance and quietly spent another twelve agent calls.
 
 The operator has exactly two moves, and both are recorded:
 
-- **`accept last draft`** (case-insensitive) — the retained draft becomes the
-  accepted plan. That is the operator overruling the critic, which is their
-  authority; the continuation run logs the override, republishes the plan as its
-  own, and returns the draft text like any accepted plan.
+- **`accept last draft`** (the offered option, matched case-insensitively) — the
+  retained draft becomes the accepted plan. That is the operator overruling the
+  critic, which is their authority; the continuation run logs the override,
+  republishes the plan as its own, and returns the draft text like any accepted
+  plan.
 - **anything else is drafting guidance** — the continuation run re-enters the
   drafting loop seeded with the retained draft and its open defects, without
   re-scouting. Both roles receive the guidance verbatim and are told it outranks

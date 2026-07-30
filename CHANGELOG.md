@@ -21,9 +21,19 @@ This file records user-visible changes to the public package.
   the run's `journal.ndjson` — one line per event, tagged with its agent, stage
   and round — and every child transcript linked by its stage label, so the raw
   ndjson evidence is one click away instead of a directory dive.
-  `README.md`, `task.md` and `result.md` stay runner-owned names; a document
-  that would collide with them (or with another document's sanitized filename)
-  takes a `-2` suffix instead of overwriting.
+  The report also says which document is the answer: the one whose newest
+  revision is the run's terminal text is marked **final result**, and a run that
+  produced none says so plainly rather than leaving a rejected draft to be read
+  as one. `README.md`, `task.md` and `result.md` stay runner-owned names — but
+  only when the report actually writes them, so a workflow that publishes its own
+  `result.md` keeps the name; a document that still collides takes a `-2` suffix
+  instead of overwriting. Every copy of the operator task folds into `task.md`,
+  including the transferred one a continuation consumes, which retires the
+  byte-identical `task-2.md` that used to lead a continuation's document list.
+  A run that did not complete gets a `## Why this run ended` section carrying
+  the full failure reason — the structured result rendered as Markdown — because
+  every live surface clips that text and a structured result otherwise left the
+  defects readable only inside `result.json`.
 
 - **`plan`'s round cap hands the stall to the operator instead of burning the
   run, and its critic ratchets instead of relitigating.** A live run showed the
@@ -38,7 +48,14 @@ This file records user-visible changes to the public package.
   producing a plan. And reaching `MAX_PLAN_ROUNDS` without an acceptance now
   retains the stalled state (`task.md`, `context.md`, the last `plan.md`,
   `unresolved-defects.md`) and declares an operator handoff with one text
-  question: answer `accept last draft` to take the retained draft as the plan —
+  question — a select offering `accept last draft` with free text allowed, so a
+  near-miss on a typed phrase cannot silently become drafting guidance. All four
+  refs are published together immediately before the handoff, the task included
+  even though the run already published it: the terminal artifact projection
+  keeps only the newest 20 outputs, and a stage re-asked on a schema rejection
+  writes an artifact per attempt, so a ref published at the start could be
+  evicted and fail the run on its last step after paying for every round.
+  Answering `accept last draft` takes the retained draft as the plan —
   the operator overruling the critic, recorded as such — or answer with drafting
   guidance and the continuation run redrafts from the retained state without
   re-scouting, with the guidance outranking earlier defects for planner and
@@ -59,6 +76,34 @@ This file records user-visible changes to the public package.
   one-line notice (once per session) naming the run and how to reopen it.
   Never-answered handoffs keep their existing behavior: the oldest pending
   question still opens by itself when Pi is idle.
+
+- **One dropped surface no longer takes the session's keyboard with it.** Pi
+  resolves a `custom()` interaction only from its own close callback, so a
+  component torn down any other way — the agent fleet's session-scoped
+  `invalidate()`, which runs on every session start, shutdown and reload — left
+  that promise pending forever. The awaiting caller is a slash-command handler,
+  and Pi's interactive loop awaits the handler before it re-arms the editor
+  callback, so one stranded `/ps` stopped **every** later command in the session
+  from being dispatched: the editor still accepted text and Enter still cleared
+  it, and nothing ran. A question mounting over the dead surface restored the
+  editor and made the session look healthy again, which is why this read as
+  "`/ps` stops working after the clarification questions". Two changes close it:
+  a component disposed without ever reporting now fails its caller with a stale
+  interaction instead of leaving it awaiting, and the fleet menu is closed
+  through its own `done` — the way Escape closes it — so Pi hands the editor
+  back. A component that disposes itself and then reports, which the agent
+  viewer's Escape does, is unaffected.
+
+- **A failed run now says which command prints the reason it failed.** Both
+  finished-run surfaces cap what they print — the chat digest at 160 characters
+  because it enters model context, the panel at the terminal width — and both
+  already named `/workflows result` for a run whose result is prose. A run that
+  ended badly with a structured `{ ok: false }` result had no such line: the
+  operator was left with a sentence fragment ending in `...` and a journal path,
+  and the defects that explain the failure were only in `result.json`. Both
+  surfaces now add `read the full reason: /workflows status <runId>` for any run
+  that did not complete without prose to open. `/workflows result` is not
+  offered there, because it refuses a non-prose result and would be a dead end.
 
 - **A stale agent catalog no longer fails every workflow step closed.** Before
   model tiers were executed, the shipped agents wrote their tier as

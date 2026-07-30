@@ -191,6 +191,14 @@ export function createWorkflowTranscript(
       if (res.resultTextPath !== undefined && res.resultTextPath !== "") {
         bodyLines.push(firstTranscriptLine(`result: ${res.resultTextPath}`));
         bodyLines.push(firstTranscriptLine(`read the full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
+      } else if (disposition.status !== "completed") {
+        // A run that ended badly and produced NO prose result — a script that
+        // returned a structured `{ok:false}` is the common case — used to leave
+        // the operator with a 160-character sentence fragment and a journal path.
+        // The reason it failed is in the structured result, so this names the one
+        // command that prints it. `/workflows result` deliberately refuses a
+        // non-prose result, so pointing there would send them to a dead end.
+        bodyLines.push(firstTranscriptLine(`read the full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
       }
       if (res.failureDiagnostic !== undefined) {
         for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {

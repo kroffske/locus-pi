@@ -42,11 +42,23 @@ Markdown here — a flat object becomes a key list with numbered items, anything
 nested stays pretty-printed inside a fence — because this folder is for
 reading. The verbatim JSON bytes remain in the artifact store below.
 
+The list also says which document is the run's answer. The one whose newest
+revision equals the run's terminal text is marked **final result**; a run that
+returned none — a failed or stalled one — says so in place of that marker,
+because its last draft is working material and reading it as a result is the
+mistake the marker exists to prevent. A run that did not complete additionally
+carries a `## Why this run ended` section with the full failure reason rendered
+from the structured result, since every live surface clips that text.
+
 Documents published by the script itself use the author `workflow`; revisions
 consumed from a previous run (continuations) read `transferred from run <id>`.
-`README.md`, `task.md` and `result.md` are runner-owned names, so a document
-that would claim one of them (or a second name sanitizing to an already-claimed
-filename) takes a `-2` suffix instead of overwriting. The writer mirrors
+`README.md`, `task.md` and `result.md` are runner-owned names, but each is
+reserved only when the report actually writes it — a workflow that publishes its
+own `result.md` while returning a structured result keeps that name. Every
+record carrying the task's name folds into `task.md`, the transferred copy a
+continuation consumed included, so a continuation cannot grow a second
+byte-identical task document. A document that still collides with a claimed name
+takes a `-2` suffix instead of overwriting. The writer mirrors
 the artifact store's path discipline: the run id must be a safe component and
 no element of `.locus-pi/<runId>` may be a symlink, checked before anything —
 including the directory itself — is created.

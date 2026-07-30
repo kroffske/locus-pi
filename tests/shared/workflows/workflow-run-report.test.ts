@@ -331,6 +331,134 @@ describe("workflow run report", () => {
     assert.equal(readFileSync(path.join(reportDir, "broken.json"), "utf8"), "not json at all");
   });
 
+  it("prints the whole reason a run stopped, and refuses to call a rejected draft a result", () => {
+    // The live shape this comes from: a stalled `plan` returns `{ok:false}` with
+    // its open defects, and every live surface clips that text — the operator saw
+    // one sentence ending in "..." and had nowhere to read the rest, while
+    // `plan.md` in this folder held a draft the critic had rejected.
+    const root = project();
+    const defect =
+      "S1: the find command pattern used to identify DAG files is not properly executed and may miss files " +
+      "under nested directories, so the step cannot be carried out as written";
+    const records = [
+      record({ artifactId: "call-0002-answer", name: "plan.md", kind: "answer", callId: "call-0002", stage: "draft" }),
+    ];
+    const outcome = writeWorkflowRunReport(
+      {
+        projectRoot: root,
+        runId: RUN_ID,
+        status: "failed",
+        result: {
+          ok: false,
+          stoppedBy: "round-cap",
+          rounds: 4,
+          summary: "plan was not accepted within 4 drafting round(s)",
+          unresolvedRows: [defect, "S3: no verification command exists for this step"],
+        },
+        journal: agentLines("call-0002", "draft plan round 4", "draft"),
+      },
+      evidenceFrom(records, { "call-0002-answer": "the rejected draft" }),
+    );
+
+    assert.equal(outcome.ok, true);
+    const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
+    assert.match(readme, /## Why this run ended `failed`/u);
+    assert.match(readme, /- \*\*summary\*\*: plan was not accepted within 4 drafting round\(s\)/u);
+    // The defect is present in full — no ellipsis, no 160-character cap.
+    assert.ok(readme.includes(defect), "the whole defect sentence must be readable in the report");
+    assert.match(readme, /S3: no verification command exists for this step/u);
+    // And the retained draft is not dressed up as the run's answer.
+    assert.match(readme, /This run returned no document as its result \(status `failed`\)/u);
+    assert.equal(/\*\*final result\*\*/u.test(readme), false);
+  });
+
+  it("folds every copy of the task into task.md instead of leaving a duplicate document", () => {
+    // A continuation holds the task twice — the input it consumed and the copy it
+    // republished — and the second one used to become a byte-identical `task-2.md`
+    // leading the Documents list under a name that says nothing.
+    const root = project();
+    const records = [
+      record({
+        artifactId: "input-0001",
+        name: "task.md",
+        kind: "input",
+        relativePath: path.join("inputs", "input-0001-task.md"),
+        source: {
+          runId: "20260728-180000-prev",
+          artifactId: "published-0001",
+          name: "task.md",
+          sha256: "c".repeat(64),
+        },
+      }),
+      record({ artifactId: "published-0001", name: "task.md", kind: "published" }),
+      record({ artifactId: "call-0001-answer", name: "plan.md", kind: "answer", callId: "call-0001" }),
+    ];
+    const outcome = writeWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
+      evidenceFrom(records, {
+        "input-0001": "the operator task",
+        "published-0001": "the operator task",
+        "call-0001-answer": "plan body",
+      }),
+    );
+
+    assert.equal(outcome.ok, true);
+    const reportDir = workflowReportDir(root, RUN_ID);
+    assert.deepEqual(readdirSync(reportDir).sort(), ["README.md", "plan.md", "task.md"]);
+    const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
+    assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
+    assert.equal(/task-2\.md/u.test(readme), false);
+  });
+
+  it("leaves result.md to a document that owns the name when the run returned no text", () => {
+    // Reserving all three runner-owned names unconditionally cost a document its
+    // own name: this run writes no result.md, so nothing should be renamed.
+    const root = project();
+    const records = [record({ artifactId: "published-0001", name: "result.md", kind: "published" })];
+    const outcome = writeWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, status: "completed", result: { ok: true }, journal: [] },
+      evidenceFrom(records, { "published-0001": "a document the workflow named result.md" }),
+    );
+
+    assert.equal(outcome.ok, true);
+    const reportDir = workflowReportDir(root, RUN_ID);
+    assert.deepEqual(readdirSync(reportDir).sort(), ["README.md", "result.md"]);
+    assert.equal(readFileSync(path.join(reportDir, "result.md"), "utf8"), "a document the workflow named result.md");
+  });
+
+  it("writes the operator task even when a continuation received it as a transferred input", () => {
+    // A continuation run gets task.md as an `input` record, not a `published` one.
+    // Matching only `published` left the report with no `task.md` and no `- Task:`
+    // line, while the transferred copy took the leftover name `task-2.md`.
+    const root = project();
+    const records = [
+      record({
+        artifactId: "input-0001",
+        name: "task.md",
+        kind: "input",
+        relativePath: path.join("inputs", "input-0001-task.md"),
+        source: {
+          runId: "20260728-180000-prev",
+          artifactId: "published-0001",
+          name: "task.md",
+          sha256: "c".repeat(64),
+        },
+      }),
+    ];
+    const outcome = writeWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
+      evidenceFrom(records, { "input-0001": "the operator task" }),
+    );
+
+    assert.equal(outcome.ok, true);
+    const reportDir = workflowReportDir(root, RUN_ID);
+    assert.deepEqual(readdirSync(reportDir).sort(), ["README.md", "task.md"]);
+    assert.equal(readFileSync(path.join(reportDir, "task.md"), "utf8"), "the operator task");
+    const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
+    assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
+    assert.equal(/task-2\.md/u.test(readme), false);
+  });
+
   it("keeps a structured result out of result.md and says where it lives", () => {
     const root = project();
     const outcome = writeWorkflowRunReport(
@@ -444,7 +572,10 @@ describe("workflow run report", () => {
     assert.equal(readFileSync(path.join(reportDir, "result.md"), "utf8"), "exact answer\n");
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
     assert.match(readme, /- Workflow: `report` \(project\)/u);
-    assert.match(readme, /\[review\.md\]\(review\.md\) — scout/u);
+    // This run returned the agent's answer, so that document is the result and
+    // says so — the rest of a run's documents are working material.
+    assert.match(readme, /\[review\.md\]\(review\.md\) — \*\*final result\*\* — scout/u);
+    assert.match(readme, /The document marked \*\*final result\*\* is what the run returned/u);
     // The Logs section names the combined journal even when no child exported a
     // transcript (this harness executor returns answers without one).
     assert.match(readme, /## Logs/u);
