@@ -557,7 +557,7 @@ This file records user-visible changes to the public package.
 
 - **One package budget contract, so a workflow run is bounded on every axis the
   host can enforce without the script saying anything.**
-  `DEFAULT_WORKFLOW_BUDGET` in `extensions/_shared/workflow-budget.ts` is now the
+  `DEFAULT_WORKFLOW_BUDGET` in `extensions/workflows/runtime/workflow-budget.ts` is now the
   single source for global agent concurrency (4), total agent invocations per run
   (200), run wall clock over the agent chain (2 h), per-child wall clock (10 min),
   per-child tool calls (1000), per-child turns (5) and answer characters

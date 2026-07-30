@@ -277,6 +277,7 @@ tests/extensions/agents/agents-discovery.test.ts
 tests/extensions/agents/agents-parent-context-tool.test.ts
 tests/extensions/agents/bundled-agent-profiles.test.ts
 tests/extensions/agents/fleet-menu-entrypoints.test.ts
+tests/extensions/agents/session-viewer-entrypoints.test.ts
 tests/extensions/ask-user-question/ask-entrypoint-surfaces.test.ts
 tests/extensions/ask-user-question/ask-user-question.test.ts
 tests/extensions/ast-structural-edit/tools.test.ts
@@ -324,6 +325,8 @@ tests/fixtures/extensions/fleet-menu-consumer.ts
 tests/fixtures/extensions/fleet-menu-producer.ts
 tests/fixtures/extensions/operator-status-consumer.ts
 tests/fixtures/extensions/operator-status-producer.ts
+tests/fixtures/extensions/session-viewer-consumer.ts
+tests/fixtures/extensions/session-viewer-producer.ts
 tests/fixtures/extensions/shared-store-consumer.ts
 tests/fixtures/extensions/shared-store-producer.ts
 tests/fixtures/extensions/workflow-live-consumer.ts

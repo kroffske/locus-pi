@@ -6,10 +6,15 @@
  *
  * `extensions/_shared` was a flat bag of modules with no declared direction, so
  * nothing stopped a foundational module from importing a feature entrypoint. The
- * refactor that splits it runs as nine independent slices; between slices the tree
- * is half-migrated by design. A reviewer cannot hold "which of 64 files is allowed
- * to import which" in their head across nine pull requests, so the ownership
- * decision is embedded here as data and re-checked mechanically by every slice.
+ * refactor that split it ran as a series of independent slices, and between slices the
+ * tree was half-migrated by design. A reviewer could not hold "which of 64 files is
+ * allowed to import which" in their head across that many pull requests, so the
+ * ownership decision is embedded here as data and re-checked mechanically.
+ *
+ * The relocations have all landed: `_shared` now holds nothing but its six named layer
+ * directories, and nothing is awaiting relocation. The ledger stays because it is what
+ * keeps the direction enforced from here on — the rules below govern every future edit,
+ * not only the slices that established them.
  *
  * THE LEDGER
  *
@@ -166,7 +171,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// Ledger: feature destinations (pending relocation)
+// Ledger: feature destinations (all landed; rule 4 asserts each one still exists)
 // ---------------------------------------------------------------------------
 
 const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
@@ -191,7 +196,7 @@ const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
  * every other workflow module: W2 routed its externally consumed READ EXPORTS
  * through `extensions/workflows/run-read.ts`, which is a facade file, not a new
  * home for the module — W3 moved the journal itself to the destination below,
- * alongside the other fourteen `workflow-*` modules of the same subsystem.
+ * alongside the other thirteen `workflow-*` modules of the same subsystem.
  */
 const FEATURE_DESTINATIONS: Record<string, string> = {
   ...Object.fromEntries(
@@ -235,11 +240,16 @@ interface FeatureInternalEntry {
  * nothing. `destinations` lists the paths the module is allowed to become, so the
  * declaration does not go stale the slice it moves; the module is asserted to exist
  * at one of them, because a declaration pointing at nothing is a rule switched off.
+ *
+ * Once a move has landed, `module` becomes the landed path and `destinations` goes back
+ * to empty. A destination kept past its move is a second accepted path for a file that
+ * has only one, and it is `module` — the path a reader treats as authoritative — that
+ * would be left naming nothing.
  */
 const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
   {
-    module: "extensions/_shared/workflow-journal.ts",
-    destinations: ["extensions/workflows/runtime/workflow-journal.ts"],
+    module: "extensions/workflows/runtime/workflow-journal.ts",
+    destinations: [],
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
     reason:
@@ -288,28 +298,33 @@ interface RegistryEntry {
  * and the independent-entrypoint invariant each one carries.
  */
 const REGISTRIES: readonly RegistryEntry[] = [
-  { symbol: "locus-pi.agent-live-store.v4", owner: "extensions/_shared/agent-sdk-host.ts" },
-  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/_shared/workflow-journal.ts" },
-  { symbol: "locus-pi.fleet-menu-state.v2", owner: "extensions/_shared/fleet-menu.ts" },
-  { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/command-ui.ts" },
-  { symbol: "locus-pi.operator-status.v1", owner: "extensions/_shared/operator-status.ts" },
+  { symbol: "locus-pi.agent-live-store.v4", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
+  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-journal.ts" },
+  { symbol: "locus-pi.fleet-menu-state.v2", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
+  { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },
+  { symbol: "locus-pi.operator-status.v1", owner: "extensions/_shared/operator/operator-status.ts" },
   { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/background-run-registry.ts" },
   { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/session-viewer.ts" },
 ];
 
 /**
- * A registry's owning file moves when its slice runs, so the ledger records the
- * destination the owner path is allowed to become. Until the move happens the
- * owner is the current path; afterwards the sweep finds the symbol at the moved
- * path and matches this entry instead of failing as an unledgered duplicate.
+ * Empty by data. A registry's owning file moves when its slice runs, so a slice may
+ * declare here the destination the owner path is allowed to become; until the move
+ * happens the owner above stays the current path, and afterwards the sweep finds the
+ * symbol at the moved path and matches the alias instead of failing as an unledgered
+ * duplicate. The mechanism stays because that is the correct handling for the next
+ * relocation of a registry owner.
+ *
+ * The five entries this held all named `extensions/_shared/<name>.ts` sources whose moves
+ * had already landed, so every one of them widened its registry's accepted owner set to
+ * two paths when only one existed — and the `owner` field a reader treats as the answer
+ * named the gone one. The owners above are now the landed paths.
+ *
+ * ASSERTED NON-STALE below, for the same reason BASELINE_MUTABLE_EXPORTS is: an alias for
+ * a completed move is a silent second accepted owner, which is exactly the "two modules
+ * naming one slot" that rule 7 exists to catch. Fold a landed alias into `owner`.
  */
-const REGISTRY_OWNER_ALIASES: Record<string, readonly string[]> = {
-  "extensions/_shared/agent-sdk-host.ts": ["extensions/_shared/agent-runtime/agent-sdk-host.ts"],
-  "extensions/_shared/workflow-journal.ts": ["extensions/workflows/runtime/workflow-journal.ts"],
-  "extensions/_shared/fleet-menu.ts": ["extensions/_shared/agent-runtime/fleet-menu.ts"],
-  "extensions/_shared/command-ui.ts": ["extensions/_shared/operator/command-ui.ts"],
-  "extensions/_shared/operator-status.ts": ["extensions/_shared/operator/operator-status.ts"],
-};
+const REGISTRY_OWNER_ALIASES: Record<string, readonly string[]> = {};
 
 // ---------------------------------------------------------------------------
 // Ledger: non-symbol mutable module state (rule 8)
@@ -349,10 +364,10 @@ const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
     destinations: [],
   },
   {
-    file: "extensions/_shared/ast-engine.ts",
+    file: "extensions/ast-structural-edit/ast-engine.ts",
     binding: "pythonRegistered",
-    note: "module-level `let` guarding a one-shot ast-grep dynamic language registration; single-owner, moves with its module.",
-    destinations: ["extensions/ast-structural-edit/ast-engine.ts"],
+    note: "module-level `let` guarding a one-shot ast-grep dynamic language registration; single-owner, moved with its module in W6.",
+    destinations: [],
   },
 ];
 
@@ -477,7 +492,8 @@ export async function checkExtensionLayers(root: string): Promise<void> {
   if (!byBasename.has("workflow-journal") && !(await fileExists(path.join(root, WORKFLOW_READ_FACADE)))) {
     failures.push(
       `rule 4 (destination reached): workflow-journal has left ${SHARED_DIR}/ but the declared read facade ` +
-        `${WORKFLOW_READ_FACADE} does not exist. W2 must land it before the journal moves.`,
+        `${WORKFLOW_READ_FACADE} does not exist. W2 landed it and W3 moved the journal behind it; deleting the ` +
+        `facade now leaves every outside consumer with no sanctioned way to read a run.`,
     );
   }
 
@@ -854,6 +870,30 @@ async function checkRegistries(root: string): Promise<string[]> {
       `rule 7 (registry inventory): declared registry Symbol.for("${entry.symbol}") owned by ${entry.owner} was not ` +
         `found anywhere under ${EXTENSIONS_DIR}/. Either it was deleted — which changes process-wide behavior and ` +
         `needs its own decision — or it was renamed without updating REGISTRIES.`,
+    );
+  }
+
+  // Stale owner alias. An alias exists only for the window in which a registry owner is
+  // moving; once the move lands it is a second accepted owner path for a file that has
+  // one, and nothing else here would notice.
+  for (const [owner, aliases] of Object.entries(REGISTRY_OWNER_ALIASES)) {
+    if (!REGISTRIES.some((entry) => entry.owner === owner)) {
+      failures.push(
+        `stale alias: REGISTRY_OWNER_ALIASES declares aliases for "${owner}", which is not the owner of any entry in ` +
+          `REGISTRIES. An alias keyed on a path no owner uses grants an exemption nobody reviews — delete it.`,
+      );
+      continue;
+    }
+    if (await fileExists(path.join(root, owner))) continue;
+    const landed: string[] = [];
+    for (const alias of aliases) {
+      if (await fileExists(path.join(root, alias))) landed.push(alias);
+    }
+    if (landed.length !== 1) continue;
+    failures.push(
+      `stale alias: the declared owner ${owner} no longer exists and its registry now lives at ${landed[0]}. The move ` +
+        `has landed: set that path as the entry's \`owner\` in REGISTRIES and delete the alias, so exactly one module ` +
+        `path is accepted for the slot.`,
     );
   }
 

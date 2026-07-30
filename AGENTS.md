@@ -41,11 +41,13 @@ CI repeats source checks, tests, source-audit checks, public-repository inventor
 
 ## Extension ownership layers
 
-`extensions/_shared/` is being broken up into named ownership layers, so its modules are not interchangeable and its import direction is enforced, not conventional. `scripts/check-extension-layers.ts` (run by `npm run check:layers`, and inside `npm run check`) holds the ledger and the rules:
+`extensions/_shared/` is broken up into six named ownership layers — `host`, `operator`, `runtime`, `model`, `project`, `agent-runtime` — and holds nothing but those directories, so its modules are not interchangeable and its import direction is enforced, not conventional. `scripts/check-extension-layers.ts` (run by `npm run check:layers`, and inside `npm run check`) holds the ledger and the rules:
 
 - No module under `extensions/_shared/**` may import a feature directory under `extensions/**`. Invert the dependency, or move the module out of `_shared/`.
-- Every `_shared` module is declared exactly once — either in a shared layer or with the feature directory it is scheduled to move to. A new shared module with no declared owner fails the check.
-- Shared layers have a declared order (`host` first, then the provisional catch-all, `runtime`/`model`, `project`, `agent-runtime`); the operator UI layer is a leaf — it may reach only `host`, and no other shared layer may reach it. Type-only imports count, because they still encode ownership.
+- Every `_shared` module is declared exactly once — either in a shared layer or with the feature directory that owns it, when a module is still awaiting relocation. A new shared module with no declared owner fails the check.
+- The directory a module sits in must equal the layer it is declared under, so the tree on disk cannot disagree with the ledger. A module declared as belonging to a feature may not sit in a layer directory at all.
+- Shared layers have a declared order (`host` first, then `operator`, `runtime`/`model`, `project`, `agent-runtime`); the operator UI layer is a leaf — it may reach only `host`, and no other shared layer may reach it. Type-only imports count, because they still encode ownership.
+- One extension may not import another's internals when that module is declared internal behind a named facade; the facade is the only door.
 - Versioned `globalThis` registries (`Symbol.for("locus-pi.…")`) have exactly one declared owning module. Two modules naming one slot is how a relocation splits process-wide live state.
 - Mutable module-level state that is not such a registry is declared separately, because it does not survive Pi loading two entrypoints with the module cache disabled.
 
