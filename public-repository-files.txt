@@ -293,6 +293,7 @@ tests/extensions/todo-context/todo-command-surfaces.test.ts
 tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/consilium-reference-workflow.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
+tests/extensions/workflows/live-smoke-workflow.test.ts
 tests/extensions/workflows/plan-implement-workflow.test.ts
 tests/extensions/workflows/plan-workflow.test.ts
 tests/extensions/workflows/requirements-grill-workflow.test.ts

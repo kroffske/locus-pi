@@ -6,6 +6,13 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The packaged `live-smoke` workflow now enforces the read-only contract its
+  public description already promised.** Both child calls are confined to the
+  project workspace with `readOnly: true` and only the `find` tool, so the
+  write-capable `quick_task` profile cannot edit files or run shell commands.
+  The prompt no longer asks the read-only `explore` profile to use a `bash` tool
+  it does not have.
+
 - **The two catch-all files are gone, and `extensions/_shared/` is now nothing but its six
   named layers.** `types.ts` and `state.ts` held unrelated contracts and one shared mutable
   object between them; each export moved to the module that owns its lifecycle and both files
