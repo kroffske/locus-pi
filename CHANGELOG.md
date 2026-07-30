@@ -14,11 +14,12 @@ This file records user-visible changes to the public package.
   is now six rounds after a real external inventory plan exhausted four while
   still carrying two repairable verification defects. The same live run exposed
   a second boundary: all per-step reviews could pass while the combined result
-  remained partial. A validated structured grade now accounts for every plan
+  remained partial. A validated structured grade now accounts for every selected
   step, drives one bounded reconciliation of only the partial rows, and becomes
-  the source of truth for the final task ledger, reader-facing report, and
-  disjoint completed/unresolved result rows. Any remaining partial or blocked
-  grade is returned as non-success rather than `completed`.
+  the source of truth for selected-task state and disjoint completed/unresolved
+  result rows; deterministic code combines it with the full ledger for the
+  reader-facing report. Any remaining partial or blocked grade is returned as
+  non-success rather than `completed`.
 
 - **The shipped `plan` → `plan-implement` pair now carries an explicit,
   resumable task lifecycle.** `plan` still produces the accepted ordered

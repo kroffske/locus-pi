@@ -113,7 +113,6 @@ const MAX_RAW_CHECK_EVIDENCE_CHARS = 128_000;
 const MAX_REPORT_RESULT_CHARS = 128_000;
 const MAX_RECONCILIATION_CHARS = 128_000;
 const MAX_STEP_ATTEMPTS = 2;
-const MAX_REPORT_STEPS = 200;
 const MAX_REPORT_FILES = 30;
 const MAX_REPORT_CHECKS = 40;
 const MAX_REPORT_UNEXPECTED_CHANGES = 20;
@@ -180,7 +179,7 @@ const IMPLEMENTATION_REVIEW_SCHEMA = freezeSchema({
     steps: {
       type: "array",
       minItems: 1,
-      maxItems: MAX_REPORT_STEPS,
+      maxItems: MAX_SELECTED_STEPS,
       uniqueBy: "id",
       items: {
         type: "object",
@@ -650,7 +649,7 @@ ${workerText}
 
   applyImplementationReviewToLedger(taskLedger, implementationReview);
   publishTaskLedger(publishArtifact, taskLedger);
-  const reportText = renderImplementationReport(implementationReview);
+  const reportText = renderImplementationReport(implementationReview, taskLedger);
   publishArtifact("implementation-report.md", reportText);
 
   if (failure === undefined && implementationReview.outcome === "complete") return reportText;
@@ -769,9 +768,10 @@ ${truncateText(reconciliationText, MAX_RECONCILIATION_CHARS)}
 ${READ_ONLY_NOTE}
 
 TASK — independently grade the implementation. You wrote none of the changes.
-Reopen the live diff and affected files. Account for every accepted-plan step
-exactly once and in plan order. For a step this run did not select, use
-\`not-attempted\`; do not credit unrelated pre-existing work as this run's result.
+Reopen the live diff and affected files. Account for every selected step exactly
+once and in accepted-plan order. Do not return rows for unselected steps:
+deterministic code projects those from the task ledger, so unrelated pre-existing
+work cannot be credited as this run's result.
 
 Judge only the operator intent and each accepted step's explicit \`Change:\` and
 \`Verify:\` clauses. The ledger, worker answers, reviews, and check evidence are
@@ -872,21 +872,16 @@ ${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
 
 function implementationReviewErrors(planSteps, selectedSteps, value) {
   const errors = [];
-  const selectedIds = new Set(selectedSteps.map((step) => step.id));
   const rows = Array.isArray(value?.steps) ? value.steps : [];
 
-  if (rows.length !== planSteps.length) {
-    errors.push(`steps: expected exactly ${planSteps.length} row(s), got ${rows.length}`);
+  if (rows.length !== selectedSteps.length) {
+    errors.push(`steps: expected exactly ${selectedSteps.length} selected row(s), got ${rows.length}`);
   }
-  for (const [index, step] of planSteps.entries()) {
+  for (const [index, step] of selectedSteps.entries()) {
     const row = rows[index];
     if (row?.id !== step.id) {
       errors.push(`steps[${index}].id: expected ${step.id}, got ${JSON.stringify(row?.id)}`);
       continue;
-    }
-    const isSelected = selectedIds.has(step.id);
-    if (!isSelected && row.status !== "not-attempted") {
-      errors.push(`steps[${index}].status: unselected step ${step.id} must be not-attempted`);
     }
     if (row.status === "done" && row.remaining.trim().toLowerCase() !== "none") {
       errors.push(`steps[${index}].remaining: done step ${step.id} must be exactly "none"`);
@@ -896,10 +891,13 @@ function implementationReviewErrors(planSteps, selectedSteps, value) {
     }
   }
 
-  const selectedRows = rows.filter((row) => selectedIds.has(row.id));
-  const allDone = selectedRows.length === selectedSteps.length && selectedRows.every((row) => row.status === "done");
-  const hasPartial = selectedRows.some((row) => row.status === "partial");
-  const hasBlocked = selectedRows.some((row) => row.status === "blocked" || row.status === "not-attempted");
+  const planIds = new Set(planSteps.map((step) => step.id));
+  for (const [index, row] of rows.entries()) {
+    if (!planIds.has(row.id)) errors.push(`steps[${index}].id: unknown plan step ${row.id}`);
+  }
+  const allDone = rows.length === selectedSteps.length && rows.every((row) => row.status === "done");
+  const hasPartial = rows.some((row) => row.status === "partial");
+  const hasBlocked = rows.some((row) => row.status === "blocked" || row.status === "not-attempted");
   if (value?.outcome === "complete" && !allDone) {
     errors.push("outcome complete requires every selected step to be done");
   }
@@ -928,14 +926,15 @@ function markReconciliationInLedger(taskLedger, repairRows) {
 function applyImplementationReviewToLedger(taskLedger, review) {
   const reviewById = new Map(review.steps.map((row) => [row.id, row]));
   for (const task of taskLedger) {
+    if (!task.selected) continue;
     const row = reviewById.get(task.id);
     if (row === undefined) throw new Error(`plan-implement terminal grade lost plan step ${task.id}`);
-    task.status = task.selected ? row.status : "not-selected";
+    task.status = row.status;
     task.summary = row.status === "done" ? row.evidence.trim() : row.remaining.trim();
   }
 }
 
-function renderImplementationReport(review) {
+function renderImplementationReport(review, taskLedger) {
   const outcome = {
     complete: "Plan implemented",
     partial: "Partly implemented",
@@ -947,7 +946,19 @@ function renderImplementationReport(review) {
     blocked: "Blocked",
     "not-attempted": "Not attempted",
   };
-  const stepSections = review.steps.flatMap((row) => [
+  const reviewById = new Map(review.steps.map((row) => [row.id, row]));
+  const reportRows = taskLedger.map((task) =>
+    task.selected
+      ? reviewById.get(task.id)
+      : {
+          id: task.id,
+          status: "not-attempted",
+          files: [],
+          evidence: "Not selected for this run.",
+          remaining: "Not selected for this run.",
+        },
+  );
+  const stepSections = reportRows.flatMap((row) => [
     `### ${row.id} — ${status[row.status]}`,
     `Files: ${row.files.length === 0 ? "none" : row.files.map(markdownCode).join(", ")}`,
     `Evidence: ${row.evidence.trim()}`,

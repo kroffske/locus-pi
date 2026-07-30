@@ -215,7 +215,7 @@ function grade(
   } satisfies ImplementationGrade);
 }
 
-function renderedReport(gradeText: string): string {
+function renderedReport(gradeText: string, planIds?: string[]): string {
   const value = JSON.parse(gradeText) as ImplementationGrade;
   const outcome = {
     complete: "Plan implemented",
@@ -228,7 +228,18 @@ function renderedReport(gradeText: string): string {
     blocked: "Blocked",
     "not-attempted": "Not attempted",
   };
-  const steps = value.steps.flatMap((row) => [
+  const byId = new Map(value.steps.map((row) => [row.id, row]));
+  const rows = (planIds ?? value.steps.map((row) => row.id)).map(
+    (id) =>
+      byId.get(id) ?? {
+        id,
+        status: "not-attempted" as const,
+        files: [],
+        evidence: "Not selected for this run.",
+        remaining: "Not selected for this run.",
+      },
+  );
+  const steps = rows.flatMap((row) => [
     `### ${row.id} — ${statuses[row.status]}`,
     `Files: ${row.files.length === 0 ? "none" : row.files.map((file) => `\`${file}\``).join(", ")}`,
     `Evidence: ${row.evidence}`,
@@ -398,11 +409,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   it("repairs the current task from review feedback before starting the next task", async () => {
     const fixture = createPlanFixture();
     const calls: WorkflowAgentRequest[] = [];
-    const terminalGrade = grade("complete", [
-      { id: "S1", status: "done" },
-      { id: "S2", status: "not-attempted" },
-    ]);
-    const report = renderedReport(terminalGrade);
+    const terminalGrade = grade("complete", [{ id: "S1", status: "done" }]);
+    const report = renderedReport(terminalGrade, ["S1", "S2"]);
     const { dsl, artifactStore } = runtimeWith(fixture, async (request) => {
       calls.push(request);
       if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
@@ -570,7 +578,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
   });
 
-  it("rejects terminal rows that are unknown, out of order, or credit an unselected step", async () => {
+  it("rejects terminal rows that are unknown, out of order, or outside the selected set", async () => {
     const fixture = createPlanFixture();
     const calls: WorkflowAgentRequest[] = [];
     let gradeAttempt = 0;
@@ -610,7 +618,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     });
 
     await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      "unselected step S2 must be not-attempted",
+      "steps: expected exactly 1 selected row(s), got 2",
     );
     expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
   });
@@ -780,15 +788,15 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
 
   it("accepts a plan of any length, and refuses only an empty one", async () => {
     // A length cap on the whole plan could only reject something somebody had
-    // already accepted, after the run that wrote it was over. Twelve ordinary
-    // steps put this plan past the 256,000-character bound the entry used to
-    // impose, while each block stays inside the per-step budget that really does
-    // keep one writer's prompt in hand.
-    const steps = Array.from({ length: 12 }, (_unused, index) =>
+    // already accepted, after the run that wrote it was over. 201 ordinary
+    // steps put this plan past both the old 256,000-character plan bound and the
+    // old 200-row terminal-grade bound, while each block stays inside the
+    // per-step budget that really does keep one writer's prompt in hand.
+    const steps = Array.from({ length: 201 }, (_unused, index) =>
       [
         `### S${index + 1} — Rewrite pagination part ${index + 1}`,
         "Files: `src/page.ts`",
-        `Change: ${"detail ".repeat(3_500)}`,
+        `Change: ${"detail ".repeat(200)}`,
         "Verify: `npm test -- page`",
         index === 0 ? "Depends on: none" : `Depends on: S${index}`,
       ].join("\n"),
@@ -796,14 +804,11 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const fixture = createPlanFixture({ steps });
     expect(fixture.planText.length).toBeGreaterThan(256_000);
 
-    const terminalGrade = grade("complete", [
-      { id: "S1", status: "done" },
-      ...Array.from({ length: 11 }, (_unused, index) => ({
-        id: `S${index + 2}`,
-        status: "not-attempted" as const,
-      })),
-    ]);
-    const report = renderedReport(terminalGrade);
+    const terminalGrade = grade("complete", [{ id: "S1", status: "done" }]);
+    const report = renderedReport(
+      terminalGrade,
+      Array.from({ length: 201 }, (_unused, index) => `S${index + 1}`),
+    );
     const { dsl } = runtimeWith(fixture, async (request) => {
       switch (request.label) {
         case "select plan steps":

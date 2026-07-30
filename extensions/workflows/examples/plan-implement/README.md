@@ -6,11 +6,12 @@ critic accepted. It first publishes the selected steps as
 implementer changes the checkout, an independent read-only reviewer accepts,
 requests one bounded repair, or blocks the task, and only an accepted task lets
 the next one start. A final read-only agent returns a validated structured grade
-for every plan step; deterministic code turns that grade into the reader-facing
-report and the authoritative task ledger. If the grade proves that selected work
+for every selected step; deterministic code combines that grade with the full
+task ledger to account for unselected steps in the reader-facing report. The same
+grade updates the authoritative selected-task state. If it proves selected work
 is partial, one bounded reconciliation receives only those partial rows, checks
-and grading run again, and a second partial or blocked grade ends the workflow
-as non-success.
+and grading run again, and a second partial or blocked grade ends the workflow as
+non-success.
 The reporter judges only the operator request and the accepted plan: when a
 read-only stage cannot rerun an otherwise evidenced command, it records that
 limitation under checks instead of inventing a new completion requirement.
