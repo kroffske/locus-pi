@@ -160,9 +160,10 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   moves it, and a path you print in an `awaitOperator` question is a path the
   operator can open. A `readOnly` call is told where the directory is and is not
   asked to create anything in it. Auto-captured material goes elsewhere on purpose: agent
-  answers, published texts and consumed inputs are projected in creation order
-  into `.locus/runtime/workflows/<runId>/logs/`, where the ordinal prefix lives,
-  and child transcripts (`.jsonl` plus an `.html` render) stay under
+  answers, published texts and consumed inputs are projected into
+  `.locus/runtime/workflows/<runId>/logs/` — one document per artifact name
+  holding its newest revision, with the README recording write order and every
+  revision — and child transcripts (`.jsonl` plus an `.html` render) stay under
   `artifacts/transcripts/`.
 - **Keep evidence under the run owner:**
   `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical
