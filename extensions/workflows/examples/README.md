@@ -35,8 +35,8 @@ Two distribution levels remain, and they are independent of resolution:
   Both lists name regular files, never directories, so a new file under an
   already-public folder is not published implicitly.
 
-Resolution and packing are pinned together by
-[`tests/integration/package-boundary.test.ts`](../../../tests/integration/package-boundary.test.ts):
+Resolution and packing are pinned together by the repository test
+`tests/integration/package-boundary.test.ts`, which is not packed:
 the packed workflow names must equal the names this directory resolves. A
 workflow added here without a `package.json#files` entry would run in a checkout
 and be missing after `npm i`, which is the one way "the folder is the registry"
@@ -45,8 +45,9 @@ could lie to an operator.
 Adding a file here is adding a Package workflow, so it is still a public-surface
 change: the boundary test, the manuals, the support boundary, and the changelog
 move with it. A worked reference you do **not** want registered belongs under
-[`../references/`](../references/) instead — that is where
-`excalidraw-pipeline` lives, and why it runs by path only.
+`extensions/workflows/references/` instead — that is where `excalidraw-pipeline`
+lives, and why it runs by path only. Of that directory only
+[`patterns.md`](../references/patterns.md) is packed.
 
 This directory is also the only place a workflow can be both tracked and
 resolvable by name: every other directory the resolver scans — `.pi/workflows/`,
@@ -55,15 +56,15 @@ so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                                             | Read it for                                                                                                                                                                          |
-| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `live-smoke`          | Child-session diagnostic                                 | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
-| `requirements-grill`  | Requirements refinement                                  | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.         |
-| `review`              | Evidence-backed code review                              | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
-| `review-fix`          | Human-directed fixes                                     | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
-| `plan`                | Task → accepted plan                                     | A declared agent roster — `scout`, `planner`, `critic` — and a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                       |
-| `plan-implement`      | Accepted plan → changes                                  | The other end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true` outcome.                           |
-| `excalidraw-pipeline` | Reference only, under [`../references/`](../references/) | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
+| Example               | Product role                                                         | Read it for                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
+| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.         |
+| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
+| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
+| `plan`                | Task → accepted plan                                                 | A declared agent roster — `scout`, `planner`, `critic` — and a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                       |
+| `plan-implement`      | Accepted plan → changes                                              | The other end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true` outcome.                           |
+| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
 `plan` and `plan-implement` are a pair, and the seam between them is the point:
 `plan` ends by returning the accepted plan text, which the runtime retains as
@@ -103,7 +104,7 @@ charter for every round and still records exactly two pieces of prompt evidence.
 
 The four short `review` prompts and all five `review-fix` prompts moved inline on
 2026-07-26 under the amendment recorded in
-[`docs/adr/text-agent-results-and-prompt-resources.md`](../../../docs/adr/text-agent-results-and-prompt-resources.md).
+`docs/adr/text-agent-results-and-prompt-resources.md`, which is not packed.
 
 **Shape versus meaning, in three tiers.** Lengths, counts, id patterns, enums,
 uniqueness and blankness belong in `agent({ schema })`. Cross-field agreement,

@@ -1,6 +1,6 @@
 # plan-implement
 
-Carries out one plan that a [`plan`](../plan/) run produced and its critic
+Carries out one plan that a [`plan`](../plan/README.md) run produced and its critic
 accepted: one write-capable agent per plan step, then independent checks and a
 fresh report against the original plan.
 

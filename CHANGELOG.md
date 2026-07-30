@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Packed Markdown links are now checked against the actual npm tarball.**
+  Relative links in shipped documentation must resolve to packed files, while
+  repository-only references are labeled as paths instead of dead links. The
+  two workflow diagrams referenced by public manuals are now included in the
+  package, and generated `.locus-pi/` workflow reports are ignored by Git.
+
 - **The README now documents the complete Git-clone installation lifecycle.**
   It distinguishes stable `main` from integration `dev`, shows user-scoped
   registration that works from every directory, explains update and uninstall
