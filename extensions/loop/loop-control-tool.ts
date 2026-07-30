@@ -11,7 +11,7 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ToolResult } from "../_shared/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/pi-api.js";
 import { validateParams } from "../_shared/validation.js";
-import { readLoopStatus, renderLoopStatus } from "../_shared/loop-continuation.js";
+import { readLoopStatus, renderLoopStatus } from "./loop-continuation.js";
 import { runLoopOnce } from "./continuation-launcher.js";
 import { unsupportedLoopText } from "./operator-ui.js";
 

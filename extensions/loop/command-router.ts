@@ -12,7 +12,7 @@ import { getCommandText, getProjectRoot } from "../_shared/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
 import { requestOperatorInput } from "../_shared/operator-input.js";
 import { SETTINGS_HELP_PLACEMENT } from "../_shared/widget-render.js";
-import { readLoopStatus, renderLoopStatus } from "../_shared/loop-continuation.js";
+import { readLoopStatus, renderLoopStatus } from "./loop-continuation.js";
 import { errorMessage } from "../_shared/error-text.js";
 import { parseLoopCommand, parseLoopInput } from "./command-parser.js";
 import { runLoopOnce } from "./continuation-launcher.js";

@@ -210,6 +210,49 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **Reading a workflow run from outside the workflows extension now goes through
+  one read-only door, and nothing can reach past it.** The module that owns
+  `.locus/runtime/workflows/<runId>/` also owns the append sink, the
+  journal-to-live-row projection and the live-row retention bound. Two consumers
+  only ever needed to _read_ a run — the agent drill's round submenu and the
+  loop's continuation source — and both imported that module directly, so both
+  held its write side as well. `extensions/workflows/run-read.ts` is the surface
+  they get instead: the read operations and the one type those return, and nothing
+  else.
+  **Nothing was reimplemented behind it, and that was the evidenced choice rather
+  than the lazy one.** A read operation is worth relocating only when it is
+  self-contained, and none of these is. The live-row id parser is called by the
+  journal's own retention pass, which then clears the retired runs' writer entries
+  from a process-global map; the run-directory path builder is still used by three
+  sibling modules inside `_shared/`. Relocating either would have made
+  foundational shared code import a feature directory — the one edge the ownership
+  refactor exists to remove. The run listing, the journal read, the run summary and
+  the two round readers all resolve through private journal internals: the
+  start-timestamp proof that orders runs, the per-line structural validator that
+  separates valid rows from diagnostics, and the persisted-result disposition
+  projection. Copying any of them across would have forked a parser away from the
+  format it parses, and splitting a function from the global state it reads is how a
+  relocation silently ends up with two live-state slots. Facade purity was worth
+  less than either.
+  **A ninth check keeps the door from becoming decorative.** `npm run check:layers`
+  now accepts a declaration that a module is internal to one extension plus the one
+  facade file that stands in for it everywhere else, and rejects any import of that
+  module from another extension directory. The existing no-upward-import rule was
+  about direction — shared code may not reach up into a feature — and said nothing
+  about two features being peers, so without this the next edit could import the
+  journal from `extensions/agents/` again and the facade would sit there unused.
+  Tests are deliberately out of scope: a test of the journal has to import the
+  journal, or it is testing the facade while the internals go uncovered.
+  **The loop's continuation helper moved to the extension that owns it.**
+  `extensions/_shared/loop-continuation.ts` is now
+  `extensions/loop/loop-continuation.ts`. Its only importers were three files in
+  `extensions/loop/`, and it read the workflow journal — so had it stayed in
+  `_shared` while the facade landed, a shared module would have been importing a
+  feature directory, which is exactly what the new check forbids. Moved, the same
+  dependency is a legal edge from one extension to another's declared facade.
+  Behavior is unchanged throughout: run listing, round lookup, continuation
+  creation and the refusal for an absent run all do what they did before.
+
 - **`extensions/_shared` now has a declared owner per module, and the import
   direction is checked instead of assumed.** The directory had grown to 64 modules
   with no stated boundary, so nothing distinguished a genuinely shared primitive

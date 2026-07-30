@@ -48,7 +48,7 @@ OMP review sources were used as design evidence only. No OMP implementation code
 ## Local evidence owner
 
 - `extensions/loop/index.ts`
-- `extensions/_shared/loop-continuation.ts`
+- `extensions/loop/loop-continuation.ts`
 - `extensions/_shared/goal-mode.ts`
 - `tests/extensions/loop/loop.test.ts`
 - `tests/integration/public-registration.test.ts`

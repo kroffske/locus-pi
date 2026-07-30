@@ -42,11 +42,18 @@
  *   8. Mutable module state. Declared non-symbol mutable module state must still be
  *      present where declared, and a new undeclared mutable exported container in
  *      `_shared` fails.
+ *   9. Feature-internal module. A module declared internal to one feature may be
+ *      imported, from another feature directory, only through that feature's
+ *      declared facade file. Rule 1 stops a shared module from reaching into a
+ *      feature; nothing stopped one feature from reaching into another's internals,
+ *      which is how a narrow facade becomes decorative one edit after it lands.
  *
  * SCOPE — READ THIS BEFORE WIDENING IT
  *
- * The rule-7 registry sweep covers `extensions/**` only. Tests are deliberately
- * out of scope: `tests/extensions/agents/agent-live-store-entrypoints.test.ts`
+ * The rule-7 registry sweep and the rule-9 importer sweep cover `extensions/**`
+ * only. Tests are deliberately out of scope for both.
+ *
+ * For rule 7: `tests/extensions/agents/agent-live-store-entrypoints.test.ts`
  * legitimately holds a historical `locus-pi.agent-live-store.v3` key to prove the
  * superseded slot stays empty, and a sweep that demanded a ledger entry for it
  * would either reject that test or force the ledger to carry dead versions. Tests
@@ -54,6 +61,13 @@
  * parsed (`.ts`, `.mts`, `.mjs`, `.js`) — a `Symbol.for` spelled inside Markdown
  * or JSON under `extensions/**` is prose, not a registry, and the AST walk also
  * means a mention inside a comment does not register.
+ *
+ * For rule 9: a test of a feature-internal module has to import that module, or it
+ * is testing the facade instead and the internals go uncovered. Rule 9 governs what
+ * ships — which extension may depend on which — and `extensions/_shared/**` is
+ * excluded from it for the same reason: a `_shared` sibling's edges are already
+ * fully governed by rules 1, 2 and 3, and a second verdict on them would only
+ * disagree.
  *
  * Imports are read from the real TypeScript AST rather than by regular expression:
  * `_shared` modules contain comment prose and regex literals that a line-based
@@ -159,9 +173,9 @@ const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
 
 /**
  * Destination is the module's final file path. `workflow-journal` is listed like
- * every other workflow module: W2 extracts its externally consumed READ EXPORTS
- * into `extensions/workflows/run-read.ts`, which is a new facade file, not a new
- * home for the module.
+ * every other workflow module: W2 routed its externally consumed READ EXPORTS
+ * through `extensions/workflows/run-read.ts`, which is a facade file, not a new
+ * home for the module — the journal itself still moves to the destination below.
  */
 const FEATURE_DESTINATIONS: Record<string, string> = {
   ...Object.fromEntries(
@@ -176,8 +190,46 @@ const FEATURE_DESTINATIONS: Record<string, string> = {
   "mode-state": "extensions/plan/mode-state.ts",
 };
 
-/** The facade W2 must create. Checked only once `workflow-journal` has left `_shared`. */
+/**
+ * The read-only facade W2 landed. Rule 9 requires it unconditionally, since it is the
+ * declared way past a feature-internal module; the rule-4 check below is the narrower
+ * one that catches the journal leaving `_shared` without it.
+ */
 const WORKFLOW_READ_FACADE = "extensions/workflows/run-read.ts";
+
+// ---------------------------------------------------------------------------
+// Ledger: feature-internal modules (rule 9)
+// ---------------------------------------------------------------------------
+
+interface FeatureInternalEntry {
+  readonly module: string;
+  readonly destinations: readonly string[];
+  readonly owner: string;
+  readonly facade: string;
+  readonly reason: string;
+}
+
+/**
+ * A module whose OWN feature is the only extension allowed to import it, plus the
+ * one file that stands in for it everywhere else.
+ *
+ * Rule 1 is about direction — shared code may not reach up into a feature. Rule 9
+ * is about reach: two features are peers, so nothing in rule 1 stops one of them
+ * from importing the other's internals, and a facade that a peer can bypass buys
+ * nothing. `destinations` lists the paths the module is allowed to become, so the
+ * declaration does not go stale the slice it moves; the module is asserted to exist
+ * at one of them, because a declaration pointing at nothing is a rule switched off.
+ */
+const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
+  {
+    module: "extensions/_shared/workflow-journal.ts",
+    destinations: ["extensions/workflows/runtime/workflow-journal.ts"],
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "the journal owns the run directory layout, the append sink, the journal-to-live-row projection and the live-row retention bound; a consumer that only needs to read a run must not hold the write side, so the read operations two outside consumers use are re-exported by the facade instead.",
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Ledger: declared exceptions to rule 2
@@ -521,6 +573,9 @@ export async function checkExtensionLayers(root: string): Promise<void> {
   // Rule 7: registry inventory.
   failures.push(...(await checkRegistries(root)));
 
+  // Rule 9: feature-internal module reached from another feature.
+  failures.push(...(await checkFeatureInternalModules(root)));
+
   if (failures.length > 0) {
     console.error(`Extension layer check failed with ${failures.length} violation(s):\n\n${failures.join("\n\n")}`);
     process.exitCode = 1;
@@ -533,6 +588,7 @@ export async function checkExtensionLayers(root: string): Promise<void> {
     `Extension layers verified: ${sharedSources.length} shared source(s) across ${layerCount} declared layer(s), ` +
       `${pending.length} awaiting relocation, ${REGISTRIES.length} process-global registries, ` +
       `${MUTABLE_MODULE_STATE.length} ledgered mutable module bindings, ` +
+      `${FEATURE_INTERNAL_MODULES.length} feature-internal module(s) behind a facade, ` +
       `${PROVISIONAL_UPWARD_EDGES.length} declared provisional upward edge(s)` +
       `${provisional.length > 0 ? `, provisional layer(s) still present: ${provisional.join(", ")}` : ""}.`,
   );
@@ -764,6 +820,77 @@ async function checkRegistries(root: string): Promise<string[]> {
   }
 
   return failures;
+}
+
+async function checkFeatureInternalModules(root: string): Promise<string[]> {
+  const failures: string[] = [];
+  if (FEATURE_INTERNAL_MODULES.length === 0) return failures;
+
+  const sources = (await listFiles(path.join(root, EXTENSIONS_DIR), root)).filter((file) =>
+    SOURCE_EXTENSIONS.has(path.extname(file)),
+  );
+  const located: { entry: FeatureInternalEntry; at: string }[] = [];
+
+  for (const entry of FEATURE_INTERNAL_MODULES) {
+    const candidates = [entry.module, ...entry.destinations];
+    const at = await firstExisting(root, candidates);
+    if (at === undefined) {
+      failures.push(
+        `rule 9 (feature-internal module): declared internal module ${entry.module} was not found at its declared ` +
+          `path or any declared destination (${entry.destinations.join(", ")}). A declaration pointing at nothing is ` +
+          `a rule switched off: update FEATURE_INTERNAL_MODULES in the same change that moves or renames it.`,
+      );
+      continue;
+    }
+    if (!(await fileExists(path.join(root, entry.facade)))) {
+      failures.push(
+        `rule 9 (feature-internal module): ${at} is declared internal to ${entry.owner}/ with facade ${entry.facade}, ` +
+          `but that facade file does not exist. Without it every other extension is left with no sanctioned way to ` +
+          `read what the module owns.`,
+      );
+      continue;
+    }
+    located.push({ entry, at });
+  }
+  if (located.length === 0) return failures;
+
+  for (const file of sources) {
+    // `_shared` siblings are governed by rules 1-3; see the SCOPE note.
+    if (isInside(file, SHARED_DIR)) continue;
+    const text = await readFile(path.join(root, file), "utf8");
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindFor(file));
+    for (const edge of collectImportEdges(source)) {
+      if (!edge.specifier.startsWith(".")) continue;
+      const resolved = resolveSpecifier(file, edge.specifier);
+      for (const { entry, at } of located) {
+        if (!sameModule(resolved, at)) continue;
+        if (isInside(file, entry.owner) || file === entry.facade) continue;
+        failures.push(
+          `rule 9 (feature-internal module): ${file}:${edge.line} ${edge.typeOnly ? "type-only import" : "value import"} ` +
+            `of "${edge.specifier}" resolves to ${at}, which is declared internal to ${entry.owner}/. ` +
+            `Import ${entry.facade} instead, adding the symbol to it if it is missing — ${entry.reason}`,
+        );
+      }
+    }
+  }
+
+  return failures;
+}
+
+async function firstExisting(root: string, candidates: readonly string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    if (await fileExists(path.join(root, candidate))) return candidate;
+  }
+  return undefined;
+}
+
+/** Compare an import target with a source path, ignoring the ESM `.js`-for-`.ts` spelling. */
+function sameModule(resolved: string, modulePath: string): boolean {
+  return stripSourceExtension(resolved) === stripSourceExtension(modulePath);
+}
+
+function stripSourceExtension(value: string): string {
+  return value.replace(/\.(?:mts|mjs|ts|js)$/, "");
 }
 
 async function locateBinding(root: string, entry: MutableStateEntry): Promise<boolean> {

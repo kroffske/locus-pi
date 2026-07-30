@@ -83,7 +83,6 @@ extensions/_shared/goal-ai-draft.ts
 extensions/_shared/goal-mode.ts
 extensions/_shared/human-control.ts
 extensions/_shared/live-model-display.ts
-extensions/_shared/loop-continuation.ts
 extensions/_shared/mode-state.ts
 extensions/_shared/model-settings.ts
 extensions/_shared/operator-input.ts
@@ -161,6 +160,7 @@ extensions/loop/command-parser.ts
 extensions/loop/command-router.ts
 extensions/loop/continuation-launcher.ts
 extensions/loop/index.ts
+extensions/loop/loop-continuation.ts
 extensions/loop/loop-control-tool.ts
 extensions/loop/manifest.json
 extensions/loop/operator-surface.ts
@@ -245,6 +245,7 @@ extensions/workflows/references/excalidraw-pipeline/resources/section-author.pro
 extensions/workflows/references/excalidraw-pipeline/resources/section-repair.prompt.md
 extensions/workflows/references/patterns.md
 extensions/workflows/run-evidence.ts
+extensions/workflows/run-read.ts
 extensions/workflows/run-viewer.ts
 extensions/workflows/workflow-catalog.ts
 extensions/workflows/workflow-command-launcher.ts

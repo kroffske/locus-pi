@@ -15,7 +15,7 @@ import {
   createWorkflowLoopContinuation,
   renderGoalLoopContinuationResult,
   renderLoopWorkflowContinuationResult,
-} from "../_shared/loop-continuation.js";
+} from "./loop-continuation.js";
 
 export async function runLoopOnce(
   pi: ExtensionAPI,

@@ -1,9 +1,33 @@
+/**
+ * extensions/loop/loop-continuation.ts — What `/loop` and `loopControl` know about
+ * their two continuation sources.
+ *
+ * Reports which source (goal, workflow, review) can produce a bounded next prompt
+ * and renders that report, and writes the workflow continuation artifact itself.
+ * Nothing here auto-dispatches; a continuation is a saved prompt, never a run.
+ *
+ * The workflow side reads run persistence through `workflows/run-read.js` — the
+ * read-only facade — rather than the workflow journal directly, so the loop holds
+ * no handle on the journal's sink or its live-row retention.
+ */
+
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "./pi-api.js";
-import { goalContinuationPath, loadGoalState, renderGoalContinuationArtifact, type GoalContinuationArtifact } from "./goal-mode.js";
-import { listWorkflowRunIds, readWorkflowRunJournal, readWorkflowRunSummary, workflowRunDir, type WorkflowRunSummary } from "./workflow-journal.js";
-import { runtimeStateDir } from "./files.js";
+import type { ExtensionAPI } from "../_shared/pi-api.js";
+import {
+  goalContinuationPath,
+  loadGoalState,
+  renderGoalContinuationArtifact,
+  type GoalContinuationArtifact,
+} from "../_shared/goal-mode.js";
+import {
+  listWorkflowRunIds,
+  readWorkflowRunJournal,
+  readWorkflowRunSummary,
+  workflowRunDir,
+  type WorkflowRunSummary,
+} from "../workflows/run-read.js";
+import { runtimeStateDir } from "../_shared/files.js";
 
 export type LoopSourceKind = "goal" | "workflow" | "review";
 export type LoopSourceAvailability = "available" | "blocked" | "missing" | "unsupported";
@@ -95,12 +119,17 @@ export function renderLoopStatus(report: LoopStatusReport): string {
     `status: ${report.mode}`,
     ...report.sources.map(renderLoopSourceStatus),
     renderLoopNextStep(report),
-  ].map(boundStatusLine).join("\n");
+  ]
+    .map(boundStatusLine)
+    .join("\n");
 }
 
 export function renderLoopSourceStatus(source: LoopStatusSourceReport): string {
   const fields = [`${source.source}: ${source.availability}`];
-  if (source.id !== undefined) fields.push(`${source.source === "workflow" ? "run" : "id"}=${shortenStatusValue(source.id, LOOP_STATUS_ID_WIDTH)}`);
+  if (source.id !== undefined)
+    fields.push(
+      `${source.source === "workflow" ? "run" : "id"}=${shortenStatusValue(source.id, LOOP_STATUS_ID_WIDTH)}`,
+    );
   if (source.status !== undefined) fields.push(`state=${shortenStatusValue(source.status, 14)}`);
   fields.push(renderLoopSourceHint(source));
   return boundStatusLine(fields.join(" | "));
@@ -144,7 +173,11 @@ function boundStatusLine(line: string): string {
   return `${line.slice(0, LOOP_STATUS_LINE_WIDTH - 3)}...`;
 }
 
-export async function createWorkflowLoopContinuation(projectRoot: string, runId: string, rawPrompt: string): Promise<LoopWorkflowContinuationResult> {
+export async function createWorkflowLoopContinuation(
+  projectRoot: string,
+  runId: string,
+  rawPrompt: string,
+): Promise<LoopWorkflowContinuationResult> {
   const summary = await loadWorkflowContinuationSummary(projectRoot, runId);
   const prompt = buildWorkflowContinuationPrompt(runId, summary, rawPrompt);
   const artifact = normalizeWorkflowLoopContinuationArtifact({
@@ -173,19 +206,13 @@ export async function createWorkflowLoopContinuation(projectRoot: string, runId:
 }
 
 export function renderLoopWorkflowContinuationResult(result: LoopWorkflowContinuationResult): string {
-  return [
-    "Loop continuation saved.",
-    `source: workflow`,
-    renderLoopWorkflowContinuationArtifact(result.artifact),
-  ].join("\n");
+  return ["Loop continuation saved.", `source: workflow`, renderLoopWorkflowContinuationArtifact(result.artifact)].join(
+    "\n",
+  );
 }
 
 export function renderGoalLoopContinuationResult(goalArtifact: GoalContinuationArtifact): string {
-  return [
-    "Loop continuation saved.",
-    `source: goal`,
-    renderGoalContinuationArtifact(goalArtifact),
-  ].join("\n");
+  return ["Loop continuation saved.", `source: goal`, renderGoalContinuationArtifact(goalArtifact)].join("\n");
 }
 
 export function renderLoopWorkflowContinuationArtifact(artifact: LoopWorkflowContinuationArtifact): string {
@@ -213,7 +240,10 @@ export function readLatestWorkflowRunId(projectRoot: string): string | undefined
   return runIds[0];
 }
 
-async function resolveGoalSource(projectRoot: string, goalState: Awaited<ReturnType<typeof loadGoalState>>): Promise<LoopStatusSourceReport> {
+async function resolveGoalSource(
+  projectRoot: string,
+  goalState: Awaited<ReturnType<typeof loadGoalState>>,
+): Promise<LoopStatusSourceReport> {
   if (!goalState) {
     return { source: "goal", availability: "missing", reason: "no saved goal state" };
   }
@@ -244,7 +274,11 @@ async function resolveGoalSource(projectRoot: string, goalState: Awaited<ReturnT
 async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSourceReport> {
   const latestRunId = readLatestWorkflowRunId(projectRoot);
   if (latestRunId === undefined) {
-    return { source: "workflow", availability: "missing", reason: "no workflow run metadata found under .locus/runtime/workflows" };
+    return {
+      source: "workflow",
+      availability: "missing",
+      reason: "no workflow run metadata found under .locus/runtime/workflows",
+    };
   }
 
   const summary = readWorkflowRunSummary(projectRoot, latestRunId);
@@ -283,7 +317,13 @@ async function loadWorkflowContinuationSummary(projectRoot: string, runId: strin
 
 function buildWorkflowContinuationPrompt(runId: string, summary: WorkflowRunSummary, rawPrompt: string): string {
   const trimmed = rawPrompt.trim();
-  const parts = trimmed === "" ? [] : trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  const parts =
+    trimmed === ""
+      ? []
+      : trimmed
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
   const summaryNote = parts[0] ?? `Summarize workflow ${runId} and propose one bounded follow-up step.`;
   const nextStep = parts[1] ?? "Choose one bounded workflow follow-up and stop.";
 
@@ -321,7 +361,9 @@ function buildWorkflowContinuationPrompt(runId: string, summary: WorkflowRunSumm
   ].join("\n");
 }
 
-function normalizeWorkflowLoopContinuationArtifact(artifact: LoopWorkflowContinuationArtifact): LoopWorkflowContinuationArtifact {
+function normalizeWorkflowLoopContinuationArtifact(
+  artifact: LoopWorkflowContinuationArtifact,
+): LoopWorkflowContinuationArtifact {
   return {
     ...artifact,
     version: 1,
