@@ -1,24 +1,31 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type {
   WorkflowArtifactPorts,
   WorkflowArtifactRef,
+  WorkflowBoundContinuation,
+  WorkflowConsumedTextArtifact,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { workflowContinuationForHandoff } from "../../../extensions/workflows/runtime/workflow-handoff.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { createHarness } from "../../test-harness.js";
 
 /**
  * The tracked `plan` example. One loop carries its "iteratively" claim, and it can
  * end in two ways, so both are pinned here: the drafting loop must stop on the
- * critic's verdict, and the round cap is the safety net that fails the run.
+ * critic's verdict, and the round cap is the safety net that retains the stalled
+ * state and hands the decision to the operator.
  */
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/plan/plan.workflow.mjs");
 
@@ -56,11 +63,26 @@ function priorRef(runId: string, artifactId: string, name: string, text: string)
   return { runId, artifactId, name, sha256: digest(text) };
 }
 
-function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>) {
+function runtimeWith(
+  runner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
+  options: { consumed?: Map<string, WorkflowConsumedTextArtifact> } = {},
+) {
   const runId = "plan-test";
   const runDir = mkdtempSync(path.join(tmpdir(), "locus-plan-workflow-"));
   const published: PublishedArtifact[] = [];
   const answers: PublishedArtifact[] = [];
+  const awaiting: Array<{ reason: string; operatorHandoff?: unknown }> = [];
+  let continuation: WorkflowBoundContinuation | undefined;
+  if (options.consumed !== undefined && options.consumed.size > 0) {
+    const pairs = [...options.consumed.values()].map((item, index) => ({
+      sourceRef: item.ref,
+      consumedArtifact: {
+        ...item,
+        ref: priorRef(runId, `input-${index + 1}`, item.ref.name, item.text),
+      },
+    }));
+    continuation = { originRunId: pairs[0]!.sourceRef.runId, artifacts: pairs };
+  }
   const artifactPorts: WorkflowArtifactPorts = {
     recordAgentEvidence(input) {
       if (input.text === undefined) return {};
@@ -83,11 +105,45 @@ function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<Workflow
       agentRunner: runner,
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       artifactPorts,
+      onAwaitOperator(declaration) {
+        awaiting.push(declaration);
+      },
+      ...(continuation === undefined ? {} : { continuation }),
       projectRoot: process.cwd(),
     }),
     published,
     answers,
+    awaiting,
   };
+}
+
+/** The four artifacts a stalled run retains, as consumed continuation pairs. */
+function stalledPlanContinuation(
+  overrides: Partial<Record<string, string>> = {},
+): Map<string, WorkflowConsumedTextArtifact> {
+  const originRunId = "plan-origin-run";
+  const texts: Record<string, string> = {
+    "task.md": "advance pagination",
+    "context.md": SCOUT_CONTEXT,
+    "plan.md": PLAN_DRAFT,
+    "unresolved-defects.md": "1. S1: still unverifiable",
+    ...overrides,
+  };
+  return new Map(
+    Object.entries(texts).map(([name, text]) => [
+      name,
+      {
+        ref: priorRef(originRunId, `published-${name}`, name, text),
+        text,
+        source: {
+          runId: originRunId,
+          target: { kind: "name" as const, ref: "plan", source: "package" as const },
+          artifact: { kind: "published" as const },
+          terminal: { artifactRefs: [] },
+        },
+      },
+    ]),
+  );
 }
 
 const PLAN_DRAFT = [
@@ -343,13 +399,41 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(answers[3]?.text).toBe(secondDraft);
   });
 
-  it("fails the run when the round cap is reached without an accepted plan", async () => {
-    // A draft nobody accepted is not a plan, and failing here is also what keeps
-    // it out of `plan-implement`: continuation consumes only a successful run's
-    // projected artifacts.
+  it("gives every critic round the previous round's defects so the loop converges instead of relitigating", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: WorkflowAgentRequest[] = [];
+    const defect = "S1: `src/page.ts` has no offset variable; name the symbol the step changes";
+    const outputs: Record<string, string> = {
+      scout: SCOUT_CONTEXT,
+      "planner round 1": PLAN_DRAFT,
+      "critic round 1": JSON.stringify({ verdict: "revise", defects: [defect] }),
+      "planner round 2": PLAN_DRAFT.replace("Advance the offset.", "Advance the offset in `loadPage`."),
+      "critic round 2": '{"verdict":"accept","defects":[]}',
+    };
     const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    await runWorkflow(dsl, "advance pagination");
+
+    const secondCritic = calls.find((call) => call.label === "critic round 2");
+    // The exact defect sentence, numbered, inside the previous-defects block —
+    // and the ratchet contract that makes new defects earn their place.
+    expect(secondCritic?.prompt).toContain("--- BEGIN DEFECTS REPORTED ON THE PREVIOUS DRAFT ---");
+    expect(secondCritic?.prompt).toContain(`1. ${defect}`);
+    expect(secondCritic?.prompt).toContain("never reopen an aspect of\nthe plan you previously left unflagged");
+    const firstCritic = calls.find((call) => call.label === "critic round 1");
+    expect(firstCritic?.prompt).toContain("(none; this is the first draft)");
+  });
+
+  it("hands the round cap to the operator with the retained draft instead of failing the run", async () => {
+    // A draft nobody accepted is still not a plan — the run returns no plan text.
+    // But the scout's map and six rounds of drafting are paid for, so the cap
+    // retains them and asks the operator instead of burning the run.
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published, awaiting } = runtimeWith(async (request) => {
       calls.push(request);
       if (request.label === "scout") return completed(request, SCOUT_CONTEXT);
       if (request.label!.startsWith("critic")) {
@@ -359,14 +443,97 @@ describe("workflow example: plan.workflow.mjs", () => {
     });
 
     expect(await runWorkflow(dsl, "advance pagination")).toEqual({
-      ok: false,
+      decision: "needs_operator",
       stoppedBy: "round-cap",
       rounds: 6,
-      summary: "plan was not accepted within 6 drafting round(s)",
+      summary: "plan was not accepted within 6 drafting round(s); awaiting operator guidance",
       unresolvedRows: ["S1: still unverifiable"],
     });
     expect(calls.filter((call) => call.label!.startsWith("planner"))).toHaveLength(6);
     expect(calls.at(-1)?.label).toBe("critic round 6");
+    // The stalled state is retained under its own names, ready for continuation.
+    expect(published.map((item) => item.ref.name)).toEqual([
+      "task.md",
+      "context.md",
+      "plan.md",
+      "unresolved-defects.md",
+    ]);
+    expect(published[2]?.text).toBe(PLAN_DRAFT);
+    expect(published[3]?.text).toBe("1. S1: still unverifiable");
+    expect(awaiting).toHaveLength(1);
+    expect(awaiting[0]).toMatchObject({
+      reason: "plan round cap without acceptance",
+      operatorHandoff: {
+        title: "Plan drafting stalled",
+        questions: [{ kind: "text", id: "plan-guidance" }],
+      },
+    });
+    const refs = (awaiting[0]?.operatorHandoff as { continuationArtifactRefs: WorkflowArtifactRef[] })
+      .continuationArtifactRefs;
+    expect(refs.map((ref) => ref.name)).toEqual(["task.md", "context.md", "plan.md", "unresolved-defects.md"]);
+  });
+
+  it("lets the operator accept the retained draft without spawning a single agent", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl, published, awaiting } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, "never used");
+      },
+      { consumed: stalledPlanContinuation() },
+    );
+
+    // Case-insensitive around whitespace: this is a human typing an answer.
+    expect(await runWorkflow(dsl, "  Accept Last Draft \n")).toBe(PLAN_DRAFT);
+    expect(calls).toEqual([]);
+    expect(awaiting).toEqual([]);
+    // The accepting run republishes the task and the now-accepted plan as its own.
+    expect(published.map((item) => item.ref.name)).toEqual(["task.md", "plan.md"]);
+    expect(published[1]?.text).toBe(PLAN_DRAFT);
+  });
+
+  it("redrafts under operator guidance from the retained state, without re-scouting", async () => {
+    const runWorkflow = await loadWorkflow();
+    const calls: WorkflowAgentRequest[] = [];
+    const guided = PLAN_DRAFT.replace("Advance the offset.", "Advance the offset behind the feature flag.");
+    const outputs: Record<string, string> = {
+      "planner round 1": guided,
+      "critic round 1": '{"verdict":"accept","defects":[]}',
+    };
+    const { dsl } = runtimeWith(
+      async (request) => {
+        calls.push(request);
+        return completed(request, outputs[request.label!]!);
+      },
+      { consumed: stalledPlanContinuation() },
+    );
+    const guidance = "Keep S1 but do the change behind the existing feature flag; the verify command is fine as is.";
+
+    expect(await runWorkflow(dsl, guidance)).toBe(guided);
+    // No scout: the retained context is the map, and the loop restarts at round 1.
+    expect(calls.map((call) => call.label)).toEqual(["planner round 1", "critic round 1"]);
+    const planner = calls[0]!;
+    expect(planner.prompt).toContain("--- BEGIN OPERATOR GUIDANCE ---");
+    expect(planner.prompt).toContain(guidance);
+    expect(planner.prompt).toContain(PLAN_DRAFT);
+    expect(planner.prompt).toContain("1. S1: still unverifiable");
+    expect(planner.prompt).toContain("continues a previous run that stalled at its round cap");
+    const critic = calls[1]!;
+    expect(critic.prompt).toContain("--- BEGIN OPERATOR GUIDANCE ---");
+    expect(critic.prompt).toContain("a defect the guidance explicitly waives or\noverrules is not a defect");
+    expect(critic.prompt).toContain("1. S1: still unverifiable");
+  });
+
+  it("refuses a continuation that does not carry exactly the four retained artifacts", async () => {
+    const runWorkflow = await loadWorkflow();
+    const partial = stalledPlanContinuation();
+    partial.delete("unresolved-defects.md");
+    const { dsl } = runtimeWith(async (request) => completed(request, "never used"), { consumed: partial });
+
+    await expect(runWorkflow(dsl, "some guidance")).rejects.toThrow(
+      "plan continuation requires exactly task.md, context.md, plan.md, unresolved-defects.md",
+    );
   });
 
   it.each([
@@ -394,6 +561,81 @@ describe("workflow example: plan.workflow.mjs", () => {
     // never sees the validator's rejection banner.
     expect(calls[1]?.prompt).not.toContain("REJECTED by the workflow script");
     expect(calls.some((call) => call.label === "planner round 2")).toBe(false);
+  });
+
+  it("round-caps into an actionable handoff through the real runner, and the continuation accepts the draft", async () => {
+    // The mock-runtime tests above pin the script's behavior; this one pins the
+    // seam that broke in the live run this change answers: the cap's declared
+    // refs must survive the runner's terminal artifact projection, and the
+    // handoff continuation must feed the same workflow back to an accepted plan.
+    const root = mkdtempSync(path.join(tmpdir(), "locus-plan-e2e-"));
+    try {
+      mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+      writeFileSync(
+        path.join(root, ".agents", "agents", "default.md"),
+        "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+      );
+      const harness = createHarness(root, { sessionId: "plan-e2e-parent" });
+      const executed: string[] = [];
+      const createExecutor = (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          const role = request.task.includes("map the repository facts")
+            ? "scout"
+            : request.task.includes("write the complete implementation plan")
+              ? "planner"
+              : "critic";
+          executed.push(role);
+          const text =
+            role === "scout"
+              ? SCOUT_CONTEXT
+              : role === "planner"
+                ? PLAN_DRAFT
+                : '{"verdict":"revise","defects":["S1: still unverifiable"]}';
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: text,
+            text,
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      });
+
+      const stalled = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "plan",
+        input: "advance pagination",
+        createExecutor,
+      });
+
+      expect(stalled.ok, stalled.error).toBe(true);
+      expect(stalled.disposition).toMatchObject({ status: "awaiting_operator" });
+      expect(stalled.operatorHandoff).toBeDefined();
+      const refs = stalled.operatorHandoff!.continuationArtifactRefs;
+      expect(refs.map((ref) => ref.name)).toEqual(["task.md", "context.md", "plan.md", "unresolved-defects.md"]);
+      expect(executed.filter((role) => role === "planner")).toHaveLength(6);
+
+      const accepted = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "plan",
+        input: "accept last draft",
+        continuation: workflowContinuationForHandoff(stalled.operatorHandoff!),
+        createExecutor: () => {
+          throw new Error("accepting the retained draft must not spawn an agent");
+        },
+      });
+
+      expect(accepted.ok, accepted.error).toBe(true);
+      expect(accepted.disposition).toMatchObject({ status: "completed" });
+      expect(accepted.result).toBe(PLAN_DRAFT);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("refuses an empty task, and bounds nothing the host already bounds", async () => {

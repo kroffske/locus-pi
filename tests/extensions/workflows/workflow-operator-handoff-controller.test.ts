@@ -258,6 +258,59 @@ describe("workflow operator handoff controller", () => {
     expect(launch).toHaveBeenCalledTimes(1);
   });
 
+  it("never reopens a retryable handoff unprompted, and says so exactly once per session", async () => {
+    // A retryable handoff already consumed an answer whose continuation failed.
+    // The unprompted pump re-asking those questions is how an operator ends up
+    // answering the same clarification twice with no way to type a command.
+    const item = handoff("20260725-120000-retryable");
+    const launch = vi.fn(async () => ({ status: "started" as const }));
+    const ports: WorkflowHandoffControllerPorts = {
+      scan: () => [{ status: "actionable", handoff: item, state: "retryable" }],
+      read: () => item,
+      launch,
+    };
+    const queue = new WorkflowOperatorHandoffController(ports);
+    const harness = createHarness();
+
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "deferred", runId: item.runId });
+    await expect(queue.pump(harness.ctx)).resolves.toEqual({ status: "none" });
+    expect(harness.customComponents).toEqual([]);
+    expect(launch).not.toHaveBeenCalled();
+
+    // An explicit /workflows still opens the same handoff with its questions.
+    harness.customInputQueue.push("\r");
+    await expect(queue.pump(harness.ctx, { explicit: true })).resolves.toMatchObject({
+      status: "started",
+      sourceRunId: item.runId,
+    });
+    expect(launch).toHaveBeenCalledWith(item, "Current changes", harness.ctx);
+  });
+
+  it("still opens pending handoffs unprompted while a retryable one waits behind them", async () => {
+    const pending = handoff("20260725-121000-pending");
+    const retryable = handoff("20260725-120000-retryable");
+    const launch = vi.fn(async () => ({ status: "started" as const }));
+    const ports: WorkflowHandoffControllerPorts = {
+      scan: () => [
+        { status: "actionable", handoff: pending, state: "pending" },
+        { status: "actionable", handoff: retryable, state: "retryable" },
+      ],
+      read: () => pending,
+      launch,
+    };
+    const queue = new WorkflowOperatorHandoffController(ports);
+    const harness = createHarness();
+    harness.customInputQueue.push("\r");
+
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({
+      status: "started",
+      sourceRunId: pending.runId,
+    });
+    // The retryable handoff is not part of the unprompted queue count.
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("Question 1 of 1");
+    expect(launch).toHaveBeenCalledWith(pending, "Current changes", harness.ctx);
+  });
+
   it("translates unexpected pump failures to invalid instead of rejecting", async () => {
     const item = handoff("20260725-120000-rejection");
     const ports: WorkflowHandoffControllerPorts = {

@@ -350,11 +350,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
   end and declares its three participants in one frozen `PLAN_AGENTS` roster:
   `scout` maps the repository once, then a `planner`/`critic` pair loops on a
   declared `accept`/`revise` enum with the critic's exact defects forwarded to the
-  next round. It never pauses for an operator; an undecided choice is recorded by
+  next round, and the previous round's defects handed back to the critic so each
+  round converges on closing them. The loop never pauses for an operator; an
+  undecided choice is recorded by
   the planner under `## Assumptions` and judged by the critic, so an unstated
   assumption is a defect and a stated one is not. Reaching the round cap without
-  an acceptance returns `ok:false`, which is also what keeps an unaccepted draft
-  out of implementation. `plan-implement` accepts semantic text plus host
+  an acceptance retains the stalled state (`task.md`, `context.md`, `plan.md`,
+  `unresolved-defects.md`) and declares an operator handoff — `accept last draft`
+  takes the retained draft on operator authority, any other answer is guidance a
+  continuation redrafts under without re-scouting. An unaccepted draft still
+  reaches implementation only through an explicit operator decision. `plan-implement` accepts semantic text plus host
   continuation containing one complete `plan.md` ref, and reads the bytes the host
   already verified and copied — at any length — rather than re-deriving that proof
   or capping a plan somebody has already accepted. Deterministic code parses `### S<n>` blocks, a no-tool

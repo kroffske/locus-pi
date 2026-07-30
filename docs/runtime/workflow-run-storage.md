@@ -15,25 +15,38 @@ every byte is a projection of the machine records below.
 <project root>/.locus-pi/<runId>/
   README.md            table of contents: workflow, status, task, result,
                        the budget this run was held to beside the spend its
-                       evidence can measure, the document list in creation
-                       order, and a pointer to the machine records
+                       evidence can measure, the document list with each
+                       document's revision chain, the Logs section, and a
+                       pointer to the machine records
   task.md              the operator task, verbatim as the workflow received it
   result.md            the run's terminal text (present when the result is prose)
-  01-scout-context.md              agent documents, in creation order:
-  02-planner-round-1-plan.md       <NN>-<author>-<artifact name>, where the
-  03-critic-round-1-plan-critique.md     author is the workflow's own stage
-                                   label ("planner round 1") and the artifact
-                                   extension is preserved — `.md` is appended
-                                   only when the name carries none
+  context.md           one file PER DOCUMENT — an artifact name is one document,
+  plan.md              and the file holds its NEWEST revision. A plan redrafted
+  plan-critique.md     six times is one `plan.md`, not six numbered copies; the
+                       artifact extension is preserved and `.md` is appended
+                       only when the name carries none
 ```
+
+An artifact name is a document identity, and a run that writes the same name
+again is updating that document, not creating a new one. The report projects
+that cycle: the file under the name carries the last revision, and the README's
+`## Documents` list shows every revision — who wrote it, at which stage, on
+which model — each linking the verbatim bytes in the machine store. Nothing is
+lost and nothing is duplicated: round 2 of a six-round plan is one click away,
+but only the current plan occupies a file. The README's `## Logs` section links
+the run's `journal.ndjson` — one line per event, tagged with its agent, stage
+and round — and every child transcript by its stage label.
 
 A JSON document (a critic's verdict, any schema-shaped answer) is rendered as
 Markdown here — a flat object becomes a key list with numbered items, anything
 nested stays pretty-printed inside a fence — because this folder is for
 reading. The verbatim JSON bytes remain in the artifact store below.
 
-Documents published by the script itself use the author `workflow`; documents
-consumed from a previous run (continuations) use `input`. The writer mirrors
+Documents published by the script itself use the author `workflow`; revisions
+consumed from a previous run (continuations) read `transferred from run <id>`.
+`README.md`, `task.md` and `result.md` are runner-owned names, so a document
+that would claim one of them (or a second name sanitizing to an already-claimed
+filename) takes a `-2` suffix instead of overwriting. The writer mirrors
 the artifact store's path discipline: the run id must be a safe component and
 no element of `.locus-pi/<runId>` may be a symlink, checked before anything —
 including the directory itself — is created.

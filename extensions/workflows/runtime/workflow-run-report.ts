@@ -6,10 +6,18 @@
  * journal, replay record, result envelope, script snapshot, transcripts, and the
  * hash-verified artifact store that replay and continuations depend on. This
  * module projects the human-facing part of that evidence — the task, the final
- * result, and every document in creation order under a name that says who wrote
- * it, with the README grouping them by origin (agent documents, transferred
- * inputs, workflow-published) — so that opening the report folder answers "what
- * happened here" without opening a single machine file.
+ * result, and the run's documents — so that opening the report folder answers
+ * "what happened here" without opening a single machine file.
+ *
+ * Documents are projected as an update cycle, not an accumulation: an artifact
+ * NAME is one document, and a name that was written several times (a plan
+ * redrafted each round, a task ledger republished per step) becomes ONE file
+ * holding the newest revision, with the README listing every revision and
+ * linking each one's verbatim bytes in the machine store. A reader who opens
+ * `plan.md` gets the plan as it stood when the run ended; a reader who wants
+ * round 2 follows the revision link. The superseded projection — one
+ * `NN-author-name` copy per write — duplicated every revision into the folder
+ * and made the current document a filename guess.
  *
  * Best-effort by contract, like result.md: a failed report write costs the
  * reader's copy, never the run or its durable evidence.
@@ -75,8 +83,8 @@ export interface WorkflowRunReportEvidenceSource {
 
 export type WorkflowRunReportOutcome = { ok: true; path: string; documents: number } | { ok: false; message: string };
 
-interface WorkflowReportDocument {
-  fileName: string;
+/** One write of a document: who produced these bytes and where they live verbatim. */
+interface WorkflowReportRevision {
   author: string;
   kind: string;
   stage?: string;
@@ -86,7 +94,23 @@ interface WorkflowReportDocument {
   executedModel?: string;
   /** For agent answers: the declared tier had no assignment and the session model was used. */
   modelRoleFallback?: string;
+  /** Repo-relative-from-report link target of the verbatim machine bytes. */
+  machineHref: string;
+}
+
+/** One document — one artifact name — with its whole revision chain in creation order. */
+interface WorkflowReportDocument {
+  fileName: string;
+  name: string;
+  revisions: WorkflowReportRevision[];
   unavailable?: string;
+}
+
+/** One child transcript, named by the stage that produced it. */
+interface WorkflowReportTranscript {
+  author: string;
+  stage?: string;
+  machineHref: string;
 }
 
 /** Write the whole report folder for one finished run. Never throws. */
@@ -107,6 +131,7 @@ export function writeWorkflowRunReport(
 
     const authors = authorsByCallId(input.journal);
     const executions = executionsByCallId(input.journal);
+    const machineArtifactsHref = `../../.locus/runtime/workflows/${input.runId}/artifacts`;
     const readable = records.filter(
       (record) => record.kind === "answer" || record.kind === "published" || record.kind === "input",
     );
@@ -122,25 +147,43 @@ export function writeWorkflowRunReport(
       }
     }
 
-    const documents: WorkflowReportDocument[] = [];
-    for (const [position, record] of chain.entries()) {
-      const author = documentAuthor(record, authors);
-      const bytes = tryRead(evidence, record);
-      // A JSON document is machine truth; the reader gets a Markdown rendering
-      // of it, and the verbatim bytes stay in the artifact store.
-      const rendered = bytes !== undefined && record.name.endsWith(".json") ? renderedJsonMarkdown(bytes) : undefined;
-      const fileName = documentFileName(position + 1, author, record.name, rendered !== undefined);
+    const revisionOf = (record: WorkflowArtifactRecord): WorkflowReportRevision => {
       const execution = record.callId !== undefined ? executions.get(record.callId) : undefined;
-      const document: WorkflowReportDocument = {
-        fileName,
-        author,
+      return {
+        author: documentAuthor(record, authors),
         kind: record.kind,
         ...(record.stage !== undefined ? { stage: record.stage } : {}),
         ...(record.kind === "input" && record.source?.runId !== undefined ? { sourceRunId: record.source.runId } : {}),
-        // Which model produced this document. Read from `agent_end`, which is the only
+        // Which model produced this revision. Read from `agent_end`, which is the only
         // line that can know it — `agent_start` is written before anything executes.
         ...(execution?.executedModel !== undefined ? { executedModel: execution.executedModel } : {}),
         ...(execution?.modelRoleFallback !== undefined ? { modelRoleFallback: execution.modelRoleFallback } : {}),
+        machineHref: `${machineArtifactsHref}/${hrefPath(record.relativePath)}`,
+      };
+    };
+
+    // One document per artifact NAME, in first-write order; the newest revision's
+    // bytes become the document file. `README.md`, `task.md` and `result.md` are
+    // runner-owned names, so a document is never allowed to claim them.
+    const byName = new Map<string, WorkflowArtifactRecord[]>();
+    for (const record of chain) {
+      const revisions = byName.get(record.name) ?? [];
+      revisions.push(record);
+      byName.set(record.name, revisions);
+    }
+    const claimedFileNames = new Set(["readme.md", "task.md", "result.md"]);
+    const documents: WorkflowReportDocument[] = [];
+    for (const [name, revisionRecords] of byName) {
+      const newest = revisionRecords[revisionRecords.length - 1]!;
+      const bytes = tryRead(evidence, newest);
+      // A JSON document is machine truth; the reader gets a Markdown rendering
+      // of it, and the verbatim bytes stay in the artifact store.
+      const rendered = bytes !== undefined && newest.name.endsWith(".json") ? renderedJsonMarkdown(bytes) : undefined;
+      const fileName = claimDocumentFileName(name, rendered !== undefined, claimedFileNames);
+      const document: WorkflowReportDocument = {
+        fileName,
+        name,
+        revisions: revisionRecords.map(revisionOf),
       };
       if (bytes === undefined) {
         document.unavailable = "the stored artifact could not be read back";
@@ -149,6 +192,17 @@ export function writeWorkflowRunReport(
       }
       documents.push(document);
     }
+
+    const transcripts: WorkflowReportTranscript[] = records
+      .filter((record) => record.kind === "transcript")
+      .map((record) => {
+        const author = record.callId !== undefined ? authors.get(record.callId) : undefined;
+        return {
+          author: author ?? "agent",
+          ...(record.stage !== undefined ? { stage: record.stage } : {}),
+          machineHref: `${machineArtifactsHref}/${hrefPath(record.relativePath)}`,
+        };
+      });
 
     const resultText = typeof input.result === "string" && input.result.trim() !== "" ? input.result : undefined;
     if (resultText !== undefined) {
@@ -160,6 +214,7 @@ export function writeWorkflowRunReport(
       reportReadme({
         input,
         documents,
+        transcripts,
         taskWritten,
         hasResultText: resultText !== undefined,
         hasStructuredResult: resultText === undefined && input.result !== undefined,
@@ -213,17 +268,29 @@ function canonicalReportDir(projectRoot: string, runId: string): string {
 }
 
 /**
- * `NN-<author>-<name>` with the artifact's own extension preserved and `.md`
- * appended only when the name carries none — the rule that retires
- * `call-0002-plan.md.md`. A document rendered from JSON becomes Markdown and
- * takes `.md` in place of `.json`.
+ * The document keeps the artifact's own name: `plan.md` is `plan.md`, with the
+ * extension preserved and `.md` appended only when the name carries none. A
+ * document rendered from JSON becomes Markdown and takes `.md` in place of
+ * `.json`. Names are claimed case-insensitively against the runner-owned files
+ * and against each other — two artifact names that sanitize to one filename are
+ * two documents, so the later one takes a `-2` suffix rather than silently
+ * overwriting the first.
  */
-function documentFileName(position: number, author: string, artifactName: string, asMarkdown: boolean): string {
-  const ordinal = String(position).padStart(2, "0");
+function claimDocumentFileName(artifactName: string, asMarkdown: boolean, claimed: Set<string>): string {
   const extension = WORKFLOW_REPORT_EXTENSION_REGEX.exec(artifactName)?.[0] ?? "";
-  const base = extension === "" ? artifactName : artifactName.slice(0, -extension.length);
-  const finalExtension = asMarkdown || extension === "" ? ".md" : extension;
-  return `${ordinal}-${safeFileComponent(author)}-${safeFileComponent(base)}${finalExtension}`;
+  const base = safeFileComponent(extension === "" ? artifactName : artifactName.slice(0, -extension.length));
+  const finalExtension = asMarkdown || extension === "" ? ".md" : extension.toLowerCase();
+  let candidate = `${base}${finalExtension}`;
+  for (let suffix = 2; claimed.has(candidate.toLowerCase()); suffix += 1) {
+    candidate = `${base}-${suffix}${finalExtension}`;
+  }
+  claimed.add(candidate.toLowerCase());
+  return candidate;
+}
+
+/** Markdown link path for a machine-store relative path, in URL separators. */
+function hrefPath(relativePath: string): string {
+  return relativePath.split(path.sep).join("/");
 }
 
 /**
@@ -341,6 +408,7 @@ function safeFileComponent(value: string): string {
 function reportReadme(options: {
   input: WorkflowRunReportInput;
   documents: readonly WorkflowReportDocument[];
+  transcripts: readonly WorkflowReportTranscript[];
   taskWritten: boolean;
   hasResultText: boolean;
   hasStructuredResult: boolean;
@@ -371,35 +439,52 @@ function reportReadme(options: {
   );
   lines.push(...budgetSection(input));
   const retryLines = retriedCallLines(input.journal);
+  lines.push("", "## Documents", "");
   if (documents.length === 0) {
-    lines.push("", "## Documents", "");
     lines.push(
       options.indexUnavailable !== undefined
         ? `- none — the artifact index was unavailable: ${singleLine(options.indexUnavailable)}`
         : "- none",
     );
-    lines.push(...retryLines);
-    lines.push("");
-    return lines.join("\n");
-  }
-  // Grouped by origin so a reader can tell at a glance what an agent wrote
-  // versus what arrived automatically. The `NN-` file prefix stays the run-wide
-  // creation order.
-  const groups: Array<{ heading: string; documents: WorkflowReportDocument[] }> = [
-    { heading: "## Agent documents, in creation order", documents: documents.filter((d) => d.kind === "answer") },
-    { heading: "## Transferred inputs", documents: documents.filter((d) => d.kind === "input") },
-    { heading: "## Published by the workflow", documents: documents.filter((d) => d.kind === "published") },
-  ];
-  for (const group of groups) {
-    if (group.documents.length === 0) continue;
-    lines.push("", group.heading, "");
-    for (const [position, document] of group.documents.entries()) {
+  } else {
+    lines.push(
+      "One file per document, holding its newest revision. A document written " +
+        "more than once lists every revision below it, each linking the verbatim " +
+        "machine bytes.",
+      "",
+    );
+    for (const [position, document] of documents.entries()) {
       lines.push(`${position + 1}. ${documentEntry(document)}`);
+      if (document.revisions.length > 1) {
+        for (const [index, revision] of document.revisions.entries()) {
+          lines.push(`   ${index + 1}. ${revisionEntry(revision)}`);
+        }
+      }
     }
   }
+  lines.push(...logsSection(input.runId, options.transcripts));
   lines.push(...retryLines);
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Where the raw logs live, by stage name. The journal is one file whose every
+ * line names its agent, stage and round; each child's full transcript is its
+ * own ndjson. Links, not copies: the report stays a projection, and the
+ * machine store keeps the single source of truth.
+ */
+function logsSection(runId: string, transcripts: readonly WorkflowReportTranscript[]): string[] {
+  const lines: string[] = ["", "## Logs", ""];
+  lines.push(
+    `- [journal.ndjson](../../.locus/runtime/workflows/${runId}/journal.ndjson) — every run event ` +
+      "on one line each, tagged with its agent, stage and round",
+  );
+  for (const transcript of transcripts) {
+    const stage = transcript.stage === undefined ? "" : ` · ${transcript.stage}`;
+    lines.push(`- ${transcript.author}${stage} — [transcript](${transcript.machineHref})`);
+  }
+  return lines;
 }
 
 /**
@@ -614,34 +699,42 @@ function journalSpend(journal: readonly WorkflowJournalLine[]): WorkflowJournalS
   };
 }
 
-function documentEntry(document: WorkflowReportDocument): string {
+function revisionDescription(revision: WorkflowReportRevision): string {
   const describedAs =
-    document.kind === "input"
-      ? [`transferred from run ${document.sourceRunId ?? "(unknown)"}`]
-      : document.kind === "published"
-        ? document.stage !== undefined
-          ? [document.stage]
-          : []
+    revision.kind === "input"
+      ? [`transferred from run ${revision.sourceRunId ?? "(unknown)"}`]
+      : revision.kind === "published"
+        ? ["workflow", ...(revision.stage !== undefined ? [revision.stage] : [])]
         : [
-            document.author,
-            ...(document.stage !== undefined ? [document.stage] : []),
+            revision.author,
+            ...(revision.stage !== undefined ? [revision.stage] : []),
             // The reader's answer to "which model wrote this". Absent rather than
             // guessed when the run predates the field. `unavailable` is a SENTINEL
             // meaning "the peer reported nothing", not a model name, so it is spelled
             // out as a missing readback — "ran on unavailable" reads to a human like a
             // model called `unavailable`, which is the kind of surface this task exists
             // to stop.
-            ...(document.executedModel === undefined
+            ...(revision.executedModel === undefined
               ? []
-              : document.executedModel === EXECUTED_MODEL_UNAVAILABLE
+              : revision.executedModel === EXECUTED_MODEL_UNAVAILABLE
                 ? ["executed model unavailable"]
-                : [`ran on ${document.executedModel}`]),
-            ...(document.modelRoleFallback !== undefined ? ["declared tier unassigned"] : []),
+                : [`ran on ${revision.executedModel}`]),
+            ...(revision.modelRoleFallback !== undefined ? ["declared tier unassigned"] : []),
           ];
-  const description = describedAs.length === 0 ? "" : ` — ${describedAs.join(" · ")}`;
+  return describedAs.join(" · ");
+}
+
+function documentEntry(document: WorkflowReportDocument): string {
+  const newest = document.revisions[document.revisions.length - 1];
+  const description = newest === undefined ? "" : ` — ${revisionDescription(newest)}`;
+  const revisionCount = document.revisions.length > 1 ? ` — ${document.revisions.length} revisions:` : "";
   return document.unavailable !== undefined
     ? `${document.fileName}${description} — unavailable: ${document.unavailable}`
-    : `[${document.fileName}](${document.fileName})${description}`;
+    : `[${document.fileName}](${document.fileName})${description}${revisionCount}`;
+}
+
+function revisionEntry(revision: WorkflowReportRevision): string {
+  return `${revisionDescription(revision)} — [machine copy](${revision.machineHref})`;
 }
 
 function lastJournalTimestamp(journal: readonly WorkflowJournalLine[]): string | undefined {

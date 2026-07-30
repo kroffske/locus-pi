@@ -608,6 +608,44 @@ irreversible — the same weighing the 2026-07-28 `plan-implement` amendment mad
 `clarification-questions.md`; those are shape gates on what arrived, not claims
 about where it came from.
 
+## Amendment 2026-07-30 — `plan`'s round cap becomes an operator handoff, and the critic ratchets
+
+Two changes to `plan`'s drafting loop, driven by a live run in which a critic on
+a weak model returned a different set of plausible objections every round, hit
+the cap, and left the operator with a dead `ok:false` run — no plan, no reusable
+state, and the only path forward a full restart including the operator's
+clarification answers.
+
+**The critic receives the previous round's defects.** Each round's critic prompt
+now carries the defects reported on the previous draft and judges in that order:
+first whether each is closed or answered under `## Critique responses` with
+evidence, then whether any NEW defect meets the existing bar (an implementer
+would stop, guess, or do the wrong thing). Reopening an aspect the previous
+round left unflagged, when this draft did not change it, is named in the prompt
+as the way the loop fails without producing a plan. The verdict shape, the
+schema, and the `validate` callback are unchanged; this is convergence
+discipline, not a new gate.
+
+**The round cap declares an operator handoff instead of failing.** The
+2026-07-28 amendment removed the pre-planning clarification pause because a
+paused run yields no plan while a written assumption is cheap to correct by
+replanning. That reasoning does not carry to the cap: there the run holds no
+accepted plan either way, and failing threw away the scout's map and every
+drafting round. The cap now publishes the stalled state — `task.md`,
+`context.md`, the last `plan.md`, `unresolved-defects.md` — and declares the
+same `awaitOperator` handoff shape `review` uses, with one text question
+(`plan-guidance`). The exact answer `accept last draft` takes the retained draft
+as the accepted plan — the operator overruling the critic is recorded, not
+hidden — and any other answer is guidance a continuation run redrafts under,
+seeded with the retained draft and defects, without re-scouting; the guidance
+outranks previously reported defects where they conflict, for the planner and
+the critic alike. A continuation that stalls again declares the handoff again.
+
+The fail-closed property this ADR promised is kept in its intended form: a draft
+nobody accepted still never flows into implementation on its own. What changed
+is who ends the stall — the operator, by an explicit recorded decision, instead
+of the clock.
+
 ## Consequences
 
 The Package surface grew from three to five names, back to four when `llm-smoke`

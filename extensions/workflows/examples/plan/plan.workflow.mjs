@@ -10,11 +10,20 @@
 // Only the planner and the critic loop; the critic is the measured exit and the
 // round cap is the safety net, and the result says which one stopped the run.
 //
-// The run never stops to ask the operator a question. When something is
-// genuinely undecided, the planner writes it down under `## Assumptions` and
+// The loop never stops mid-round to ask the operator a question. When something
+// is genuinely undecided, the planner writes it down under `## Assumptions` and
 // plans on top of it, and the critic treats a decision hidden as an unstated
 // assumption as a defect. An assumption that turns out wrong is cheaper to fix
 // by replanning than a run that halts and waits.
+//
+// The round cap is the one exception, because there the choice is no longer the
+// planner's to assume: the run has spent its rounds and holds a draft nobody
+// accepted. Instead of burning the scout's map and every round on a dead FAILED
+// run, the workflow retains the draft with its unresolved defects and declares
+// an operator handoff. The operator answers "accept last draft" to take the
+// retained draft as the plan — their authority, recorded as such — or answers
+// with drafting guidance, and the continuation run redrafts from the retained
+// state without re-scouting.
 //
 // Every stage is host-enforced read-only: planning reads the repository and
 // writes nothing to it. The only durable output is runtime-owned text.
@@ -85,6 +94,11 @@ const MAX_ALL_PLAN_DEFECTS_CHARS = 4_000;
 const MAX_CONTEXT_CHARS = 128_000;
 const MAX_PLAN_CHARS = 256_000;
 
+/** The one answer that takes the retained draft instead of redrafting. */
+const ACCEPT_LAST_DRAFT_ANSWER = "accept last draft";
+/** Exactly what a stalled run hands its continuation, by artifact name. */
+const PLAN_CONTINUATION_NAMES = ["task.md", "context.md", "plan.md", "unresolved-defects.md"];
+
 /**
  * The drafting loop's exit condition, declared instead of guessed. The script
  * must branch on "is this plan good enough to implement", and the only honest
@@ -125,7 +139,7 @@ const PLAN_AGENTS = Object.freeze({
   }),
   planner: Object.freeze({
     id: "planner",
-    receives: "the task, the scout's context, its own previous draft, and the critic's defects",
+    receives: "the task, the scout's context, its own previous draft, the critic's defects, and operator guidance",
     returns: "plan.md — the complete ordered plan, rewritten in full every round",
     options: Object.freeze({
       ...PLAN_STAGE_OPTIONS,
@@ -135,7 +149,7 @@ const PLAN_AGENTS = Object.freeze({
   }),
   critic: Object.freeze({
     id: "critic",
-    receives: "the task, the scout's context, and the plan under review",
+    receives: "the task, the scout's context, the plan under review, and the previous round's defects",
     returns: "plan-critique.json — an accept/revise verdict with concrete defects",
     options: Object.freeze({
       ...PLAN_STAGE_OPTIONS,
@@ -154,7 +168,8 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan",
-  description: "Scouts the repository, then drafts and critiques a plan until the critic accepts it.",
+  description:
+    "Scouts the repository, then drafts and critiques a plan until the critic accepts it; a stalled round cap hands the decision to the operator.",
   phases: [
     { title: "scout-repository", detail: "One read-only scout maps the surfaces the task depends on." },
     { title: "draft-plan", detail: "The planner writes the complete plan, revising against the previous critique." },
@@ -168,10 +183,13 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
+  const continued = planContinuationState(dsl);
+  if (continued !== undefined) return await resumePlanning(dsl, continued, input);
+
   const taskText = requireTask(input);
   const { agent, phase, log, publishArtifact } = dsl;
 
-  publishArtifact("task.md", taskText);
+  const taskRef = publishArtifact("task.md", taskText);
 
   phase("scout-repository");
   log(`Agent ${PLAN_AGENTS.scout.id}: mapping the repository surfaces this task depends on.`);
@@ -180,54 +198,151 @@ export default async function runWorkflow(dsl, input) {
     label: PLAN_AGENTS.scout.id,
   });
 
-  let planText = "";
-  let defectsText = "(none; this is the first draft)";
+  const outcome = await draftAcceptedPlan(dsl, { taskText, contextText });
+  if (outcome.accepted) return outcome.planText;
+  return declareRoundCapHandoff(dsl, { taskRef, contextText, outcome });
+}
+
+/**
+ * The drafting loop, shared by a fresh run and a guided continuation. Every
+ * round the planner returns the COMPLETE plan, so the workflow never merges two
+ * model documents: the last draft is the plan, and each round is retained
+ * separately under the same reader-facing name. The critic judges each draft
+ * against the defects the previous round left open, so the loop converges on
+ * closing them instead of relitigating the whole plan every round.
+ */
+async function draftAcceptedPlan(dsl, { taskText, contextText, seedPlanText, seedDefectsText, guidanceText }) {
+  const { agent, phase, log } = dsl;
+  const continuing = seedPlanText !== undefined;
+  let planText = seedPlanText ?? "";
+  let defectsText = seedDefectsText ?? "(none; this is the first draft)";
   let round = 0;
-  let acceptedAt;
   let unresolved = [];
   while (round < MAX_PLAN_ROUNDS) {
     round += 1;
 
     phase("draft-plan");
     log(`Agent ${PLAN_AGENTS.planner.id}: drafting round ${round} of at most ${MAX_PLAN_ROUNDS}.`);
-    // Every round returns the COMPLETE plan, so the workflow never merges two
-    // model documents: the last draft is the plan, and each round is retained
-    // separately under the same reader-facing name.
-    planText = await agent(plannerPrompt({ taskText, contextText, planText, defectsText, round }), {
-      ...PLAN_AGENTS.planner.options,
-      label: `${PLAN_AGENTS.planner.id} round ${round}`,
-    });
+    planText = await agent(
+      plannerPrompt({ taskText, contextText, planText, defectsText, round, continuing, guidanceText }),
+      {
+        ...PLAN_AGENTS.planner.options,
+        label: `${PLAN_AGENTS.planner.id} round ${round}`,
+      },
+    );
 
     phase("critique-plan");
     log(`Agent ${PLAN_AGENTS.critic.id}: judging round ${round} against the live repository.`);
-    const verdict = await agent(criticPrompt({ taskText, contextText, planText, round }), {
-      ...PLAN_AGENTS.critic.options,
-      label: `${PLAN_AGENTS.critic.id} round ${round}`,
-    });
+    const verdict = await agent(
+      criticPrompt({ taskText, contextText, planText, previousDefectsText: defectsText, round, guidanceText }),
+      {
+        ...PLAN_AGENTS.critic.options,
+        label: `${PLAN_AGENTS.critic.id} round ${round}`,
+      },
+    );
     if (verdict.verdict === "accept") {
-      acceptedAt = round;
       log(`Agent ${PLAN_AGENTS.critic.id} accepted the plan in round ${round}.`);
-      break;
+      return { accepted: true, planText, rounds: round };
     }
     unresolved = verdict.defects.map((defect) => defect.trim());
     defectsText = unresolved.map((defect, index) => `${index + 1}. ${defect}`).join("\n");
     log(`Round ${round} left ${unresolved.length} defect(s) open.`);
   }
+  return { accepted: false, planText, unresolved, defectsText, rounds: round };
+}
 
-  if (acceptedAt === undefined) {
-    // A plan nobody accepted is not a plan. Failing here is also what keeps it
-    // out of `plan-implement`: a failed run projects no terminal artifact, so an
-    // unaccepted draft cannot be handed to a writer.
-    log(`No plan was accepted within ${MAX_PLAN_ROUNDS} round(s); the last draft is retained but not accepted.`);
-    return {
-      ok: false,
-      stoppedBy: "round-cap",
-      rounds: round,
-      summary: `plan was not accepted within ${MAX_PLAN_ROUNDS} drafting round(s)`,
-      unresolvedRows: unresolved,
-    };
+/**
+ * The round cap without an acceptance. A draft nobody accepted is not a plan,
+ * so the run does not return one — but it holds the scout's map and the last
+ * draft, and burning those on a dead FAILED run is what forced operators to
+ * start over from nothing. The run retains the exact state the loop stalled on
+ * and asks the operator the one question only they can answer: accept the
+ * retained draft on their own authority, or send the loop back with guidance.
+ *
+ * Four continuation refs, all published here at the end of the run, plus the
+ * task published at the start. The handoff requires each ref to appear in the
+ * terminal artifact projection, which keeps the NEWEST 20 outputs: at 6 rounds
+ * a fresh run ends with 17 outputs (task + context + 6×2 round answers + the 3
+ * published below), so all four refs sit inside it. Raising `MAX_PLAN_ROUNDS`
+ * past 7 breaks that arithmetic for the task ref — republish the task here too
+ * if the cap ever grows.
+ */
+function declareRoundCapHandoff(dsl, { taskRef, contextText, outcome }) {
+  const { log, publishArtifact, awaitOperator } = dsl;
+  const contextRef = publishArtifact("context.md", contextText);
+  const planRef = publishArtifact("plan.md", outcome.planText);
+  const defectsRef = publishArtifact("unresolved-defects.md", outcome.defectsText);
+  log(
+    `No plan was accepted within ${outcome.rounds} round(s); the last draft is retained and the operator decides how to continue.`,
+  );
+  awaitOperator({
+    reason: "plan round cap without acceptance",
+    operatorHandoff: {
+      title: "Plan drafting stalled",
+      questions: [
+        {
+          kind: "text",
+          id: "plan-guidance",
+          prompt:
+            `No draft was accepted within ${outcome.rounds} rounds; the retained draft and its open defects are in the ` +
+            `run report (plan.md, unresolved-defects.md). Answer "${ACCEPT_LAST_DRAFT_ANSWER}" to take the retained ` +
+            "draft as the plan, or answer with drafting guidance for further rounds.",
+        },
+      ],
+      continuationArtifactRefs: [taskRef, contextRef, planRef, defectsRef],
+    },
+  });
+  return {
+    decision: "needs_operator",
+    stoppedBy: "round-cap",
+    rounds: outcome.rounds,
+    summary: `plan was not accepted within ${outcome.rounds} drafting round(s); awaiting operator guidance`,
+    unresolvedRows: outcome.unresolved,
+  };
+}
+
+/**
+ * The continuation entry. The host has already verified and copied the four
+ * retained artifacts; the operator's answer arrives as this run's input. One
+ * exact answer accepts the retained draft — the operator overriding the critic
+ * is an authority this workflow records, not a failure it hides — and any other
+ * answer is drafting guidance that re-enters the loop seeded with the retained
+ * draft and its open defects, without re-scouting the repository.
+ */
+async function resumePlanning(dsl, continued, input) {
+  const { log, publishArtifact } = dsl;
+  const answer = requireOperatorAnswer(input);
+  const taskRef = publishArtifact("task.md", continued.taskText);
+  if (answer.toLowerCase() === ACCEPT_LAST_DRAFT_ANSWER) {
+    log("Operator accepted the retained draft; the critic's round cap is overridden by that decision.");
+    publishArtifact("plan.md", continued.planText);
+    return continued.planText;
   }
-  return planText;
+  const outcome = await draftAcceptedPlan(dsl, {
+    taskText: continued.taskText,
+    contextText: continued.contextText,
+    seedPlanText: continued.planText,
+    seedDefectsText: continued.defectsText,
+    guidanceText: answer,
+  });
+  if (outcome.accepted) return outcome.planText;
+  return declareRoundCapHandoff(dsl, { taskRef, contextText: continued.contextText, outcome });
+}
+
+/** The retained state of a stalled run, or undefined for a fresh one. */
+function planContinuationState(dsl) {
+  const pairs = dsl.continuationArtifacts();
+  if (pairs.length === 0) return undefined;
+  const byName = new Map(pairs.map((pair) => [pair.sourceRef.name, pair.consumedArtifact.text]));
+  if (pairs.length !== PLAN_CONTINUATION_NAMES.length || PLAN_CONTINUATION_NAMES.some((name) => !byName.has(name))) {
+    throw new Error(`plan continuation requires exactly ${PLAN_CONTINUATION_NAMES.join(", ")}`);
+  }
+  return {
+    taskText: requireNonBlank(byName.get("task.md"), "continued task.md"),
+    contextText: requireNonBlank(byName.get("context.md"), "continued context.md"),
+    planText: requireNonBlank(byName.get("plan.md"), "continued plan.md"),
+    defectsText: requireNonBlank(byName.get("unresolved-defects.md"), "continued unresolved-defects.md"),
+  };
 }
 
 /** Agent `scout` — the only stage that reads the repository broadly. */
@@ -272,7 +387,7 @@ ${taskText}
 }
 
 /** Agent `planner` — writes the whole plan every round. */
-function plannerPrompt({ taskText, contextText, planText, defectsText, round }) {
+function plannerPrompt({ taskText, contextText, planText, defectsText, round, continuing, guidanceText }) {
   return `${COMMON}
 
 ${AST_INDEX_NOTE}
@@ -330,13 +445,31 @@ assumption the operator can read and correct is the point; a plan that quietly
 depends on an unstated choice is a defect.
 
 ${
-  round === 1
+  round === 1 && !continuing
     ? "This is the first draft: there is no critique yet."
-    : `The critic reviewed your previous draft against the repository and returned the
-defects below. Rewrite the complete plan so that each one is closed. When you
+    : `${
+        round === 1 && continuing
+          ? `This drafting loop continues a previous run that stalled at its round cap.
+Your previous draft and the defects that were still open when it stalled are
+below. `
+          : "The critic reviewed your previous draft against the repository and returned the\ndefects below. "
+      }Rewrite the complete plan so that each one is closed. When you
 believe a defect is wrong, keep your approach and answer it explicitly under
 \`## Critique responses\` with the evidence you read — do not silently ignore it,
 and do not change the plan you still believe in just to end the loop.`
+}${
+  guidanceText === undefined
+    ? ""
+    : `
+
+The operator answered the stalled run with the guidance below. It is the
+operator speaking, so it outranks the critic's earlier defects where they
+conflict: follow it even where a defect pulls the other way, and record under
+\`## Assumptions\` any part of it you could not honor and why.
+
+--- BEGIN OPERATOR GUIDANCE ---
+${guidanceText}
+--- END OPERATOR GUIDANCE ---`
 }
 
 Return exactly this structure, and return the whole plan every round:
@@ -383,7 +516,7 @@ ${contextText}
 --- END TASK CONTEXT ---
 
 --- BEGIN YOUR PREVIOUS DRAFT ---
-${round === 1 ? "(none; this is the first draft)" : planText}
+${round === 1 && !continuing ? "(none; this is the first draft)" : planText}
 --- END YOUR PREVIOUS DRAFT ---
 
 --- BEGIN DEFECTS THE CRITIC REPORTED ---
@@ -392,7 +525,7 @@ ${defectsText}
 }
 
 /** Agent `critic` — the loop's exit, and the only stage with a declared shape. */
-function criticPrompt({ taskText, contextText, planText, round }) {
+function criticPrompt({ taskText, contextText, planText, previousDefectsText, round, guidanceText }) {
   return `${COMMON}
 
 ${AST_INDEX_NOTE}
@@ -440,6 +573,30 @@ is \`accept\`. When you accept, return no defects; when you ask for a revision,
 every defect must name the step id and the concrete place, so the next round can
 close it without guessing what you meant.
 
+The defects reported on the previous draft are below. This loop converges on
+closing them, so judge in that order: first decide, for each one, whether this
+draft closes it — a defect answered under \`## Critique responses\` with evidence
+you cannot refute against the repository is closed. A defect not in that list is
+NEW. Report a new defect only when it meets the bar above — it would make an
+implementer stop, guess, or do the wrong thing — and never reopen an aspect of
+the plan you previously left unflagged unless this draft changed it. Finding a
+different defect each round on a part that did not change is how this loop fails
+without ever producing a plan. When every previous defect is closed and no new
+defect meets the bar, the verdict is \`accept\`.${
+    guidanceText === undefined
+      ? ""
+      : `
+
+The operator reviewed a stalled draft of this plan and answered with the
+guidance below. It is the operator speaking, so it outranks previously reported
+defects where they conflict: a defect the guidance explicitly waives or
+overrules is not a defect, even when you still disagree with it.
+
+--- BEGIN OPERATOR GUIDANCE ---
+${guidanceText}
+--- END OPERATOR GUIDANCE ---`
+  }
+
 Return one JSON value only:
 
 \`\`\`json
@@ -457,8 +614,9 @@ Use at most ${MAX_PLAN_DEFECTS} defects of ${MAX_PLAN_DEFECT_CHARS} characters
 each, ${MAX_ALL_PLAN_DEFECTS_CHARS} characters combined.
 
 This is round ${round} of at most ${MAX_PLAN_ROUNDS}. When the cap is reached
-without an accepted plan, the run ends unsuccessfully and your last defects are
-what the operator sees, so keep them precise rather than exhaustive.
+without an accepted plan, the run stops and hands your last defects to the
+operator, who decides whether to accept the draft over them — so keep them
+precise rather than exhaustive.
 
 --- BEGIN OPERATOR TASK ---
 ${taskText}
@@ -467,6 +625,10 @@ ${taskText}
 --- BEGIN TASK CONTEXT ---
 ${contextText}
 --- END TASK CONTEXT ---
+
+--- BEGIN DEFECTS REPORTED ON THE PREVIOUS DRAFT ---
+${previousDefectsText}
+--- END DEFECTS REPORTED ON THE PREVIOUS DRAFT ---
 
 --- BEGIN PLAN UNDER REVIEW ---
 ${planText}
@@ -504,6 +666,23 @@ function planVerdictErrors(value) {
 function requireTask(value) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error("plan requires a non-empty task");
+  }
+  return value;
+}
+
+/** A continuation's input is the operator's handoff answer, trimmed for the
+ *  accept comparison; the same host input cap applies, so no second bound. */
+function requireOperatorAnswer(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error("plan continuation requires a non-empty operator answer");
+  }
+  return value.trim();
+}
+
+/** A consumed artifact that arrives blank names itself instead of failing later. */
+function requireNonBlank(value, label) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`plan continuation received a blank ${label}`);
   }
   return value;
 }
