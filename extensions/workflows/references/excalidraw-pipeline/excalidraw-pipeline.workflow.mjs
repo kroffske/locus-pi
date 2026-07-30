@@ -38,31 +38,40 @@ export const meta = {
 };
 
 /**
- * The acceptance selector for the authoring stages. A workflow whose stages are
- * decomposed correctly finishes on a weak model; pinning it here keeps that claim
- * honest instead of leaning on whichever model the session happens to run.
+ * The acceptance TIER for the authoring stages.
  *
- * That sentence was false until T-129 — the selector never reached the child and
- * every stage silently ran on the session model. It is now enforced: this exact
- * `provider/id` is resolved through the host registry before the child exists, and
- * a host without it fails the call by name rather than substituting something else.
+ * The claim behind this pipeline — a workflow whose stages are decomposed
+ * correctly finishes on a weak model — is a claim about a RUN, and the run that
+ * established it is recorded in the README together with the exact model it used.
+ * Freezing that `provider/id` into the script never kept the claim honest; a
+ * reader cannot re-derive a past run from a constant. What it did do is decide
+ * which vendor a reader pays: a concrete selector is resolved through the host
+ * registry before the child exists, so every operator without that provider got a
+ * call refused by name instead of a pipeline.
+ *
+ * The tier keeps the routing deliberate and hands the choice back: `agent`
+ * resolves to whatever `/model-roles` assigns, and unassigned it runs on the
+ * session model with the degradation recorded in the run evidence. To reproduce
+ * the recorded run rather than merely execute the pipeline, assign AGENT to the
+ * model the README names.
  */
-const STAGE_MODEL = "openai-codex/gpt-5.6-luna";
+const AUTHOR_MODEL_ROLE = "agent";
 
 /**
- * The draft stage is the cheap one, and it says so as a TIER rather than a pin.
- * Turning free-form intent into a structured request file is bounded, mechanical
- * work against a stated template, which is what makes it the stage to buy cheaply.
+ * The draft stage is the cheap one, and it names the cheap tier rather than the
+ * authoring one. Turning free-form intent into a structured request file is
+ * bounded, mechanical work against a stated template, which is what makes it the
+ * stage to buy cheaply.
  * `smol` resolves to whatever the operator's `.pi/model-roles/config.json` assigns;
  * unassigned, it runs on the session model and the run evidence records the
  * degradation.
  *
  * Explicitly NOT the reason: this stage's script-side `parseRequestFile` gate below.
- * That gate and its repair loop predate this pin and are the script-side debt roadmap
- * P0.2 owns (`references/patterns.md`, "What the script may check" — a shape the
- * script must branch on belongs in `agent({ schema })`, whose runtime retry is the
- * one correction loop the DSL gives for free). A cheap tier is not licensed by a
- * script that re-reads the answer, and this pin must not be read as endorsing one.
+ * That gate and its repair loop predate this choice and are the script-side debt
+ * roadmap P0.2 owns (`references/patterns.md`, "What the script may check" — a shape
+ * the script must branch on belongs in `agent({ schema })`, whose runtime retry is
+ * the one correction loop the DSL gives for free). A cheap tier is not licensed by a
+ * script that re-reads the answer, and this choice must not be read as endorsing one.
  */
 const DRAFT_MODEL_ROLE = "smol";
 
@@ -80,14 +89,14 @@ const AGENT_DEFAULTS = Object.freeze({
 /** Every authoring stage may read the repository and write exactly one assigned file. */
 const AUTHOR_TOOLS = Object.freeze(["read", "write", "grep", "find"]);
 
-/** The section authoring and repair stages, pinned to the acceptance selector. */
+/** The section authoring and repair stages, on the acceptance tier. */
 const AUTHOR_OPTIONS = Object.freeze({
   ...AGENT_DEFAULTS,
-  model: STAGE_MODEL,
+  modelRole: AUTHOR_MODEL_ROLE,
   tools: [...AUTHOR_TOOLS],
 });
 
-/** The draft stage, on the cheap tier. `model` is absent so the tier is what routes. */
+/** The draft stage, on the cheap tier. No stage names a concrete `provider/id`. */
 const DRAFT_OPTIONS = Object.freeze({
   ...AGENT_DEFAULTS,
   modelRole: DRAFT_MODEL_ROLE,

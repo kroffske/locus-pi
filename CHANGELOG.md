@@ -39,6 +39,13 @@ This file records user-visible changes to the public package.
   replayable across this change: the tier is part of the request key, so a
   `--resume` of a run recorded before it re-runs its calls for real.
 
+  The repository-only `excalidraw-pipeline` reference is converted the same way —
+  its authoring and repair stages move from `openai-codex/gpt-5.6-luna` to the
+  `agent` tier, joining the draft stage already on `smol`, so no shipped or
+  referenced workflow names a provider. The acceptance claim that pin carried is
+  a claim about a run, so it moves to that reference's README, which now names
+  the model the recorded run used and how to assign it.
+
 - **Workflow model effort is now executed, not merely displayed.** A concrete
   `provider/id:level` selector passes both the resolved model and `level` to the
   Pi child session, and a missing model fails by name instead of silently
