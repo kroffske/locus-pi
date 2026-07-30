@@ -41,15 +41,14 @@ no second allowlist to keep in sync.
 | `review`             | Evidence-backed review of a real target; publishes `review.md`.       | `review/review.workflow.mjs`                 |
 | `review-fix`         | Apply the findings a human kept from an immutable `review.md`.        | `review-fix/review-fix.workflow.mjs`         |
 | `plan`               | Turn a task into an accepted `plan.md` through a draft/critique loop. | `plan/plan.workflow.mjs`                     |
-| `plan-implement`     | Turn that accepted plan into changes, one writer per step.            | `plan-implement/plan-implement.workflow.mjs` |
+| `plan-implement`     | Turn that plan into a task ledger and reviewed sequential changes.    | `plan-implement/plan-implement.workflow.mjs` |
 
 `plan` → `plan-implement` and `review` → `review-fix` are pairs. The second run
 consumes the first run's artifact through the host-verified `continuation`
 control — a complete `{ runId, artifactId, name, sha256 }` reference, never a
-path you type. `review-fix` additionally refuses anything that was not the
-source run's terminal result; `plan-implement` stopped re-deriving that proof on
-2026-07-28, so it will accept a same-named draft from an earlier round of the
-same run.
+path you type. Both receiving workflows require the expected artifact name and
+use the bytes the host verified and copied before their scripts start; they do
+not re-derive source-stage or terminal-result provenance.
 
 One more worked pipeline ships as reference only — **not** registered, not
 launchable by bare name: `extensions/workflows/references/excalidraw-pipeline/`.
@@ -246,7 +245,7 @@ place a given technique is visible:
 | `review/review.workflow.mjs`                  | A staged text pipeline, two shaped gates, a bounded loop, an operator handoff that splits the run, and both prompt-placement rules in one file.         |
 | `review-fix/review-fix.workflow.mjs`          | A model-planned dependency graph that deterministic code validates and orders before any writer starts; one writer per finding; independent checks.     |
 | `plan/plan.workflow.mjs`                      | A frozen agent roster read before any control flow, and a draft/critique loop whose exit is a shaped verdict rather than a human being asked.           |
-| `plan-implement/plan-implement.workflow.mjs`  | The receiving end of a cross-run handoff: host-verified plan bytes, deterministic step parsing, one writer per step, and a deliberate `partial: true`.  |
+| `plan-implement/plan-implement.workflow.mjs`  | The receiving end of a cross-run handoff: host-verified plan bytes, a persisted task ledger, and a sequential writer/reviewer repair loop per step.     |
 
 `extensions/workflows/examples/README.md` tabulates the same set with measured
 line counts, prompt placement, and which checks each one declares in a schema

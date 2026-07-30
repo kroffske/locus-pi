@@ -35,14 +35,14 @@ evidence remains in the public GitHub repository rather than the npm artifact.
 
 Only these names are registered as Package workflows:
 
-| Workflow             | Intended use                                                                                                  |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions. |
-| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.   |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.            |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.         |
-| `plan`               | Scouts the repository, then drafts and critiques until a shaped verdict accepts `plan.md`.                    |
-| `plan-implement`     | Consumes an accepted `plan.md` from its source run and gives each selected step one write-capable agent.      |
+| Workflow             | Intended use                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.   |
+| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.     |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.              |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.           |
+| `plan`               | Scouts the repository, then drafts and critiques until a shaped verdict accepts `plan.md`.                      |
+| `plan-implement`     | Turns an accepted `plan.md` into a task ledger, then writes, reviews, and if needed repairs each task in order. |
 
 Use the operator catalog to inspect and run them:
 

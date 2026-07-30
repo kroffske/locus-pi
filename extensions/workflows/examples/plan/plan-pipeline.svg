@@ -156,7 +156,7 @@
     <rect x="50" y="850" width="500" height="94" rx="12"/>
     <text class="name" x="72" y="878">The run returns the accepted plan</text>
     <text class="line" x="72" y="900">Its final text is retained as plan.md — the one thing the follow-on</text>
-    <text class="line" x="72" y="919">plan-implement run consumes, one writer per step.</text>
+    <text class="line" x="72" y="919">plan-implement run consumes into a reviewed sequential task ledger.</text>
   </g>
 
   <!-- round cap -->
