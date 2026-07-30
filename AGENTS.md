@@ -45,7 +45,7 @@ CI repeats source checks, tests, source-audit checks, public-repository inventor
 
 - No module under `extensions/_shared/**` may import a feature directory under `extensions/**`. Invert the dependency, or move the module out of `_shared/`.
 - Every `_shared` module is declared exactly once — either in a shared layer or with the feature directory it is scheduled to move to. A new shared module with no declared owner fails the check.
-- Shared layers have a declared order (`host` first, then the provisional catch-all, `runtime`/`model`, `project`, `agent-runtime`); `operator` may reach only `host`. Type-only imports count, because they still encode ownership.
+- Shared layers have a declared order (`host` first, then the provisional catch-all, `runtime`/`model`, `project`, `agent-runtime`); the operator UI layer is a leaf — it may reach only `host`, and no other shared layer may reach it. Type-only imports count, because they still encode ownership.
 - Versioned `globalThis` registries (`Symbol.for("locus-pi.…")`) have exactly one declared owning module. Two modules naming one slot is how a relocation splits process-wide live state.
 - Mutable module-level state that is not such a registry is declared separately, because it does not survive Pi loading two entrypoints with the module cache disabled.
 

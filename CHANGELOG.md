@@ -223,7 +223,10 @@ This file records user-visible changes to the public package.
   order, type-only imports included, since a type edge encodes ownership just as
   much as a value edge; a new shared module with no declared owner; a module deleted
   from `_shared/` without landing at its declared destination; and a module sitting
-  in a layer subdirectory that contradicts its declared layer.
+  in a layer subdirectory that contradicts its declared layer. The operator UI layer
+  is a leaf in both directions — it may reach only the host layer, and no other
+  shared layer may reach it, because a foundational module that depended on it would
+  drag command registration and rendering down into the base of the tree.
   **Two kinds of process-wide state are tracked separately, because only one of them
   is findable.** Versioned `globalThis` slots (`Symbol.for("locus-pi.…")`) each get
   exactly one declared owning module — two modules naming one slot is precisely how

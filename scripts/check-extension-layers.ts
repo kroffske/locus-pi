@@ -76,9 +76,12 @@ import ts from "typescript";
 type SharedLayer = "host" | "mixed" | "operator" | "runtime" | "model" | "project" | "agent-runtime";
 
 /**
- * Rank is the only thing rule 2 compares. `mixed` and `operator` share rank 1
- * because neither may reach the other: `mixed` is provisional and `operator` is
- * narrowed by name below.
+ * Rank is the only thing rule 2 compares, EXCEPT for `operator`, which is
+ * narrowed by name in `layerImportAllowed` in both directions: it may reach only
+ * `host` and itself, and no other layer may reach it. Operator UI is a leaf
+ * consumer — a shared layer that depended on it would drag command registration
+ * and rendering into foundational code. `mixed` shares rank 1 only because it is
+ * provisional; nothing may point at it that `host` could not.
  */
 const LAYER_RANK: Record<SharedLayer, number> = {
   host: 0,
@@ -373,6 +376,19 @@ export async function checkExtensionLayers(root: string): Promise<void> {
       if (classification.kind === "feature") pending.push(name);
       continue;
     }
+    // A provisional-layer member is shredded by domain, not moved: its exports go
+    // to several owners and the synthesized `_shared/<layer>/<name>.ts` destination
+    // is never meant to exist. Demanding it would fail the very slice that does the
+    // job correctly, so the requirement is the opposite one — retire the entry.
+    if (classification.kind === "shared" && classification.layer && isProvisionalLayer(classification.layer)) {
+      failures.push(
+        `rule 4 (destination reached): provisional entry "${name}" is gone from ${SHARED_DIR}/ but is still declared ` +
+          `in the "${classification.layer}" layer. A provisional module is split across owners rather than moved, so ` +
+          `it has no single destination: delete "${name}" from SHARED_LAYER_MEMBERS.${classification.layer} in the ` +
+          `same change that shreds it, and remove the layer once it is empty.`,
+      );
+      continue;
+    }
     if (!(await fileExists(path.join(root, classification.destination)))) {
       failures.push(
         `rule 4 (destination reached): ledger entry "${name}" is gone from ${SHARED_DIR}/ but its declared ` +
@@ -551,12 +567,17 @@ function buildLedger(failures: string[]): Map<string, Classification> {
   return ledger;
 }
 
+function isProvisionalLayer(layer: SharedLayer): boolean {
+  return PROVISIONAL_LAYERS.includes(layer);
+}
+
 function describeClassification(classification: Classification): string {
   return classification.kind === "shared" ? `shared:${classification.layer}` : `feature:${classification.destination}`;
 }
 
 function layerImportAllowed(from: SharedLayer, to: SharedLayer): boolean {
   if (from === "operator") return to === "host" || to === "operator";
+  if (to === "operator") return false;
   return LAYER_RANK[to] <= LAYER_RANK[from];
 }
 
