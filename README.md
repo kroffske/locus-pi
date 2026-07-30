@@ -148,21 +148,42 @@ Remove the npm package with the same source identity:
 pi remove npm:@kroffske/locus-pi
 ```
 
-## Work from a source checkout
+## Install from a Git clone
 
-This path is for current maintainers and reviewers. It is not an npm
-installation procedure.
+Use a source checkout when you want Pi to load the repository directly instead
+of the published npm package. A normal clone checks out the stable `main`
+branch:
 
-### 1. Remove any earlier installation first
+```bash
+git clone https://github.com/kroffske/locus-pi.git
+cd locus-pi
+npm ci --ignore-scripts
+```
+
+To test accepted integration work before it is released from `main`, clone the
+`dev` branch instead:
+
+```bash
+git clone --branch dev https://github.com/kroffske/locus-pi.git
+cd locus-pi
+npm ci --ignore-scripts
+```
+
+Review the checkout before registering it. Pi loads extension source directly
+from the cloned directory; this package does not sandbox that code.
+
+### 1. Remove any earlier registration
 
 Two registrations of the same package both load, so clear the old one before
-adding the checkout. The two ways this package can already be present are
-different things and are removed differently:
+adding the checkout. The package can already be registered from npm or from
+another checkout, and each source identity is removed separately:
 
 ```bash
 pi list                              # what Pi actually loads, per scope
 pi remove npm:@kroffske/locus-pi     # user scope  (~/.pi/agent/settings.json)
 pi remove npm:@kroffske/locus-pi -l  # project scope (.pi/settings.json)
+pi remove /absolute/path/to/old/locus-pi
+pi remove /absolute/path/to/old/locus-pi -l
 ```
 
 ```bash
@@ -180,34 +201,70 @@ separately, and the same checkout registered in both scopes appears twice; drop
 it from one of them.
 
 A source is matched by its resolved path, not by the string in the settings
-file, so `pi remove -l .` from the checkout root removes an entry stored as
-`".."`, and passing the absolute path works too.
+file. Run `pi remove .` from the registered checkout root, or pass that
+checkout's absolute path. Do this before deleting or moving the directory.
 
 Runtime state Pi wrote under `~/.pi/<project>/` is not an installation. Leave it
 alone unless you mean to discard that history.
 
-### 2. Install the checkout
+### 2. Register the checkout for this user
 
 ```bash
-npm ci --ignore-scripts
-pi install -l .        # project scope: records the checkout in .pi/settings.json
+pi install .
+pi list
 npm run check
 ./bin/locus-pi doctor  # expects: 10 extensions, all ok
 ```
 
-Use `pi install .` without `-l` to register the checkout for every project of
-this user instead. Prefer `-l` while reviewing: a project-scoped entry cannot
-follow you into an unrelated repository. Review the checkout before approving
-project-local code — Pi loads its extension source, and this package does not
-sandbox it.
+`pi install .` registers the checkout at user scope, so Pi loads these
+extensions when started from this repository or any other directory. `pi list`
+must show the checkout once.
 
-A session started after that loads the extensions straight from the working
-tree, so an edit is live on the next start with no reinstall step.
-
-### 3. Go back to the published package
+Do not also run `pi install . -l` for the same checkout. That adds a second,
+project-scoped registration; Pi then loads both copies when started in this
+repository and reports duplicate tool names. If Pi works elsewhere but fails
+inside `locus-pi`, remove the project-scoped copy:
 
 ```bash
-pi remove . -l                      # or: pi remove .   for the user scope
+cd /absolute/path/to/locus-pi
+pi remove . -l
+pi list
+```
+
+Maintainers who intentionally want a checkout active only for this project may
+use `pi install . -l` instead of `pi install .`, but never both.
+
+### 3. Update the checkout
+
+The registration points to the checkout path, so updating in place does not
+require another `pi install`:
+
+```bash
+cd /absolute/path/to/locus-pi
+git pull --ff-only
+npm ci --ignore-scripts
+./bin/locus-pi doctor
+```
+
+Start a fresh Pi session after updating so it reloads the extension source.
+
+### 4. Uninstall the checkout
+
+Unregister the source before deleting its directory:
+
+```bash
+cd /absolute/path/to/locus-pi
+pi remove .
+pi list
+```
+
+If the checkout was registered with `pi install . -l`, remove it with
+`pi remove . -l` from that project instead. Removing the registration does not
+delete the checkout or Pi's runtime history.
+
+To go back to the published package:
+
+```bash
 pi install npm:@kroffske/locus-pi
 pi list
 ```

@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The README now documents the complete Git-clone installation lifecycle.**
+  It distinguishes stable `main` from integration `dev`, shows user-scoped
+  registration that works from every directory, explains update and uninstall
+  commands, and identifies duplicate user/project registrations as the reason
+  Pi can fail only inside the `locus-pi` checkout.
+
 - **The packaged `live-smoke` workflow now enforces the read-only contract its
   public description already promised.** Both child calls are confined to the
   project workspace with `readOnly: true` and only the `find` tool, so the
