@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 // plan-implement.workflow.mjs
 //
-// Executes one plan that a prior `plan` run produced and a critic accepted. The
-// plan arrives as continuation bytes the host has already verified and copied,
-// never as text pasted into the input, so this module reads the plan and starts
-// working instead of re-proving where it came from.
+// Executes one accepted implementation plan. A host continuation remains the
+// strongest input because its bytes are already verified and copied, but an
+// operator may also supply pasted plan text or a path for a read-only resolver
+// stage to reopen. Artifact filenames are not part of the plan contract.
 //
 // The shape is deliberate:
 //
@@ -102,6 +105,8 @@ const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
 
 const MAX_SELECTED_STEPS = 30;
 const MAX_INTENT_CHARS = 16_000;
+const MAX_DIRECT_PLAN_CHARS = 500_000;
+const MAX_PLAN_PATH_CHARS = 4_096;
 const MAX_STEP_BLOCK_CHARS = 32_000;
 const MAX_SELECTED_STEPS_CHARS = 128_000;
 const MAX_NOTE_CHARS = 4_000;
@@ -175,13 +180,84 @@ const STEP_REVIEW_SCHEMA = freezeSchema({
   },
 });
 
+/** The check collector owns observed command outcomes. Keeping them structured
+ * lets deterministic workflow code refuse a green terminal result after any
+ * selected-step or repository check failed. */
+const CHECK_EVIDENCE_SCHEMA = freezeSchema({
+  type: "object",
+  additionalProperties: false,
+  required: ["stepChecks", "repositoryChecks", "unexpectedChanges", "gaps"],
+  properties: {
+    stepChecks: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_SELECTED_STEPS,
+      uniqueBy: "id",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "command", "status", "evidence"],
+        properties: {
+          id: { type: "string", pattern: STEP_ID_PATTERN },
+          command: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+          status: { type: "string", enum: ["passed", "failed", "not-run"] },
+          evidence: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+        },
+      },
+    },
+    repositoryChecks: {
+      type: "array",
+      maxItems: MAX_REPORT_CHECKS,
+      uniqueBy: "command",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["command", "status", "evidence"],
+        properties: {
+          command: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+          status: { type: "string", enum: ["passed", "failed", "not-run"] },
+          evidence: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+        },
+      },
+    },
+    unexpectedChanges: {
+      type: "array",
+      maxItems: MAX_REPORT_UNEXPECTED_CHANGES,
+      uniqueTrimmedItems: true,
+      items: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+    },
+    gaps: {
+      type: "array",
+      maxItems: MAX_REPORT_CHECKS,
+      uniqueTrimmedItems: true,
+      items: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+    },
+  },
+});
+
 const IMPLEMENTATION_REVIEW_SCHEMA = freezeSchema({
   type: "object",
   additionalProperties: false,
-  required: ["outcome", "summary", "steps", "checks", "unexpectedChanges", "nextStep"],
+  required: ["outcome", "summary", "deliverable", "steps", "nextStep"],
   properties: {
     outcome: { type: "string", enum: ["complete", "partial", "blocked"] },
     summary: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+    deliverable: {
+      type: "object",
+      additionalProperties: false,
+      required: ["name", "kind", "location", "status", "summary", "evidence"],
+      properties: {
+        name: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+        kind: {
+          type: "string",
+          enum: ["working-change", "document", "decision", "evidence-package", "gate", "other"],
+        },
+        location: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+        status: { type: "string", enum: ["ready", "partial", "missing"] },
+        summary: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+        evidence: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
+      },
+    },
     steps: {
       type: "array",
       minItems: 1,
@@ -205,18 +281,6 @@ const IMPLEMENTATION_REVIEW_SCHEMA = freezeSchema({
         },
       },
     },
-    checks: {
-      type: "array",
-      maxItems: MAX_REPORT_CHECKS,
-      uniqueTrimmedItems: true,
-      items: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
-    },
-    unexpectedChanges: {
-      type: "array",
-      maxItems: MAX_REPORT_UNEXPECTED_CHANGES,
-      uniqueTrimmedItems: true,
-      items: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
-    },
     nextStep: { type: "string", nonBlank: true, maxLength: MAX_REPORT_FIELD_CHARS },
   },
 });
@@ -229,7 +293,8 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan-implement",
-  description: "Turns an accepted plan into a task ledger, then implements and reviews each task in order.",
+  description:
+    "Turns an outcome-first accepted plan into a verified primary result, task ledger, and supporting report.",
   phases: [
     { title: "select-steps", detail: "Consume the accepted plan and validate which steps this run implements." },
     { title: "resolve-implementation-scope", detail: "Reopen the checkout and resolve what the selected steps touch." },
@@ -237,8 +302,14 @@ export const meta = {
       title: "apply-steps",
       detail: "Persist a task ledger, then run one sequential writer/reviewer loop per selected step.",
     },
-    { title: "collect-check-evidence", detail: "Inspect the full diff and run repository checks without edit tools." },
-    { title: "report-implementation", detail: "Independently grade every step against the original plan." },
+    {
+      title: "collect-check-evidence",
+      detail: "Record structured selected-step and repository check outcomes without edit tools.",
+    },
+    {
+      title: "report-implementation",
+      detail: "Independently grade the primary result and every selected step against the accepted plan.",
+    },
     {
       title: "reconcile-implementation",
       detail: "Repair one final cross-step gap when the independent report proves the plan is still partial.",
@@ -260,31 +331,32 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const { agent, log, phase, publishArtifact } = dsl;
-  const intent = requireBoundedText(input, "intent", MAX_INTENT_CHARS);
+  const { agent, log, phase, publishArtifact, publishPrimaryArtifact } = dsl;
 
   phase("select-steps");
   log("Binding the accepted plan and validating the selected steps.");
   const continuation = dsl.continuationArtifacts();
-  if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "plan.md") {
-    throw new Error('plan-implement continuation requires exactly one artifact named "plan.md"');
+  if (continuation.length > 1) {
+    throw new Error("plan-implement accepts at most one continuation artifact");
   }
-  const consumedPlan = continuation[0].consumedArtifact;
-  // The host verifies and copies the referenced bytes before this module starts,
-  // so the script reads them and gets on with the work. It used to re-derive
-  // that proof here — matching digests, the source run's target, its stage, and
-  // its terminal result — which is cognitive load in every reader's way for a
-  // risk the operator judged not worth it: the worst case is implementing a plan
-  // the critic had not accepted, which replanning fixes.
-  //
-  // The plan is not length-bounded either. A cap here could only reject a plan
-  // somebody already accepted, after the run that wrote it had finished; the
-  // runtime already bounds what a child may answer, and the per-step budgets
-  // below are what actually keep a stage's prompt in hand.
-  const planText = consumedPlan.text;
+  let planText;
+  let intent;
+  if (continuation.length === 1) {
+    // The host verifies and copies continuation bytes before this module starts.
+    // Their source filename is descriptive metadata, not an execution gate.
+    planText = continuation[0].consumedArtifact.text;
+    intent =
+      input === undefined
+        ? "Implement the whole accepted plan."
+        : requireBoundedText(input, "intent", MAX_INTENT_CHARS);
+  } else {
+    planText = resolveDirectPlanInput(dsl, input);
+    intent = "Implement the whole supplied plan.";
+  }
   if (typeof planText !== "string" || planText.trim() === "") {
-    throw new Error("plan-implement requires a non-empty consumed plan");
+    throw new Error("plan-implement requires a non-empty plan");
   }
+  const outcomeContract = parseOutcomeContract(planText);
   const steps = parseStepBlocks(planText);
 
   const selection = await agent(
@@ -358,6 +430,10 @@ checks, and the current working-tree state. ${HANDOFF_NOTE}
 ${intent}
 --- END EXACT OPERATOR INTENT ---
 
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
+
 --- BEGIN SELECTED STEPS ---
 ${selectedText}
 --- END SELECTED STEPS ---`,
@@ -416,6 +492,10 @@ ${HANDOFF_NOTE}
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intent}
 --- END EXACT OPERATOR INTENT ---
+
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
 
 --- BEGIN IMPLEMENTATION SCOPE ---
 ${scopeText}
@@ -486,6 +566,10 @@ Return one JSON value only:
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intent}
 --- END EXACT OPERATOR INTENT ---
+
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
 
 --- BEGIN IMPLEMENTATION SCOPE ---
 ${scopeText}
@@ -565,6 +649,7 @@ ${workerText}
   const reportContext = {
     intent,
     planText,
+    outcomeContract,
     selectedText,
     scopeText,
     taskLedger,
@@ -574,22 +659,24 @@ ${workerText}
 
   phase("collect-check-evidence");
   log("Collecting independent diff evidence and running bounded repository checks.");
-  let checkText = await agent(buildCheckPrompt(reportContext), {
+  let checkEvidence = await agent(buildCheckPrompt(reportContext), {
     ...IMPLEMENT_CHECK_OPTIONS,
-    artifact: "check-evidence.md",
+    artifact: "check-evidence.json",
     label: "collect check evidence",
     maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
+    schema: CHECK_EVIDENCE_SCHEMA,
+    validate: (value) => checkEvidenceErrors(selected, value),
   });
 
   phase("report-implementation");
-  log("Grading every planned step against the accepted plan.");
-  let implementationReview = await agent(buildImplementationReviewPrompt({ ...reportContext, checkText }), {
+  log("Grading the primary result and every selected step against the accepted plan.");
+  let implementationReview = await agent(buildImplementationReviewPrompt({ ...reportContext, checkEvidence }), {
     ...IMPLEMENT_READ_OPTIONS,
     artifact: "implementation-verdict.json",
     label: "grade implementation",
     maxAnswerChars: MAX_REPORT_RESULT_CHARS,
     schema: IMPLEMENTATION_REVIEW_SCHEMA,
-    validate: (value) => implementationReviewErrors(steps, selected, value),
+    validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, value),
   });
 
   if (failure === undefined && implementationReview.outcome === "partial") {
@@ -605,7 +692,8 @@ ${workerText}
       buildReconciliationPrompt({
         intent,
         planText,
-        checkText,
+        outcomeContract,
+        checkEvidence,
         implementationReview,
         repairRows,
       }),
@@ -619,7 +707,7 @@ ${workerText}
 
     phase("collect-reconciliation-evidence");
     log("Rechecking the reconciled working tree before the terminal grade.");
-    checkText = await agent(
+    checkEvidence = await agent(
       buildCheckPrompt({
         ...reportContext,
         priorReview: implementationReview,
@@ -627,9 +715,11 @@ ${workerText}
       }),
       {
         ...IMPLEMENT_CHECK_OPTIONS,
-        artifact: "reconciliation-check-evidence.md",
+        artifact: "reconciliation-check-evidence.json",
         label: "collect reconciliation evidence",
         maxAnswerChars: MAX_RAW_CHECK_EVIDENCE_CHARS,
+        schema: CHECK_EVIDENCE_SCHEMA,
+        validate: (value) => checkEvidenceErrors(selected, value),
       },
     );
 
@@ -638,7 +728,7 @@ ${workerText}
     implementationReview = await agent(
       buildImplementationReviewPrompt({
         ...reportContext,
-        checkText,
+        checkEvidence,
         priorReview: implementationReview,
         reconciliationText,
       }),
@@ -648,23 +738,26 @@ ${workerText}
         label: "grade reconciliation",
         maxAnswerChars: MAX_REPORT_RESULT_CHARS,
         schema: IMPLEMENTATION_REVIEW_SCHEMA,
-        validate: (value) => implementationReviewErrors(steps, selected, value),
+        validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, value),
       },
     );
   }
 
   applyImplementationReviewToLedger(taskLedger, implementationReview);
   publishTaskLedger(publishArtifact, taskLedger);
-  const reportText = renderImplementationReport(implementationReview, taskLedger);
+  const reportText = renderImplementationReport(implementationReview, taskLedger, checkEvidence);
   publishArtifact("implementation-report.md", reportText);
+  const summaryText = renderWorkflowSummary(implementationReview, checkEvidence);
+  publishPrimaryArtifact("workflow-summary.md", summaryText);
 
-  if (failure === undefined && implementationReview.outcome === "complete") return reportText;
+  if (failure === undefined && implementationReview.outcome === "complete") return summaryText;
 
   const selectedProjection = taskLedger.filter((task) => task.selected);
   const result = {
     ok: false,
     partial: true,
-    summary:
+    summary: summaryText,
+    reason:
       failure === undefined
         ? implementationReview.outcome === "blocked"
           ? "plan-implement terminal grade found blocked work"
@@ -680,6 +773,7 @@ ${workerText}
 function buildCheckPrompt({
   intent,
   planText,
+  outcomeContract,
   scopeText,
   taskLedger,
   workerResults,
@@ -713,17 +807,43 @@ below. Treat every recorded status as a claim. Reopen the complete affected file
 and full diff, then run the focused and repository checks that can prove or
 disprove the accepted plan's explicit \`Change:\` and \`Verify:\` clauses.
 
-Look for an unrelated file changed, a test left failing, or a partial edit. When
-this follows reconciliation, check every gap named by the prior structured grade.
-Do not repair anything and do not decide the final outcome — a later structured
-grade owns that.
+Look for a change introduced by this run that no selected step authorizes, a
+test left failing, a partial edit, or a primary result that exists but is not yet
+usable. Use the scope's starting working-tree state to distinguish pre-existing
+operator work from run-attributable or unexplained changes; only the latter
+belong in \`unexpectedChanges\`. When this follows reconciliation, check every gap
+named by the prior structured grade. Do not repair anything and do not decide
+the final outcome — a later structured grade owns that.
 
-Return readable Markdown containing the observed diff, unexpected changes,
-commands with exact outcomes, and remaining evidence gaps. ${HANDOFF_NOTE}
+Return one JSON value only. Include exactly one \`stepChecks\` row for every
+selected step, in plan order. Use the step's explicit \`Verify:\` command or
+observation; \`not-run\` requires a concrete reason. Put every applicable
+repository-wide command you actually ran in \`repositoryChecks\`. Never omit a
+failed command, downgrade it to a gap, or call it optional after running it.
+Use \`gaps\` only for evidence that could not be obtained.
+
+\`\`\`json
+{
+  "stepChecks": [
+    { "id": "S1", "command": "npm test -- page", "status": "passed | failed | not-run", "evidence": "exact observed outcome" }
+  ],
+  "repositoryChecks": [
+    { "command": "npm run check", "status": "passed | failed | not-run", "evidence": "exact observed outcome" }
+  ],
+  "unexpectedChanges": [],
+  "gaps": []
+}
+\`\`\`
+
+Do not return Markdown or a result envelope. ${HANDOFF_NOTE}
 
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intent}
 --- END EXACT OPERATOR INTENT ---
+
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
 
 --- BEGIN ACCEPTED PLAN ---
 ${planText}
@@ -749,11 +869,12 @@ ${renderReviewResults(reviewResults, MAX_CHECK_EVIDENCE_CHARS)}
 function buildImplementationReviewPrompt({
   intent,
   planText,
+  outcomeContract,
   selectedText,
   taskLedger,
   workerResults,
   reviewResults,
-  checkText,
+  checkEvidence,
   priorReview,
   reconciliationText,
 }) {
@@ -779,18 +900,26 @@ once and in accepted-plan order. Do not return rows for unselected steps:
 deterministic code projects those from the task ledger, so unrelated pre-existing
 work cannot be credited as this run's result.
 
-Judge only the operator intent and each accepted step's explicit \`Change:\` and
-\`Verify:\` clauses. The ledger, worker answers, reviews, and check evidence are
-leads, not proof. An unavailable independent rerun is an evidence gap in
-\`checks\`, not by itself unfinished implementation when live files, retained
-machine-readable evidence, and the exact recorded command outcome agree.
-
+Judge the declared primary outcome first, then each selected step. The ledger,
+worker answers, reviews, and check evidence are leads, not proof. The primary
+result is \`ready\` only when it exists at the declared location, contains or
+performs what the outcome promises, and its usability proof holds. An
+implementation report, changed-file list, transcript, or green task ledger is
+not the primary result unless the accepted plan explicitly declares it as such.
 Return one JSON value only with this exact shape:
 
 \`\`\`json
 {
   "outcome": "complete | partial | blocked",
   "summary": "what the live evidence proves",
+  "deliverable": {
+    "name": "the declared primary result",
+    "kind": "working-change | document | decision | evidence-package | gate | other",
+    "location": "where the operator can find or use it",
+    "status": "ready | partial | missing",
+    "summary": "what the result now provides",
+    "evidence": "what proves the required content or behavior"
+  },
   "steps": [
     {
       "id": "S1",
@@ -800,21 +929,25 @@ Return one JSON value only with this exact shape:
       "remaining": "none, or the concrete missing work"
     }
   ],
-  "checks": ["command — exact outcome"],
-  "unexpectedChanges": [],
   "nextStep": "one concrete operator action"
 }
 \`\`\`
 
-\`complete\` means every selected step is \`done\`. Use \`partial\` only when at
-least one selected step is \`partial\` and none is blocked or not attempted. Use
-\`blocked\` when any selected step is blocked or not attempted. A done step's
-\`remaining\` must be exactly \`none\`; every other status must name remaining
-work. Do not return Markdown or a result envelope.
+\`complete\` means the deliverable is \`ready\`, every selected step is \`done\`,
+every collected check passed, no evidence gap remains, and no run-attributable
+unexpected change remains. Use \`partial\` when the result is missing or can be
+completed by the bounded reconciliation. Use \`blocked\` when any selected step
+is blocked or not attempted. A
+done step's \`remaining\` must be exactly \`none\`; every other status must name
+remaining work. Do not return Markdown or a result envelope.
 
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intent}
 --- END EXACT OPERATOR INTENT ---
+
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
 
 --- BEGIN ACCEPTED PLAN ---
 ${planText}
@@ -837,20 +970,29 @@ ${renderReviewResults(reviewResults, MAX_CHECK_EVIDENCE_CHARS)}
 --- END ALL STEP REVIEWS ---
 
 --- BEGIN INDEPENDENT CHECK EVIDENCE ---
-${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
+${truncateText(JSON.stringify(checkEvidence, null, 2), MAX_CHECK_EVIDENCE_CHARS)}
 --- END INDEPENDENT CHECK EVIDENCE ---${reconciliationContext}`;
 }
 
-function buildReconciliationPrompt({ intent, planText, checkText, implementationReview, repairRows }) {
+function buildReconciliationPrompt({
+  intent,
+  planText,
+  outcomeContract,
+  checkEvidence,
+  implementationReview,
+  repairRows,
+}) {
   return `${COMMON}
 
-TASK — reconcile only the selected steps listed in the repair rows below. This
-is the one bounded continuation after independent grading.
+TASK — reconcile only the unfinished primary-result, verification, and selected
+step gaps named below. This is the one bounded continuation after independent
+grading.
 
 Reopen the live checkout. Preserve completed and unselected work. Fix only the
-concrete missing work in these rows, including tests, documentation, or evidence
-their accepted-plan clauses require. Do not redesign the plan, touch another
-step, or repeat completed work. Run focused verification for each repair.
+concrete missing work in the structured grade and failed or missing checks,
+including the declared primary result even when every individual step row is
+already done. Do not redesign the plan, touch another step, or repeat completed
+work. Run focused verification for each repair.
 
 Return concise Markdown naming changed files, exact checks and outcomes, and
 anything still unresolved. Do not return JSON or a status token. ${HANDOFF_NOTE}
@@ -858,6 +1000,10 @@ anything still unresolved. Do not return JSON or a status token. ${HANDOFF_NOTE}
 --- BEGIN EXACT OPERATOR INTENT ---
 ${intent}
 --- END EXACT OPERATOR INTENT ---
+
+--- BEGIN PRIMARY OUTCOME CONTRACT ---
+${outcomeContract.text}
+--- END PRIMARY OUTCOME CONTRACT ---
 
 --- BEGIN ACCEPTED PLAN ---
 ${planText}
@@ -872,11 +1018,25 @@ ${JSON.stringify(repairRows, null, 2)}
 --- END ALLOWED REPAIR ROWS ---
 
 --- BEGIN CHECK EVIDENCE ---
-${truncateText(checkText, MAX_CHECK_EVIDENCE_CHARS)}
+${truncateText(JSON.stringify(checkEvidence, null, 2), MAX_CHECK_EVIDENCE_CHARS)}
 --- END CHECK EVIDENCE ---`;
 }
 
-function implementationReviewErrors(planSteps, selectedSteps, value) {
+function checkEvidenceErrors(selectedSteps, value) {
+  const errors = [];
+  const rows = Array.isArray(value?.stepChecks) ? value.stepChecks : [];
+  if (rows.length !== selectedSteps.length) {
+    errors.push(`stepChecks: expected exactly ${selectedSteps.length} selected row(s), got ${rows.length}`);
+  }
+  for (const [index, step] of selectedSteps.entries()) {
+    if (rows[index]?.id !== step.id) {
+      errors.push(`stepChecks[${index}].id: expected ${step.id}, got ${JSON.stringify(rows[index]?.id)}`);
+    }
+  }
+  return errors;
+}
+
+function implementationReviewErrors(planSteps, selectedSteps, checkEvidence, value) {
   const errors = [];
   const rows = Array.isArray(value?.steps) ? value.steps : [];
 
@@ -904,17 +1064,31 @@ function implementationReviewErrors(planSteps, selectedSteps, value) {
   const allDone = rows.length === selectedSteps.length && rows.every((row) => row.status === "done");
   const hasPartial = rows.some((row) => row.status === "partial");
   const hasBlocked = rows.some((row) => row.status === "blocked" || row.status === "not-attempted");
-  if (value?.outcome === "complete" && !allDone) {
-    errors.push("outcome complete requires every selected step to be done");
+  const deliverableStatus = value?.deliverable?.status;
+  const checkRows = [...(checkEvidence?.stepChecks ?? []), ...(checkEvidence?.repositoryChecks ?? [])];
+  const allChecksPassed = checkRows.every((row) => row.status === "passed");
+  const hasEvidenceGaps = (checkEvidence?.gaps ?? []).length > 0;
+  const hasUnexpectedChanges = (checkEvidence?.unexpectedChanges ?? []).length > 0;
+  const complete =
+    allDone && deliverableStatus === "ready" && allChecksPassed && !hasEvidenceGaps && !hasUnexpectedChanges;
+  const blocked = hasBlocked;
+  const partial =
+    !blocked &&
+    (hasPartial || deliverableStatus !== "ready" || !allChecksPassed || hasEvidenceGaps || hasUnexpectedChanges);
+
+  if (value?.outcome === "complete" && !complete) {
+    errors.push(
+      "outcome complete requires a ready primary deliverable, every selected step done, every collected check passed, no evidence gaps, and no unexpected run-attributable changes",
+    );
   }
-  if (value?.outcome === "partial" && (!hasPartial || hasBlocked || allDone)) {
-    errors.push("outcome partial requires a selected partial step and no selected blocked or not-attempted step");
+  if (value?.outcome === "partial" && !partial) {
+    errors.push("outcome partial requires unfinished deliverable, step, check, or evidence work without a blocked row");
   }
-  if (value?.outcome === "blocked" && !hasBlocked) {
+  if (value?.outcome === "blocked" && !blocked) {
     errors.push("outcome blocked requires a selected blocked or not-attempted step");
   }
-  if (value?.outcome !== "complete" && allDone) {
-    errors.push(`${value?.outcome} outcome cannot mark every selected step done`);
+  if (value?.outcome !== "complete" && complete) {
+    errors.push(`${value?.outcome} outcome cannot downgrade a ready and fully verified result`);
   }
   return errors;
 }
@@ -940,7 +1114,7 @@ function applyImplementationReviewToLedger(taskLedger, review) {
   }
 }
 
-function renderImplementationReport(review, taskLedger) {
+function renderImplementationReport(review, taskLedger, checkEvidence) {
   const outcome = {
     complete: "Plan implemented",
     partial: "Partly implemented",
@@ -983,13 +1157,17 @@ function renderImplementationReport(review, taskLedger) {
     ...stepSections,
     "## Checks",
     "",
-    ...(review.checks.length === 0 ? ["none"] : review.checks.map((check) => `- ${check.trim()}`)),
+    ...renderCheckRows(checkEvidence),
     "",
     "## Unexpected changes",
     "",
-    ...(review.unexpectedChanges.length === 0
+    ...(checkEvidence.unexpectedChanges.length === 0
       ? ["none"]
-      : review.unexpectedChanges.map((change) => `- ${change.trim()}`)),
+      : checkEvidence.unexpectedChanges.map((change) => `- ${change.trim()}`)),
+    "",
+    "## Evidence gaps",
+    "",
+    ...(checkEvidence.gaps.length === 0 ? ["none"] : checkEvidence.gaps.map((gap) => `- ${gap.trim()}`)),
     "",
     "## Next step for the operator",
     "",
@@ -997,8 +1175,114 @@ function renderImplementationReport(review, taskLedger) {
   ].join("\n");
 }
 
+function renderWorkflowSummary(review, checkEvidence) {
+  const outcome = {
+    complete: "Completed",
+    partial: "Partly completed",
+    blocked: "Blocked",
+  }[review.outcome];
+  return [
+    "# Workflow Summary",
+    "",
+    "## Outcome",
+    "",
+    `${outcome} — ${review.summary.trim()}`,
+    "",
+    "## Primary result",
+    "",
+    `Name: ${review.deliverable.name.trim()}`,
+    `Type: ${review.deliverable.kind}`,
+    `Location: ${review.deliverable.location.trim()}`,
+    `Status: ${review.deliverable.status}`,
+    `Summary: ${review.deliverable.summary.trim()}`,
+    `Evidence: ${review.deliverable.evidence.trim()}`,
+    "",
+    "## Verification",
+    "",
+    ...renderCheckRows(checkEvidence),
+    "",
+    "## Remaining gaps",
+    "",
+    ...(checkEvidence.gaps.length === 0 ? ["none"] : checkEvidence.gaps.map((gap) => `- ${gap.trim()}`)),
+    "",
+    "## Unexpected run-attributable changes",
+    "",
+    ...(checkEvidence.unexpectedChanges.length === 0
+      ? ["none"]
+      : checkEvidence.unexpectedChanges.map((change) => `- ${change.trim()}`)),
+    "",
+    "## Supporting workflow artifacts",
+    "",
+    "- `implementation-report.md` — per-step technical evidence.",
+    "- `implementation-tasks.md` — latest execution ledger.",
+    "",
+    "## Next step",
+    "",
+    review.nextStep.trim(),
+  ].join("\n");
+}
+
+function renderCheckRows(checkEvidence) {
+  const rows = [
+    ...checkEvidence.stepChecks.map(
+      (check) => `- ${check.id}: ${check.command.trim()} — ${check.status}; ${check.evidence.trim()}`,
+    ),
+    ...checkEvidence.repositoryChecks.map(
+      (check) => `- ${check.command.trim()} — ${check.status}; ${check.evidence.trim()}`,
+    ),
+  ];
+  return rows.length === 0 ? ["none"] : rows;
+}
+
 function markdownCode(value) {
   return `\`${value.replace(/`/gu, "\\`")}\``;
+}
+
+/** The primary-result contract is the semantic seam between planning and
+ * implementation. Old plans without it are intentionally refused: implementing
+ * steps without knowing the result they must add up to is the defect this pair
+ * exists to prevent. */
+function parseOutcomeContract(planText) {
+  const sections = [...planText.matchAll(/^##[ \t]+Outcome[ \t]*$/gmu)];
+  if (sections.length === 0) throw new Error('plan-implement supplied plan has no "## Outcome" section');
+  if (sections.length !== 1)
+    throw new Error('plan-implement supplied plan must contain exactly one "## Outcome" section');
+  const section = sections[0];
+  const tail = planText.slice(section.index + section[0].length);
+  const nextSection = /^##[ \t]+/mu.exec(tail);
+  const body = nextSection === null ? tail : tail.slice(0, nextSection.index);
+  const labels = [
+    "Outcome type",
+    "Primary result",
+    "Consumer",
+    "Form and location",
+    "Required content or behavior",
+    "Usability proof",
+    "Supporting evidence",
+  ];
+  const values = {};
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const matches = [...body.matchAll(new RegExp(`^${escaped}:[ \\t]*(.+)$`, "gmu"))];
+    if (matches.length !== 1 || matches[0][1].trim() === "") {
+      throw new Error(`plan-implement supplied plan must contain exactly one non-empty "${label}:" line`);
+    }
+    values[label] = matches[0][1].trim();
+  }
+  return { ...values, text: `## Outcome${body}`.trimEnd() };
+}
+
+function resolveDirectPlanInput(dsl, input) {
+  const supplied = requireBoundedText(input, "plan input", MAX_DIRECT_PLAN_CHARS);
+  if (supplied.includes("\n")) return supplied;
+
+  const requestedPath = requireBoundedText(supplied, "plan path", MAX_PLAN_PATH_CHARS);
+  const planPath = path.resolve(dsl.projectRoot(), requestedPath);
+  try {
+    return requireBoundedText(readFileSync(planPath, "utf8"), "resolved plan", MAX_DIRECT_PLAN_CHARS);
+  } catch (error) {
+    throw new Error(`plan-implement could not read plan path ${JSON.stringify(requestedPath)}: ${String(error)}`);
+  }
 }
 
 /**
@@ -1008,18 +1292,23 @@ function markdownCode(value) {
  */
 function parseStepBlocks(planText) {
   const section = /^##[ \t]+Steps[ \t]*$/mu.exec(planText);
-  if (section === null) throw new Error('plan-implement plan.md has no "## Steps" section');
+  if (section === null) throw new Error('plan-implement supplied plan has no "## Steps" section');
   const tail = planText.slice(section.index + section[0].length);
   const nextSection = /^##[ \t]+/mu.exec(tail);
   const body = nextSection === null ? tail : tail.slice(0, nextSection.index);
   const headings = [...body.matchAll(/^###[ \t]+([^\n]+)$/gmu)];
-  if (headings.length === 0) throw new Error("plan-implement found no steps in plan.md");
+  if (headings.length === 0) throw new Error("plan-implement found no steps in the supplied plan");
 
   const steps = headings.map((heading, index) => {
     const headingText = heading[1].trim();
     const idMatch = /^(S[1-9][0-9]*)(?:\s|—|-|$)/u.exec(headingText);
     if (idMatch === null) throw new Error(`plan-implement invalid step heading: ${headingText}`);
     const end = headings[index + 1]?.index ?? body.length;
+    const block = requireBoundedText(
+      body.slice(heading.index, end).trimEnd(),
+      `step ${idMatch[1]}`,
+      MAX_STEP_BLOCK_CHARS,
+    );
     return {
       id: idMatch[1],
       title:
@@ -1027,12 +1316,43 @@ function parseStepBlocks(planText) {
           .slice(idMatch[1].length)
           .replace(/^\s*(?:—|-)\s*/u, "")
           .trim() || idMatch[1],
-      block: requireBoundedText(body.slice(heading.index, end).trimEnd(), `step ${idMatch[1]}`, MAX_STEP_BLOCK_CHARS),
+      block,
+      dependsOn: parseStepDependencies(block, idMatch[1]),
     };
   });
   const duplicate = steps.find(({ id }, index) => steps.findIndex((step) => step.id === id) !== index);
-  if (duplicate !== undefined) throw new Error(`plan-implement duplicate step id in plan.md: ${duplicate.id}`);
+  if (duplicate !== undefined)
+    throw new Error(`plan-implement duplicate step id in the supplied plan: ${duplicate.id}`);
+  const stepIndex = new Map(steps.map((step, index) => [step.id, index]));
+  for (const [index, step] of steps.entries()) {
+    for (const dependency of step.dependsOn) {
+      const dependencyIndex = stepIndex.get(dependency);
+      if (dependencyIndex === undefined) {
+        throw new Error(`plan-implement step ${step.id} depends on unknown step ${dependency}`);
+      }
+      if (dependencyIndex >= index) {
+        throw new Error(`plan-implement step ${step.id} dependency ${dependency} must name an earlier step`);
+      }
+    }
+  }
   return steps;
+}
+
+function parseStepDependencies(block, stepId) {
+  const matches = [...block.matchAll(/^Depends on:[ \t]*(.+)$/gmu)];
+  if (matches.length !== 1 || matches[0][1].trim() === "") {
+    throw new Error(`plan-implement step ${stepId} must contain exactly one non-empty "Depends on:" line`);
+  }
+  const value = matches[0][1].trim();
+  if (value.toLowerCase() === "none") return [];
+  const dependencies = value.split(",").map((dependency) => dependency.trim());
+  if (dependencies.some((dependency) => !/^S[1-9][0-9]*$/u.test(dependency))) {
+    throw new Error(`plan-implement step ${stepId} has invalid dependency list: ${value}`);
+  }
+  if (new Set(dependencies).size !== dependencies.length) {
+    throw new Error(`plan-implement step ${stepId} repeats a dependency: ${value}`);
+  }
+  return dependencies;
 }
 
 /**
@@ -1044,11 +1364,18 @@ function parseStepBlocks(planText) {
  */
 function stepSelectionErrors(steps, value) {
   const byId = new Map(steps.map((step) => [step.id, step]));
+  const selectedIds = new Set(value.steps.map((step) => step.id));
   const errors = [];
   let allNotesChars = 0;
   for (const [index, { id, note }] of value.steps.entries()) {
     if (!byId.has(id)) {
       errors.push(`steps[${index}].id: value ${JSON.stringify(id)} is not a step id in the plan`);
+    } else {
+      for (const dependency of byId.get(id).dependsOn) {
+        if (!selectedIds.has(dependency)) {
+          errors.push(`steps[${index}].id: step ${id} requires selected dependency ${dependency}`);
+        }
+      }
     }
     allNotesChars += note.length;
   }

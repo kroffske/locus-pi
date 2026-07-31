@@ -1,6 +1,10 @@
 {
   "id": "plan",
   "name": "plan",
+  "agent": {
+    "name": "extension-plan",
+    "description": "Compose plans, goals, prompt shelves, planning commands, and the goal tool."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

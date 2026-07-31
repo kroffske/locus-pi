@@ -13,6 +13,12 @@ import {
   buildWorkflowInfoBlock,
 } from "../../../extensions/workflows/workflow-catalog.js";
 import { createHarness } from "../../test-harness.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  workflowJournalFile,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
@@ -521,7 +527,7 @@ describe("focused workflow catalog", () => {
     expect(harness.editorText).toBe("/workflows run alpha");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
   });
 
   it("never calls setEditorText before the custom browser promise resolves", async () => {
@@ -622,7 +628,7 @@ describe("focused workflow catalog", () => {
     expect(setEditorText).not.toHaveBeenCalled();
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
   });
 
   it.each(["rpc", "print"] as const)("keeps %s passive even if a host object exposes custom UI", async (mode) => {
@@ -804,14 +810,13 @@ function writeRun(
   name: string,
   executedSource = `export default () => ${JSON.stringify(runId)};\n`,
 ): void {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
+  const runDir = ensureWorkflowRunDir(root, runId);
+  writeFileSync(workflowJournalFile(runDir), "", "utf8");
   const sha256 = createHash("sha256").update(executedSource).digest("hex");
-  const snapshotPath = path.join(runDir, `script-${sha256}.workflow.mjs`);
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${sha256}.workflow.mjs`);
   writeFileSync(snapshotPath, executedSource, "utf8");
   writeFileSync(
-    path.join(runDir, "result.json"),
+    workflowResultFile(runDir),
     JSON.stringify({
       runId,
       ok: true,

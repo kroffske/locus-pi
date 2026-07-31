@@ -673,10 +673,16 @@ return review;
 ```
 
 When the operator must inspect or reuse the plan, use the shipped `plan` →
-`plan-implement` pair instead. `plan` returns an accepted ordered `plan.md`;
-`plan-implement` consumes that verified artifact, publishes
-`implementation-tasks.md`, and advances one task only after an independent
-review accepts it. A repair verdict retries the same task once, and stable
+`plan-implement` pair instead. `plan` returns an accepted ordered `plan.md` whose
+`## Outcome` names the primary result, consumer, location, required behavior,
+usability proof, and supporting evidence before any steps. `plan-implement`
+consumes that verified artifact, publishes `implementation-tasks.md`, and
+advances one task only after an independent review accepts it. Declared
+dependencies are enforced for subset selection. Structured check evidence,
+run-attributable unexpected changes, and the primary-result grade are
+fail-closed; the terminal primary
+document is `workflow-summary.md`, while `implementation-report.md` remains
+supporting evidence. A repair verdict retries the same task once, and stable
 labels let `--resume` replay completed calls rather than applying them again.
 
 ## Ordered pipeline

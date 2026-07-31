@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { workflowRunDir } from "./workflow-run-layout.js";
 
 export interface WorkflowWorktreeInfo {
   id: string;
@@ -17,8 +18,7 @@ export interface WorkflowWorktreeOptions {
 
 export function createWorkflowWorktree(options: WorkflowWorktreeOptions): WorkflowWorktreeInfo {
   const repoRoot = resolveGitRepoRoot(options.projectRoot);
-  const baseDir =
-    options.baseDir ?? path.join(options.projectRoot, ".locus", "runtime", "workflows", options.runId, "worktrees");
+  const baseDir = options.baseDir ?? path.join(workflowRunDir(options.projectRoot, options.runId), "worktrees");
   mkdirSync(baseDir, { recursive: true });
   const id = safePathSegment(options.safeCallId);
   const target = path.join(baseDir, id);

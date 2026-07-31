@@ -39,10 +39,11 @@ export default async function runWorkflow(dsl, input) {
   const {
     agent,
     publishArtifact,
+    publishPrimaryArtifact,
     consumeTextArtifact,
     continuationArtifacts,
     awaitOperator,
-    runFilesDir,
+    runWorkspaceDir,
     phase,
     log,
     promptFile,
@@ -54,7 +55,7 @@ export default async function runWorkflow(dsl, input) {
   // imported modules have full host Node.js capabilities. Run reviewed files only.
   // `input` is absent or the exact bounded semantic text supplied by the caller.
   // Cross-run refs arrive separately through continuationArtifacts().
-  // The returned value is written to result.json as `result`.
+  // The returned value is written to runtime/result.json as `result`.
 }
 ```
 
@@ -119,7 +120,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   randomness call is not rejected — the AST scan simply marks the script
   unproven and refuses to record or replay it. Replay rules, refusal reasons, and
   the replayed-run marking are in the canonical doc.
-- **Read the result:** `.locus/runtime/workflows/<runId>/result.json`. Top-level
+- **Read the result:** `.pi/locus-pi/workflows/<runId>/runtime/result.json`. Top-level
   `disposition` is the operator lifecycle truth: `completed`,
   `awaiting_operator`, `cancelled`, or `failed`. Use
   `awaitOperator({ reason, operatorHandoff? })` immediately before a successful
@@ -152,26 +153,27 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   value or failure to persist this mandatory envelope is an infrastructure
   failure and makes the outer run `ok:false`; there is no successful
   result-unavailable or write-warning-only state.
-- **Write this run's files where they are findable:** `runFilesDir()` returns the
+- **Write this run's files where they are findable:** `runWorkspaceDir()` returns the
   absolute working directory of the current run,
-  `.locus/runtime/workflows/<runId>/files/`, created before your script starts.
+  `.pi/locus-pi/workflows/<runId>/workspace/`, created before your script starts.
   Every child agent's prompt opens by naming that same directory, so a file an
   agent writes as `plan.md` is on disk as `plan.md` — nothing renames, numbers or
   moves it, and a path you print in an `awaitOperator` question is a path the
   operator can open. A `readOnly` call is told where the directory is and is not
-  asked to create anything in it. Auto-captured material goes elsewhere on purpose: agent
-  answers, published texts and consumed inputs are projected into
-  `.locus/runtime/workflows/<runId>/logs/` — one document per artifact name
-  holding its newest revision, with the README recording write order and every
-  revision — and child transcripts (`.jsonl` plus an `.html` render) stay under
-  `artifacts/transcripts/`.
+  asked to create anything in it. Auto-captured answers and consumed inputs stay
+  under `runtime/artifacts/`. Only text the workflow deliberately publishes is
+  projected into `.pi/locus-pi/workflows/<runId>/outputs/` — one document per
+  artifact name holding its newest revision, with the README recording write
+  order and every revision. Child transcripts (`.jsonl` plus an `.html` render)
+  stay under `runtime/artifacts/transcripts/`.
 - **Keep evidence under the run owner:**
-  `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical
+  `.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json` is the canonical
   artifact inventory. Every `agent()` attempt automatically persists its exact
   answer and, for a fresh child session, its Pi transcript and result envelope.
   Use `agent(prompt, { artifact: "report.md" })` to give that answer a stable
-  name. Use `publishArtifact(name, text)` for deterministic workflow-authored
-  text. Agent-first cross-run calls attach complete digest-bound
+  name. Use `publishArtifact(name, text)` for a readable supporting document and
+  `publishPrimaryArtifact(name, text)` once for the semantic result. Agent-first
+  cross-run calls attach complete digest-bound
   `{ runId, artifactId, name, sha256 }` refs through the workflow tool's closed
   `continuation` control. The host verifies and copies every ref before the
   workflow module or any child starts; `continuationArtifacts()` exposes readonly
@@ -193,7 +195,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   with a letter or digit); text is limited to 2 MiB. Duplicate names are allowed,
   because `artifactId` is the identity; duplicate ids or destinations fail closed.
   The completed run envelope and model-callable workflow tool project the newest
-  20 answer/published refs and an explicit omitted count, so a later call can
+  20 published/primary refs and an explicit omitted count, so a later call can
   carry a real ref without guessing the index. The full index remains canonical.
 - **Treat groups as fail-closed full barriers:** `parallel()` / `pipeline()` wait
   for scheduled siblings, then reject `WorkflowGroupFailureError` when an

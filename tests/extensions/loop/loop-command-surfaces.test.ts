@@ -5,6 +5,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import loop from "../../../extensions/loop/index.js";
 import plan from "../../../extensions/plan/index.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 /**
@@ -20,14 +23,13 @@ import { createHarness, runTool } from "../../test-harness.js";
  */
 
 async function writeCompletedWorkflowRun(projectRoot: string, runId: string): Promise<void> {
-  const runDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId);
-  await mkdir(runDir, { recursive: true });
+  const runDir = ensureWorkflowRunDir(projectRoot, runId);
   await writeFile(
-    path.join(runDir, "journal.ndjson"),
+    workflowJournalFile(runDir),
     `${JSON.stringify({ ts: "2026-06-17T12:00:00.000Z", runId, kind: "phase", phase: "collect", message: "collect" })}\n`,
     "utf8",
   );
-  await writeFile(path.join(runDir, "result.json"), JSON.stringify({ ok: true }, null, 2), "utf8");
+  await writeFile(workflowResultFile(runDir), JSON.stringify({ ok: true }, null, 2), "utf8");
 }
 
 describe("loop command surfaces", () => {

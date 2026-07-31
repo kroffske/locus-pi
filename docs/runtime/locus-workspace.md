@@ -1,13 +1,18 @@
 # `.locus/` workspace contract
 
-`.locus/` is the project-local workspace for Locus runtime state and workflow
-artifacts. It is not part of the published package surface and must not change
-`package.json#pi.extensions`.
+`.locus/` is the project-local workspace for Locus planning, reports, and
+non-workflow runtime state. Pi extension workflow runs belong to the host-native
+`.pi/locus-pi/` namespace instead. Neither location is part of the published
+package surface or changes `package.json#pi.extensions`.
 
 ## Source truth
 
 - `package.json#pi.extensions` remains the default Pi extension source truth.
-- `.locus/runtime/**` stores generated runtime state for the current project.
+- `.locus/runtime/**` stores generated non-workflow runtime state for the current
+  project.
+- `.pi/locus-pi/workflows/<runId>/**` stores each workflow in three zones:
+  readable `outputs/`, deliberate agent `workspace/`, and machine-owned
+  `runtime/` state including journals, results, artifacts, resources, and snapshots.
 - `.locus/AGENTS.md` is the local registry for saved `.locus/**` files in this
   checkout. It must list real files, not template-only expectations.
 - `.tasks/**`, when present, remains project task truth. `.locus/runtime/artifacts/**` can feed `.tasks/**` only through explicit bridge logic.
@@ -16,6 +21,7 @@ artifacts. It is not part of the published package surface and must not change
 ## Expected runtime directories
 
 ```text
+.pi/locus-pi/workflows/  # workflow runs, one direct child directory per RunID
 .locus/runtime/artifacts/   # prompt-planning drafts, handoff artifacts, future structured artifacts
 .locus/runtime/reports/     # generated scratch reports, inventories, non-package research output
 .locus/runtime/runs/        # future agent run envelopes/results/transcripts
@@ -49,7 +55,9 @@ this checkout unless a later task creates them.
 ## Git/package policy
 
 - `.gitignore` ignores `.locus/` by default.
-- `package.json#files` must not include `.locus`.
+- `.gitignore` also ignores `.pi/`, including workflow runtime and project-local
+  workflow scripts.
+- `package.json#files` must not include either local state directory.
 - Generated files under `.locus/runtime/**` are local runtime artifacts, not manual docs.
 - If a generated report becomes release evidence, move or copy the curated artifact into `docs/evidence.md` or `docs/extension-gallery/` and cite the exact smoke command.
 - If `.locus/agents/` becomes canonical, keep `.agents/agents/**` as compatibility fallback until a separate agent-definition decision says otherwise.
@@ -57,6 +65,7 @@ this checkout unless a later task creates them.
 ## Current integration
 
 - `prompt-planning` writes approved prepared-task artifacts under `.locus/runtime/artifacts/*.json` when manually loaded.
+- `workflows` writes only under `.pi/locus-pi/workflows/<runId>/`.
 - `devext-doctor` reports `.locus` root, runtime subdirectories, and `.locus/agents` presence.
 - No default extension currently writes `.locus/runtime/runs/**` or `.locus/runtime/reviews/**`.
 

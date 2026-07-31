@@ -67,7 +67,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | Seam                                | Location                                                                                                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bounded concurrency                 | `extensions/workflows/runtime/workflow-runtime.ts` `runScheduled()`                                         | DONE. `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering; width bounds each `runScheduled` call, not globally, so nested fan-out used to multiply. The **global limiter** now exists: every run applies `DEFAULT_WORKFLOW_BUDGET.concurrency` to the leaf `AgentConcurrencyGate` (see "Run budget"). `SCHEDULER_WIDTH` tuning and worktree-isolated real concurrency remain a future scheduler task.                                                                                                                             |
-| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.locus/runtime/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                |
+| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.pi/locus-pi/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                  |
 | Trusted script execution            | `extensions/workflows/runtime/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
 | Owner-default agent + model routing | `extensions/workflows/runtime/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
 
@@ -75,14 +75,14 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ## Curated Package workflows
 
-| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `plan`               | **Task to accepted plan**: read-only throughout, and three agents declared in one `PLAN_AGENTS` roster. A `scout` maps the repository once, then a `planner`/`critic` pair loops: every round returns the complete plan and the critic returns shaped `accept`/`revise` with concrete defects the next round receives verbatim — and the critic also receives the previous round's defects, so each round ratchets toward closing them instead of relitigating the plan. The loop never pauses for an operator; an open choice is recorded under `## Assumptions` and an unstated one is a critic defect. Reaching `MAX_PLAN_ROUNDS` without an acceptance still ships no plan — instead of failing, the run retains `task.md`, `context.md`, the last `plan.md` and `unresolved-defects.md` and declares an operator handoff: answer `accept last draft` to take the retained draft on operator authority, or answer with guidance that a continuation run redrafts under, without re-scouting.                                                                                                                                                                                                                                                                                                                                      |
-| `plan-implement`     | **Accepted plan to reviewed changes**: semantic text plus host continuation supplies exactly one non-empty `plan.md` reference, which the host verifies and copies before workflow code starts. Deterministic code parses `### S<n>` blocks, validates the selected subset, restores plan order, and publishes `implementation-tasks.md`. Each selected task gets one write-capable implementer followed immediately by a shaped independent read-only review. `repair` permits one incremental attempt on the same task; `accept` advances the ledger; `blocked`, a failed call, or a second rejected attempt skips later tasks and returns `partial: true`. A final read-only grader accounts for every selected step in validated JSON; deterministic code combines it with the full ledger to render all plan rows in `implementation-report.md`, updates authoritative selected-task state, and derives disjoint completed/unresolved result rows. A `partial` grade triggers one bounded reconciliation of only the partial selected rows plus fresh checks and grading; a second partial or any blocked grade returns non-success. The grader applies only the operator request and accepted-plan criteria; inability to rerun an otherwise evidenced command is recorded as a check gap, not promoted into a new requirement. |
+| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                      |
+| `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                           |
+| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `plan`               | **Task to outcome-first accepted plan**: read-only throughout. A `scout` maps the repository, then a `planner`/`critic` loop defines one primary result before deriving steps: outcome type, consumer, form and location, required content or behavior, usability proof, and supporting evidence. The critic rejects plans whose steps can pass without producing that result, hidden meaning-changing assumptions, and both oversized steps and repeated mechanical one-item handoffs. The existing bounded round-cap handoff remains unchanged.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `plan-implement`     | **Accepted plan to verified primary result**: one host-verified continuation artifact, pasted plan text, or one text file supplies the plan. Deterministic code extracts only routing structure — one unambiguous `## Outcome`, `### S<n>` blocks, and `Depends on:` closure — restores selected plan order, and publishes `implementation-tasks.md`; agents own the plan's meaning and the final judgment. Each step gets one writer and independent reviewer. The final checker returns structured selected-step and repository command statuses; deterministic control flow refuses `complete` after any failed or unrun check, evidence gap, run-attributable unexpected change, or non-ready primary result. One bounded reconciliation may repair any terminal gap, including a missing result after all steps are done. The primary output is `workflow-summary.md`; `implementation-report.md` remains supporting per-step evidence. |
 
 `review` always receives a non-empty semantic string. A shaped read-only
 clarifier decides `continue` or `needs_operator`. Continue starts the five review
@@ -201,9 +201,10 @@ and private-forge evidence acquisition remains child-agent-owned. Prompt text an
 permission metadata are not a sandbox; resource, artifact, or child execution
 failure remains fail-closed.
 
-Runtime-owned Markdown is the human-facing evidence. Mandatory `result.json`
+Runtime-owned Markdown under `outputs/` is the human-facing evidence. Mandatory
+`runtime/result.json`
 remains the machine-readable run envelope, while
-`.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical map from
+`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
 These six names are what `extensions/workflows/examples/` currently holds, and
@@ -241,18 +242,31 @@ run — which re-running with the right source corrects.
 `scout`, `planner`, `critic` — carrying each agent's capabilities beside what it
 receives and returns, so the cast is readable without following the control flow.
 
+Every accepted plan starts with `## Outcome`. That section names the primary
+result and the evidence that makes it useful, so `plan-implement` carries the
+operator's intended result through every writer, check, and terminal grade. A
+technical completion report is supporting evidence unless the task explicitly
+asked for one.
+
 Planning never writes. Every `plan` stage passes `readOnly: true`; in
 `plan-implement` only the per-step writers hold `write`, `edit`, and `bash`, the
 selector holds no tools at all, and both the per-step reviewer and final checker
 add `repository_check` without edit tools. The workflow publishes a deterministic
 `implementation-tasks.md` snapshot after selection and after every review
 decision; stable attempt labels let `--resume` replay completed calls instead of
-applying accepted tasks again. `plan`'s one loop ends on a declared enum rather
+applying accepted tasks again. Structured check evidence feeds deterministic
+terminal validation: no failed or unrun observed check, evidence gap,
+run-attributable unexpected change, or missing primary result can be projected
+as complete. The final checker agent owns whether that result satisfies the
+accepted outcome. The primary terminal document is
+`workflow-summary.md`, which points to the result and its proof;
+`implementation-report.md` remains the detailed step record. `plan`'s one loop ends on a declared enum rather
 than on a scan of model prose, and the run journal records whether the critic or
 the round cap stopped it. The operator-clarification round it used to run first
 was removed on the same day: the loop no longer stops to ask, and an open decision
-is recorded by the planner as a stated assumption the critic judges. The round
-cap is the one operator pause left, added 2026-07-30: a stalled loop retains the
+is recorded as a stated assumption only when one interpretation is clearly
+safer; an ambiguity that changes the primary result prevents acceptance. The
+round cap is the one operator pause left, added 2026-07-30: a stalled loop retains the
 draft with its open defects and declares a handoff, so the operator accepts the
 last draft or steers a continuation with guidance instead of restarting from
 nothing.
@@ -378,14 +392,14 @@ JavaScript is not supported.
 Every finished-run surface is bounded on purpose: the chat digest caps a line at
 160 characters because it enters model context, and the live panel clips to the
 terminal width. So a run whose result **is** prose — a review, a plan, an answer —
-writes that text verbatim to `result.md` in its run directory, and both the digest
+writes that text verbatim to `outputs/workflow-result.md`, and both the digest
 and the panel name that file plus the command that opens it. `/workflows result`
 (alias `/workflow-result`) opens the full text in a scrollable read-only screen:
 `↑/↓` and PageUp/PageDown scroll, Home/End jump, Esc closes. A host without custom
 UI gets a bounded preview plus the exact path, which is the copy that is never
-truncated. Structured (non-text) results stay in `result.json`, which already
-pretty-prints them; a run recorded before `result.md` existed is recovered from the
-persisted envelope, so older runs still open.
+truncated. The native workflow tool's operator card also renders this exact text
+without clipping, while its model-facing content remains bounded. Structured
+(non-text) results stay in `runtime/result.json`, which already pretty-prints them.
 
 A run that ends badly and produced **no** prose result — a script returning a
 structured `{ ok: false }` is the common case — gets the same treatment against a
@@ -464,21 +478,25 @@ mounting. Pi exposes no global custom-UI lock for unrelated third-party
 extensions, so `/workflows` is the recovery path if another extension displaces
 the question.
 
-Every run is persisted to `.locus/runtime/workflows/<runId>/` (`journal.ndjson`
-while running, `result.json` when finished), so `status` works across sessions and
-after the fact.
+Every run is persisted to `.pi/locus-pi/workflows/<runId>/`. The runner creates
+the non-symlink `outputs/`, `workspace/`, and `runtime/` directories and writes
+the first `runtime/journal.ndjson` line before it
+announces the RunID; initialization failure announces no start and launches no
+child. The start surface reports the resolved run directory, which matters when
+the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
+the run finishes, so `status` works across sessions and after the fact.
 
 ### Persisted run artifacts and viewer
 
 The canonical artifact inventory is
-`.locus/runtime/workflows/<runId>/artifacts/index.json`. Every record includes a
+`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record includes a
 logical id/name, media type, byte size, relative path, stage, provenance, and
 SHA-256. Its portable identity is always the complete object
 `{ runId, artifactId, name, sha256 }`; a run id or path alone is not an artifact
 reference.
 
 Every `agent()` attempt receives a stable `call-<n>` identity before scheduling.
-The runtime persists the exact non-empty child text under `artifacts/answers/`.
+The runtime persists the exact non-empty child text under `runtime/artifacts/answers/`.
 A fresh child session must also export a Pi session transcript under
 `artifacts/transcripts/<callId>/` and a JSON result envelope under
 `artifacts/results/<callId>/`; missing evidence makes the call fail before its
@@ -486,14 +504,17 @@ terminal `agent_end` is emitted. A replayed call writes a new answer record with
 `provenance: "replay"` and its source run id, but invents no transcript or result
 envelope because no child ran.
 
-Authors can add or connect deterministic text evidence through three surfaces:
+Authors can add or connect deterministic text evidence through four surfaces:
 
 - `publishArtifact(name, text)` writes bounded workflow-authored Markdown under
-  `artifacts/published/` and returns its full reference.
+  `runtime/artifacts/published/`, projects it into `outputs/`, and returns its
+  full reference.
+- `publishPrimaryArtifact(name, text)` does the same while explicitly declaring
+  the run's one primary semantic document. A second declaration fails closed.
 - `consumeTextArtifact(ref)` accepts only a full prior-run reference, requires the
   source run to have `ok:true`, requires the exact ref in its terminal
   `artifactRefs` projection, verifies index identity, media type, size, digest,
-  path confinement, and bytes, then copies them under `artifacts/inputs/` with
+  path confinement, and bytes, then copies them under `runtime/artifacts/inputs/` with
   the original reference recorded as lineage. Self-reference is refused.
 - `agent(prompt, { artifact: "report.md" })` names the automatic answer artifact.
   Without `artifact`, the runtime derives a safe name from the label or agent.
@@ -514,15 +535,15 @@ The artifact index is single-owner and append-only during a run. External index
 changes, duplicate identities, symlink escapes, unsafe names, oversized text,
 tampered bytes, or malformed transcript headers fail closed.
 The same owner resolves the project root and rejects symlinks in every ancestor
-through `.locus/runtime/workflows/<runId>` before any artifact read, write, or
+through `.pi/locus-pi/workflows/<runId>` before any artifact read, write, or
 consume, preventing a redirected canonical root.
 
-At run completion, `result.json` and the model-callable `workflow` tool project
-up to the newest 20 reader-facing answer/published refs as `artifactRefs`; an
+At run completion, `runtime/result.json` and the model-callable `workflow` tool project
+up to the newest 20 explicitly published/primary refs as `artifactRefs`; an
 `artifactRefsOmitted` count makes truncation explicit. Each projected item is the
 same complete `{runId, artifactId, name, sha256}` identity verified by the index.
 This bounded projection is the handoff for a later workflow; the full inventory
-remains in `artifacts/index.json` for inspection only. The caller must use a
+remains in `runtime/artifacts/index.json` for inspection only. The caller must use a
 terminally projected ref, not infer an id from a logical filename or consume an
 index-only record.
 
@@ -874,7 +895,7 @@ working model in a scratch project so child agents actually spawn:
    ```
 3. Verify it actually spawned child agents — don't trust the chat summary, read the journal:
    ```
-   cat .test_pi/.locus/runtime/workflows/<runId>/result.json
+   cat .test_pi/.pi/locus-pi/workflows/<runId>/runtime/result.json
    ```
    A real run shows `agent_end` events with `status: "completed"` and a non-empty
    `childSessions.*` session id. If the host cannot spawn a child, the run fails closed
@@ -986,7 +1007,7 @@ The diagram is an ownership map, not a decorative code trace:
   end the run: an operator pause with `disposition: awaiting_operator`, a
   fail-closed stop, and the terminal result a later run may consume.
 - Draw each persisted artifact under the exact name the code publishes it with,
-  so the picture and `.locus/runtime/workflows/<runId>/artifacts/` agree.
+  so the picture and `.pi/locus-pi/workflows/<runId>/runtime/artifacts/` agree.
 - Include a legend explaining every visual type used.
 
 Keep the file self-contained and diffable: no `<script>`, no embedded or remote
@@ -1187,12 +1208,13 @@ the package surface remains `./extensions/workflows/index.ts`.
 agent(prompt, opts?)          // Run a catalog/local agent; returns exact child text
 agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
+publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
 projectRoot()                 // Absolute launch project root
-runFilesDir()                 // Absolute working directory for this run's files; agent file names kept verbatim
+runWorkspaceDir()             // Absolute working directory for this run; agent file names kept verbatim
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
 phase(name)                   // Progress grouping + journal line
@@ -1223,15 +1245,15 @@ Those questions stay in their run's evidence and reopen on request: bare
 `/workflows` takes the oldest pending one project-wide, `/workflow-continue
 <runId>` takes a named run.
 
-`runFilesDir()` is the absolute path of this run's working directory
-(`.locus/runtime/workflows/<runId>/files/`), created before the script starts.
+`runWorkspaceDir()` is the absolute path of this run's working directory
+(`.pi/locus-pi/workflows/<runId>/workspace/`), created before the script starts.
 Every child agent's prompt opens by naming the same directory and telling it to
 create the run's files there under their exact names; a `readOnly` call is told
 where the directory is and is not asked to create anything in it. Nothing in the
 runtime renames, numbers or moves what an agent writes, so a path a workflow
-prints in a question is a path that exists. Auto-captured material — agent answers,
-published texts, transcripts — goes to the run's `logs/` and `artifacts/`
-directories instead; see `docs/runtime/workflow-run-storage.md`.
+prints in a question is a path that exists. Auto-captured readable material goes
+to `outputs/`; machine evidence and transcripts go to `runtime/artifacts/`.
+See `docs/runtime/workflow-run-storage.md`.
 
 `now()` and `random()` exist so a workflow can be nondeterministic AND replayable.
 They return exactly what `Date.now()` / `Math.random()` would, and the runtime
@@ -1422,7 +1444,7 @@ the attempt **threw** instead of answering — both carrying `attempt`, `attempt
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
 `[workflow:retry]` line names the boundary between attempts, and the run's journal folder
-`.locus/runtime/workflows/<runId>/logs/` grows a `## Retried agent calls` section listing every attempt by
+`.pi/locus-pi/workflows/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
 `callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
@@ -1704,7 +1726,7 @@ package values. Giving scripts a run-level surface means deciding where
 operator-changeable knobs live, which is an open owner decision.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.locus/runtime/workflows/<runId>/logs/README.md` carries a `## Budget` section
+applied budget, and `.pi/locus-pi/workflows/<runId>/outputs/README.md` carries a `## Budget` section
 with each axis, its applied value, and the spend the run evidence can measure:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
@@ -1791,7 +1813,7 @@ hard cap.
   `workflow`, and unknown tools are removed. `git_read` accepts argv for
   allowlisted Git queries and rejects mutation, output-file, external-diff,
   textconv, pager, signature, and config options before launch.
-- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus/runtime/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
+- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.pi/locus-pi/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
   The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
@@ -1962,21 +1984,24 @@ A replayed call reports **no** token usage, so the run budget shown by
 ## Journal layout
 
 ```
-.locus/runtime/workflows/<runId>/
-  script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
-  journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
+.pi/locus-pi/workflows/<runId>/
+  outputs/           — README, semantic documents, exact workflow-result.md prose
+  workspace/         — files deliberately written by workflow agents
+  runtime/
+    script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
+    journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
                       kinds: phase | log | agent_start | agent_end |
                              group_start | group_end | error
-  replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
+    replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
                       absent for scripts that are not replay-safe (see "Resume and replay")
-  result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
-  artifacts/
-    index.json       — Canonical digest-bound inventory for this run
-    answers/         — Exact automatic agent answers
-    transcripts/     — Fresh child Pi session JSONL, grouped by call id
-    results/         — Fresh child result envelopes, grouped by call id
-    published/       — Text written through publishArtifact()
-    inputs/          — Verified copies consumed from prior runs, with source refs
+    result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
+    artifacts/
+      index.json       — Canonical digest-bound inventory for this run
+      answers/         — Exact automatic agent answers
+      transcripts/     — Fresh child Pi session JSONL, grouped by call id
+      results/         — Fresh child result envelopes, grouped by call id
+      published/       — Text written through publishArtifact()/publishPrimaryArtifact()
+      inputs/          — Verified copies consumed from prior runs, with source refs
 ```
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —

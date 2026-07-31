@@ -5,6 +5,12 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowArtifactStore } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  workflowJournalFile,
+  workflowRunArtifactsDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { WorkflowRunViewer } from "../../../extensions/workflows/run-viewer.js";
 import { createHarness } from "../../test-harness.js";
@@ -56,11 +62,14 @@ describe("workflow persisted evidence viewer", () => {
     const runId = "20260722-010102-ab12";
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "trusted answer" }]);
     const index = JSON.parse(
-      readFileSync(path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", "index.json"), "utf8"),
+      readFileSync(
+        path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)), "index.json"),
+        "utf8",
+      ),
     ) as { artifacts: Array<{ kind: string; relativePath: string }> };
     const answer = index.artifacts.find((record) => record.kind === "answer")!;
     writeFileSync(
-      path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", answer.relativePath),
+      path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)), answer.relativePath),
       "changed after indexing",
       "utf8",
     );
@@ -94,7 +103,10 @@ describe("workflow persisted evidence viewer", () => {
     );
     viewer.handleInput("enter");
 
-    const indexPath = path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", "index.json");
+    const indexPath = path.join(
+      workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)),
+      "index.json",
+    );
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ kind: string; name: string }>;
     };
@@ -112,7 +124,7 @@ describe("workflow persisted evidence viewer", () => {
     const runId = "20260722-010108-ab12";
     const runDir = writeJournal(root, runId, [journal(runId, "phase", { phase: "inspect" })]);
     writeFileSync(
-      path.join(runDir, "journal.ndjson"),
+      workflowJournalFile(runDir),
       [
         JSON.stringify(journal(runId, "phase", { phase: "inspect" })),
         "{not-json",
@@ -204,7 +216,7 @@ describe("workflow persisted evidence viewer", () => {
       const runId = malformed ? "20260722-010104-ab12" : "20260722-010103-ab12";
       const runDir = writeJournal(root, runId, [journal(runId, "phase", { phase: "inspect" })]);
       if (malformed) {
-        const artifactsDir = path.join(runDir, "artifacts");
+        const artifactsDir = workflowRunArtifactsDir(runDir);
         mkdirSync(artifactsDir, { recursive: true });
         writeFileSync(path.join(artifactsDir, "index.json"), "{not-json", "utf8");
       }
@@ -358,14 +370,9 @@ function createEvidenceRun(
 }
 
 function writeJournal(root: string, runId: string, lines: Array<Record<string, unknown>>): string {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(
-    path.join(runDir, "journal.ndjson"),
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
-    "utf8",
-  );
-  writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify({ runId, ok: true, result: "done" })}\n`, "utf8");
+  const runDir = ensureWorkflowRunDir(root, runId);
+  writeFileSync(workflowJournalFile(runDir), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+  writeFileSync(workflowResultFile(runDir), `${JSON.stringify({ runId, ok: true, result: "done" })}\n`, "utf8");
   return runDir;
 }
 

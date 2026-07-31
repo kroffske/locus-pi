@@ -158,7 +158,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   mismatch, records actual fresh attempts, and mirrors the outcome to terminal
   journal lines; it is protocol accounting, not a domain-quality verdict.
 - `extensions/workflows/runtime/workflow-artifacts.ts` owns the canonical per-run artifact
-  store at `.locus/runtime/workflows/<runId>/artifacts/index.json`. Every record
+  store at `.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record
   binds `{runId, artifactId, name, sha256}` to media type, size, relative path,
   stage, provenance, and optional source lineage. It assigns confined
   answer/transcript/result, published, and consumed-input destinations; verifies
@@ -169,7 +169,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   prior run's terminal artifact projection, verifies and copies the source
   bytes, and records the original ref. An index-only record is not consumable.
   The confinement check starts at the physical project root and rejects a
-  symlink in any `.locus/runtime/workflows/<runId>` ancestor before read, write,
+  symlink in any `.pi/locus-pi/workflows/<runId>` ancestor before read, write,
   or consume. It also returns the verified source workflow target, source
   artifact kind/stage, structured terminal result, and terminal artifact refs so
   compositions can bind a handoff to the producer's result rather than mutable
@@ -178,9 +178,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
   evidence owner has settled: controlling abort, failure, declared operator
   handoff, then completion. It persists closed cancellation reasons and a
   runtime cancellation journal line, so trusted script catches cannot turn an
-  aborted run green. It also projects the newest 20 answer and
-  workflow-published refs into the persisted run envelope, with an explicit
-  omitted count. `extensions/workflows/workflow-tool.ts` copies the same bounded list
+  aborted run green. It also projects the newest 20 explicitly published or
+  primary refs into the persisted run envelope, with an explicit omitted count.
+  `extensions/workflows/workflow-tool.ts` copies the same bounded list
   into native workflow tool details and text so the calling model can pass a
   complete ref to a later run without inventing an artifact id. The canonical
   full inventory remains the per-run artifact index.
@@ -359,16 +359,19 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `unresolved-defects.md`) and declares an operator handoff — `accept last draft`
   takes the retained draft on operator authority, any other answer is guidance a
   continuation redrafts under without re-scouting. An unaccepted draft still
-  reaches implementation only through an explicit operator decision. `plan-implement` accepts semantic text plus host
-  continuation containing one complete `plan.md` ref, and reads the bytes the host
-  already verified and copied — at any length — rather than re-deriving that proof
-  or capping a plan somebody has already accepted. Deterministic code parses `### S<n>` blocks, a no-tool
+  reaches implementation only through an explicit operator decision.
+  `plan-implement` accepts one host continuation artifact regardless of
+  filename, pasted plan text, or one file path. Continuation bytes stay
+  uncapped; deterministic script code passes multiline input through as plan
+  text or reads the named text file, then extracts only the Outcome routing
+  fields and `### S<n>` blocks. Agents own their meaning. A no-tool
   selector chooses the steps, the plan's own order is restored, and one
   write-capable session owns each step in the launch checkout. A read-only
   checker and a fresh reporter
   follow; a failed writer skips the remaining steps and the run returns
-  `partial: true`. Both entries import nothing and retain
-  `self-contained-static` identity.
+  `partial: true`. Both entries retain `self-contained-static` identity; the
+  implementation entry uses only static Node.js built-ins for its direct file
+  input.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner

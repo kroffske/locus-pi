@@ -16,6 +16,7 @@ import {
   type WorkflowBudget,
 } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS,
   DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
@@ -278,7 +279,7 @@ async function runSaved(
  * regression that emitted the line into the mirror alone would fail.
  */
 function persistedJournal(runDir: string): WorkflowJournalLine[] {
-  return readFileSync(path.join(runDir, "journal.ndjson"), "utf8")
+  return readFileSync(workflowJournalFile(runDir), "utf8")
     .split("\n")
     .filter((row) => row.trim() !== "")
     .map((row) => JSON.parse(row) as WorkflowJournalLine);

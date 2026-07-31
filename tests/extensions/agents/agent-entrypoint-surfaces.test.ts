@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
@@ -133,8 +135,7 @@ describe("bounded agents text widget", () => {
 
 describe("drill rounds submenu", () => {
   function writeRoundsJournal(root: string, runId: string, slotKey: string): void {
-    const runDir = workflowRunDir(root, runId);
-    mkdirSync(runDir, { recursive: true });
+    const runDir = ensureWorkflowRunDir(root, runId);
     const lines = [
       { ts: "1", runId, kind: "agent_start", agent: "reviewer", label: "verify fix", phase: "verify", slotKey },
       {
@@ -162,11 +163,7 @@ describe("drill rounds submenu", () => {
         durationMs: 900,
       },
     ];
-    writeFileSync(
-      path.join(runDir, "journal.ndjson"),
-      `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
-      "utf8",
-    );
+    writeFileSync(workflowJournalFile(runDir), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
   }
 
   it("offers the journal rounds for a slotted workflow row", async () => {

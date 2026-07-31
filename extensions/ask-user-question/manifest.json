@@ -1,6 +1,10 @@
 {
   "id": "ask-user-question",
   "name": "ask-user-question",
+  "agent": {
+    "name": "extension-ask-user-question",
+    "description": "Handle human-in-the-loop ask prompts, including the legacy askUserQuestion alias."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

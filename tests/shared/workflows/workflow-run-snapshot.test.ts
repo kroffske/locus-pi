@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readWorkflowRunScriptSnapshot } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { workflowRunRuntimeDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 
 const roots: string[] = [];
 
@@ -35,9 +37,9 @@ describe("persisted workflow run source snapshot", () => {
     const root = temporaryRoot();
     const runId = "20260713-010102-legacy";
     const runDir = workflowRunDirectory(root, runId);
-    mkdirSync(runDir, { recursive: true });
+    mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
     writeFileSync(
-      path.join(runDir, "result.json"),
+      workflowResultFile(runDir),
       JSON.stringify({
         target: { kind: "name", ref: "alpha", source: "project" },
       }),
@@ -53,7 +55,7 @@ describe("persisted workflow run source snapshot", () => {
   it("reports malformed persisted snapshot identity as invalid rather than legacy", () => {
     const fixture = writeSnapshotRun("20260713-010102-invalid-identity", "invalid identity\n");
     writeFileSync(
-      path.join(fixture.runDir, "result.json"),
+      workflowResultFile(fixture.runDir),
       JSON.stringify({
         target: { kind: "name", ref: "alpha", source: "project" },
         scriptIdentity: { snapshotPath: fixture.snapshotPath, scriptSha256: "wrong" },
@@ -87,15 +89,24 @@ describe("persisted workflow run source snapshot", () => {
   it("rejects a symlinked ancestor below the project root", () => {
     const root = temporaryRoot();
     const external = temporaryRoot();
-    mkdirSync(path.join(root, ".locus"), { recursive: true });
-    symlinkSync(external, path.join(root, ".locus", "runtime"));
+    mkdirSync(path.join(root, ".pi"), { recursive: true });
+    symlinkSync(external, path.join(root, ".pi", "locus-pi"));
     const runId = "20260713-010105-ancestor-link";
     const source = "ancestor symlink\n";
     const sha256 = digest(source);
     const externalRunDir = path.join(external, "workflows", runId);
     mkdirSync(externalRunDir, { recursive: true });
-    const snapshotPath = path.join(root, ".locus", "runtime", "workflows", runId, `script-${sha256}.workflow.mjs`);
-    writeFileSync(path.join(externalRunDir, path.basename(snapshotPath)), source);
+    const snapshotPath = path.join(
+      root,
+      ".pi",
+      "locus-pi",
+      "workflows",
+      runId,
+      "runtime",
+      `script-${sha256}.workflow.mjs`,
+    );
+    mkdirSync(path.dirname(path.join(externalRunDir, "runtime", path.basename(snapshotPath))), { recursive: true });
+    writeFileSync(path.join(externalRunDir, "runtime", path.basename(snapshotPath)), source);
     writeResult(externalRunDir, snapshotPath, sha256);
 
     expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({ kind: "invalid" });
@@ -106,7 +117,7 @@ describe("persisted workflow run source snapshot", () => {
     const wrongPath = path.join(path.dirname(fixture.snapshotPath), "snapshot.workflow.mjs");
     rmSync(fixture.snapshotPath);
     writeFileSync(wrongPath, fixture.source);
-    writeResult(path.dirname(wrongPath), wrongPath, fixture.sha256);
+    writeResult(fixture.runDir, wrongPath, fixture.sha256);
 
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
   });
@@ -134,8 +145,8 @@ function writeSnapshotRun(runId: string, source: string) {
   const root = temporaryRoot();
   const runDir = workflowRunDirectory(root, runId);
   const sha256 = digest(source);
-  const snapshotPath = path.join(runDir, `script-${sha256}.workflow.mjs`);
-  mkdirSync(runDir, { recursive: true });
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${sha256}.workflow.mjs`);
+  mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
   writeFileSync(snapshotPath, source);
   writeResult(runDir, snapshotPath, sha256);
   return { root, runId, runDir, source, sha256, snapshotPath };
@@ -143,7 +154,7 @@ function writeSnapshotRun(runId: string, source: string) {
 
 function writeResult(runDir: string, snapshotPath: string, sha256: string): void {
   writeFileSync(
-    path.join(runDir, "result.json"),
+    workflowResultFile(runDir),
     JSON.stringify({
       ok: true,
       target: { kind: "name", ref: "alpha", source: "project" },
@@ -166,7 +177,7 @@ function writeResult(runDir: string, snapshotPath: string, sha256: string): void
 }
 
 function workflowRunDirectory(root: string, runId: string): string {
-  return path.join(root, ".locus", "runtime", "workflows", runId);
+  return path.join(root, ".pi", "locus-pi", "workflows", runId);
 }
 
 function temporaryRoot(): string {

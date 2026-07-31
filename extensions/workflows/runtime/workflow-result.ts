@@ -6,8 +6,13 @@
  * projection, bounded raw detail, and result.json persistence.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import {
+  ensureWorkflowDirectoryNoSymlink,
+  workflowRunOutputsDir,
+  workflowRunRuntimeDir,
+  writeWorkflowRunFile,
+} from "./workflow-run-layout.js";
 
 export const WORKFLOW_RESULT_NOT_JSON_SAFE = "WORKFLOW_RESULT_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE = "WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE";
@@ -57,16 +62,17 @@ type JsonSerialization = { ok: true; json: string } | { ok: false; message: stri
  * caps a line at 160 characters because it enters model context, and the
  * progress panel clips to the terminal width. A run whose result IS prose — a
  * review, a plan, an answer — therefore had no readable copy anywhere except a
- * one-line JSON string inside result.json. This file is that readable copy, and
+ * one-line JSON string inside `runtime/result.json`. This file is that readable
+ * copy under `outputs/`, and
  * it is what `/workflows result` opens.
  */
 export function workflowResultTextFile(runDir: string): string {
-  return path.join(runDir, "result.md");
+  return path.join(workflowRunOutputsDir(runDir), "workflow-result.md");
 }
 
 /**
  * The verbatim text of a terminal result, or undefined when the result is not
- * text. A structured result is left to result.json, which already pretty-prints
+ * text. A structured result is left to `runtime/result.json`, which already pretty-prints
  * it; inventing a prose rendering for it would be a guess, not evidence.
  */
 export function workflowResultText(result: unknown): string | undefined {
@@ -74,14 +80,14 @@ export function workflowResultText(result: unknown): string | undefined {
   return result.trim() === "" ? undefined : result;
 }
 
-/** Best-effort: a failed write costs the convenience file, never the run. */
+/** Return undefined on write failure; the runner promotes that to failed finalization. */
 export function writeWorkflowResultText(runDir: string, result: unknown): string | undefined {
   const text = workflowResultText(result);
   if (text === undefined) return undefined;
   const resultTextPath = workflowResultTextFile(runDir);
   try {
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(resultTextPath, text.endsWith("\n") ? text : `${text}\n`, "utf8");
+    ensureWorkflowDirectoryNoSymlink(runDir, path.dirname(resultTextPath));
+    writeWorkflowRunFile(runDir, resultTextPath, text.endsWith("\n") ? text : `${text}\n`);
     return resultTextPath;
   } catch {
     return undefined;
@@ -89,7 +95,7 @@ export function writeWorkflowResultText(runDir: string, result: unknown): string
 }
 
 export function workflowResultFile(runDir: string): string {
-  return path.join(runDir, "result.json");
+  return path.join(workflowRunRuntimeDir(runDir), "result.json");
 }
 
 /**
@@ -218,8 +224,8 @@ export function writeWorkflowResultJson(runDir: string, payload: unknown): Workf
     };
   }
   try {
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(resultPath, `${serialized.json}\n`, "utf8");
+    ensureWorkflowDirectoryNoSymlink(runDir, path.dirname(resultPath));
+    writeWorkflowRunFile(runDir, resultPath, `${serialized.json}\n`);
     return { ok: true, path: resultPath };
   } catch (error) {
     return {

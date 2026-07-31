@@ -33,6 +33,7 @@ interface PublishedArtifact {
   ref: WorkflowArtifactRef;
   text: string;
   stage?: string;
+  kind?: "published" | "primary";
 }
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
@@ -102,9 +103,9 @@ function runtimeWith(
       answers.push({ ref, text: input.text, ...(input.stage === undefined ? {} : { stage: input.stage }) });
       return { answer: ref };
     },
-    publishText(name, text, stage) {
+    publishText(name, text, stage, kind = "published") {
       const ref = priorRef(runId, `published-${published.length + 1}`, name, text);
-      published.push({ ref, text, ...(stage === undefined ? {} : { stage }) });
+      published.push({ ref, text, kind, ...(stage === undefined ? {} : { stage }) });
       return ref;
     },
     consumeText(ref) {
@@ -160,8 +161,14 @@ function stalledPlanContinuation(
 
 const PLAN_DRAFT = [
   "# Implementation Plan",
-  "## Goal",
-  "The offset advances.",
+  "## Outcome",
+  "Outcome type: working delivery",
+  "Primary result: Pagination advances past the first page.",
+  "Consumer: Callers of the pagination API.",
+  "Form and location: `src/page.ts` runtime behavior.",
+  "Required content or behavior: The offset advances by the configured page size.",
+  "Usability proof: `npm test -- page` passes the multi-page behavior case.",
+  "Supporting evidence: implementation report and test output.",
   "",
   "## Assumptions",
   "- Assumed the caller owns the offset, because `loadPage` reads it; wrong if the store owns it.",
@@ -184,6 +191,18 @@ const PLAN_DRAFT = [
 const SCOUT_CONTEXT = "# Task Context\n## Existing behavior\n- `src/page.ts` — paginates.";
 
 describe("workflow example: plan.workflow.mjs", () => {
+  it("allows one explicit primary document and rejects a second declaration", () => {
+    const { dsl, published } = runtimeWith(async () => {
+      throw new Error("no child expected");
+    });
+
+    const ref = dsl.publishPrimaryArtifact("plan.md", PLAN_DRAFT);
+
+    expect(ref.name).toBe("plan.md");
+    expect(published).toMatchObject([{ text: PLAN_DRAFT, kind: "primary" }]);
+    expect(() => dsl.publishPrimaryArtifact("other.md", "other")).toThrow(/already published its primary output/u);
+  });
+
   it("routes every planning stage through the agent tier and names no provider", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -286,11 +305,11 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(source).toContain("\n## Assumptions\n- Assumed X, because Y; wrong if Z.");
     expect(prose).toContain('in the exact form "assumed X, because Y; wrong if Z"');
 
-    expect(prose).toContain("a decision the plan depends on but never states — an unstated assumption is a defect");
+    expect(prose).toContain("a decision the plan depends on but never states — especially an ambiguity");
     expect(prose).toContain("while a choice recorded under \\`## Assumptions\\` with its reason is not");
   });
 
-  it("tells both roles that a step is one changed thing, verified by a command", () => {
+  it("makes the primary user result the source of the steps and verification", () => {
     // Three failures from one live run on 2026-07-28, each addressed on both
     // sides so the critic can refuse what the planner is told not to write: a
     // plan whose first "step" only read nine files, a second step that wrote
@@ -301,25 +320,21 @@ describe("workflow example: plan.workflow.mjs", () => {
 
     expect(prose).toContain("Every step changes the repository.");
     expect(prose).toContain("a step that changes nothing");
-    expect(prose).toContain("give each one its own step");
-    expect(prose).toContain("one step covering more than one of them is exactly that");
+    expect(prose).toContain("Start with the result, not the edits.");
+    expect(prose).toContain("Name one primary result.");
+    expect(prose).toContain("the named primary result is only a list of completed steps");
+    expect(prose).toContain("the steps can all pass without producing the primary result");
     expect(prose).toContain("one command a later agent can rerun without a human");
     expect(prose).toContain("a step block missing any of the mandatory");
   });
 
-  it("tells both roles that a shared destination file does not justify one step", () => {
-    // The 2026-07-28 rerun on the same local model closed the previous gap and
-    // opened this one: the plan collapsed to a single step for all three
-    // sections, and the critic's own reasoning excused it because the task said
-    // "in one new file". The exemption for work that cannot be done apart is
-    // real, but a shared destination is not an instance of it, so both sides are
-    // told what does not count.
+  it("groups repetitive work unless distinct decisions, risks, or proof require a split", () => {
     const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
 
-    expect(prose).toContain("One destination is not such a reason.");
-    expect(prose).toContain("the shared file says where the work goes, not that it is one job");
-    expect(prose).toContain("That they share one destination file is not such a reason");
-    expect(prose).toContain("a shared file states where the work goes, not that it is one job");
+    expect(prose).toContain("group repetitive work when it shares one decision");
+    expect(prose).toContain("different behavior, risk, ownership, dependencies, or proof");
+    expect(prose).toContain("several steps that repeat the same mechanical change");
+    expect(prose).toContain("multiplying implementer and reviewer handoffs");
   });
 
   it("tells both roles that a closing verification step is a step that changes nothing", () => {
@@ -362,8 +377,9 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(calls.map((call) => call.phase)).toEqual(["scout-repository", "draft-plan", "critique-plan"]);
     expect(calls[1]?.prompt).toContain(SCOUT_CONTEXT);
     expect(calls[2]?.prompt).toContain(PLAN_DRAFT);
-    expect(published.map((item) => item.ref.name)).toEqual(["task.md"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["task.md", "plan.md"]);
     expect(published[0]?.text).toBe(task);
+    expect(published[1]).toMatchObject({ text: PLAN_DRAFT, kind: "primary" });
     expect(answers.map((item) => item.ref.name)).toEqual(["context.md", "plan.md", "plan-critique.json"]);
   });
 
@@ -523,7 +539,7 @@ describe("workflow example: plan.workflow.mjs", () => {
       "planner round 1": guided,
       "critic round 1": '{"verdict":"accept","defects":[]}',
     };
-    const { dsl } = runtimeWith(
+    const { dsl, published } = runtimeWith(
       async (request) => {
         calls.push(request);
         return completed(request, outputs[request.label!]!);
@@ -533,6 +549,10 @@ describe("workflow example: plan.workflow.mjs", () => {
     const guidance = "Keep S1 but do the change behind the existing feature flag; the verify command is fine as is.";
 
     expect(await runWorkflow(dsl, guidance)).toBe(guided);
+    expect(published.map((item) => ({ name: item.ref.name, stage: item.stage }))).toEqual([
+      { name: "task.md", stage: "publish-plan" },
+      { name: "plan.md", stage: "publish-plan" },
+    ]);
     // No scout: the retained context is the map, and the loop restarts at round 1.
     expect(calls.map((call) => call.label)).toEqual(["planner round 1", "critic round 1"]);
     const planner = calls[0]!;
@@ -660,13 +680,9 @@ describe("workflow example: plan.workflow.mjs", () => {
     }
   });
 
-  it("keeps its handoff refs inside the terminal projection even when the critic is re-asked all round", async () => {
-    // The projection keeps only the newest 20 answer+published outputs, and a
-    // schema re-ask writes an answer artifact per ATTEMPT — so a run whose critic
-    // needs its extra attempts produces far more outputs than its round count
-    // suggests. When the task ref was published once at the start, that was
-    // enough to evict it, and the run died on its very last step with a message
-    // about artifact projection after paying for every round.
+  it("keeps handoff refs in the terminal projection while re-asked answers stay runtime-only", async () => {
+    // Schema re-asks still write exact answer evidence per attempt, but only
+    // deliberate publications enter the terminal handoff projection.
     const root = mkdtempSync(path.join(tmpdir(), "locus-plan-projection-"));
     try {
       mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
@@ -707,8 +723,9 @@ describe("workflow example: plan.workflow.mjs", () => {
 
       expect(stalled.ok, stalled.error).toBe(true);
       expect(stalled.disposition).toMatchObject({ status: "awaiting_operator" });
-      // The run really did overflow the window — otherwise this proves nothing.
-      expect(stalled.artifactRefsOmitted ?? 0).toBeGreaterThan(0);
+      // Automatic child answers stay runtime-only, so the terminal projection
+      // contains the deliberate handoff publications without window pressure.
+      expect(stalled.artifactRefsOmitted ?? 0).toBe(0);
       const refs = stalled.operatorHandoff?.continuationArtifactRefs ?? [];
       expect(refs.map((ref) => ref.name)).toEqual(["task.md", "context.md", "plan.md", "unresolved-defects.md"]);
       // And the operator can actually act on it: the continuation is accepted by

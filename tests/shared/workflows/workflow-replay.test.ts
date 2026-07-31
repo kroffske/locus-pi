@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { WORKFLOW_RUN_FILES_PROMPT_SEPARATOR } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
+import { WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { DEFAULT_WORKFLOW_BUDGET } from "../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   createWorkflowReplayController,
@@ -85,8 +88,8 @@ function digestFor(root: string, outcome: RunOutcome): string {
 
 /** The workflow's own prompt, without the run working-directory note the bridge prepends. */
 function workflowPrompt(task: string): string {
-  const at = task.indexOf(WORKFLOW_RUN_FILES_PROMPT_SEPARATOR);
-  return at === -1 ? task : task.slice(at + WORKFLOW_RUN_FILES_PROMPT_SEPARATOR.length);
+  const at = task.indexOf(WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR);
+  return at === -1 ? task : task.slice(at + WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR.length);
 }
 
 /**
@@ -212,9 +215,9 @@ export default async function runWorkflow(dsl) {
 describe("workflow --resume replays recorded agent calls", () => {
   it("projects an unreadable persisted result envelope as unknown", () => {
     const root = temporaryProject();
-    const runDir = path.join(root, ".locus", "runtime", "workflows", "corrupt-result");
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(path.join(runDir, "result.json"), "{not-json", "utf8");
+    const runDir = path.join(root, ".pi", "locus-pi", "workflows", "corrupt-result");
+    ensureWorkflowRunDir(root, "corrupt-result");
+    writeFileSync(workflowResultFile(runDir), "{not-json", "utf8");
 
     expect(readWorkflowRunSummary(root, "corrupt-result").status).toBe("unknown");
   });
@@ -380,7 +383,7 @@ export default async function runWorkflow(dsl) {
     const first = await runWorkflow(root, "unsafe");
     expect(first.ok).toBe(true);
     expect(first.replay).toMatchObject({ recorded: false, notRecordedReason: "replay-unsafe-script" });
-    expect(existsSync(path.join(first.runDir, "replay.ndjson"))).toBe(false);
+    expect(existsSync(workflowReplayFile(first.runDir))).toBe(false);
 
     const resumed = await runWorkflow(root, "unsafe", { resumeFromRunId: first.runId });
     expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "replay-unsafe-script" });
@@ -397,7 +400,7 @@ export default async function runWorkflow(dsl) {
 
     // The run id still resolves (journal.ndjson survives), so this is reached
     // rather than the hard "source run not found" error raised earlier.
-    rmSync(path.join(first.runDir, "result.json"));
+    rmSync(workflowResultFile(first.runDir));
     const resumed = await runWorkflow(root, "stages", { input: "alpha", resumeFromRunId: first.runId });
 
     expect(resumed.ok).toBe(true);
@@ -427,7 +430,7 @@ export default async function runWorkflow(dsl) {
     const first = await runWorkflow(root, "modular");
     expect(first.ok).toBe(true);
     expect(first.replay).toMatchObject({ recorded: false, notRecordedReason: "identity-coverage-unproven" });
-    expect(existsSync(path.join(first.runDir, "replay.ndjson"))).toBe(false);
+    expect(existsSync(workflowReplayFile(first.runDir))).toBe(false);
 
     const resumed = await runWorkflow(root, "modular", { resumeFromRunId: first.runId });
     expect(resumed.ok).toBe(true);
@@ -519,7 +522,7 @@ export default async function runWorkflow(dsl) {
     const first = await runWorkflow(root, "stages", { input: "alpha" });
     expect(first.ok).toBe(true);
 
-    const recordPath = path.join(first.runDir, "replay.ndjson");
+    const recordPath = workflowReplayFile(first.runDir);
     const downgraded = readFileSync(recordPath, "utf8")
       .split("\n")
       .filter((line) => line.trim() !== "")
@@ -672,7 +675,7 @@ export default async function runWorkflow(dsl, input) {
     writeWorkflow(root, "stages", THREE_STAGE_WORKFLOW);
     const first = await runWorkflow(root, "stages", { input: "alpha" });
 
-    const journalText = readFileSync(path.join(first.runDir, "journal.ndjson"), "utf8");
+    const journalText = readFileSync(workflowJournalFile(first.runDir), "utf8");
     expect(journalText).not.toContain("answer(stage-1)");
     const recorded = readWorkflowReplayLog(root, first.runId);
     expect(recorded.filter((entry) => entry.kind === "agent")).toHaveLength(3);
@@ -680,7 +683,7 @@ export default async function runWorkflow(dsl, input) {
 
     // The three run artifacts coexist and result.json carries the typed envelope.
     const resumed = await runWorkflow(root, "stages", { input: "alpha", resumeFromRunId: first.runId });
-    const persisted = JSON.parse(readFileSync(path.join(resumed.runDir, "result.json"), "utf8")) as {
+    const persisted = JSON.parse(readFileSync(workflowResultFile(resumed.runDir), "utf8")) as {
       replay?: Record<string, unknown>;
     };
     expect(persisted.replay).toMatchObject({
@@ -690,9 +693,9 @@ export default async function runWorkflow(dsl, input) {
       replayedCalls: 3,
       freshCalls: 0,
     });
-    for (const artifact of ["journal.ndjson", "replay.ndjson", "result.json"]) {
-      expect(existsSync(path.join(resumed.runDir, artifact)), artifact).toBe(true);
-    }
+    expect(existsSync(workflowJournalFile(resumed.runDir)), "journal.ndjson").toBe(true);
+    expect(existsSync(workflowReplayFile(resumed.runDir)), "replay.ndjson").toBe(true);
+    expect(existsSync(workflowResultFile(resumed.runDir)), "result.json").toBe(true);
   });
 });
 
@@ -813,7 +816,7 @@ export default async function runWorkflow(dsl) {
     const first = await runWorkflow(root, "bypass");
     expect(first.ok).toBe(true);
     expect(first.replay).toMatchObject({ recorded: false, notRecordedReason: "replay-unsafe-script" });
-    expect(existsSync(path.join(first.runDir, "replay.ndjson"))).toBe(false);
+    expect(existsSync(workflowReplayFile(first.runDir))).toBe(false);
 
     const resumed = await runWorkflow(root, "bypass", { resumeFromRunId: first.runId });
     expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "replay-unsafe-script" });

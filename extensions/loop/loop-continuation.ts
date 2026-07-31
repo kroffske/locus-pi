@@ -24,6 +24,8 @@ import {
   listWorkflowRunIds,
   readWorkflowRunJournal,
   readWorkflowRunSummary,
+  workflowJournalFile,
+  workflowResultFile,
   workflowRunDir,
   type WorkflowRunSummary,
 } from "../workflows/run-read.js";
@@ -194,8 +196,8 @@ export async function createWorkflowLoopContinuation(
     createdAt: new Date().toISOString(),
     maxSteps: 1,
     sourceSummary: renderWorkflowSummary(summary),
-    journalPath: path.join(workflowRunDir(projectRoot, runId), "journal.ndjson"),
-    resultPath: path.join(workflowRunDir(projectRoot, runId), "result.json"),
+    journalPath: workflowJournalFile(workflowRunDir(projectRoot, runId)),
+    resultPath: workflowResultFile(workflowRunDir(projectRoot, runId)),
   });
 
   persistWorkflowLoopContinuationArtifact(artifact);
@@ -277,7 +279,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
     return {
       source: "workflow",
       availability: "missing",
-      reason: "no workflow run metadata found under .locus/runtime/workflows",
+      reason: "no workflow run metadata found under .pi/locus-pi/workflows",
     };
   }
 

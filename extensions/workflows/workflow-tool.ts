@@ -9,10 +9,11 @@
 
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
+import { Text } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import type { ToolResult } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
-import { WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "./runtime/workflow-artifacts.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
 import { runWorkflowScript } from "./runtime/workflow-runner.js";
@@ -28,12 +29,17 @@ import {
 import { renderAgentLiveRowsText } from "./progress-widget.js";
 import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { createWorkflowTranscript } from "./workflow-transcript.js";
+import {
+  readWorkflowRunTextFile,
+  WORKFLOW_SAFE_COMPONENT_PATTERN,
+  workflowRunOutputsDir,
+} from "./runtime/workflow-run-layout.js";
 
 const WorkflowArtifactRefParams = Type.Object(
   {
-    runId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
-    artifactId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
-    name: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    runId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
+    artifactId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
+    name: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
     sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   },
   { additionalProperties: false },
@@ -41,7 +47,7 @@ const WorkflowArtifactRefParams = Type.Object(
 
 const WorkflowContinuationParams = Type.Object(
   {
-    originRunId: Type.String({ pattern: WORKFLOW_ARTIFACT_COMPONENT_PATTERN }),
+    originRunId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
     artifactRefs: Type.Array(WorkflowArtifactRefParams, { minItems: 1, maxItems: 8 }),
   },
   { additionalProperties: false },
@@ -109,6 +115,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
     parameters: WorkflowParams,
     approval: "exec",
     formatApprovalDetails: workflowApprovalDetails,
+    renderResult: renderWorkflowToolResultCard,
     async execute(_toolCallId, params, signal, update, ctx) {
       const valid = validateParams(WorkflowParams, params);
       if (!valid.ok) return valid.result;
@@ -139,10 +146,14 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
-          onRunStart: ({ runId }) => {
+          onRunStart: ({ runId, runDir }) => {
             background.setRunId(runId);
             deps.onRunStarted(runId);
-            transcript.start(runId);
+            transcript.start(runId, runDir);
+            update({
+              content: [{ type: "text", text: `workflow started\nrunDir: ${runDir}` }],
+              details: { runId, runDir },
+            });
           },
           onEvent: (line: WorkflowJournalLine) => {
             applyWorkflowJournalLineToAgentLiveStore(line, getProjectRoot(ctx));
@@ -185,6 +196,9 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           transcript: transcriptDetails,
           runId: res.runId,
           runDir: res.runDir,
+          outputDir: workflowRunOutputsDir(res.runDir),
+          ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
+          ...(res.primaryOutputPath !== undefined ? { primaryOutputPath: res.primaryOutputPath } : {}),
           resultPath: res.resultPersistence.path,
           resultPersistence: res.resultPersistence,
           ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
@@ -210,6 +224,9 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         transcript: transcriptDetails,
         runId: res.runId,
         runDir: res.runDir,
+        outputDir: workflowRunOutputsDir(res.runDir),
+        ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
+        ...(res.primaryOutputPath !== undefined ? { primaryOutputPath: res.primaryOutputPath } : {}),
         resultPath: res.resultPersistence.path,
         resultPersistence: res.resultPersistence,
         ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
@@ -245,7 +262,9 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
     disposition.status === "awaiting_operator"
       ? `workflow ${res.runId} · ${disposition.status} · ${disposition.summary}`
       : `workflow ${res.runId} · ${disposition.status}`;
-  const lines = [firstLine, `runDir: ${res.runDir}`];
+  const lines = [firstLine, `runDir: ${res.runDir}`, `outputDir: ${workflowRunOutputsDir(res.runDir)}`];
+  if (res.resultTextPath !== undefined) lines.push(`result: ${res.resultTextPath}`);
+  if (res.primaryOutputPath !== undefined) lines.push(`primary output: ${res.primaryOutputPath}`);
   if (res.scriptIdentity !== undefined) lines.push(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref));
   if (!res.resultPersistence.ok) {
     lines.push(`persistence: ${res.resultPersistence.code}`);
@@ -259,6 +278,47 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
   }
   lines.push("", digest);
   return lines.join("\n");
+}
+
+/** Human-only transcript card. The model still receives the bounded `content` digest. */
+function renderWorkflowToolResultCard(result: ToolResult): Text {
+  const details = (result.details ?? {}) as Record<string, unknown>;
+  const lines = [result.isError === true ? "[ERROR] Workflow" : "[RESULT] Workflow"];
+  if (typeof details.runId === "string") lines.push(`run: ${details.runId}`);
+  if (typeof details.outputDir === "string") lines.push(`outputs: ${details.outputDir}`);
+  if (typeof details.primaryOutputPath === "string") lines.push(`primary output: ${details.primaryOutputPath}`);
+  if (typeof details.resultTextPath === "string") lines.push(`workflow result: ${details.resultTextPath}`);
+  const persistedResult = readPersistedWorkflowResult(details);
+  if (persistedResult !== undefined) {
+    lines.push("", persistedResult);
+  } else {
+    const firstText = result.content.find((part) => part.type === "text");
+    if (firstText?.type === "text") lines.push("", firstText.text);
+  }
+  return new Text(lines.join("\n"), 0, 0);
+}
+
+function readPersistedWorkflowResult(details: Record<string, unknown>): string | undefined {
+  if (
+    typeof details.runDir !== "string" ||
+    typeof details.outputDir !== "string" ||
+    typeof details.resultTextPath !== "string"
+  )
+    return undefined;
+  const runDir = path.resolve(details.runDir);
+  const outputDir = workflowRunOutputsDir(runDir);
+  if (path.resolve(details.outputDir) !== outputDir) {
+    return "[full workflow result unavailable: invalid output path]";
+  }
+  const resultPath = path.resolve(details.resultTextPath);
+  if (resultPath !== path.join(outputDir, "workflow-result.md")) {
+    return "[full workflow result unavailable: invalid result path]";
+  }
+  try {
+    return readWorkflowRunTextFile(runDir, resultPath).replace(/\n$/u, "");
+  } catch {
+    return "[full workflow result unavailable: result file cannot be read]";
+  }
 }
 
 function operatorScriptIdentity(

@@ -10,6 +10,7 @@ import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "./runtime/workflow-result.js";
+import { workflowJournalFile } from "./runtime/workflow-run-layout.js";
 import { notifyOperator } from "../_shared/operator/operator-notify.js";
 
 /**
@@ -46,7 +47,7 @@ export interface WorkflowTranscriptOptions {
 
 export interface WorkflowTranscript {
   /** Returns the run-boundary banner for surfaces that can publish one. */
-  start(runId: string): WorkflowTranscriptAnnouncement | undefined;
+  start(runId: string, runDir?: string): WorkflowTranscriptAnnouncement | undefined;
   event(line: WorkflowJournalLine): void;
   finish(res: RunWorkflowScriptResult): WorkflowTranscriptCompletion;
 }
@@ -90,7 +91,7 @@ export function createWorkflowTranscript(
     return bodyLines.length - 1;
   };
   return {
-    start(id) {
+    start(id, runDir) {
       if (announced) return undefined;
       announced = true;
       startedAt = Date.now();
@@ -100,6 +101,7 @@ export function createWorkflowTranscript(
         text: [
           workflowRunRule(safeTarget, id, "started", startedAt),
           "● workflow started · live progress in the panel below · /ps opens the agent fleet",
+          ...(runDir === undefined ? [] : [`runDir: ${runDir}`]),
         ].join("\n"),
       };
     },
@@ -205,7 +207,7 @@ export function createWorkflowTranscript(
           bodyLines.push(firstTranscriptLine(line));
         }
       } else if (res.runDir !== undefined && res.runDir !== "") {
-        bodyLines.push(firstTranscriptLine(`journal: ${path.join(res.runDir, "journal.ndjson")}`));
+        bodyLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
       }
       const headerLines = [
         workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),

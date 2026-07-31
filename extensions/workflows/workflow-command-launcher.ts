@@ -40,7 +40,7 @@ export interface WorkflowCommandLaunchPreparation {
 }
 
 export interface WorkflowCommandLaunchObserver {
-  onRunStart(runId: string): void;
+  onRunStart(run: { runId: string; runDir: string }): void;
   onEvent(line: WorkflowJournalLine): void;
   onResult(result: RunWorkflowScriptResult, isCurrent: () => boolean): void | Promise<void>;
   onError(error: unknown): void;
@@ -131,9 +131,9 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
             ...(request.operatorHandoffClaim === undefined
               ? {}
               : { operatorHandoffClaim: request.operatorHandoffClaim }),
-            onRunStart: ({ runId }) => {
+            onRunStart: ({ runId, runDir }) => {
               background.setRunId(runId);
-              if (isCurrent()) observer.onRunStart(runId);
+              if (isCurrent()) observer.onRunStart({ runId, runDir });
             },
             onEvent: (line) => {
               if (isCurrent()) observer.onEvent(line);

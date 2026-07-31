@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import {
+  chmodWorkflowRunFile,
+  ensureWorkflowDirectoryNoSymlink,
+  readWorkflowRunFile,
+  writeWorkflowRunFile,
+} from "./workflow-run-layout.js";
 
 export const WORKFLOW_SCRIPT_IDENTITY_SCHEMA_VERSION = 2 as const;
 export const WORKFLOW_IDENTITY_POLICY = "static-node-only-v1" as const;
@@ -339,9 +345,9 @@ export function createWorkflowScriptSnapshot(sourcePath: string, runDir: string)
   const assessment = assessWorkflowSourceIdentity(sourceBytes.toString("utf8"));
   const scriptSha256 = sha256WorkflowBytes(sourceBytes);
   const snapshotPath = path.join(runDir, `script-${scriptSha256}.workflow.mjs`);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(snapshotPath, sourceBytes, { flag: "wx" });
-  chmodSync(snapshotPath, 0o444);
+  ensureWorkflowDirectoryNoSymlink(runDir, runDir);
+  writeWorkflowRunFile(runDir, snapshotPath, sourceBytes, { exclusive: true });
+  chmodWorkflowRunFile(runDir, snapshotPath, 0o444);
 
   const identity: WorkflowScriptIdentity = {
     schemaVersion: WORKFLOW_SCRIPT_IDENTITY_SCHEMA_VERSION,
@@ -368,7 +374,9 @@ export function workflowScriptExecutionPath(identity: WorkflowScriptIdentity): s
 export function verifyWorkflowScriptSnapshot(
   identity: Pick<WorkflowScriptIdentity, "snapshotPath" | "scriptSha256">,
 ): void {
-  const snapshotSha256 = sha256WorkflowBytes(readFileSync(identity.snapshotPath));
+  const snapshotSha256 = sha256WorkflowBytes(
+    readWorkflowRunFile(path.dirname(identity.snapshotPath), identity.snapshotPath),
+  );
   if (snapshotSha256 !== identity.scriptSha256) {
     throw new Error(`Workflow script snapshot hash mismatch: expected ${identity.scriptSha256}, got ${snapshotSha256}`);
   }

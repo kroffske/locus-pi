@@ -56,23 +56,24 @@ so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                                                         | Read it for                                                                                                                                                                                                                                                |
-| --------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                                                                                                     |
-| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                                                               |
-| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                                                                       |
-| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                                                                      |
-| `plan`                | Task → accepted plan                                                 | Luna/medium `scout`, `planner`, and `critic`, plus a bounded draft/critique loop whose exit is a shaped verdict rather than a human.                                                                                                                       |
-| `plan-implement`      | Accepted plan → reviewed changes                                     | The Luna/medium end of a cross-run handoff: host-verified plan bytes, a persisted task ledger, one sequential writer/reviewer repair loop per step, and a validated structured terminal grade that drives one bounded reconciliation and the final ledger. |
-| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                                                                |
+| Example               | Product role                                                         | Read it for                                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                                                                                        |
+| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                                                  |
+| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                                                          |
+| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                                                         |
+| `plan`                | Task → outcome-first accepted plan                                   | A read-only `scout`, `planner`, and `critic`, plus a bounded draft/critique loop that names the primary result, its consumer, location, required behavior, and usability proof before deriving steps.                                         |
+| `plan-implement`      | Accepted plan → verified primary result                              | Host-verified plan bytes, a persisted task ledger, one sequential writer/reviewer repair loop per step, structured command evidence, fail-closed terminal grading, and primary `workflow-summary.md` plus a supporting implementation report. |
+| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                                                   |
 
 `plan` and `plan-implement` are a pair, and the seam between them is the point:
 `plan` ends by returning the accepted plan text, which the runtime retains as
-`plan.md`; `plan-implement` takes that artifact's complete
+`plan.md`; `plan-implement` can take that artifact's complete
 `{ runId, artifactId, name, sha256 }` reference through the workflow tool's
 closed `continuation` control, which the host verifies and copies before any
-workflow code runs. Since 2026-07-28 the entry no longer re-derives that proof
-for itself: it requires exactly one non-empty `plan.md` reference and reads it.
+workflow code runs. It also accepts pasted plan text or one file path through a
+read-only resolver. A continuation artifact's name is descriptive metadata, not
+an execution requirement.
 The accepted cost is recorded in
 [`docs/adr/curated-workflow-portfolio.md`](../../../docs/adr/curated-workflow-portfolio.md) —
 a run can now start from a same-named draft of an earlier round rather than the

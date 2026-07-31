@@ -6,6 +6,52 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow run contents now have three stable ownership zones.** Every run
+  creates `outputs/` for readable results, `workspace/` for deliberate
+  agent-written files, and `runtime/` for journals, result envelopes, replay,
+  snapshots, handoff claims, and digest-bound artifacts. All names come from one
+  path module, old flat layouts are not read, prose finishes are saved as
+  `outputs/workflow-result.md`, and the native tool shows that full text to the
+  operator while keeping model-facing content bounded.
+
+- **Workflow runs now live under Pi's project-local extension namespace.** The
+  canonical run root moved from `.locus/runtime/workflows/<runId>/` to the
+  shallower `.pi/locus-pi/workflows/<runId>/`. The journal, result, artifacts,
+  reports, replay records, script snapshots, resources, and retained worktrees
+  all use the same owner path, while unrelated goal and agent runtime state
+  remains under `.locus/runtime/`.
+
+- **A workflow start now names storage that already exists.** The runner creates
+  the non-symlink run directory and writes the budget as the first
+  `journal.ndjson` line before `onRunStart` can announce the RunID. Unsafe or
+  unwritable initialization fails before the live announcement and before any
+  child agent; later journal appends remain best-effort so a presentation-side
+  logging fault cannot crash an already-running workflow.
+
+- **`plan-implement` accepts a plan instead of requiring a filename.** One
+  host-verified continuation artifact is still supported at any accepted size,
+  but its name no longer has to be `plan.md`. Without a continuation, the
+  workflow uses a read-only resolver to accept either pasted plan text or one
+  file path, then sends the resolved plan through the existing deterministic
+  step parser and implementation/review pipeline.
+
+- **Planning now starts from the result the operator will use.** `plan` records
+  one primary result, its consumer, location, required content or behavior, and
+  usability proof before deriving implementation steps. `plan-implement`
+  requires that contract, records command outcomes as structured evidence, and
+  cannot return success after a failed or unrun check, an evidence gap,
+  run-attributable unexpected work, or a non-ready result. Step dependencies are
+  now enforced for subset runs, and one bounded reconciliation may build a
+  missing result after the selected steps finish. The primary output is now
+  `workflow-summary.md`, while `implementation-report.md` remains supporting
+  per-step evidence.
+
+- **The public extension index is now a source and dependency map.** It links
+  every default extension to its entrypoint, manifest, and active manual;
+  distinguishes direct feature imports from shared-layer and external-package
+  dependencies; and corrects the ownership documentation's stale count of four
+  Package workflows to the six that ship.
+
 - **Declining a workflow question is now an answer, not a postponement.**
   Pressing Escape on a workflow's operator question used to set a session-local
   snooze the running workflow never heard about, leaving the run parked. It now
@@ -28,7 +74,7 @@ this workflow's questions.` — through the same continuation a typed reply
 
 - **A file a workflow agent writes now exists under the name the agent gave
   it.** Each run gets a working directory,
-  `.locus/runtime/workflows/<runId>/files/`, created before the script starts,
+  `.pi/locus-pi/workflows/<runId>/files/`, created before the script starts,
   handed to the script as `dsl.runFilesDir()` and named at the top of every
   child agent's prompt. Nothing renames, numbers or moves what an agent writes
   there, so a path a workflow prints in a question is a path that can be opened.
@@ -37,7 +83,7 @@ this workflow's questions.` — through the same continuation a typed reply
   Auto-captured material moved with it: the run report — `task.md`,
   `result.md`, the current revision of every published document, and the
   `README.md` that indexes revisions, budget and logs — is now written to
-  `.locus/runtime/workflows/<runId>/logs/`, and the mirror under
+  `.pi/locus-pi/workflows/<runId>/logs/`, and the mirror under
   `<project root>/.locus-pi/<runId>/` is no longer written or read. Write order
   and revision history are recorded in the README, not in file names.
 
@@ -701,7 +747,7 @@ this workflow's questions.` — through the same continuation a typed reply
 
 - **Reading a workflow run from outside the workflows extension now goes through
   one read-only door, and nothing can reach past it.** The module that owns
-  `.locus/runtime/workflows/<runId>/` also owns the append sink, the
+  `.pi/locus-pi/workflows/<runId>/` also owns the append sink, the
   journal-to-live-row projection and the live-row retention bound. Two consumers
   only ever needed to _read_ a run — the agent drill's round submenu and the
   loop's continuation source — and both imported that module directly, so both
@@ -1451,7 +1497,7 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
   regression risk. Runtime-owned `agent({ artifact })` answers replace the old
   helper and publisher stages. Changes remain uncommitted in the launch checkout.
 - Added a canonical per-run artifact index at
-  `.locus/runtime/workflows/<runId>/artifacts/index.json`. Every `agent()` attempt
+  `.pi/locus-pi/workflows/<runId>/artifacts/index.json`. Every `agent()` attempt
   persists its exact answer and, for fresh child sessions, its transcript and
   result envelope. `publishArtifact()` writes deterministic workflow-authored
   text; `consumeTextArtifact()` verifies and copies a complete prior-run text
@@ -1465,7 +1511,7 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
   Consumed text also carries the validated source terminal result/ref projection
   for consumers that must prove a report was the run's actual final output.
   The store validates the complete physical directory chain from the project
-  root through `.locus/runtime/workflows/<runId>` before reads and writes, so a
+  root through `.pi/locus-pi/workflows/<runId>` before reads and writes, so a
   symlinked `.locus`, `runtime`, or deeper ancestor cannot redirect evidence.
 - Made persisted journal evidence discriminated by event kind: required and
   allowed fields are checked before projection, so malformed rows such as an

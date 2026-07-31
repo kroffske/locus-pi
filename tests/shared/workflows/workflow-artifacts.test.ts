@@ -13,6 +13,11 @@ import {
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
+  workflowRunArtifactsDir,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
@@ -32,7 +37,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const dir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const dir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -42,7 +47,7 @@ describe("workflow run artifact store", () => {
     const root = project();
     const absent = readWorkflowArtifactIndex(root, "absent-run");
     assert.equal(absent.status, "missing");
-    assert.equal(existsSync(path.join(root, ".locus")), false);
+    assert.equal(existsSync(path.join(root, ".pi")), false);
 
     const id = "reader-run";
     const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
@@ -56,6 +61,21 @@ describe("workflow run artifact store", () => {
     if (record.status === "ready") assert.equal(record.bytes.toString("utf8"), "reader bytes");
     assert.equal(readWorkflowArtifactRecord(root, id, "missing-id").status, "missing");
     assert.equal(readWorkflowArtifactIndex(root, "../escape").status, "invalid");
+  });
+
+  it("persists exactly one explicitly primary publication", () => {
+    const root = project();
+    const id = "primary-run";
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+
+    const ref = store.publishText("plan.md", "accepted plan", "finalize", "primary");
+
+    assert.equal(ref.name, "plan.md");
+    assert.equal(store.list()[0]?.kind, "primary");
+    assert.throws(
+      () => store.publishText("other.md", "other", "finalize", "primary"),
+      /already contains a primary output/u,
+    );
   });
 
   it("publishes and consumes only a complete verified prior-run text reference", () => {
@@ -73,7 +93,7 @@ describe("workflow run artifact store", () => {
       questionsRef: { ...sourceRef, artifactId: "published-0002", name: "questions.md" },
     };
     writeFileSync(
-      path.join(runDir(root, sourceRunId), "result.json"),
+      workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
         ok: true,
         result: terminalResult,
@@ -118,7 +138,7 @@ describe("workflow run artifact store", () => {
     const projectedRef = source.publishText("projected.md", "projected");
     const omittedRef = source.publishText("omitted.md", "omitted");
     writeFileSync(
-      path.join(runDir(root, sourceRunId), "result.json"),
+      workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
         ok: true,
         result: "projected",
@@ -182,8 +202,9 @@ describe("workflow run artifact store", () => {
     });
     const missingIndexRun = "legacy-source";
     const legacyDir = runDir(root, missingIndexRun);
+    mkdirSync(workflowRunRuntimeDir(legacyDir), { recursive: true });
     writeFileSync(
-      path.join(legacyDir, "result.json"),
+      workflowResultFile(legacyDir),
       `${JSON.stringify({ ok: true, target: { kind: "name", ref: "review", source: "package" } })}\n`,
     );
     const legacyRef = {
@@ -194,7 +215,7 @@ describe("workflow run artifact store", () => {
     };
 
     assert.throws(() => current.consumeText(legacyRef), /index is missing/u);
-    assert.equal(existsSync(path.join(legacyDir, "artifacts", "index.json")), false);
+    assert.equal(existsSync(path.join(workflowRunArtifactsDir(legacyDir), "index.json")), false);
 
     const noTargetRun = "missing-target-source";
     const source = createWorkflowArtifactStore({
@@ -203,7 +224,7 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, noTargetRun),
     });
     const ref = source.publishText("plan.md", "bytes");
-    writeFileSync(path.join(runDir(root, noTargetRun), "result.json"), '{"ok":true}\n');
+    writeFileSync(workflowResultFile(runDir(root, noTargetRun)), '{"ok":true}\n');
     assert.throws(() => current.consumeText(ref), /not usable/u);
     assert.equal(
       current.list().some((record) => record.kind === "input"),
@@ -265,32 +286,32 @@ describe("workflow run artifact store", () => {
   });
 
   it("rejects symlinked canonical-root ancestors before external artifact reads or writes", () => {
-    for (const linkedAncestor of [".locus", "runtime"] as const) {
+    for (const linkedAncestor of [".pi", "locus-pi"] as const) {
       const root = project();
       const external = project();
       const id = `ancestor-${linkedAncestor.replace(".", "")}`;
-      const externalLocus = path.join(external, "external-locus");
-      const externalRuntime = path.join(external, "external-runtime");
+      const externalPi = path.join(external, "external-pi");
+      const externalLocusPi = path.join(external, "external-locus-pi");
       const externalRunDir =
-        linkedAncestor === ".locus"
-          ? path.join(externalLocus, "runtime", "workflows", id)
-          : path.join(externalRuntime, "workflows", id);
+        linkedAncestor === ".pi"
+          ? path.join(externalPi, "locus-pi", "workflows", id)
+          : path.join(externalLocusPi, "workflows", id);
       mkdirSync(externalRunDir, { recursive: true });
 
-      if (linkedAncestor === ".locus") {
-        symlinkSync(externalLocus, path.join(root, ".locus"));
+      if (linkedAncestor === ".pi") {
+        symlinkSync(externalPi, path.join(root, ".pi"));
       } else {
-        mkdirSync(path.join(root, ".locus"));
-        symlinkSync(externalRuntime, path.join(root, ".locus", "runtime"));
+        mkdirSync(path.join(root, ".pi"));
+        symlinkSync(externalLocusPi, path.join(root, ".pi", "locus-pi"));
       }
 
-      const externalArtifacts = path.join(externalRunDir, "artifacts");
+      const externalArtifacts = workflowRunArtifactsDir(externalRunDir);
       assert.throws(
         () =>
           createWorkflowArtifactStore({
             projectRoot: root,
             runId: id,
-            runDir: path.join(root, ".locus", "runtime", "workflows", id),
+            runDir: path.join(root, ".pi", "locus-pi", "workflows", id),
           }),
         /directory is unsafe/u,
       );
@@ -427,14 +448,16 @@ describe("workflow run artifact store", () => {
 
     assert.equal(result.ok, true, result.error);
     const index = JSON.parse(
-      readFileSync(path.join(result.runDir, "artifacts", "index.json"), "utf8"),
+      readFileSync(path.join(workflowRunArtifactsDir(result.runDir), "index.json"), "utf8"),
     ) as WorkflowArtifactIndex;
     assert.deepEqual(index.artifacts.map((entry) => entry.kind).sort(), ["answer", "result", "transcript"]);
     assert.ok(index.artifacts.every((entry) => !path.isAbsolute(entry.relativePath)));
     assert.equal(index.artifacts.find((entry) => entry.kind === "answer")?.name, "review.md");
     assert.ok(
       index.artifacts.every((entry) =>
-        path.resolve(result.runDir, "artifacts", entry.relativePath).startsWith(path.join(result.runDir, "artifacts")),
+        path
+          .resolve(workflowRunArtifactsDir(result.runDir), entry.relativePath)
+          .startsWith(workflowRunArtifactsDir(result.runDir)),
       ),
     );
   });
@@ -486,7 +509,7 @@ describe("workflow run artifact store", () => {
     assert.equal(replay.ok, true, replay.error);
     assert.equal(executions, 1);
     const index = JSON.parse(
-      readFileSync(path.join(replay.runDir, "artifacts", "index.json"), "utf8"),
+      readFileSync(path.join(workflowRunArtifactsDir(replay.runDir), "index.json"), "utf8"),
     ) as WorkflowArtifactIndex;
     assert.deepEqual(
       index.artifacts.map((entry) => entry.kind),

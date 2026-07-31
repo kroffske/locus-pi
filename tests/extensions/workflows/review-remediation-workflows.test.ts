@@ -2,11 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
   type WorkflowArtifactRef,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
+import { workflowRunArtifactsDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
@@ -14,6 +18,7 @@ import {
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { createHarness } from "../../test-harness.js";
 
 const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/review-fix/review-fix.workflow.mjs");
 
@@ -86,7 +91,7 @@ interface ReviewFixture {
 function createReviewFixture(findings?: string[], targetRef = "review", stage = "verify-review"): ReviewFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-review-fix-"));
   const sourceRunId = "review-source";
-  const sourceRunDir = path.join(root, ".locus", "runtime", "workflows", sourceRunId);
+  const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
   mkdirSync(sourceRunDir, { recursive: true });
   const sourceStore = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
   const text = reviewText(findings);
@@ -98,7 +103,7 @@ function createReviewFixture(findings?: string[], targetRef = "review", stage = 
     replayed: false,
   }).answer!;
   writeFileSync(
-    path.join(sourceRunDir, "result.json"),
+    workflowResultFile(sourceRunDir),
     `${JSON.stringify({
       ok: true,
       result: text,
@@ -122,6 +127,24 @@ function completed(request: WorkflowAgentRequest, text: string): WorkflowAgentRe
   };
 }
 
+function queuedExecutor(answers: string[]): () => AgentExecutor {
+  let index = 0;
+  return () => ({
+    async run(request: AgentRunRequest) {
+      const text = answers[index++];
+      if (text === undefined) throw new Error(`unexpected workflow agent call ${index}: ${request.task}`);
+      return {
+        status: "completed",
+        agentName: request.agent.name,
+        reason: text,
+        text,
+        diagnostics: [],
+        lifecycleEntryIds: [],
+      };
+    },
+  });
+}
+
 let runtimeOrdinal = 0;
 
 function runtimeWith(
@@ -130,7 +153,7 @@ function runtimeWith(
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
 ) {
   const runId = `review-fix-test-${++runtimeOrdinal}`;
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   const consumedReview = artifactStore.consumeText(reviewRef);
@@ -159,6 +182,61 @@ function plan(findings: Array<{ id: string; note?: string; dependsOn?: string[] 
 }
 
 describe("curated review remediation workflow", () => {
+  it("continues the real packaged review terminal artifact into review-fix", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-review-continuation-"));
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "review-continuation" });
+    const sourceReview = reviewText([FINDING_F1]);
+    const reviewed = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "review",
+      input: "Review the current branch.",
+      createExecutor: queuedExecutor([
+        JSON.stringify({ decision: "continue", questions: [] }),
+        "# Review Scope\nTarget: `origin/main...HEAD`",
+        "# Change Inventory\n## C1\nPath: `src/page.ts`\nChange: Pagination changed.",
+        "# Review Units\n## U1\nCoverage: C1\nPath: `src/page.ts`\nChange: Pagination behavior changed.",
+        "# Review Questions\n## Q1\nCoverage: U1\nQuestion: Does pagination advance?",
+        JSON.stringify({ decision: "complete", gaps: [] }),
+        sourceReview,
+      ]),
+    });
+
+    expect(reviewed.ok, reviewed.error).toBe(true);
+    const reviewRef = reviewed.artifactRefs?.find((ref) => ref.name === "review.md");
+    expect(reviewRef, "review.md must survive the terminal artifact projection").toBeDefined();
+
+    const fixed = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "review-fix",
+      input: "Fix F1.",
+      continuation: { originRunId: reviewed.runId, artifactRefs: [reviewRef!] },
+      createExecutor: queuedExecutor([
+        plan([{ id: "F1" }]),
+        "# Remediation scope\nApply F1 and run focused checks.",
+        "# Worker F1\nAdvanced the pagination offset.",
+        "# Check evidence\nFocused pagination checks passed.",
+        "# Re-review\nF1 is resolved with focused test evidence.",
+      ]),
+    });
+
+    expect(fixed.ok, fixed.error).toBe(true);
+    expect(fixed.continuation?.originRunId).toBe(reviewed.runId);
+    expect(fixed.continuation?.artifacts).toEqual([
+      expect.objectContaining({ sourceRef: reviewRef }),
+    ]);
+    expect(fixed.result).toBe("# Re-review\nF1 is resolved with focused test evidence.");
+  });
+
   it("keeps selection and complete-block parsing deterministic and delegates artifact persistence to the runtime", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -238,9 +316,9 @@ describe("curated review remediation workflow", () => {
     // reference is verified against the source run's terminal projection while the
     // continuation is bound, so an unprojected ref never reaches the module at all.
     const fixture = createReviewFixture();
-    const sourceRunDir = path.join(fixture.root, ".locus", "runtime", "workflows", fixture.reviewRef.runId);
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
     writeFileSync(
-      path.join(sourceRunDir, "result.json"),
+      workflowResultFile(sourceRunDir),
       `${JSON.stringify({
         ok: true,
         result: fixture.reviewText,
@@ -263,17 +341,10 @@ describe("curated review remediation workflow", () => {
     // The other half of what the script used to re-derive: the stored bytes are
     // digest-bound, and rewriting them under a valid reference is refused on consume.
     const fixture = createReviewFixture();
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
     const stored = fixture.sourceStore.list().find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId);
     expect(stored, "the fixture must have persisted the review artifact").toBeDefined();
-    const storedPath = path.join(
-      fixture.root,
-      ".locus",
-      "runtime",
-      "workflows",
-      fixture.reviewRef.runId,
-      "artifacts",
-      stored!.relativePath,
-    );
+    const storedPath = path.join(workflowRunArtifactsDir(sourceRunDir), stored!.relativePath);
     expect(existsSync(storedPath)).toBe(true);
     writeFileSync(storedPath, `${fixture.reviewText}\ntampered`, "utf8");
 
@@ -347,15 +418,15 @@ describe("curated review remediation workflow", () => {
     // index cannot speak for. This is the exact case the deleted script check claimed
     // to own, asserted against the authority that actually owns it.
     const fixture = createReviewFixture(undefined, "review", "resolve-scope");
-    const sourceRunDir = path.join(fixture.root, ".locus", "runtime", "workflows", fixture.reviewRef.runId);
-    const indexPath = path.join(sourceRunDir, "artifacts", "index.json");
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
+    const indexPath = path.join(workflowRunArtifactsDir(sourceRunDir), "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ artifactId: string; stage?: string }>;
     };
     index.artifacts.find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId)!.stage = "verify-review";
     writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
     writeFileSync(
-      path.join(sourceRunDir, "result.json"),
+      workflowResultFile(sourceRunDir),
       `${JSON.stringify({
         ok: true,
         result: "an unrelated terminal answer",
@@ -808,7 +879,7 @@ describe("curated review remediation workflow", () => {
     const fixture = createReviewFixture();
     const workflow = await loadWorkflow();
     const runId = "review-fix-without-continuation";
-    const runDir = path.join(fixture.root, ".locus", "runtime", "workflows", runId);
+    const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
     const { dsl } = createWorkflowRuntime({

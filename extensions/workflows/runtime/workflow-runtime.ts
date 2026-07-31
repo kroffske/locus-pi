@@ -235,14 +235,17 @@ export interface WorkflowDsl {
   /** Absolute project root captured by the workflow runner. */
   projectRoot(): string;
   /**
-   * Absolute working directory for THIS run's files, created before the script
+   * Absolute agent workspace for THIS run, created before the script
    * starts. Every child agent is told the same path, and a file written there
    * keeps the exact name its author chose — the runtime never renames or
-   * numbers it. Auto-captured evidence goes elsewhere (`logs/`, `artifacts/`).
+   * numbers it. Auto-captured evidence goes under `runtime/`; workflow-owned
+   * readable documents go under `outputs/`.
    */
-  runFilesDir(): string;
+  runWorkspaceDir(): string;
   /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
   publishArtifact(name: string, text: string): WorkflowArtifactRef;
+  /** Publish the one semantic document that represents a successful terminal result. */
+  publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef;
   /** Verify and copy one complete prior-run text reference into this run. */
   consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
   /** Host-verified continuation artifacts bound before trusted workflow code starts. */
@@ -589,8 +592,8 @@ export interface WorkflowRuntimeOptions {
   /** Already consumed and digest-bound by the runner before workflow code starts. */
   continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
-  /** Absolute working directory for this run's files; the runner creates it before the script starts. */
-  runFilesDir?: string;
+  /** Absolute agent workspace for this run; the runner creates it before the script starts. */
+  runWorkspaceDir?: string;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
   maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
@@ -2501,16 +2504,25 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.projectRoot;
   }
 
-  function runFilesDir(): string {
-    if (options.runFilesDir === undefined || options.runFilesDir.trim() === "") {
-      throw new Error("workflow run files directory is not configured");
+  function runWorkspaceDir(): string {
+    if (options.runWorkspaceDir === undefined || options.runWorkspaceDir.trim() === "") {
+      throw new Error("workflow run workspace directory is not configured");
     }
-    return options.runFilesDir;
+    return options.runWorkspaceDir;
   }
 
   function publishArtifact(name: string, text: string): WorkflowArtifactRef {
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
     return options.artifactPorts.publishText(name, text, _currentPhase);
+  }
+
+  let primaryArtifactPublished = false;
+  function publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef {
+    if (primaryArtifactPublished) throw new Error("workflow already published its primary output");
+    if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    const ref = options.artifactPorts.publishText(name, text, stage ?? _currentPhase, "primary");
+    primaryArtifactPublished = true;
+    return ref;
   }
 
   function consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact {
@@ -2541,8 +2553,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     promptFile,
     workspace,
     projectRoot,
-    runFilesDir,
+    runWorkspaceDir,
     publishArtifact,
+    publishPrimaryArtifact,
     consumeTextArtifact,
     continuationArtifacts,
     parallel,

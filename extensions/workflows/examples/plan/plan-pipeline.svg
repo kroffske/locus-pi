@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 1000" width="1120" height="1000" role="img" aria-label="The plan workflow as three named agents: a scout hands the repository context to a planner, the planner hands a complete plan to a critic, and the critic either accepts it or hands defects back for another round.">
   <title>plan workflow — three agents and what each one hands to the next</title>
-  <desc>A scout reads the repository and returns context.md. A planner receives the task, that context, its own previous draft and the critic's defects, and returns the complete plan every round. A critic receives the plan under review, the same evidence, and the defects the previous round reported, and returns accept or revise with up to twelve defects. Revise starts another round, up to six; accept ends the run with the plan text, which the plan-implement workflow consumes. A sixth revise retains the draft with its open defects and hands the decision to the operator, who accepts the last draft or answers with guidance that a continuation run redrafts under. The loop never pauses mid-round for a human: an open decision is recorded as a stated assumption and planned on.</desc>
+  <desc>A scout reads the repository and returns context.md. A planner first defines the primary result, its consumer, location, required behavior, usability proof, and supporting evidence, then derives implementation steps and returns the complete plan every round. A critic receives the plan under review, the same evidence, and the defects the previous round reported, and returns accept or revise with up to twelve defects. Revise starts another round, up to six; accept ends the run with the plan text, which the plan-implement workflow consumes. A sixth revise retains the draft with its open defects and hands the decision to the operator, who accepts the last draft or answers with guidance that a continuation run redrafts under. The loop never pauses mid-round for a human: a safe choice is recorded as an assumption, while a meaning-changing ambiguity remains an open question.</desc>
 
   <style>
     .bg { fill: #ffffff; }
@@ -152,11 +152,15 @@
   <!-- accept -->
   <path class="edge" d="M 470 778 L 470 850" marker-end="url(#a)"/>
   <text class="edge-label" x="482" y="826">accept</text>
+  <g class="phase">
+    <rect x="50" y="806" width="200" height="30" rx="8"/>
+    <text x="66" y="826">publish-plan</text>
+  </g>
   <g class="done">
     <rect x="50" y="850" width="500" height="94" rx="12"/>
     <text class="name" x="72" y="878">The run returns the accepted plan</text>
     <text class="line" x="72" y="900">Its final text is retained as plan.md — the one thing the follow-on</text>
-    <text class="line" x="72" y="919">plan-implement run consumes into a reviewed sequential task ledger.</text>
+    <text class="line" x="72" y="919">plan-implement turns the outcome contract into a verified primary result.</text>
   </g>
 
   <!-- round cap -->

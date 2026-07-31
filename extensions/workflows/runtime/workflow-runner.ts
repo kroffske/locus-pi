@@ -65,6 +65,7 @@ import {
   isWorkflowResultExplicitFailure,
   workflowDispositionForCompletion,
   workflowResultFile,
+  workflowResultText,
   writeWorkflowResultJson,
   writeWorkflowResultText,
   type WorkflowDisposition,
@@ -101,7 +102,8 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
-import { ensureWorkflowRunFilesDir } from "./workflow-run-layout.js";
+import { ensureWorkflowRunWorkspaceDir, readWorkflowRunTextFile } from "./workflow-run-layout.js";
+import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
 import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
@@ -178,7 +180,7 @@ export interface RunWorkflowScriptOptions {
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: import("../../_shared/model/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
-  /** Called once after run identity is allocated and before any journal event. Presentation-only. */
+  /** Called once after the run directory and first journal line exist. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
   onEvent?: (line: WorkflowJournalLine) => void;
 }
@@ -194,6 +196,8 @@ export interface RunWorkflowScriptResult {
   resultPersistence: WorkflowResultPersistence;
   /** Path of the verbatim text copy of a prose result, when the run produced one. */
   resultTextPath?: string;
+  /** Semantic named document whose newest revision equals the terminal prose. */
+  primaryOutputPath?: string;
   journal: WorkflowJournalLine[];
   error?: string;
   /** Who failed, when the run failed. Presentation-only; wording, not truth. */
@@ -527,7 +531,18 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const workingDirectory = getWorkingDirectory(opts.ctx);
   const runId = newWorkflowRunId();
   const runDir = workflowRunDir(projectRoot, runId);
+  const runtimeDir = workflowRunRuntimeDir(runDir);
+  const outputDir = workflowReportDir(projectRoot, runId);
   const journal = createWorkflowJournalSink(projectRoot, runId);
+  const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
+  const budgetPrelude: WorkflowJournalLine = {
+    ts: new Date().toISOString(),
+    runId,
+    kind: "log",
+    source: "runtime",
+    message: formatWorkflowBudgetPrelude(budget),
+  };
+  journal.initialize(budgetPrelude);
   try {
     opts.onRunStart?.({ runId, runDir });
   } catch {
@@ -547,7 +562,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let awaitOperatorDeclaration: WorkflowAwaitOperatorDeclaration | undefined;
   let handoffClaimBound = false;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
-  const preludeLines: WorkflowJournalLine[] = [];
+  const preludeLines: WorkflowJournalLine[] = [budgetPrelude];
   const emitPrelude = (line: WorkflowJournalLine): void => {
     preludeLines.push(line);
     journal.write(line);
@@ -562,24 +577,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
    * surface claim delivery for a workflow that never spoke — the same reason the
    * default replay plan is silent below.
    */
-  const journalPrelude = (line: WorkflowJournalLine): void => {
-    preludeLines.push(line);
-    journal.write(line);
-  };
-  // THE place the package budget contract becomes this run's policy. Resolved
-  // before anything else can spend, so every axis has a number before the first
-  // child and the journal can state it. A script says nothing and is still bounded.
-  const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
-  // The applied budget is the FIRST line of every run's journal: a reader who opens
-  // the evidence should see the policy before the first thing that spends under it,
-  // and a run that fails before its script loads still says what it was bounded by.
-  journalPrelude({
-    ts: new Date().toISOString(),
-    runId,
-    kind: "log",
-    source: "runtime",
-    message: formatWorkflowBudgetPrelude(budget),
-  });
+  // The applied budget is initialized as the FIRST durable line before the live
+  // start callback. A start announcement therefore always names an existing run
+  // directory and journal, or initialization throws before any child can run.
   // A narrowing applies silently; a raise never does. The line names the axis, the
   // package default and what was asked for, so a raise is auditable from the run
   // evidence alone instead of living in whoever's memory chose it.
@@ -609,6 +609,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   ];
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
+    let primaryOutputPath: string | undefined;
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
@@ -630,7 +631,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       try {
         const outputRecords = artifactStore
           .list()
-          .filter((record) => record.kind === "answer" || record.kind === "published");
+          .filter((record) => record.kind === "published" || record.kind === "primary");
         const artifactRefs = outputRecords.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS).map((record) => ({
           runId: record.runId,
           artifactId: record.artifactId,
@@ -725,11 +726,33 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // funnels here, so the operator gets the same stage/script/evidence pointer
     // whether the trusted script threw or the runtime around it did.
     enrichedFields = withFailureDiagnostic(enrichedFields);
-    // The run's ordered journal under <runDir>/logs/: table of contents, task,
-    // result, budget-versus-spend, and every captured text under an author-and-
-    // step name. Files the agents wrote themselves are NOT projected here — they
-    // stay under their own names in <runDir>/files/. Best-effort like result.md —
-    // the envelope below stays the durable truth, and a report failure never fails
+    // Human-visible terminal prose is mandatory. Persist it once before the
+    // best-effort report so every later surface can point at one owned file.
+    const terminalText = workflowResultText(enrichedFields.result);
+    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
+    if (terminalText !== undefined && resultTextPath === undefined) {
+      const message = `Workflow terminal output was not persisted under ${outputDir}.`;
+      const outputFailure: WorkflowJournalLine = {
+        ts: new Date().toISOString(),
+        runId,
+        kind: "error",
+        source: "runtime",
+        message,
+      };
+      journal.write(outputFailure);
+      enrichedFields = withFailureDiagnostic({
+        ...enrichedFields,
+        ok: false,
+        disposition: { status: "failed" },
+        error: enrichedFields.error ?? message,
+        journal: [...enrichedFields.journal, outputFailure],
+      });
+    }
+    // The run's human outputs under <runDir>/outputs/: table of contents, task,
+    // result, budget-versus-spend, and workflow-published documents under their
+    // semantic names. Agent call answers remain evidence under runtime/ unless
+    // the workflow explicitly publishes one. Files agents wrote themselves stay
+    // under their own names in <runDir>/workspace/. The envelope below stays the durable truth, and a report failure never fails
     // the run. It runs BEFORE result.json so a failed write can still be recorded
     // in the journal that result.json persists.
     if (artifactStore !== undefined) {
@@ -754,6 +777,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         },
         artifactStore,
       );
+      if (reportOutcome.ok) primaryOutputPath = reportOutcome.primaryOutputPath;
       if (!reportOutcome.ok) {
         // The run disposition is deliberately unchanged — reversing that is the
         // evidence contract's call, not this one's. What changes is the silence:
@@ -781,10 +805,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ...enrichedFields,
       resultPersistence: intendedPersistence,
     });
-    // A prose result gets a readable sibling file. Every live surface bounds its
-    // own output, so without this the whole text existed only as one escaped
-    // JSON string.
-    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
     if (resultPersistence.ok) {
       return {
         runId,
@@ -792,6 +812,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         ...enrichedFields,
         resultPersistence,
         ...(resultTextPath === undefined ? {} : { resultTextPath }),
+        ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
       };
     }
 
@@ -820,12 +841,40 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
     });
+    // result.json is the durable machine envelope, but its own write can fail.
+    // Re-project the human README from the now-failed fields so the readable
+    // surface cannot keep claiming success after that failure.
+    if (artifactStore !== undefined) {
+      const failedReport = writeWorkflowRunReport(
+        {
+          projectRoot,
+          runId,
+          status: failedFields.disposition?.status ?? "failed",
+          ...(failedFields.target === undefined
+            ? {}
+            : {
+                target: {
+                  kind: failedFields.target.kind,
+                  ref: failedFields.target.ref,
+                  source: failedFields.target.source,
+                },
+              }),
+          result: failedFields.result,
+          ...(failedFields.error === undefined ? {} : { error: failedFields.error }),
+          journal: failedFields.journal,
+          budget: { applied: budget, peakConcurrency: runtime?.peakAgentConcurrency() ?? 0 },
+        },
+        artifactStore,
+      );
+      if (failedReport.ok) primaryOutputPath = failedReport.primaryOutputPath;
+    }
     return {
       runId,
       runDir,
       ...failedFields,
       resultPersistence,
       ...(resultTextPath === undefined ? {} : { resultTextPath }),
+      ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
     };
   };
 
@@ -919,7 +968,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   let scriptIdentity: WorkflowScriptIdentity;
   try {
-    scriptIdentity = createWorkflowScriptSnapshot(target.path, runDir);
+    scriptIdentity = createWorkflowScriptSnapshot(target.path, runtimeDir);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -971,19 +1020,19 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   resourceLoader = createWorkflowResourceLoader({
     workflowSourcePath: target.path,
-    runDir,
+    runDir: runtimeDir,
   });
   workspaceManager = createWorkflowWorkspaceManager({
     projectRoot,
     runId,
   });
-  let runFilesDir: string;
+  let runWorkspaceDir: string;
   try {
     artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
     // The run's working directory exists BEFORE any child starts: its path is
     // named in every agent prompt, and a prompt that points at a missing
     // directory is the defect this layout replaced.
-    runFilesDir = ensureWorkflowRunFilesDir(projectRoot, runId);
+    runWorkspaceDir = ensureWorkflowRunWorkspaceDir(projectRoot, runId);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -1048,7 +1097,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     workflowRunId: runId,
     workspaceManager,
     evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
-    runFilesDir,
+    runWorkspaceDir,
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
@@ -1058,7 +1107,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     agentRunner,
     journal,
     projectRoot,
-    runFilesDir,
+    runWorkspaceDir,
     resourceLoader,
     workspaceManager,
     artifactPorts: artifactStore,
@@ -1259,7 +1308,9 @@ function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan 
 /** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
 function readWorkflowReplaySafety(scriptIdentity: WorkflowScriptIdentity): WorkflowReplaySafety {
   try {
-    return assessWorkflowReplaySafety(readFileSync(scriptIdentity.snapshotPath, "utf8")).replaySafety;
+    return assessWorkflowReplaySafety(
+      readWorkflowRunTextFile(path.dirname(scriptIdentity.snapshotPath), scriptIdentity.snapshotPath),
+    ).replaySafety;
   } catch {
     return "unproven";
   }

@@ -16,6 +16,8 @@ import {
   workflowLiveExecutionCount,
 } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { workflowRunArtifactsDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -43,7 +45,7 @@ describe("workflow replay live-row answer hydration", () => {
         ok: true,
         result: { summary: "replayed" },
         journal: [fixture.start, fixture.end],
-        resultPersistence: { ok: true, path: path.join(fixture.runDir, "result.json") },
+        resultPersistence: { ok: true, path: workflowResultFile(fixture.runDir) },
       };
     });
     try {
@@ -81,7 +83,11 @@ describe("workflow replay live-row answer hydration", () => {
     const tampered = replayFixture("Original answer.");
     const read = readWorkflowArtifactRecord(tampered.root, tampered.runId, tampered.ref.artifactId);
     if (read.status !== "ready") throw new Error(read.message);
-    writeFileSync(path.join(tampered.runDir, "artifacts", read.record.relativePath), "Tampered answer.", "utf8");
+    writeFileSync(
+      path.join(workflowRunArtifactsDir(tampered.runDir), read.record.relativePath),
+      "Tampered answer.",
+      "utf8",
+    );
     applyWorkflowJournalLineToAgentLiveStore(tampered.start);
     applyWorkflowJournalLineToAgentLiveStore(tampered.end, tampered.root);
     const tamperedRow = agentLiveStore.rows.get(workflowAgentLiveRowId(tampered.end));
@@ -288,7 +294,7 @@ function replayFixture(answer: string): {
 } {
   const root = temporaryProject();
   const runId = `replay-${roots.length}`;
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const store = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   const ref = store.recordAgentEvidence({

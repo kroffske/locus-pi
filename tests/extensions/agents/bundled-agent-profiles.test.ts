@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import {
   type ModelRolesState,
 } from "../../../extensions/_shared/model/model-settings.js";
 import { createHarness } from "../../test-harness.js";
+import { loadExtensionAgentCatalog, refreshAgents, resolveAgentSelection } from "../../../extensions/agents/catalog.js";
 
 function loadBundledAgent(name: string): AgentDefinition {
   const loaded = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
@@ -24,6 +25,60 @@ function loadBundledAgent(name: string): AgentDefinition {
   expect(definition).toBeDefined();
   return definition!;
 }
+
+describe("bundled extension-agent catalog", () => {
+  it("covers every default extension and resolves its manifest description", () => {
+    const entries = loadExtensionAgentCatalog();
+    expect(entries).toHaveLength(10);
+    expect(new Set(entries.map((entry) => entry.extensionId)).size).toBe(entries.length);
+    expect(new Set(entries.map((entry) => entry.agentName)).size).toBe(entries.length);
+
+    refreshAgents(process.cwd());
+    for (const entry of entries) {
+      expect(resolveAgentSelection(entry.agentName)?.agent.description).toBe(entry.description);
+      expect(entry.profilePath).toMatch(/^\.agents\/agents\/extension-[^/]+\.md$/);
+    }
+  });
+
+  it("rejects an unknown or duplicate assignment in a package fixture", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-extension-agent-catalog-"));
+    try {
+      await mkdir(join(root, "extensions", "one"), { recursive: true });
+      await mkdir(join(root, ".agents", "agents"), { recursive: true });
+      await writeFile(
+        join(root, "package.json"),
+        JSON.stringify({ pi: { extensions: ["./extensions/one/index.ts"] } }),
+      );
+      await writeFile(
+        join(root, "extensions", "one", "manifest.json"),
+        JSON.stringify({ id: "one", agent: { name: "missing", description: "x" } }),
+      );
+      expect(() => loadExtensionAgentCatalog({ packageRoot: root })).toThrow("unknown bundled agent profile");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects drift between manifest and profile descriptions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-extension-agent-description-"));
+    try {
+      await mkdir(join(root, "extensions", "one"), { recursive: true });
+      await mkdir(join(root, ".agents", "agents"), { recursive: true });
+      await writeFile(join(root, "package.json"), JSON.stringify({ pi: { extensions: ["./extensions/one/index.ts"] } }));
+      await writeFile(
+        join(root, "extensions", "one", "manifest.json"),
+        JSON.stringify({ id: "one", agent: { name: "extension-one", description: "Manifest description." } }),
+      );
+      await writeFile(
+        join(root, ".agents", "agents", "extension-one.md"),
+        "---\nname: extension-one\ndescription: Profile description.\nmodel: task\n---\nOne.\n",
+      );
+      expect(() => loadExtensionAgentCatalog({ packageRoot: root })).toThrow("description drift");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("bundled agent profiles", () => {
   it("loads real default.md with reasoning-only evidence policy", () => {

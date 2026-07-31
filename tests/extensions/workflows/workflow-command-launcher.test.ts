@@ -34,8 +34,8 @@ describe("workflow command launcher", () => {
       runScript,
       createObserver(request) {
         return {
-          onRunStart(runId) {
-            observed.push(`start:${request.scriptRef}:${runId}`);
+          onRunStart({ runId, runDir }) {
+            observed.push(`start:${request.scriptRef}:${runId}:${runDir}`);
           },
           onEvent: () => {},
           onResult(result) {
@@ -76,10 +76,10 @@ describe("workflow command launcher", () => {
       continuation: { originRunId: "source-run", artifactRefs: [] },
     });
     expect(observed).toEqual([
-      "start:ordinary:launcher-run-1",
+      "start:ordinary:launcher-run-1:/tmp/launcher-run-1",
       "result:ordinary:launcher-run-1",
       "finally:ordinary",
-      "start:continued:launcher-run-2",
+      "start:continued:launcher-run-2:/tmp/launcher-run-2",
       "result:continued:launcher-run-2",
       "finally:continued",
     ]);

@@ -10,7 +10,7 @@ function repository() {
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
   execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-  writeFileSync(path.join(root, ".gitignore"), ".locus/\n", "utf8");
+  writeFileSync(path.join(root, ".gitignore"), ".pi/\n", "utf8");
   writeFileSync(path.join(root, "file.txt"), "one\n", "utf8");
   execFileSync("git", ["add", ".gitignore", "file.txt"], { cwd: root });
   execFileSync("git", ["commit", "-qm", "first"], { cwd: root });

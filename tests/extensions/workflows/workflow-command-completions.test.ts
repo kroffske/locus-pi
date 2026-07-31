@@ -7,6 +7,8 @@ import {
   workflowFlatCommandCompletions,
 } from "../../../extensions/workflows/command-completions.js";
 import workflows from "../../../extensions/workflows/index.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -26,13 +28,8 @@ function project(): string {
     "utf8",
   );
   for (const runId of ["20260724-120000-old", "20260724-130000-new"]) {
-    const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(
-      path.join(runDir, "result.json"),
-      JSON.stringify({ runId, ok: true, result: null, journal: [] }),
-      "utf8",
-    );
+    const runDir = ensureWorkflowRunDir(root, runId);
+    writeFileSync(workflowResultFile(runDir), JSON.stringify({ runId, ok: true, result: null, journal: [] }), "utf8");
   }
   return root;
 }

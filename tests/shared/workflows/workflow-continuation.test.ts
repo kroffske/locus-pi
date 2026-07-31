@@ -10,7 +10,12 @@ import {
   type WorkflowArtifactRef,
   type WorkflowContinuation,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
-import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  readWorkflowRunJournalState,
+  workflowJournalFile,
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
@@ -55,9 +60,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const directory = path.join(root, ".locus", "runtime", "workflows", runId);
-  mkdirSync(directory, { recursive: true });
-  return directory;
+  return ensureWorkflowRunDir(root, runId);
 }
 
 function sourceContinuation(
@@ -70,7 +73,7 @@ function sourceContinuation(
     store.publishText(index === 0 ? "intent.md" : `artifact-${index + 1}.md`, `source ${index + 1}`, "prepare"),
   );
   writeFileSync(
-    path.join(runDir(root, runId), "result.json"),
+    workflowResultFile(runDir(root, runId)),
     `${JSON.stringify({
       ok: true,
       result: { mode: "prepared", artifactRefs: refs },
@@ -307,7 +310,7 @@ describe("workflow continuation", () => {
       continuation: { originRunId: "source-run", artifacts: [{ sourceRef: ref, consumedRef: consumed }] },
     };
     writeFileSync(
-      path.join(directory, "journal.ndjson"),
+      workflowJournalFile(directory),
       [base, { ...base, continuation: { ...base.continuation, extra: true } }]
         .map((value) => JSON.stringify(value))
         .join("\n") + "\n",
@@ -347,7 +350,7 @@ describe("workflow continuation", () => {
         ],
       },
     };
-    writeFileSync(path.join(directory, "journal.ndjson"), `${JSON.stringify(row)}\n`);
+    writeFileSync(workflowJournalFile(directory), `${JSON.stringify(row)}\n`);
 
     const state = readWorkflowRunJournalState(root, runId);
     expect(state.lines).toEqual([]);

@@ -92,7 +92,7 @@ which is ownership.
 
 `extensions/workflows/run-read.ts` is the only door into workflow run persistence
 for code outside the workflows extension. Workflow runs persist under
-`.locus/runtime/workflows/<runId>/`, and the module that owns that layout —
+`.pi/locus-pi/workflows/<runId>/`, and the module that owns that layout —
 `extensions/workflows/runtime/workflow-journal.ts` — also owns the append sink, the
 journal-to-live-row projection, and the live-row retention bound. Two consumers
 only ever needed to read a run, and both had been importing that module directly,

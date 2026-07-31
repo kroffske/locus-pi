@@ -2,6 +2,10 @@
 
 These pages describe the ten entrypoints currently loaded by `package.json#pi.extensions`.
 
+Each default extension has exactly one dedicated bundled agent profile. The
+public [extension-agent map](../../extension-agent-map.md) is the catalog
+contract for those assignments; generic bundled agents remain available too.
+
 Source truth remains code-first:
 
 - `package.json#pi.extensions` defines the default loadable surface.

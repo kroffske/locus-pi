@@ -24,7 +24,8 @@ import path from "node:path";
 import type { WorkflowArtifactRef, WorkflowContinuation } from "./workflow-artifacts.js";
 import { workflowRunDir } from "./workflow-journal.js";
 import { readWorkflowRunSummary } from "./workflow-journal.js";
-import { projectWorkflowDisposition } from "./workflow-result.js";
+import { projectWorkflowDisposition, workflowResultFile } from "./workflow-result.js";
+import { readWorkflowRunTextFile, workflowRunRuntimeDir } from "./workflow-run-layout.js";
 import {
   assessWorkflowSourceIdentity,
   sha256WorkflowBytes,
@@ -294,7 +295,7 @@ export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId:
   try {
     assertSafeComponent(runId, "workflow runId");
     const runDir = assertCanonicalRunDirectory(projectRoot, runId);
-    const resultPath = path.join(runDir, "result.json");
+    const resultPath = workflowResultFile(runDir);
     // A run directory with no result.json has not published a terminal result
     // yet — it is still executing, or it was interrupted. Such a run cannot
     // carry an operator handoff, so absence is the honest answer; calling it
@@ -304,7 +305,7 @@ export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId:
     // rather than masquerade as an absent one.
     if (lstatSync(resultPath, { throwIfNoEntry: false }) === undefined) return { status: "absent" };
     assertRegularConfinedFile(runDir, resultPath, "Workflow result");
-    return readWorkflowOperatorHandoff(JSON.parse(readFileSync(resultPath, "utf8")) as unknown);
+    return readWorkflowOperatorHandoff(JSON.parse(readWorkflowRunTextFile(runDir, resultPath)) as unknown);
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }
@@ -733,8 +734,8 @@ interface WorkflowHandoffClaimPaths {
 function claimPaths(projectRoot: string, runId: string): WorkflowHandoffClaimPaths {
   const runDir = assertCanonicalRunDirectory(projectRoot, runId);
   return {
-    claimPath: path.join(runDir, HANDOFF_CLAIM_FILE),
-    lockPath: path.join(runDir, HANDOFF_CLAIM_LOCK_FILE),
+    claimPath: path.join(workflowRunRuntimeDir(runDir), HANDOFF_CLAIM_FILE),
+    lockPath: path.join(workflowRunRuntimeDir(runDir), HANDOFF_CLAIM_LOCK_FILE),
   };
 }
 
