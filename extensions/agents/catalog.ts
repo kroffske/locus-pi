@@ -6,8 +6,16 @@
  * name resolution with the built-in aliases, and the flat catalog projections the
  * unknown-agent report reads.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { Type } from "@sinclair/typebox";
-import { discoverAgentDefinitions, formatAgentCatalogHint } from "../_shared/agent-runtime/agents.js";
+import {
+  BUNDLED_AGENTS_DIR,
+  discoverAgentDefinitions,
+  formatAgentCatalogHint,
+  loadAgentsFromDir,
+} from "../_shared/agent-runtime/agents.js";
+import { DEFAULT_MODEL_ROLES } from "../_shared/model/model-settings.js";
 import { agentCatalog } from "./catalog-state.js";
 import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
 
@@ -35,6 +43,89 @@ export const TaskParams = Type.Object({
 export const DEFAULT_TASK_AGENT_NAME = "task";
 const BUILT_IN_AGENT_ALIASES = { default: DEFAULT_TASK_AGENT_NAME, general: DEFAULT_TASK_AGENT_NAME } as const;
 
+export interface ExtensionAgentCatalogEntry {
+  extensionId: string;
+  agentName: string;
+  description: string;
+  profilePath: string;
+  manifestPath: string;
+}
+
+interface ExtensionManifest {
+  id: string;
+  agent?: { name?: unknown; description?: unknown };
+}
+
+interface PackageMetadata {
+  pi?: { extensions?: unknown };
+}
+
+const PACKAGE_ROOT = path.resolve(BUNDLED_AGENTS_DIR, "..", "..");
+
+/**
+ * Validate and read the package-owned extension-to-agent catalog. Keeping this
+ * derived from package.json prevents a new default entrypoint from silently
+ * shipping without a resolvable dedicated profile.
+ */
+export function loadExtensionAgentCatalog(
+  options: { packageRoot?: string; bundledAgentsDir?: string } = {},
+): ExtensionAgentCatalogEntry[] {
+  const packageRoot = options.packageRoot ?? PACKAGE_ROOT;
+  const bundledAgentsDir = options.bundledAgentsDir ?? path.join(packageRoot, ".agents", "agents");
+  const packageMetadata = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as PackageMetadata;
+  const entrypoints = packageMetadata.pi?.extensions;
+  if (!Array.isArray(entrypoints)) throw new Error("package.json#pi.extensions must be an array");
+
+  const extensionIds = entrypoints.map((entrypoint) => {
+    if (typeof entrypoint !== "string") throw new Error("package.json#pi.extensions contains a non-string entrypoint");
+    const match = /^\.\/extensions\/([^/]+)\/index\.ts$/.exec(entrypoint);
+    if (!match?.[1]) throw new Error(`invalid default extension entrypoint: ${entrypoint}`);
+    return match[1];
+  });
+  if (new Set(extensionIds).size !== extensionIds.length) throw new Error("duplicate default extension entrypoint");
+
+  const loaded = loadAgentsFromDir(bundledAgentsDir, "bundled");
+  if (loaded.diagnostics.length) {
+    throw new Error(loaded.diagnostics.map(({ filePath, message }) => `${filePath}: ${message}`).join("; "));
+  }
+  const profiles = new Map<string, AgentDefinition>();
+  for (const profile of loaded.definitions) {
+    if (profiles.has(profile.name)) throw new Error(`duplicate bundled agent profile: ${profile.name}`);
+    profiles.set(profile.name, profile);
+  }
+
+  const assigned = new Set<string>();
+  const entries = extensionIds.map((extensionId) => {
+    const manifestPath = path.join(packageRoot, "extensions", extensionId, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+    if (manifest.id !== extensionId) throw new Error(`manifest id mismatch: ${manifestPath}`);
+    const name = manifest.agent?.name;
+    const description = manifest.agent?.description;
+    if (typeof name !== "string" || !name || typeof description !== "string" || !description) {
+      throw new Error(`extension manifest has no complete agent assignment: ${manifestPath}`);
+    }
+    if (assigned.has(name)) throw new Error(`duplicate extension agent assignment: ${name}`);
+    assigned.add(name);
+    const profile = profiles.get(name);
+    if (!profile) throw new Error(`unknown bundled agent profile: ${name}`);
+    if (
+      profile.model?.length !== 1 ||
+      profile.model[0]!.includes("/") ||
+      !DEFAULT_MODEL_ROLES.some((role) => role === profile.model![0])
+    ) {
+      throw new Error(`invalid model role for extension agent: ${name}`);
+    }
+    return {
+      extensionId,
+      agentName: name,
+      description,
+      profilePath: path.relative(packageRoot, profile.filePath ?? path.join(bundledAgentsDir, `${name}.md`)),
+      manifestPath: path.relative(packageRoot, manifestPath),
+    };
+  });
+  return entries;
+}
+
 export interface AgentResolution {
   requestedAgent: string;
   resolvedAgent: string;
@@ -43,12 +134,17 @@ export interface AgentResolution {
 }
 
 export function refreshAgents(projectRoot: string) {
+  const extensionAgents = new Map(loadExtensionAgentCatalog().map((entry) => [entry.agentName, entry]));
   const discovered = discoverAgentDefinitions(projectRoot);
   agentCatalog.clear();
-  for (const agent of discovered.definitions) {
+  const resolvedDefinitions = discovered.definitions.map((agent) => {
+    const assignment = agent.source === "bundled" ? extensionAgents.get(agent.name) : undefined;
+    return assignment ? { ...agent, description: assignment.description } : agent;
+  });
+  for (const agent of resolvedDefinitions) {
     agentCatalog.set(agent.name, agent);
   }
-  writeAgentCatalogHint(discovered.definitions);
+  writeAgentCatalogHint(resolvedDefinitions);
   return discovered;
 }
 

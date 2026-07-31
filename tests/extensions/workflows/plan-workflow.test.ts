@@ -161,8 +161,14 @@ function stalledPlanContinuation(
 
 const PLAN_DRAFT = [
   "# Implementation Plan",
-  "## Goal",
-  "The offset advances.",
+  "## Outcome",
+  "Outcome type: working delivery",
+  "Primary result: Pagination advances past the first page.",
+  "Consumer: Callers of the pagination API.",
+  "Form and location: `src/page.ts` runtime behavior.",
+  "Required content or behavior: The offset advances by the configured page size.",
+  "Usability proof: `npm test -- page` passes the multi-page behavior case.",
+  "Supporting evidence: implementation report and test output.",
   "",
   "## Assumptions",
   "- Assumed the caller owns the offset, because `loadPage` reads it; wrong if the store owns it.",
@@ -299,11 +305,11 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(source).toContain("\n## Assumptions\n- Assumed X, because Y; wrong if Z.");
     expect(prose).toContain('in the exact form "assumed X, because Y; wrong if Z"');
 
-    expect(prose).toContain("a decision the plan depends on but never states — an unstated assumption is a defect");
+    expect(prose).toContain("a decision the plan depends on but never states — especially an ambiguity");
     expect(prose).toContain("while a choice recorded under \\`## Assumptions\\` with its reason is not");
   });
 
-  it("tells both roles that a step is one changed thing, verified by a command", () => {
+  it("makes the primary user result the source of the steps and verification", () => {
     // Three failures from one live run on 2026-07-28, each addressed on both
     // sides so the critic can refuse what the planner is told not to write: a
     // plan whose first "step" only read nine files, a second step that wrote
@@ -314,25 +320,21 @@ describe("workflow example: plan.workflow.mjs", () => {
 
     expect(prose).toContain("Every step changes the repository.");
     expect(prose).toContain("a step that changes nothing");
-    expect(prose).toContain("give each one its own step");
-    expect(prose).toContain("one step covering more than one of them is exactly that");
+    expect(prose).toContain("Start with the result, not the edits.");
+    expect(prose).toContain("Name one primary result.");
+    expect(prose).toContain("the named primary result is only a list of completed steps");
+    expect(prose).toContain("the steps can all pass without producing the primary result");
     expect(prose).toContain("one command a later agent can rerun without a human");
     expect(prose).toContain("a step block missing any of the mandatory");
   });
 
-  it("tells both roles that a shared destination file does not justify one step", () => {
-    // The 2026-07-28 rerun on the same local model closed the previous gap and
-    // opened this one: the plan collapsed to a single step for all three
-    // sections, and the critic's own reasoning excused it because the task said
-    // "in one new file". The exemption for work that cannot be done apart is
-    // real, but a shared destination is not an instance of it, so both sides are
-    // told what does not count.
+  it("groups repetitive work unless distinct decisions, risks, or proof require a split", () => {
     const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
 
-    expect(prose).toContain("One destination is not such a reason.");
-    expect(prose).toContain("the shared file says where the work goes, not that it is one job");
-    expect(prose).toContain("That they share one destination file is not such a reason");
-    expect(prose).toContain("a shared file states where the work goes, not that it is one job");
+    expect(prose).toContain("group repetitive work when it shares one decision");
+    expect(prose).toContain("different behavior, risk, ownership, dependencies, or proof");
+    expect(prose).toContain("several steps that repeat the same mechanical change");
+    expect(prose).toContain("multiplying implementer and reviewer handoffs");
   });
 
   it("tells both roles that a closing verification step is a step that changes nothing", () => {
@@ -537,7 +539,7 @@ describe("workflow example: plan.workflow.mjs", () => {
       "planner round 1": guided,
       "critic round 1": '{"verdict":"accept","defects":[]}',
     };
-    const { dsl } = runtimeWith(
+    const { dsl, published } = runtimeWith(
       async (request) => {
         calls.push(request);
         return completed(request, outputs[request.label!]!);
@@ -547,6 +549,10 @@ describe("workflow example: plan.workflow.mjs", () => {
     const guidance = "Keep S1 but do the change behind the existing feature flag; the verify command is fine as is.";
 
     expect(await runWorkflow(dsl, guidance)).toBe(guided);
+    expect(published.map((item) => ({ name: item.ref.name, stage: item.stage }))).toEqual([
+      { name: "task.md", stage: "publish-plan" },
+      { name: "plan.md", stage: "publish-plan" },
+    ]);
     // No scout: the retained context is the map, and the loop restarts at round 1.
     expect(calls.map((call) => call.label)).toEqual(["planner round 1", "critic round 1"]);
     const planner = calls[0]!;

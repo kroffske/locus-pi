@@ -10,11 +10,10 @@
 // Only the planner and the critic loop; the critic is the measured exit and the
 // round cap is the safety net, and the result says which one stopped the run.
 //
-// The loop never stops mid-round to ask the operator a question. When something
-// is genuinely undecided, the planner writes it down under `## Assumptions` and
-// plans on top of it, and the critic treats a decision hidden as an unstated
-// assumption as a defect. An assumption that turns out wrong is cheaper to fix
-// by replanning than a run that halts and waits.
+// The loop never stops mid-round to ask the operator a question. A safe choice
+// is recorded under `## Assumptions`; an ambiguity that changes the primary
+// result stays open, and the critic refuses to accept a plan built across it.
+// The round-cap handoff is where the operator resolves a choice the loop cannot.
 //
 // The round cap is the one exception, because there the choice is no longer the
 // planner's to assume: the run has spent its rounds and holds a draft nobody
@@ -169,7 +168,7 @@ function freezeSchema(value) {
 export const meta = {
   name: "plan",
   description:
-    "Scouts the repository, then drafts and critiques a plan until the critic accepts it; a stalled round cap hands the decision to the operator.",
+    "Defines the primary result, then drafts and critiques its implementation plan; a stalled round cap hands the decision to the operator.",
   phases: [
     { title: "scout-repository", detail: "One read-only scout maps the surfaces the task depends on." },
     { title: "draft-plan", detail: "The planner writes the complete plan, revising against the previous critique." },
@@ -180,6 +179,7 @@ export const meta = {
     // stage happened to run last.
     { title: "await-operator", detail: "The round cap retains the stalled state and asks the operator to decide." },
     { title: "accept-draft", detail: "The operator took the retained draft as the plan; no agent runs." },
+    { title: "publish-plan", detail: "A guided continuation publishes its accepted task and plan together." },
   ],
 };
 
@@ -358,6 +358,7 @@ async function resumePlanning(dsl, continued, input) {
     guidanceText: answer,
   });
   if (outcome.accepted) {
+    phase("publish-plan");
     publishArtifact("task.md", continued.taskText);
     publishPrimaryArtifact("plan.md", outcome.planText, "publish-plan");
     return outcome.planText;
@@ -435,6 +436,19 @@ TASK — write the complete implementation plan for the operator task below. You
 are the planner. This is round ${round} of at most ${MAX_PLAN_ROUNDS}. Plan the
 work; do not do it.
 
+Start with the result, not the edits. Before you derive steps, decide what must
+exist or work when the task is finished, who uses it, where they find it, what
+content or behavior makes it useful, and what evidence proves that usefulness.
+Name one primary result. Tests, logs, transcripts, changed-file lists, and an
+implementation report are supporting evidence unless the operator explicitly
+asked for one of them as the result.
+
+Classify the outcome as a working delivery, decision, evidence package, or
+gate. When the operator's wording permits meanings that would produce different
+results, choose only when one interpretation is clearly safer and record the
+assumption. Otherwise leave an open question that names the decision required;
+do not silently narrow the task to the easiest technical interpretation.
+
 Every step must be an action a single implementer can carry out and someone else
 can check afterwards. Name the real files the step touches — the context map
 below is a starting point, not a substitute for opening them. Order the steps so
@@ -465,17 +479,13 @@ own place in the order, so a final "integrity pass", "sanity check", or
 changes nothing. The plan ends with the last step that changes something.
 
 When the task names several things of the same kind — files, modules, endpoints,
-tables, sections of one document — give each one its own step. They are
-independent work with independent evidence even when the writing is repetitive,
-and one step covering several of them makes a single implementer own decisions
-nobody can check separately. Combine them only when a step says plainly why they
-cannot be done apart.
-
-One destination is not such a reason. Three sections appended to the same new
-document are three pieces of work with three separate pieces of evidence: the
-shared file says where the work goes, not that it is one job. Combining is
-justified when one part cannot be written until another exists, not when the
-parts merely land next to each other.
+tables, or document rows — group repetitive work when it shares one decision,
+one implementation pattern, and one meaningful verification. Split it only
+where items carry different behavior, risk, ownership, dependencies, or proof.
+A step per item is not safer when every implementer would repeat the same
+mechanical change; it only multiplies handoffs. A shared destination alone does
+not require either grouping or splitting: choose the boundary that preserves an
+independently understandable change and check.
 
 Nobody will answer a question mid-run. Where the task leaves a real choice open,
 take the most defensible option, plan on it, and record it under
@@ -515,8 +525,14 @@ Return exactly this structure, and return the whole plan every round:
 
 \`\`\`text
 # Implementation Plan
-## Goal
-One paragraph: what will be true when this plan is done.
+## Outcome
+Outcome type: working delivery | decision | evidence package | gate
+Primary result: The one result the operator will use.
+Consumer: Who or what uses the result.
+Form and location: The concrete repository path, runtime surface, or other place where the result will exist.
+Required content or behavior: What must be present or work for the result to be useful.
+Usability proof: The command or observable evidence that proves the result is usable, not merely created.
+Supporting evidence: Reports, tests, logs, or other secondary material; write \`none\` when unnecessary.
 
 ## Assumptions
 - Assumed X, because Y; wrong if Z. Write \`- none\` when the task left nothing open.
@@ -578,6 +594,16 @@ The plan is a claim about the repository, not evidence about it. Open the files
 it names and check each step against what is actually there. A defect is
 something that would make an implementer stop, guess, or do the wrong thing:
 
+- the \`## Outcome\` contract is missing a primary result, consumer, form and
+  location, required content or behavior, usability proof, or supporting
+  evidence;
+- the named primary result is only a list of completed steps, changed files,
+  logs, transcripts, or an implementation report even though the operator asked
+  for a working change, document, decision, or other domain result;
+- the steps can all pass without producing the primary result or without making
+  its required content or behavior usable;
+- the usability proof checks only that files changed or tests ran, but not the
+  user-visible content or behavior promised by the outcome;
 - a step that names a file, symbol, or command that does not exist;
 - a step block missing any of the mandatory \`Files:\`, \`Change:\`, \`Verify:\` or
   \`Depends on:\` lines — this is a defect and not a formatting nicety, because
@@ -589,17 +615,20 @@ something that would make an implementer stop, guess, or do the wrong thing:
 - a step whose verification cannot pass at that step's own place in the order,
   because it depends on something a later step creates;
 - an ordering that requires something a later step creates;
-- a decision the plan depends on but never states — an unstated assumption is a
-  defect, while a choice recorded under \`## Assumptions\` with its reason is not,
-  even if you would have chosen differently;
+- a decision the plan depends on but never states — especially an ambiguity that
+  changes what the primary result means. An unstated assumption is a defect,
+  while a choice recorded under \`## Assumptions\` with its reason is not when one
+  interpretation is clearly safer;
+- an open question whose answer can change the primary result, the steps, or
+  their verification. An accepted plan resolves it as a justified assumption or
+  leaves the loop to reach the operator handoff;
 - a surface the task requires that no step touches — callers, tests,
   configuration, or an existing document that states the contract being changed;
-- a step so large that it hides several independent decisions — and when the
-  task names several things of the same kind, one step covering more than one of
-  them is exactly that, unless the step says why they cannot be done apart. That
-  they share one destination file is not such a reason: a shared file states
-  where the work goes, not that it is one job, and sections appended to one
-  document can each be written and checked on their own;
+- a step so large that it hides several independent decisions, risks, owners, or
+  proofs;
+- several steps that repeat the same mechanical change under one decision and
+  one verification boundary, multiplying implementer and reviewer handoffs
+  without making the result safer or easier to check;
 - a step that changes nothing, because reading and confirming are how the plan
   was written rather than work an implementer can be given. A closing step that
   verifies the finished result is this defect and not an exception to it: each

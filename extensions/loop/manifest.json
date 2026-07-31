@@ -1,6 +1,10 @@
 {
   "id": "loop",
   "name": "loop",
+  "agent": {
+    "name": "extension-loop",
+    "description": "Continue bounded goals and workflows through /loop and loopControl with explicit state."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

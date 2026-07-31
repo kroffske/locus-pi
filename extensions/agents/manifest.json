@@ -1,6 +1,10 @@
 {
   "id": "agents",
   "name": "agents",
+  "agent": {
+    "name": "extension-agents",
+    "description": "Manage the agent catalog, child sessions, /agent and /ps, and spawn_agent/task tools."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

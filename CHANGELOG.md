@@ -35,6 +35,23 @@ This file records user-visible changes to the public package.
   file path, then sends the resolved plan through the existing deterministic
   step parser and implementation/review pipeline.
 
+- **Planning now starts from the result the operator will use.** `plan` records
+  one primary result, its consumer, location, required content or behavior, and
+  usability proof before deriving implementation steps. `plan-implement`
+  requires that contract, records command outcomes as structured evidence, and
+  cannot return success after a failed or unrun check, an evidence gap,
+  run-attributable unexpected work, or a non-ready result. Step dependencies are
+  now enforced for subset runs, and one bounded reconciliation may build a
+  missing result after the selected steps finish. The primary output is now
+  `workflow-summary.md`, while `implementation-report.md` remains supporting
+  per-step evidence.
+
+- **The public extension index is now a source and dependency map.** It links
+  every default extension to its entrypoint, manifest, and active manual;
+  distinguishes direct feature imports from shared-layer and external-package
+  dependencies; and corrects the ownership documentation's stale count of four
+  Package workflows to the six that ship.
+
 - **Declining a workflow question is now an answer, not a postponement.**
   Pressing Escape on a workflow's operator question used to set a session-local
   snooze the running workflow never heard about, leaving the run parked. It now

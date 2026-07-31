@@ -1,6 +1,10 @@
 {
   "id": "todo-context",
   "name": "todo-context",
+  "agent": {
+    "name": "extension-todo-context",
+    "description": "Manage session todos, todo_write, bounded continuation, and /todo."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

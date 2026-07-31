@@ -73,7 +73,10 @@ follow, and an explicit list of what it could not determine.
 **`planner` writes the whole plan every round, never a delta**, so the workflow
 never merges two model documents. Rounds share the `plan.md` name: the artifact
 id is the index identity, so every round is retained separately and the last one
-is the plan.
+is the plan. It starts with an explicit `## Outcome` contract: outcome type,
+primary result, consumer, form and location, required content or behavior,
+usability proof, and supporting evidence. The steps are then derived from that
+result rather than treated as the result themselves.
 
 **`critic` is the exit.** It reopens the repository, checks each step against
 what is actually there, and returns the shaped `{verdict, defects}`. Script code
@@ -91,16 +94,17 @@ failure and forbids it.
 ### The loop never stops to ask
 
 There is no operator pause mid-loop and no clarification round. When the task
-leaves a real choice open, the planner takes the most defensible option and
-records it in the plan under `## Assumptions`, in the form "assumed X, because
-Y; wrong if Z"; the critic treats a decision the plan depends on but never
-states as a defect, and a choice recorded with its reason as not a defect even
-when it would have chosen differently.
+leaves a choice open and one interpretation is clearly safer, the planner takes
+it and records it in the plan under `## Assumptions`, in the form "assumed X,
+because Y; wrong if Z". An ambiguity that changes the primary result remains an
+open question instead of being silently narrowed. The critic rejects an
+unstated decision and also rejects a plan whose steps can pass without producing
+the declared result.
 
-That is a deliberate trade. A run that halts to ask has to be resumed, and until
-it is there is no plan at all; an assumption written down is visible to the
-operator the moment the run finishes, and correcting it means replanning — which
-this workflow is cheap enough to do.
+That is a deliberate trade. A justified assumption stays visible and is cheap to
+correct by replanning. A meaning-changing ambiguity cannot produce an accepted
+plan; if the loop cannot resolve it, the existing round-cap handoff asks the
+operator to accept the retained draft or provide guidance.
 
 ### The round cap hands the decision to the operator
 
@@ -170,8 +174,8 @@ flowchart LR
     K -->|"blocked"| E
     N -->|"yes"| W
     N -->|"no"| E["collect check evidence (read-only + repository_check)"]
-    E --> Q["fresh reporter (read-only)"]
-    Q --> O["runtime implementation-report.md"]
+    E --> Q["fresh grader: primary result + steps (read-only)"]
+    Q --> O["runtime workflow-summary.md + supporting implementation-report.md"]
 ```
 
 The preferred handoff is one continuation artifact whose bytes the host has
@@ -188,11 +192,16 @@ plan's length, because a cap here could only reject a plan somebody had already
 accepted, after the run that wrote it was over. The budgets that still matter are
 the per-step ones below, which are what keep a single writer's prompt in hand.
 
-Deterministic code then parses the `### S<n>` blocks. That text was written by a
-_previous_ run's agent, so a malformed plan is a fatal error: nobody in this run
-can be re-asked for it. Everything the current run's selector can repair —
+Deterministic code first requires the seven fields in `## Outcome`, then parses
+the `### S<n>` blocks. That text was written by a _previous_ run's agent, so a
+malformed plan is a fatal error: nobody in this run can be re-asked for it.
+Everything the current run's selector can repair —
 choosing ids that exist, staying inside the note budget — is a schema keyword or a
 `validate` callback instead, and is re-asked rather than fatal.
+
+`Depends on:` is parsed with each step. Every dependency must name an earlier
+plan step, and the selector is re-asked when it chooses a step without its
+declared predecessors, so subset execution cannot silently skip required work.
 
 The selector may implement a subset when the operator asked for one, but the
 **plan's own order is authority**: `orderStepSelection` restores it regardless of
@@ -221,16 +230,31 @@ and needs describing. The run returns `{ ok: false, partial: true, appliedSteps,
 failedStep, unresolvedRows }`, and the runner projects that deliberate partial as
 a non-success.
 
+The final check stage returns structured status for every selected step's
+verification and every repository-wide command it ran. Deterministic validation
+does not permit `complete` when any observed check failed or was not run, when
+an evidence gap or run-attributable unexpected change remains, or when the
+declared primary result is not ready. One bounded reconciliation can repair any
+of those terminal gaps, including a missing result, even when every individual
+step row was already marked done.
+
+The final grader identifies the primary result, its location, its readiness,
+and the evidence that makes it usable. The runtime renders that as the primary
+`workflow-summary.md`; the per-step `implementation-report.md` and current
+`implementation-tasks.md` remain supporting evidence. Successful runs return
+the same full summary text shown to the operator.
+
 ### What the run retains
 
 - `step-selection.json`, `scope.md`, and repeated `implementation-tasks.md`
   snapshots whose newest entry is the current task ledger;
 - `worker-S<n>-attempt-<n>.md` and `review-S<n>-attempt-<n>.json` for every
   implementation/review attempt;
-- `check-evidence.md` and `implementation-report.md`;
-- the returned text, equal to `implementation-report.md`, unless the run was
-  partial — then the returned value is the structured envelope above and the
-  report is still retained.
+- `check-evidence.json` and, after reconciliation when needed,
+  `reconciliation-check-evidence.json`;
+- supporting `implementation-report.md` plus primary `workflow-summary.md`;
+- the returned text, equal to `workflow-summary.md`, unless the run is partial —
+  then the structured non-success envelope retains the same summary.
 
 ## Capability boundary
 

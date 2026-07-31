@@ -28,8 +28,14 @@ contains exactly these ten entrypoints:
 | `workflows`           | Provides `/workflows`, first-class `/workflow-*` commands, and the `workflow` tool for reviewed trusted JavaScript workflows, child-agent orchestration, and actionable operator handoffs.                                                             |
 
 Each retained extension also has a manifest and a manual under
-[`docs/extensions/active/`](docs/extensions/active/README.md). Maintainer source-audit
-evidence remains in the public GitHub repository rather than the npm artifact.
+[`docs/extensions/active/`](docs/extensions/active/README.md). Every default
+extension has one dedicated bundled agent profile, published in the
+[extension-agent map](docs/extension-agent-map.md); the generic bundled agents
+remain available as well. The public [extension source and dependency
+map](docs/extension-index.md) links every entrypoint, manifest, and manual and
+separates direct feature imports from shared-layer and external-package
+dependencies. Maintainer source-audit evidence remains in the public GitHub
+repository rather than the npm artifact.
 
 ## Curated Package workflows
 
