@@ -124,6 +124,7 @@ The default export receives `(dsl, input)`. Everything a stage needs is on
 | ------------------------------ | ----------------------------------------------------------------------------------- |
 | `agent(prompt, opts?)`         | Run one child agent; resolves to its exact non-empty final text.                    |
 | `agent(prompt, { schema, … })` | Same, under a declared answer shape; resolves to the **validated value**, not text. |
+| `fusion(question, options)`    | Ask 2–10 explicit models independently; return a separate judge's final answer.     |
 | `promptFile(path, vars?)`      | Render a neighboring `.prompt.md`; snapshotted and hashed once per run.             |
 | `phase(name)` / `log(msg)`     | Move the reader-visible stage; append a journal line.                               |
 | `parallel(thunks)`             | Independent branches behind one fail-closed barrier, input order preserved.         |
@@ -141,6 +142,24 @@ Useful `agent()` options: `agent` (catalog name), `readOnly: true`, `tools`,
 `maxToolCalls`, `model`, `timeoutMs`, `maxTurns`, `maxAnswerChars`, `label`,
 `phase`, `artifact` (gives the answer a stable name), `sandbox`, and — on the
 shaped overload — `schema` plus `validate`.
+
+Use `fusion()` for one bounded same-question panel, not general delegation. Each
+member and judge declares exactly one unique `model` or `modelRole`; members are
+read-only and tool-free, run at most four at once, and all must answer before the
+judge runs. The default context is prompt-only. Earlier conversation is never
+inherited: pass only deliberate text with
+`context: { mode: "provided", text }`. `strategy: "replicate"` sends the common
+packet unchanged; `strategy: "roles"` requires a `lens` on every member. The
+return value is only the judge answer, while the packet and every leg remain in
+run artifacts. Supplied context is therefore retained verbatim. Member answers
+default to 8,000 characters, the judge answer to 16,000, and the complete judge
+prompt has a fixed 160,000-character ceiling. Larger panels may need a lower
+member answer bound because preflight reserves worst-case escaping. A judge
+synthesizes; a later `agent()` verifies when correctness needs an independent
+gate. The production runner resolves the whole roster before the first child;
+overlapping Fusion calls reserve their complete worst-case invocation counts.
+Fusion replay is all-or-nothing: a missing or divergent recorded leg stops before
+any fresh child, so run without `--resume` when a new panel is intended.
 
 Every run already applies the package budget contract, so a script that declares
 none of the limits above is still bounded: global agent concurrency, total agent

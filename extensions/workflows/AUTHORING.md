@@ -321,6 +321,72 @@ host validates the concrete model first and passes the selected level to Pi's
 `createAgentSession`; unsupported combinations fail at that boundary rather
 than silently changing effort.
 
+### Ask several models, then synthesize once
+
+Use `fusion(question, options)` when several independently selected models must
+answer the same self-contained question and one separately selected judge must
+write the final answer. Fusion is one bounded composition of normal `agent()`
+calls: every member answer and the judge answer keeps the usual transcript,
+artifact, replay, executed-model, usage, and failure evidence.
+
+```js
+const answer = await dsl.fusion("Which migration is safer, and why?", {
+  members: [
+    {
+      label: "operations",
+      model: "anthropic/claude-sonnet-4-5",
+      lens: "Focus on downtime and operational recovery.",
+    },
+    { label: "data", model: "openai/gpt-5.2", lens: "Focus on consistency and write safety." },
+    { label: "rollback", modelRole: "fast", lens: "Challenge whether rollback is actually reversible." },
+  ],
+  judge: { label: "synthesizer", modelRole: "judge" },
+  context: {
+    mode: "provided",
+    text: "The maintenance window is four minutes and rollback must preserve writes.",
+  },
+  strategy: "roles",
+  // `roles` requires one lens per member; `replicate` sends the same packet to all.
+  output: "Return one recommendation, the decisive tradeoff, and three next steps.",
+});
+```
+
+The context default is `context: { mode: "prompt-only" }`: Fusion receives only
+the `question` string. It never reads the parent chat or session history. To use
+earlier information, prepare it outside Fusion and pass
+`context: { mode: "provided", text }`. Automatic summaries, relevant-history
+selection, and full-history access are deliberately not v1 modes because they
+would hide a lossy context decision and token spend. Supplied context is retained
+verbatim in `fusion-…-packet.md`; do not pass secrets that must not enter run
+evidence.
+
+The runtime validates the complete declaration before the first child starts:
+2–10 members, unique labels, exactly one `model` or `modelRole` per leg, unique
+declared selectors, a judge selector not used by a member, role lenses, remaining
+invocation budget, schema, limits, and the maximum judge packet. Members run in
+declaration order behind the existing four-wide scheduler. Every leg is
+read-only and tool-free; any failed or empty member stops before the judge.
+The public Workflow runner resolves the complete roster through the host model
+registry and roles table before the first child, and overlapping Fusion calls
+atomically reserve their worst-case invocation counts. On `--resume`, recorded
+answers keep the existing replay contract and do not require those models to
+remain configured. Fusion replay is all-or-nothing: a missing or divergent leg
+fails the Fusion before any fresh child instead of mixing recorded and new panel
+answers. Run the workflow without `--resume` to execute a fresh panel.
+Member answers default to at most 8,000 characters each, the judge answer to
+16,000 characters, and the complete judge prompt to 160,000 characters. Use
+`memberLimits` or `judgeLimits` to set answer, timeout, turn, or attempt bounds;
+the 160,000-character aggregate ceiling is fixed. Preflight uses the worst-case
+escaped candidate size, so larger panels may need a lower member answer bound.
+
+Fusion returns only the judge's exact text. Add `schema` and optional `validate`
+to apply the existing shaped-answer contract to the judge only. Member answers
+remain runtime-owned evidence under names such as
+`fusion-0001-member-01-operations.md`; `fusion-0001-packet.md` records the exact
+question, context mode, strategy, selectors, output instruction, and member
+prompts. Treat the judge as a synthesizer, not a correctness oracle. If the
+answer needs independent verification, make that a later `agent()` stage.
+
 **Making a tier mean something.** Roles resolve through `session` → Pi settings →
 project config → user config. The project layer is a local, git-ignored file:
 

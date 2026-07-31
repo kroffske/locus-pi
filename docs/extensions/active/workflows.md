@@ -19,7 +19,7 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / publishArtifact /
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / publishArtifact /
 consumeTextArtifact / awaitOperator / parallel / pipeline / phase / log / promptFile / workspace`)
 for orchestrating catalog-agent sessions through the existing
 `task / createAgentSession` path and retaining their evidence under one run root.
@@ -29,9 +29,14 @@ One way a workflow reaches a model:
 - **`agent()`** — spawns a full catalog or workflow-local child session and returns
   its exact non-empty final text, routed through the same code path as the `task`
   tool. With `opts.schema` it returns a validated value instead; see "Opt-in shaped
-  answers" below. There is no second model-calling primitive: a direct one-shot
-  completion node (`llm()`) existed until 0.2.x and was removed so that an author
-  never has to choose a surface before writing a stage.
+  answers" below.
+- **`fusion()`** — validates a panel of 2–10 explicit model selectors, runs its
+  isolated tool-free members through ordinary `agent()` calls, and asks a separate
+  judge call for one final answer. It receives no ambient conversation history.
+
+There is no direct one-shot completion node: `llm()` existed until 0.2.x and was
+removed so every physical model call keeps the same agent-session evidence path.
+Fusion is a composition of that path, not a second transport.
 
 Every `agent()` call in a workflow script routes through exactly the same code path as the `task` tool:
 
@@ -1218,6 +1223,8 @@ the package surface remains `./extensions/workflows/index.ts`.
 ```ts
 agent(prompt, opts?)          // Run a catalog/local agent; returns exact child text
 agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
+fusion(question, options)     // 2-10 isolated answers -> separate judge; returns only the judge answer
+fusion(question, {schema, …}) // Same panel; validates only the judge's final answer
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
@@ -1233,6 +1240,19 @@ log(msg)                      // Journal line
 now()                         // Recorded wall clock (ms); replayed on --resume
 random()                      // Recorded randomness in [0,1); replayed on --resume
 ```
+
+`fusion()` defaults to prompt-only context and never reads ambient chat history.
+Explicit `context: { mode: "provided", text }` is copied verbatim into the
+Fusion packet artifact. Member answers default to 8,000 characters, the judge
+answer to 16,000, and the complete judge prompt has a fixed 160,000-character
+ceiling. All declared members are required; a member failure stops before the
+judge runs. Larger panels may need a lower member answer bound because preflight
+reserves the worst-case escaped candidate size. The production runner resolves
+all declared model selectors before the first child, and overlapping Fusion
+calls reserve their complete worst-case invocation counts atomically. A resume
+tries recorded answers without requiring the old models to remain configured;
+Fusion fails before any fresh child if one of its recorded legs is missing or
+divergent. Run without `--resume` to execute a new panel.
 
 `awaitOperator()` accepts exactly one non-empty compact reason of at most 200
 characters. It is a control declaration, not model output and not a thrown

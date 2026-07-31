@@ -6,6 +6,16 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow authors can now call `dsl.fusion()` for one bounded multi-model
+  answer.** Fusion validates 2–10 unique member selectors and a separate judge
+  before spending, sends no ambient chat history, supports identical or
+  role-lensed prompts plus explicit supplied context, runs tool-free members at
+  the existing four-call concurrency bound, fails before judging when any member
+  fails, preserves the packet and every answer as evidence, and returns only the
+  judge's exact text or existing schema-validated value. The host resolves the
+  complete roster before the first child, and concurrent Fusion calls reserve
+  their worst-case invocation counts instead of overcommitting the run budget.
+
 - **The public extension catalog now gives operators and planning agents a
   concise English roster of all ten default extensions.** It links each
   entrypoint, manifest, and active manual, separates direct feature edges from

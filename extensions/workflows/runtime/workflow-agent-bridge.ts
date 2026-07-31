@@ -38,6 +38,7 @@ import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.
 import { DEFAULT_WORKFLOW_AGENT, workflowSlotKey } from "./workflow-runtime.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
 import type {
+  WorkflowAgentPreflight,
   WorkflowAgentRunner,
   WorkflowAgentRequest,
   WorkflowAgentResult,
@@ -186,6 +187,36 @@ export function resolveWorkspaceMode(input: {
 // ---------------------------------------------------------------------------
 // createWorkflowAgentRunner
 // ---------------------------------------------------------------------------
+
+/** Resolve every declared agent/model leg without creating a child session.
+ *  Compositions use this before fan-out so a bad judge cannot spend members. */
+export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions): WorkflowAgentPreflight {
+  const defaultAgentName = options.defaultAgent ?? DEFAULT_WORKFLOW_AGENT;
+  const resolveModelFn: WorkflowModelResolver = options.resolveModel ?? createWorkflowModelResolver(options.ctx);
+
+  return async function preflightWorkflowAgents(requests): Promise<void> {
+    const projectRoot = getProjectRoot(options.ctx);
+    const discovered = discoverAgentDefinitions(projectRoot);
+    const agentMap = new Map(discovered.definitions.map((agent) => [agent.name, agent]));
+    const modelRoles = await loadModelRolesState(options.ctx);
+
+    for (const request of requests) {
+      const agentName = request.agent !== undefined && request.agent !== "" ? request.agent : defaultAgentName;
+      const agent = agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
+      if (agent === undefined || !agentMap.has(agentName)) {
+        throw new Error(`Unknown agent: ${agentName}. Available: ${[...agentMap.keys()].join(", ")}`);
+      }
+      const req: WorkflowAgentRequest = {
+        prompt: "Fusion model preflight",
+        agent: agentName,
+        ...(request.model !== undefined ? { model: request.model } : {}),
+        ...(request.modelRole !== undefined ? { modelRole: request.modelRole } : {}),
+      };
+      const tier = await resolveWorkflowTier({ req, agent, modelRoles, resolveModelFn });
+      if (tier.kind === "refused") throw new Error(tier.message);
+    }
+  };
+}
 
 /** Builds the WorkflowAgentRunner the runtime depends on. */
 export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): WorkflowAgentRunner {
