@@ -46,7 +46,7 @@ export interface WorkflowTranscriptOptions {
 
 export interface WorkflowTranscript {
   /** Returns the run-boundary banner for surfaces that can publish one. */
-  start(runId: string): WorkflowTranscriptAnnouncement | undefined;
+  start(runId: string, runDir?: string): WorkflowTranscriptAnnouncement | undefined;
   event(line: WorkflowJournalLine): void;
   finish(res: RunWorkflowScriptResult): WorkflowTranscriptCompletion;
 }
@@ -90,7 +90,7 @@ export function createWorkflowTranscript(
     return bodyLines.length - 1;
   };
   return {
-    start(id) {
+    start(id, runDir) {
       if (announced) return undefined;
       announced = true;
       startedAt = Date.now();
@@ -100,6 +100,7 @@ export function createWorkflowTranscript(
         text: [
           workflowRunRule(safeTarget, id, "started", startedAt),
           "● workflow started · live progress in the panel below · /ps opens the agent fleet",
+          ...(runDir === undefined ? [] : [`runDir: ${runDir}`]),
         ].join("\n"),
       };
     },

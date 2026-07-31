@@ -1,12 +1,12 @@
 /**
- * workflow-journal.ts — runId generation + .locus/runtime/workflows/<runId>/ layout
+ * workflow-journal.ts — runId generation + .pi/locus-pi/workflows/<runId>/ layout
  * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
  *
- * This is the ONLY filesystem surface of the runtime; keeps workflow-runtime.ts pure.
- * Reuses runtimeStateDir from files.ts.
+ * Owns journal persistence and read-side run discovery while workflow-runtime.ts
+ * stays filesystem-free. Canonical path derivation lives in workflow-run-paths.ts.
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -14,7 +14,6 @@ import {
   type AgentLiveExecutionHandle,
   type AgentLiveStatus,
 } from "../../_shared/agent-runtime/agent-sdk-host.js";
-import { runtimeStateDir } from "../../_shared/host/files.js";
 import { AGENT_FAILURE_CAUSES } from "../../_shared/agent-runtime/agent-failure-cause.js";
 import type {
   WorkflowAgentFailureCause,
@@ -30,6 +29,10 @@ import {
 import { parseWorkflowFailureDiagnostic, type WorkflowFailureDiagnostic } from "./workflow-failure.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
 import { projectWorkflowDisposition } from "./workflow-result.js";
+import { ensureWorkflowRunDir } from "./workflow-run-layout.js";
+import { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-paths.js";
+
+export { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-paths.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
 const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_ARTIFACT_COMPONENT_PATTERN, "u");
@@ -76,45 +79,34 @@ export function newWorkflowRunId(now?: () => Date): string {
 }
 
 // ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
-
-export function workflowsRootDir(projectRoot: string): string {
-  return path.join(runtimeStateDir(projectRoot), "workflows");
-}
-
-export function workflowRunDir(projectRoot: string, runId: string): string {
-  return path.join(workflowsRootDir(projectRoot), runId);
-}
-
-/** The run's append-only journal file — one name, one owner. */
-export function workflowJournalFile(runDir: string): string {
-  return path.join(runDir, "journal.ndjson");
-}
-
-// ---------------------------------------------------------------------------
 // File-backed journal sink
 // ---------------------------------------------------------------------------
 
-export function createWorkflowJournalSink(projectRoot: string, runId: string): WorkflowJournalSink {
+export interface WorkflowJournalFileSink extends WorkflowJournalSink {
+  /** Create the safe run root and write the first line. Throws on any failure. */
+  initialize(firstLine: WorkflowJournalLine): void;
+}
+
+export function createWorkflowJournalSink(projectRoot: string, runId: string): WorkflowJournalFileSink {
   const runDir = workflowRunDir(projectRoot, runId);
   const journalPath = workflowJournalFile(runDir);
-  let dirEnsured = false;
+  let initialized = false;
 
-  function ensureDir(): void {
-    if (dirEnsured) return;
-    try {
-      mkdirSync(runDir, { recursive: true });
-      dirEnsured = true;
-    } catch {
-      // If mkdir fails, writes will fail silently below — never throw into the DSL.
-    }
+  function initialize(firstLine: WorkflowJournalLine): void {
+    if (initialized) throw new Error("Workflow journal is already initialized.");
+    ensureWorkflowRunDir(projectRoot, runId);
+    writeFileSync(journalPath, JSON.stringify(firstLine) + "\n", { encoding: "utf8", flag: "wx" });
+    initialized = true;
   }
 
   return {
+    initialize,
     write(line: WorkflowJournalLine): void {
       try {
-        ensureDir();
+        if (!initialized) {
+          initialize(line);
+          return;
+        }
         appendFileSync(journalPath, JSON.stringify(line) + "\n", "utf8");
       } catch {
         // Never throw into the DSL.

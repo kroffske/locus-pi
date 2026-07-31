@@ -26,7 +26,7 @@ function project(): string {
     "utf8",
   );
   for (const runId of ["20260724-120000-old", "20260724-130000-new"]) {
-    const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+    const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
     mkdirSync(runDir, { recursive: true });
     writeFileSync(
       path.join(runDir, "result.json"),

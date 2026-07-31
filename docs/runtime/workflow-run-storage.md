@@ -1,15 +1,20 @@
 # Where a workflow run writes
 
 One workflow run writes everything under
-`<project root>/.locus/runtime/workflows/<runId>/`, split by who produced it.
+`<project root>/.pi/locus-pi/workflows/<runId>/`, split by who produced it.
 Two of those directories are addressed by name and are the ones a person opens:
 
 ```
-.locus/runtime/workflows/<runId>/
+.pi/locus-pi/workflows/<runId>/
   files/     what the run's AGENTS wrote, under their own names
   logs/      what the runtime CAPTURED, in order
   …          machine records (journal, replay, result envelope, artifacts)
 ```
+
+The runner creates this run directory and writes the first `journal.ndjson`
+line before the live start callback. A UI that has announced the RunID can
+therefore show an existing directory immediately; failure to initialize the
+non-symlink path stops before the announcement or any child agent.
 
 The split exists because the two answer different questions. "Where is the plan
 the planner wrote?" is answered by a file called `plan.md`. "What happened, and
@@ -40,7 +45,7 @@ back. Deleting this folder loses no evidence — every byte is a projection of t
 machine records beside it.
 
 ```
-.locus/runtime/workflows/<runId>/logs/
+.pi/locus-pi/workflows/<runId>/logs/
   README.md            table of contents: workflow, status, task, result,
                        the budget this run was held to beside the spend its
                        evidence can measure, the document list with each

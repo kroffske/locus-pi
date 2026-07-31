@@ -19,11 +19,11 @@ limitation under checks instead of inventing a new completion requirement.
 The pair is documented together in [`../plan/README.md`](../plan/README.md) —
 read it before running this one. Two things matter most:
 
-- **The plan arrives as host-verified continuation bytes**, not as text in the
-  input. The entry requires exactly one non-empty artifact named `plan.md`; the
-  host verifies and copies the referenced bytes. The entry deliberately does not
-  re-prove which drafting round produced them, so the operator must continue from
-  the accepted `plan` result rather than an earlier same-named draft.
+- **The plan may be a continuation, pasted text, or one file path.** A single
+  continuation remains strongest because the host verifies and copies its bytes,
+  but its artifact name is irrelevant. Without a continuation, a read-only
+  resolver treats the input as complete plan text or reads the named file, then
+  returns the exact plan before deterministic step parsing begins.
 - **This workflow writes to the launch checkout.** It is a Package workflow, so
   `/workflow-run plan-implement "<request>"` resolves by name, and
   workflow JavaScript is trusted local code with full Node.js host access. Unlike
@@ -37,3 +37,10 @@ read it before running this one. Two things matter most:
   Pi installation: assign `AGENT` in `/model-roles` to choose the model and its
   reasoning effort, or assign nothing and every stage runs on the current session
   model with the degradation recorded in the run evidence.
+
+Direct input examples:
+
+```text
+/workflows run plan-implement docs/accepted-plan.md
+/workflows run plan-implement "<complete pasted plan>"
+```

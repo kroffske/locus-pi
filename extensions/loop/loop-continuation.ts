@@ -277,7 +277,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
     return {
       source: "workflow",
       availability: "missing",
-      reason: "no workflow run metadata found under .locus/runtime/workflows",
+      reason: "no workflow run metadata found under .pi/locus-pi/workflows",
     };
   }
 

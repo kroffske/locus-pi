@@ -521,7 +521,7 @@ describe("focused workflow catalog", () => {
     expect(harness.editorText).toBe("/workflows run alpha");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
   });
 
   it("never calls setEditorText before the custom browser promise resolves", async () => {
@@ -622,7 +622,7 @@ describe("focused workflow catalog", () => {
     expect(setEditorText).not.toHaveBeenCalled();
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".locus", "runtime", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
   });
 
   it.each(["rpc", "print"] as const)("keeps %s passive even if a host object exposes custom UI", async (mode) => {
@@ -804,7 +804,7 @@ function writeRun(
   name: string,
   executedSource = `export default () => ${JSON.stringify(runId)};\n`,
 ): void {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
   const sha256 = createHash("sha256").update(executedSource).digest("hex");

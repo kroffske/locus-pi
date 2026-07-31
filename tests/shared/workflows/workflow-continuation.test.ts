@@ -55,7 +55,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const directory = path.join(root, ".locus", "runtime", "workflows", runId);
+  const directory = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(directory, { recursive: true });
   return directory;
 }

@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { workflowRunDir } from "./workflow-run-paths.js";
 
 export const WORKFLOW_ARTIFACT_INDEX_VERSION = "locus.workflow.artifacts.v1" as const;
 export const DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT = 2 * 1024 * 1024;
@@ -204,7 +205,7 @@ export function readWorkflowArtifactIndex(projectRoot: string, runId: string): W
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }
-  const runDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId);
+  const runDir = workflowRunDir(projectRoot, runId);
   const artifactsDir = path.join(runDir, "artifacts");
   const indexPath = path.join(artifactsDir, "index.json");
   try {
@@ -243,7 +244,7 @@ export function readWorkflowArtifactRecord(
   if (record === undefined) {
     return { status: "missing", message: `Workflow artifact ${artifactId} is not indexed for run ${runId}.` };
   }
-  const artifactsDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId, "artifacts");
+  const artifactsDir = path.join(workflowRunDir(projectRoot, runId), "artifacts");
   try {
     const bytes = readRegularConfinedFile(artifactsDir, path.join(artifactsDir, record.relativePath));
     if (bytes.byteLength !== record.size || sha256(bytes) !== record.sha256) {
@@ -257,7 +258,7 @@ export function readWorkflowArtifactRecord(
 
 export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStoreOptions): WorkflowArtifactStore {
   assertSafeComponent(options.runId, "runId");
-  const expectedRunDir = path.join(options.projectRoot, ".locus", "runtime", "workflows", options.runId);
+  const expectedRunDir = workflowRunDir(options.projectRoot, options.runId);
   if (path.resolve(options.runDir) !== path.resolve(expectedRunDir)) {
     throw new Error("Workflow artifact run directory does not match the canonical run root.");
   }
@@ -471,7 +472,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   function consumeText(ref: WorkflowArtifactRef, stage?: string): WorkflowConsumedTextArtifact {
     validateRef(ref);
     if (ref.runId === options.runId) throw new Error("Workflow artifact self-reference is not allowed.");
-    const sourceRunDir = path.join(options.projectRoot, ".locus", "runtime", "workflows", ref.runId);
+    const sourceRunDir = workflowRunDir(options.projectRoot, ref.runId);
     const sourceResult = path.join(sourceRunDir, "result.json");
     assertCanonicalRunDirectory(options.projectRoot, sourceRunDir, ref.runId);
     const resultBytes = readRegularConfinedFile(sourceRunDir, sourceResult);
@@ -739,7 +740,7 @@ function readRegularConfinedFile(root: string, file: string): Buffer {
 function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId: string): void {
   const lexicalProjectRoot = path.resolve(projectRoot);
   const lexicalRunDir = path.resolve(runDir);
-  const expectedLexicalRunDir = path.join(lexicalProjectRoot, ".locus", "runtime", "workflows", runId);
+  const expectedLexicalRunDir = workflowRunDir(lexicalProjectRoot, runId);
   if (lexicalRunDir !== expectedLexicalRunDir) {
     throw new Error("Workflow artifact run directory does not match the canonical run root.");
   }
@@ -749,7 +750,7 @@ function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId:
   if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) {
     throw new Error("Workflow artifact project root is not a regular directory.");
   }
-  const expectedPhysicalRunDir = path.join(physicalProjectRoot, ".locus", "runtime", "workflows", runId);
+  const expectedPhysicalRunDir = workflowRunDir(physicalProjectRoot, runId);
   assertNoSymlinkChain(physicalProjectRoot, expectedPhysicalRunDir);
   if (realpathSync(lexicalRunDir) !== expectedPhysicalRunDir) {
     throw new Error("Workflow artifact run directory escapes its physical project root.");

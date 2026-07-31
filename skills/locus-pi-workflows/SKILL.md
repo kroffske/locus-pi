@@ -84,8 +84,8 @@ this package will work either, and its failure names the reason.
 
 On disk, under the project:
 
-- `.locus/runtime/workflows/<runId>/result.json` — the run envelope.
-- `.locus/runtime/workflows/<runId>/artifacts/index.json` — the canonical
+- `.pi/locus-pi/workflows/<runId>/result.json` — the run envelope.
+- `.pi/locus-pi/workflows/<runId>/artifacts/index.json` — the canonical
   artifact inventory. Every `agent()` attempt persists its exact answer there,
   plus the child transcript for a fresh session.
 
@@ -147,7 +147,7 @@ none of the limits above is still bounded: global agent concurrency, total agent
 invocations, a run wall clock over the agent chain, and per child a wall-clock
 fuse, tool calls, turns and answer characters. Declare an option only where the
 stage needs a different number than the package default; the run's
-`.locus/runtime/workflows/<runId>/logs/README.md` prints every axis with the value that applied,
+`.pi/locus-pi/workflows/<runId>/logs/README.md` prints every axis with the value that applied,
 beside the spend evidence that actually exists. Per-child tool calls, turns and
 answer characters are enforced but counted by nobody, so they print as "not
 recorded" rather than as a number — as does cost, which the host reports as a

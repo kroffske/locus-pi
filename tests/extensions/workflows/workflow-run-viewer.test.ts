@@ -56,11 +56,11 @@ describe("workflow persisted evidence viewer", () => {
     const runId = "20260722-010102-ab12";
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "trusted answer" }]);
     const index = JSON.parse(
-      readFileSync(path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", "index.json"), "utf8"),
+      readFileSync(path.join(root, ".pi", "locus-pi", "workflows", runId, "artifacts", "index.json"), "utf8"),
     ) as { artifacts: Array<{ kind: string; relativePath: string }> };
     const answer = index.artifacts.find((record) => record.kind === "answer")!;
     writeFileSync(
-      path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", answer.relativePath),
+      path.join(root, ".pi", "locus-pi", "workflows", runId, "artifacts", answer.relativePath),
       "changed after indexing",
       "utf8",
     );
@@ -94,7 +94,7 @@ describe("workflow persisted evidence viewer", () => {
     );
     viewer.handleInput("enter");
 
-    const indexPath = path.join(root, ".locus", "runtime", "workflows", runId, "artifacts", "index.json");
+    const indexPath = path.join(root, ".pi", "locus-pi", "workflows", runId, "artifacts", "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ kind: string; name: string }>;
     };
@@ -358,7 +358,7 @@ function createEvidenceRun(
 }
 
 function writeJournal(root: string, runId: string, lines: Array<Record<string, unknown>>): string {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
     path.join(runDir, "journal.ndjson"),

@@ -174,10 +174,10 @@ flowchart LR
     Q --> O["runtime implementation-report.md"]
 ```
 
-The plan arrives as continuation bytes the host has already verified and copied,
-never as text pasted into the input. The entry requires exactly one continuation
-artifact named `plan.md` and non-empty, and then reads it at whatever length it
-is.
+The preferred handoff is one continuation artifact whose bytes the host has
+already verified and copied; its filename is not significant. The same entry can
+instead accept pasted plan text or one file path. A read-only resolver returns
+the complete plan before deterministic `### S<n>` parsing begins.
 
 Two things it deliberately no longer does, both removed on 2026-07-28. It no
 longer re-derives the host's proof — matching digests, the source run's target

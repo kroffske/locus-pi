@@ -55,6 +55,6 @@ The command and tool both return compact text plus machine-readable details. Com
 - Commands: `loop`
 - Tools: `loopControl`
 - Hooks: none
-- Permissions: fs.read=`.locus/runtime/goal/state.json`, `.locus/runtime/workflows/**`; fs.write=`.locus/runtime/goal/continue.md`, `.locus/runtime/loop/**`; subprocess=none; network=none; browser=false; models=false; ui=`editor`, `setWidget`, `setStatus`
-- State: `.locus/runtime/goal/state.json`, `.locus/runtime/goal/continue.md`, `.locus/runtime/workflows/<runId>/journal.ndjson`, `.locus/runtime/workflows/<runId>/result.json`, `.locus/runtime/loop/workflow/*.json`
+- Permissions: fs.read=`.locus/runtime/goal/state.json`, `.pi/locus-pi/workflows/**`; fs.write=`.locus/runtime/goal/continue.md`, `.locus/runtime/loop/**`; subprocess=none; network=none; browser=false; models=false; ui=`editor`, `setWidget`, `setStatus`
+- State: `.locus/runtime/goal/state.json`, `.locus/runtime/goal/continue.md`, `.pi/locus-pi/workflows/<runId>/journal.ndjson`, `.pi/locus-pi/workflows/<runId>/result.json`, `.locus/runtime/loop/workflow/*.json`
 - Review: status=reviewed, source=copy-after-audit, reviewedBy=locus-pi, reviewedAt=2026-06-17, risk=medium

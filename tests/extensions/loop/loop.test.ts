@@ -82,15 +82,22 @@ describe("loop bounded continuation runtime", () => {
       plan(h.pi);
       loop(h.pi);
 
-      const created = await runTool(h, "goal", { op: "create", objective: "Keep loop status compact at eighty columns" });
+      const created = await runTool(h, "goal", {
+        op: "create",
+        objective: "Keep loop status compact at eighty columns",
+      });
       expect(created.isError).not.toBe(true);
 
       const runId = "20260618-023148-6c50-extra-long-run-id-that-must-not-wrap";
-      const runDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId);
+      const runDir = path.join(projectRoot, ".pi", "locus-pi", "workflows", runId);
       await mkdir(runDir, { recursive: true });
-      await writeFile(path.join(runDir, "journal.ndjson"), [
-        JSON.stringify({ ts: "2026-06-18T02:31:48.000Z", runId, kind: "phase", phase: "verify", message: "verify" }),
-      ].join("\n"), "utf8");
+      await writeFile(
+        path.join(runDir, "journal.ndjson"),
+        [
+          JSON.stringify({ ts: "2026-06-18T02:31:48.000Z", runId, kind: "phase", phase: "verify", message: "verify" }),
+        ].join("\n"),
+        "utf8",
+      );
       await writeFile(path.join(runDir, "result.json"), JSON.stringify({ ok: true }, null, 2), "utf8");
 
       const status = await runTool(h, "loopControl", { action: "status" });
@@ -169,7 +176,9 @@ describe("loop bounded continuation runtime", () => {
       expect(h.statuses.get("locus")).toBe("LOOP: goal");
       expect(h.statuses.has("loop")).toBe(false);
 
-      const artifact = JSON.parse(await readFile(path.join(projectRoot, ".locus", "runtime", "goal", "continue.md"), "utf8")) as Record<string, unknown>;
+      const artifact = JSON.parse(
+        await readFile(path.join(projectRoot, ".locus", "runtime", "goal", "continue.md"), "utf8"),
+      ) as Record<string, unknown>;
       expect(artifact).toMatchObject({
         version: 1,
         autoDispatch: false,
@@ -195,15 +204,17 @@ describe("loop bounded continuation runtime", () => {
       expect(created.isError).not.toBe(true);
 
       const result = await runTool(h, "loopControl", { action: "once", source: "goal" });
-      const details = result.details as {
-        owner?: string;
-        source?: string;
-        autoDispatch?: boolean;
-        status?: string;
-        maxSteps?: number;
-        prompt?: string;
-        sourceMetadata?: { goalId?: string; goalStatus?: string; objective?: string };
-      } | undefined;
+      const details = result.details as
+        | {
+            owner?: string;
+            source?: string;
+            autoDispatch?: boolean;
+            status?: string;
+            maxSteps?: number;
+            prompt?: string;
+            sourceMetadata?: { goalId?: string; goalStatus?: string; objective?: string };
+          }
+        | undefined;
 
       expect(result.isError).not.toBe(true);
       expect(result.content[0]).toMatchObject({ type: "text" });
@@ -226,7 +237,9 @@ describe("loop bounded continuation runtime", () => {
       expect(String(details?.prompt ?? "")).toContain("Task:");
       expect(String(details?.prompt ?? "")).toContain("Final result:");
 
-      const artifact = JSON.parse(await readFile(path.join(projectRoot, ".locus", "runtime", "goal", "continue.md"), "utf8")) as Record<string, unknown>;
+      const artifact = JSON.parse(
+        await readFile(path.join(projectRoot, ".locus", "runtime", "goal", "continue.md"), "utf8"),
+      ) as Record<string, unknown>;
       expect(artifact).toMatchObject({
         version: 1,
         goalId: details?.sourceMetadata?.goalId,
@@ -277,11 +290,21 @@ describe("loop bounded continuation runtime", () => {
       loop(h.pi);
 
       const runId = "20260617-120000-abcd";
-      const runDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId);
+      const runDir = path.join(projectRoot, ".pi", "locus-pi", "workflows", runId);
       await mkdir(runDir, { recursive: true });
-      await writeFile(path.join(runDir, "journal.ndjson"), [
-        JSON.stringify({ ts: "2026-06-17T12:00:00.000Z", runId, kind: "phase", phase: "collect", message: "collect" }),
-      ].join("\n"), "utf8");
+      await writeFile(
+        path.join(runDir, "journal.ndjson"),
+        [
+          JSON.stringify({
+            ts: "2026-06-17T12:00:00.000Z",
+            runId,
+            kind: "phase",
+            phase: "collect",
+            message: "collect",
+          }),
+        ].join("\n"),
+        "utf8",
+      );
       await writeFile(path.join(runDir, "result.json"), JSON.stringify({ ok: true }, null, 2), "utf8");
 
       const result = await runTool(h, "loopControl", { action: "once", source: "workflow", runId });
@@ -301,14 +324,16 @@ describe("loop bounded continuation runtime", () => {
         sourceMetadata: {
           runId,
           runStatus: "completed",
-          sourcePath: path.join(projectRoot, ".locus", "runtime", "workflows", runId),
+          sourcePath: path.join(projectRoot, ".pi", "locus-pi", "workflows", runId),
         },
       });
       expect(String(result.details?.sourceSummary ?? "")).toContain("status: completed");
       expect(String(result.details?.prompt ?? "")).toContain("Task:");
       expect(String(result.details?.prompt ?? "")).toContain("Final result:");
 
-      const artifact = JSON.parse(await readFile(path.join(projectRoot, ".locus", "runtime", "loop", "workflow", `${runId}.json`), "utf8")) as Record<string, unknown>;
+      const artifact = JSON.parse(
+        await readFile(path.join(projectRoot, ".locus", "runtime", "loop", "workflow", `${runId}.json`), "utf8"),
+      ) as Record<string, unknown>;
       expect(artifact).toMatchObject({
         version: 1,
         source: "workflow",
@@ -337,8 +362,12 @@ describe("loop bounded continuation runtime", () => {
       const result = await runTool(h, "loopControl", { action: "once", source: "workflow", runId: "missing-run" });
       expect(result.isError).toBe(true);
       expect(result.details).toMatchObject({ owner: "loop", source: "blocked" });
-      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("Loop continuation is blocked.");
-      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("workflow continuation failed: No workflow metadata found for run missing-run.");
+      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain(
+        "Loop continuation is blocked.",
+      );
+      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain(
+        "workflow continuation failed: No workflow metadata found for run missing-run.",
+      );
       expect(existsSync(artifactPath)).toBe(false);
 
       await h.commands.get("loop")!.handler("once workflow missing-run", h.ctx);
@@ -388,15 +417,17 @@ describe("loop bounded continuation runtime", () => {
       plan(h.pi);
       loop(h.pi);
       await runTool(h, "goal", { op: "create", objective: "Repair invalid loop input" });
-      const editor = vi.fn()
-        .mockResolvedValueOnce("archive stale")
-        .mockResolvedValueOnce("goal corrected focus");
+      const editor = vi.fn().mockResolvedValueOnce("archive stale").mockResolvedValueOnce("goal corrected focus");
       h.ctx.ui.editor = editor as never;
 
       await h.commands.get("loop")!.handler("", h.ctx);
 
       expect(editor).toHaveBeenNthCalledWith(1, "[INPUT] Loop — goal [focus] | workflow <runId> [focus]", "goal ");
-      expect(editor).toHaveBeenNthCalledWith(2, "[WARN] Loop continuation — use goal or workflow source", "archive stale");
+      expect(editor).toHaveBeenNthCalledWith(
+        2,
+        "[WARN] Loop continuation — use goal or workflow source",
+        "archive stale",
+      );
       const artifactPath = path.join(projectRoot, ".locus", "runtime", "goal", "continue.md");
       expect(existsSync(artifactPath)).toBe(true);
       expect(h.widgets.get("loop")).toContain("[RESULT]");

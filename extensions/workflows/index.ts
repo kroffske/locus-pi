@@ -98,9 +98,9 @@ export default function workflows(pi: ExtensionAPI): void {
         ...(request.input === undefined ? {} : { input: request.input }),
       });
       return {
-        onRunStart(runId) {
+        onRunStart({ runId, runDir }) {
           sessionRunIds.add(runId);
-          const announcement = transcript.start(runId);
+          const announcement = transcript.start(runId, runDir);
           // The run boundary is published while the session is still idle from
           // the launch check; a busy session gets no banner rather than a
           // steered parent agent.

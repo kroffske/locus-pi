@@ -425,7 +425,7 @@ describe("completed workflow live-row retention", () => {
       },
     ];
     const spy = vi.spyOn(runner, "runWorkflowScript").mockImplementation(async (options) => {
-      options.onRunStart?.({ runId, runDir: path.join(root, ".locus", "runtime", "workflows", runId) });
+      options.onRunStart?.({ runId, runDir: path.join(root, ".pi", "locus-pi", "workflows", runId) });
       for (const event of events) {
         options.onEvent?.(event);
         if (event.kind === "agent_start") {
@@ -445,7 +445,7 @@ describe("completed workflow live-row retention", () => {
       }
       return {
         runId,
-        runDir: path.join(root, ".locus", "runtime", "workflows", runId),
+        runDir: path.join(root, ".pi", "locus-pi", "workflows", runId),
         ok: true,
         result: { ok: true },
         journal: events,

@@ -246,6 +246,7 @@ extensions/workflows/runtime/workflow-replay.ts
 extensions/workflows/runtime/workflow-resources.ts
 extensions/workflows/runtime/workflow-result.ts
 extensions/workflows/runtime/workflow-run-layout.ts
+extensions/workflows/runtime/workflow-run-paths.ts
 extensions/workflows/runtime/workflow-run-report.ts
 extensions/workflows/runtime/workflow-runner.ts
 extensions/workflows/runtime/workflow-runtime.ts
@@ -385,6 +386,7 @@ tests/shared/workflows/workflow-run-report.test.ts
 tests/shared/workflows/workflow-run-snapshot.test.ts
 tests/shared/workflows/workflow-runner-host-crash.test.ts
 tests/shared/workflows/workflow-script-identity.test.ts
+tests/shared/workflows/workflow-startup.test.ts
 tests/shared/workflows/workflow-target-confinement.test.ts
 tests/shared/workflows/workflow-workspace.test.ts
 tests/test-harness.ts

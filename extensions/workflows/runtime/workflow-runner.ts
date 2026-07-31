@@ -178,7 +178,7 @@ export interface RunWorkflowScriptOptions {
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: import("../../_shared/model/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
-  /** Called once after run identity is allocated and before any journal event. Presentation-only. */
+  /** Called once after the run directory and first journal line exist. Presentation-only. */
   onRunStart?: (run: { runId: string; runDir: string }) => void;
   onEvent?: (line: WorkflowJournalLine) => void;
 }
@@ -528,6 +528,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const runId = newWorkflowRunId();
   const runDir = workflowRunDir(projectRoot, runId);
   const journal = createWorkflowJournalSink(projectRoot, runId);
+  const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
+  const budgetPrelude: WorkflowJournalLine = {
+    ts: new Date().toISOString(),
+    runId,
+    kind: "log",
+    source: "runtime",
+    message: formatWorkflowBudgetPrelude(budget),
+  };
+  journal.initialize(budgetPrelude);
   try {
     opts.onRunStart?.({ runId, runDir });
   } catch {
@@ -547,7 +556,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let awaitOperatorDeclaration: WorkflowAwaitOperatorDeclaration | undefined;
   let handoffClaimBound = false;
   const hasResume = resumeFromRunId !== undefined && resumeFromRunId !== "";
-  const preludeLines: WorkflowJournalLine[] = [];
+  const preludeLines: WorkflowJournalLine[] = [budgetPrelude];
   const emitPrelude = (line: WorkflowJournalLine): void => {
     preludeLines.push(line);
     journal.write(line);
@@ -562,24 +571,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
    * surface claim delivery for a workflow that never spoke — the same reason the
    * default replay plan is silent below.
    */
-  const journalPrelude = (line: WorkflowJournalLine): void => {
-    preludeLines.push(line);
-    journal.write(line);
-  };
-  // THE place the package budget contract becomes this run's policy. Resolved
-  // before anything else can spend, so every axis has a number before the first
-  // child and the journal can state it. A script says nothing and is still bounded.
-  const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
-  // The applied budget is the FIRST line of every run's journal: a reader who opens
-  // the evidence should see the policy before the first thing that spends under it,
-  // and a run that fails before its script loads still says what it was bounded by.
-  journalPrelude({
-    ts: new Date().toISOString(),
-    runId,
-    kind: "log",
-    source: "runtime",
-    message: formatWorkflowBudgetPrelude(budget),
-  });
+  // The applied budget is initialized as the FIRST durable line before the live
+  // start callback. A start announcement therefore always names an existing run
+  // directory and journal, or initialization throws before any child can run.
   // A narrowing applies silently; a raise never does. The line names the axis, the
   // package default and what was asked for, so a raise is auditable from the run
   // evidence alone instead of living in whoever's memory chose it.

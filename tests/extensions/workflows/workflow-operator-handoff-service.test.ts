@@ -38,7 +38,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
   const scriptIdentity = {
     ...currentIdentity,
     sourcePath: target.path,
-    snapshotPath: path.join(root, ".locus", "runtime", "workflows", runId, "script.workflow.mjs"),
+    snapshotPath: path.join(root, ".pi", "locus-pi", "workflows", runId, "script.workflow.mjs"),
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
@@ -66,7 +66,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
     scriptIdentity,
     terminalArtifactRefs: [artifactRef],
   });
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
     path.join(runDir, "result.json"),
@@ -88,7 +88,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
 }
 
 function corruptHandoff(root: string, runId: string): void {
-  const resultPath = path.join(root, ".locus", "runtime", "workflows", runId, "result.json");
+  const resultPath = path.join(root, ".pi", "locus-pi", "workflows", runId, "result.json");
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   result.operatorHandoff = { ...(result.operatorHandoff as Record<string, unknown>), title: 42 };
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
@@ -173,7 +173,7 @@ describe("workflow operator handoff service", () => {
   it("reports both launch and claim-release failures without hiding the durable claim", async () => {
     const runId = "20260725-143003-throw-release-failure";
     const root = projectWithHandoff(runId);
-    const claimLockPath = path.join(root, ".locus", "runtime", "workflows", runId, "operator-handoff-claim.lock");
+    const claimLockPath = path.join(root, ".pi", "locus-pi", "workflows", runId, "operator-handoff-claim.lock");
     const launch = vi.fn((): WorkflowCommandLaunchResult => {
       writeFileSync(claimLockPath, "active\n", "utf8");
       throw new Error("launcher exploded");
@@ -205,7 +205,7 @@ describe("workflow operator handoff service", () => {
     );
     if (claimed.status !== "claimed") throw new Error("expected a claimed handoff");
     bindWorkflowHandoffClaim(claimed.claim, childRunId);
-    const childRunDir = path.join(root, ".locus", "runtime", "workflows", childRunId);
+    const childRunDir = path.join(root, ".pi", "locus-pi", "workflows", childRunId);
     mkdirSync(childRunDir, { recursive: true });
     writeFileSync(
       path.join(childRunDir, "result.json"),

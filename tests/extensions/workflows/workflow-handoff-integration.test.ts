@@ -36,7 +36,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
   const scriptIdentity = {
     ...currentIdentity,
     sourcePath: target.path,
-    snapshotPath: path.join(root, ".locus", "runtime", "workflows", runId, "script.workflow.mjs"),
+    snapshotPath: path.join(root, ".pi", "locus-pi", "workflows", runId, "script.workflow.mjs"),
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
@@ -69,7 +69,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
     scriptIdentity,
     terminalArtifactRefs: [artifactRef],
   });
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
     path.join(runDir, "result.json"),
@@ -91,14 +91,14 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
 }
 
 function corruptPersistedHandoff(root: string, runId: string): void {
-  const resultPath = path.join(root, ".locus", "runtime", "workflows", runId, "result.json");
+  const resultPath = path.join(root, ".pi", "locus-pi", "workflows", runId, "result.json");
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   result.operatorHandoff = { ...(result.operatorHandoff as Record<string, unknown>), title: 42 };
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
 }
 
 function persistCompletedChild(root: string, runId: string): void {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
     path.join(runDir, "result.json"),
@@ -273,7 +273,7 @@ describe("workflow actionable handoff integration", () => {
   it("does not mount a tool-origin question on turn_end and uses the fresh agent_settled context", async () => {
     const sourceRunId = "20260725-122000-source";
     const root = projectWithHandoff(sourceRunId);
-    const resultPath = path.join(root, ".locus", "runtime", "workflows", sourceRunId, "result.json");
+    const resultPath = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId, "result.json");
     const deferredPath = `${resultPath}.deferred`;
     // Hidden while the run settles, so the terminal pump finds nothing and the
     // question can only arrive through the lifecycle event under test.

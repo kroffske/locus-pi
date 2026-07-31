@@ -1,9 +1,9 @@
 // plan-implement.workflow.mjs
 //
-// Executes one plan that a prior `plan` run produced and a critic accepted. The
-// plan arrives as continuation bytes the host has already verified and copied,
-// never as text pasted into the input, so this module reads the plan and starts
-// working instead of re-proving where it came from.
+// Executes one accepted implementation plan. A host continuation remains the
+// strongest input because its bytes are already verified and copied, but an
+// operator may also supply pasted plan text or a path for a read-only resolver
+// stage to reopen. Artifact filenames are not part of the plan contract.
 //
 // The shape is deliberate:
 //
@@ -102,6 +102,7 @@ const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
 
 const MAX_SELECTED_STEPS = 30;
 const MAX_INTENT_CHARS = 16_000;
+const MAX_DIRECT_PLAN_CHARS = 500_000;
 const MAX_STEP_BLOCK_CHARS = 32_000;
 const MAX_SELECTED_STEPS_CHARS = 128_000;
 const MAX_NOTE_CHARS = 4_000;
@@ -261,29 +262,50 @@ export const meta = {
  */
 export default async function runWorkflow(dsl, input) {
   const { agent, log, phase, publishArtifact } = dsl;
-  const intent = requireBoundedText(input, "intent", MAX_INTENT_CHARS);
 
   phase("select-steps");
   log("Binding the accepted plan and validating the selected steps.");
   const continuation = dsl.continuationArtifacts();
-  if (continuation.length !== 1 || continuation[0]?.sourceRef?.name !== "plan.md") {
-    throw new Error('plan-implement continuation requires exactly one artifact named "plan.md"');
+  if (continuation.length > 1) {
+    throw new Error("plan-implement accepts at most one continuation artifact");
   }
-  const consumedPlan = continuation[0].consumedArtifact;
-  // The host verifies and copies the referenced bytes before this module starts,
-  // so the script reads them and gets on with the work. It used to re-derive
-  // that proof here — matching digests, the source run's target, its stage, and
-  // its terminal result — which is cognitive load in every reader's way for a
-  // risk the operator judged not worth it: the worst case is implementing a plan
-  // the critic had not accepted, which replanning fixes.
-  //
-  // The plan is not length-bounded either. A cap here could only reject a plan
-  // somebody already accepted, after the run that wrote it had finished; the
-  // runtime already bounds what a child may answer, and the per-step budgets
-  // below are what actually keep a stage's prompt in hand.
-  const planText = consumedPlan.text;
+  let planText;
+  let intent;
+  if (continuation.length === 1) {
+    // The host verifies and copies continuation bytes before this module starts.
+    // Their source filename is descriptive metadata, not an execution gate.
+    planText = continuation[0].consumedArtifact.text;
+    intent =
+      input === undefined
+        ? "Implement the whole accepted plan."
+        : requireBoundedText(input, "intent", MAX_INTENT_CHARS);
+  } else {
+    const planInput = requireBoundedText(input, "plan input", MAX_INTENT_CHARS);
+    planText = await agent(
+      `${COMMON}
+
+TASK — resolve the operator's plan input without interpreting or editing it.
+The input is either the complete plan text or one file path. If it is a path,
+use the read tool to read exactly that file from the launch checkout. If it is
+already a plan, use it as-is. Return only the complete plan bytes as plain text:
+no Markdown fence, preface, summary, correction, or omitted section. Fail
+clearly when a path cannot be read or does not name one regular text file.
+
+--- BEGIN OPERATOR PLAN INPUT ---
+${planInput}
+--- END OPERATOR PLAN INPUT ---`,
+      {
+        ...IMPLEMENT_READ_OPTIONS,
+        label: "resolve plan input",
+        artifact: "resolved-plan.md",
+        maxAnswerChars: MAX_DIRECT_PLAN_CHARS,
+      },
+    );
+    planText = requireBoundedText(planText, "resolved plan", MAX_DIRECT_PLAN_CHARS);
+    intent = "Implement the whole supplied plan.";
+  }
   if (typeof planText !== "string" || planText.trim() === "") {
-    throw new Error("plan-implement requires a non-empty consumed plan");
+    throw new Error("plan-implement requires a non-empty plan");
   }
   const steps = parseStepBlocks(planText);
 
@@ -1008,12 +1030,12 @@ function markdownCode(value) {
  */
 function parseStepBlocks(planText) {
   const section = /^##[ \t]+Steps[ \t]*$/mu.exec(planText);
-  if (section === null) throw new Error('plan-implement plan.md has no "## Steps" section');
+  if (section === null) throw new Error('plan-implement supplied plan has no "## Steps" section');
   const tail = planText.slice(section.index + section[0].length);
   const nextSection = /^##[ \t]+/mu.exec(tail);
   const body = nextSection === null ? tail : tail.slice(0, nextSection.index);
   const headings = [...body.matchAll(/^###[ \t]+([^\n]+)$/gmu)];
-  if (headings.length === 0) throw new Error("plan-implement found no steps in plan.md");
+  if (headings.length === 0) throw new Error("plan-implement found no steps in the supplied plan");
 
   const steps = headings.map((heading, index) => {
     const headingText = heading[1].trim();
@@ -1031,7 +1053,8 @@ function parseStepBlocks(planText) {
     };
   });
   const duplicate = steps.find(({ id }, index) => steps.findIndex((step) => step.id === id) !== index);
-  if (duplicate !== undefined) throw new Error(`plan-implement duplicate step id in plan.md: ${duplicate.id}`);
+  if (duplicate !== undefined)
+    throw new Error(`plan-implement duplicate step id in the supplied plan: ${duplicate.id}`);
   return steps;
 }
 

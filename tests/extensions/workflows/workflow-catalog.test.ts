@@ -421,7 +421,7 @@ function writeRun(
   target: { kind: "name" | "scriptPath"; ref: string; source: "project" | "personal" | "package" },
   executedSource = `export default () => ${JSON.stringify(runId)};\n`,
 ): void {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
   const sha256 = createHash("sha256").update(executedSource).digest("hex");

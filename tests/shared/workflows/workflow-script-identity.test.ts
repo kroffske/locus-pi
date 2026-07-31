@@ -407,7 +407,7 @@ describe("workflow script identity coverage", () => {
 
   it("fails when script-owned toJSON mutates the retained snapshot", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-identity-tojson-tamper-"));
-    const workflowsRoot = path.join(root, ".locus", "runtime", "workflows");
+    const workflowsRoot = path.join(root, ".pi", "locus-pi", "workflows");
     try {
       writeFileSync(
         path.join(root, "entry.workflow.mjs"),

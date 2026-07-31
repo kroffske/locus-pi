@@ -158,7 +158,7 @@ cases out is documentation plus a pinning test in
 apart, and this ADR says so rather than claiming a guarantee it does not have.
 
 The canonical evidence owner is
-`.locus/runtime/workflows/<runId>/artifacts/index.json`. Automatic answers and
+`.pi/locus-pi/workflows/<runId>/artifacts/index.json`. Automatic answers and
 fresh child transcripts/result envelopes share the same digest-bound index with
 workflow-published and consumed text. This makes the report inspectable through
 the persisted run viewer and makes cross-run approval immutable without requiring
@@ -166,7 +166,7 @@ the reviewed working tree itself to be committed. Writers still leave source
 changes uncommitted and do not commit, push, create a pull request, merge,
 deploy, or discard unrelated work.
 The artifact owner validates every physical directory from the resolved project
-root through `.locus/runtime/workflows/<runId>` before artifact I/O; symlinked
+root through `.pi/locus-pi/workflows/<runId>` before artifact I/O; symlinked
 ancestors cannot relocate the canonical evidence root outside the project.
 
 ## Amendment 2026-07-21 — the portfolio drops to four with `llm-smoke`
@@ -382,9 +382,11 @@ assumption is visible the moment the run finishes and is corrected by replanning
 which this workflow is cheap enough to repeat. The clarification shape stays in
 `review`, where the answer changes what is reviewed at all.
 
-**`plan-implement` no longer re-derives provenance.** It still requires exactly
-one non-empty continuation artifact named `plan.md`, but the entry-code
-checks on digest, source target, source stage, and terminal result are gone. The
+**`plan-implement` no longer re-derives provenance or treats a filename as
+authority.** One continuation artifact remains the strongest handoff, but its
+name is descriptive metadata; pasted plan text and one file path are also
+accepted through a read-only resolver. The entry-code checks on digest, source
+target, source stage, and terminal result are gone. The
 cost is real and is accepted here rather than hidden: that terminal-result check
 was what distinguished the accepted plan from a same-named draft of an earlier
 drafting round, so an implementation run can now start from a plan the critic had

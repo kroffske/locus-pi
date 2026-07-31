@@ -4,7 +4,7 @@
  *
  * WHY THIS EXISTS
  *
- * Workflow runs persist under `.locus/runtime/workflows/<runId>/`, and the module
+ * Workflow runs persist under `.pi/locus-pi/workflows/<runId>/`, and the module
  * that owns that layout also owns the append sink, the journal-to-live-row
  * projection, and the live-row retention bound. Two consumers outside this
  * extension only ever needed to READ a run — the agent drill's round submenu and

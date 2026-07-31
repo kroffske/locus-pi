@@ -39,7 +39,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 500): Promise<voi
 }
 
 function writeWorkflowRun(root: string, runId: string): void {
-  const dir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const dir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   const journal: WorkflowJournalLine[] = [
     { ts: "2026-01-01T00:00:00.000Z", runId, kind: "phase", phase: "repair-proof" },
     { ts: "2026-01-01T00:00:01.000Z", runId, kind: "error", message: "failed proof" },
@@ -838,10 +838,10 @@ describe("workflow progress widget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "20260101-000000-r1");
 
-    component.finish({ ok: true, result: { ok: true }, runDir: ".locus/runtime/workflows/20260101-000000-r1" });
+    component.finish({ ok: true, result: { ok: true }, runDir: ".pi/locus-pi/workflows/20260101-000000-r1" });
 
     const text = component.render(120).join("\n");
-    expect(text).toContain("saved: .locus/runtime/workflows/20260101-000000-r1");
+    expect(text).toContain("saved: .pi/locus-pi/workflows/20260101-000000-r1");
   });
 
   it("points a clipped prose verdict at the file and the command that show all of it", () => {
@@ -851,17 +851,15 @@ describe("workflow progress widget", () => {
     component.finish({
       ok: true,
       result: `# Code Review\n\n${"A verdict far wider than this terminal. ".repeat(6)}`,
-      runDir: ".locus/runtime/workflows/20260726-212752-98cc",
-      resultTextPath: ".locus/runtime/workflows/20260726-212752-98cc/result.md",
+      runDir: ".pi/locus-pi/workflows/20260726-212752-98cc",
+      resultTextPath: ".pi/locus-pi/workflows/20260726-212752-98cc/result.md",
     });
 
     const narrow = component.render(60).join("\n");
     // The command names the run, so it is usable even where the panel clips paths.
     expect(narrow).toContain("read the full result: /workflows result 98cc");
     for (const line of narrow.split("\n")) expect(line.length).toBeLessThanOrEqual(60);
-    expect(component.render(120).join("\n")).toContain(
-      "result: .locus/runtime/workflows/20260726-212752-98cc/result.md",
-    );
+    expect(component.render(120).join("\n")).toContain("result: .pi/locus-pi/workflows/20260726-212752-98cc/result.md");
   });
 
   it("points a failed run with no prose result at the command that prints the reason", () => {
@@ -876,7 +874,7 @@ describe("workflow progress widget", () => {
         summary: "plan was not accepted within 4 drafting round(s)",
         unresolvedRows: [`S1: ${"the find command pattern may miss files. ".repeat(5)}`],
       },
-      runDir: ".locus/runtime/workflows/20260730-162453-000e",
+      runDir: ".pi/locus-pi/workflows/20260730-162453-000e",
     });
 
     const narrow = component.render(60).join("\n");
@@ -1392,6 +1390,7 @@ describe("workflow progress widget", () => {
       expect(persisted).toHaveLength(2);
       expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
       expect(persisted[0]).toContain("● workflow started");
+      expect(persisted[0]).toContain(`runDir: ${path.join(root, ".pi", "locus-pi", "workflows")}`);
       expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished · completed");
       expect(
         harness.sentMessages.every(
@@ -1446,7 +1445,7 @@ describe("workflow progress widget", () => {
   it("run command passes --resume as persisted retry metadata", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-command-resume-"));
     const sourceRunId = "20260101-000001-source";
-    const runDir = path.join(root, ".locus", "runtime", "workflows", sourceRunId);
+    const runDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
     try {
       mkdirSync(runDir, { recursive: true });
       writeFileSync(
@@ -1483,7 +1482,7 @@ describe("workflow progress widget", () => {
   it("status detail keeps raw result and distinguishes script, runtime, and legacy logs", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-status-detail-"));
     const runId = "20260101-000001-detail";
-    const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+    const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
     const journal: WorkflowJournalLine[] = [
       { ts: "2026-01-01T00:00:00.000Z", runId, kind: "log", source: "script", message: "compare candidates" },
       { ts: "2026-01-01T00:00:01.000Z", runId, kind: "log", source: "runtime", message: "[workflow:exit]" },
@@ -1640,7 +1639,7 @@ describe("workflow progress widget", () => {
         "utf8",
       );
       const runId = "20260101-000001-alpha";
-      const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+      const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
       mkdirSync(runDir, { recursive: true });
       writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
       writeFileSync(
@@ -1801,7 +1800,7 @@ describe("workflow progress widget", () => {
         );
         writeWorkflowRun(root, `20260101-00000${index}-rpc`);
       }
-      const longRunDir = path.join(root, ".locus", "runtime", "workflows", "20260101-000005-rpc");
+      const longRunDir = path.join(root, ".pi", "locus-pi", "workflows", "20260101-000005-rpc");
       writeFileSync(
         path.join(longRunDir, "journal.ndjson"),
         `${JSON.stringify({

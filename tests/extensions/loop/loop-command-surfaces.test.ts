@@ -20,7 +20,7 @@ import { createHarness, runTool } from "../../test-harness.js";
  */
 
 async function writeCompletedWorkflowRun(projectRoot: string, runId: string): Promise<void> {
-  const runDir = path.join(projectRoot, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(projectRoot, ".pi", "locus-pi", "workflows", runId);
   await mkdir(runDir, { recursive: true });
   await writeFile(
     path.join(runDir, "journal.ndjson"),

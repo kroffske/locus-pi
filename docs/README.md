@@ -53,7 +53,7 @@ promotion decision says otherwise:
 
 - `.locus/**` — runtime state, generated reports, task-local evidence.
 - `.locus-pi/**` — retired location of workflow run reports, which now live inside
-  the run directory (`.locus/runtime/workflows/<runId>/logs/`). Still ignored so a
+  the run directory (`.pi/locus-pi/workflows/<runId>/logs/`). Still ignored so a
   checkout that predates the move stays clean.
 - `.tasks/**` — local task state.
 - `.pi/**` — project-local Pi settings and workflow scratch.

@@ -1,6 +1,6 @@
 /**
  * workflow-run-report.ts — the ordered execution journal of one workflow run,
- * under `<projectRoot>/.locus/runtime/workflows/<runId>/logs/`.
+ * under `<projectRoot>/.pi/locus-pi/workflows/<runId>/logs/`.
  *
  * Everything here is AUTO-CAPTURED — the task the run received, the final
  * result, and the run's documents — so that opening the folder answers "what

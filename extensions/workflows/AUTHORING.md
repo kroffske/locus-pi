@@ -119,7 +119,7 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   randomness call is not rejected — the AST scan simply marks the script
   unproven and refuses to record or replay it. Replay rules, refusal reasons, and
   the replayed-run marking are in the canonical doc.
-- **Read the result:** `.locus/runtime/workflows/<runId>/result.json`. Top-level
+- **Read the result:** `.pi/locus-pi/workflows/<runId>/result.json`. Top-level
   `disposition` is the operator lifecycle truth: `completed`,
   `awaiting_operator`, `cancelled`, or `failed`. Use
   `awaitOperator({ reason, operatorHandoff? })` immediately before a successful
@@ -154,19 +154,19 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   result-unavailable or write-warning-only state.
 - **Write this run's files where they are findable:** `runFilesDir()` returns the
   absolute working directory of the current run,
-  `.locus/runtime/workflows/<runId>/files/`, created before your script starts.
+  `.pi/locus-pi/workflows/<runId>/files/`, created before your script starts.
   Every child agent's prompt opens by naming that same directory, so a file an
   agent writes as `plan.md` is on disk as `plan.md` — nothing renames, numbers or
   moves it, and a path you print in an `awaitOperator` question is a path the
   operator can open. A `readOnly` call is told where the directory is and is not
   asked to create anything in it. Auto-captured material goes elsewhere on purpose: agent
   answers, published texts and consumed inputs are projected into
-  `.locus/runtime/workflows/<runId>/logs/` — one document per artifact name
+  `.pi/locus-pi/workflows/<runId>/logs/` — one document per artifact name
   holding its newest revision, with the README recording write order and every
   revision — and child transcripts (`.jsonl` plus an `.html` render) stay under
   `artifacts/transcripts/`.
 - **Keep evidence under the run owner:**
-  `.locus/runtime/workflows/<runId>/artifacts/index.json` is the canonical
+  `.pi/locus-pi/workflows/<runId>/artifacts/index.json` is the canonical
   artifact inventory. Every `agent()` attempt automatically persists its exact
   answer and, for a fresh child session, its Pi transcript and result envelope.
   Use `agent(prompt, { artifact: "report.md" })` to give that answer a stable

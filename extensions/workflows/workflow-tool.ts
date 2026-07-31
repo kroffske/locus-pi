@@ -139,10 +139,14 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
-          onRunStart: ({ runId }) => {
+          onRunStart: ({ runId, runDir }) => {
             background.setRunId(runId);
             deps.onRunStarted(runId);
-            transcript.start(runId);
+            transcript.start(runId, runDir);
+            update({
+              content: [{ type: "text", text: `workflow started\nrunDir: ${runDir}` }],
+              details: { runId, runDir },
+            });
           },
           onEvent: (line: WorkflowJournalLine) => {
             applyWorkflowJournalLineToAgentLiveStore(line, getProjectRoot(ctx));

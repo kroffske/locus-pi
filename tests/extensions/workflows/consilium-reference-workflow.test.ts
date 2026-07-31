@@ -48,7 +48,7 @@ let ordinal = 0;
 function runtimeWith(runner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>) {
   const root = mkdtempSync(path.join(tmpdir(), "locus-consilium-"));
   const runId = `consilium-test-${++ordinal}`;
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   return {
@@ -170,7 +170,7 @@ describe("consilium reference workflow", () => {
 
     // Not just index entries: three advisor documents are really on disk under the
     // run's own artifacts directory, each holding that advisor's exact text.
-    const artifactsDir = path.join(root, ".locus", "runtime", "workflows", runId, "artifacts");
+    const artifactsDir = path.join(root, ".pi", "locus-pi", "workflows", runId, "artifacts");
     for (const advisor of ["advisor-evidence.md", "advisor-risk.md", "advisor-alternative.md"]) {
       const stored = artifactStore.list().find(({ name }) => name === advisor);
       expect(stored, advisor).toBeDefined();

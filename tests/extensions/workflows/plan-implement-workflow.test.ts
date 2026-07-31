@@ -65,16 +65,16 @@ interface PlanFixture {
   planText: string;
 }
 
-function createPlanFixture(options: { steps?: string[] } = {}): PlanFixture {
+function createPlanFixture(options: { steps?: string[]; name?: string } = {}): PlanFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-"));
   const sourceRunId = "plan-source";
-  const sourceRunDir = path.join(root, ".locus", "runtime", "workflows", sourceRunId);
+  const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
   mkdirSync(sourceRunDir, { recursive: true });
   const sourceStore = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
   const text = planText(options.steps);
   const planRef = sourceStore.recordAgentEvidence({
     callId: "call-0003",
-    name: "plan.md",
+    name: options.name ?? "plan.md",
     stage: "draft-plan",
     text,
     replayed: false,
@@ -132,7 +132,7 @@ function runtimeWith(
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
 ) {
   const runId = `plan-implement-test-${++runtimeOrdinal}`;
-  const runDir = path.join(fixture.root, ".locus", "runtime", "workflows", runId);
+  const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
   const consumedPlan = artifactStore.consumeText(fixture.planRef);
@@ -146,6 +146,26 @@ function runtimeWith(
         originRunId: fixture.planRef.runId,
         artifacts: [{ sourceRef: fixture.planRef, consumedArtifact: consumedPlan }],
       },
+      resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
+      agentRunner,
+    }),
+  };
+}
+
+function runtimeWithoutContinuation(
+  fixture: PlanFixture,
+  agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
+) {
+  const runId = `plan-implement-direct-test-${++runtimeOrdinal}`;
+  const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
+  mkdirSync(runDir, { recursive: true });
+  const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
+  return {
+    artifactStore,
+    ...createWorkflowRuntime({
+      runId,
+      projectRoot: fixture.root,
+      artifactPorts: artifactStore,
       resourceLoader: createWorkflowResourceLoader({ workflowSourcePath: workflowPath, runDir }),
       agentRunner,
     }),
@@ -323,7 +343,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   });
 
   it("lists tasks, then writes and reviews each one in plan order before returning the report", async () => {
-    const fixture = createPlanFixture();
+    const fixture = createPlanFixture({ name: "result.md" });
     const calls: WorkflowAgentRequest[] = [];
     const terminalGrade = grade("complete", [
       { id: "S1", status: "done" },
@@ -407,6 +427,31 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "implementation-tasks.md",
       "implementation-report.md",
     ]);
+  });
+
+  it.each([
+    ["pasted plan text", (fixture: PlanFixture) => fixture.planText],
+    ["project-relative plan path", () => "docs/accepted-plan.md"],
+  ])("resolves %s without requiring a plan.md continuation", async (_case, inputFor) => {
+    const fixture = createPlanFixture({ steps: [STEP_S1] });
+    const input = inputFor(fixture);
+    const terminalGrade = grade("complete", [{ id: "S1", status: "done" }]);
+    const report = renderedReport(terminalGrade);
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWithoutContinuation(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "resolve plan input") return completed(request, fixture.planText);
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") return completed(request, review("accept", "S1 passed."));
+      if (request.label === "grade implementation") return completed(request, terminalGrade);
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, input)).resolves.toBe(report);
+    expect(calls[0]?.label).toBe("resolve plan input");
+    expect(calls[0]?.prompt).toContain(input);
+    expect(calls[0]?.tools).toEqual(["read", "git_read", "ast_index", "grep", "find"]);
+    expect(calls[1]?.label).toBe("select plan steps");
   });
 
   it("repairs the current task from review feedback before starting the next task", async () => {
@@ -748,14 +793,14 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   });
 
   it.each([
-    ["# Implementation Plan\n## Goal\nNo steps section here.", 'plan.md has no "## Steps" section'],
-    ["# Implementation Plan\n## Steps\n\nProse, but no step headings.", "found no steps in plan.md"],
+    ["# Implementation Plan\n## Goal\nNo steps section here.", 'supplied plan has no "## Steps" section'],
+    ["# Implementation Plan\n## Steps\n\nProse, but no step headings.", "found no steps in the supplied plan"],
     ["# Implementation Plan\n## Steps\n### Advance the offset\nFiles: `a.ts`", "invalid step heading"],
   ])("fails closed on a malformed plan: %s", async (broken, message) => {
     // The plan was written by a previous run's agent: nobody in *this* run can be
     // re-asked for it, which is what makes a fatal error the right tier here.
     const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-broken-"));
-    const sourceRunDir = path.join(root, ".locus", "runtime", "workflows", "plan-source");
+    const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", "plan-source");
     mkdirSync(sourceRunDir, { recursive: true });
     const sourceStore = createWorkflowArtifactStore({
       projectRoot: root,
@@ -828,10 +873,10 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(report);
   });
 
-  it("refuses a continuation that is not exactly one plan.md, and refuses empty input", async () => {
+  it("refuses missing plan input and empty continuation intent", async () => {
     const fixture = createPlanFixture();
     const runId = "plan-implement-no-continuation";
-    const runDir = path.join(fixture.root, ".locus", "runtime", "workflows", runId);
+    const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
     const { dsl } = createWorkflowRuntime({
@@ -842,8 +887,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       agentRunner: async (request) => completed(request, "unused"),
     });
 
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      'plan-implement continuation requires exactly one artifact named "plan.md"',
+    await expect((await loadWorkflow())(dsl, "  ")).rejects.toThrow(
+      "plan-implement plan input must be a non-empty string",
     );
 
     const withPlan = runtimeWith(fixture, async (request) => completed(request, "unused"));

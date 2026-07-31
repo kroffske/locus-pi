@@ -87,14 +87,14 @@ describe("persisted workflow run source snapshot", () => {
   it("rejects a symlinked ancestor below the project root", () => {
     const root = temporaryRoot();
     const external = temporaryRoot();
-    mkdirSync(path.join(root, ".locus"), { recursive: true });
-    symlinkSync(external, path.join(root, ".locus", "runtime"));
+    mkdirSync(path.join(root, ".pi"), { recursive: true });
+    symlinkSync(external, path.join(root, ".pi", "locus-pi"));
     const runId = "20260713-010105-ancestor-link";
     const source = "ancestor symlink\n";
     const sha256 = digest(source);
     const externalRunDir = path.join(external, "workflows", runId);
     mkdirSync(externalRunDir, { recursive: true });
-    const snapshotPath = path.join(root, ".locus", "runtime", "workflows", runId, `script-${sha256}.workflow.mjs`);
+    const snapshotPath = path.join(root, ".pi", "locus-pi", "workflows", runId, `script-${sha256}.workflow.mjs`);
     writeFileSync(path.join(externalRunDir, path.basename(snapshotPath)), source);
     writeResult(externalRunDir, snapshotPath, sha256);
 
@@ -166,7 +166,7 @@ function writeResult(runDir: string, snapshotPath: string, sha256: string): void
 }
 
 function workflowRunDirectory(root: string, runId: string): string {
-  return path.join(root, ".locus", "runtime", "workflows", runId);
+  return path.join(root, ".pi", "locus-pi", "workflows", runId);
 }
 
 function temporaryRoot(): string {

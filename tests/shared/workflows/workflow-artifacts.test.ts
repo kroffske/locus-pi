@@ -32,7 +32,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const dir = path.join(root, ".locus", "runtime", "workflows", runId);
+  const dir = path.join(root, ".pi", "locus-pi", "workflows", runId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -42,7 +42,7 @@ describe("workflow run artifact store", () => {
     const root = project();
     const absent = readWorkflowArtifactIndex(root, "absent-run");
     assert.equal(absent.status, "missing");
-    assert.equal(existsSync(path.join(root, ".locus")), false);
+    assert.equal(existsSync(path.join(root, ".pi")), false);
 
     const id = "reader-run";
     const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
@@ -265,23 +265,23 @@ describe("workflow run artifact store", () => {
   });
 
   it("rejects symlinked canonical-root ancestors before external artifact reads or writes", () => {
-    for (const linkedAncestor of [".locus", "runtime"] as const) {
+    for (const linkedAncestor of [".pi", "locus-pi"] as const) {
       const root = project();
       const external = project();
       const id = `ancestor-${linkedAncestor.replace(".", "")}`;
-      const externalLocus = path.join(external, "external-locus");
-      const externalRuntime = path.join(external, "external-runtime");
+      const externalPi = path.join(external, "external-pi");
+      const externalLocusPi = path.join(external, "external-locus-pi");
       const externalRunDir =
-        linkedAncestor === ".locus"
-          ? path.join(externalLocus, "runtime", "workflows", id)
-          : path.join(externalRuntime, "workflows", id);
+        linkedAncestor === ".pi"
+          ? path.join(externalPi, "locus-pi", "workflows", id)
+          : path.join(externalLocusPi, "workflows", id);
       mkdirSync(externalRunDir, { recursive: true });
 
-      if (linkedAncestor === ".locus") {
-        symlinkSync(externalLocus, path.join(root, ".locus"));
+      if (linkedAncestor === ".pi") {
+        symlinkSync(externalPi, path.join(root, ".pi"));
       } else {
-        mkdirSync(path.join(root, ".locus"));
-        symlinkSync(externalRuntime, path.join(root, ".locus", "runtime"));
+        mkdirSync(path.join(root, ".pi"));
+        symlinkSync(externalLocusPi, path.join(root, ".pi", "locus-pi"));
       }
 
       const externalArtifacts = path.join(externalRunDir, "artifacts");
@@ -290,7 +290,7 @@ describe("workflow run artifact store", () => {
           createWorkflowArtifactStore({
             projectRoot: root,
             runId: id,
-            runDir: path.join(root, ".locus", "runtime", "workflows", id),
+            runDir: path.join(root, ".pi", "locus-pi", "workflows", id),
           }),
         /directory is unsafe/u,
       );

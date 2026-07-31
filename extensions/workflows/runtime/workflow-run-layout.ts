@@ -2,7 +2,7 @@
  * workflow-run-layout.ts — the two directories a person opens inside one run.
  *
  * Everything a workflow run produces lives under
- * `<projectRoot>/.locus/runtime/workflows/<runId>/`. This module owns the split
+ * `<projectRoot>/.pi/locus-pi/workflows/<runId>/`. This module owns the split
  * between the two halves of that directory that are addressed by name:
  *
  *   - `files/` — the run's WORKING DIRECTORY. Its path is handed to the workflow
@@ -21,14 +21,14 @@
  *
  * Path discipline matches the artifact store's: the run id must be a safe
  * component and no element of the chain below the physical project root may be
- * a symlink — checked BEFORE anything is created, so a symlinked `.locus` can
+ * a symlink — checked BEFORE anything is created, so a symlinked `.pi` can
  * never have even an empty directory made through it.
  */
 
 import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { ensureWorkflowDirectoryNoSymlink, WORKFLOW_ARTIFACT_COMPONENT_PATTERN } from "./workflow-artifacts.js";
-import { workflowRunDir } from "./workflow-journal.js";
+import { workflowRunDir } from "./workflow-run-paths.js";
 
 export const WORKFLOW_RUN_FILES_DIRNAME = "files";
 export const WORKFLOW_RUN_LOGS_DIRNAME = "logs";
@@ -45,6 +45,11 @@ export function workflowRunLogsDir(projectRoot: string, runId: string): string {
   return path.join(workflowRunDir(projectRoot, runId), WORKFLOW_RUN_LOGS_DIRNAME);
 }
 
+/** Create the canonical run root. Throws before creation through an unsafe chain. */
+export function ensureWorkflowRunDir(projectRoot: string, runId: string): string {
+  return ensureCanonicalRunDirectory(projectRoot, runId);
+}
+
 /** Create the run working directory and return its physical path. Throws on an unsafe chain. */
 export function ensureWorkflowRunFilesDir(projectRoot: string, runId: string): string {
   return ensureCanonicalRunSubdirectory(projectRoot, runId, WORKFLOW_RUN_FILES_DIRNAME);
@@ -56,6 +61,14 @@ export function ensureWorkflowRunLogsDir(projectRoot: string, runId: string): st
 }
 
 function ensureCanonicalRunSubdirectory(projectRoot: string, runId: string, dirname: string): string {
+  const runDir = ensureCanonicalRunDirectory(projectRoot, runId);
+  const target = path.join(runDir, dirname);
+  assertExistingChainIsRegular(realpathSync(path.resolve(projectRoot)), target);
+  ensureWorkflowDirectoryNoSymlink(realpathSync(path.resolve(projectRoot)), target);
+  return target;
+}
+
+function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string {
   if (!WORKFLOW_RUN_COMPONENT_REGEX.test(runId)) {
     throw new Error(`Invalid workflow run id for run directory: ${JSON.stringify(runId)}`);
   }
@@ -64,7 +77,7 @@ function ensureCanonicalRunSubdirectory(projectRoot: string, runId: string, dirn
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error("Workflow run project root is not a regular directory.");
   }
-  const target = path.join(workflowRunDir(physicalProjectRoot, runId), dirname);
+  const target = workflowRunDir(physicalProjectRoot, runId);
   assertExistingChainIsRegular(physicalProjectRoot, target);
   ensureWorkflowDirectoryNoSymlink(physicalProjectRoot, target);
   return target;

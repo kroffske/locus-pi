@@ -68,11 +68,12 @@ so a copy placed there works on one machine and exists in no clone.
 
 `plan` and `plan-implement` are a pair, and the seam between them is the point:
 `plan` ends by returning the accepted plan text, which the runtime retains as
-`plan.md`; `plan-implement` takes that artifact's complete
+`plan.md`; `plan-implement` can take that artifact's complete
 `{ runId, artifactId, name, sha256 }` reference through the workflow tool's
 closed `continuation` control, which the host verifies and copies before any
-workflow code runs. Since 2026-07-28 the entry no longer re-derives that proof
-for itself: it requires exactly one non-empty `plan.md` reference and reads it.
+workflow code runs. It also accepts pasted plan text or one file path through a
+read-only resolver. A continuation artifact's name is descriptive metadata, not
+an execution requirement.
 The accepted cost is recorded in
 [`docs/adr/curated-workflow-portfolio.md`](../../../docs/adr/curated-workflow-portfolio.md) —
 a run can now start from a same-named draft of an earlier round rather than the

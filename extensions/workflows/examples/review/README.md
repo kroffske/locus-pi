@@ -68,7 +68,7 @@ shared sentences on both sides.
 ## Runtime-owned evidence
 
 Every full review retains these exact texts beneath the canonical run root
-`.locus/runtime/workflows/<runId>/artifacts`:
+`.pi/locus-pi/workflows/<runId>/artifacts`:
 
 - `intent.md` for a fresh full review, or the consumed prior-run intent for continuation;
 - `clarification-answers.md` for continuation;
