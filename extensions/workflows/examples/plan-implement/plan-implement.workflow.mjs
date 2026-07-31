@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 // plan-implement.workflow.mjs
@@ -130,14 +130,6 @@ const MAX_REPORT_UNEXPECTED_CHANGES = 20;
 const MAX_REPORT_FIELD_CHARS = 8_000;
 
 const STEP_ID_PATTERN = "^S[1-9][0-9]*$";
-const OUTCOME_TYPES = Object.freeze(["working delivery", "decision", "evidence package", "gate"]);
-const DELIVERABLE_KINDS_BY_OUTCOME_TYPE = Object.freeze({
-  "working delivery": Object.freeze(["working-change", "document"]),
-  decision: Object.freeze(["decision"]),
-  "evidence package": Object.freeze(["evidence-package"]),
-  gate: Object.freeze(["gate"]),
-});
-const OUTCOME_PLACEHOLDER_PATTERN = /^(?:<[^>]+>|\[[^\]]+\]|tbd|todo|unknown|not specified|n\/?a|none|\?+|\.{2,})$/iu;
 
 /**
  * Shape is the runtime's job: counts, lengths, the id pattern, and one entry per
@@ -684,7 +676,7 @@ ${workerText}
     label: "grade implementation",
     maxAnswerChars: MAX_REPORT_RESULT_CHARS,
     schema: IMPLEMENTATION_REVIEW_SCHEMA,
-    validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, outcomeContract, value),
+    validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, value),
   });
 
   if (failure === undefined && implementationReview.outcome === "partial") {
@@ -746,7 +738,7 @@ ${workerText}
         label: "grade reconciliation",
         maxAnswerChars: MAX_REPORT_RESULT_CHARS,
         schema: IMPLEMENTATION_REVIEW_SCHEMA,
-        validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, outcomeContract, value),
+        validate: (value) => implementationReviewErrors(steps, selected, checkEvidence, value),
       },
     );
   }
@@ -914,13 +906,6 @@ result is \`ready\` only when it exists at the declared location, contains or
 performs what the outcome promises, and its usability proof holds. An
 implementation report, changed-file list, transcript, or green task ledger is
 not the primary result unless the accepted plan explicitly declares it as such.
-Copy \`deliverable.name\`, \`deliverable.location\`, and \`deliverable.evidence\`
-exactly from the accepted plan's \`Primary result\`, \`Form and location\`, and
-\`Usability proof\` lines. Choose \`deliverable.kind\` consistently with its
-declared outcome type: working delivery is \`working-change\` or \`document\`,
-decision is \`decision\`, evidence package is \`evidence-package\`, and gate is
-\`gate\`. Deterministic validation rejects a grade about a different result.
-
 Return one JSON value only with this exact shape:
 
 \`\`\`json
@@ -1051,7 +1036,7 @@ function checkEvidenceErrors(selectedSteps, value) {
   return errors;
 }
 
-function implementationReviewErrors(planSteps, selectedSteps, checkEvidence, outcomeContract, value) {
+function implementationReviewErrors(planSteps, selectedSteps, checkEvidence, value) {
   const errors = [];
   const rows = Array.isArray(value?.steps) ? value.steps : [];
 
@@ -1080,22 +1065,6 @@ function implementationReviewErrors(planSteps, selectedSteps, checkEvidence, out
   const hasPartial = rows.some((row) => row.status === "partial");
   const hasBlocked = rows.some((row) => row.status === "blocked" || row.status === "not-attempted");
   const deliverableStatus = value?.deliverable?.status;
-  const outcomeType = outcomeContract["Outcome type"].toLowerCase();
-  const allowedKinds = DELIVERABLE_KINDS_BY_OUTCOME_TYPE[outcomeType] ?? [];
-  if (value?.deliverable?.name?.trim() !== outcomeContract["Primary result"]) {
-    errors.push('deliverable.name must exactly match the accepted plan "Primary result"');
-  }
-  if (!allowedKinds.includes(value?.deliverable?.kind)) {
-    errors.push(
-      `deliverable.kind ${JSON.stringify(value?.deliverable?.kind)} does not match accepted outcome type ${JSON.stringify(outcomeType)}`,
-    );
-  }
-  if (value?.deliverable?.location?.trim() !== outcomeContract["Form and location"]) {
-    errors.push('deliverable.location must exactly match the accepted plan "Form and location"');
-  }
-  if (value?.deliverable?.evidence?.trim() !== outcomeContract["Usability proof"]) {
-    errors.push('deliverable.evidence must exactly match the accepted plan "Usability proof"');
-  }
   const checkRows = [...(checkEvidence?.stepChecks ?? []), ...(checkEvidence?.repositoryChecks ?? [])];
   const allChecksPassed = checkRows.every((row) => row.status === "passed");
   const hasEvidenceGaps = (checkEvidence?.gaps ?? []).length > 0;
@@ -1276,7 +1245,8 @@ function markdownCode(value) {
 function parseOutcomeContract(planText) {
   const sections = [...planText.matchAll(/^##[ \t]+Outcome[ \t]*$/gmu)];
   if (sections.length === 0) throw new Error('plan-implement supplied plan has no "## Outcome" section');
-  if (sections.length !== 1) throw new Error('plan-implement supplied plan must contain exactly one "## Outcome" section');
+  if (sections.length !== 1)
+    throw new Error('plan-implement supplied plan must contain exactly one "## Outcome" section');
   const section = sections[0];
   const tail = planText.slice(section.index + section[0].length);
   const nextSection = /^##[ \t]+/mu.exec(tail);
@@ -1297,48 +1267,22 @@ function parseOutcomeContract(planText) {
     if (matches.length !== 1 || matches[0][1].trim() === "") {
       throw new Error(`plan-implement supplied plan must contain exactly one non-empty "${label}:" line`);
     }
-    const value = matches[0][1].trim();
-    if (OUTCOME_PLACEHOLDER_PATTERN.test(value) && !(label === "Supporting evidence" && value.toLowerCase() === "none")) {
-      throw new Error(`plan-implement supplied plan has placeholder value for "${label}:"`);
-    }
-    values[label] = value;
+    values[label] = matches[0][1].trim();
   }
-  const outcomeType = values["Outcome type"].toLowerCase();
-  if (!OUTCOME_TYPES.includes(outcomeType)) {
-    throw new Error(`plan-implement supplied plan has invalid "Outcome type:" ${JSON.stringify(values["Outcome type"])}`);
-  }
-  values["Outcome type"] = outcomeType;
   return { ...values, text: `## Outcome${body}`.trimEnd() };
 }
 
 function resolveDirectPlanInput(dsl, input) {
   const supplied = requireBoundedText(input, "plan input", MAX_DIRECT_PLAN_CHARS);
-  if (/^##[ \t]+Outcome[ \t]*$/mu.test(supplied) && /^##[ \t]+Steps[ \t]*$/mu.test(supplied)) return supplied;
+  if (supplied.includes("\n")) return supplied;
 
   const requestedPath = requireBoundedText(supplied, "plan path", MAX_PLAN_PATH_CHARS);
-  if (path.isAbsolute(requestedPath)) {
-    throw new Error("plan-implement plan path must be project-relative");
-  }
-  const projectRoot = realpathSync(path.resolve(dsl.projectRoot()));
-  const lexicalPath = path.resolve(projectRoot, requestedPath);
-  const relative = path.relative(projectRoot, lexicalPath);
-  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error("plan-implement plan path escapes the project root");
-  }
-  const stat = lstatSync(lexicalPath, { throwIfNoEntry: false });
-  if (stat === undefined || stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error("plan-implement plan path must name one regular non-symlink file");
-  }
-  if (realpathSync(lexicalPath) !== lexicalPath) {
-    throw new Error("plan-implement plan path must not traverse a symlink");
-  }
-  let text;
+  const planPath = path.resolve(dsl.projectRoot(), requestedPath);
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(lexicalPath));
+    return requireBoundedText(readFileSync(planPath, "utf8"), "resolved plan", MAX_DIRECT_PLAN_CHARS);
   } catch (error) {
-    throw new Error(`plan-implement plan path must contain valid UTF-8 text: ${String(error)}`);
+    throw new Error(`plan-implement could not read plan path ${JSON.stringify(requestedPath)}: ${String(error)}`);
   }
-  return requireBoundedText(text, "resolved plan", MAX_DIRECT_PLAN_CHARS);
 }
 
 /**

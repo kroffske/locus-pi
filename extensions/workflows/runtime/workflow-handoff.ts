@@ -25,7 +25,7 @@ import type { WorkflowArtifactRef, WorkflowContinuation } from "./workflow-artif
 import { workflowRunDir } from "./workflow-journal.js";
 import { readWorkflowRunSummary } from "./workflow-journal.js";
 import { projectWorkflowDisposition, workflowResultFile } from "./workflow-result.js";
-import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
+import { readWorkflowRunTextFile, workflowRunRuntimeDir } from "./workflow-run-layout.js";
 import {
   assessWorkflowSourceIdentity,
   sha256WorkflowBytes,
@@ -305,7 +305,7 @@ export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId:
     // rather than masquerade as an absent one.
     if (lstatSync(resultPath, { throwIfNoEntry: false }) === undefined) return { status: "absent" };
     assertRegularConfinedFile(runDir, resultPath, "Workflow result");
-    return readWorkflowOperatorHandoff(JSON.parse(readFileSync(resultPath, "utf8")) as unknown);
+    return readWorkflowOperatorHandoff(JSON.parse(readWorkflowRunTextFile(runDir, resultPath)) as unknown);
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }

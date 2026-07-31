@@ -26,11 +26,15 @@
  * Filesystem surface only — the pure runtime talks to `WorkflowReplayController`.
  */
 
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { workflowRunDir } from "./workflow-journal.js";
-import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
+import {
+  appendWorkflowRunTextFile,
+  ensureWorkflowDirectoryNoSymlink,
+  readWorkflowRunTextFile,
+  workflowRunRuntimeDir,
+} from "./workflow-run-layout.js";
 
 export const WORKFLOW_REPLAY_FILE = "replay.ndjson";
 /**
@@ -132,7 +136,8 @@ export function workflowReplayFile(runDir: string): string {
 export function readWorkflowReplayLog(projectRoot: string, runId: string): WorkflowReplayEntry[] {
   let raw: string;
   try {
-    raw = readFileSync(workflowReplayFile(workflowRunDir(projectRoot, runId)), "utf8");
+    const runDir = workflowRunDir(projectRoot, runId);
+    raw = readWorkflowRunTextFile(runDir, workflowReplayFile(runDir));
   } catch {
     return [];
   }
@@ -166,6 +171,7 @@ export function createWorkflowReplayController(
 }
 
 class FileBackedWorkflowReplayController implements WorkflowReplayController {
+  readonly #runDir: string;
   readonly #recordPath: string;
   readonly #recordedAgents: readonly WorkflowReplayAgentEntry[];
   readonly #recordedValues: ReadonlyMap<WorkflowReplayValueKind, readonly number[]>;
@@ -181,6 +187,7 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
   #directoryEnsured = false;
 
   constructor(options: CreateWorkflowReplayControllerOptions) {
+    this.#runDir = options.runDir;
     this.#recordPath = workflowReplayFile(options.runDir);
     const recorded = options.recorded ?? [];
     this.#replayEnabled = options.recorded !== undefined;
@@ -266,10 +273,10 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
   #append(entry: WorkflowReplayEntry): void {
     try {
       if (!this.#directoryEnsured) {
-        mkdirSync(path.dirname(this.#recordPath), { recursive: true });
+        ensureWorkflowDirectoryNoSymlink(this.#runDir, workflowRunRuntimeDir(this.#runDir));
         this.#directoryEnsured = true;
       }
-      appendFileSync(this.#recordPath, `${JSON.stringify(entry)}\n`, "utf8");
+      appendWorkflowRunTextFile(this.#runDir, this.#recordPath, `${JSON.stringify(entry)}\n`);
     } catch {
       // A record that cannot be written costs a future resume, never this run.
       // Same discipline as the journal sink: never throw into the DSL.

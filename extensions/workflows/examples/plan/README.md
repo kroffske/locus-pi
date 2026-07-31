@@ -180,10 +180,9 @@ flowchart LR
 
 The preferred handoff is one continuation artifact whose bytes the host has
 already verified and copied; its filename is not significant. The same entry can
-instead accept pasted plan text or one project-relative file path. Deterministic
-workflow code recognizes a complete plan by its required headings; otherwise it
-confines the path to the project and requires one regular, non-symlink UTF-8 file
-before exact bytes reach `## Outcome` and `### S<n>` parsing.
+instead accept pasted plan text or one file path. Deterministic workflow code
+passes multiline input through or reads the named text file before structural
+`## Outcome` and `### S<n>` parsing.
 
 Two things it deliberately no longer does, both removed on 2026-07-28. It no
 longer re-derives the host's proof — matching digests, the source run's target
@@ -194,9 +193,9 @@ plan's length, because a cap here could only reject a plan somebody had already
 accepted, after the run that wrote it was over. The budgets that still matter are
 the per-step ones below, which are what keep a single writer's prompt in hand.
 
-Deterministic code first requires exactly one `## Outcome`, its supported outcome
-type and seven non-placeholder fields, then parses the `### S<n>` blocks. That
-text was written by a _previous_ run's agent, so a
+Deterministic code first requires exactly one unambiguous `## Outcome` with its
+seven routing fields, then parses the `### S<n>` blocks. It does not grade the
+meaning of those fields. That text was written by a _previous_ run's agent, so a
 malformed plan is a fatal error: nobody in this run can be re-asked for it.
 Everything the current run's selector can repair —
 choosing ids that exist, staying inside the note budget — is a schema keyword or a

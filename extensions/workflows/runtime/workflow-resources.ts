@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import {
+  chmodWorkflowRunFile,
+  ensureWorkflowDirectoryNoSymlink,
+  readWorkflowRunFile,
+  writeWorkflowRunFile,
+} from "./workflow-run-layout.js";
 
 export type WorkflowResourceKind = "prompt";
 
@@ -72,13 +78,15 @@ export function createWorkflowResourceLoader(options: WorkflowResourceLoaderOpti
 
     const bytes = readFileSync(physicalPath);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    mkdirSync(snapshotDirectory, { recursive: true });
+    ensureWorkflowDirectoryNoSymlink(options.runDir, snapshotDirectory);
     const snapshotPath = path.join(snapshotDirectory, `${sha256}-${path.basename(physicalPath)}`);
     if (!existsSync(snapshotPath)) {
-      writeFileSync(snapshotPath, bytes, { flag: "wx" });
-      chmodSync(snapshotPath, 0o444);
+      writeWorkflowRunFile(options.runDir, snapshotPath, bytes, { exclusive: true });
+      chmodWorkflowRunFile(options.runDir, snapshotPath, 0o444);
     } else {
-      const retainedSha256 = createHash("sha256").update(readFileSync(snapshotPath)).digest("hex");
+      const retainedSha256 = createHash("sha256")
+        .update(readWorkflowRunFile(options.runDir, snapshotPath))
+        .digest("hex");
       if (retainedSha256 !== sha256) {
         throw new Error(`Workflow resource snapshot hash mismatch: ${snapshotPath}`);
       }

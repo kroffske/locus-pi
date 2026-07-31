@@ -1,19 +1,14 @@
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { workflowResultFile } from "./workflow-result.js";
 import {
   ensureWorkflowDirectoryNoSymlink,
+  readWorkflowRunFile,
+  removeWorkflowRunFile,
+  renameWorkflowRunFile,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
+  writeWorkflowRunFile,
   workflowRunArtifactsDir,
   workflowRunDir,
   workflowRunRuntimeDir,
@@ -280,10 +275,12 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   ensureWorkflowDirectoryNoSymlink(options.runDir, runtimeDir);
   ensureWorkflowDirectoryNoSymlink(runtimeDir, artifactsDir);
   assertCanonicalRunDirectory(options.projectRoot, options.runDir, options.runId);
-  let index = existsSync(indexPath)
-    ? parseIndex(readFileSync(indexPath, "utf8"), options.runId)
-    : { version: WORKFLOW_ARTIFACT_INDEX_VERSION, runId: options.runId, artifacts: [] };
-  let indexDigest = existsSync(indexPath) ? sha256(readFileSync(indexPath)) : undefined;
+  const existingIndexBytes = existsSync(indexPath) ? readWorkflowRunFile(options.runDir, indexPath) : undefined;
+  let index =
+    existingIndexBytes === undefined
+      ? { version: WORKFLOW_ARTIFACT_INDEX_VERSION, runId: options.runId, artifacts: [] }
+      : parseIndex(existingIndexBytes.toString("utf8"), options.runId);
+  let indexDigest = existingIndexBytes === undefined ? undefined : sha256(existingIndexBytes);
 
   function verifyIndexUnchanged(): void {
     if (indexDigest === undefined) {
@@ -300,11 +297,11 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     const temp = path.join(artifactsDir, `.index-${process.pid}-${Date.now()}.tmp`);
     let tempCreated = false;
     try {
-      writeFileSync(temp, bytes, { flag: "wx" });
+      writeWorkflowRunFile(options.runDir, temp, bytes, { exclusive: true });
       tempCreated = true;
-      renameSync(temp, indexPath);
+      renameWorkflowRunFile(options.runDir, temp, indexPath);
     } catch (error) {
-      if (tempCreated && existsSync(temp)) unlinkSync(temp);
+      if (tempCreated && existsSync(temp)) removeWorkflowRunFile(options.runDir, temp);
       throw error;
     }
     index = next;
@@ -327,7 +324,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     const destination = path.join(artifactsDir, relativePath);
     ensureWorkflowDirectoryNoSymlink(artifactsDir, path.dirname(destination));
     if (existsSync(destination)) throw new Error(`Workflow artifact destination already exists: ${relativePath}`);
-    writeFileSync(destination, input.bytes, { flag: "wx" });
+    writeWorkflowRunFile(options.runDir, destination, input.bytes, { exclusive: true });
     try {
       const digest = sha256(input.bytes);
       const record: WorkflowArtifactRecord = {
@@ -350,7 +347,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       persistIndex({ ...index, artifacts: [...index.artifacts, record] });
       return refFromRecord(record);
     } catch (error) {
-      if (existsSync(destination)) unlinkSync(destination);
+      if (existsSync(destination)) removeWorkflowRunFile(options.runDir, destination);
       throw error;
     }
   }
@@ -751,7 +748,7 @@ function readRegularConfinedFile(root: string, file: string): Buffer {
   const physicalRelative = path.relative(physicalRoot, physicalFile);
   if (physicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(physicalRelative))
     throw new Error("Workflow artifact escapes its physical run root.");
-  return readFileSync(lexicalFile);
+  return readWorkflowRunFile(lexicalRoot, lexicalFile);
 }
 
 function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId: string): void {

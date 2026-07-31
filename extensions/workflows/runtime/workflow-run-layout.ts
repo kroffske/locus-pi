@@ -20,7 +20,18 @@
  * symlink. Checks happen before creation, so a symlinked `.pi` receives nothing.
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 export const WORKFLOW_RUNTIME_DIRNAME = ".pi";
@@ -87,8 +98,24 @@ export function writeWorkflowRunFile(
 }
 
 export function appendWorkflowRunTextFile(runDir: string, filePath: string, text: string): void {
-  assertWorkflowRunFilePath(runDir, filePath, true);
+  assertWorkflowRunFilePath(runDir, filePath, false);
   appendFileSync(filePath, text, "utf8");
+}
+
+export function chmodWorkflowRunFile(runDir: string, filePath: string, mode: number): void {
+  assertWorkflowRunFilePath(runDir, filePath, true);
+  chmodSync(filePath, mode);
+}
+
+export function renameWorkflowRunFile(runDir: string, sourcePath: string, destinationPath: string): void {
+  assertWorkflowRunFilePath(runDir, sourcePath, true);
+  assertWorkflowRunFilePath(runDir, destinationPath, false);
+  renameSync(sourcePath, destinationPath);
+}
+
+export function removeWorkflowRunFile(runDir: string, filePath: string): void {
+  assertWorkflowRunFilePath(runDir, filePath, true);
+  unlinkSync(filePath);
 }
 
 /** Create the canonical run root. Throws before creation through an unsafe chain. */

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -286,12 +286,12 @@ function grade(
     outcome,
     summary,
     deliverable: {
-      name: "Pagination advances past the first page.",
+      name: "Working pagination",
       kind: "working-change",
-      location: "`src/page.ts` runtime behavior.",
+      location: "src/page.ts",
       status: deliverableStatus,
       summary: "Pagination advances by the configured page size.",
-      evidence: "`npm test -- page` passes the multi-page behavior case.",
+      evidence: "The multi-page behavior test proves the result.",
     },
     steps: rows.map(({ id, status, remaining }) => ({
       id,
@@ -527,20 +527,27 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(calls.some((call) => call.label === "resolve plan input")).toBe(false);
   });
 
-  it("rejects escaping and symlinked plan paths before any agent runs", async () => {
+  it("extracts routing structure without grading Outcome prose", async () => {
     const fixture = createPlanFixture({ steps: [STEP_S1] });
-    const target = path.join(fixture.root, "accepted-target.md");
-    writeFileSync(target, fixture.planText, "utf8");
-    symlinkSync(target, path.join(fixture.root, "linked-plan.md"));
+    const suppliedPlan = fixture.planText
+      .replace("Outcome type: working delivery", "Outcome type: operator-defined result")
+      .replace(
+        "Consumer: Callers of the pagination API.",
+        "Consumer: <chosen by the implementation agent>\nContext: Preserve this note for the agents.",
+      );
+    const terminalGrade = grade("complete", [{ id: "S1", status: "done" }]);
     const calls: WorkflowAgentRequest[] = [];
     const { dsl } = runtimeWithoutContinuation(fixture, async (request) => {
       calls.push(request);
-      return completed(request, "unused");
+      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
+      if (request.label === "review step S1 attempt 1") return completed(request, review("accept", "S1 passed."));
+      if (request.label === "grade implementation") return completed(request, terminalGrade);
+      return completed(request, `# ${request.label}\nDone.`);
     });
 
-    await expect((await loadWorkflow())(dsl, "../outside-plan.md")).rejects.toThrow("escapes the project root");
-    await expect((await loadWorkflow())(dsl, "linked-plan.md")).rejects.toThrow("regular non-symlink file");
-    expect(calls).toEqual([]);
+    await expect((await loadWorkflow())(dsl, suppliedPlan)).resolves.toBe(renderedReport(terminalGrade));
+    expect(calls[0]?.prompt).toContain("Outcome type: operator-defined result");
+    expect(calls[0]?.prompt).toContain("Context: Preserve this note for the agents.");
   });
 
   it("repairs the current task from review feedback before starting the next task", async () => {
@@ -713,27 +720,6 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     const rejection = (await loadWorkflow())(dsl, DEFAULT_INTENT);
     await expect(rejection).rejects.toBeInstanceOf(SchemaValidationError);
     await expect(rejection).rejects.toThrow("outcome complete requires a ready primary deliverable");
-    expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
-  });
-
-  it("rejects a complete grade about a different primary result", async () => {
-    const fixture = createPlanFixture({ steps: [STEP_S1] });
-    const mismatched = JSON.parse(grade("complete", [{ id: "S1", status: "done" }])) as ImplementationGrade;
-    mismatched.deliverable.name = "A different deliverable";
-    mismatched.deliverable.location = "elsewhere";
-    mismatched.deliverable.evidence = "A different proof";
-    const calls: WorkflowAgentRequest[] = [];
-    const { dsl } = runtimeWith(fixture, async (request) => {
-      calls.push(request);
-      if (request.label === "select plan steps") return completed(request, selection([{ id: "S1" }]));
-      if (request.label === "review step S1 attempt 1") return completed(request, review("accept", "S1 passed."));
-      if (request.label === "grade implementation") return completed(request, JSON.stringify(mismatched));
-      return completed(request, `# ${request.label}\nDone.`);
-    });
-
-    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).rejects.toThrow(
-      'deliverable.name must exactly match the accepted plan "Primary result"',
-    );
     expect(calls.filter((call) => call.label === "grade implementation")).toHaveLength(3);
   });
 
@@ -1013,10 +999,10 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     [planText([STEP_S1]).replace("## Steps", "## Work"), 'supplied plan has no "## Steps" section'],
     [planText([]), "found no steps in the supplied plan"],
     [planText(["### Advance the offset\nFiles: `a.ts`"]), "invalid step heading"],
-    [planText([STEP_S1]).replace("Outcome type: working delivery", "Outcome type: report"), 'invalid "Outcome type:"'],
-    [planText([STEP_S1]).replace("Primary result: Pagination", "Primary result: TBD\nPrimary result: Pagination"), 'exactly one non-empty "Primary result:" line'],
-    [planText([STEP_S1]).replace("Consumer: Callers", "Consumer: <consumer>\nIgnored: Callers"), 'placeholder value for "Consumer:"'],
-    [planText([STEP_S1]).replace("## Steps", "## Outcome\nOutcome type: decision\n\n## Steps"), 'exactly one "## Outcome" section'],
+    [
+      planText([STEP_S1]).replace("## Steps", "## Outcome\nOutcome type: decision\n\n## Steps"),
+      'exactly one "## Outcome" section',
+    ],
   ])("fails closed on a malformed plan: %s", async (broken, message) => {
     // The plan was written by a previous run's agent: nobody in *this* run can be
     // re-asked for it, which is what makes a fatal error the right tier here.

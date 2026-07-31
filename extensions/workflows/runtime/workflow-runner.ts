@@ -102,7 +102,7 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
-import { ensureWorkflowRunWorkspaceDir } from "./workflow-run-layout.js";
+import { ensureWorkflowRunWorkspaceDir, readWorkflowRunTextFile } from "./workflow-run-layout.js";
 import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
 import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
@@ -1308,7 +1308,9 @@ function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan 
 /** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
 function readWorkflowReplaySafety(scriptIdentity: WorkflowScriptIdentity): WorkflowReplaySafety {
   try {
-    return assessWorkflowReplaySafety(readFileSync(scriptIdentity.snapshotPath, "utf8")).replaySafety;
+    return assessWorkflowReplaySafety(
+      readWorkflowRunTextFile(path.dirname(scriptIdentity.snapshotPath), scriptIdentity.snapshotPath),
+    ).replaySafety;
   } catch {
     return "unproven";
   }
