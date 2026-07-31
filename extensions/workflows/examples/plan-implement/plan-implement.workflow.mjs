@@ -261,7 +261,7 @@ export const meta = {
  * @param {string | undefined} input
  */
 export default async function runWorkflow(dsl, input) {
-  const { agent, log, phase, publishArtifact } = dsl;
+  const { agent, log, phase, publishArtifact, publishPrimaryArtifact } = dsl;
 
   phase("select-steps");
   log("Binding the accepted plan and validating the selected steps.");
@@ -678,7 +678,7 @@ ${workerText}
   applyImplementationReviewToLedger(taskLedger, implementationReview);
   publishTaskLedger(publishArtifact, taskLedger);
   const reportText = renderImplementationReport(implementationReview, taskLedger);
-  publishArtifact("implementation-report.md", reportText);
+  publishPrimaryArtifact("implementation-report.md", reportText);
 
   if (failure === undefined && implementationReview.outcome === "complete") return reportText;
 

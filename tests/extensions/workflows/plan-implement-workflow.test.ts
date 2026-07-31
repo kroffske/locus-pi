@@ -7,6 +7,7 @@ import {
   type WorkflowArtifactRef,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
@@ -80,7 +81,7 @@ function createPlanFixture(options: { steps?: string[]; name?: string } = {}): P
     replayed: false,
   }).answer!;
   writeFileSync(
-    path.join(sourceRunDir, "result.json"),
+    workflowResultFile(sourceRunDir),
     `${JSON.stringify({
       ok: true,
       result: text,
@@ -183,7 +184,7 @@ function namedAnswers(store: ReturnType<typeof createWorkflowArtifactStore>): st
 function namedPublished(store: ReturnType<typeof createWorkflowArtifactStore>): string[] {
   return store
     .list()
-    .filter((record) => record.kind === "published")
+    .filter((record) => record.kind === "published" || record.kind === "primary")
     .map((record) => record.name);
 }
 
@@ -317,7 +318,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("IMPLEMENTATION_REVIEW_SCHEMA");
     expect(source).toContain("implementationReviewErrors");
     expect(source).toContain('publishArtifact("implementation-tasks.md"');
-    expect(source).toContain('publishArtifact("implementation-report.md", reportText)');
+    expect(source).toContain('publishPrimaryArtifact("implementation-report.md", reportText)');
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
@@ -815,7 +816,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       replayed: false,
     }).answer!;
     writeFileSync(
-      path.join(sourceRunDir, "result.json"),
+      workflowResultFile(sourceRunDir),
       `${JSON.stringify({
         ok: true,
         result: broken,

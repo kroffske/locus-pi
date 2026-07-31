@@ -225,7 +225,7 @@ describe("workflow persistent transcript", () => {
     for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
     expect(completion.digest).toContain("result: /tmp/run-98cc/result.md");
     expect(completion.digest).toContain("read the full result: /workflows result 98cc");
-    expect(completion.digest).toContain("journal: /tmp/run-98cc/journal.ndjson");
+    expect(completion.digest).toContain("journal: /tmp/run-98cc/runtime/journal.ndjson");
   });
 
   it("names the command that prints the reason when a run fails with a structured result and no text", () => {
@@ -255,7 +255,7 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("read the full reason: /workflows status 000e");
     // `/workflows result` refuses a non-prose result, so it must not be offered here.
     expect(completion.digest).not.toContain("/workflows result");
-    expect(completion.digest).toContain("journal: /tmp/run-000e/journal.ndjson");
+    expect(completion.digest).toContain("journal: /tmp/run-000e/runtime/journal.ndjson");
   });
 
   it("buffers a bounded tool digest without calling sendMessage and always retains workflow_end", () => {

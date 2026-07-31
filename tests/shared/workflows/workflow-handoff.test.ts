@@ -19,6 +19,12 @@ import {
   type WorkflowOperatorHandoffEnvelope,
 } from "../../../extensions/workflows/runtime/workflow-handoff.js";
 import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  workflowJournalFile,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { resolveWorkflowTarget, runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
@@ -95,7 +101,7 @@ async function sourceRun(root: string): Promise<{
   const read = readWorkflowOperatorHandoff(result);
   expect(read.status).toBe("ready");
   if (read.status !== "ready") throw new Error("expected ready handoff");
-  const resultPath = path.join(result.runDir, "result.json");
+  const resultPath = workflowResultFile(result.runDir);
   return { handoff: read.handoff, resultPath, resultBytes: readFileSync(resultPath, "utf8") };
 }
 
@@ -136,9 +142,9 @@ describe("workflow operator handoff", () => {
   it("reads a run with no result.json as absent, and a symlinked one as invalid", () => {
     const root = project();
     const incompleteDir = workflowRunDir(root, "20260725-135526-6710");
-    mkdirSync(incompleteDir, { recursive: true });
+    ensureWorkflowRunDir(root, "20260725-135526-6710");
     writeFileSync(
-      path.join(incompleteDir, "journal.ndjson"),
+      workflowJournalFile(incompleteDir),
       `${JSON.stringify({ ts: "2026-07-25T13:55:26.000Z", runId: "20260725-135526-6710", kind: "phase", phase: "scout" })}\n`,
       "utf8",
     );
@@ -148,8 +154,8 @@ describe("workflow operator handoff", () => {
     expect(readPersistedWorkflowOperatorHandoff(root, "20260725-135526-6710")).toEqual({ status: "absent" });
 
     const danglingDir = workflowRunDir(root, "20260725-140000-aaaa");
-    mkdirSync(danglingDir, { recursive: true });
-    symlinkSync(path.join(root, "outside-result.json"), path.join(danglingDir, "result.json"));
+    ensureWorkflowRunDir(root, "20260725-140000-aaaa");
+    symlinkSync(path.join(root, "outside-result.json"), workflowResultFile(danglingDir));
     expect(readPersistedWorkflowOperatorHandoff(root, "20260725-140000-aaaa")).toMatchObject({
       status: "invalid",
       message: expect.stringContaining("regular non-symlink file"),
@@ -337,7 +343,7 @@ describe("workflow operator handoff", () => {
     expect(claimRead).toMatchObject({ status: "ready" });
     expect(claimRead.status === "ready" ? claimRead.state : {}).not.toHaveProperty("childRunId");
     const claimText = readFileSync(
-      path.join(workflowRunDir(root, source.handoff.originRunId), "operator-handoff-claim.json"),
+      path.join(workflowRunRuntimeDir(workflowRunDir(root, source.handoff.originRunId)), "operator-handoff-claim.json"),
       "utf8",
     );
     expect(claimText).not.toContain("operator answer");
@@ -379,8 +385,8 @@ describe("workflow operator handoff", () => {
     });
     expect(initial.status).toBe("claimed");
     const runDirectory = workflowRunDir(root, source.handoff.originRunId);
-    const claimPath = path.join(runDirectory, "operator-handoff-claim.json");
-    const lockPath = path.join(runDirectory, "operator-handoff-claim.lock");
+    const claimPath = path.join(workflowRunRuntimeDir(runDirectory), "operator-handoff-claim.json");
+    const lockPath = path.join(workflowRunRuntimeDir(runDirectory), "operator-handoff-claim.lock");
     const successorState = {
       ...(JSON.parse(readFileSync(claimPath, "utf8")) as Record<string, unknown>),
       claimId: "11111111-1111-4111-8111-111111111111",
@@ -445,7 +451,7 @@ describe("workflow operator handoff", () => {
       childRunId: child.runId,
     });
     const claimText = readFileSync(
-      path.join(workflowRunDir(root, source.handoff.originRunId), "operator-handoff-claim.json"),
+      path.join(workflowRunRuntimeDir(workflowRunDir(root, source.handoff.originRunId)), "operator-handoff-claim.json"),
       "utf8",
     );
     expect(claimText).not.toContain("operator answer");
@@ -479,7 +485,10 @@ describe("workflow operator handoff", () => {
   it("fails closed on malformed or symlinked claim state", async () => {
     const root = project();
     const source = await sourceRun(root);
-    const claimPath = path.join(workflowRunDir(root, source.handoff.originRunId), "operator-handoff-claim.json");
+    const claimPath = path.join(
+      workflowRunRuntimeDir(workflowRunDir(root, source.handoff.originRunId)),
+      "operator-handoff-claim.json",
+    );
     writeFileSync(claimPath, '{"version":"future"}\n', "utf8");
     expect(readWorkflowHandoffClaim(root, source.handoff)).toMatchObject({ status: "invalid" });
     expect(() => projectWorkflowHandoffState(root, source.handoff)).toThrow();

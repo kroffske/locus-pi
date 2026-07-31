@@ -23,6 +23,8 @@ import {
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { AgentExecutor } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   createWorkflowRuntime,
   workflowSlotKey,
@@ -278,8 +280,7 @@ describe("REQ-009 W2 — journal round records", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-rounds-read-"));
     const runId = "20260709-000000-abcd";
     const slotKey = workflowSlotKey({ phase: "verify", label: "verify fix" });
-    const runDir = workflowRunDir(root, runId);
-    mkdirSync(runDir, { recursive: true });
+    const runDir = ensureWorkflowRunDir(root, runId);
     const lines = [
       { ts: "1", runId, kind: "agent_start", agent: "reviewer", label: "verify fix", phase: "verify", slotKey },
       {
@@ -311,7 +312,7 @@ describe("REQ-009 W2 — journal round records", () => {
         usage: { input: 50, output: 20, totalTokens: 70, costTotal: 0 },
       },
     ];
-    writeFileSync(path.join(runDir, "journal.ndjson"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
+    writeFileSync(workflowJournalFile(runDir), lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
 
     expect(listWorkflowRoundsForSlot(root, runId, slotKey)).toEqual([1, 2]);
     const body1 = readWorkflowRoundBody(root, runId, slotKey, 1);
@@ -324,8 +325,7 @@ describe("REQ-009 W2 — journal round records", () => {
   it("treats an OLD journal without round fields as no-rounds and never throws (backward compat)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-rounds-old-"));
     const runId = "20260101-000000-old0";
-    const runDir = workflowRunDir(root, runId);
-    mkdirSync(runDir, { recursive: true });
+    const runDir = ensureWorkflowRunDir(root, runId);
     // Pre-T-193 journal: agent lines carry NO slotKey/round/usage.
     const oldLines = [
       { ts: "1", runId, kind: "agent_start", agent: "reviewer", label: "verify fix", phase: "verify" },
@@ -340,11 +340,7 @@ describe("REQ-009 W2 — journal round records", () => {
         durationMs: 1000,
       },
     ];
-    writeFileSync(
-      path.join(runDir, "journal.ndjson"),
-      oldLines.map((l) => JSON.stringify(l)).join("\n") + "\n",
-      "utf8",
-    );
+    writeFileSync(workflowJournalFile(runDir), oldLines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
 
     expect(() => listWorkflowRoundsForSlot(root, runId, "verifyverify fix")).not.toThrow();
     expect(listWorkflowRoundsForSlot(root, runId, "verifyverify fix")).toEqual([]);

@@ -193,7 +193,7 @@ export default async function runWorkflow(dsl, input) {
   if (continued !== undefined) return await resumePlanning(dsl, continued, input);
 
   const taskText = requireTask(input);
-  const { agent, phase, log, publishArtifact } = dsl;
+  const { agent, phase, log, publishArtifact, publishPrimaryArtifact } = dsl;
 
   publishArtifact("task.md", taskText);
 
@@ -205,7 +205,10 @@ export default async function runWorkflow(dsl, input) {
   });
 
   const outcome = await draftAcceptedPlan(dsl, { taskText, contextText });
-  if (outcome.accepted) return outcome.planText;
+  if (outcome.accepted) {
+    publishPrimaryArtifact("plan.md", outcome.planText, "publish-plan");
+    return outcome.planText;
+  }
   return declareRoundCapHandoff(dsl, { taskText, contextText, outcome });
 }
 
@@ -335,7 +338,7 @@ function declareRoundCapHandoff(dsl, { taskText, contextText, outcome }) {
  * draft and its open defects, without re-scouting the repository.
  */
 async function resumePlanning(dsl, continued, input) {
-  const { log, phase, publishArtifact } = dsl;
+  const { log, phase, publishArtifact, publishPrimaryArtifact } = dsl;
   const answer = requireOperatorAnswer(input);
   if (answer.toLowerCase() === ACCEPT_LAST_DRAFT_ANSWER) {
     // Same reason as the handoff's own phase: these copies are published outside
@@ -344,7 +347,7 @@ async function resumePlanning(dsl, continued, input) {
     phase("accept-draft");
     log("Operator accepted the retained draft; the critic's round cap is overridden by that decision.");
     publishArtifact("task.md", continued.taskText);
-    publishArtifact("plan.md", continued.planText);
+    publishPrimaryArtifact("plan.md", continued.planText);
     return continued.planText;
   }
   const outcome = await draftAcceptedPlan(dsl, {
@@ -356,6 +359,7 @@ async function resumePlanning(dsl, continued, input) {
   });
   if (outcome.accepted) {
     publishArtifact("task.md", continued.taskText);
+    publishPrimaryArtifact("plan.md", outcome.planText, "publish-plan");
     return outcome.planText;
   }
   // The stalled state is republished by the handoff itself, task included, so a

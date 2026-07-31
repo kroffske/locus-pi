@@ -19,6 +19,12 @@ import {
   workflowAgentLiveRowId,
 } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  workflowJournalFile,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {
@@ -39,18 +45,13 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 500): Promise<voi
 }
 
 function writeWorkflowRun(root: string, runId: string): void {
-  const dir = path.join(root, ".pi", "locus-pi", "workflows", runId);
+  const dir = ensureWorkflowRunDir(root, runId);
   const journal: WorkflowJournalLine[] = [
     { ts: "2026-01-01T00:00:00.000Z", runId, kind: "phase", phase: "repair-proof" },
     { ts: "2026-01-01T00:00:01.000Z", runId, kind: "error", message: "failed proof" },
   ];
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    path.join(dir, "journal.ndjson"),
-    journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-    "utf8",
-  );
-  writeFileSync(path.join(dir, "result.json"), JSON.stringify({ runId, ok: false, journal }), "utf8");
+  writeFileSync(workflowJournalFile(dir), journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+  writeFileSync(workflowResultFile(dir), JSON.stringify({ runId, ok: false, journal }), "utf8");
 }
 
 function renderHarnessWidget(harness: ReturnType<typeof createHarness>, key = "workflows", width = 220): string {
@@ -1445,16 +1446,15 @@ describe("workflow progress widget", () => {
   it("run command passes --resume as persisted retry metadata", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-command-resume-"));
     const sourceRunId = "20260101-000001-source";
-    const runDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
+    const runDir = ensureWorkflowRunDir(root, sourceRunId);
     try {
-      mkdirSync(runDir, { recursive: true });
       writeFileSync(
-        path.join(runDir, "journal.ndjson"),
+        workflowJournalFile(runDir),
         JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", runId: sourceRunId, kind: "log", message: "source" }) + "\n",
         "utf8",
       );
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({ runId: sourceRunId, ok: true, result: { source: true }, journal: [] }),
         "utf8",
       );
@@ -1482,7 +1482,7 @@ describe("workflow progress widget", () => {
   it("status detail keeps raw result and distinguishes script, runtime, and legacy logs", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-status-detail-"));
     const runId = "20260101-000001-detail";
-    const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
+    const runDir = ensureWorkflowRunDir(root, runId);
     const journal: WorkflowJournalLine[] = [
       { ts: "2026-01-01T00:00:00.000Z", runId, kind: "log", source: "script", message: "compare candidates" },
       { ts: "2026-01-01T00:00:01.000Z", runId, kind: "log", source: "runtime", message: "[workflow:exit]" },
@@ -1505,14 +1505,13 @@ describe("workflow progress widget", () => {
       },
     ];
     try {
-      mkdirSync(runDir, { recursive: true });
       writeFileSync(
-        path.join(runDir, "journal.ndjson"),
+        workflowJournalFile(runDir),
         journal.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
         "utf8",
       );
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({
           runId,
           ok: true,
@@ -1521,7 +1520,7 @@ describe("workflow progress widget", () => {
           target: { kind: "name", ref: "detail", source: "project" },
           scriptIdentity: {
             sourcePath: "/private/source/detail.workflow.mjs",
-            snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
+            snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
             scriptSha256: "a".repeat(64),
           },
         }),
@@ -1639,11 +1638,10 @@ describe("workflow progress widget", () => {
         "utf8",
       );
       const runId = "20260101-000001-alpha";
-      const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
-      mkdirSync(runDir, { recursive: true });
-      writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
+      const runDir = ensureWorkflowRunDir(root, runId);
+      writeFileSync(workflowJournalFile(runDir), "", "utf8");
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({ runId, ok: true, result: "alpha", target: { kind: "name", ref: "alpha", source: "project" } }),
         "utf8",
       );
@@ -1802,7 +1800,7 @@ describe("workflow progress widget", () => {
       }
       const longRunDir = path.join(root, ".pi", "locus-pi", "workflows", "20260101-000005-rpc");
       writeFileSync(
-        path.join(longRunDir, "journal.ndjson"),
+        workflowJournalFile(longRunDir),
         `${JSON.stringify({
           ts: "2026-01-01T00:00:02.000Z",
           runId: "20260101-000005-rpc",

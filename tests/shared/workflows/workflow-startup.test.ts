@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { createHarness } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -39,7 +40,7 @@ describe("workflow startup persistence", () => {
       scriptPath: ".agents/workflows/startup.workflow.mjs",
       onRunStart: ({ runDir }) => {
         announcedRunDir = runDir;
-        const journalPath = path.join(runDir, "journal.ndjson");
+        const journalPath = workflowJournalFile(runDir);
         journalExistedAtAnnouncement = existsSync(journalPath);
         journalAtAnnouncement = journalExistedAtAnnouncement ? readFileSync(journalPath, "utf8") : "";
       },

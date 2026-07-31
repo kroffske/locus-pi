@@ -489,8 +489,10 @@ function artifactKindOrder(kind: WorkflowArtifactRecord["kind"]): number {
       return 2;
     case "published":
       return 3;
-    case "input":
+    case "primary":
       return 4;
+    case "input":
+      return 5;
   }
 }
 

@@ -158,7 +158,7 @@ cases out is documentation plus a pinning test in
 apart, and this ADR says so rather than claiming a guarantee it does not have.
 
 The canonical evidence owner is
-`.pi/locus-pi/workflows/<runId>/artifacts/index.json`. Automatic answers and
+`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Automatic answers and
 fresh child transcripts/result envelopes share the same digest-bound index with
 workflow-published and consumed text. This makes the report inspectable through
 the persisted run viewer and makes cross-run approval immutable without requiring

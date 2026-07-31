@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { workflowRunDir } from "./workflow-run-paths.js";
+import { workflowRunDir } from "./workflow-run-layout.js";
 
 export interface WorkflowWorktreeInfo {
   id: string;

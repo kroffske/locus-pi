@@ -10,6 +10,7 @@ import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "./runtime/workflow-result.js";
+import { workflowJournalFile } from "./runtime/workflow-run-layout.js";
 import { notifyOperator } from "../_shared/operator/operator-notify.js";
 
 /**
@@ -206,7 +207,7 @@ export function createWorkflowTranscript(
           bodyLines.push(firstTranscriptLine(line));
         }
       } else if (res.runDir !== undefined && res.runDir !== "") {
-        bodyLines.push(firstTranscriptLine(`journal: ${path.join(res.runDir, "journal.ndjson")}`));
+        bodyLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
       }
       const headerLines = [
         workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),

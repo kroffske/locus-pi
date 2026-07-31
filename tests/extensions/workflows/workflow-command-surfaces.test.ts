@@ -13,6 +13,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, type Harness } from "../../test-harness.js";
 
@@ -30,8 +33,7 @@ function makeRoot(): string {
 
 /** One finished run on disk: a journal Pi can replay and a persisted envelope. */
 function writeRun(root: string, runId: string): void {
-  const runDir = workflowRunDir(root, runId);
-  mkdirSync(runDir, { recursive: true });
+  const runDir = ensureWorkflowRunDir(root, runId);
   const journal = [
     { ts: "2026-07-26T21:27:52.000Z", runId, kind: "phase", phase: "review" },
     { ts: "2026-07-26T21:27:53.000Z", runId, kind: "agent_start", agent: "reviewer", label: "pass 1" },
@@ -45,13 +47,9 @@ function writeRun(root: string, runId: string): void {
     },
     { ts: "2026-07-26T21:27:55.000Z", runId, kind: "log", source: "script", message: "wrote findings" },
   ];
+  writeFileSync(workflowJournalFile(runDir), `${journal.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
   writeFileSync(
-    path.join(runDir, "journal.ndjson"),
-    `${journal.map((line) => JSON.stringify(line)).join("\n")}\n`,
-    "utf8",
-  );
-  writeFileSync(
-    path.join(runDir, "result.json"),
+    workflowResultFile(runDir),
     `${JSON.stringify({ runId, ok: true, result: { summary: "review done" }, journal: [] }, null, 2)}\n`,
     "utf8",
   );

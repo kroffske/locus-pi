@@ -25,6 +25,8 @@ import {
   workflowScriptExecutionPath,
 } from "../../../extensions/workflows/runtime/workflow-script-identity.js";
 import { readWorkflowRunResult, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { workflowRunRuntimeDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness } from "../../test-harness.js";
 
 async function runScript(root: string, scriptPath: string, sessionId: string): Promise<RunWorkflowScriptResult> {
@@ -243,14 +245,14 @@ describe("workflow script identity coverage", () => {
     const runId = "legacy-run";
     try {
       const runDir = workflowRunDir(root, runId);
-      mkdirSync(runDir, { recursive: true });
+      mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({
           ok: true,
           scriptIdentity: {
             sourcePath: "/private/legacy.workflow.mjs",
-            snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
+            snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
             scriptSha256: "a".repeat(64),
           },
         }),
@@ -266,11 +268,11 @@ describe("workflow script identity coverage", () => {
 
       const legacyFields = {
         sourcePath: "/private/legacy.workflow.mjs",
-        snapshotPath: path.join(runDir, `script-${"a".repeat(64)}.workflow.mjs`),
+        snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
         scriptSha256: "a".repeat(64),
       };
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({
           ok: true,
           scriptIdentity: { ...legacyFields, schemaVersion: 3 },
@@ -280,7 +282,7 @@ describe("workflow script identity coverage", () => {
       expect(readWorkflowRunResult(root, runId)?.scriptIdentity).toBeUndefined();
 
       writeFileSync(
-        path.join(runDir, "result.json"),
+        workflowResultFile(runDir),
         JSON.stringify({
           ok: true,
           scriptIdentity: {
@@ -374,9 +376,12 @@ describe("workflow script identity coverage", () => {
     let tampered = false;
     const timer = setInterval(() => {
       if (runDir === undefined || tampered) return;
-      const snapshot = readdirSync(runDir).find((name) => name.startsWith("script-") && name.endsWith(".workflow.mjs"));
+      const runtimeDir = workflowRunRuntimeDir(runDir);
+      const snapshot = readdirSync(runtimeDir).find(
+        (name) => name.startsWith("script-") && name.endsWith(".workflow.mjs"),
+      );
       if (snapshot === undefined) return;
-      const snapshotPath = path.join(runDir, snapshot);
+      const snapshotPath = path.join(runtimeDir, snapshot);
       chmodSync(snapshotPath, 0o644);
       appendFileSync(snapshotPath, "\n// evaluation tamper\n", "utf8");
       tampered = true;
@@ -419,8 +424,9 @@ describe("workflow script identity coverage", () => {
           "  toJSON() {",
           "    const runId = readdirSync(workflowsRoot)[0];",
           "    const runDir = path.join(workflowsRoot, runId);",
-          "    const snapshot = readdirSync(runDir).find((name) => name.startsWith('script-'));",
-          "    const snapshotPath = path.join(runDir, snapshot);",
+          "    const runtimeDir = path.join(runDir, 'runtime');",
+          "    const snapshot = readdirSync(runtimeDir).find((name) => name.startsWith('script-'));",
+          "    const snapshotPath = path.join(runtimeDir, snapshot);",
           "    chmodSync(snapshotPath, 0o644);",
           "    appendFileSync(snapshotPath, '\\n// toJSON tamper\\n');",
           "    return { escaped: true };",

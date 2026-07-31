@@ -10,8 +10,9 @@ package surface or changes `package.json#pi.extensions`.
 - `package.json#pi.extensions` remains the default Pi extension source truth.
 - `.locus/runtime/**` stores generated non-workflow runtime state for the current
   project.
-- `.pi/locus-pi/workflows/<runId>/**` stores each workflow's journal, result,
-  artifacts, reports, resources, snapshots, and retained worktrees.
+- `.pi/locus-pi/workflows/<runId>/**` stores each workflow in three zones:
+  readable `outputs/`, deliberate agent `workspace/`, and machine-owned
+  `runtime/` state including journals, results, artifacts, resources, and snapshots.
 - `.locus/AGENTS.md` is the local registry for saved `.locus/**` files in this
   checkout. It must list real files, not template-only expectations.
 - `.tasks/**`, when present, remains project task truth. `.locus/runtime/artifacts/**` can feed `.tasks/**` only through explicit bridge logic.

@@ -47,7 +47,7 @@
     "extensions/workflows/examples/review/resources/interrogator.prompt.md",
     "extensions/workflows/examples/review/resources/verifier.prompt.md",
     "extensions/workflows/examples/review/review.workflow.mjs",
-    "extensions/workflows/runtime/workflow-run-paths.ts",
+    "extensions/workflows/runtime/workflow-run-layout.ts",
     "package-lock.json",
     "public-repository.json",
     "scripts/audit-sources.ts",

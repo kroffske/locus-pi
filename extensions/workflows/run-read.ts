@@ -62,3 +62,5 @@ export {
   workflowRunIdFromRowId,
 } from "./runtime/workflow-journal.js";
 export type { WorkflowRunSummary } from "./runtime/workflow-journal.js";
+export { workflowJournalFile } from "./runtime/workflow-run-layout.js";
+export { workflowResultFile } from "./runtime/workflow-result.js";

@@ -5,6 +5,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import loop from "../../../extensions/loop/index.js";
 import plan from "../../../extensions/plan/index.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 function expectBoundedLoopText(text: string): void {
@@ -89,16 +92,15 @@ describe("loop bounded continuation runtime", () => {
       expect(created.isError).not.toBe(true);
 
       const runId = "20260618-023148-6c50-extra-long-run-id-that-must-not-wrap";
-      const runDir = path.join(projectRoot, ".pi", "locus-pi", "workflows", runId);
-      await mkdir(runDir, { recursive: true });
+      const runDir = ensureWorkflowRunDir(projectRoot, runId);
       await writeFile(
-        path.join(runDir, "journal.ndjson"),
+        workflowJournalFile(runDir),
         [
           JSON.stringify({ ts: "2026-06-18T02:31:48.000Z", runId, kind: "phase", phase: "verify", message: "verify" }),
         ].join("\n"),
         "utf8",
       );
-      await writeFile(path.join(runDir, "result.json"), JSON.stringify({ ok: true }, null, 2), "utf8");
+      await writeFile(workflowResultFile(runDir), JSON.stringify({ ok: true }, null, 2), "utf8");
 
       const status = await runTool(h, "loopControl", { action: "status" });
       expect(status.isError).not.toBe(true);
@@ -290,10 +292,9 @@ describe("loop bounded continuation runtime", () => {
       loop(h.pi);
 
       const runId = "20260617-120000-abcd";
-      const runDir = path.join(projectRoot, ".pi", "locus-pi", "workflows", runId);
-      await mkdir(runDir, { recursive: true });
+      const runDir = ensureWorkflowRunDir(projectRoot, runId);
       await writeFile(
-        path.join(runDir, "journal.ndjson"),
+        workflowJournalFile(runDir),
         [
           JSON.stringify({
             ts: "2026-06-17T12:00:00.000Z",
@@ -305,7 +306,7 @@ describe("loop bounded continuation runtime", () => {
         ].join("\n"),
         "utf8",
       );
-      await writeFile(path.join(runDir, "result.json"), JSON.stringify({ ok: true }, null, 2), "utf8");
+      await writeFile(workflowResultFile(runDir), JSON.stringify({ ok: true }, null, 2), "utf8");
 
       const result = await runTool(h, "loopControl", { action: "once", source: "workflow", runId });
       expect(result.isError).not.toBe(true);

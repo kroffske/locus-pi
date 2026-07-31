@@ -108,7 +108,7 @@ export interface WorkflowAgentBridgeOptions {
    * runtime's prompt is part of the replay key: a run-specific absolute path in
    * it would make every recorded call miss on the next resume.
    */
-  runFilesDir?: string;
+  runWorkspaceDir?: string;
 }
 
 /**
@@ -117,7 +117,7 @@ export interface WorkflowAgentBridgeOptions {
  * A stable, single boundary: the note never contains it, so the FIRST occurrence
  * in a composed child task always marks where the author's prompt begins.
  */
-export const WORKFLOW_RUN_FILES_PROMPT_SEPARATOR = "\n\n---\n\n";
+export const WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR = "\n\n---\n\n";
 
 /**
  * The child task as the model receives it: this run's working-directory note,
@@ -134,14 +134,14 @@ export const WORKFLOW_RUN_FILES_PROMPT_SEPARATOR = "\n\n---\n\n";
  */
 export function composeWorkflowChildTask(
   prompt: string,
-  runFilesDir: string | undefined,
+  runWorkspaceDir: string | undefined,
   options: { readOnly?: boolean } = {},
 ): string {
-  if (runFilesDir === undefined || runFilesDir.trim() === "") return prompt;
+  if (runWorkspaceDir === undefined || runWorkspaceDir.trim() === "") return prompt;
   const note = [
     "## This workflow run's working directory",
     "",
-    runFilesDir,
+    runWorkspaceDir,
     "",
     ...(options.readOnly === true
       ? [
@@ -153,7 +153,7 @@ export function composeWorkflowChildTask(
           "Names are kept verbatim: nothing renames, numbers or moves what you write.",
         ]),
   ].join("\n");
-  return `${note}${WORKFLOW_RUN_FILES_PROMPT_SEPARATOR}${prompt}`;
+  return `${note}${WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR}${prompt}`;
 }
 
 export function resolvePermissionMode(input: {
@@ -351,7 +351,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // `agent` here is the EFFECTIVE definition, after the per-call `readOnly`
     // narrowing above — so a call that read-only-ed a writable catalog agent
     // gets the read-only note too.
-    const childTask = composeWorkflowChildTask(req.prompt, options.runFilesDir, { readOnly: agent.readOnly === true });
+    const childTask = composeWorkflowChildTask(req.prompt, options.runWorkspaceDir, {
+      readOnly: agent.readOnly === true,
+    });
     const request = createAgentRunRequest(agent, childTask, {
       maxTurns,
       approvalTier,

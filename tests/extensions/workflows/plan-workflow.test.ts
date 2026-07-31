@@ -33,6 +33,7 @@ interface PublishedArtifact {
   ref: WorkflowArtifactRef;
   text: string;
   stage?: string;
+  kind?: "published" | "primary";
 }
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
@@ -102,9 +103,9 @@ function runtimeWith(
       answers.push({ ref, text: input.text, ...(input.stage === undefined ? {} : { stage: input.stage }) });
       return { answer: ref };
     },
-    publishText(name, text, stage) {
+    publishText(name, text, stage, kind = "published") {
       const ref = priorRef(runId, `published-${published.length + 1}`, name, text);
-      published.push({ ref, text, ...(stage === undefined ? {} : { stage }) });
+      published.push({ ref, text, kind, ...(stage === undefined ? {} : { stage }) });
       return ref;
     },
     consumeText(ref) {
@@ -184,6 +185,18 @@ const PLAN_DRAFT = [
 const SCOUT_CONTEXT = "# Task Context\n## Existing behavior\n- `src/page.ts` — paginates.";
 
 describe("workflow example: plan.workflow.mjs", () => {
+  it("allows one explicit primary document and rejects a second declaration", () => {
+    const { dsl, published } = runtimeWith(async () => {
+      throw new Error("no child expected");
+    });
+
+    const ref = dsl.publishPrimaryArtifact("plan.md", PLAN_DRAFT);
+
+    expect(ref.name).toBe("plan.md");
+    expect(published).toMatchObject([{ text: PLAN_DRAFT, kind: "primary" }]);
+    expect(() => dsl.publishPrimaryArtifact("other.md", "other")).toThrow(/already published its primary output/u);
+  });
+
   it("routes every planning stage through the agent tier and names no provider", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -362,8 +375,9 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(calls.map((call) => call.phase)).toEqual(["scout-repository", "draft-plan", "critique-plan"]);
     expect(calls[1]?.prompt).toContain(SCOUT_CONTEXT);
     expect(calls[2]?.prompt).toContain(PLAN_DRAFT);
-    expect(published.map((item) => item.ref.name)).toEqual(["task.md"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["task.md", "plan.md"]);
     expect(published[0]?.text).toBe(task);
+    expect(published[1]).toMatchObject({ text: PLAN_DRAFT, kind: "primary" });
     expect(answers.map((item) => item.ref.name)).toEqual(["context.md", "plan.md", "plan-critique.json"]);
   });
 
@@ -660,13 +674,9 @@ describe("workflow example: plan.workflow.mjs", () => {
     }
   });
 
-  it("keeps its handoff refs inside the terminal projection even when the critic is re-asked all round", async () => {
-    // The projection keeps only the newest 20 answer+published outputs, and a
-    // schema re-ask writes an answer artifact per ATTEMPT — so a run whose critic
-    // needs its extra attempts produces far more outputs than its round count
-    // suggests. When the task ref was published once at the start, that was
-    // enough to evict it, and the run died on its very last step with a message
-    // about artifact projection after paying for every round.
+  it("keeps handoff refs in the terminal projection while re-asked answers stay runtime-only", async () => {
+    // Schema re-asks still write exact answer evidence per attempt, but only
+    // deliberate publications enter the terminal handoff projection.
     const root = mkdtempSync(path.join(tmpdir(), "locus-plan-projection-"));
     try {
       mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
@@ -707,8 +717,9 @@ describe("workflow example: plan.workflow.mjs", () => {
 
       expect(stalled.ok, stalled.error).toBe(true);
       expect(stalled.disposition).toMatchObject({ status: "awaiting_operator" });
-      // The run really did overflow the window — otherwise this proves nothing.
-      expect(stalled.artifactRefsOmitted ?? 0).toBeGreaterThan(0);
+      // Automatic child answers stay runtime-only, so the terminal projection
+      // contains the deliberate handoff publications without window pressure.
+      expect(stalled.artifactRefsOmitted ?? 0).toBe(0);
       const refs = stalled.operatorHandoff?.continuationArtifactRefs ?? [];
       expect(refs.map((ref) => ref.name)).toEqual(["task.md", "context.md", "plan.md", "unresolved-defects.md"]);
       // And the operator can actually act on it: the continuation is accepted by

@@ -7,6 +7,8 @@ import {
   type WorkflowArtifactRef,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
+import { workflowRunArtifactsDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
@@ -98,7 +100,7 @@ function createReviewFixture(findings?: string[], targetRef = "review", stage = 
     replayed: false,
   }).answer!;
   writeFileSync(
-    path.join(sourceRunDir, "result.json"),
+    workflowResultFile(sourceRunDir),
     `${JSON.stringify({
       ok: true,
       result: text,
@@ -240,7 +242,7 @@ describe("curated review remediation workflow", () => {
     const fixture = createReviewFixture();
     const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
     writeFileSync(
-      path.join(sourceRunDir, "result.json"),
+      workflowResultFile(sourceRunDir),
       `${JSON.stringify({
         ok: true,
         result: fixture.reviewText,
@@ -263,17 +265,10 @@ describe("curated review remediation workflow", () => {
     // The other half of what the script used to re-derive: the stored bytes are
     // digest-bound, and rewriting them under a valid reference is refused on consume.
     const fixture = createReviewFixture();
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
     const stored = fixture.sourceStore.list().find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId);
     expect(stored, "the fixture must have persisted the review artifact").toBeDefined();
-    const storedPath = path.join(
-      fixture.root,
-      ".pi",
-      "locus-pi",
-      "workflows",
-      fixture.reviewRef.runId,
-      "artifacts",
-      stored!.relativePath,
-    );
+    const storedPath = path.join(workflowRunArtifactsDir(sourceRunDir), stored!.relativePath);
     expect(existsSync(storedPath)).toBe(true);
     writeFileSync(storedPath, `${fixture.reviewText}\ntampered`, "utf8");
 
@@ -348,14 +343,14 @@ describe("curated review remediation workflow", () => {
     // to own, asserted against the authority that actually owns it.
     const fixture = createReviewFixture(undefined, "review", "resolve-scope");
     const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
-    const indexPath = path.join(sourceRunDir, "artifacts", "index.json");
+    const indexPath = path.join(workflowRunArtifactsDir(sourceRunDir), "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ artifactId: string; stage?: string }>;
     };
     index.artifacts.find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId)!.stage = "verify-review";
     writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
     writeFileSync(
-      path.join(sourceRunDir, "result.json"),
+      workflowResultFile(sourceRunDir),
       `${JSON.stringify({
         ok: true,
         result: "an unrelated terminal answer",

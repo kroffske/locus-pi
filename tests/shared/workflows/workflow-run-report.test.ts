@@ -22,6 +22,8 @@ import {
   type WorkflowRunReportInput,
 } from "../../../extensions/workflows/runtime/workflow-run-report.js";
 import { readWorkflowRunJournalState, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile, writeWorkflowResultText } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
@@ -94,42 +96,30 @@ describe("workflow run report", () => {
     const records = [
       record({ artifactId: "published-0001", name: "task.md", kind: "published" }),
       record({
-        artifactId: "input-0001",
-        name: "plan.md",
-        kind: "input",
-        relativePath: path.join("inputs", "input-0001-plan.md"),
-        source: {
-          runId: "20260728-180000-prev",
-          artifactId: "call-0002-answer",
-          name: "plan.md",
-          sha256: "b".repeat(64),
-        },
-      }),
-      record({
         artifactId: "call-0001-answer",
         name: "context.md",
-        kind: "answer",
+        kind: "published",
         callId: "call-0001",
         stage: "scout-repository",
       }),
       record({
         artifactId: "call-0002-answer",
         name: "plan.md",
-        kind: "answer",
+        kind: "published",
         callId: "call-0002",
         stage: "draft-plan",
       }),
       record({
         artifactId: "call-0003-answer",
         name: "plan-critique.json",
-        kind: "answer",
+        kind: "published",
         callId: "call-0003",
         stage: "critique-plan",
       }),
       record({
         artifactId: "call-0004-answer",
         name: "plan.md",
-        kind: "answer",
+        kind: "primary",
         callId: "call-0004",
         stage: "draft-plan",
       }),
@@ -144,6 +134,7 @@ describe("workflow run report", () => {
         mediaType: "application/x-ndjson",
       }),
     ];
+    writeWorkflowResultText(workflowRunDir(root, RUN_ID), "# Accepted plan\n");
     const outcome = writeWorkflowRunReport(
       {
         projectRoot: root,
@@ -160,7 +151,6 @@ describe("workflow run report", () => {
       },
       evidenceFrom(records, {
         "published-0001": "the task text",
-        "input-0001": "consumed plan",
         "call-0001-answer": "context body",
         "call-0002-answer": "plan round 1 body",
         "call-0003-answer": '{"verdict":"revise","defects":["S2: path is wrong","S5: no verify"]}',
@@ -178,14 +168,14 @@ describe("workflow run report", () => {
       "plan-critique.md",
       "plan.md",
       "questions.md",
-      "result.md",
       "task.md",
+      "workflow-result.md",
     ]);
     assert.ok(names.every((name) => !name.endsWith(".md.md")));
     assert.equal(readFileSync(path.join(reportDir, "task.md"), "utf8"), "the task text");
-    assert.equal(readFileSync(path.join(reportDir, "result.md"), "utf8"), "# Accepted plan\n");
+    assert.equal(readFileSync(path.join(reportDir, "workflow-result.md"), "utf8"), "# Accepted plan\n");
     assert.equal(readFileSync(path.join(reportDir, "context.md"), "utf8"), "context body");
-    // The document IS the newest revision — not the transferred input it started as.
+    // The document is the newest explicitly published revision.
     assert.equal(readFileSync(path.join(reportDir, "plan.md"), "utf8"), "plan round 2 body");
     assert.equal(
       readFileSync(path.join(reportDir, "plan-critique.md"), "utf8"),
@@ -196,39 +186,35 @@ describe("workflow run report", () => {
     assert.match(readme, /- Workflow: `plan` \(package\)/u);
     assert.match(readme, /- Status: completed/u);
     assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
-    assert.match(readme, /- Result: \[result\.md\]\(result\.md\)/u);
+    assert.match(readme, /- Result: \[workflow-result\.md\]\(workflow-result\.md\)/u);
     // The report sits inside the run directory, so it points at its siblings.
-    assert.match(readme, /- Files this run's agents wrote: `\.\.\/files\/`/u);
-    assert.match(readme, /- Machine records: `\.\.`/u);
-    assert.equal(reportDir, path.join(workflowRunDir(root, RUN_ID), "logs"));
-    // One Documents list ordered by first write; the revised document names its
-    // newest author and lists every revision with a machine-bytes link.
+    assert.match(readme, /- Files this run's agents wrote: `\.\.\/workspace\/`/u);
+    assert.match(readme, /- Machine records: `\.\.\/runtime\/`/u);
+    assert.equal(reportDir, path.join(workflowRunDir(root, RUN_ID), "outputs"));
+    // One Documents list ordered by first publication; the revised document
+    // lists every workflow-owned revision with a machine-bytes link.
     assert.match(readme, /## Documents/u);
-    assert.match(readme, /\[plan\.md\]\(plan\.md\) — planner round 2 · draft-plan — 3 revisions:/u);
-    assert.match(
-      readme,
-      /1\. transferred from run 20260728-180000-prev — \[machine copy\]\(\.\.\/artifacts\/inputs\/input-0001-plan\.md\)/u,
-    );
-    assert.match(readme, /2\. planner round 1 · draft-plan — \[machine copy\]/u);
-    assert.match(readme, /3\. planner round 2 · draft-plan — \[machine copy\]/u);
+    assert.match(readme, /\[plan\.md\]\(plan\.md\) — \*\*primary output\*\* — workflow · draft-plan — 2 revisions:/u);
+    assert.match(readme, /1\. workflow · draft-plan — \[machine copy\]/u);
+    assert.match(readme, /2\. workflow · draft-plan — \[machine copy\]/u);
     // Single-revision documents stay single lines without a revision list.
-    assert.match(readme, /\[context\.md\]\(context\.md\) — scout · scout-repository/u);
+    assert.match(readme, /\[context\.md\]\(context\.md\) — workflow · scout-repository/u);
     assert.doesNotMatch(readme, /\[context\.md\]\(context\.md\)[^\n]*revisions/u);
     assert.match(readme, /\[questions\.md\]\(questions\.md\) — workflow · draft-plan/u);
     const planEntry = readme.indexOf("[plan.md](plan.md)");
     const contextEntry = readme.indexOf("[context.md](context.md)");
-    assert.ok(planEntry > 0 && planEntry < contextEntry, "documents are ordered by first write");
+    assert.ok(contextEntry > 0 && contextEntry < planEntry, "documents are ordered by first publication");
     // The Logs section names the combined journal and each child transcript,
     // as run-directory siblings of the report.
     assert.match(readme, /## Logs/u);
-    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/journal\.ndjson\)/u);
+    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/runtime\/journal\.ndjson\)/u);
     assert.match(
       readme,
-      /scout · scout-repository — \[transcript\]\(\.\.\/artifacts\/transcripts\/call-0001\/trace\.jsonl\)/u,
+      /scout · scout-repository — \[transcript\]\(\.\.\/runtime\/artifacts\/transcripts\/call-0001\/trace\.jsonl\)/u,
     );
   });
 
-  it("names the model each agent document ran on, and only from agent_end", () => {
+  it("keeps un-published agent answers and their model metadata out of outputs", () => {
     const root = project();
     const records = [
       record({ artifactId: "call-0001-answer", name: "cheap.md", kind: "answer", callId: "call-0001", stage: "draft" }),
@@ -269,15 +255,11 @@ describe("workflow run report", () => {
 
     assert.equal(outcome.ok, true, outcome.ok ? undefined : outcome.message);
     const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
-    assert.match(readme, /cheap stage · draft · ran on test\/fast/u);
-    assert.match(readme, /strong stage · judge · ran on test\/strong/u);
-    // No executedModel on that line ⇒ the report says nothing about a model, and
-    // says the tier degraded. Absence is never filled in from the request.
-    assert.match(readme, /legacy stage · legacy · declared tier unassigned/u);
-    assert.equal(/legacy stage · legacy · ran on/u.test(readme), false);
+    assert.match(readme, /## Documents\n\n- none/u);
+    assert.equal(/test\/fast|test\/strong|declared tier unassigned/u.test(readme), false);
   });
 
-  it("spells out an unavailable readback instead of naming a model called `unavailable`", () => {
+  it("does not leak unavailable model sentinels from runtime-only answers", () => {
     // `unavailable` is the D6 sentinel for "the peer reported nothing". Rendered as
     // "ran on unavailable" it reads to a human as a model NAMED unavailable — a
     // fabricated model name in the reader's own copy of the evidence.
@@ -295,16 +277,16 @@ describe("workflow run report", () => {
 
     assert.equal(outcome.ok, true, outcome.ok ? undefined : outcome.message);
     const readme = readFileSync(path.join(workflowReportDir(root, RUN_ID), "README.md"), "utf8");
-    assert.match(readme, /quiet stage · draft · executed model unavailable/u);
-    assert.equal(/ran on unavailable/u.test(readme), false);
+    assert.match(readme, /## Documents\n\n- none/u);
+    assert.equal(/unavailable/u.test(readme), false);
   });
 
   it("renders JSON documents as Markdown, fencing nested shapes and keeping non-JSON verbatim", () => {
     const root = project();
     const records = [
-      record({ artifactId: "call-0001-answer", name: "flat.json", kind: "answer", callId: "call-0001" }),
-      record({ artifactId: "call-0002-answer", name: "nested.json", kind: "answer", callId: "call-0002" }),
-      record({ artifactId: "call-0003-answer", name: "broken.json", kind: "answer", callId: "call-0003" }),
+      record({ artifactId: "call-0001-answer", name: "flat.json", kind: "published", callId: "call-0001" }),
+      record({ artifactId: "call-0002-answer", name: "nested.json", kind: "published", callId: "call-0002" }),
+      record({ artifactId: "call-0003-answer", name: "broken.json", kind: "published", callId: "call-0003" }),
     ];
     const outcome = writeWorkflowRunReport(
       { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
@@ -336,7 +318,13 @@ describe("workflow run report", () => {
       "S1: the find command pattern used to identify DAG files is not properly executed and may miss files " +
       "under nested directories, so the step cannot be carried out as written";
     const records = [
-      record({ artifactId: "call-0002-answer", name: "plan.md", kind: "answer", callId: "call-0002", stage: "draft" }),
+      record({
+        artifactId: "call-0002-answer",
+        name: "plan.md",
+        kind: "published",
+        callId: "call-0002",
+        stage: "draft",
+      }),
     ];
     const outcome = writeWorkflowRunReport(
       {
@@ -386,7 +374,7 @@ describe("workflow run report", () => {
         },
       }),
       record({ artifactId: "published-0001", name: "task.md", kind: "published" }),
-      record({ artifactId: "call-0001-answer", name: "plan.md", kind: "answer", callId: "call-0001" }),
+      record({ artifactId: "call-0001-answer", name: "plan.md", kind: "primary", callId: "call-0001" }),
     ];
     const outcome = writeWorkflowRunReport(
       { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
@@ -421,10 +409,7 @@ describe("workflow run report", () => {
     assert.equal(readFileSync(path.join(reportDir, "result.md"), "utf8"), "a document the workflow named result.md");
   });
 
-  it("writes the operator task even when a continuation received it as a transferred input", () => {
-    // A continuation run gets task.md as an `input` record, not a `published` one.
-    // Matching only `published` left the report with no `task.md` and no `- Task:`
-    // line, while the transferred copy took the leftover name `task-2.md`.
+  it("keeps transferred inputs runtime-only until the workflow publishes them", () => {
     const root = project();
     const records = [
       record({
@@ -447,11 +432,9 @@ describe("workflow run report", () => {
 
     assert.equal(outcome.ok, true);
     const reportDir = workflowReportDir(root, RUN_ID);
-    assert.deepEqual(readdirSync(reportDir).sort(), ["README.md", "task.md"]);
-    assert.equal(readFileSync(path.join(reportDir, "task.md"), "utf8"), "the operator task");
+    assert.deepEqual(readdirSync(reportDir).sort(), ["README.md"]);
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
-    assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
-    assert.equal(/task-2\.md/u.test(readme), false);
+    assert.doesNotMatch(readme, /- Task:/u);
   });
 
   it("keeps a structured result out of result.md and says where it lives", () => {
@@ -476,7 +459,7 @@ describe("workflow run report", () => {
     assert.match(readme, /- Error: plan was not accepted/u);
   });
 
-  it("refuses an unsafe run id and a symlinked logs directory", () => {
+  it("refuses an unsafe run id and a symlinked outputs directory", () => {
     const root = project();
     const unsafe = writeWorkflowRunReport(
       { projectRoot: root, runId: "../escape", status: "completed", journal: [] },
@@ -487,7 +470,7 @@ describe("workflow run report", () => {
     const elsewhere = path.join(root, "elsewhere");
     mkdirSync(elsewhere);
     mkdirSync(workflowRunDir(root, RUN_ID), { recursive: true });
-    symlinkSync(elsewhere, path.join(workflowRunDir(root, RUN_ID), "logs"));
+    symlinkSync(elsewhere, path.join(workflowRunDir(root, RUN_ID), "outputs"));
     const symlinked = writeWorkflowRunReport(
       { projectRoot: root, runId: RUN_ID, status: "completed", journal: [] },
       evidenceFrom([], {}),
@@ -499,8 +482,8 @@ describe("workflow run report", () => {
   it("survives an unreadable artifact and marks it unavailable in the table of contents", () => {
     const root = project();
     const records = [
-      record({ artifactId: "call-0001-answer", name: "context.md", kind: "answer", callId: "call-0001" }),
-      record({ artifactId: "call-0002-answer", name: "plan.md", kind: "answer", callId: "call-0002" }),
+      record({ artifactId: "call-0001-answer", name: "context.md", kind: "published", callId: "call-0001" }),
+      record({ artifactId: "call-0002-answer", name: "plan.md", kind: "primary", callId: "call-0002" }),
     ];
     const outcome = writeWorkflowRunReport(
       {
@@ -516,7 +499,7 @@ describe("workflow run report", () => {
     assert.equal(existsSync(path.join(reportDir, "context.md")), false);
     assert.equal(readFileSync(path.join(reportDir, "plan.md"), "utf8"), "plan body");
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
-    assert.match(readme, /context\.md — scout — unavailable/u);
+    assert.match(readme, /context\.md — workflow — unavailable/u);
   });
 
   it("is written by the runner next to the machine records on a live run", async () => {
@@ -532,7 +515,9 @@ describe("workflow run report", () => {
       [
         "export default async function runWorkflow(dsl) {",
         '  dsl.publishArtifact("task.md", "the operator task");',
-        '  return await dsl.agent("answer", { artifact: "review.md", label: "scout" });',
+        '  const review = await dsl.agent("answer", { artifact: "review.md", label: "scout" });',
+        '  dsl.publishPrimaryArtifact("review.md", review);',
+        "  return review;",
         "}",
         "",
       ].join("\n"),
@@ -562,20 +547,20 @@ describe("workflow run report", () => {
     assert.equal(result.ok, true, result.error);
     const reportDir = workflowReportDir(root, result.runId);
     const names = readdirSync(reportDir).sort();
-    assert.deepEqual(names, ["README.md", "result.md", "review.md", "task.md"]);
+    assert.deepEqual(names, ["README.md", "review.md", "task.md", "workflow-result.md"]);
     assert.equal(readFileSync(path.join(reportDir, "review.md"), "utf8"), "exact answer");
     assert.equal(readFileSync(path.join(reportDir, "task.md"), "utf8"), "the operator task");
-    assert.equal(readFileSync(path.join(reportDir, "result.md"), "utf8"), "exact answer\n");
+    assert.equal(readFileSync(path.join(reportDir, "workflow-result.md"), "utf8"), "exact answer\n");
     const readme = readFileSync(path.join(reportDir, "README.md"), "utf8");
     assert.match(readme, /- Workflow: `report` \(project\)/u);
     // This run returned the agent's answer, so that document is the result and
     // says so — the rest of a run's documents are working material.
-    assert.match(readme, /\[review\.md\]\(review\.md\) — \*\*final result\*\* — scout/u);
-    assert.match(readme, /The document marked \*\*final result\*\* is what the run returned/u);
+    assert.match(readme, /\[review\.md\]\(review\.md\) — \*\*primary output\*\* — workflow/u);
+    assert.match(readme, /The document marked \*\*primary output\*\* is the workflow-declared result/u);
     // The Logs section names the combined journal even when no child exported a
     // transcript (this harness executor returns answers without one).
     assert.match(readme, /## Logs/u);
-    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/journal\.ndjson\)/u);
+    assert.match(readme, /\[journal\.ndjson\]\(\.\.\/runtime\/journal\.ndjson\)/u);
   });
 
   it("names every discarded transport attempt, its callId and its class", async () => {
@@ -1195,12 +1180,12 @@ describe("workflow run report budget section", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       name: "report-fail",
-      // A regular FILE where the logs directory must be: the write fails and the
+      // A regular FILE where the outputs directory must be: the write fails and the
       // module returns { ok: false } instead of throwing, exactly as documented.
       // Planted once the run id exists and long before the report is written.
       onRunStart: ({ runDir }) => {
-        mkdirSync(runDir, { recursive: true });
-        writeFileSync(path.join(runDir, "logs"), "not a directory", "utf8");
+        rmSync(path.join(runDir, "outputs"), { recursive: true });
+        writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
       },
       onEvent: (line) => events.push(line),
       createExecutor: (): AgentExecutor => ({
@@ -1217,8 +1202,10 @@ describe("workflow run report budget section", () => {
       }),
     });
 
-    // The run disposition is unchanged: a report failure never fails the run.
-    assert.equal(result.ok, true, result.error);
+    // The secondary report failure is recorded, and the missing mandatory
+    // terminal output makes the run fail instead of claiming an unreadable success.
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /terminal output was not persisted/u);
     const failure = result.journal.find(
       (line) => line.kind === "error" && (line.message ?? "").includes("Workflow run report was not written"),
     );
@@ -1229,15 +1216,16 @@ describe("workflow run report budget section", () => {
       "and reach the live surface too",
     );
     // The durable journal on disk carries it, not only the returned envelope.
-    const persisted = readFileSync(path.join(result.runDir, "journal.ndjson"), "utf8");
+    const persisted = readFileSync(workflowJournalFile(result.runDir), "utf8");
     assert.match(persisted, /Workflow run report was not written/u);
+    assert.match(persisted, /Workflow terminal output was not persisted/u);
     // And so does result.json, which is the point of writing the report BEFORE it.
     // journal.ndjson alone would not carry the guarantee — its sink swallows its own
     // write failures so it can never throw into a running workflow — whereas
     // result.json reports its own persistence outcome, so losing the line everywhere
     // takes a second, separately reported, failure.
     assert.equal(result.resultPersistence.ok, true);
-    const envelope = JSON.parse(readFileSync(path.join(result.runDir, "result.json"), "utf8")) as {
+    const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
       journal?: { message?: string }[];
     };
     assert.ok(

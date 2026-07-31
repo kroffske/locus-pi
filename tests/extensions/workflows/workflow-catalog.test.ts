@@ -15,6 +15,12 @@ import {
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
 import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  workflowJournalFile,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 
 describe("workflow operator catalog", () => {
   it("keeps every curated Package workflow description concise and purpose-first", () => {
@@ -421,14 +427,13 @@ function writeRun(
   target: { kind: "name" | "scriptPath"; ref: string; source: "project" | "personal" | "package" },
   executedSource = `export default () => ${JSON.stringify(runId)};\n`,
 ): void {
-  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
+  const runDir = ensureWorkflowRunDir(root, runId);
+  writeFileSync(workflowJournalFile(runDir), "", "utf8");
   const sha256 = createHash("sha256").update(executedSource).digest("hex");
-  const snapshotPath = path.join(runDir, `script-${sha256}.workflow.mjs`);
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${sha256}.workflow.mjs`);
   writeFileSync(snapshotPath, executedSource, "utf8");
   writeFileSync(
-    path.join(runDir, "result.json"),
+    workflowResultFile(runDir),
     JSON.stringify({
       runId,
       ok: true,

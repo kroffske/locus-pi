@@ -5,6 +5,7 @@ import os from "node:os";
 import { createHarness } from "../../test-harness.js";
 import workflows from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 
 function registerHarness() {
   const h = createHarness();
@@ -366,6 +367,47 @@ describe("/workflows run launch gate", () => {
     }
   });
 
+  it("renders the exact terminal text for the operator while keeping model tool content bounded", async () => {
+    const h = registerHarness();
+    const terminalText = `${"Complete plan line. ".repeat(600)}\nUNTRUNCATED_TERMINAL_SENTINEL`;
+    const runDir = mkdtempSync(path.join(os.tmpdir(), "workflow-tool-full-result-"));
+    const outputDir = path.join(runDir, "outputs");
+    mkdirSync(outputDir);
+    writeFileSync(path.join(outputDir, "workflow-result.md"), `${terminalText}\n`, "utf8");
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-full-result",
+      runDir,
+      ok: true,
+      result: terminalText,
+      resultTextPath: path.join(outputDir, "workflow-result.md"),
+      primaryOutputPath: path.join(outputDir, "plan.md"),
+      journal: [],
+      resultPersistence: { ok: true, path: path.join(runDir, "runtime", "result.json") },
+    });
+    try {
+      const tool = h.tools.get("workflow")!;
+      const result = await tool.execute(
+        "tool-full-result",
+        { name: "plan" },
+        new AbortController().signal,
+        () => void 0,
+        h.ctx,
+      );
+      const modelText = result.content[0]?.type === "text" ? result.content[0].text : "";
+      expect(modelText).not.toContain("UNTRUNCATED_TERMINAL_SENTINEL");
+      expect(result.details).not.toHaveProperty("humanResultText");
+
+      const operatorText = tool.renderResult!(result, h.ctx).render(80).join("\n");
+      expect(operatorText).toContain("outputs:");
+      expect(operatorText).toContain("primary output:");
+      expect(operatorText).toContain("workflow-result.md");
+      expect(operatorText).toContain("UNTRUNCATED_TERMINAL_SENTINEL");
+    } finally {
+      spy.mockRestore();
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  });
+
   it("invalid path escape runs once, writes failed result evidence, and records no approval decision", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wf-launch-"));
     try {
@@ -379,7 +421,7 @@ describe("/workflows run launch gate", () => {
       const result = await spy.mock.results[0]?.value;
       expect(result?.ok).toBe(false);
       expect(String(result?.error ?? "")).toContain("escapes project root");
-      expect(readFileSync(path.join(result!.runDir, "result.json"), "utf8")).toContain("escapes project root");
+      expect(readFileSync(workflowResultFile(result!.runDir), "utf8")).toContain("escapes project root");
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -470,7 +512,7 @@ describe("/workflows run launch gate", () => {
       const resolved = await result!;
       expect(resolved.ok).toBe(false);
       expect(String(resolved.error ?? "")).toContain("escapes project root");
-      expect(readFileSync(path.join(resolved.runDir, "result.json"), "utf8")).toContain("escapes project root");
+      expect(readFileSync(workflowResultFile(resolved.runDir), "utf8")).toContain("escapes project root");
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });

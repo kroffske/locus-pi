@@ -13,6 +13,11 @@ import {
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
+  workflowRunArtifactsDir,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
@@ -58,6 +63,21 @@ describe("workflow run artifact store", () => {
     assert.equal(readWorkflowArtifactIndex(root, "../escape").status, "invalid");
   });
 
+  it("persists exactly one explicitly primary publication", () => {
+    const root = project();
+    const id = "primary-run";
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+
+    const ref = store.publishText("plan.md", "accepted plan", "finalize", "primary");
+
+    assert.equal(ref.name, "plan.md");
+    assert.equal(store.list()[0]?.kind, "primary");
+    assert.throws(
+      () => store.publishText("other.md", "other", "finalize", "primary"),
+      /already contains a primary output/u,
+    );
+  });
+
   it("publishes and consumes only a complete verified prior-run text reference", () => {
     const root = project();
     const sourceRunId = "source-run";
@@ -73,7 +93,7 @@ describe("workflow run artifact store", () => {
       questionsRef: { ...sourceRef, artifactId: "published-0002", name: "questions.md" },
     };
     writeFileSync(
-      path.join(runDir(root, sourceRunId), "result.json"),
+      workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
         ok: true,
         result: terminalResult,
@@ -118,7 +138,7 @@ describe("workflow run artifact store", () => {
     const projectedRef = source.publishText("projected.md", "projected");
     const omittedRef = source.publishText("omitted.md", "omitted");
     writeFileSync(
-      path.join(runDir(root, sourceRunId), "result.json"),
+      workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
         ok: true,
         result: "projected",
@@ -182,8 +202,9 @@ describe("workflow run artifact store", () => {
     });
     const missingIndexRun = "legacy-source";
     const legacyDir = runDir(root, missingIndexRun);
+    mkdirSync(workflowRunRuntimeDir(legacyDir), { recursive: true });
     writeFileSync(
-      path.join(legacyDir, "result.json"),
+      workflowResultFile(legacyDir),
       `${JSON.stringify({ ok: true, target: { kind: "name", ref: "review", source: "package" } })}\n`,
     );
     const legacyRef = {
@@ -194,7 +215,7 @@ describe("workflow run artifact store", () => {
     };
 
     assert.throws(() => current.consumeText(legacyRef), /index is missing/u);
-    assert.equal(existsSync(path.join(legacyDir, "artifacts", "index.json")), false);
+    assert.equal(existsSync(path.join(workflowRunArtifactsDir(legacyDir), "index.json")), false);
 
     const noTargetRun = "missing-target-source";
     const source = createWorkflowArtifactStore({
@@ -203,7 +224,7 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, noTargetRun),
     });
     const ref = source.publishText("plan.md", "bytes");
-    writeFileSync(path.join(runDir(root, noTargetRun), "result.json"), '{"ok":true}\n');
+    writeFileSync(workflowResultFile(runDir(root, noTargetRun)), '{"ok":true}\n');
     assert.throws(() => current.consumeText(ref), /not usable/u);
     assert.equal(
       current.list().some((record) => record.kind === "input"),
@@ -284,7 +305,7 @@ describe("workflow run artifact store", () => {
         symlinkSync(externalLocusPi, path.join(root, ".pi", "locus-pi"));
       }
 
-      const externalArtifacts = path.join(externalRunDir, "artifacts");
+      const externalArtifacts = workflowRunArtifactsDir(externalRunDir);
       assert.throws(
         () =>
           createWorkflowArtifactStore({
@@ -427,14 +448,16 @@ describe("workflow run artifact store", () => {
 
     assert.equal(result.ok, true, result.error);
     const index = JSON.parse(
-      readFileSync(path.join(result.runDir, "artifacts", "index.json"), "utf8"),
+      readFileSync(path.join(workflowRunArtifactsDir(result.runDir), "index.json"), "utf8"),
     ) as WorkflowArtifactIndex;
     assert.deepEqual(index.artifacts.map((entry) => entry.kind).sort(), ["answer", "result", "transcript"]);
     assert.ok(index.artifacts.every((entry) => !path.isAbsolute(entry.relativePath)));
     assert.equal(index.artifacts.find((entry) => entry.kind === "answer")?.name, "review.md");
     assert.ok(
       index.artifacts.every((entry) =>
-        path.resolve(result.runDir, "artifacts", entry.relativePath).startsWith(path.join(result.runDir, "artifacts")),
+        path
+          .resolve(workflowRunArtifactsDir(result.runDir), entry.relativePath)
+          .startsWith(workflowRunArtifactsDir(result.runDir)),
       ),
     );
   });
@@ -486,7 +509,7 @@ describe("workflow run artifact store", () => {
     assert.equal(replay.ok, true, replay.error);
     assert.equal(executions, 1);
     const index = JSON.parse(
-      readFileSync(path.join(replay.runDir, "artifacts", "index.json"), "utf8"),
+      readFileSync(path.join(workflowRunArtifactsDir(replay.runDir), "index.json"), "utf8"),
     ) as WorkflowArtifactIndex;
     assert.deepEqual(
       index.artifacts.map((entry) => entry.kind),

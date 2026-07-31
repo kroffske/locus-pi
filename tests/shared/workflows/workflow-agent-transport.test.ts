@@ -26,6 +26,7 @@ import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
 } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { workflowRunArtifactsDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentResult,
@@ -1336,7 +1337,8 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
 
     // The discarded attempt's evidence was ADOPTED, not lost: transcript and result envelope
     // for call-0001 are both in the run's own artifact index.
-    const index = JSON.parse(readFileSync(path.join(result.runDir, "artifacts", "index.json"), "utf8")) as {
+    const artifactsDir = workflowRunArtifactsDir(result.runDir);
+    const index = JSON.parse(readFileSync(path.join(artifactsDir, "index.json"), "utf8")) as {
       artifacts: { kind: string; callId?: string; relativePath: string }[];
     };
     const firstAttempt = index.artifacts.filter((entry) => entry.callId === "call-0001");
@@ -1347,7 +1349,7 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
     const readEnvelope = (callId: string): { version: string; status: string; failureCause?: string } => {
       const record = index.artifacts.find((entry) => entry.callId === callId && entry.kind === "result");
       expect(record, `no result envelope adopted for ${callId}`).toBeDefined();
-      const wrapper = JSON.parse(readFileSync(path.join(result.runDir, "artifacts", record!.relativePath), "utf8")) as {
+      const wrapper = JSON.parse(readFileSync(path.join(artifactsDir, record!.relativePath), "utf8")) as {
         content: string;
       };
       return JSON.parse(wrapper.content) as { version: string; status: string; failureCause?: string };

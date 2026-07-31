@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,13 @@ import {
   resolveWorkflowRunId,
   workflowRunDir,
 } from "../../../extensions/workflows/runtime/workflow-journal.js";
-import { writeWorkflowResultText } from "../../../extensions/workflows/runtime/workflow-result.js";
+import {
+  workflowResultFile,
+  workflowResultTextFile,
+  writeWorkflowResultText,
+} from "../../../extensions/workflows/runtime/workflow-result.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -36,8 +42,8 @@ const REVIEW_TEXT = [
 ].join("\n");
 
 /**
- * One finished run on disk. `resultText: false` reproduces a run recorded before
- * result.md existed, which is the only copy those runs ever had.
+ * One finished run on disk. `resultText: false` exercises the JSON recovery path
+ * when the readable output projection is unavailable.
  */
 function writeFinishedRun(
   root: string,
@@ -46,13 +52,13 @@ function writeFinishedRun(
   options: { resultText?: boolean } = {},
 ): string {
   const runDir = workflowRunDir(root, runId);
-  mkdirSync(runDir, { recursive: true });
+  ensureWorkflowRunDir(root, runId);
   writeFileSync(
-    path.join(runDir, "journal.ndjson"),
+    workflowJournalFile(runDir),
     `${JSON.stringify({ ts: "2026-07-26T21:27:52.000Z", runId, kind: "phase", phase: "review" })}\n`,
     "utf8",
   );
-  writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify({ runId, ok: true, result }, null, 2)}\n`, "utf8");
+  writeFileSync(workflowResultFile(runDir), `${JSON.stringify({ runId, ok: true, result }, null, 2)}\n`, "utf8");
   if (options.resultText !== false) writeWorkflowResultText(runDir, result);
   return runDir;
 }
@@ -62,7 +68,7 @@ describe("workflow result text persistence", () => {
     const root = makeRoot();
     const runDir = writeFinishedRun(root, "20260726-212752-98cc", REVIEW_TEXT);
 
-    const written = readFileSync(path.join(runDir, "result.md"), "utf8");
+    const written = readFileSync(workflowResultTextFile(runDir), "utf8");
     expect(written).toContain("# Code Review");
     expect(written).toContain("## Last line of the review");
     expect(written.trimEnd()).toBe(REVIEW_TEXT.trimEnd());
@@ -71,7 +77,7 @@ describe("workflow result text persistence", () => {
     expect(writeWorkflowResultText(structuredDir, { verdict: "pass" })).toBeUndefined();
   });
 
-  it("reads the whole text back, including for a run finished before result.md existed", () => {
+  it("reads the whole text back, including from result.json when the readable projection is missing", () => {
     const root = makeRoot();
     writeFinishedRun(root, "20260726-212752-98cc", REVIEW_TEXT);
     writeFinishedRun(root, "20260725-101010-7f3a", REVIEW_TEXT, { resultText: false });
@@ -79,15 +85,15 @@ describe("workflow result text persistence", () => {
     const fresh = readWorkflowRunResultText(root, "20260726-212752-98cc");
     expect(fresh.status).toBe("ready");
     if (fresh.status !== "ready") return;
-    expect(fresh.path.endsWith("result.md")).toBe(true);
+    expect(fresh.path.endsWith("workflow-result.md")).toBe(true);
     expect(fresh.text).toContain("## Last line of the review");
 
-    const legacy = readWorkflowRunResultText(root, "20260725-101010-7f3a");
-    expect(legacy.status).toBe("ready");
-    if (legacy.status !== "ready") return;
-    expect(legacy.path.endsWith("result.json")).toBe(true);
-    expect(legacy.text).toContain("## Last line of the review");
-    expect(legacy.text).not.toContain("\\n");
+    const recovered = readWorkflowRunResultText(root, "20260725-101010-7f3a");
+    expect(recovered.status).toBe("ready");
+    if (recovered.status !== "ready") return;
+    expect(recovered.path.endsWith("result.json")).toBe(true);
+    expect(recovered.text).toContain("## Last line of the review");
+    expect(recovered.text).not.toContain("\\n");
   });
 
   it("resolves the run id an operator actually has: the printed short suffix, or last", () => {
@@ -205,7 +211,7 @@ describe("/workflows result", () => {
     // survive intact once the wrapping is undone, and the line count must be the
     // whole result rather than whatever fitted.
     const unwrapped = widget.replace(/\n/gu, "");
-    expect(unwrapped).toContain(path.join(runDir, "result.md"));
+    expect(unwrapped).toContain(workflowResultTextFile(runDir));
     expect(unwrapped).toContain(`full text: ${REVIEW_TEXT.split("\n").length} line(s)`);
   });
 });

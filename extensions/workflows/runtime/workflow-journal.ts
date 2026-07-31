@@ -3,7 +3,7 @@
  * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
  *
  * Owns journal persistence and read-side run discovery while workflow-runtime.ts
- * stays filesystem-free. Canonical path derivation lives in workflow-run-paths.ts.
+ * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
  */
 
 import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -21,21 +21,23 @@ import type {
   WorkflowJournalSink,
   WorkflowUsage,
 } from "./workflow-runtime.js";
-import {
-  readWorkflowArtifactRecord,
-  WORKFLOW_ARTIFACT_COMPONENT_PATTERN,
-  type WorkflowArtifactRef,
-} from "./workflow-artifacts.js";
+import { readWorkflowArtifactRecord, type WorkflowArtifactRef } from "./workflow-artifacts.js";
 import { parseWorkflowFailureDiagnostic, type WorkflowFailureDiagnostic } from "./workflow-failure.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
-import { projectWorkflowDisposition } from "./workflow-result.js";
-import { ensureWorkflowRunDir } from "./workflow-run-layout.js";
-import { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-paths.js";
+import { projectWorkflowDisposition, workflowResultFile, workflowResultTextFile } from "./workflow-result.js";
+import {
+  ensureWorkflowRunDir,
+  WORKFLOW_SAFE_COMPONENT_PATTERN,
+  workflowJournalFile,
+  workflowRunDir,
+  workflowRunRuntimeDir,
+  workflowsRootDir,
+} from "./workflow-run-layout.js";
 
-export { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-paths.js";
+export { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-layout.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
-const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_ARTIFACT_COMPONENT_PATTERN, "u");
+const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
 const WORKFLOW_LIVE_EXECUTIONS_KEY = Symbol.for("locus-pi.workflow-live-executions.v1");
 
 function workflowLiveExecutions(): Map<string, AgentLiveExecutionHandle> {
@@ -563,7 +565,7 @@ export function listWorkflowRunIds(projectRoot: string): string[] {
 function workflowRunStartedAt(projectRoot: string, runId: string): number | undefined {
   const runDir = workflowRunDir(projectRoot, runId);
   const journalPath = workflowJournalFile(runDir);
-  const resultPath = path.join(runDir, "result.json");
+  const resultPath = workflowResultFile(runDir);
   if (!existsSync(journalPath) && !existsSync(resultPath)) return undefined;
 
   const canonical = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-|$)/u.exec(runId);
@@ -1121,14 +1123,14 @@ export type WorkflowRunResultText =
   { status: "ready"; runId: string; path: string; text: string } | { status: "none"; runId: string; message: string };
 
 /**
- * The whole terminal output of one finished run, read from disk. `result.md` is
- * the verbatim copy a prose run writes; older runs and structured results are
- * recovered from result.json, so a run finished before that file existed still
- * opens. Nothing here is truncated — being readable is the entire point.
+ * The whole terminal output of one finished run, read from disk.
+ * `outputs/workflow-result.md` is the verbatim copy a prose run writes. The
+ * canonical `runtime/result.json` envelope can recover the text if that readable
+ * copy was removed. Nothing here is truncated — being readable is the point.
  */
 export function readWorkflowRunResultText(projectRoot: string, runId: string): WorkflowRunResultText {
   const runDir = workflowRunDir(projectRoot, runId);
-  const textPath = path.join(runDir, "result.md");
+  const textPath = workflowResultTextFile(runDir);
   try {
     const text = readFileSync(textPath, "utf8");
     if (text.trim() !== "") return { status: "ready", runId, path: textPath, text };
@@ -1136,7 +1138,7 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
     // No verbatim copy: fall through to the JSON envelope.
   }
   const envelope = readWorkflowRunResult(projectRoot, runId);
-  const jsonPath = path.join(runDir, "result.json");
+  const jsonPath = workflowResultFile(runDir);
   if (envelope === null) {
     return { status: "none", runId, message: `No persisted result was found for run ${runId}.` };
   }
@@ -1160,9 +1162,7 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
 export function readWorkflowRunResult(projectRoot: string, runId: string): WorkflowRunResultEnvelope | null {
   try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"),
-    );
+    const parsed: unknown = JSON.parse(readFileSync(workflowResultFile(workflowRunDir(projectRoot, runId)), "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
     const target = parsePersistedWorkflowTarget(record.target);
@@ -1241,13 +1241,14 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   const lexicalProjectRoot = path.resolve(projectRoot);
   const lexicalWorkflowsRoot = path.resolve(workflowsRootDir(lexicalProjectRoot));
   const lexicalRunDir = path.resolve(lexicalWorkflowsRoot, runId);
+  const lexicalRuntimeDir = workflowRunRuntimeDir(lexicalRunDir);
   const expectedName = `script-${identity.scriptSha256}.workflow.mjs`;
   const lexicalSnapshot = path.resolve(identity.snapshotPath);
   if (
     path.dirname(lexicalRunDir) !== lexicalWorkflowsRoot ||
-    path.dirname(lexicalSnapshot) !== lexicalRunDir ||
+    path.dirname(lexicalSnapshot) !== lexicalRuntimeDir ||
     path.basename(lexicalSnapshot) !== expectedName ||
-    identity.snapshotPath !== path.join(lexicalRunDir, expectedName)
+    identity.snapshotPath !== path.join(lexicalRuntimeDir, expectedName)
   ) {
     return snapshotUnavailable(
       "invalid",
@@ -1259,7 +1260,7 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   }
 
   try {
-    assertNonSymlinkDirectoryChain(lexicalProjectRoot, lexicalRunDir);
+    assertNonSymlinkDirectoryChain(lexicalProjectRoot, lexicalRuntimeDir);
   } catch (error) {
     return snapshotUnavailable(
       "invalid",
@@ -1296,10 +1297,11 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   try {
     const physicalProjectRoot = realpathSync(lexicalProjectRoot);
     const physicalRunDir = realpathSync(lexicalRunDir);
+    const physicalRuntimeDir = realpathSync(lexicalRuntimeDir);
     const physicalSnapshot = realpathSync(lexicalSnapshot);
     if (
       !isContainedPath(physicalProjectRoot, physicalRunDir) ||
-      path.dirname(physicalSnapshot) !== physicalRunDir ||
+      path.dirname(physicalSnapshot) !== physicalRuntimeDir ||
       path.basename(physicalSnapshot) !== expectedName
     ) {
       return snapshotUnavailable(
@@ -1352,9 +1354,7 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
 
 function persistedResultHasScriptIdentity(projectRoot: string, runId: string): boolean {
   try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(path.join(workflowRunDir(projectRoot, runId), "result.json"), "utf8"),
-    );
+    const parsed: unknown = JSON.parse(readFileSync(workflowResultFile(workflowRunDir(projectRoot, runId)), "utf8"));
     return (
       typeof parsed === "object" &&
       parsed !== null &&
@@ -1555,7 +1555,7 @@ export function readWorkflowRoundBody(
 
 /** Summarize one run from its journal + result.json. Best-effort; never throws. */
 export function readWorkflowRunSummary(projectRoot: string, runId: string): WorkflowRunSummary {
-  const resultPath = path.join(workflowRunDir(projectRoot, runId), "result.json");
+  const resultPath = workflowResultFile(workflowRunDir(projectRoot, runId));
   const hasResult = existsSync(resultPath);
   const lines = readWorkflowRunJournal(projectRoot, runId);
 

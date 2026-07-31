@@ -6,6 +6,14 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow run contents now have three stable ownership zones.** Every run
+  creates `outputs/` for readable results, `workspace/` for deliberate
+  agent-written files, and `runtime/` for journals, result envelopes, replay,
+  snapshots, handoff claims, and digest-bound artifacts. All names come from one
+  path module, old flat layouts are not read, prose finishes are saved as
+  `outputs/workflow-result.md`, and the native tool shows that full text to the
+  operator while keeping model-facing content bounded.
+
 - **Workflow runs now live under Pi's project-local extension namespace.** The
   canonical run root moved from `.locus/runtime/workflows/<runId>/` to the
   shallower `.pi/locus-pi/workflows/<runId>/`. The journal, result, artifacts,

@@ -201,9 +201,10 @@ and private-forge evidence acquisition remains child-agent-owned. Prompt text an
 permission metadata are not a sandbox; resource, artifact, or child execution
 failure remains fail-closed.
 
-Runtime-owned Markdown is the human-facing evidence. Mandatory `result.json`
+Runtime-owned Markdown under `outputs/` is the human-facing evidence. Mandatory
+`runtime/result.json`
 remains the machine-readable run envelope, while
-`.pi/locus-pi/workflows/<runId>/artifacts/index.json` is the canonical map from
+`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
 These six names are what `extensions/workflows/examples/` currently holds, and
@@ -378,14 +379,14 @@ JavaScript is not supported.
 Every finished-run surface is bounded on purpose: the chat digest caps a line at
 160 characters because it enters model context, and the live panel clips to the
 terminal width. So a run whose result **is** prose — a review, a plan, an answer —
-writes that text verbatim to `result.md` in its run directory, and both the digest
+writes that text verbatim to `outputs/workflow-result.md`, and both the digest
 and the panel name that file plus the command that opens it. `/workflows result`
 (alias `/workflow-result`) opens the full text in a scrollable read-only screen:
 `↑/↓` and PageUp/PageDown scroll, Home/End jump, Esc closes. A host without custom
 UI gets a bounded preview plus the exact path, which is the copy that is never
-truncated. Structured (non-text) results stay in `result.json`, which already
-pretty-prints them; a run recorded before `result.md` existed is recovered from the
-persisted envelope, so older runs still open.
+truncated. The native workflow tool's operator card also renders this exact text
+without clipping, while its model-facing content remains bounded. Structured
+(non-text) results stay in `runtime/result.json`, which already pretty-prints them.
 
 A run that ends badly and produced **no** prose result — a script returning a
 structured `{ ok: false }` is the common case — gets the same treatment against a
@@ -465,23 +466,24 @@ extensions, so `/workflows` is the recovery path if another extension displaces
 the question.
 
 Every run is persisted to `.pi/locus-pi/workflows/<runId>/`. The runner creates
-the non-symlink directory and writes the first `journal.ndjson` line before it
+the non-symlink `outputs/`, `workspace/`, and `runtime/` directories and writes
+the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
 child. The start surface reports the resolved run directory, which matters when
-the terminal is viewing another checkout or worktree. `result.json` appears when
+the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
 ### Persisted run artifacts and viewer
 
 The canonical artifact inventory is
-`.pi/locus-pi/workflows/<runId>/artifacts/index.json`. Every record includes a
+`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record includes a
 logical id/name, media type, byte size, relative path, stage, provenance, and
 SHA-256. Its portable identity is always the complete object
 `{ runId, artifactId, name, sha256 }`; a run id or path alone is not an artifact
 reference.
 
 Every `agent()` attempt receives a stable `call-<n>` identity before scheduling.
-The runtime persists the exact non-empty child text under `artifacts/answers/`.
+The runtime persists the exact non-empty child text under `runtime/artifacts/answers/`.
 A fresh child session must also export a Pi session transcript under
 `artifacts/transcripts/<callId>/` and a JSON result envelope under
 `artifacts/results/<callId>/`; missing evidence makes the call fail before its
@@ -489,14 +491,17 @@ terminal `agent_end` is emitted. A replayed call writes a new answer record with
 `provenance: "replay"` and its source run id, but invents no transcript or result
 envelope because no child ran.
 
-Authors can add or connect deterministic text evidence through three surfaces:
+Authors can add or connect deterministic text evidence through four surfaces:
 
 - `publishArtifact(name, text)` writes bounded workflow-authored Markdown under
-  `artifacts/published/` and returns its full reference.
+  `runtime/artifacts/published/`, projects it into `outputs/`, and returns its
+  full reference.
+- `publishPrimaryArtifact(name, text)` does the same while explicitly declaring
+  the run's one primary semantic document. A second declaration fails closed.
 - `consumeTextArtifact(ref)` accepts only a full prior-run reference, requires the
   source run to have `ok:true`, requires the exact ref in its terminal
   `artifactRefs` projection, verifies index identity, media type, size, digest,
-  path confinement, and bytes, then copies them under `artifacts/inputs/` with
+  path confinement, and bytes, then copies them under `runtime/artifacts/inputs/` with
   the original reference recorded as lineage. Self-reference is refused.
 - `agent(prompt, { artifact: "report.md" })` names the automatic answer artifact.
   Without `artifact`, the runtime derives a safe name from the label or agent.
@@ -520,12 +525,12 @@ The same owner resolves the project root and rejects symlinks in every ancestor
 through `.pi/locus-pi/workflows/<runId>` before any artifact read, write, or
 consume, preventing a redirected canonical root.
 
-At run completion, `result.json` and the model-callable `workflow` tool project
-up to the newest 20 reader-facing answer/published refs as `artifactRefs`; an
+At run completion, `runtime/result.json` and the model-callable `workflow` tool project
+up to the newest 20 explicitly published/primary refs as `artifactRefs`; an
 `artifactRefsOmitted` count makes truncation explicit. Each projected item is the
 same complete `{runId, artifactId, name, sha256}` identity verified by the index.
 This bounded projection is the handoff for a later workflow; the full inventory
-remains in `artifacts/index.json` for inspection only. The caller must use a
+remains in `runtime/artifacts/index.json` for inspection only. The caller must use a
 terminally projected ref, not infer an id from a logical filename or consume an
 index-only record.
 
@@ -877,7 +882,7 @@ working model in a scratch project so child agents actually spawn:
    ```
 3. Verify it actually spawned child agents — don't trust the chat summary, read the journal:
    ```
-   cat .test_pi/.pi/locus-pi/workflows/<runId>/result.json
+   cat .test_pi/.pi/locus-pi/workflows/<runId>/runtime/result.json
    ```
    A real run shows `agent_end` events with `status: "completed"` and a non-empty
    `childSessions.*` session id. If the host cannot spawn a child, the run fails closed
@@ -989,7 +994,7 @@ The diagram is an ownership map, not a decorative code trace:
   end the run: an operator pause with `disposition: awaiting_operator`, a
   fail-closed stop, and the terminal result a later run may consume.
 - Draw each persisted artifact under the exact name the code publishes it with,
-  so the picture and `.pi/locus-pi/workflows/<runId>/artifacts/` agree.
+  so the picture and `.pi/locus-pi/workflows/<runId>/runtime/artifacts/` agree.
 - Include a legend explaining every visual type used.
 
 Keep the file self-contained and diffable: no `<script>`, no embedded or remote
@@ -1190,12 +1195,13 @@ the package surface remains `./extensions/workflows/index.ts`.
 agent(prompt, opts?)          // Run a catalog/local agent; returns exact child text
 agent(prompt, {schema, …})    // Same child run under a declared shape; returns the VALIDATED value
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
+publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
 projectRoot()                 // Absolute launch project root
-runFilesDir()                 // Absolute working directory for this run's files; agent file names kept verbatim
+runWorkspaceDir()             // Absolute working directory for this run; agent file names kept verbatim
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
 phase(name)                   // Progress grouping + journal line
@@ -1226,15 +1232,15 @@ Those questions stay in their run's evidence and reopen on request: bare
 `/workflows` takes the oldest pending one project-wide, `/workflow-continue
 <runId>` takes a named run.
 
-`runFilesDir()` is the absolute path of this run's working directory
-(`.pi/locus-pi/workflows/<runId>/files/`), created before the script starts.
+`runWorkspaceDir()` is the absolute path of this run's working directory
+(`.pi/locus-pi/workflows/<runId>/workspace/`), created before the script starts.
 Every child agent's prompt opens by naming the same directory and telling it to
 create the run's files there under their exact names; a `readOnly` call is told
 where the directory is and is not asked to create anything in it. Nothing in the
 runtime renames, numbers or moves what an agent writes, so a path a workflow
-prints in a question is a path that exists. Auto-captured material — agent answers,
-published texts, transcripts — goes to the run's `logs/` and `artifacts/`
-directories instead; see `docs/runtime/workflow-run-storage.md`.
+prints in a question is a path that exists. Auto-captured readable material goes
+to `outputs/`; machine evidence and transcripts go to `runtime/artifacts/`.
+See `docs/runtime/workflow-run-storage.md`.
 
 `now()` and `random()` exist so a workflow can be nondeterministic AND replayable.
 They return exactly what `Date.now()` / `Math.random()` would, and the runtime
@@ -1425,7 +1431,7 @@ the attempt **threw** instead of answering — both carrying `attempt`, `attempt
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
 `[workflow:retry]` line names the boundary between attempts, and the run's journal folder
-`.pi/locus-pi/workflows/<runId>/logs/` grows a `## Retried agent calls` section listing every attempt by
+`.pi/locus-pi/workflows/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
 `callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
@@ -1707,7 +1713,7 @@ package values. Giving scripts a run-level surface means deciding where
 operator-changeable knobs live, which is an open owner decision.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.pi/locus-pi/workflows/<runId>/logs/README.md` carries a `## Budget` section
+applied budget, and `.pi/locus-pi/workflows/<runId>/outputs/README.md` carries a `## Budget` section
 with each axis, its applied value, and the spend the run evidence can measure:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
@@ -1966,20 +1972,23 @@ A replayed call reports **no** token usage, so the run budget shown by
 
 ```
 .pi/locus-pi/workflows/<runId>/
-  script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
-  journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
+  outputs/           — README, semantic documents, exact workflow-result.md prose
+  workspace/         — files deliberately written by workflow agents
+  runtime/
+    script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
+    journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
                       kinds: phase | log | agent_start | agent_end |
                              group_start | group_end | error
-  replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
+    replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
                       absent for scripts that are not replay-safe (see "Resume and replay")
-  result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
-  artifacts/
-    index.json       — Canonical digest-bound inventory for this run
-    answers/         — Exact automatic agent answers
-    transcripts/     — Fresh child Pi session JSONL, grouped by call id
-    results/         — Fresh child result envelopes, grouped by call id
-    published/       — Text written through publishArtifact()
-    inputs/          — Verified copies consumed from prior runs, with source refs
+    result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
+    artifacts/
+      index.json       — Canonical digest-bound inventory for this run
+      answers/         — Exact automatic agent answers
+      transcripts/     — Fresh child Pi session JSONL, grouped by call id
+      results/         — Fresh child result envelopes, grouped by call id
+      published/       — Text written through publishArtifact()/publishPrimaryArtifact()
+      inputs/          — Verified copies consumed from prior runs, with source refs
 ```
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —

@@ -10,12 +10,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { workflowRunDir } from "./workflow-run-paths.js";
+import { workflowResultFile } from "./workflow-result.js";
+import {
+  ensureWorkflowDirectoryNoSymlink,
+  WORKFLOW_SAFE_COMPONENT_PATTERN,
+  workflowRunArtifactsDir,
+  workflowRunDir,
+  workflowRunRuntimeDir,
+} from "./workflow-run-layout.js";
 
 export const WORKFLOW_ARTIFACT_INDEX_VERSION = "locus.workflow.artifacts.v1" as const;
 export const DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT = 2 * 1024 * 1024;
-export const WORKFLOW_ARTIFACT_COMPONENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
-const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_ARTIFACT_COMPONENT_PATTERN, "u");
+const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
 
 export interface WorkflowArtifactRef {
   runId: string;
@@ -24,7 +30,7 @@ export interface WorkflowArtifactRef {
   sha256: string;
 }
 
-export type WorkflowArtifactKind = "answer" | "transcript" | "result" | "published" | "input";
+export type WorkflowArtifactKind = "answer" | "transcript" | "result" | "published" | "primary" | "input";
 export type WorkflowArtifactProvenance = "fresh" | "replay" | "published" | "consumed";
 
 export interface WorkflowArtifactRecord extends WorkflowArtifactRef {
@@ -123,7 +129,7 @@ export interface WorkflowAgentEvidence {
 
 export interface WorkflowArtifactPorts {
   recordAgentEvidence(input: WorkflowAgentEvidenceInput): WorkflowAgentEvidence;
-  publishText(name: string, text: string, stage?: string): WorkflowArtifactRef;
+  publishText(name: string, text: string, stage?: string, kind?: "published" | "primary"): WorkflowArtifactRef;
   consumeText(ref: WorkflowArtifactRef, stage?: string): WorkflowConsumedTextArtifact;
 }
 
@@ -206,7 +212,7 @@ export function readWorkflowArtifactIndex(projectRoot: string, runId: string): W
     return { status: "invalid", message: errorMessage(error) };
   }
   const runDir = workflowRunDir(projectRoot, runId);
-  const artifactsDir = path.join(runDir, "artifacts");
+  const artifactsDir = workflowRunArtifactsDir(runDir);
   const indexPath = path.join(artifactsDir, "index.json");
   try {
     assertCanonicalRunDirectory(projectRoot, runDir, runId);
@@ -244,7 +250,7 @@ export function readWorkflowArtifactRecord(
   if (record === undefined) {
     return { status: "missing", message: `Workflow artifact ${artifactId} is not indexed for run ${runId}.` };
   }
-  const artifactsDir = path.join(workflowRunDir(projectRoot, runId), "artifacts");
+  const artifactsDir = workflowRunArtifactsDir(workflowRunDir(projectRoot, runId));
   try {
     const bytes = readRegularConfinedFile(artifactsDir, path.join(artifactsDir, record.relativePath));
     if (bytes.byteLength !== record.size || sha256(bytes) !== record.sha256) {
@@ -259,10 +265,11 @@ export function readWorkflowArtifactRecord(
 export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStoreOptions): WorkflowArtifactStore {
   assertSafeComponent(options.runId, "runId");
   const expectedRunDir = workflowRunDir(options.projectRoot, options.runId);
-  if (path.resolve(options.runDir) !== path.resolve(expectedRunDir)) {
+  if (realpathSync(path.resolve(options.runDir)) !== realpathSync(path.resolve(expectedRunDir))) {
     throw new Error("Workflow artifact run directory does not match the canonical run root.");
   }
-  const artifactsDir = path.join(options.runDir, "artifacts");
+  const runtimeDir = workflowRunRuntimeDir(options.runDir);
+  const artifactsDir = workflowRunArtifactsDir(options.runDir);
   const indexPath = path.join(artifactsDir, "index.json");
   const now = options.now ?? (() => new Date().toISOString());
   const maxTextBytes = options.maxTextBytes ?? DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT;
@@ -270,7 +277,8 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     throw new Error("Workflow text artifact limit must be a positive safe integer.");
   }
   assertCanonicalRunDirectory(options.projectRoot, options.runDir, options.runId);
-  ensureWorkflowDirectoryNoSymlink(options.runDir, artifactsDir);
+  ensureWorkflowDirectoryNoSymlink(options.runDir, runtimeDir);
+  ensureWorkflowDirectoryNoSymlink(runtimeDir, artifactsDir);
   assertCanonicalRunDirectory(options.projectRoot, options.runDir, options.runId);
   let index = existsSync(indexPath)
     ? parseIndex(readFileSync(indexPath, "utf8"), options.runId)
@@ -453,14 +461,23 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     return evidence;
   }
 
-  function publishText(name: string, text: string, stage?: string): WorkflowArtifactRef {
+  function publishText(
+    name: string,
+    text: string,
+    stage?: string,
+    kind: "published" | "primary" = "published",
+  ): WorkflowArtifactRef {
     assertArtifactName(name);
-    const ordinal = index.artifacts.filter((entry) => entry.kind === "published").length + 1;
+    if (kind === "primary" && index.artifacts.some((entry) => entry.kind === "primary")) {
+      throw new Error("workflow artifact store already contains a primary output");
+    }
+    const ordinal =
+      index.artifacts.filter((entry) => entry.kind === "published" || entry.kind === "primary").length + 1;
     const artifactId = `published-${String(ordinal).padStart(4, "0")}`;
     return addRecord({
       artifactId,
       name,
-      kind: "published",
+      kind,
       mediaType: "text/markdown; charset=utf-8",
       bytes: boundedText(text, maxTextBytes),
       relativePath: path.join("published", `${artifactId}-${markdownFilename(name)}`),
@@ -473,7 +490,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     validateRef(ref);
     if (ref.runId === options.runId) throw new Error("Workflow artifact self-reference is not allowed.");
     const sourceRunDir = workflowRunDir(options.projectRoot, ref.runId);
-    const sourceResult = path.join(sourceRunDir, "result.json");
+    const sourceResult = workflowResultFile(sourceRunDir);
     assertCanonicalRunDirectory(options.projectRoot, sourceRunDir, ref.runId);
     const resultBytes = readRegularConfinedFile(sourceRunDir, sourceResult);
     const sourceEnvelope = parseSourceRunEnvelope(resultBytes, ref.runId);
@@ -741,7 +758,7 @@ function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId:
   const lexicalProjectRoot = path.resolve(projectRoot);
   const lexicalRunDir = path.resolve(runDir);
   const expectedLexicalRunDir = workflowRunDir(lexicalProjectRoot, runId);
-  if (lexicalRunDir !== expectedLexicalRunDir) {
+  if (lexicalRunDir !== expectedLexicalRunDir && realpathSync(lexicalRunDir) !== realpathSync(expectedLexicalRunDir)) {
     throw new Error("Workflow artifact run directory does not match the canonical run root.");
   }
 
@@ -755,21 +772,6 @@ function assertCanonicalRunDirectory(projectRoot: string, runDir: string, runId:
   if (realpathSync(lexicalRunDir) !== expectedPhysicalRunDir) {
     throw new Error("Workflow artifact run directory escapes its physical project root.");
   }
-}
-
-/** Create `directory` below `root` and prove no component of the chain is a symlink.
- *  Shared by the artifact store and `workflow-run-layout.ts`, which holds the run's
- *  `files/` and `logs/` directories to the same path discipline. */
-export function ensureWorkflowDirectoryNoSymlink(root: string, directory: string): void {
-  const lexicalRoot = path.resolve(root);
-  const lexicalDirectory = path.resolve(directory);
-  const relative = path.relative(lexicalRoot, lexicalDirectory);
-  if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-    throw new Error("Workflow artifact directory escapes its run root.");
-  if (existsSync(lexicalRoot) && lstatSync(lexicalRoot).isSymbolicLink())
-    throw new Error("Workflow run root must not be a symlink.");
-  mkdirSync(lexicalDirectory, { recursive: true });
-  assertNoSymlinkChain(lexicalRoot, lexicalDirectory);
 }
 
 function assertNoSymlinkChain(root: string, target: string): void {
@@ -904,7 +906,12 @@ function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef):
 
 function isArtifactKind(value: unknown): value is WorkflowArtifactKind {
   return (
-    value === "answer" || value === "transcript" || value === "result" || value === "published" || value === "input"
+    value === "answer" ||
+    value === "transcript" ||
+    value === "result" ||
+    value === "published" ||
+    value === "primary" ||
+    value === "input"
   );
 }
 

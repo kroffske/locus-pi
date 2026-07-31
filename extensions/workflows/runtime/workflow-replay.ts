@@ -30,6 +30,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { workflowRunDir } from "./workflow-journal.js";
+import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
 
 export const WORKFLOW_REPLAY_FILE = "replay.ndjson";
 /**
@@ -119,7 +120,7 @@ export interface WorkflowReplayController {
 }
 
 export function workflowReplayFile(runDir: string): string {
-  return path.join(runDir, WORKFLOW_REPLAY_FILE);
+  return path.join(workflowRunRuntimeDir(runDir), WORKFLOW_REPLAY_FILE);
 }
 
 /**
