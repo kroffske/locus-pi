@@ -25,12 +25,15 @@ interface ExtensionMapRow {
   manual: string;
 }
 
+type ExtensionCatalogRow = ExtensionMapRow;
+
 const sourceAuditUrlPrefix = "https://github.com/kroffske/locus-pi/blob/main/";
 const sourceExtensions = new Set([".cjs", ".js", ".mjs", ".mts", ".ts", ".tsx"]);
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
 const extensionIndex = readFileSync(path.join(root, "docs/extension-index.md"), "utf8");
+const extensionCatalog = readFileSync(path.join(root, "docs/extension-catalog.md"), "utf8");
 const ownershipMatrix = readFileSync(path.join(root, "docs/extension-ownership-matrix.md"), "utf8");
 
 function extensionIdFromEntrypoint(entrypoint: string): string {
@@ -77,6 +80,41 @@ function parseExtensionMap(markdown: string): Map<string, ExtensionMapRow> {
       manual: inlineCode(columns[6] ?? ""),
       dependencies:
         dependencyCell === "none" ? [] : [...dependencyCell.matchAll(/`([^`]+)`/g)].map((match) => match[1]!),
+    });
+  }
+  return rows;
+}
+
+function parseExtensionCatalog(markdown: string): Map<string, ExtensionCatalogRow> {
+  const section = markdown.split("## Public roster\n")[1]?.split("\n## ")[0];
+  if (!section) {
+    throw new Error("missing Public roster section");
+  }
+
+  const rows = new Map<string, ExtensionCatalogRow>();
+  for (const line of section.split("\n")) {
+    if (!line.startsWith("| `")) continue;
+    const columns = line
+      .split("|")
+      .slice(1, -1)
+      .map((column) => column.trim());
+    if (columns.length !== 8) {
+      throw new Error(`invalid extension catalog row: ${line}`);
+    }
+
+    const id = inlineCode(columns[0] ?? "");
+    if (rows.has(id)) {
+      throw new Error(`duplicate extension catalog row: ${id}`);
+    }
+    const dependencyCell = columns[5] ?? "";
+    rows.set(id, {
+      entrypoint: inlineCode(columns[2] ?? ""),
+      manifest: inlineCode(columns[3] ?? ""),
+      manual: inlineCode(columns[4] ?? ""),
+      dependencies:
+        dependencyCell === "none"
+          ? []
+          : [...dependencyCell.matchAll(/`([^`]+)`/g)].map((match) => match[1]!.split("/")[0]!),
     });
   }
   return rows;
@@ -224,6 +262,33 @@ describe("public registration contract", () => {
       "review-fix",
       "review",
     ]);
+  });
+
+  it("keeps the public extension catalog aligned with package, manifests, manuals, and source imports", () => {
+    const extensionIds = pkg.pi.extensions.map(extensionIdFromEntrypoint);
+    const catalogRows = parseExtensionCatalog(extensionCatalog);
+    expect([...catalogRows.keys()].sort()).toEqual([...extensionIds].sort());
+
+    for (const [index, entrypoint] of pkg.pi.extensions.entries()) {
+      const id = extensionIds[index]!;
+      const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+      const catalogRow = catalogRows.get(id);
+
+      expect(catalogRow, `missing extension catalog row: ${id}`).toBeDefined();
+      expect(catalogRow?.entrypoint).toBe(entrypoint.slice(2));
+      expect(catalogRow?.manifest).toBe(path.relative(root, manifestPath));
+      expect(catalogRow?.manual).toBe(manifest.docsPath);
+      expect(existsSync(path.join(root, entrypoint)), `missing entrypoint: ${entrypoint}`).toBe(true);
+      expect(existsSync(manifestPath), `missing manifest: ${manifestPath}`).toBe(true);
+      expect(existsSync(path.join(root, manifest.docsPath)), `missing docsPath from ${manifestPath}`).toBe(true);
+    }
+
+    const sourceGraph = featureDependencyGraph(extensionIds);
+    const catalogGraph = new Map([...catalogRows].map(([id, row]) => [id, row.dependencies]));
+    expect(catalogGraph).toEqual(sourceGraph);
+    expect(extensionCatalog).toContain("`agents → workflows`");
+    expect(extensionCatalog).toContain("`loop → workflows/run-read.ts`");
   });
 
   it("keeps the public extension map aligned with package, manifests, manuals, and source imports", () => {

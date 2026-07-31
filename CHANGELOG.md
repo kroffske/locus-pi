@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The public extension catalog now gives operators and planning agents a
+  concise English roster of all ten default extensions.** It links each
+  entrypoint, manifest, and active manual, separates direct feature edges from
+  shared-layer and external-package dependencies, and is included in the
+  package and public-repository inventory.
+
 - **Workflow run contents now have three stable ownership zones.** Every run
   creates `outputs/` for readable results, `workspace/` for deliberate
   agent-written files, and `runtime/` for journals, result envelopes, replay,
@@ -45,6 +51,18 @@ This file records user-visible changes to the public package.
   missing result after the selected steps finish. The primary output is now
   `workflow-summary.md`, while `implementation-report.md` remains supporting
   per-step evidence.
+
+- **Accepted plans now describe one bounded agent subtask per step.** Every new
+  `S<n>` block carries `Context:`, one `Question:`, and one `Output:` contract;
+  planning may emit dozens of explicit item-sized steps instead of sending one
+  agent across an entire collection. Different reasoning over one source — for
+  example literal Airflow metadata versus a description inferred from DAG code
+  — stays in separate steps, and final aggregation is an ordinary dependent
+  step. `plan-implement` preserves legacy plans, validates the new three-part
+  contract as a unit, rejects missing or shared output paths, repeats the
+  contract in the individual writer prompt, and accepts up to 80 selected steps.
+  A stalled `plan` run now tells the operator to continue that run with guidance
+  instead of editing `plan.md` and starting over.
 
 - **The public extension index is now a source and dependency map.** It links
   every default extension to its entrypoint, manifest, and active manual;

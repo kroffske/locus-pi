@@ -43,6 +43,7 @@ docs/adr/curated-workflow-portfolio.md
 docs/adr/extension-ownership-layers.md
 docs/adr/text-agent-results-and-prompt-resources.md
 docs/extension-agent-map.md
+docs/extension-catalog.md
 docs/extension-index.md
 docs/extension-ownership-matrix.md
 docs/extensions/README.md
@@ -256,7 +257,6 @@ extensions/workflows/runtime/workflow-journal.ts
 extensions/workflows/runtime/workflow-replay.ts
 extensions/workflows/runtime/workflow-resources.ts
 extensions/workflows/runtime/workflow-result.ts
-extensions/workflows/runtime/workflow-run-layout.ts
 extensions/workflows/runtime/workflow-run-layout.ts
 extensions/workflows/runtime/workflow-run-report.ts
 extensions/workflows/runtime/workflow-runner.ts

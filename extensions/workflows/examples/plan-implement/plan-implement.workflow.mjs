@@ -103,12 +103,12 @@ const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
   tools: ["read", "write", "edit", "bash", "ast_index", "grep", "find"],
 });
 
-const MAX_SELECTED_STEPS = 30;
+const MAX_SELECTED_STEPS = 80;
 const MAX_INTENT_CHARS = 16_000;
 const MAX_DIRECT_PLAN_CHARS = 500_000;
 const MAX_PLAN_PATH_CHARS = 4_096;
 const MAX_STEP_BLOCK_CHARS = 32_000;
-const MAX_SELECTED_STEPS_CHARS = 128_000;
+const MAX_SELECTED_STEPS_CHARS = 256_000;
 const MAX_NOTE_CHARS = 4_000;
 const MAX_ALL_NOTES_CHARS = 16_000;
 const MAX_SCOPE_CHARS = 64_000;
@@ -467,6 +467,8 @@ TASK — carry out exactly the one plan step supplied below. You are one
 write-capable implementer, and this session owns that task alone. This is
 attempt ${attempt} of at most ${MAX_STEP_ATTEMPTS}. Never implement another task
 because it looks related, and never "improve" code the task does not name.
+
+${renderAgentSubtaskFocus(step)}
 
 Reopen the files the step names before editing; the plan was written earlier and
 the repository may have moved. Make the smallest complete change that satisfies
@@ -1318,11 +1320,13 @@ function parseStepBlocks(planText) {
           .trim() || idMatch[1],
       block,
       dependsOn: parseStepDependencies(block, idMatch[1]),
+      subtask: parseAgentSubtaskContract(block, idMatch[1]),
     };
   });
   const duplicate = steps.find(({ id }, index) => steps.findIndex((step) => step.id === id) !== index);
   if (duplicate !== undefined)
     throw new Error(`plan-implement duplicate step id in the supplied plan: ${duplicate.id}`);
+  validateUniqueSubtaskOutputs(steps);
   const stepIndex = new Map(steps.map((step, index) => [step.id, index]));
   for (const [index, step] of steps.entries()) {
     for (const dependency of step.dependsOn) {
@@ -1336,6 +1340,75 @@ function parseStepBlocks(planText) {
     }
   }
   return steps;
+}
+
+/**
+ * New plans make the unit of execution explicit: context, one question, and one
+ * output. Old accepted plans remain executable; a partially upgraded block is
+ * refused because guessing which of the three missing contracts the author
+ * intended would put that ambiguity back into the worker prompt.
+ */
+function parseAgentSubtaskContract(block, stepId) {
+  const context = optionalStepLine(block, "Context", stepId);
+  const question = optionalStepLine(block, "Question", stepId);
+  const output = optionalStepLine(block, "Output", stepId);
+  const present = [context, question, output].filter((value) => value !== undefined).length;
+  if (present === 0) return undefined;
+  if (present !== 3) {
+    throw new Error(
+      `plan-implement step ${stepId} must contain Context:, Question:, and Output: together or omit all three`,
+    );
+  }
+  const outputPathMatch = output.match(/`([^`]+)`/u);
+  const outputPath = outputPathMatch?.[1].trim();
+  if (
+    outputPath === undefined ||
+    /^(?:none|n\/a|no output)$/iu.test(outputPath) ||
+    outputPath.includes("...") ||
+    outputPath.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/u.test(outputPath)
+  ) {
+    throw new Error(
+      `plan-implement step ${stepId} Output: must name one concrete repository-relative backticked output path`,
+    );
+  }
+  return { context, question, output, outputPath };
+}
+
+function validateUniqueSubtaskOutputs(steps) {
+  const owners = new Map();
+  for (const step of steps) {
+    if (step.subtask === undefined) continue;
+    const previous = owners.get(step.subtask.outputPath);
+    if (previous !== undefined) {
+      throw new Error(
+        `plan-implement steps ${previous} and ${step.id} share Output path ${step.subtask.outputPath}; each explicit agent subtask needs its own output`,
+      );
+    }
+    owners.set(step.subtask.outputPath, step.id);
+  }
+}
+
+function optionalStepLine(block, label, stepId) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const matches = [...block.matchAll(new RegExp(`^${escaped}:[ \\t]*(.+)$`, "gmu"))];
+  if (matches.length > 1) {
+    throw new Error(`plan-implement step ${stepId} must contain at most one non-empty "${label}:" line`);
+  }
+  return matches.length === 0 ? undefined : matches[0][1].trim();
+}
+
+function renderAgentSubtaskFocus(step) {
+  if (step.subtask === undefined) {
+    return "This is a legacy plan block without an explicit Context/Question/Output contract. Treat its complete Change line as the one task and its Files line as the output boundary.";
+  }
+  return `This accepted step has an explicit agent-subtask contract:
+- Context: ${step.subtask.context}
+- One semantic question: ${step.subtask.question}
+- Required output: ${step.subtask.output}
+
+Answer only that question and write exactly that output. The rest of the plan is
+ordering context, not permission to absorb another subtask.`;
 }
 
 function parseStepDependencies(block, stepId) {
