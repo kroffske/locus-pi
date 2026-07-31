@@ -34,12 +34,12 @@ read it before running this one. Two things matter most:
   text file before structural step parsing begins. Agents own the plan's meaning
   and the final judgment; the script only extracts routing structure.
 - **This workflow writes to the launch checkout.** It is a Package workflow, so
-  `/workflow-run plan-implement "<request>"` resolves by name, and
+  `/workflows run plan-implement "<request>"` resolves by name, and
   workflow JavaScript is trusted local code with full Node.js host access. Unlike
   its read-only `plan` sibling, this one changes files — start it deliberately.
 - **Resume does not apply completed tasks again.** Stable stage labels and
   deterministic task-ledger updates let
-  `/workflow-run plan-implement --resume <runId> "<request>"` replay recorded
+  `/workflows run plan-implement --resume <runId> "<request>"` replay recorded
   agent answers before continuing from the unfinished task.
 - **Every stage uses the same route, and the route is yours.**
   `modelRole: "agent"` names a tier instead of a provider, so the pair runs on any

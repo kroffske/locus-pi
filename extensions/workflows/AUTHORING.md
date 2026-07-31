@@ -102,8 +102,8 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
      host-enforced `readOnly: true` plus `repository_check`, never unrestricted
      shell, and their intent, plans, units, predecessor handoffs, results, and
      final verification inputs have explicit bounds.
-- **Run:** `/workflow-run <name|path> [input]` (compatibility:
-  `/workflows run <name|path> [input]`) or the
+- **Run:** `/workflows run <name|path> [input]` (flat compatibility alias:
+  `/workflow-run <name|path> [input]`) or the
   `workflow { name | scriptPath, input, continuation? }` tool. Both surfaces pass
   only optional bounded semantic text. The tool can separately attach 1–8
   complete prior-run artifact refs through its closed `continuation` control;
@@ -131,8 +131,9 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   unchanged. A reason-only declaration remains valid but is not directly
   actionable. The runner honors the declaration only when the run otherwise
   succeeds; an abort or failure takes precedence. The last declaration wins.
-  The host can reopen the oldest actionable question through `/workflows` or
-  `/workflow-continue <runId>`, verifies artifacts and identity again, atomically
+  The TUI `/workflows` menu can list eligible handoffs oldest-first and lets the
+  operator select one; typed `/workflows continue <runId>` names a run directly.
+  The host verifies artifacts and identity again, atomically
   claims one continuation, and never rewrites source `result.json`. Escape is an
   ANSWER, not a postponement: the continuation receives the question list with
   the line `The operator declined to answer this workflow's questions.` and each
@@ -141,8 +142,9 @@ bytes; direct `node import()` alone does not apply the runner's coverage gate.
   what a declined question means. A question is raised automatically only for a
   run the current Pi session started (and the continuations it spawns), so
   nothing from an earlier session interrupts a new one — at start or later;
-  `/workflows` and `/workflow-continue <runId>` are the ways back to an
-  unanswered question, and `/workflow-stop` is the explicit cancellation path. Top-level
+  the `/workflows` menu's `continue` entry and `/workflows continue <runId>` are
+  the ways back to an unanswered question, and `/workflows stop` is the explicit
+  cancellation path. Flat forms remain compatibility aliases. Top-level
   boolean `result.ok` is reserved as the script's run outcome: `false` makes the
   outer run fail even without a technical `error`; missing, nested, or
   non-boolean `ok` keeps legacy execution-success semantics. A top-level

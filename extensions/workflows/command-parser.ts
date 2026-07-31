@@ -20,11 +20,22 @@ export interface ParsedContinueCommand {
   missingAnswer?: boolean;
 }
 
+/**
+ * Encode one workflow target as one command token. Ordinary names and paths
+ * stay readable; whitespace, controls, quotes, and backslashes use a JSON
+ * string so editor-prefilled commands parse back to the exact same ref.
+ */
+export function formatWorkflowCommandToken(value: string): string {
+  return /^[^\s"\\\u0000-\u001f\u007f-\u009f]+$/u.test(value) ? value : JSON.stringify(value);
+}
+
 export function parseRunCommand(text: string): ParsedRunCommand | null {
-  const match = /^run\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
-  if (match === null) return null;
-  const scriptRef = match[1] ?? "";
-  const rest = (match[2] ?? "").trim();
+  const prefix = /^run\s+/u.exec(text);
+  if (prefix === null) return null;
+  const target = parseWorkflowCommandToken(text.slice(prefix[0].length));
+  if (target === undefined || target.value === "") return null;
+  const scriptRef = target.value;
+  const rest = target.rest.trim();
   if (rest === "") return { scriptRef };
   if (rest === "--resume") return { scriptRef, missingResumeId: true };
   if (rest.startsWith("--resume ")) {
@@ -41,6 +52,24 @@ export function parseRunCommand(text: string): ParsedRunCommand | null {
     };
   }
   return { scriptRef, input: rest };
+}
+
+export function parseWorkflowCommandToken(text: string): { value: string; rest: string } | undefined {
+  if (text.startsWith('"')) {
+    const match = /^"(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|[^"\\\u0000-\u001f])*"/u.exec(text);
+    if (match === null) return undefined;
+    const token = match[0];
+    const rest = text.slice(token.length);
+    if (rest !== "" && !/^\s/u.test(rest)) return undefined;
+    try {
+      const value: unknown = JSON.parse(token);
+      return typeof value === "string" ? { value, rest: rest.trimStart() } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const match = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(text);
+  return match === null ? undefined : { value: match[1] ?? "", rest: match[2] ?? "" };
 }
 
 export function parseContinueCommand(text: string): ParsedContinueCommand | null {

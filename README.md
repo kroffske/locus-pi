@@ -25,7 +25,7 @@ contains exactly these ten entrypoints:
 | `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
-| `workflows`           | Provides `/workflows`, first-class `/workflow-*` commands, and the `workflow` tool for reviewed trusted JavaScript workflows, child-agent orchestration, and actionable operator handoffs.                                                             |
+| `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, flat `/workflow-*` compatibility aliases, and the `workflow` tool for trusted JavaScript orchestration.                                                              |
 
 Each retained extension also has a manifest and a manual under
 [`docs/extensions/active/`](docs/extensions/active/README.md). Every default
@@ -50,30 +50,52 @@ Only these names are registered as Package workflows:
 | `plan`               | Scouts the repository, then drafts and critiques until a shaped verdict accepts `plan.md`.                      |
 | `plan-implement`     | Turns an accepted `plan.md` into a task ledger, then writes, reviews, and if needed repairs each task in order. |
 
-Use the operator catalog to inspect and run them:
+Use the canonical `/workflows` command menu to inspect and run them:
 
 ```text
-/workflow-list
-/workflow-info live-smoke
-/workflow-run live-smoke
-/workflow-stop last
+/workflows
+/workflows list
+/workflows info live-smoke
+/workflows run live-smoke
+/workflows stop last
 /ps
 ```
 
-`/workflow-run` starts one interactive run in the background and returns the
+Bare `/workflows` opens the interactive command menu when TUI selection is
+available. Its exact verbs are `dashboard`, `list`, `info`, `status`, `result`,
+`run`, `continue`, and `stop`, each shown with a short description; direct typed
+forms such as `/workflows run live-smoke` remain available. Other hosts receive
+the typed help fallback. Flat `/workflow-*` commands remain compatibility
+aliases while their behavior reaches parity with the unified command; they are
+not removed yet.
+
+In the interactive catalog, each row leads with the workflow name and uses a
+compact `[P]`, `[U]`, or `[PKG]` badge for its Project, User, or Package source.
+History rows lead with the workflow name, then run id, then source badge. On a
+source screen, press `Tab` or Left/Right to change the focused action, then
+press Enter to activate it.
+
+`/workflows run` starts one interactive run in the background and returns the
 editor immediately. The compact widget below the editor shows the current
 workflow stage and one active child; `/ps` expands the same shared agent fleet
 for leaf selection and readable drill-down. A second interactive run in the
-same session/project is rejected until the first run settles. `/workflow-stop [runId|last]`
-requests cancellation and remains honest about the run being
+same session/project is rejected until the first run settles. `/workflows stop
+[runId|last]` requests cancellation and remains honest about the run being
 `stopping` until its terminal result is persisted. The programmatic `workflow`
-tool remains awaited and headless. Compatibility `/workflows <subcommand>`
-forms remain available.
+tool remains awaited and headless. `/ps` drill-down renders the complete
+retained agent transcript, starting with the original task/request, at natural
+height in normal Pi/terminal scrollback. It has no terminal-height internal
+viewport or `Home`/`End`/arrow scrolling mode. Press `d` to toggle tool detail;
+`Esc` or `q` closes the view without aborting the child. Transcript retention
+still applies its documented content, byte, and node bounds.
 
-When a workflow declares an actionable operator handoff, its oldest pending
-question opens directly in the primary editor after Pi is idle. Escape snoozes
-without cancelling; bare `/workflows` reopens it. `/workflow-continue` answers
-the source run through verified artifacts and one atomic continuation claim.
+When a workflow declares an actionable operator handoff, a run launched by the
+current Pi session (or one of its continuations) opens its oldest pending
+question directly in the primary editor after Pi is idle. Escape submits an
+explicit declined answer; it does not snooze or cancel. Open the `/workflows`
+menu and choose `continue` to select an eligible handoff oldest-first, or type
+`/workflows continue <runId>` to name one directly. Flat `/workflow-continue`
+remains a compatibility alias for the same verified-artifact continuation.
 
 Project and user workflow directories remain scan-based. A pi-native
 `<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,
@@ -87,7 +109,7 @@ curated registry.
 ## The shipped skill
 
 Nothing has to be copied anywhere for the six workflows above to be runnable:
-they resolve out of the installed package, so `/workflow-list` shows them the
+they resolve out of the installed package, so `/workflows list` shows them the
 first time Pi starts after `pi install`, whether the package came from npm or
 from a local checkout.
 

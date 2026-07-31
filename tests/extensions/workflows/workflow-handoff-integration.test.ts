@@ -220,7 +220,7 @@ describe("workflow actionable handoff integration", () => {
 
     // Still reachable, but only because the operator asked for it.
     harness.customInputQueue.push("\r");
-    await harness.commands.get("workflows")!.handler("", harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${sourceRunId}`, harness.ctx);
     await waitFor(() => requests.length === 1);
     expect(harness.customComponents).toHaveLength(1);
   });
@@ -243,7 +243,7 @@ describe("workflow actionable handoff integration", () => {
     expect(requests).toEqual([]);
 
     harness.customInputQueue.push("\r");
-    await harness.commands.get("workflows")!.handler("", harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${sourceRunId}`, harness.ctx);
     await waitFor(() => requests.length === 1);
     expect(requests[0]?.continuation?.originRunId).toBe(sourceRunId);
     expect(harness.customComponents).toHaveLength(1);
@@ -412,12 +412,12 @@ describe("workflow actionable handoff integration", () => {
 
     await emit(harness, "session_start");
     // Unreadable evidence from a run this session never launched is not raised on
-    // its own; bare /workflows is where the operator asks and is told.
+    // its own; an explicit continuation path is where the operator asks and is told.
     await emit(harness, "agent_settled");
     await flushBackground();
     expect(harness.widgets.get("workflows")).toBeUndefined();
 
-    await harness.commands.get("workflows")!.handler("", harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${runId}`, harness.ctx);
     await waitFor(() => (harness.widgets.get("workflows") ?? "").includes("operatorHandoff title"));
 
     expect(harness.widgets.get("workflows")).toContain("operatorHandoff title");
@@ -441,7 +441,7 @@ describe("workflow actionable handoff integration", () => {
       expect.objectContaining({ value: actionableRunId }),
     ]);
 
-    await harness.commands.get("workflows")!.handler("", harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${actionableRunId}`, harness.ctx);
     await waitFor(() => requests.length === 1);
 
     expect(requests[0]?.continuation?.originRunId).toBe(actionableRunId);

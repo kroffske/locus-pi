@@ -155,8 +155,8 @@ describe("workflow operator catalog", () => {
       const filtered = buildWorkflowCatalogBlock(root, root, "invoices");
       const filteredText = filtered.body?.join("\n") ?? "";
       expect(filtered.primary).toBe('Matches for "invoices".');
-      expect(filteredText).toContain("[P] alpha · Handles invoices");
-      expect(filteredText).not.toContain("[P] beta");
+      expect(filteredText).toContain("alpha · [P] · Handles invoices");
+      expect(filteredText).not.toContain("beta · [P]");
       expect(filteredText).toContain("[R] Run history:\n  (no recent matches)");
       expect(filteredText).toContain("[U] User:\n  (no matches)");
 
@@ -206,11 +206,22 @@ describe("workflow operator catalog", () => {
         subject: "Workflow catalog",
         metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history"],
       });
-      expect(recent).toContain("[R] [U] same · historical run snapshot");
-      expect(recent).toContain("[R] [P] secret.workflow.mjs · historical run snapshot");
-      expect(recent).not.toContain("[R] [P] same");
+      expect(recent).toContain("same · run 20260101-000002-personal · [U] · historical run snapshot");
+      expect(recent).toContain("secret.workflow.mjs · run 20260101-000001-path · [P] · historical run snapshot");
+      expect(recent).not.toContain("same · run 20260101-000002-personal · [P]");
       expect(text).not.toContain("/var/folders/private");
-      expect(text).toContain("[P] same · current project");
+      expect(text).toContain("same · [P] · current project");
+      const catalogRows = block.body?.filter((line) => line.startsWith("  ") && !line.startsWith("  (")) ?? [];
+      expect(catalogRows.every((line) => !/\b(?:Project|User|Package)\b/u.test(line))).toBe(true);
+
+      const compactRows = buildWorkflowCatalogBlock(root, root, undefined, { compact: true }).body ?? [];
+      expect(compactRows).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("same · run 20260101-000002-personal · [U] · historical run snapshot"),
+          expect.stringContaining("same · [P] · current project"),
+        ]),
+      );
+      expect(compactRows.every((line) => !/\b(?:Project|User|Package)\b/u.test(line))).toBe(true);
       expect(text.indexOf("[R] Run history:")).toBeLessThan(text.indexOf("[P] Project:"));
       expect(text.indexOf("[P] Project:")).toBeLessThan(text.indexOf("[U] User:"));
       expect(text.indexOf("[U] User:")).toBeLessThan(text.indexOf("[PKG] Package:"));

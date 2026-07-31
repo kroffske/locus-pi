@@ -392,19 +392,26 @@ JavaScript is not supported.
 
 ### `/workflows` command
 
+`/workflows` is the canonical visible workflow command. Bare `/workflows`
+opens its command menu with all eight exact verbs — `dashboard`, `list`, `info`,
+`status`, `result`, `run`, `continue`, and `stop` — and a description beside
+each verb when interactive select is available in TUI; RPC, headless hosts, and
+TUI without select receive the same help as a typed command fallback. Direct typed forms such as
+`/workflows run <name>` remain available. Flat `/workflow-*` commands route to
+the same owners as compatibility aliases; they remain in place until parity
+with the unified command is proven, and are not removed as part of this menu.
+
 ```
-/workflows                        reopen the oldest pending operator question, or show the workflow home
+/workflows                        open the canonical command menu (or typed help fallback)
+/workflows dashboard              persisted run → stage → evidence viewer
+/workflows list [query]           current first-wins workflows + run-specific immutable history
+/workflows info [name]            explain discovery, metadata, trust, DSL, agents, and model routing
+/workflows status [runId]         interactive persisted viewer and stage evidence
+/workflows result [runId|last]    whole text the run finished with, scrollable and untruncated
 /workflows run live-smoke         start one background workflow (returns editor)
+/workflows continue <runId>       answer and continue an actionable handoff
 /workflows stop [runId|last]      request cancellation; terminal state follows settlement
 /workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
-/workflows dashboard              persisted run → stage → evidence viewer
-/workflows list                   current first-wins workflows + run-specific immutable history
-/workflows list <query>           filter catalog by name or description
-/workflows info                   explain discovery, metadata, trust, DSL, agents, and model routing
-/workflows info <name>            add exact first-wins source/path, static meta.description and declared phases
-/workflows status                 interactive persisted viewer; bounded run list without custom UI
-/workflows status <runId>         interactive stage evidence; bounded detail without custom UI
-/workflows result [runId|last]    the whole text the run finished with, scrollable and untruncated
 ```
 
 ### Direct Fusion from the main session
@@ -443,7 +450,7 @@ Every finished-run surface is bounded on purpose: the chat digest caps a line at
 terminal width. So a run whose result **is** prose — a review, a plan, an answer —
 writes that text verbatim to `outputs/workflow-result.md`, and both the digest
 and the panel name that file plus the command that opens it. `/workflows result`
-(alias `/workflow-result`) opens the full text in a scrollable read-only screen:
+(flat alias `/workflow-result`) opens the full text in a scrollable read-only screen:
 `↑/↓` and PageUp/PageDown scroll, Home/End jump, Esc closes. A host without custom
 UI gets a bounded preview plus the exact path, which is the copy that is never
 truncated. The native workflow tool's operator card also renders this exact text
@@ -465,7 +472,7 @@ or a full run id. A short suffix matching more than one run is refused with the 
 match count and the listed candidates — never opened as the wrong run, and never
 reported as missing when runs were found.
 
-The same owners are available as first-class commands:
+The same owners are also available as flat commands:
 
 ```
 /workflow-run <name|path> [input]
@@ -478,36 +485,43 @@ The same owners are available as first-class commands:
 ```
 
 Pi's native slash-command filtering exposes these complete names and Tab selects
-them without first entering `/workflows`. The compatibility
-`/workflows <subcommand>` forms remain supported and keep their argument
-completion for workflow names, persisted run ids, `last`, and replay ids.
-Catalog queries, paths, and semantic input remain free text.
+them without first entering `/workflows`. Direct typed `/workflows <subcommand>`
+forms remain supported and keep their argument completion for workflow names,
+persisted run ids, `last`, and replay ids. Flat commands are compatibility
+aliases, not a second implementation; keep them until parity with the unified
+menu is proven. Catalog queries, paths, and semantic input remain free text.
 
-`/workflow-run` adapts to the host's run mode. In `tui` and `rpc` the session
+`/workflows run` adapts to the host's run mode. In `tui` and `rpc` the session
 outlives the turn, so the run is detached: the command returns immediately, the
-live panel streams it, and `/workflow-stop` can cancel it. In the one-shot output
+live panel streams it, and `/workflows stop` can cancel it. Flat `/workflow-run`
+and `/workflow-stop` commands remain compatibility aliases. In the one-shot output
 modes (`pi -p`, `--mode json`) the host disposes the session when the turn ends —
 a detached run would lose the ctx its child sessions need — so the command holds
 the turn open until the run settles and its result is persisted. A headless
 invocation therefore blocks for the whole run and there is no concurrent
-`/workflow-stop`; cancel it with the host's own interrupt.
+`/workflows stop`; cancel it with the host's own interrupt.
 
 An actionable `awaiting_operator` handoff opens directly in the primary editor
 after Pi becomes idle — automatically only for runs this session launched,
 their continuations included. A question left by an earlier session stays in
-its run's evidence until asked for: bare `/workflows` opens the oldest pending
-one project-wide, `/workflow-continue <runId>` a named one. There is no
-workflow/run picker. Multiple handoffs are oldest-first and show
+its run's evidence until asked for: open the `/workflows` menu and choose
+`continue` for the oldest pending one project-wide, or type
+`/workflows continue <runId>` for a named one. The menu provides contextual
+workflow/run selection for `info`, `result`, `run`, `continue`, and `stop`, not
+one combined picker. Multiple handoffs are oldest-first and show
 `Question 1 of N`; answering launches one integrity-checked continuation before
 the next item opens. Escape is an answer, not a postponement: the continuation
 receives the question list with an operator-declined note, keeping any answers
 given before the refusal. A retryable handoff — one whose continuation consumed
 an answer and then failed — never reopens unprompted; the idle pump prints a
-one-line notice (once per session) naming the run, and `/workflows` reopens it.
-Only `/workflow-stop` (or its compatibility form) cancels a workflow.
+one-line notice (once per session) naming the run; `/workflows` then opens the
+menu so `continue` can reopen it.
+Only `/workflows stop` cancels a workflow; flat `/workflow-stop` remains a
+compatibility alias for the same cancellation owner.
 
-`/workflow-continue <runId>` collects answers interactively in TUI and RPC.
-`--answer` is the explicit non-interactive path and accepts exactly one
+`/workflows continue <runId>` collects answers interactively in TUI and RPC;
+flat `/workflow-continue` remains a compatibility alias. `--answer` is the
+explicit non-interactive path and accepts exactly one
 question: closed selections require an exact label, while custom-enabled
 questions accept other non-empty text. Multi-question handoffs fail closed
 instead of guessing how one string should be distributed.
@@ -518,14 +532,14 @@ Mode behavior stays explicit:
 | ------------------ | ---------------------------------------------- | ------------------------------------------ |
 | TUI                | Automatic primary-editor select/text component | Arrows, Enter, or inline custom text       |
 | RPC                | Command/static projection                      | Native bidirectional extension UI requests |
-| JSON/print         | Readable one-way lifecycle output              | `/workflow-continue … --answer …` only     |
+| JSON/print         | Readable one-way lifecycle output              | `/workflows continue … --answer …` only    |
 | Embedded child SDK | Existing `session.subscribe(...)` observation  | Not applicable                             |
 
 Pi 0.82.0 is the minimum supported host for automatic questions. Locus
 serializes its own inline components and rechecks the current idle session before
 mounting. Pi exposes no global custom-UI lock for unrelated third-party
-extensions, so `/workflows` is the recovery path if another extension displaces
-the question.
+extensions, so `/workflows` opens the recovery menu if another extension
+displaces the question.
 
 Every run is persisted to `.pi/locus-pi/workflows/<runId>/`. The runner creates
 the non-symlink `outputs/`, `workspace/`, and `runtime/` directories and writes
@@ -658,9 +672,9 @@ The background run installs a compact `belowEditor` widget. Its header identifie
 
 The detached run adapter and transcript callbacks carry the originating Pi session generation; late completion therefore cannot write through them into a new session. The progress component's live-store listener and spinner timer are instead session-owned resources: the extension disposes them synchronously on session start/shutdown and idempotently on terminal, error, and `finally` paths, even when a runner ignores abort and settles later. `session_shutdown` (including reload) also aborts active work. This lifecycle uses Pi's documented [`session_shutdown`](https://pi.dev/docs/latest/extensions#events), [`input`/`turn_end`](https://pi.dev/docs/latest/extensions#events), and [`setWidget(key, undefined)` cleanup](https://pi.dev/docs/latest/extensions#widgets-status-and-footer) seams, plus the one shared agent-row formatter.
 
-Transcript persistence follows the Pi surface that started the run. The slash-command path publishes exactly two records, both with `customType: "locus-workflow-run"`: a run-boundary banner at launch and a bounded digest at settlement. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and immediately writes the digest through `pi.sendMessage({ customType: "locus-workflow-run", display: true, ... }, { triggerTurn: false })`. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Both records are stored and participate in later LLM context.
+Transcript persistence follows the Pi surface that started the run. The slash-command path publishes a run-boundary banner at launch and a bounded digest at settlement, both with `customType: "locus-workflow-run"`. When the workflow returns prose, it then publishes that exact text separately with `customType: "locus-workflow-result"`; this result message is intentionally untruncated so the operator can read and copy it directly from scrollback. Structured, non-text results do not fabricate a prose message and remain available through persisted evidence. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and synchronously appends the bounded digest followed by the optional full result before awaiting either send. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Every published record is stored and participates in later LLM context.
 
-The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Both paths cap each line at 160 characters and keep at most 20 agent rows plus the terminal verdict and one evidence path, so a digest stays within 4096 characters. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Workflow agent lines use the stable catalog `agent` plus `label` and status, not the workflow parent-row petname: the live panel may collapse that parent in favour of an SDK child with a different canonical petname. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the final digest remain correctly leveled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, the digest is not sent and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
+The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Digests on both paths cap each line at 160 characters and keep at most 20 agent rows plus the terminal verdict and one evidence path, so a digest stays within 4096 characters; the separate command result message deliberately does not use those bounds. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Workflow agent lines use the stable catalog `agent` plus `label` and status, not the workflow parent-row petname: the live panel may collapse that parent in favour of an SDK child with a different canonical petname. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the completion messages remain correctly levelled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, completion persistence stops and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
 
 The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the whole run in the order it happened: settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, its `warning` color, and its activity sub-line; and every declared stage the run has not reached yet follows as a dim `○ <title> · planned · <detail>` row, with the detail read statically from `meta.phases`. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the roster does not fit the terminal, the oldest settled rows collapse behind an announced `(+N earlier agents)` line — the current row, the pending stages, and the final verdict are never the part that is dropped. It does not publish or expand the global fleet selection. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: a bare result remains script-controlled, while a result returned directly from a `parallel()` branch or `pipeline()` stage with `status: "failed" | "blocked" | "cancelled"` becomes typed group failure after the barrier. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows remain visible status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
 
@@ -760,16 +774,17 @@ would split workflow progress from `/agent drill` and fleet control.
 
 `/workflows list [query]` is a read model over the same first-wins resolver used
 by `/workflows run`: scan-based discovery for Project, User, and Package alike.
-It does not add a separate UI-only registry. Every current row
-is one selectable two-line block: the first line shows the compact badge, human
-source label (`Project`, `User`, or `Package`), name, and one-line description;
-the second line indents the exact origin path under the content column. A path
-that still exceeds the terminal width is middle-truncated so its beginning and
-basename remain visible. Current and History stay adjacent when the terminal has
-spare rows; unused height remains below the lists instead of splitting them.
-Very low terminals use a compact one-line fallback.
+It does not add a separate UI-only registry. Every current row is one selectable
+two-line block whose row identity leads with the workflow name and a compact
+source badge (`[P]`, `[U]`, or `[PKG]`); its detail line carries the one-line
+description and exact origin path. A path that still exceeds the terminal width
+is middle-truncated so its beginning and basename remain visible. Current and
+History stay adjacent when the terminal has spare rows; unused height remains
+below the lists instead of splitting them. Very low terminals use a compact
+one-line fallback.
 History rows are separate evidenced runs, not a deduplicated list of names: each
-row carries its own `runId`, persisted target, source label, and retained snapshot
+row leads with the workflow name, then its `runId`, then the compact source
+badge, and carries the persisted target, source label, and retained snapshot
 availability. `[R]` means run history; `[P]`, `[U]`, and `[PKG]` are compact source
 badges, not alternative registries.
 
@@ -810,8 +825,9 @@ shows the human source label and exact path. History identity also shows the run
 ID, exact snapshot path, and SHA when present. Press `i` again or `Esc` to return
 to the source at the preserved position.
 
-The action bar is deliberate prompt handoff, not execution. `Tab` cycles the
-visible actions and Enter activates only the focused action. Focus is marked by
+The action bar is deliberate prompt handoff, not execution. `Tab` or the
+Left/Right arrows changes the focused action, and Enter activates only that
+action. Focus is marked by
 both a `›` caret and the theme's warning color (normally yellow); other available
 actions use the success color (normally green). `[VIEW]`, `Source:`, `Path:`, and
 the equivalent history metadata labels use the same semantic success styling so
@@ -873,9 +889,11 @@ scrolling is unavailable. Neither projection imports or runs a workflow,
 invents an execution graph, mutates the editor, or writes a file. This focused
 view is not a generic fix for `Ctrl-O`, `cat`, or terminal scrollback.
 
-Bare `/workflows` first reopens the oldest actionable handoff. When no such
-handoff is pending, it clears stale workflow chrome and installs a typed `VIEW`
-with catalog, information, history, and run commands. Passive `/workflows list`,
+Bare `/workflows` opens the canonical command menu in TUI, including when an
+actionable handoff is pending. Choosing `continue` from that menu (or typing
+`/workflows continue <runId>`) opens the oldest handoff. In RPC and headless
+hosts, the same command returns the typed `VIEW` help fallback. It clears stale
+workflow chrome before installing the menu. Passive `/workflows list`,
 `/workflows status`, settled run receipts, and non-interactive `/workflows info`
 reuse the shared operator frame. Interactive list and info views are separate
 workflow-owned custom components; info still renders the same semantic block as
@@ -901,7 +919,8 @@ stays pinned until terminal state, and persistent/shared status is not cleared.
 Escape inside an operator question is an answer, not a dismissal: the run
 continues with a plain-text refusal naming its questions, keeping any answers
 typed before it. It does not abort an agent or cancel a workflow —
-`/workflow-stop` remains the only cancellation path.
+`/workflows stop` remains the only cancellation path; flat `/workflow-stop` is
+its compatibility alias.
 The focused catalog owns the source-to-catalog and catalog-to-close lifecycle
 described above. The shared TUI adapter requests a full host redraw for passive
 open/close, so stale border or bracket glyphs do not remain after
@@ -1305,9 +1324,9 @@ be for any other answer text.
 A question opens on its own only for a run the current Pi session started, or a
 continuation that run spawned. Nothing an earlier session left unanswered
 interrupts a new one — not at session start and not on its first settled turn.
-Those questions stay in their run's evidence and reopen on request: bare
-`/workflows` takes the oldest pending one project-wide, `/workflow-continue
-<runId>` takes a named run.
+Those questions stay in their run's evidence and reopen on request: the
+`/workflows` menu's `continue` entry takes the oldest pending one project-wide,
+and `/workflows continue <runId>` takes a named run.
 
 `runWorkspaceDir()` is the absolute path of this run's working directory
 (`.pi/locus-pi/workflows/<runId>/workspace/`), created before the script starts.

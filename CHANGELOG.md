@@ -25,6 +25,35 @@ This file records user-visible changes to the public package.
   prompts, model preflight, limits, journal, answers, packet, and result evidence
   as `dsl.fusion()`.
 
+- **Finished command-launched workflows now print their complete prose result.**
+  After the existing bounded `locus-workflow-run` digest, `/workflows run`
+  appends a separate `locus-workflow-result` message containing the exact,
+  untruncated terminal text. The result is directly readable and copyable from
+  scrollback; structured non-text results remain in persisted run evidence.
+
+- **`/workflows` is now the canonical visible workflow command.** In an
+  interactive TUI, bare `/workflows` opens one unified menu with the exact verbs
+  `dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop`;
+  direct typed `/workflows <subcommand>` forms remain available. Other hosts
+  receive typed help. Flat `/workflow-*` commands stay as compatibility aliases
+  until parity with the unified command is proven, so existing operator habits
+  and scripts continue to work.
+
+- **The workflow menu makes each action legible before selection.** The root
+  menu shows a description beside all eight verbs. Catalog rows lead with the
+  workflow name and a compact `[P]`, `[U]`, or `[PKG]` source badge; history
+  rows lead with the workflow name, then run id, then its source badge. On a
+  source screen, `Tab` or the Left/Right arrows changes the focused action
+  before Enter activates it.
+
+- **Selected-agent `/ps` history now uses normal terminal scrollback.** The
+  viewer renders the complete retained transcript, starting with the original
+  task/request, at natural height instead of clipping it into a terminal-height
+  internal viewport. There is no `Home`/`End`/arrow scroll mode: normal
+  Pi/terminal scrollback handles navigation, `d` toggles tool detail, and `Esc`
+  or `q` closes the view without aborting the child. Existing content, byte, and
+  node retention bounds still limit what can be retained and displayed.
+
 - **The public extension catalog now gives operators and planning agents a
   concise English roster of all ten default extensions.** It links each
   entrypoint, manifest, and active manual, separates direct feature edges from

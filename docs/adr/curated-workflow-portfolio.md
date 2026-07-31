@@ -217,9 +217,12 @@ question directly in Pi, verifies the two declared artifacts and unchanged
 self-contained-static script identity, atomically claims one continuation, and
 reuses the ordinary workflow launcher.
 
-Escape snoozes the question without cancelling the source run; bare
-`/workflows` reopens it, and `/workflow-stop` remains the only cancellation
-path. `/workflow-continue` is distinct from replay-only `--resume`. Pi 0.82.0 is
+At the time of this amendment, Escape snoozed the question without cancelling
+the source run; that historical behavior is superseded by an explicit declined
+answer. The current TUI `/workflows` menu lists eligible handoffs oldest-first,
+while typed `/workflows continue <runId>` names one directly. `/workflows stop`
+is the canonical cancellation path; flat forms remain compatibility aliases.
+`/workflow-continue` is distinct from replay-only `--resume`. Pi 0.82.0 is
 the minimum host because tool-origin projection relies on the terminal
 `agent_settled` lifecycle event. TUI is inline-interactive, RPC uses native
 bidirectional UI requests, and JSON/print requires an explicit answer.

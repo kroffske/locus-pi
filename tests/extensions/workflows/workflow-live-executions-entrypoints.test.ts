@@ -120,5 +120,5 @@ process.stdout.write(JSON.stringify({
       slotConfigurable: false,
       slotWritable: false,
     });
-  });
+  }, 30_000);
 });

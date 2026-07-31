@@ -145,7 +145,12 @@ describe("agent command run (unified live surface)", () => {
 
     const row = reviewerRow(agentLiveStore);
     expect(row).toBeDefined();
-    expect(row).toMatchObject({ status: "done", finalAnswer: "Reviewed", childSessionId: "sdk-run-1" });
+    expect(row).toMatchObject({
+      status: "done",
+      finalAnswer: "Reviewed",
+      childSessionId: "sdk-run-1",
+      request: "Review this",
+    });
     // REQ-007 fleet stays below the editor while focus replaces only the editor.
     expect(h.widgetOptions.get("agents")).toEqual({ placement: "belowEditor" });
     expect(typeof h.widgetPayloads.get("agents")).toBe("function");
@@ -209,6 +214,8 @@ describe("agent command run (unified live surface)", () => {
 
     expect(toolRow).toBeDefined();
     expect(slashRow).toBeDefined();
+    expect(toolRow.request).toBe("Review this");
+    expect(slashRow.request).toBe("Review this");
     // T-191: petname is per-instance (derived from the row id), so the two triggers
     // differ in name — parity is now on the shared title, model badge, and state.
     for (const rowLine of [toolLine, slashLine]) {
