@@ -331,6 +331,9 @@ export function createHarness(
       sentUserMessages.push(options === undefined ? { message } : { message, options });
       notifications.push(message);
     },
+    getActiveTools() {
+      return [...activeTools];
+    },
     setActiveTools(toolNames) {
       activeTools = toolNames;
       harness.activeTools = activeTools;

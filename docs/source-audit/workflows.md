@@ -9,8 +9,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
 ## Local source truth
 
 - `extensions/workflows/index.ts` is the entrypoint. It registers the
-  `workflow` tool (`workflow-tool.ts`) and the `/workflows` command
-  (`command-router.ts`), and wires only the per-session state those two need —
+  `workflow` tool (`workflow-tool.ts`), the opt-in direct `fusion` tool and
+  `/fusion` command (`fusion-surface.ts`), and the `/workflows` command
+  (`command-router.ts`), and wires only the per-session state these surfaces need —
   live progress panels, completed-run bookkeeping, the command launcher, and
   the operator handoff controller. Command routing (`command-router.ts`),
   launch-precondition target resolution (`launch-guard.ts`), transcript
@@ -27,6 +28,15 @@ or borrowed runtime implementation was identified for this source-audit slice.
   is the sole workflow operator-cancellation path, and reports `stopping` until
   terminal settlement. Native command completion (`command-completions.ts`) returns full argument strings
   for grammar-owned tokens and yields free-text tails.
+- `extensions/workflows/fusion-config.ts` owns the project-local
+  `.pi/locus-pi/fusion/config.json` boundary, the available-model projection,
+  closed member/judge validation, and `/fusion set` grammar. `fusion-surface.ts`
+  owns registration, active-tool reconciliation, interactive selection, command
+  presentation, and translation into a direct run. `fusion-runner.ts` owns that
+  run's ordinary Workflow journal, child bridge, artifact store, result envelope,
+  and readable report. Disabled means absent from `pi.getActiveTools()`; it
+  remains registered in the complete inventory so `/fusion enable` can activate
+  it immediately without a reload.
 - `extensions/workflows/workflow-command-launcher.ts` is the single command
   execution policy used by flat and compatibility command routes. It owns the
   current session lease, exclusive background launch, non-exclusive tool

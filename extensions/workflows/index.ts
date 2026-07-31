@@ -36,6 +36,7 @@ import {
 } from "./progress-widget.js";
 import { createWorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { registerWorkflowTool } from "./workflow-tool.js";
+import { registerFusionSurface } from "./fusion-surface.js";
 import {
   announceCommandWorkflowStart,
   createWorkflowTranscript,
@@ -230,6 +231,7 @@ export default function workflows(pi: ExtensionAPI): void {
     onRunStarted: (runId) => sessionRunIds.add(runId),
     onRunCompleted: (runId) => completedRunIds.add(runId),
   });
+  registerFusionSurface(pi);
 
   registerWorkflowCommands(pi, {
     commandLauncher,

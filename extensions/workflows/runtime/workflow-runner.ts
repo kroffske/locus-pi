@@ -36,7 +36,11 @@ import {
 } from "./workflow-budget.js";
 import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
-import { createWorkflowAgentRunner } from "./workflow-agent-bridge.js";
+import {
+  createWorkflowAgentPreflight,
+  createWorkflowAgentRunner,
+  type WorkflowAgentBridgeOptions,
+} from "./workflow-agent-bridge.js";
 import {
   buildWorkflowFailureDiagnostic,
   type WorkflowFailureDiagnostic,
@@ -1090,7 +1094,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       });
     }
   }
-  const agentRunner = createWorkflowAgentRunner({
+  const agentBridgeOptions: WorkflowAgentBridgeOptions = {
     pi: opts.pi,
     ctx: opts.ctx,
     signal: opts.signal,
@@ -1101,10 +1105,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
-  });
+  };
+  const agentRunner = createWorkflowAgentRunner(agentBridgeOptions);
+  const preflightAgentRequests = createWorkflowAgentPreflight(agentBridgeOptions);
   runtime = createWorkflowRuntime({
     runId,
     agentRunner,
+    preflightAgentRequests,
     journal,
     projectRoot,
     runWorkspaceDir,

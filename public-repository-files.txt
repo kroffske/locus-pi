@@ -227,6 +227,9 @@ extensions/workflows/examples/review/README.md
 extensions/workflows/examples/review/resources/interrogator.prompt.md
 extensions/workflows/examples/review/resources/verifier.prompt.md
 extensions/workflows/examples/review/review.workflow.mjs
+extensions/workflows/fusion-config.ts
+extensions/workflows/fusion-runner.ts
+extensions/workflows/fusion-surface.ts
 extensions/workflows/index.ts
 extensions/workflows/launch-guard.ts
 extensions/workflows/manifest.json
@@ -306,6 +309,7 @@ tests/extensions/todo-context/todo-command-surfaces.test.ts
 tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/consilium-reference-workflow.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
+tests/extensions/workflows/fusion-tool.test.ts
 tests/extensions/workflows/live-smoke-workflow.test.ts
 tests/extensions/workflows/plan-implement-workflow.test.ts
 tests/extensions/workflows/plan-workflow.test.ts
@@ -385,6 +389,7 @@ tests/shared/workflows/workflow-budget.test.ts
 tests/shared/workflows/workflow-continuation.test.ts
 tests/shared/workflows/workflow-evidence.test.ts
 tests/shared/workflows/workflow-failure-diagnostic.test.ts
+tests/shared/workflows/workflow-fusion.test.ts
 tests/shared/workflows/workflow-group-failure.test.ts
 tests/shared/workflows/workflow-handoff.test.ts
 tests/shared/workflows/workflow-input.test.ts

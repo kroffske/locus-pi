@@ -446,6 +446,7 @@ export interface ExtensionAPI {
   appendEntry(type: string, data: unknown): Promise<void>;
   sendMessage?(message: ExtensionMessage, opts?: SendMessageOptions): Promise<void> | void;
   sendUserMessage(message: string, opts?: Record<string, unknown>): Promise<void>;
+  getActiveTools(): string[];
   setActiveTools(toolNames: string[]): void;
   setModel?(model: ModelLike): boolean | Promise<boolean>;
   setThinkingLevel?(level: ThinkingLevel): void;

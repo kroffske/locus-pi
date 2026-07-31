@@ -96,5 +96,5 @@ process.stdout.write(JSON.stringify({
       sameSlot: true,
       sameStore: true,
     });
-  });
+  }, 30_000);
 });

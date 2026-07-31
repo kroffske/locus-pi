@@ -6,6 +6,25 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow authors can now call `dsl.fusion()` for one bounded multi-model
+  answer.** Fusion validates 2–10 unique member selectors and a separate judge
+  before spending, sends no ambient chat history, supports identical or
+  role-lensed prompts plus explicit supplied context, runs tool-free members at
+  the existing four-call concurrency bound, fails before judging when any member
+  fails, preserves the packet and every answer as evidence, and returns only the
+  judge's exact text or existing schema-validated value. The host resolves the
+  complete roster before the first child, and concurrent Fusion calls reserve
+  their worst-case invocation counts instead of overcommitting the run budget.
+
+- **The main Pi session can now call Fusion directly as an opt-in `fusion`
+  tool.** `/fusion` configures 2–10 concrete member models and a separate judge
+  from the host's available-model list, enables or disables the tool immediately,
+  reports its current state, and can run a question manually. Fusion is disabled
+  by default, so its schema and description do not enter the model's active tool
+  context until the operator enables it; direct runs retain the same isolated
+  prompts, model preflight, limits, journal, answers, packet, and result evidence
+  as `dsl.fusion()`.
+
 - **Finished command-launched workflows now print their complete prose result.**
   After the existing bounded `locus-workflow-run` digest, `/workflows run`
   appends a separate `locus-workflow-result` message containing the exact,
