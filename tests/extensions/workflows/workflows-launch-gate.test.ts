@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHarness } from "../../test-harness.js";
@@ -402,6 +402,42 @@ describe("/workflows run launch gate", () => {
       expect(operatorText).toContain("primary output:");
       expect(operatorText).toContain("workflow-result.md");
       expect(operatorText).toContain("UNTRUNCATED_TERMINAL_SENTINEL");
+    } finally {
+      spy.mockRestore();
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a replaced terminal-result symlink when rendering for the operator", async () => {
+    const h = registerHarness();
+    const runDir = mkdtempSync(path.join(os.tmpdir(), "workflow-tool-result-symlink-"));
+    const outputDir = path.join(runDir, "outputs");
+    mkdirSync(outputDir);
+    const secretPath = path.join(runDir, "secret.md");
+    writeFileSync(secretPath, "DO_NOT_RENDER", "utf8");
+    symlinkSync(secretPath, path.join(outputDir, "workflow-result.md"));
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-result-symlink",
+      runDir,
+      ok: true,
+      result: "bounded fallback",
+      resultTextPath: path.join(outputDir, "workflow-result.md"),
+      journal: [],
+      resultPersistence: { ok: true, path: path.join(runDir, "runtime", "result.json") },
+    });
+    try {
+      const tool = h.tools.get("workflow")!;
+      const result = await tool.execute(
+        "tool-result-symlink",
+        { name: "plan" },
+        new AbortController().signal,
+        () => void 0,
+        h.ctx,
+      );
+
+      const operatorText = tool.renderResult!(result, h.ctx).render(80).join("\n");
+      expect(operatorText).toContain("full workflow result unavailable");
+      expect(operatorText).not.toContain("DO_NOT_RENDER");
     } finally {
       spy.mockRestore();
       rmSync(runDir, { recursive: true, force: true });

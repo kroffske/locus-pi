@@ -7,7 +7,6 @@
  * surfaces belong to `/workflows`.
  */
 
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -30,7 +29,11 @@ import {
 import { renderAgentLiveRowsText } from "./progress-widget.js";
 import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { createWorkflowTranscript } from "./workflow-transcript.js";
-import { WORKFLOW_SAFE_COMPONENT_PATTERN, workflowRunOutputsDir } from "./runtime/workflow-run-layout.js";
+import {
+  readWorkflowRunTextFile,
+  WORKFLOW_SAFE_COMPONENT_PATTERN,
+  workflowRunOutputsDir,
+} from "./runtime/workflow-run-layout.js";
 
 const WorkflowArtifactRefParams = Type.Object(
   {
@@ -296,14 +299,23 @@ function renderWorkflowToolResultCard(result: ToolResult): Text {
 }
 
 function readPersistedWorkflowResult(details: Record<string, unknown>): string | undefined {
-  if (typeof details.outputDir !== "string" || typeof details.resultTextPath !== "string") return undefined;
-  const outputDir = path.resolve(details.outputDir);
+  if (
+    typeof details.runDir !== "string" ||
+    typeof details.outputDir !== "string" ||
+    typeof details.resultTextPath !== "string"
+  )
+    return undefined;
+  const runDir = path.resolve(details.runDir);
+  const outputDir = workflowRunOutputsDir(runDir);
+  if (path.resolve(details.outputDir) !== outputDir) {
+    return "[full workflow result unavailable: invalid output path]";
+  }
   const resultPath = path.resolve(details.resultTextPath);
   if (resultPath !== path.join(outputDir, "workflow-result.md")) {
     return "[full workflow result unavailable: invalid result path]";
   }
   try {
-    return readFileSync(resultPath, "utf8").replace(/\n$/u, "");
+    return readWorkflowRunTextFile(runDir, resultPath).replace(/\n$/u, "");
   } catch {
     return "[full workflow result unavailable: result file cannot be read]";
   }

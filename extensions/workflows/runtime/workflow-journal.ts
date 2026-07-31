@@ -6,7 +6,7 @@
  * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
  */
 
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -29,6 +29,7 @@ import {
   ensureWorkflowRunDir,
   appendWorkflowRunTextFile,
   readWorkflowRunTextFile,
+  readWorkflowRunFile,
   writeWorkflowRunFile,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowJournalFile,
@@ -1317,7 +1318,7 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
         details,
       );
     }
-    const sourceBytes = readFileSync(lexicalSnapshot);
+    const sourceBytes = readWorkflowRunFile(lexicalRunDir, lexicalSnapshot);
     const actualSha256 = createHash("sha256").update(sourceBytes).digest("hex");
     if (actualSha256 !== identity.scriptSha256) {
       return snapshotUnavailable(

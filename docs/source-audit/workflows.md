@@ -362,15 +362,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
   reaches implementation only through an explicit operator decision.
   `plan-implement` accepts one host continuation artifact regardless of
   filename, pasted plan text, or one file path. Continuation bytes stay
-  uncapped; direct input is normalized by a read-only resolver. Deterministic
-  code parses `### S<n>` blocks, a no-tool
+  uncapped; deterministic script code passes multiline input through as plan
+  text or reads the named text file, then extracts only the Outcome routing
+  fields and `### S<n>` blocks. Agents own their meaning. A no-tool
   selector chooses the steps, the plan's own order is restored, and one
   write-capable session owns each step in the launch checkout. A read-only
   checker and a fresh reporter
   follow; a failed writer skips the remaining steps and the run returns
-  `partial: true`. Both entries import nothing and retain
-  `self-contained-static` identity; path resolution remains an agent stage,
-  not filesystem code inside the trusted workflow script.
+  `partial: true`. Both entries retain `self-contained-static` identity; the
+  implementation entry uses only static Node.js built-ins for its direct file
+  input.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner
