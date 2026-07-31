@@ -7,8 +7,8 @@ writes to the operator's checkout, and the operator decides — by launching the
 second one — whether a plan is worth executing.
 
 Both are **Package workflows**: they live in `extensions/workflows/examples/`,
-which the resolver scans, so `/workflow-run plan "<task>"` and
-`/workflow-run plan-implement "<request>"` resolve without any project file, and
+which the resolver scans, so `/workflows run plan "<task>"` and
+`/workflows run plan-implement "<request>"` resolve without any project file, and
 both ship in `package.json#files` and `public-repository.json`. Workflow
 JavaScript is trusted local code with full Node.js host access; it is not
 sandboxed. `plan` is read-only end to end, `plan-implement` writes to the launch
@@ -114,7 +114,8 @@ the run returns none. What it no longer does is burn the run. The scout's map
 and six rounds of drafting are paid for, so the run publishes the exact stalled
 state — `task.md`, `context.md`, the last `plan.md`, `unresolved-defects.md` —
 and declares an operator handoff with one question. The oldest pending question
-opens in the editor when Pi is idle; `/workflows` reopens it.
+opens in the editor when Pi is idle; the `/workflows` menu's `continue` entry
+reopens it, or typed `/workflows continue <runId>` names it directly.
 
 All four refs are published together, immediately before the handoff — including
 a second copy of the task the run already published at its start. The handoff
@@ -221,7 +222,7 @@ advancing to the next one. Every verdict republishes the ledger, and the next
 task starts only after the current one is accepted.
 
 Stable attempt labels and deterministic ledger updates keep the workflow
-replay-safe: `/workflow-run plan-implement --resume <runId>` replays completed
+replay-safe: `/workflows run plan-implement --resume <runId>` replays completed
 agent answers instead of running those tasks again.
 
 A failed or still-rejected task stops the remaining tasks — plan steps are

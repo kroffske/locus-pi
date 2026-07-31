@@ -1915,6 +1915,25 @@ describe("executed-model readback", () => {
     const row = agentLiveStore.rows.get("create-failed-row");
     expect(row?.status).toBe("error");
     expect(row?.model).toBeUndefined();
+    expect(row?.request).toBe("Review this change");
+  });
+
+  it("bounds the request retained for the live viewer and reports omitted characters", async () => {
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => {
+        throw new Error("create failed");
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      live: { rowId: "bounded-request-row", label: "bounded request" },
+    });
+
+    await executor.run({ ...request(), task: "x".repeat(32_125) }, new AbortController().signal);
+
+    const retained = agentLiveStore.rows.get("bounded-request-row")?.request;
+    expect(retained?.startsWith("x".repeat(32_000))).toBe(true);
+    expect(retained).toContain("… 125 additional request character(s) omitted");
+    expect(retained?.length).toBeLessThan(32_125);
   });
 
   it("leaves the row's display value alone when the peer reports no model", async () => {

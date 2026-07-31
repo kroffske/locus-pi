@@ -1305,13 +1305,14 @@ describe("workflow progress widget", () => {
   it("pins an active run, then retires its widget while retaining terminal rows on next input", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-live-input-"));
     try {
+      const exactResult = `${"Complete implementation plan line. ".repeat(200)}\nUNTRUNCATED_COMMAND_RESULT`;
       writeFileSync(
         path.join(root, "slow.workflow.mjs"),
         `export default async function run(dsl) {\n` +
           `  dsl.phase("slow");\n` +
           `  dsl.log("started");\n` +
           `  await new Promise((resolve) => setTimeout(resolve, 100));\n` +
-          `  return { ok: true };\n` +
+          `  return ${JSON.stringify(exactResult)};\n` +
           `}\n`,
         "utf8",
       );
@@ -1388,16 +1389,19 @@ describe("workflow progress widget", () => {
       expect(agentLiveStore.rows.has("unrelated-row")).toBe(true);
       expect(harness.statuses.has("locus")).toBe(false);
       const persisted = harness.sentMessages.map((entry) => String(entry.message.content));
-      expect(persisted).toHaveLength(2);
+      expect(persisted).toHaveLength(3);
       expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
       expect(persisted[0]).toContain("● workflow started");
       expect(persisted[0]).toContain(`runDir: ${path.join(root, ".pi", "locus-pi", "workflows")}`);
-      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished · completed");
-      expect(
-        harness.sentMessages.every(
-          (entry) => entry.message.customType === "locus-workflow-run" && entry.message.display === true,
-        ),
-      ).toBe(true);
+      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished · Complete implementation plan line.");
+      expect(persisted[1]).not.toContain("UNTRUNCATED_COMMAND_RESULT");
+      expect(persisted[2]).toBe(exactResult);
+      expect(harness.sentMessages.map((entry) => entry.message.customType)).toEqual([
+        "locus-workflow-run",
+        "locus-workflow-run",
+        "locus-workflow-result",
+      ]);
+      expect(harness.sentMessages.every((entry) => entry.message.display === true)).toBe(true);
       expect(
         harness.sentMessages.every(
           (entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined,
@@ -1657,10 +1661,10 @@ describe("workflow progress widget", () => {
       expect(text.indexOf("[R] Run history:")).toBeLessThan(text.indexOf("[P] Project:"));
       expect(text.indexOf("[P] Project:")).toBeLessThan(text.indexOf("[U] User:"));
       expect(text.indexOf("[U] User:")).toBeLessThan(text.indexOf("[PKG] Package:"));
-      expect(text).toContain("[R] [P] alpha · historical run snapshot");
-      expect(text).toContain("[P] alpha · Handles alpha invoices");
-      expect(text).toContain("[P] beta · Reviews beta releases");
-      expect(text).toContain("[PKG] live-smoke ·");
+      expect(text).toContain("alpha · run 20260101-000001-alpha · [P] · historical run snapshot");
+      expect(text).toContain("alpha · [P] · Handles alpha invoices");
+      expect(text).toContain("beta · [P] · Reviews beta releases");
+      expect(text).toContain("live-smoke · [PKG] ·");
       expect(text).toContain("[U] User:");
       expect(text).toContain("(none found)");
       expect(text.match(/Sources: \[P\]/gu)).toHaveLength(1);
@@ -1697,8 +1701,8 @@ describe("workflow progress widget", () => {
 
       await handler("list invoices", harness.ctx);
       const filtered = renderHarnessWidget(harness);
-      expect(filtered).toContain("[P] alpha · Handles alpha invoices");
-      expect(filtered).not.toContain("[P] beta");
+      expect(filtered).toContain("alpha · [P] · Handles alpha invoices");
+      expect(filtered).not.toContain("beta · [P]");
 
       await handler("list definitely-no-match", harness.ctx);
       const noMatch = renderHarnessWidget(harness);
@@ -1731,10 +1735,9 @@ describe("workflow progress widget", () => {
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
   });
 
-  it("bare dashboard replaces stale status with a typed transient command view", async () => {
+  it("bare /workflows opens the root chooser after a stale status view", async () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;
-    delete harness.ctx.ui.custom;
     workflowsExt(harness.pi);
     const handler = harness.commands.get("workflows")!.handler;
 
@@ -1743,14 +1746,16 @@ describe("workflow progress widget", () => {
 
     await handler("", harness.ctx);
 
-    expect(typeof harness.widgetPayloads.get("workflows")).toBe("function");
-    const widget = harness.widgets.get("workflows") ?? "";
-    expect(widget).toContain("[VIEW]");
-    expect(widget).toContain("Workflow commands");
-    expect(widget).toContain("Catalog: /workflow-list [query]");
-    expect(widget).toContain("Run: /workflow-run <name|path>");
-    expect(widget).toContain("Continue: /workflow-continue <runId>");
-    expect(widget).toContain("Existing /workflows <subcommand> forms remain supported.");
+    expect(harness.selectCalls.at(-1)?.options).toEqual([
+      "dashboard — inspect persisted runs and evidence",
+      "list — browse available workflows",
+      "info — inspect one workflow's details",
+      "status — view recent run progress",
+      "result — read a finished run's output",
+      "run — start a workflow",
+      "continue — answer a pending handoff",
+      "stop — stop an active run",
+    ]);
     expect(harness.notifications).toEqual([]);
   });
 

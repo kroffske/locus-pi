@@ -10,6 +10,7 @@
 import type { CommandArgumentCompletion } from "../_shared/host/pi-api.js";
 import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
 import type { FlatWorkflowCommand } from "./command-router.js";
+import { formatWorkflowCommandToken } from "./command-parser.js";
 import { listExampleNames } from "./operator-ui.js";
 import { buildWorkflowCatalogModel } from "./workflow-catalog.js";
 
@@ -17,6 +18,7 @@ export function workflowArgumentCompletions(
   rawPrefix: string,
   projectRoot: string,
   workingDirectory = projectRoot,
+  actionableRunIds?: readonly string[],
 ): CommandArgumentCompletion[] | null {
   const prefix = rawPrefix.replace(/^\s+/u, "");
   const rootCommands: CommandArgumentCompletion[] = [
@@ -24,13 +26,16 @@ export function workflowArgumentCompletions(
     { value: "list ", label: "list", description: "Browse workflow catalog" },
     { value: "info ", label: "info", description: "Show one workflow" },
     { value: "status ", label: "status", description: "Inspect persisted run status" },
+    { value: "result ", label: "result", description: "Read a finished run result" },
     { value: "run ", label: "run", description: "Start a workflow" },
+    { value: "continue ", label: "continue", description: "Answer a workflow handoff" },
     { value: "stop ", label: "stop", description: "Stop a workflow explicitly" },
   ];
   if (!prefix.includes(" ")) return matchingCompletions(rootCommands, prefix);
   if (prefix.startsWith("list ")) return null;
 
   const runIds = (): string[] => listWorkflowRunIds(projectRoot).slice(0, 20);
+  const continuationRunIds = (): readonly string[] => actionableRunIds?.slice(0, 20) ?? runIds();
   const workflowNames = (): string[] => {
     try {
       return buildWorkflowCatalogModel(projectRoot, workingDirectory).current.map((row) => row.name);
@@ -40,7 +45,7 @@ export function workflowArgumentCompletions(
   };
   if (prefix.startsWith("info ")) {
     return matchingCompletions(
-      workflowNames().map((name) => ({ value: `info ${name}`, label: name })),
+      workflowNames().map((name) => ({ value: `info ${formatWorkflowCommandToken(name)}`, label: name })),
       prefix,
     );
   }
@@ -48,6 +53,24 @@ export function workflowArgumentCompletions(
     return matchingCompletions(
       runIds().map((runId) => ({ value: `status ${runId}`, label: runId })),
       prefix,
+    );
+  }
+  if (prefix.startsWith("result ")) {
+    return matchingCompletions(
+      [
+        { value: "result last", label: "last", description: "Most recently started run" },
+        ...runIds().map((runId) => ({ value: `result ${runId}`, label: runId })),
+      ],
+      prefix,
+    );
+  }
+  if (prefix.startsWith("continue ")) {
+    const completions = workflowContinueArgumentCompletions(prefix.slice("continue ".length), continuationRunIds());
+    return (
+      completions?.map((completion) => ({
+        ...completion,
+        value: `continue ${completion.value}`,
+      })) ?? null
     );
   }
   if (prefix.startsWith("stop ")) {
@@ -67,7 +90,7 @@ export function workflowArgumentCompletions(
   if (targetPrefix.includes("/") || targetPrefix.startsWith(".")) return null;
   if (firstSpace < 0) {
     return matchingCompletions(
-      workflowNames().map((name) => ({ value: `run ${name}`, label: name })),
+      workflowNames().map((name) => ({ value: `run ${formatWorkflowCommandToken(name)}`, label: name })),
       prefix,
     );
   }

@@ -114,7 +114,7 @@ process.stdout.write(JSON.stringify({
   ok: true,
   loads: 2,
   // The producer's own view of the viewer it just opened: registered, and rendering
-  // header + 4 body rows + footer for a 6-row terminal.
+  // the complete empty-transcript view (six lines here, independent of terminal height).
   producerOpened,
   // Only possible on one shared set: the consumer opened nothing and reads the peer's viewer.
   consumerObserved,

@@ -14,6 +14,7 @@ import {
   type WorkflowBackgroundLaunchResult,
   type WorkflowBackgroundRunContext,
   type WorkflowBackgroundRunRegistry,
+  type WorkflowBackgroundRunSnapshot,
   type WorkflowBackgroundStopResult,
   type WorkflowSessionLease,
 } from "./background-run-registry.js";
@@ -78,6 +79,7 @@ export interface WorkflowCommandLauncher {
     hostSignal: AbortSignal,
     execute: (background: WorkflowBackgroundRunContext) => Promise<T>,
   ): WorkflowBackgroundLaunchResult<T>;
+  unsettled(lease: WorkflowSessionLease): WorkflowBackgroundRunSnapshot<unknown>[];
   stop(lease: WorkflowSessionLease, selector?: string): WorkflowBackgroundStopResult;
   shutdown(): void;
 }
@@ -175,6 +177,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
         ? ({ ok: false, reason: "stale-lease" } as const)
         : backgroundRuns.attach(lease, hostSignal, execute);
     },
+    unsettled: (lease) => backgroundRuns.unsettled(lease),
     stop: (lease, selector) => backgroundRuns.stop(lease, selector),
     shutdown() {
       sessionRevoked = true;

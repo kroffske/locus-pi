@@ -58,10 +58,11 @@ per-stage model pin; run it by path if you want to watch it move.
 ## 3. Run one
 
 ```
-/workflow-run <name|path> [input]              # canonical
-/workflows run <name|path> [input]             # same thing, older spelling
-/workflow-run <name> --resume <runId> [input]  # replay recorded answers
+/workflows run <name|path> [input]             # canonical
+/workflows run <name> --resume <runId> [input] # replay recorded answers
 ```
+
+Flat `/workflow-run` remains a compatibility alias while parity is proven.
 
 The model-callable form is the `workflow` tool: `{ name | scriptPath, input,
 continuation? }`. Both surfaces accept only **optional bounded text** as input —
@@ -78,9 +79,15 @@ this package will work either, and its failure names the reason.
 /workflows status               # recent runs
 /workflows status <runId>       # one run's stage progress
 /workflows result [runId|last]  # the whole terminal text of a finished run
-/workflows                      # reopen the oldest pending operator question
-/workflow-stop [runId|last]     # explicit cancellation
+/workflows continue <runId>     # continue a named handoff
+/workflows                      # open the command menu
+/workflows stop [runId|last]    # explicit cancellation
 ```
+
+In interactive TUI, menu `continue` lists eligible handoffs oldest-first and
+lets the operator select one. Typed `continue` names a run directly. RPC,
+print/no-UI, and TUI without interactive select receive help instead. Flat
+`/workflow-continue` and `/workflow-stop` remain compatibility aliases.
 
 On disk, under the project:
 
@@ -92,7 +99,9 @@ On disk, under the project:
 Top-level `disposition` is the lifecycle truth: `completed`,
 `awaiting_operator`, `cancelled`, or `failed`. A run sitting at
 `awaiting_operator` is waiting for a human answer, not broken — answer it with
-`/workflows` or `/workflow-continue <runId>`.
+the `/workflows` menu's `continue` entry or `/workflows continue <runId>`.
+Only runs launched by the current Pi session (and their continuations) open a
+question automatically; older handoffs remain durable until explicitly chosen.
 
 Inside the script's own returned value, `ok: false` fails the outer run even
 with no technical error, and `partial: true` is never a success. A run never

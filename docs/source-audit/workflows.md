@@ -47,7 +47,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   current target and script identity, atomically claims the source handoff,
   delegates continuation to `workflow-command-launcher.ts`, and releases the
   claim when launch is busy or stale. The adjacent controller owns only
-  session-local FIFO, snooze, question collection, and mount/launch guards.
+  session-local FIFO, question collection (including explicit declined
+  answers), and mount/launch guards.
 - `extensions/workflows/workflow-transcript.ts` owns the explicit command/tool
   transcript boundary. Command and tool runs buffer lifecycle without any
   active-run `sendMessage`. After completion, a command awaits `waitForIdle`,
@@ -69,7 +70,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
   reader, re-reads before open, and returns `stale` if the selected run target,
   path, SHA, or identity coverage changed. It never consults current source.
   `[R]` is a run-history lens;
-  `[P]`/`[U]`/`[PKG]` are compact labels for project, user, and package sources.
+  `[P]`/`[U]`/`[PKG]` are compact labels for project, user, and package sources;
+  catalog rows lead with the workflow name, while history rows lead with the
+  workflow name, then run id, then source badge.
 - `extensions/workflows/catalog-viewer.ts` owns the focused `/workflows list`
   cursor, current/history selection, catalog/source/identity screen transition,
   independent source and identity scroll, action focus, and width-bounded
@@ -80,8 +83,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   with no 24-row cap. `i` exposes the exact current path or history run ID,
   snapshot path, and SHA; Up/Down, PageUp/PageDown, Home, and End keep that
   identity reachable even at widths 8 and 1. Current ready source exposes
-  `Back`/`Start`/`Edit`/`Review`; history exposes only `Back`/`Review`. Tab changes
-  action focus, a caret plus semantic warning tone marks the selected action, and
+  `Back`/`Start`/`Edit`/`Review`; history exposes only `Back`/`Review`. Tab or
+  Left/Right changes action focus, a caret plus semantic warning tone marks the selected action, and
   success tone distinguishes other actions and metadata labels. Enter resolves a
   typed intent, Esc returns to the preserved catalog cursor from source, and `i`
   or Esc returns from identity to the preserved source position. Source
@@ -469,13 +472,21 @@ artifact digests and target/script identity before continuation, and serializes
 all Locus-owned custom UI through the shared operator-interaction owner. TUI
 uses inline select/text editing; RPC uses native bidirectional UI requests;
 print/JSON accepts only explicit `--answer` input. Pi provides no global lock for
-third-party extensions, so bare `/workflows` is the documented recovery path.
+third-party extensions, so bare `/workflows` opens the recovery menu and its
+`continue` entry is the documented recovery path.
 
-First-class `/workflow-run`, `/workflow-stop`, `/workflow-list`,
-`/workflow-info`, `/workflow-status`, and `/workflow-continue` registrations
-exist for native slash filtering and Tab selection. They route through the same
-handlers as compatibility `/workflows <subcommand>` forms; no duplicate launcher
-or cancellation owner exists.
+Bare `/workflows` is the canonical visible command and opens the unified menu
+in TUI when interactive select is available; each of its exact verbs —
+`dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop` —
+has a description beside it. RPC, headless hosts, and TUI without select
+receive the same help as a typed-command fallback. Direct typed
+`/workflows <subcommand>` forms remain supported. Flat `/workflow-run`,
+`/workflow-stop`, `/workflow-list`, `/workflow-info`, `/workflow-status`,
+`/workflow-result`, and
+`/workflow-continue` registrations exist for native slash filtering and Tab
+selection. They route through the same handlers as the unified command and stay
+as compatibility aliases until parity is proven; no duplicate launcher or
+cancellation owner exists.
 
 ## Workflow-author boundary
 

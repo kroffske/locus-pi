@@ -85,6 +85,7 @@ export interface WorkflowBackgroundRunRegistry {
     execute: (context: WorkflowBackgroundRunContext) => Promise<T>,
   ): WorkflowBackgroundLaunchResult<T>;
   active(lease: WorkflowSessionLease): WorkflowBackgroundRunSnapshot<unknown> | undefined;
+  unsettled(lease: WorkflowSessionLease): WorkflowBackgroundRunSnapshot<unknown>[];
   hasActiveSession(projectRoot: string, sessionId: string): boolean;
   stop(lease: WorkflowSessionLease, selector?: string): WorkflowBackgroundStopResult;
   shutdown(lease: WorkflowSessionLease): void;
@@ -124,6 +125,10 @@ export function workflowBackgroundRunRegistry(): WorkflowBackgroundRunRegistry {
       if (!isCurrentLease(state, lease)) return undefined;
       const record = findActiveExclusiveRun(state, lease);
       return record === undefined ? undefined : snapshot(record);
+    },
+    unsettled(lease) {
+      if (!isCurrentLease(state, lease)) return [];
+      return findUnsettledRuns(state, lease).map((record) => snapshot(record));
     },
     hasActiveSession(projectRoot, sessionId) {
       const current = state.sessions.get(sessionKey(projectRoot, sessionId));
@@ -243,16 +248,20 @@ function findActiveExclusiveRun(
   state: WorkflowBackgroundRunRegistryState,
   lease: WorkflowSessionLease,
 ): WorkflowBackgroundRunRecord<unknown> | undefined {
+  return findUnsettledRuns(state, lease).find(
+    // Records created by the v1 hot-reload shape predate this field and were
+    // all slash-command runs, so absence remains exclusive.
+    (record) => record.exclusive !== false,
+  );
+}
+
+function findUnsettledRuns(
+  state: WorkflowBackgroundRunRegistryState,
+  lease: WorkflowSessionLease,
+): WorkflowBackgroundRunRecord<unknown>[] {
   return [...state.runs.values()]
-    .filter(
-      (record) =>
-        sameSession(record.lease, lease) &&
-        record.state !== "settled" &&
-        // Records created by the v1 hot-reload shape predate this field and
-        // were all slash-command runs, so absence remains exclusive.
-        record.exclusive !== false,
-    )
-    .sort((left, right) => right.startedOrder - left.startedOrder)[0];
+    .filter((record) => sameSession(record.lease, lease) && record.state !== "settled")
+    .sort((left, right) => right.startedOrder - left.startedOrder);
 }
 
 function selectRun(

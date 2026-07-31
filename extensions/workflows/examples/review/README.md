@@ -9,8 +9,9 @@ read-only clarifier returns the shaped decision `{decision, questions}`. A
 the exact intent and readable questions, returns their complete refs, declares a
 generic actionable handoff, and stops. After Pi is idle, the oldest question
 opens directly in the primary editor. Arrow/Enter selection or inline custom
-text starts one host-owned continuation; bare `/workflows` reopens a question
-that was dismissed with Escape.
+text starts one host-owned continuation; the `/workflows` menu's `continue`
+entry selects an eligible handoff, while typed `/workflows continue <runId>`
+names one directly.
 
 A continuation supplies the operator's answers as ordinary text and attaches
 exactly `intent.md` plus `clarification-questions.md` through the workflow

@@ -22,11 +22,14 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |  1185 |              0 |            4 |      10 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
-resolves through `/workflow-run <name>`, discovered by existence on each call
+resolves through `/workflows run <name>`, discovered by existence on each call
 exactly like a project directory — there is no separate allowlist to keep in
 sync. The scan descends one directory level, which is how a workflow keeps its
 prompt resources and its diagram beside its entry, and it accepts only regular
 files, so a symlink never resolves out of the package.
+
+Flat `/workflow-run <name>` remains a compatibility alias for the canonical
+`/workflows run <name>` form.
 
 Two distribution levels remain, and they are independent of resolution:
 

@@ -16,11 +16,16 @@ import {
   requestInlineOperatorInteraction,
 } from "../_shared/operator/operator-interaction.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
+import { listWorkflowRunIds, readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "./command-completions.js";
-import { parseContinueCommand, parseRunCommand } from "./command-parser.js";
+import {
+  formatWorkflowCommandToken,
+  parseContinueCommand,
+  parseRunCommand,
+  parseWorkflowCommandToken,
+} from "./command-parser.js";
 import { isOneShotCommandMode, preflightWorkflowCommandTarget, workflowCommandIdleBlock } from "./launch-guard.js";
 import type { WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";
 import { clearWorkflowWidget, presentWorkflowHandoffPumpResult } from "./operator-surface.js";
@@ -55,6 +60,29 @@ import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 
 /** Bounded preview for hosts without custom UI; the file path carries the rest. */
 const WORKFLOW_RESULT_WIDGET_LINES = 40;
+const WORKFLOW_MENU_OPTION_LIMIT = 20;
+
+const WORKFLOW_MENU_COMMANDS = ["dashboard", "list", "info", "status", "result", "run", "continue", "stop"] as const;
+
+type WorkflowMenuCommand = (typeof WORKFLOW_MENU_COMMANDS)[number];
+type WorkflowMenuSelection =
+  { status: "selected"; value: string } | { status: "dismissed" } | { status: "failed"; message: string };
+
+const WORKFLOW_MENU_DESCRIPTIONS: Record<WorkflowMenuCommand, string> = {
+  dashboard: "inspect persisted runs and evidence",
+  list: "browse available workflows",
+  info: "inspect one workflow's details",
+  status: "view recent run progress",
+  result: "read a finished run's output",
+  run: "start a workflow",
+  continue: "answer a pending handoff",
+  stop: "stop an active run",
+};
+
+const WORKFLOW_MENU_OPTIONS = WORKFLOW_MENU_COMMANDS.map((command) => ({
+  command,
+  label: `${command} — ${WORKFLOW_MENU_DESCRIPTIONS[command]}`,
+}));
 
 const FLAT_WORKFLOW_COMMANDS = ["run", "stop", "list", "info", "status", "result", "continue"] as const;
 
@@ -81,15 +109,22 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
     const projectRoot = getProjectRoot(ctx);
     rememberCompletionContext(ctx);
 
-    // Bare `/workflows` reopens the oldest question; home is the no-attention fallback.
+    // Bare `/workflows` is the interactive command chooser. Noninteractive
+    // hosts receive the same grammar as a read-only block instead of a prompt.
     if (text === "") {
       clearWorkflowWidget(ctx, WORKFLOW_LIVE_WIDGET_KEY);
-      const pending = await pumpCurrentHandoffs(ctx);
-      if (pending.status !== "none") {
-        presentWorkflowHandoffPumpResult(ctx, pending);
-        return;
+      if (workflowMenuAvailable(ctx)) {
+        await openWorkflowCommandMenu(
+          ctx,
+          projectRoot,
+          getWorkingDirectory(ctx),
+          commandLauncher,
+          deps.actionableRunIds,
+          (command) => handleWorkflowCommand(command, ctx),
+        );
+      } else {
+        setOperatorWidget(ctx, "workflows", workflowHelpBlock());
       }
-      setOperatorWidget(ctx, "workflows", workflowHelpBlock());
       return;
     }
 
@@ -185,7 +220,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
 
     const infoMatch = /^info(?:\s+([\s\S]+))?$/.exec(text);
     if (infoMatch !== null) {
-      const name = infoMatch[1]?.trim();
+      const name = workflowInfoName(infoMatch[1]?.trim());
       const infoBlock = buildWorkflowInfoBlock(projectRoot, getWorkingDirectory(ctx), name === "" ? undefined : name);
       if (ctx.mode === "tui" && ctx.hasUI !== false && ctx.ui.custom !== undefined) {
         try {
@@ -288,7 +323,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
           "workflows",
           workflowWarningBlock(
             "Workflow continuation requires a source run id.",
-            "Retry: /workflow-continue <runId> [--answer <text>]",
+            "Retry: /workflows continue <runId> [--answer <text>]",
           ),
         );
         return;
@@ -297,7 +332,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
         setOperatorWidget(
           ctx,
           "workflows",
-          workflowWarningBlock("Missing text after --answer.", "Retry: /workflow-continue <runId> --answer <text>"),
+          workflowWarningBlock("Missing text after --answer.", "Retry: /workflows continue <runId> --answer <text>"),
         );
         return;
       }
@@ -311,7 +346,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
           "workflows",
           workflowWarningBlock(
             `No actionable workflow handoff was found for ${parsedContinue.runId}.`,
-            "Inspect durable evidence: /workflow-status <runId>",
+            "Inspect durable evidence: /workflows status <runId>",
           ),
         );
         return;
@@ -414,16 +449,290 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
     },
     {
       description:
-        "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input] | continue <runId> [--answer <text>] | stop [runId|last]. Bare /workflows reopens the oldest pending operator question; subcommands remain available for compatibility.",
+        "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | run <name|path> [--resume <runId>] [input] | continue <runId> [--answer <text>] | stop [runId|last]. Bare /workflows opens an interactive command menu only in a Pi TUI with select support; other hosts receive command help. Subcommands remain available directly.",
       getArgumentCompletions: (prefix) => {
         const context = deps.completionContext();
-        return workflowArgumentCompletions(prefix, context.projectRoot, context.workingDirectory);
+        return workflowArgumentCompletions(
+          prefix,
+          context.projectRoot,
+          context.workingDirectory,
+          deps.actionableRunIds(context.projectRoot),
+        );
       },
       handler: handleWorkflowCommand,
     },
   );
 
   registerWorkflowCommandAliases(pi, handleWorkflowCommand, deps.completionContext, deps.actionableRunIds);
+}
+
+function workflowMenuAvailable(ctx: ExtensionCommandContext): boolean {
+  return ctx.mode === "tui" && ctx.hasUI !== false && typeof ctx.ui.select === "function";
+}
+
+async function openWorkflowCommandMenu(
+  ctx: ExtensionCommandContext,
+  projectRoot: string,
+  workingDirectory: string,
+  commandLauncher: WorkflowCommandLauncher,
+  actionableRunIds: (projectRoot: string) => string[],
+  route: (command: string) => Promise<void>,
+): Promise<void> {
+  const root = await requestWorkflowMenuSelection(
+    ctx,
+    "[SELECT] Workflows",
+    WORKFLOW_MENU_OPTIONS.map((option) => option.label),
+  );
+  if (!presentWorkflowMenuSelectionFailure(ctx, root, "Retry /workflows or use /workflows <subcommand>.")) return;
+
+  const command = WORKFLOW_MENU_OPTIONS.find((option) => option.label === root.value)?.command;
+  if (command === undefined) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(
+        `Workflow menu returned an unsupported root selection: ${JSON.stringify(root.value)}.`,
+        "Retry /workflows or use /workflows <subcommand>.",
+      ),
+    );
+    return;
+  }
+  switch (command) {
+    case "dashboard":
+    case "list":
+    case "status":
+      await route(command);
+      return;
+    case "info": {
+      const selected = await selectWorkflowTarget(ctx, projectRoot, workingDirectory, "info");
+      if (selected !== undefined) await route(`info ${formatWorkflowCommandToken(selected.name)}`);
+      return;
+    }
+    case "result": {
+      const runId = await selectWorkflowRun(ctx, projectRoot, "read result for");
+      if (runId !== undefined) await route(`result ${runId}`);
+      return;
+    }
+    case "run": {
+      const selected = await selectWorkflowTarget(ctx, projectRoot, workingDirectory, "run");
+      if (selected !== undefined) {
+        fillWorkflowEditor(ctx, `/workflows run ${formatWorkflowCommandToken(selected.ref)}`);
+      }
+      return;
+    }
+    case "continue": {
+      let runIds: string[];
+      try {
+        runIds = actionableRunIds(projectRoot).slice(0, WORKFLOW_MENU_OPTION_LIMIT);
+      } catch (error) {
+        setOperatorWidget(
+          ctx,
+          "workflows",
+          workflowWarningBlock(
+            `Workflow handoffs could not be listed: ${errorMessage(error)}.`,
+            "No handoff was opened; inspect durable evidence with /workflows status.",
+          ),
+        );
+        return;
+      }
+      if (runIds.length === 0) {
+        setOperatorWidget(
+          ctx,
+          "workflows",
+          workflowWarningBlock("No workflow handoff currently needs an answer.", "Inspect runs: /workflows status"),
+        );
+        return;
+      }
+      const selected = await requestWorkflowMenuSelection(ctx, "[SELECT] Workflow handoff to continue", runIds);
+      if (!presentWorkflowMenuSelectionFailure(ctx, selected, "Retry /workflows continue <runId>.")) return;
+      await route(`continue ${selected.value}`);
+      return;
+    }
+    case "stop": {
+      const lease = commandLauncher.currentLease(ctx);
+      if (lease === undefined) {
+        setOperatorWidget(
+          ctx,
+          "workflows",
+          workflowWarningBlock(
+            "Workflow stop is unavailable because this extension session has already shut down.",
+            "Wait for Pi to finish reloading, then retry /workflows.",
+          ),
+        );
+        return;
+      }
+      const selectors = [...new Set(commandLauncher.unsettled(lease).map((run) => run.runId ?? run.launchId))];
+      if (selectors.length === 0) {
+        setOperatorWidget(
+          ctx,
+          "workflows",
+          workflowWarningBlock(
+            "No workflow run in the current session is available to stop.",
+            "Start one: /workflows run",
+          ),
+        );
+        return;
+      }
+      const selected = await requestWorkflowMenuSelection(ctx, "[SELECT] Workflow run to stop", ["last", ...selectors]);
+      if (!presentWorkflowMenuSelectionFailure(ctx, selected, "Retry /workflows stop [runId|last].")) return;
+      fillWorkflowEditor(ctx, `/workflows stop ${selected.value}`);
+      return;
+    }
+    default:
+      return assertNever(command);
+  }
+}
+
+async function selectWorkflowTarget(
+  ctx: ExtensionCommandContext,
+  projectRoot: string,
+  workingDirectory: string,
+  action: "info" | "run",
+): Promise<{ name: string; ref: string } | undefined> {
+  let rows: ReturnType<typeof buildWorkflowCatalogModel>["current"];
+  try {
+    rows = buildWorkflowCatalogModel(projectRoot, workingDirectory).current.slice(0, WORKFLOW_MENU_OPTION_LIMIT);
+  } catch (error) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(
+        `Workflow catalog could not be opened: ${errorMessage(error)}.`,
+        "No editor text was changed and no workflow was started.",
+      ),
+    );
+    return undefined;
+  }
+  if (rows.length === 0) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock("No current workflow is available.", "Browse: /workflows list"),
+    );
+    return undefined;
+  }
+  const choices = workflowTargetMenuChoices(rows);
+  const selected = await requestWorkflowMenuSelection(
+    ctx,
+    `[SELECT] Workflow to ${action}`,
+    choices.map((choice) => choice.label),
+  );
+  if (!presentWorkflowMenuSelectionFailure(ctx, selected, `Retry /workflows ${action} <name>.`)) return undefined;
+  const choice = choices.find((candidate) => candidate.label === selected.value);
+  if (choice !== undefined) return { name: choice.name, ref: choice.ref };
+  setOperatorWidget(
+    ctx,
+    "workflows",
+    workflowWarningBlock("Workflow selection no longer matches the current catalog.", "Nothing was opened or started."),
+  );
+  return undefined;
+}
+
+function workflowInfoName(raw: string | undefined): string | undefined {
+  if (raw === undefined || !raw.startsWith('"')) return raw;
+  const parsed = parseWorkflowCommandToken(raw);
+  return parsed?.rest === "" ? parsed.value : raw;
+}
+
+function workflowTargetMenuChoices(
+  rows: ReturnType<typeof buildWorkflowCatalogModel>["current"],
+): Array<{ label: string; name: string; ref: string }> {
+  const used = new Set<string>();
+  return rows.map((row) => {
+    const base = workflowTargetMenuLabel(row.name);
+    let label = base;
+    let suffix = 2;
+    while (used.has(label)) label = `${base} [${suffix++}]`;
+    used.add(label);
+    return { label, name: row.name, ref: row.target.ref };
+  });
+}
+
+function workflowTargetMenuLabel(name: string): string {
+  if (/^[^\s"\\\u0000-\u001f\u007f-\u009f]+$/u.test(name)) return name;
+  return JSON.stringify(name).replace(
+    /[\u007f-\u009f\u2028\u2029]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+async function selectWorkflowRun(
+  ctx: ExtensionCommandContext,
+  projectRoot: string,
+  action: string,
+): Promise<string | undefined> {
+  const runIds = listWorkflowRunIds(projectRoot).slice(0, WORKFLOW_MENU_OPTION_LIMIT);
+  if (runIds.length === 0) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock("No workflow run is available.", "Start one: /workflows run"),
+    );
+    return undefined;
+  }
+  const selected = await requestWorkflowMenuSelection(ctx, `[SELECT] Workflow run to ${action}`, runIds);
+  return presentWorkflowMenuSelectionFailure(ctx, selected, "Inspect runs: /workflows status")
+    ? selected.value
+    : undefined;
+}
+
+async function requestWorkflowMenuSelection(
+  ctx: ExtensionCommandContext,
+  title: string,
+  choices: string[],
+): Promise<WorkflowMenuSelection> {
+  try {
+    const result = await ctx.ui.select(title, choices);
+    if (result === undefined) return { status: "dismissed" };
+    if (typeof result !== "string") {
+      return { status: "failed", message: "Workflow menu returned an unsupported selection result." };
+    }
+    if (result === "") return { status: "failed", message: "Workflow menu returned an empty selection." };
+    const allowed = choices.includes(result);
+    return allowed
+      ? { status: "selected", value: result }
+      : { status: "failed", message: `Workflow menu returned an unsupported selection: ${JSON.stringify(result)}.` };
+  } catch (error) {
+    return { status: "failed", message: `Workflow menu closed with an error: ${errorMessage(error)}.` };
+  }
+}
+
+function presentWorkflowMenuSelectionFailure(
+  ctx: ExtensionCommandContext,
+  selection: WorkflowMenuSelection,
+  recovery: string,
+): selection is Extract<WorkflowMenuSelection, { status: "selected" }> {
+  if (selection.status === "selected") return true;
+  if (selection.status === "failed") {
+    setOperatorWidget(ctx, "workflows", workflowWarningBlock(selection.message, recovery));
+  }
+  return false;
+}
+
+function fillWorkflowEditor(ctx: ExtensionCommandContext, command: string): void {
+  if (ctx.ui.setEditorText === undefined) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(
+        "Workflow action could not fill the editor because this Pi host does not expose setEditorText().",
+        "Nothing was started or stopped; use the matching /workflows subcommand directly.",
+      ),
+    );
+    return;
+  }
+  try {
+    ctx.ui.setEditorText(command);
+  } catch (error) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(
+        `Workflow action could not fill the editor: ${errorMessage(error)}.`,
+        "Nothing was started or stopped.",
+      ),
+    );
+  }
 }
 
 function registerWorkflowCommandAliases(
@@ -466,19 +775,19 @@ function registerWorkflowCommandAliases(
 function flatWorkflowCommandDescription(command: FlatWorkflowCommand): string {
   switch (command) {
     case "run":
-      return "Run a saved workflow: /workflow-run <name|path> [--resume <runId>] [input]";
+      return "Compatibility alias for /workflows run <name|path> [--resume <runId>] [input]: /workflow-run";
     case "stop":
-      return "Explicitly stop a workflow: /workflow-stop [runId|last]";
+      return "Compatibility alias for /workflows stop [runId|last]: /workflow-stop";
     case "list":
-      return "Browse saved workflows: /workflow-list [query]";
+      return "Compatibility alias for /workflows list [query]: /workflow-list";
     case "info":
-      return "Show workflow information: /workflow-info [name]";
+      return "Compatibility alias for /workflows info [name]: /workflow-info";
     case "status":
-      return "Inspect persisted workflow evidence: /workflow-status [runId]";
+      return "Compatibility alias for /workflows status [runId]: /workflow-status";
     case "result":
-      return "Read the full text a run finished with: /workflow-result [runId|last]";
+      return "Compatibility alias for /workflows result [runId|last]: /workflow-result";
     case "continue":
-      return "Answer and continue an actionable workflow handoff: /workflow-continue <runId> [--answer <text>]";
+      return "Compatibility alias for /workflows continue <runId> [--answer <text>]: /workflow-continue";
     default:
       return assertNever(command);
   }

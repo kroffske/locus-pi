@@ -14,12 +14,14 @@ import { workflowJournalFile } from "./runtime/workflow-run-layout.js";
 import { notifyOperator } from "../_shared/operator/operator-notify.js";
 
 /**
- * One custom message type carries both run-boundary records. The name says what
- * the block is (one workflow run) instead of when it was emitted; `details
- * .eventKind` separates the opening banner from the closing digest. It stays a
- * single declared surface: the manifest lists one customType, not two.
+ * One custom message type carries both bounded run-boundary records. The name
+ * says what the block is (one workflow run) instead of when it was emitted;
+ * `details.eventKind` separates the opening banner from the closing digest.
+ * Exact terminal prose uses a second type so it is visibly separate and may be
+ * unbounded without weakening the digest contract.
  */
 export const WORKFLOW_RUN_CUSTOM_TYPE = "locus-workflow-run";
+export const WORKFLOW_RESULT_CUSTOM_TYPE = "locus-workflow-result";
 const TRANSCRIPT_AGENT_ROW_LIMIT = 20;
 const TRANSCRIPT_LINE_MAX_CHARS = 160;
 const TRANSCRIPT_RULE_WIDTH = 64;
@@ -38,6 +40,9 @@ export interface WorkflowTranscriptCompletion {
   runId: string;
   digest: string;
   lineCount: number;
+  /** Exact terminal prose, published separately from the bounded lifecycle digest. */
+  resultText?: string;
+  resultTextPath?: string;
 }
 
 export interface WorkflowTranscriptOptions {
@@ -218,6 +223,8 @@ export function createWorkflowTranscript(
         runId: res.runId,
         digest: [...headerLines, ...bodyLines].join("\n"),
         lineCount: bodyLines.length,
+        ...(typeof res.result === "string" && res.result.trim() !== "" ? { resultText: res.result } : {}),
+        ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
       };
       return completion;
     },
@@ -437,7 +444,8 @@ export function announceCommandWorkflowStart(
 }
 
 /**
- * Persist one command digest only after Pi reports the parent session idle.
+ * Persist one command digest and, when present, the exact prose result only
+ * after Pi reports the parent session idle.
  * `waitForIdle()` followed immediately by `isIdle()` and `sendMessage()` has no
  * intervening await, so the host's synchronous sendCustomMessage branch sees
  * the same settled state and appends instead of steering.
@@ -478,8 +486,25 @@ export async function persistCommandWorkflowTranscript(
     if (!isCurrent()) return false;
     // No await between the final idle check and this call. Pi 0.82.0 chooses
     // append-vs-steer synchronously inside sendCustomMessage.
-    const pending = pi.sendMessage(message, { triggerTurn: false });
-    if (pending !== undefined) await pending;
+    const pendingMessages = [pi.sendMessage(message, { triggerTurn: false })];
+    if (completion.resultText !== undefined) {
+      pendingMessages.push(
+        pi.sendMessage(
+          {
+            customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+            content: completion.resultText,
+            display: true,
+            details: {
+              eventKind: "workflow_result",
+              runId: completion.runId,
+              ...(completion.resultTextPath !== undefined ? { resultTextPath: completion.resultTextPath } : {}),
+            },
+          },
+          { triggerTurn: false },
+        ),
+      );
+    }
+    await Promise.all(pendingMessages);
     return true;
   } catch {
     notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage failed.");

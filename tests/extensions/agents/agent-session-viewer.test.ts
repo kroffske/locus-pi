@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { TUI, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -73,10 +73,104 @@ function executionFor(rowId: string): AgentLiveExecutionHandle {
   return execution;
 }
 
+class RecordingTerminal implements Terminal {
+  readonly writes: string[] = [];
+  readonly kittyProtocolActive = false;
+
+  constructor(
+    readonly columns: number,
+    readonly rows: number,
+  ) {}
+
+  start(): void {}
+  stop(): void {}
+  async drainInput(): Promise<void> {}
+  write(data: string): void {
+    this.writes.push(data);
+  }
+  moveBy(): void {}
+  hideCursor(): void {}
+  showCursor(): void {}
+  clearLine(): void {}
+  clearFromCursor(): void {}
+  clearScreen(): void {}
+  setTitle(): void {}
+  setProgress(): void {}
+
+  get output(): string {
+    return this.writes.join("");
+  }
+
+  reset(): void {
+    this.writes.length = 0;
+  }
+}
+
+async function flushForcedRender(tui: TUI): Promise<void> {
+  tui.requestRender(true);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 afterEach(() => agentLiveStore.reset());
 
 describe("AgentSessionViewer", () => {
-  it("fills exact terminal height, follows tail, pauses on Up, and resumes on End", () => {
+  it("shows the original request at the start and separates the viewer from surrounding UI", () => {
+    const row = agentLiveStore.begin({
+      id: "request-viewer",
+      agentName: "reviewer",
+      label: "Review",
+      request: "Inspect the changed command router and explain every regression risk before editing.",
+    });
+    for (let index = 0; index < 8; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `history-${index}` }], stopReason: "stop" },
+      });
+    }
+    const tui = { terminal: { rows: 8, columns: 32 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+    const rendered = viewer.render(32);
+    expect(rendered.length).toBeGreaterThan(tui.terminal.rows);
+    expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
+    expect(rendered[0]).toMatch(/^── /u);
+    expect(rendered.at(-1)).toMatch(/^── Esc\/q close/u);
+    const fullHistory = rendered.join("\n");
+    expect(fullHistory).toContain("── Request");
+    expect(fullHistory).toContain("Inspect the changed command");
+    expect(fullHistory).toContain("history-0");
+    expect(fullHistory).toContain("history-7");
+    expect(fullHistory.indexOf("── Request")).toBeLessThan(fullHistory.indexOf("── Agent history"));
+    for (const width of [1, 2, 8]) {
+      const narrow = viewer.render(width);
+      expect(narrow.length).toBeGreaterThan(tui.terminal.rows);
+      expect(narrow.every((line) => visibleWidth(line) === width)).toBe(true);
+    }
+    viewer.dispose();
+  });
+
+  it("renders request control characters as text instead of terminal control sequences", () => {
+    const row = agentLiveStore.begin({
+      id: "safe-request-viewer",
+      agentName: "reviewer",
+      label: "Review",
+      request: "Check \u001b[31mred\u001b[0m and \u009b31mC1-red\u009b0m output\tcarefully.",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 8, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const rendered = viewer.render(80).join("\n");
+    expect(rendered).not.toContain("\u001b[31mred");
+    expect(rendered).not.toContain("\u009b");
+    expect(rendered).toContain("Check �[31mred�[0m and �31mC1-red�0m output  carefully.");
+    viewer.dispose();
+  });
+
+  it("renders every retained block beyond terminal height and includes live additions in the same history", () => {
     const row = agentLiveStore.begin({ id: "viewer-row", agentName: "reviewer", label: "Review" });
     for (let index = 0; index < 12; index += 1) {
       agentLiveStore.feedSessionEvent(row.id, {
@@ -87,23 +181,84 @@ describe("AgentSessionViewer", () => {
     const tui = { terminal: { rows: 8, columns: 80 }, requestRender: vi.fn() };
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
-    const tail = viewer.render(80);
-    expect(tail).toHaveLength(8);
-    expect(tail.every((line) => visibleWidth(line) === 80)).toBe(true);
-    expect(tail.join("\n")).toContain("message-11");
+    const initial = viewer.render(80);
+    expect(initial.length).toBeGreaterThan(tui.terminal.rows);
+    expect(initial.every((line) => visibleWidth(line) === 80)).toBe(true);
+    expect(initial.join("\n")).toContain("message-0");
+    expect(initial.join("\n")).toContain("message-11");
 
+    tui.requestRender.mockClear();
     viewer.handleInput("up");
+    viewer.handleInput("home");
+    viewer.handleInput("end");
+    expect(tui.requestRender).not.toHaveBeenCalled();
     agentLiveStore.feedSessionEvent(row.id, {
       type: "message_end",
       message: { role: "assistant", content: [{ type: "text", text: "message-12" }], stopReason: "stop" },
     });
-    expect(viewer.followTail).toBe(false);
-    expect(viewer.render(80).slice(1, -1).join("\n")).not.toContain("assistant:message-12");
-
-    viewer.handleInput("end");
-    expect(viewer.followTail).toBe(true);
-    expect(viewer.render(80).join("\n")).toContain("message-12");
+    expect(tui.requestRender).toHaveBeenCalled();
+    const updated = viewer.render(80).join("\n");
+    expect(updated).toContain("message-0");
+    expect(updated).toContain("message-12");
     viewer.dispose();
+  });
+
+  it("writes the complete retained history through Pi TUI across live and control redraws", async () => {
+    const row = agentLiveStore.begin({
+      id: "tui-scrollback-row",
+      agentName: "reviewer",
+      label: "Review",
+      request: "Inspect every retained message.",
+    });
+    for (let index = 0; index < 12; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `scrollback-${index}` }], stopReason: "stop" },
+      });
+    }
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "tool_execution_start",
+      toolCallId: "read-scrollback",
+      toolName: "read",
+      args: { path: "README.md" },
+    });
+    const terminal = new RecordingTerminal(80, 8);
+    const tui = new TUI(terminal, false);
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability(), {
+      active: 2,
+      list: [1, 2],
+      readBody: (round) => (round === 1 ? ["historical-round-1"] : undefined),
+    });
+    tui.addChild(viewer);
+
+    await flushForcedRender(tui);
+    expect(terminal.output.split("\r\n").length).toBeGreaterThan(terminal.rows);
+    expect(terminal.output).toContain("Inspect every retained message.");
+    for (let index = 0; index < 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+    expect(terminal.output).toContain("tool:read:compact");
+
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "scrollback-12" }], stopReason: "stop" },
+    });
+    await vi.waitFor(() => expect(terminal.output).toContain("scrollback-12"));
+
+    terminal.reset();
+    viewer.handleInput("d");
+    await flushForcedRender(tui);
+    expect(terminal.output).toContain("tool:read:expanded");
+    for (let index = 0; index <= 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+
+    terminal.reset();
+    viewer.handleInput("left");
+    await flushForcedRender(tui);
+    expect(terminal.output).toContain("historical-round-1");
+    viewer.handleInput("right");
+    await flushForcedRender(tui);
+    for (let index = 0; index <= 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+
+    viewer.dispose();
+    tui.stop();
   });
 
   it("toggles native tool detail and closes without cancelling the row", () => {
@@ -131,7 +286,7 @@ describe("AgentSessionViewer", () => {
     expect(agentLiveStore.rows.get(row.id)?.status).toBe("working");
   });
 
-  it("lets focused viewer receive Escape and Down before global terminal guards", async () => {
+  it("keeps Escape ownership while leaving terminal navigation to Pi scrollback", async () => {
     const h = createHarness(process.cwd(), { isStreaming: true });
     h.ctx.hasUI = true;
     agents(h.pi);
@@ -144,8 +299,9 @@ describe("AgentSessionViewer", () => {
     expect([...h.terminalInputHandlers].map((handler) => handler("down")).every((result) => result === undefined)).toBe(
       true,
     );
+    tui.requestRender.mockClear();
     viewer.handleInput("down");
-    expect(tui.requestRender).toHaveBeenCalled();
+    expect(tui.requestRender).not.toHaveBeenCalled();
 
     expect(
       [...h.terminalInputHandlers].map((handler) => handler("escape")).every((result) => result === undefined),

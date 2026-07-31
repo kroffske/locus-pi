@@ -208,8 +208,9 @@ export default function workflows(pi: ExtensionAPI): void {
   // No handoff pump here on purpose, and the run scope resets to empty: a session
   // opens on the operator's terms. An unanswered question from an earlier session
   // stays readable in its run's evidence and is reopened only when the operator
-  // asks (`/workflows`, `/workflow-continue <runId>`) — never as a modal the new
-  // session starts with, and never on its first settled turn either.
+  // asks (bare `/workflows`, then `continue`, or `/workflow-continue <runId>`) —
+  // never as a modal the new session starts with, and never on its first settled
+  // turn either.
   pi.on("session_start", (_event, ctx) => {
     resetWorkflowLiveExecutions();
     disposeSessionPanels();

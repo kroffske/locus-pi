@@ -143,6 +143,7 @@ export type AgentLiveGroupKind = "parallel" | "pipeline";
 
 const MAX_AGENT_LIVE_EVENT_LINES = 200;
 const MAX_AGENT_LIVE_EVENT_LINE_LENGTH = 300;
+const MAX_AGENT_LIVE_REQUEST_LENGTH = 32_000;
 
 export interface AgentLiveRow {
   id: string;
@@ -155,6 +156,8 @@ export interface AgentLiveRow {
   label: string;
   /** Short work description shown in the live row (≤48 cols, REQ-003); falls back to the label. */
   title?: string;
+  /** Bounded original task sent to the child, kept separate from the internal kickoff capsule. */
+  request?: string;
   /**
    * Workflow loop slot descriptor `(phase, label)` (REQ-009, D-006). Present only for
    * workflow agents anchored to a repeatable slot; correlates the live row with the
@@ -212,6 +215,7 @@ interface AgentLiveBeginOptions {
   agentName?: string;
   label: string;
   title?: string;
+  request?: string;
   slotKey?: string;
   round?: number;
   model?: string;
@@ -459,6 +463,7 @@ class AgentLiveStore {
     const groupTotal = freshExecution
       ? (options.groupTotal ?? existing?.groupTotal)
       : (existing?.groupTotal ?? options.groupTotal);
+    const request = options.request ?? (freshExecution ? undefined : existing?.request);
     if (resetTransient) this.#transcripts.delete(id);
     const row: AgentLiveRow = {
       id,
@@ -476,6 +481,7 @@ class AgentLiveStore {
       ...(existing?.title !== undefined || options.title !== undefined
         ? { title: existing?.title ?? options.title }
         : {}),
+      ...(request !== undefined ? { request: boundedAgentLiveRequest(request) } : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
       status: freshExecution ? "queued" : (existing?.status ?? "queued"),
@@ -806,8 +812,14 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
         const execution =
           options.liveExecution ??
           (options.live !== undefined
-            ? agentLiveStore.beginExecution(liveBeginOptions(options.live.rowId, request.agent.name, options.live, cwd))
+            ? agentLiveStore.beginExecution(
+                liveBeginOptions(options.live.rowId, request.agent.name, options.live, cwd, request.task),
+              )
             : agentLiveStore.claimQueuedExecution(request.agent.name, request.agent.name));
+        const boundedRequest = boundedAgentLiveRequest(request.task);
+        if (agentLiveStore.rowForExecution(execution)?.request !== boundedRequest) {
+          agentLiveStore.patchExecution(execution, { request: boundedRequest });
+        }
         unregisterCancel = agentLiveStore.registerCancelForExecution(execution, () => childController.abort());
         try {
           options.onLiveExecution?.(execution);
@@ -1757,6 +1769,12 @@ function compactAgentLiveValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function boundedAgentLiveRequest(value: string): string {
+  if (value.length <= MAX_AGENT_LIVE_REQUEST_LENGTH) return value;
+  const omitted = value.length - MAX_AGENT_LIVE_REQUEST_LENGTH;
+  return `${value.slice(0, MAX_AGENT_LIVE_REQUEST_LENGTH)}\n\n… ${omitted} additional request character(s) omitted`;
+}
+
 function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
@@ -1766,11 +1784,13 @@ function liveBeginOptions(
   agentName: string,
   live: NonNullable<AgentSdkSessionExecutorOptions["live"]>,
   cwd: string,
+  request: string,
 ): AgentLiveBeginOptions {
   const options: AgentLiveBeginOptions = {
     agentName,
     label: live.label ?? agentName,
     currentPath: cwd,
+    request,
   };
   if (rowId !== undefined) options.id = rowId;
   if (live.title !== undefined) options.title = live.title;

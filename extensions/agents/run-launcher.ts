@@ -78,6 +78,7 @@ export async function runAgentLiveTask(
     agentName: resolvedAgent,
     label,
     title,
+    request: input.task,
     ...(liveModel?.model !== undefined ? { model: liveModel.model } : {}),
     ...(liveModel?.thinking !== undefined ? { thinking: liveModel.thinking } : {}),
     isolated: false,

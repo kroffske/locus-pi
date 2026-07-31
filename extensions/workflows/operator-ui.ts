@@ -32,18 +32,19 @@ export function workflowHelpBlock(): OperatorBlock {
   return {
     type: "VIEW",
     subject: "Workflow commands",
-    primary: "No workflow needs an answer. Browse, inspect, run, continue, or explicitly stop workflows.",
+    primary: "Choose a workflow command directly; the interactive menu is available in a Pi TUI.",
     body: [
       "Dashboard: /workflows dashboard",
-      "Catalog: /workflow-list [query]",
-      "Info: /workflow-info [exact-name]",
-      "History: /workflow-status [runId]",
-      "Run: /workflow-run <name|path> [--resume <runId>] [input]",
-      "Continue: /workflow-continue <runId> [--answer <text>]",
-      "Stop: /workflow-stop [runId|last]",
+      "Catalog: /workflows list [query]",
+      "Info: /workflows info [exact-name]",
+      "History: /workflows status [runId]",
+      "Result: /workflows result [runId|last]",
+      "Run: /workflows run <name|path> [--resume <runId>] [input]",
+      "Continue: /workflows continue <runId> [--answer <text>]",
+      "Stop: /workflows stop [runId|last]",
     ],
     metadata: [
-      "Existing /workflows <subcommand> forms remain supported.",
+      "Compatibility aliases remain available: /workflow-list, /workflow-info, /workflow-status, /workflow-result, /workflow-run, /workflow-continue, and /workflow-stop.",
       "A command starts execution only when the Pi session is provably idle.",
     ],
   };
@@ -56,7 +57,7 @@ export function workflowUnknownCommandBlock(text: string, available: string[]): 
     primary: `Unknown workflow command: ${text}`,
     body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
     controls: [
-      "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | run <name|path> [--resume <runId>] [input] | continue <runId> [--answer <text>] | stop [runId|last]",
+      "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | run <name|path> [--resume <runId>] [input] | continue <runId> [--answer <text>] | stop [runId|last]",
     ],
   };
 }
