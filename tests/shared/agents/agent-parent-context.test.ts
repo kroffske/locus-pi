@@ -32,6 +32,9 @@ function pi(): ExtensionAPI {
     on() {},
     appendEntry: vi.fn(async () => {}),
     async sendUserMessage() {},
+    getActiveTools() {
+      return [];
+    },
     setActiveTools() {},
   };
 }

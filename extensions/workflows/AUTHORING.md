@@ -387,6 +387,12 @@ question, context mode, strategy, selectors, output instruction, and member
 prompts. Treat the judge as a synthesizer, not a correctness oracle. If the
 answer needs independent verification, make that a later `agent()` stage.
 
+`dsl.fusion()` is the author-controlled form inside a trusted Workflow script.
+The default-loaded workflows extension also registers an opt-in `fusion` tool
+for the main Pi session. `/fusion` selects concrete available member/judge models
+and controls whether that tool is active; it does not change options declared by
+a Workflow script. Direct tool runs use this same runtime and evidence layout.
+
 **Making a tier mean something.** Roles resolve through `session` → Pi settings →
 project config → user config. The project layer is a local, git-ignored file:
 

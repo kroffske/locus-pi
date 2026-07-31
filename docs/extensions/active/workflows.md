@@ -23,6 +23,8 @@ A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / publ
 consumeTextArtifact / awaitOperator / parallel / pipeline / phase / log / promptFile / workspace`)
 for orchestrating catalog-agent sessions through the existing
 `task / createAgentSession` path and retaining their evidence under one run root.
+The same extension owns an opt-in direct `fusion` tool for the main Pi session;
+it is registered but inactive until the operator configures and enables it.
 
 One way a workflow reaches a model:
 
@@ -404,6 +406,37 @@ JavaScript is not supported.
 /workflows status <runId>         interactive stage evidence; bounded detail without custom UI
 /workflows result [runId|last]    the whole text the run finished with, scrollable and untruncated
 ```
+
+### Direct Fusion from the main session
+
+Fusion also has a model-callable `fusion` tool. It is disabled by default, so it
+does not enter the active tool list or the parent model's tool prompt until an
+operator explicitly enables it.
+
+```text
+/fusion                                      # interactive menu or passive status
+/fusion configure                            # choose 2–10 members and one judge
+/fusion set --members provider/a,provider/b --judge provider/judge
+/fusion enable
+/fusion disable
+/fusion status
+/fusion run <complete standalone question>  # manual call through the same runner
+```
+
+The interactive selector reads `modelRegistry.getAvailable()`, so it shows only
+models the current Pi host can actually use rather than every model known to a
+provider. Configuration is project-local at
+`.pi/locus-pi/fusion/config.json`. Members must be unique, and the judge must be
+different from every member. Enabling fails closed when the roster is incomplete
+or a selected model is no longer available.
+
+The tool accepts `question`, optional explicit `context`, and an optional final
+`output` instruction. It never forwards ambient session history. A direct run
+uses the same read-only, tool-free Fusion calls and writes the same packet,
+answers, journal, result envelope, and readable output under
+`.pi/locus-pi/workflows/<runId>/` as the Workflow DSL primitive. Disabling removes
+`fusion` from Pi's active tools immediately while leaving `/fusion` available for
+configuration.
 
 Every finished-run surface is bounded on purpose: the chat digest caps a line at
 160 characters because it enters model context, and the live panel clips to the

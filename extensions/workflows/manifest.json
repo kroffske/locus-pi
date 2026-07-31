@@ -36,6 +36,7 @@
     "workflow history uses [R] independently from persisted source tags [P]/[U]/[PKG]; passive TUI bounds status/detail to 10/20 rows, RPC to 4/1 rows, and all variants point to persisted run evidence",
     "programmatic workflow tool declares exec approval metadata to the Pi host; approval details warn that the reviewed file has full host Node.js/module access and that approval is consent, not capability isolation",
     "programmatic workflow tool stays headless and does not add a launch prompt",
+    "the direct fusion tool is registered by the default workflows extension but removed from pi.getActiveTools by default; /fusion configures 2-10 unique concrete member models and a separate judge from modelRegistry.getAvailable, persists the project-local roster under .pi/locus-pi/fusion/config.json, and uses pi.setActiveTools to enable or disable the tool immediately without changing unrelated active tools; every invocation revalidates enabled state and current model availability before creating a run, forwards no ambient history, and executes through the same read-only tool-free Fusion runtime, child bridge, journal, artifacts, result envelope, and report as dsl.fusion",
     "an agent catalog plus the createAgentSession host is required to spawn sub-agents; workflow-local behavior is supplied through rendered prompts",
     "DSL agent/publishArtifact/consumeTextArtifact/continuationArtifacts/parallel/pipeline/phase/log routes every sub-agent through executeAgentRunBoundary with createAgentSdkSessionExecutor; continuationArtifacts exposes readonly exact source refs paired with host-consumed current-run text artifacts; agent() returns exact non-empty child text, automatically persists answer/transcript/result evidence, and parses JSON-looking output only for an opt-in agent({schema}) call",
     "DSL promptFile() renders source-relative .prompt.md resources with strict variables; workflow-local agent files are not supported",
@@ -99,11 +100,12 @@
     "process-shared agentLiveStore.rows parent/child live-row state for workflow progress rendering and agents-entrypoint drill/control, with explicit workflowRunId provenance, command-only workflow stop eligibility, display-time collapse of workflow parent rows after SDK child rows exist, and store-owned retention/pruning of workflow subtrees: newest five fully terminal runs remain available while older terminal runs are removed; active, queued, and zero-row runs are untouched",
     "AgentLiveRow optional metadata and group rows for source-backed live progress details",
     "up to two Pi session custom messages with customType locus-workflow-run per command run: one idle-checked run-boundary banner at launch and one post-idle bounded digest at settlement (both participate in LLM context), plus the native workflow toolResult for one bounded tool lifecycle digest",
-    ".pi/locus-pi/workflows/<runId>/runtime/artifacts/transcripts/<callId>/*.jsonl (fresh per-child SDK session evidence)"
+    ".pi/locus-pi/workflows/<runId>/runtime/artifacts/transcripts/<callId>/*.jsonl (fresh per-child SDK session evidence)",
+    ".pi/locus-pi/fusion/config.json for project-local enabled state, concrete member selectors, and the separate judge selector"
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": ["workflow"],
+    "tools": ["workflow", "fusion"],
     "commands": [
       "workflows",
       "workflow-run",
@@ -112,7 +114,8 @@
       "workflow-info",
       "workflow-status",
       "workflow-result",
-      "workflow-continue"
+      "workflow-continue",
+      "fusion"
     ],
     "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled"]
   },
@@ -156,6 +159,12 @@
         "taxonomy": ["transient-widget", "status", "overlay-selector", "artifact-write", "no-ui"],
         "transient": ["widget:workflows", "status:locus contribution workflow.run"],
         "persistent": [".pi/locus-pi/workflows/**"]
+      },
+      {
+        "name": "fusion",
+        "taxonomy": ["transient-widget", "persistent-state", "artifact-write", "no-ui"],
+        "transient": ["widget:fusion", "widget:fusion-live"],
+        "persistent": [".pi/locus-pi/fusion/config.json", ".pi/locus-pi/workflows/**"]
       }
     ]
   },
@@ -168,7 +177,7 @@
     "network": ["*"],
     "browser": true,
     "models": true,
-    "ui": ["setWidget", "setStatus", "notify", "custom", "select", "input", "setEditorText"]
+    "ui": ["setWidget", "setStatus", "notify", "custom", "select", "input", "editor", "setEditorText"]
   },
   "risk": "critical",
   "docsPath": "docs/extensions/active/workflows.md",
@@ -203,7 +212,9 @@
     "tests/extensions/workflows/workflows-launch-gate.test.ts",
     "tests/extensions/workflows/workflows-progress.test.ts",
     "tests/integration/public-registration.test.ts",
-    "tests/extensions/workflows/workflow-result-text.test.ts"
+    "tests/extensions/workflows/workflow-result-text.test.ts",
+    "tests/shared/workflows/workflow-fusion.test.ts",
+    "tests/extensions/workflows/fusion-tool.test.ts"
   ],
   "review": {
     "status": "reviewed",

@@ -66,6 +66,7 @@
     "tests/extensions/plan/plan-command-surfaces.test.ts",
     "tests/extensions/todo-context/todo-command-surfaces.test.ts",
     "tests/extensions/workflows/consilium-reference-workflow.test.ts",
+    "tests/extensions/workflows/fusion-tool.test.ts",
     "tests/extensions/workflows/workflow-command-surfaces.test.ts",
     "tests/extensions/workflows/workflow-result-text.test.ts",
     "tests/shared/operator-interaction.test.ts",

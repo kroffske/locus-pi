@@ -16,6 +16,15 @@ This file records user-visible changes to the public package.
   complete roster before the first child, and concurrent Fusion calls reserve
   their worst-case invocation counts instead of overcommitting the run budget.
 
+- **The main Pi session can now call Fusion directly as an opt-in `fusion`
+  tool.** `/fusion` configures 2–10 concrete member models and a separate judge
+  from the host's available-model list, enables or disables the tool immediately,
+  reports its current state, and can run a question manually. Fusion is disabled
+  by default, so its schema and description do not enter the model's active tool
+  context until the operator enables it; direct runs retain the same isolated
+  prompts, model preflight, limits, journal, answers, packet, and result evidence
+  as `dsl.fusion()`.
+
 - **The public extension catalog now gives operators and planning agents a
   concise English roster of all ten default extensions.** It links each
   entrypoint, manifest, and active manual, separates direct feature edges from

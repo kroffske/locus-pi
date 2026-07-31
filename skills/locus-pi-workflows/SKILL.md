@@ -72,6 +72,14 @@ closed `continuation` control, never encoded inside `input`.
 Start `live-smoke` first on an unfamiliar machine. If it fails, nothing else in
 this package will work either, and its failure names the reason.
 
+For a one-question multi-model panel from the main session, use the opt-in
+`fusion` tool rather than writing a saved workflow. `/fusion configure` selects
+2–10 concrete models plus a distinct judge from the host's available-model list;
+`/fusion enable` adds the tool to the active model context immediately, and
+`/fusion disable` removes it. `/fusion run <question>` is the manual equivalent.
+Fusion receives only the standalone question and any explicit `context`; it does
+not inherit the parent conversation.
+
 ## 4. Read what a run produced
 
 ```
