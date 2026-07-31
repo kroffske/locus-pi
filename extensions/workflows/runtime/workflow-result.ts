@@ -6,9 +6,13 @@
  * projection, bounded raw detail, and result.json persistence.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { workflowRunOutputsDir, workflowRunRuntimeDir } from "./workflow-run-layout.js";
+import {
+  ensureWorkflowDirectoryNoSymlink,
+  workflowRunOutputsDir,
+  workflowRunRuntimeDir,
+  writeWorkflowRunFile,
+} from "./workflow-run-layout.js";
 
 export const WORKFLOW_RESULT_NOT_JSON_SAFE = "WORKFLOW_RESULT_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE = "WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE";
@@ -82,8 +86,8 @@ export function writeWorkflowResultText(runDir: string, result: unknown): string
   if (text === undefined) return undefined;
   const resultTextPath = workflowResultTextFile(runDir);
   try {
-    mkdirSync(path.dirname(resultTextPath), { recursive: true });
-    writeFileSync(resultTextPath, text.endsWith("\n") ? text : `${text}\n`, "utf8");
+    ensureWorkflowDirectoryNoSymlink(runDir, path.dirname(resultTextPath));
+    writeWorkflowRunFile(runDir, resultTextPath, text.endsWith("\n") ? text : `${text}\n`);
     return resultTextPath;
   } catch {
     return undefined;
@@ -220,8 +224,8 @@ export function writeWorkflowResultJson(runDir: string, payload: unknown): Workf
     };
   }
   try {
-    mkdirSync(path.dirname(resultPath), { recursive: true });
-    writeFileSync(resultPath, `${serialized.json}\n`, "utf8");
+    ensureWorkflowDirectoryNoSymlink(runDir, path.dirname(resultPath));
+    writeWorkflowRunFile(runDir, resultPath, `${serialized.json}\n`);
     return { ok: true, path: resultPath };
   } catch (error) {
     return {

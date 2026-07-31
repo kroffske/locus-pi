@@ -20,7 +20,7 @@
  * symlink. Checks happen before creation, so a symlinked `.pi` receives nothing.
  */
 
-import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export const WORKFLOW_RUNTIME_DIRNAME = ".pi";
@@ -63,6 +63,32 @@ export function workflowRunArtifactsDir(runDir: string): string {
 
 export function workflowJournalFile(runDir: string): string {
   return path.join(workflowRunRuntimeDir(runDir), WORKFLOW_RUN_JOURNAL_FILENAME);
+}
+
+/** Read one regular file without following a replaced run directory or file symlink. */
+export function readWorkflowRunFile(runDir: string, filePath: string): Buffer {
+  assertWorkflowRunFilePath(runDir, filePath, true);
+  return readFileSync(filePath);
+}
+
+export function readWorkflowRunTextFile(runDir: string, filePath: string): string {
+  return readWorkflowRunFile(runDir, filePath).toString("utf8");
+}
+
+/** Write one regular run-owned file after rechecking the full path immediately before I/O. */
+export function writeWorkflowRunFile(
+  runDir: string,
+  filePath: string,
+  bytes: string | NodeJS.ArrayBufferView,
+  options: { exclusive?: boolean } = {},
+): void {
+  assertWorkflowRunFilePath(runDir, filePath, false);
+  writeFileSync(filePath, bytes, { flag: options.exclusive === true ? "wx" : "w" });
+}
+
+export function appendWorkflowRunTextFile(runDir: string, filePath: string, text: string): void {
+  assertWorkflowRunFilePath(runDir, filePath, true);
+  appendFileSync(filePath, text, "utf8");
 }
 
 /** Create the canonical run root. Throws before creation through an unsafe chain. */
@@ -125,6 +151,34 @@ function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string
   assertExistingChainIsRegular(physicalProjectRoot, target);
   ensureWorkflowDirectoryNoSymlink(physicalProjectRoot, target);
   return workflowRunDir(path.resolve(projectRoot), runId);
+}
+
+/** Recheck every existing component. Missing intermediate directories are never created here. */
+function assertWorkflowRunFilePath(runDir: string, filePath: string, mustExist: boolean): void {
+  const lexicalRunDir = path.resolve(runDir);
+  const lexicalFile = path.resolve(filePath);
+  const relative = path.relative(lexicalRunDir, lexicalFile);
+  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Workflow file escapes its run root.");
+  }
+  const rootStat = lstatSync(lexicalRunDir);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error("Workflow run root is not a regular non-symlink directory.");
+  }
+  const parts = relative.split(path.sep).filter(Boolean);
+  let current = lexicalRunDir;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    const isLeaf = index === parts.length - 1;
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat === undefined) {
+      if (!isLeaf || mustExist) throw new Error(`Workflow run path is missing: ${current}`);
+      return;
+    }
+    if (stat.isSymbolicLink() || (isLeaf ? !stat.isFile() : !stat.isDirectory())) {
+      throw new Error(`Workflow run path is unsafe: ${current}`);
+    }
+  }
 }
 
 /** Refuse an unsafe component that already exists, before any mkdir can create through it. */

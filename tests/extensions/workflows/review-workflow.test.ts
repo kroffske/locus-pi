@@ -39,6 +39,7 @@ interface PublishedArtifact {
   ref: WorkflowArtifactRef;
   text: string;
   stage?: string;
+  kind?: string;
 }
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
@@ -129,9 +130,9 @@ function runtimeWith(
       answers.push({ ref, text: input.text, ...(input.stage === undefined ? {} : { stage: input.stage }) });
       return { answer: ref };
     },
-    publishText(name, text, stage) {
+    publishText(name, text, stage, kind) {
       const ref = priorRef(runId, `published-${published.length + 1}`, name, text);
-      published.push({ ref, text, ...(stage === undefined ? {} : { stage }) });
+      published.push({ ref, text, ...(stage === undefined ? {} : { stage }), ...(kind === undefined ? {} : { kind }) });
       return ref;
     },
     consumeText(ref) {
@@ -424,7 +425,8 @@ describe("workflow example: review.workflow.mjs", () => {
     expect(calls[4]?.prompt).toContain(outputs["plan review units"]);
     expect(calls[5]?.prompt).toContain(outputs["ask review questions round 1"]);
     expect(calls[6]?.prompt).toContain(outputs["ask review questions round 1"]);
-    expect(published.map((item) => item.ref.name)).toEqual(["intent.md"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["intent.md", "review.md"]);
+    expect(published.at(-1)?.kind).toBe("primary");
     expect(answers.map((item) => item.ref.name)).toEqual([
       "clarifier-decision.json",
       "scope.md",
@@ -727,7 +729,7 @@ describe("workflow example: review.workflow.mjs", () => {
 
     expect(result).toBe("# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected");
     expect(consumed).toEqual([intentRef, questionsRef]);
-    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md", "review.md"]);
     expect(answers.map((item) => item.ref.name)).toEqual([
       "scope.md",
       "inventory.md",
@@ -809,7 +811,7 @@ describe("workflow example: review.workflow.mjs", () => {
       "# Code Review\nReady.\n## Coverage and limits\nC1: U1; inspected",
     );
     // The operator's answers were still persisted by the workflow, unchanged.
-    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md"]);
+    expect(published.map((item) => item.ref.name)).toEqual(["clarification-answers.md", "review.md"]);
   });
 
   it("keeps host-owned continuation identity and provenance out of the retry loop entirely", async () => {

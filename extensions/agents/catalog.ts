@@ -108,6 +108,9 @@ export function loadExtensionAgentCatalog(
     assigned.add(name);
     const profile = profiles.get(name);
     if (!profile) throw new Error(`unknown bundled agent profile: ${name}`);
+    if (profile.description !== description) {
+      throw new Error(`extension agent description drift for ${name}: manifest and profile frontmatter must match`);
+    }
     if (
       profile.model?.length !== 1 ||
       profile.model[0]!.includes("/") ||
@@ -126,6 +129,8 @@ export function loadExtensionAgentCatalog(
   return entries;
 }
 
+const EXTENSION_AGENT_CATALOG = loadExtensionAgentCatalog();
+
 export interface AgentResolution {
   requestedAgent: string;
   resolvedAgent: string;
@@ -134,7 +139,7 @@ export interface AgentResolution {
 }
 
 export function refreshAgents(projectRoot: string) {
-  const extensionAgents = new Map(loadExtensionAgentCatalog().map((entry) => [entry.agentName, entry]));
+  const extensionAgents = new Map(EXTENSION_AGENT_CATALOG.map((entry) => [entry.agentName, entry]));
   const discovered = discoverAgentDefinitions(projectRoot);
   agentCatalog.clear();
   const resolvedDefinitions = discovered.definitions.map((agent) => {

@@ -26,11 +26,11 @@
  * folder, never the run or its durable evidence.
  */
 
-import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { WorkflowArtifactRecord, WorkflowArtifactRef } from "./workflow-artifacts.js";
 import {
   ensureWorkflowRunOutputsDir,
+  writeWorkflowRunFile,
   workflowRunDir,
   workflowRunOutputsDir,
   WORKFLOW_RUN_WORKSPACE_DIRECTORY,
@@ -113,6 +113,7 @@ export function writeWorkflowRunReport(
 ): WorkflowRunReportOutcome {
   try {
     const reportDir = ensureWorkflowRunOutputsDir(input.projectRoot, input.runId);
+    const runDir = workflowRunDir(input.projectRoot, input.runId);
 
     let records: WorkflowArtifactRecord[] = [];
     let indexUnavailable: string | undefined;
@@ -137,7 +138,7 @@ export function writeWorkflowRunReport(
     if (taskRecord !== undefined) {
       const bytes = tryRead(evidence, taskRecord);
       if (bytes !== undefined) {
-        writeFileSync(path.join(reportDir, "task.md"), bytes);
+        writeWorkflowRunFile(runDir, path.join(reportDir, "task.md"), bytes);
         taskWritten = true;
       }
     }
@@ -195,7 +196,7 @@ export function writeWorkflowRunReport(
       if (bytes === undefined) {
         document.unavailable = "the stored artifact could not be read back";
       } else {
-        writeFileSync(path.join(reportDir, fileName), rendered ?? bytes);
+        writeWorkflowRunFile(runDir, path.join(reportDir, fileName), rendered ?? bytes);
       }
       documents.push(document);
     }
@@ -211,7 +212,8 @@ export function writeWorkflowRunReport(
         };
       });
 
-    writeFileSync(
+    writeWorkflowRunFile(
+      runDir,
       path.join(reportDir, "README.md"),
       reportReadme({
         input,

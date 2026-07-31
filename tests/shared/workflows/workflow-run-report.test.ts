@@ -1233,4 +1233,44 @@ describe("workflow run report budget section", () => {
       "result.json must carry the failure line independently of the best-effort journal sink",
     );
   });
+
+  it("reprojects the readable report as failed when result.json cannot be persisted", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-result-envelope-blocked-"));
+    roots.push(root);
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "result-fail.workflow.mjs"),
+      'export default async function runWorkflow() { return "answer"; }\n',
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "result-envelope-blocked" });
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "result-fail",
+      onRunStart: ({ runDir }) => {
+        mkdirSync(workflowResultFile(runDir));
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run() {
+          throw new Error("this workflow starts no child");
+        },
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.resultPersistence.ok, false);
+    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    assert.match(readme, /- Status: failed/u);
+    assert.match(readme, /Workflow result was not persisted/u);
+    assert.doesNotMatch(readme, /- Status: completed/u);
+  });
 });

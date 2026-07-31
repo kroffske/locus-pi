@@ -841,6 +841,33 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       error: enrichedFields.error ?? resultPersistence.message,
       journal: [...enrichedFields.journal, persistenceError],
     });
+    // result.json is the durable machine envelope, but its own write can fail.
+    // Re-project the human README from the now-failed fields so the readable
+    // surface cannot keep claiming success after that failure.
+    if (artifactStore !== undefined) {
+      const failedReport = writeWorkflowRunReport(
+        {
+          projectRoot,
+          runId,
+          status: failedFields.disposition?.status ?? "failed",
+          ...(failedFields.target === undefined
+            ? {}
+            : {
+                target: {
+                  kind: failedFields.target.kind,
+                  ref: failedFields.target.ref,
+                  source: failedFields.target.source,
+                },
+              }),
+          result: failedFields.result,
+          ...(failedFields.error === undefined ? {} : { error: failedFields.error }),
+          journal: failedFields.journal,
+          budget: { applied: budget, peakConcurrency: runtime?.peakAgentConcurrency() ?? 0 },
+        },
+        artifactStore,
+      );
+      if (failedReport.ok) primaryOutputPath = failedReport.primaryOutputPath;
+    }
     return {
       runId,
       runDir,

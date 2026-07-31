@@ -15,7 +15,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { composeWorkflowChildTask } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
-import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunResultText, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   ensureWorkflowRunWorkspaceDir,
   workflowRunOutputsDir,
@@ -197,6 +197,41 @@ describe("workflow run working directory", () => {
 
     assert.throws(() => ensureWorkflowRunWorkspaceDir(root, runId), /unsafe/u);
     assert.equal(readdirSync(elsewhere).length, 0);
+  });
+
+  it("refuses a replaced outputs symlink for both terminal writes and later reads", async () => {
+    const root = project();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "symlink-output.workflow.mjs"),
+      'export default async function runWorkflow() { return "trusted result"; }\n',
+    );
+    const harness = createHarness(root, { sessionId: "run-output-symlink" });
+    const elsewhere = path.join(root, "elsewhere");
+    mkdirSync(elsewhere);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "symlink-output",
+      onRunStart: ({ runDir }) => {
+        rmSync(workflowRunOutputsDir(runDir), { recursive: true });
+        symlinkSync(elsewhere, workflowRunOutputsDir(runDir));
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run() {
+          throw new Error("this workflow starts no child");
+        },
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /terminal output was not persisted/u);
+    assert.deepEqual(readdirSync(elsewhere), []);
+    const readable = readWorkflowRunResultText(root, result.runId);
+    assert.equal(readable.status, "ready");
+    if (readable.status === "ready") assert.equal(readable.text, "trusted result");
+    assert.deepEqual(readdirSync(elsewhere), []);
   });
 });
 

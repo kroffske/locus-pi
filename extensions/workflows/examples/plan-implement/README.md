@@ -29,9 +29,10 @@ read it before running this one. Two things matter most:
 
 - **The plan may be a continuation, pasted text, or one file path.** A single
   continuation remains strongest because the host verifies and copies its bytes,
-  but its artifact name is irrelevant. Without a continuation, a read-only
-  resolver treats the input as complete plan text or reads the named file, then
-  returns the exact plan before deterministic step parsing begins.
+  but its artifact name is irrelevant. Without a continuation, deterministic
+  workflow code recognizes a complete pasted plan or reads one project-relative,
+  regular, non-symlink UTF-8 file. Escaping and absolute paths are refused before
+  exact plan bytes reach deterministic contract and step parsing.
 - **This workflow writes to the launch checkout.** It is a Package workflow, so
   `/workflow-run plan-implement "<request>"` resolves by name, and
   workflow JavaScript is trusted local code with full Node.js host access. Unlike

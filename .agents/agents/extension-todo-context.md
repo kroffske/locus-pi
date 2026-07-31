@@ -1,6 +1,6 @@
 ---
 name: extension-todo-context
-description: Manage session todos, bounded continuation, and /todo commands.
+description: Manage session todos, todo_write, bounded continuation, and /todo.
 model: task
 ---
 

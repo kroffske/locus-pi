@@ -58,6 +58,26 @@ describe("bundled extension-agent catalog", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("rejects drift between manifest and profile descriptions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-extension-agent-description-"));
+    try {
+      await mkdir(join(root, "extensions", "one"), { recursive: true });
+      await mkdir(join(root, ".agents", "agents"), { recursive: true });
+      await writeFile(join(root, "package.json"), JSON.stringify({ pi: { extensions: ["./extensions/one/index.ts"] } }));
+      await writeFile(
+        join(root, "extensions", "one", "manifest.json"),
+        JSON.stringify({ id: "one", agent: { name: "extension-one", description: "Manifest description." } }),
+      );
+      await writeFile(
+        join(root, ".agents", "agents", "extension-one.md"),
+        "---\nname: extension-one\ndescription: Profile description.\nmodel: task\n---\nOne.\n",
+      );
+      expect(() => loadExtensionAgentCatalog({ packageRoot: root })).toThrow("description drift");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("bundled agent profiles", () => {

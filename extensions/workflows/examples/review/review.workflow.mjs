@@ -469,7 +469,7 @@ function consumeClarification(dsl, answers) {
 }
 
 async function runFullReview(dsl, intentText, clarificationText, persistIntent = false) {
-  const { agent, phase, log, promptFile, publishArtifact } = dsl;
+  const { agent, phase, log, promptFile, publishArtifact, publishPrimaryArtifact } = dsl;
   requireNonEmptyText(intentText, "intent");
   requireNonEmptyText(clarificationText, "clarification context", MAX_CLARIFICATION_CONTEXT_CHARS);
 
@@ -844,12 +844,14 @@ ${questionsText}
         ? renderQuestionGaps(unresolvedGaps)
         : "(none; the question set was assessed complete, or no gap survived the last round)",
   });
-  return agent(verifierPrompt, {
+  const reviewText = await agent(verifierPrompt, {
     ...REVIEW_NAVIGATE_OPTIONS,
     label: "verify and write review",
     artifact: "review.md",
     maxAnswerChars: MAX_REVIEW_CHARS,
   });
+  publishPrimaryArtifact("review.md", reviewText);
+  return reviewText;
 }
 
 /**

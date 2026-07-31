@@ -6,7 +6,7 @@
  * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
  */
 
-import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -27,6 +27,9 @@ import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workfl
 import { projectWorkflowDisposition, workflowResultFile, workflowResultTextFile } from "./workflow-result.js";
 import {
   ensureWorkflowRunDir,
+  appendWorkflowRunTextFile,
+  readWorkflowRunTextFile,
+  writeWorkflowRunFile,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowJournalFile,
   workflowRunDir,
@@ -97,7 +100,7 @@ export function createWorkflowJournalSink(projectRoot: string, runId: string): W
   function initialize(firstLine: WorkflowJournalLine): void {
     if (initialized) throw new Error("Workflow journal is already initialized.");
     ensureWorkflowRunDir(projectRoot, runId);
-    writeFileSync(journalPath, JSON.stringify(firstLine) + "\n", { encoding: "utf8", flag: "wx" });
+    writeWorkflowRunFile(runDir, journalPath, JSON.stringify(firstLine) + "\n", { exclusive: true });
     initialized = true;
   }
 
@@ -109,7 +112,7 @@ export function createWorkflowJournalSink(projectRoot: string, runId: string): W
           initialize(line);
           return;
         }
-        appendFileSync(journalPath, JSON.stringify(line) + "\n", "utf8");
+        appendWorkflowRunTextFile(runDir, journalPath, JSON.stringify(line) + "\n");
       } catch {
         // Never throw into the DSL.
       }
@@ -582,7 +585,7 @@ function workflowRunStartedAt(projectRoot: string, runId: string): number | unde
   }
 
   try {
-    const parsed: unknown = JSON.parse(readFileSync(resultPath, "utf8"));
+    const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, resultPath));
     const journal = (parsed as { journal?: unknown }).journal;
     if (Array.isArray(journal)) {
       for (const line of journal) {
@@ -610,7 +613,8 @@ function parseWorkflowTimestamp(value: unknown): number | undefined {
 export function readWorkflowRunJournalState(projectRoot: string, runId: string): WorkflowJournalRead {
   let raw: string;
   try {
-    raw = readFileSync(workflowJournalFile(workflowRunDir(projectRoot, runId)), "utf8");
+    const runDir = workflowRunDir(projectRoot, runId);
+    raw = readWorkflowRunTextFile(runDir, workflowJournalFile(runDir));
   } catch (error) {
     return {
       lines: [],
@@ -1132,7 +1136,7 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
   const runDir = workflowRunDir(projectRoot, runId);
   const textPath = workflowResultTextFile(runDir);
   try {
-    const text = readFileSync(textPath, "utf8");
+    const text = readWorkflowRunTextFile(runDir, textPath);
     if (text.trim() !== "") return { status: "ready", runId, path: textPath, text };
   } catch {
     // No verbatim copy: fall through to the JSON envelope.
@@ -1162,7 +1166,8 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
 export function readWorkflowRunResult(projectRoot: string, runId: string): WorkflowRunResultEnvelope | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(workflowResultFile(workflowRunDir(projectRoot, runId)), "utf8"));
+    const runDir = workflowRunDir(projectRoot, runId);
+    const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, workflowResultFile(runDir)));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
     const target = parsePersistedWorkflowTarget(record.target);
@@ -1354,7 +1359,8 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
 
 function persistedResultHasScriptIdentity(projectRoot: string, runId: string): boolean {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(workflowResultFile(workflowRunDir(projectRoot, runId)), "utf8"));
+    const runDir = workflowRunDir(projectRoot, runId);
+    const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, workflowResultFile(runDir)));
     return (
       typeof parsed === "object" &&
       parsed !== null &&
