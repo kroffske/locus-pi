@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -13,9 +13,6 @@ import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import { formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
-import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
-
-const DEFAULT_TERMINAL_ROWS = 24;
 
 interface ViewerTui extends CustomUiTui {
   terminal?: { rows: number; columns: number };
@@ -151,8 +148,6 @@ export function createAgentViewerCapability(module: unknown): AgentViewerCapabil
 export class AgentSessionViewer implements CustomUiComponent {
   #disposed = false;
   #closed = false;
-  #followTail = true;
-  #scroll = 0;
   #expandedTools = false;
   #selection: number;
   readonly #title: string;
@@ -189,28 +184,19 @@ export class AgentSessionViewer implements CustomUiComponent {
   render(width: number): string[] {
     if (this.#disposed) return [];
     const safeWidth = Math.max(1, Math.floor(width));
-    const height = terminalRows(this.tui);
     const row = agentLiveStore.rowForExecution(this.execution);
     if (!this.#isHistoricalRound() && row === undefined) {
       this.#close();
       return [];
     }
     const rounds = this.roundsLabel();
-    const header = fitLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth);
+    const header = dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth);
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
       : this.#nativeLines(row, snapshot, safeWidth);
-    const bodyHeight = Math.max(0, height - 2);
-    const maxScroll = Math.max(0, content.length - bodyHeight);
-    if (this.#followTail) this.#scroll = maxScroll;
-    else this.#scroll = clamp(this.#scroll, 0, maxScroll);
-    const visible = content.slice(this.#scroll, this.#scroll + bodyHeight).map((line) => fitLine(line, safeWidth));
-    while (visible.length < bodyHeight) visible.push(" ".repeat(safeWidth));
-    const footer = fitLine(
-      `Esc close · Up/PageUp pause · End follow · d tools:${this.#expandedTools ? "expanded" : "compact"} · follow:${this.#followTail ? "on" : "off"}`,
-      safeWidth,
-    );
+    const visible = content.map((line) => fitLine(line, safeWidth));
+    const footer = dividerLine(`Esc/q close · d tools:${this.#expandedTools ? "expanded" : "compact"}`, safeWidth);
     return [header, ...visible, footer];
   }
 
@@ -227,8 +213,6 @@ export class AgentSessionViewer implements CustomUiComponent {
         return;
       }
       this.#selection = selectedRound;
-      this.#followTail = selectedRound === this.rounds?.active;
-      this.#scroll = 0;
       this.tui.requestRender();
       return;
     }
@@ -238,24 +222,6 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.tui.requestRender();
       return;
     }
-    const bodyHeight = Math.max(1, terminalRows(this.tui) - 2);
-    if (isUp(data)) {
-      this.#followTail = false;
-      this.#scroll -= 1;
-    } else if (isPageUp(data)) {
-      this.#followTail = false;
-      this.#scroll -= bodyHeight;
-    } else if (isDown(data)) {
-      this.#scroll += 1;
-    } else if (isPageDown(data)) {
-      this.#scroll += bodyHeight;
-    } else if (isEnd(data)) {
-      this.#followTail = true;
-    } else {
-      return;
-    }
-    this.#scroll = Math.max(0, this.#scroll);
-    this.tui.requestRender();
   }
 
   invalidate(): void {
@@ -283,9 +249,6 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.done();
   }
 
-  get followTail(): boolean {
-    return this.#followTail;
-  }
   get expandedTools(): boolean {
     return this.#expandedTools;
   }
@@ -295,9 +258,19 @@ export class AgentSessionViewer implements CustomUiComponent {
     snapshot: AgentLiveTranscriptSnapshot | undefined,
     width: number,
   ): string[] {
-    if (snapshot === undefined || snapshot.blocks.length === 0) return noTranscriptLines(row);
-    const omitted = snapshot.omittedBlockCount > 0 ? [`… ${snapshot.omittedBlockCount} earlier block(s) omitted`] : [];
-    return [...omitted, ...this.capability.render(snapshot.blocks, this.tui, width, this.#expandedTools)];
+    const transcript =
+      snapshot === undefined || snapshot.blocks.length === 0
+        ? noTranscriptLines(row)
+        : [
+            ...(snapshot.omittedBlockCount > 0 ? [`… ${snapshot.omittedBlockCount} earlier block(s) omitted`] : []),
+            ...this.capability.render(snapshot.blocks, this.tui, width, this.#expandedTools),
+          ];
+    return [
+      dividerLine("Request", width),
+      ...requestLines(row?.request, width),
+      dividerLine("Agent history", width),
+      ...transcript,
+    ];
   }
 
   #isHistoricalRound(): boolean {
@@ -380,7 +353,7 @@ export function disposeAgentSessionViewers(): void {
   for (const dispose of [...activeSessionViewers()]) dispose();
 }
 
-/** True while the full-screen viewer owns terminal input and Escape. */
+/** True while the expanded viewer owns terminal input and Escape. */
 export function hasActiveAgentSessionViewer(): boolean {
   return activeSessionViewers().size > 0;
 }
@@ -422,10 +395,6 @@ function isNativeComponentModule(value: unknown): value is NativeComponentModule
   );
 }
 
-function terminalRows(tui: ViewerTui): number {
-  return sharedTerminalRows(tui, 2, DEFAULT_TERMINAL_ROWS);
-}
-
 function fitLine(value: string, width: number): string {
   const line = truncateToWidth(value, width, "…");
   return `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
@@ -433,24 +402,6 @@ function fitLine(value: string, width: number): string {
 
 function isClose(data: string): boolean {
   return data === "q" || data === "escape" || data === "\u001b";
-}
-function isUp(data: string): boolean {
-  return data === "up" || data === "k" || data === "\u001b[A";
-}
-function isDown(data: string): boolean {
-  return data === "down" || data === "j" || data === "\u001b[B";
-}
-function isPageUp(data: string): boolean {
-  return data === "pageUp" || data === "pageup" || data === "\u001b[5~";
-}
-function isPageDown(data: string): boolean {
-  return data === "pageDown" || data === "pagedown" || data === "\u001b[6~";
-}
-function isEnd(data: string): boolean {
-  return data === "end" || data === "\u001b[F" || data === "\u001b[4~";
-}
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === "object" && value !== null;
@@ -461,4 +412,22 @@ function fingerprint(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function requestLines(request: string | undefined, width: number): string[] {
+  if (request === undefined) return ["Original request is unavailable for this retained row."];
+  const safe = request
+    .replace(/\r\n?/gu, "\n")
+    .replace(/\t/gu, "  ")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "�");
+  return safe.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width)));
+}
+
+function dividerLine(label: string, width: number): string {
+  if (width < 7) return "─".repeat(width);
+  const left = "── ";
+  const right = " ──";
+  const labelWidth = width - visibleWidth(left) - visibleWidth(right);
+  const fitted = truncateToWidth(label, labelWidth, "…");
+  return `${left}${fitted}${"─".repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}${right}`;
 }

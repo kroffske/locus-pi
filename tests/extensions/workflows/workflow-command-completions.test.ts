@@ -35,6 +35,15 @@ function project(): string {
 }
 
 describe("workflow command argument completion", () => {
+  it("offers the complete root command vocabulary, including result and continue", () => {
+    const root = project();
+    const labels = workflowArgumentCompletions("", root, root)?.map(
+      (completion) => completion.label ?? completion.value,
+    );
+
+    expect(labels).toEqual(["dashboard", "list", "info", "status", "result", "run", "continue", "stop"]);
+  });
+
   it("returns full argument strings for grammar-owned tokens and yields free text and paths", async () => {
     const root = project();
     const harness = createHarness(root);
@@ -93,6 +102,7 @@ describe("workflow command argument completion", () => {
         "workflow-list",
         "workflow-info",
         "workflow-status",
+        "workflow-result",
         "workflow-continue",
       ]),
     );
@@ -100,6 +110,9 @@ describe("workflow command argument completion", () => {
       expect.objectContaining({ value: "alpha", label: "alpha" }),
     );
     expect(harness.commands.get("workflow-status")?.getArgumentCompletions?.("20260724-13")).toContainEqual(
+      expect.objectContaining({ value: "20260724-130000-new" }),
+    );
+    expect(harness.commands.get("workflow-result")?.getArgumentCompletions?.("20260724-13")).toContainEqual(
       expect.objectContaining({ value: "20260724-130000-new" }),
     );
     expect(harness.commands.get("workflow-stop")?.getArgumentCompletions?.("")).toContainEqual(
@@ -116,6 +129,9 @@ describe("workflow command argument completion", () => {
     );
     expect(workflowFlatCommandCompletions("info", "a", root, root)).toContainEqual(
       expect.objectContaining({ value: "alpha", label: "alpha" }),
+    );
+    expect(workflowFlatCommandCompletions("result", "20260724-130000-new", root, root)).toContainEqual(
+      expect.objectContaining({ value: "20260724-130000-new" }),
     );
     expect(workflowFlatCommandCompletions("continue", "20260724-130000-new ", root, root)).toEqual([
       expect.objectContaining({ value: "20260724-130000-new --answer ", label: "--answer" }),

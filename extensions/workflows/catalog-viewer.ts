@@ -145,6 +145,16 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
       this.tui.requestRender();
       return;
     }
+    if (["right", "\x1b[C", "\x1bOC"].includes(data)) {
+      this.#actionIndex = cycleIndex(this.#actionIndex, 1, actions.length);
+      this.tui.requestRender();
+      return;
+    }
+    if (["left", "\x1b[D", "\x1bOD"].includes(data)) {
+      this.#actionIndex = cycleIndex(this.#actionIndex, -1, actions.length);
+      this.tui.requestRender();
+      return;
+    }
     if (matchesInput(this.keybindings, data, "tui.select.confirm", ["enter", "\r", "\n"])) {
       const action = actions[this.#actionIndex] ?? "back";
       if (action === "back") this.#returnToCatalog();
@@ -410,8 +420,7 @@ function compactCatalogProjection(
 }
 
 function compactSelectedRowLine(row: SelectableWorkflowRow): string {
-  const identity = row.kind === "history" ? `[R:${row.runId}]` : "[C]";
-  return `${identity} ${workflowSourceBadge(row.source)} ${row.name}`;
+  return catalogRowSummary(row);
 }
 
 function sourceFooter(
@@ -421,11 +430,12 @@ function sourceFooter(
   position: string,
   theme: WorkflowCatalogTheme,
 ): string[] {
+  const controls = "Tab/←/→ action · Enter choose · i details · Esc back";
   return [
     `${actionBar(screen, actions, selected, theme)}${position === "" ? "" : ` ${position}`}`,
     screen.selected.kind === "history"
-      ? "Review: authoring handoff · Tab Enter i Esc"
-      : "Start: direct command · Edit/Review: authoring handoff · Tab Enter i Esc",
+      ? `${controls} · Review handoff`
+      : `${controls} · Start direct; Edit/Review handoff`,
   ];
 }
 
@@ -561,16 +571,37 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
-  const history = row.kind === "history" ? `[R:${row.runId}] ` : "";
-  const first = `${selected ? ">" : " "} ${history}${workflowSourceBadge(row.source)} ${row.sourceLabel} · ${row.name} · ${row.description}`;
+  const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
   if (!expanded) return [style(theme, selected ? "accent" : "text", fitLine(first, width))];
   const pathPrefix = "    └ ";
-  const pathWidth = Math.max(0, width - visibleWidth(pathPrefix));
-  const path = middleTruncate(row.originPath, pathWidth);
+  const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
+  const detail = catalogDetailLine(row, detailWidth);
   return [
     style(theme, selected ? "accent" : "text", fitLine(first, width)),
-    style(theme, selected ? "accent" : "muted", fitLine(`${pathPrefix}${path}`, width)),
+    style(theme, selected ? "accent" : "muted", fitLine(`${pathPrefix}${detail}`, width)),
   ];
+}
+
+function catalogRowIdentity(row: SelectableWorkflowRow): string {
+  const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+  return `${row.name}${run} · ${workflowSourceBadge(row.source)}`;
+}
+
+function catalogRowSummary(row: SelectableWorkflowRow): string {
+  return `${catalogRowIdentity(row)} · ${row.description}`;
+}
+
+function catalogDetailLine(row: SelectableWorkflowRow, width: number): string {
+  const separator = " · ";
+  const separatorWidth = visibleWidth(separator);
+  if (width <= separatorWidth + 2) return middleTruncate(row.originPath, width);
+  const descriptionWidth = Math.min(
+    visibleWidth(row.description),
+    Math.max(1, Math.floor((width - separatorWidth) * 0.4)),
+  );
+  const description = truncateToWidth(row.description, descriptionWidth, "…");
+  const pathWidth = Math.max(1, width - visibleWidth(description) - separatorWidth);
+  return `${description}${separator}${middleTruncate(row.originPath, pathWidth)}`;
 }
 
 function middleTruncate(value: string, width: number): string {

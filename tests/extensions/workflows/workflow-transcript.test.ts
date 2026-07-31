@@ -3,6 +3,7 @@ import {
   announceCommandWorkflowStart,
   createWorkflowTranscript,
   persistCommandWorkflowTranscript,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../extensions/workflows/workflow-transcript.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
@@ -72,6 +73,49 @@ describe("workflow persistent transcript", () => {
     expect(failures).toHaveLength(1);
     expect(failures[0]?.message.details).toMatchObject({ eventKind: "workflow_end", runId: "run-2" });
     expect(String(failures[0]?.message.content)).toContain("failed");
+  });
+
+  it("prints the exact prose result in a separate unbounded message after the bounded run digest", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
+    transcript.start("20260731-215554-ea90");
+    const exactResult = `# Implementation Plan\n\n${"Full result line. ".repeat(400)}\nUNTRUNCATED_RESULT_SENTINEL`;
+    const resultTextPath = "/tmp/run-ea90/outputs/workflow-result.md";
+    const completion = transcript.finish({
+      runId: "20260731-215554-ea90",
+      runDir: "/tmp/run-ea90",
+      ok: true,
+      result: exactResult,
+      resultTextPath,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-ea90/runtime/result.json" },
+    });
+
+    expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
+    expect(harness.sentMessages).toHaveLength(2);
+    expect(harness.sentMessages[0]?.message).toMatchObject({
+      customType: WORKFLOW_RUN_CUSTOM_TYPE,
+      display: true,
+      details: { eventKind: "workflow_end", runId: "20260731-215554-ea90" },
+    });
+    expect(harness.sentMessages[0]?.message.content).not.toContain("UNTRUNCATED_RESULT_SENTINEL");
+    expect(harness.sentMessages[1]?.message).toMatchObject({
+      customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+      content: exactResult,
+      display: true,
+      details: {
+        eventKind: "workflow_result",
+        runId: "20260731-215554-ea90",
+        resultTextPath,
+      },
+    });
+    expect(String(harness.sentMessages[1]?.message.content).length).toBeGreaterThan(4096);
+    expect(harness.sentMessages.map((entry) => entry.options)).toEqual([
+      { triggerTurn: false },
+      { triggerTurn: false },
+    ]);
+    expect(harness.customMessageDeliveries).toEqual(["append", "append"]);
+    expect(harness.waitForIdleCalls).toBe(1);
   });
 
   it("renders waiting and operator cancellation as distinct terminal outcomes", () => {

@@ -166,7 +166,6 @@ export function buildWorkflowCatalogBlockFromModel(
     "[R] Run history",
     filteredRecent,
     query === undefined ? "none yet" : "no recent matches",
-    true,
   );
   appendWorkflowCatalogGroup(
     body,
@@ -377,17 +376,16 @@ export function readWorkflowCatalogSource(
 }
 
 function compactWorkflowCatalogBody(
-  recentRows: readonly WorkflowCatalogRow[],
-  catalogRows: readonly WorkflowCatalogRow[],
+  recentRows: readonly WorkflowCatalogHistoryRow[],
+  catalogRows: readonly WorkflowCatalogCurrentRow[],
   query: string | undefined,
 ): { lines: string[]; hidden: number } {
   const groups: Array<{
     label: string;
-    rows: readonly WorkflowCatalogRow[];
+    rows: readonly (WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow)[];
     empty: string;
-    history?: boolean;
   }> = [
-    { label: "[R]", rows: recentRows, empty: query === undefined ? "none yet" : "no recent matches", history: true },
+    { label: "[R]", rows: recentRows, empty: query === undefined ? "none yet" : "no recent matches" },
     {
       label: "[P]",
       rows: rowsForSource([...catalogRows], "project"),
@@ -410,8 +408,7 @@ function compactWorkflowCatalogBody(
     const row = group.rows[0];
     hidden += Math.max(0, group.rows.length - 1);
     if (row === undefined) return `${group.label} (${group.empty})`;
-    const tags = group.history === true ? `[R] ${workflowSourceBadge(row.source)}` : workflowSourceBadge(row.source);
-    return compactWorkflowCatalogLine(`${tags} ${row.sourceLabel} ${row.name} · ${row.originPath}`);
+    return compactWorkflowCatalogLine(passiveCatalogRowLine(row));
   });
   return { lines, hidden };
 }
@@ -673,7 +670,7 @@ function decodeEscapeSequence(value: string): string {
   return body;
 }
 
-function rowsForSource(rows: WorkflowCatalogRow[], source: WorkflowCatalogRow["source"]): WorkflowCatalogRow[] {
+function rowsForSource<Row extends WorkflowCatalogRow>(rows: Row[], source: WorkflowCatalogRow["source"]): Row[] {
   return rows.filter((row) => row.source === source).sort(compareCatalogRows);
 }
 
@@ -686,9 +683,8 @@ function workflowCatalogRowMatches(row: WorkflowCatalogRow, query: string | unde
 function appendWorkflowCatalogGroup(
   out: string[],
   title: string,
-  rows: readonly WorkflowCatalogRow[],
+  rows: readonly (WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow)[],
   empty: string,
-  history = false,
 ): void {
   out.push("", `${title}:`);
   if (rows.length === 0) {
@@ -696,14 +692,16 @@ function appendWorkflowCatalogGroup(
     return;
   }
   for (const row of rows) {
-    const historyBadge = history ? "[R] " : "";
-    // Stage count only: the full declaration belongs to /workflows info, and a
-    // catalog row that grows with the pipeline stops being scannable.
-    const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
-    out.push(
-      `  ${historyBadge}${workflowSourceBadge(row.source)} ${row.name} · ${row.description}${phases} · ${row.originPath}`,
-    );
+    out.push(`  ${passiveCatalogRowLine(row)}`);
   }
+}
+
+function passiveCatalogRowLine(row: WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow): string {
+  const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+  // Stage count only: the full declaration belongs to /workflows info, and a
+  // catalog row that grows with the pipeline stops being scannable.
+  const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
+  return `${row.name}${run} · ${workflowSourceBadge(row.source)} · ${row.description}${phases} · ${row.originPath}`;
 }
 
 export function workflowSourceBadge(source: WorkflowCatalogRow["source"]): "[P]" | "[U]" | "[PKG]" {

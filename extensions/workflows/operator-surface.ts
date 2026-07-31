@@ -75,7 +75,7 @@ export function presentWorkflowHandoffPumpResult(ctx: ExtensionContext, result: 
         "workflows",
         workflowWarningBlock(
           `Workflow ${result.runId} needs an answer, but this Pi mode cannot open an interactive question.`,
-          `Use: /workflow-continue ${result.runId} --answer <text>`,
+          `Use: /workflows continue ${result.runId} --answer <text>`,
         ),
       );
       return;
@@ -98,7 +98,7 @@ export function presentWorkflowHandoffPumpResult(ctx: ExtensionContext, result: 
         subject: "Workflow handoff",
         primary: `Run ${result.runId} still awaits an operator answer; its previous continuation failed.`,
         metadata: ["The question is not reopened automatically after a failed continuation."],
-        controls: [`Reopen: /workflows · or /workflow-continue ${result.runId} --answer <text>`],
+        controls: [`Reopen: /workflows continue ${result.runId} --answer <text>`],
       });
       return;
     case "invalid":
@@ -106,7 +106,7 @@ export function presentWorkflowHandoffPumpResult(ctx: ExtensionContext, result: 
       setOperatorWidget(
         ctx,
         "workflows",
-        workflowWarningBlock(result.message, "Inspect durable evidence: /workflow-status <runId>"),
+        workflowWarningBlock(result.message, "Inspect durable evidence: /workflows status <runId>"),
       );
       return;
     default:
