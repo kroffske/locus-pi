@@ -176,6 +176,9 @@ const PLAN_DRAFT = [
   "## Steps",
   "### S1 — Advance the offset",
   "Files: `src/page.ts`",
+  "Context: Read `src/page.ts` and preserve its public API.",
+  "Question: What one change advances the offset by the configured page size?",
+  "Output: `src/page.ts` — updated implementation.",
   "Change: Advance the offset.",
   "Verify: `npm test -- page`",
   "Depends on: none",
@@ -328,13 +331,50 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(prose).toContain("a step block missing any of the mandatory");
   });
 
-  it("groups repetitive work unless distinct decisions, risks, or proof require a split", () => {
+  it("uses one small agent subtask per semantic question, even when that creates many steps", () => {
     const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
 
-    expect(prose).toContain("group repetitive work when it shares one decision");
-    expect(prose).toContain("different behavior, risk, ownership, dependencies, or proof");
-    expect(prose).toContain("several steps that repeat the same mechanical change");
-    expect(prose).toContain("multiplying implementer and reviewer handoffs");
+    expect(prose).toContain("One plan step is one agent subtask");
+    expect(prose).toContain("one semantic question");
+    expect(prose).toContain("one result-producing step and one output per item");
+    expect(prose).toContain("For every Airflow DAG file");
+    expect(prose).toContain("that DAG's description output");
+    expect(prose).toContain("never use it to batch per-item answers");
+    expect(prose).toContain("use this exact topology");
+    expect(prose).toContain("every discovered DAG gets one metadata step");
+    expect(prose).toContain("one description step with a different output");
+    expect(prose).toContain("Item agents do not append directly to the shared final file");
+    expect(prose).toContain("outputs/dags/customer-sync-metadata.json");
+    expect(prose).toContain("never emit an ellipsis placeholder");
+    expect(prose).toContain("Forty-four explicit steps are valid");
+    expect(prose).toContain("Context:");
+    expect(prose).toContain("Question:");
+    expect(prose).toContain("Output:");
+  });
+
+  it("gives the critic a hard DAG subtask audit before normal review", () => {
+    const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
+
+    expect(prose).toContain("HARD AGENT-SUBTASK GATE");
+    expect(prose).toContain("Output: none");
+    expect(prose).toContain(".pi/workspaces/...");
+    expect(prose).toContain("one metadata step and a separate description step");
+    expect(prose).toContain("Build the item-to-step mapping yourself");
+  });
+
+  it("allows acceptance only after blocking open questions are resolved", () => {
+    const prose = readFileSync(workflowPath, "utf8").replace(/\s+/gu, " ");
+
+    expect(prose).toContain("A plan with any such question is not acceptable yet");
+    expect(prose).toContain("a non-empty Open questions section");
+    expect(prose).toContain("optional follow-ups belong in Out of scope or Assumptions");
+  });
+
+  it("tells a stalled operator to continue the run instead of editing the retained draft", () => {
+    const source = readFileSync(workflowPath, "utf8");
+
+    expect(source).toContain("Do not edit the retained plan.md or start a fresh plan run");
+    expect(source).toContain("continue this stalled run with custom guidance");
   });
 
   it("tells both roles that a closing verification step is a step that changes nothing", () => {
@@ -381,6 +421,126 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(published[0]?.text).toBe(task);
     expect(published[1]).toMatchObject({ text: PLAN_DRAFT, kind: "primary" });
     expect(answers.map((item) => item.ref.name)).toEqual(["context.md", "plan.md", "plan-critique.json"]);
+  });
+
+  it("reopens a critic acceptance when a new plan omits part of the agent-subtask contract", async () => {
+    const runWorkflow = await loadWorkflow();
+    const incompletePlan = PLAN_DRAFT.replace(/^Context:.*\n/mu, "");
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      scout: SCOUT_CONTEXT,
+      "planner round 1": incompletePlan,
+      "critic round 1": '{"verdict":"accept","defects":[]}',
+      "planner round 2": PLAN_DRAFT,
+      "critic round 2": '{"verdict":"accept","defects":[]}',
+    };
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    await expect(runWorkflow(dsl, "advance pagination")).resolves.toBe(PLAN_DRAFT);
+    expect(calls.map((call) => call.label)).toEqual([
+      "scout",
+      "planner round 1",
+      "critic round 1",
+      "planner round 2",
+      "critic round 2",
+    ]);
+    expect(calls[3]?.prompt).toContain("must contain exactly one non-empty Context:, Question:, and Output: line");
+  });
+
+  it("reopens a critic acceptance when the Airflow per-item execution contract is incomplete", async () => {
+    const runWorkflow = await loadWorkflow();
+    const common = [
+      "# Implementation Plan",
+      "## Outcome",
+      "Outcome type: working delivery",
+      "Primary result: Airflow DAG inventory.",
+      "Consumer: Airflow operators.",
+      "Form and location: `dag-inventory.md`.",
+      "Required content or behavior: One evidence-backed row per DAG.",
+      "Usability proof: `test -s dag-inventory.md`.",
+      "Supporting evidence: per-DAG outputs.",
+      "## Assumptions",
+      "- none",
+      "## Steps",
+      "### S1 — Discover DAGs",
+      "Files: `dags/`",
+      "Context: Repository DAG directory.",
+      "Question: Which Python files define DAGs?",
+      "Output: `outputs/dag-files.txt` — one path per line.",
+      "Change: Write the candidate list.",
+      "Verify: `test -s outputs/dag-files.txt`",
+      "Depends on: none",
+      "### S2 — Extract example metadata",
+      "Files: `dags/example.py`",
+      "Context: The source file and S1 list.",
+      "Question: What are the DAG id, owner, email, schedule, and does the DAG define a literal description keyword argument? Do NOT extract or store any description text.",
+      "Output: `outputs/example-metadata.json` — literal fields plus `has_description`.",
+      "Change: Write the metadata output.",
+      "Verify: `test -s outputs/example-metadata.json`",
+      "Depends on: S1",
+    ];
+    const tail = [
+      "### S4 — Assemble inventory",
+      "Files: `outputs/example-metadata.json`, `outputs/example-description.md`",
+      "Context: Both per-DAG outputs.",
+      "Question: How should the two outputs be assembled into the inventory?",
+      "Output: `dag-inventory.md` — one Markdown table.",
+      "Change: Write the final inventory.",
+      "Verify: `test -s dag-inventory.md`",
+      "Depends on: S2, S3",
+      "## Out of scope",
+      "- Running Airflow.",
+      "## Open questions",
+      "- none",
+    ];
+    const goodPlan = [
+      ...common,
+      "### S3 — Describe example DAG",
+      "Files: `dags/example.py`",
+      "Context: Read the DAG code deeply.",
+      "Question: What does this DAG do? Write its concise description.",
+      "Output: `outputs/example-description.md` — one description.",
+      "Change: Write the description output.",
+      "Verify: `test -s outputs/example-description.md`",
+      "Depends on: S1",
+      ...tail,
+      "```",
+      "Plan verified against the repository and ready for implementation.",
+    ].join("\n");
+    const badPlan = goodPlan
+      .replace(
+        "does the DAG define a literal description keyword argument?",
+        "what is the explicit description value (if any)?",
+      )
+      .replace("`outputs/dag-files.txt`", "`/tmp/dag-files.txt`");
+    const calls: WorkflowAgentRequest[] = [];
+    const outputs: Record<string, string> = {
+      scout: "# Context\n- `dags/example.py` defines one DAG.",
+      "planner round 1": badPlan,
+      "critic round 1": '{"verdict":"accept","defects":[]}',
+      "planner round 2": goodPlan,
+      "critic round 2": '{"verdict":"accept","defects":[]}',
+    };
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, outputs[request.label!]!);
+    });
+
+    await expect(runWorkflow(dsl, "Create an Airflow DAG inventory with descriptions")).resolves.toBe(goodPlan);
+    expect(calls.map((call) => call.label)).toEqual([
+      "scout",
+      "planner round 1",
+      "critic round 1",
+      "planner round 2",
+      "critic round 2",
+    ]);
+    expect(calls[3]?.prompt).toContain("Airflow per-item split is incomplete");
+    expect(calls[3]?.prompt).toContain("metadata missing");
+    expect(calls[3]?.prompt).toContain("Question and Output omit description text entirely");
+    expect(calls[3]?.prompt).toContain("repository-relative backticked Output path");
   });
 
   it("redrafts with the critic's exact defects and retains every round separately", async () => {

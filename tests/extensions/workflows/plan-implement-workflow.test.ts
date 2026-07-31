@@ -29,6 +29,9 @@ const STEP_S1 = [
   "### S1 — Advance the offset",
   "",
   "Files: `src/page.ts`",
+  "Context: Read `src/page.ts`; preserve the public pagination API.",
+  "Question: What one code change makes the offset advance by the configured page size?",
+  "Output: `src/page.ts` — updated implementation.",
   "Change: Advance the offset by the page size.",
   "Verify: `npm test -- page`",
   "Depends on: none",
@@ -38,6 +41,9 @@ const STEP_S2 = [
   "### S2 — Cover the final page",
   "",
   "Files: `tests/page.test.ts`",
+  "Context: Read the accepted S1 implementation and the existing pagination tests.",
+  "Question: What one test case proves the final page is returned exactly once?",
+  "Output: `tests/page.test.ts` — one focused regression case.",
   "Change: Add the missing final-page case.",
   "Verify: `npm test -- page`",
   "Depends on: S1",
@@ -62,6 +68,21 @@ function planText(steps: string[] = [STEP_S1, STEP_S2]): string {
     "## Out of scope",
     "",
     "- Renaming the module.",
+  ].join("\n");
+}
+
+function dagSubtask(index: number): string {
+  const id = `S${index}`;
+  const file = `dags/dag-${String(index).padStart(2, "0")}.py`;
+  return [
+    `### ${id} — Extract one DAG description`,
+    `Files: \`${file}\`, \`outputs/${id}.md\``,
+    `Context: Read only \`${file}\` and the output contract in the plan.`,
+    `Question: What does the DAG in \`${file}\` do?`,
+    `Output: \`outputs/${id}.md\` — one Markdown description.`,
+    `Change: Write the answer for ${file} to its dedicated output.`,
+    `Verify: \`test -s outputs/${id}.md\``,
+    `Depends on: ${index === 1 ? "none" : `S${index - 1}`}`,
   ].join("\n");
 }
 
@@ -372,6 +393,10 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).toContain("continuationArtifacts()");
     expect(source).toContain("function parseStepBlocks");
     expect(source).toContain("function parseStepDependencies");
+    expect(source).toContain("function parseAgentSubtaskContract");
+    expect(source).toContain("function validateUniqueSubtaskOutputs");
+    expect(source).toContain("function renderAgentSubtaskFocus");
+    expect(source).toContain("const MAX_SELECTED_STEPS = 80");
     expect(source).toContain("STEP_SELECTOR_SCHEMA");
     // Split the same way the curated examples are: one function decides and never
     // throws, the other merges and orders and never rejects.
@@ -593,6 +618,33 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "check-evidence.json",
       "implementation-verdict.json",
     ]);
+  });
+
+  it("accepts forty-four explicit agent subtasks and gives each writer only its own question and output", async () => {
+    const steps = Array.from({ length: 44 }, (_, index) => dagSubtask(index + 1));
+    const fixture = createPlanFixture({ steps });
+    const selected = Array.from({ length: 44 }, (_, index) => ({ id: `S${index + 1}` }));
+    const terminalGrade = grade(
+      "complete",
+      selected.map(({ id }) => ({ id, status: "done" as const })),
+    );
+    const calls: WorkflowAgentRequest[] = [];
+    const { dsl } = runtimeWith(fixture, async (request) => {
+      calls.push(request);
+      if (request.label === "select plan steps") return completed(request, selection(selected));
+      if (request.label?.startsWith("review step ")) return completed(request, review("accept", "Subtask passed."));
+      if (request.label === "grade implementation") return completed(request, terminalGrade);
+      return completed(request, `# ${request.label}\nDone.`);
+    });
+
+    await expect((await loadWorkflow())(dsl, DEFAULT_INTENT)).resolves.toBe(renderedReport(terminalGrade));
+    const writers = calls.filter((call) => call.label?.startsWith("implement step "));
+    expect(writers).toHaveLength(44);
+    expect(writers[0]?.prompt).toContain("What does the DAG in `dags/dag-01.py` do?");
+    expect(writers[0]?.prompt).toContain("Output: `outputs/S1.md`");
+    expect(writers[0]?.prompt).not.toContain("dags/dag-02.py");
+    expect(writers[43]?.prompt).toContain("What does the DAG in `dags/dag-44.py` do?");
+    expect(writers[43]?.prompt).not.toContain("dags/dag-43.py");
   });
 
   it("reconciles a final partial report once and gates success on the fresh report", async () => {
@@ -999,6 +1051,29 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     [planText([STEP_S1]).replace("## Steps", "## Work"), 'supplied plan has no "## Steps" section'],
     [planText([]), "found no steps in the supplied plan"],
     [planText(["### Advance the offset\nFiles: `a.ts`"]), "invalid step heading"],
+    [
+      planText([STEP_S1.replace(/^Output:.*$/mu, "")]),
+      "must contain Context:, Question:, and Output: together or omit all three",
+    ],
+    [
+      planText([STEP_S1.replace(/^Output:.*$/mu, "Output: None")]),
+      "Output: must name one concrete repository-relative backticked output path",
+    ],
+    [
+      planText([STEP_S1.replace(/^Output:.*$/mu, "Output: `.pi/workspaces/.../answer.md`")]),
+      "Output: must name one concrete repository-relative backticked output path",
+    ],
+    [
+      planText([STEP_S1.replace(/^Output:.*$/mu, "Output: `/tmp/answer.md`")]),
+      "Output: must name one concrete repository-relative backticked output path",
+    ],
+    [
+      planText([
+        STEP_S1,
+        STEP_S2.replace("`tests/page.test.ts` — one focused regression case.", "`src/page.ts` — duplicate output."),
+      ]),
+      "each explicit agent subtask needs its own output",
+    ],
     [
       planText([STEP_S1]).replace("## Steps", "## Outcome\nOutcome type: decision\n\n## Steps"),
       'exactly one "## Outcome" section',

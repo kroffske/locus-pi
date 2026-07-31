@@ -9,9 +9,10 @@ runtime status, not the convenience of the implementation layout.
 2. Read [active/](active/README.md) for the default extensions.
 3. Beta, fixture and future-design docs stay repository-only and are not part of
    the npm v1 package.
-4. Use [../extension-index.md](../extension-index.md) and
-   [../extension-ownership-matrix.md](../extension-ownership-matrix.md) as the
-   status ledger.
+4. Use [../extension-catalog.md](../extension-catalog.md) for the concise
+   operator and planning roster, then use [../extension-index.md](../extension-index.md)
+   and [../extension-ownership-matrix.md](../extension-ownership-matrix.md) as the
+   detailed status ledger.
 
 ## Current buckets
 

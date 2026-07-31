@@ -15,10 +15,13 @@ drafts and one-off artifacts are not part of this map.
   one, and how to author one.
 - `extensions/<name>/manifest.json` — machine-readable metadata for an
   extension: commands, tools, hooks, permissions, risk and review/source status.
-- [extension-index.md](extension-index.md) — public source map for the ten
-  retained active extensions and six curated workflows, including entrypoint,
-  manifest, manual, and dependency paths plus the direct feature dependency
-  graph.
+- [extension-catalog.md](extension-catalog.md) — concise operator and planning
+  catalog of the ten public extensions, their paths, roles, and dependency
+  boundaries.
+- [extension-index.md](extension-index.md) — detailed public source map for the
+  ten retained active extensions and six curated workflows, including
+  entrypoint, manifest, manual, and dependency paths plus the direct feature
+  dependency graph.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
   promotion decisions. If an extension changes the default surface, the decision
   must show up there.
@@ -38,6 +41,7 @@ Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast
 | Default extension list                                     | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                        |
 | Active extension manuals                                   | [extensions/active/](extensions/active/README.md).                                                                                                   |
 | Todo queue execution product contract                      | `docs/prd/todo-session-auto-continuation.md`, repository-only and intentionally not packed.                                                          |
+| Extension catalog for operators and planning agents        | [extension-catalog.md](extension-catalog.md).                                                                                                        |
 | Extension source, status, risk, paths and dependency graph | [extension-index.md](extension-index.md).                                                                                                            |
 | Ownership and promotion decisions                          | [extension-ownership-matrix.md](extension-ownership-matrix.md).                                                                                      |
 | Package/runtime boundary                                   | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                            |

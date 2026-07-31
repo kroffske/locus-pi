@@ -102,7 +102,8 @@ const PLAN_CONTINUATION_NAMES = ["task.md", "context.md", "plan.md", "unresolved
  * The drafting loop's exit condition, declared instead of guessed. The script
  * must branch on "is this plan good enough to implement", and the only honest
  * way to branch is a shaped verdict. `defects` are free text the next drafting
- * round receives verbatim; nothing in this script parses them.
+ * round receives verbatim. Deterministic code does not interpret those defects;
+ * it separately checks the executable step contract before honoring `accept`.
  */
 const PLAN_VERDICT_SCHEMA = freezeSchema({
   type: "object",
@@ -249,15 +250,164 @@ async function draftAcceptedPlan(dsl, { taskText, contextText, seedPlanText, see
         label: `${PLAN_AGENTS.critic.id} round ${round}`,
       },
     );
-    if (verdict.verdict === "accept") {
+    const contractDefects = planContractDefects(planText, taskText);
+    if (verdict.verdict === "accept" && contractDefects.length === 0) {
       log(`Agent ${PLAN_AGENTS.critic.id} accepted the plan in round ${round}.`);
       return { accepted: true, planText, rounds: round };
     }
-    unresolved = verdict.defects.map((defect) => defect.trim());
+    unresolved = mergePlanDefects(contractDefects, verdict.defects);
     defectsText = unresolved.map((defect, index) => `${index + 1}. ${defect}`).join("\n");
+    if (verdict.verdict === "accept") {
+      log(
+        `The critic accepted round ${round}, but the executable plan contract reopened ${contractDefects.length} defect(s).`,
+      );
+    }
     log(`Round ${round} left ${unresolved.length} defect(s) open.`);
   }
   return { accepted: false, planText, unresolved, defectsText, rounds: round };
+}
+
+function mergePlanDefects(contractDefects, criticDefects) {
+  const unique = [];
+  for (const defect of [...contractDefects, ...criticDefects]) {
+    const trimmed = defect.trim();
+    if (trimmed !== "" && !unique.includes(trimmed)) unique.push(trimmed);
+  }
+  return unique.slice(0, MAX_PLAN_DEFECTS);
+}
+
+function planContractDefects(planText, taskText) {
+  const defects = [];
+  const stepsSection = planText.split(/^## Steps\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
+  const stepMatches = [...stepsSection.matchAll(/^### (S\d+)\b[^\n]*\n([\s\S]*?)(?=^### S\d+\b|(?![\s\S]))/gmu)];
+  const steps = stepMatches.map((match) => ({
+    id: match[1],
+    block: match[2],
+    files: stepLine(match[2], "Files") ?? "",
+    question: stepLine(match[2], "Question") ?? "",
+    output: stepLine(match[2], "Output") ?? "",
+    change: stepLine(match[2], "Change") ?? "",
+  }));
+
+  if (steps.length === 0) {
+    defects.push("The Steps section contains no executable S<n> agent subtasks.");
+  }
+
+  const outputOwners = new Map();
+  for (const step of steps) {
+    const contractCounts = ["Context", "Question", "Output"].map((label) => stepLineMatches(step.block, label).length);
+    if (contractCounts.some((count) => count !== 1)) {
+      defects.push(
+        `${step.id} must contain exactly one non-empty Context:, Question:, and Output: line so plan-implement can execute it as one agent subtask.`,
+      );
+    }
+    const path = step.output.match(/`([^`]+)`/u)?.[1]?.trim();
+    if (
+      path === undefined ||
+      path === "" ||
+      /^(?:none|n\/a|no output)$/iu.test(path) ||
+      path.includes("...") ||
+      isAbsoluteOutputPath(path)
+    ) {
+      defects.push(
+        `${step.id} must name one concrete, non-placeholder, repository-relative backticked Output path that this subtask writes.`,
+      );
+    } else {
+      const previous = outputOwners.get(path);
+      if (previous !== undefined) {
+        defects.push(`${previous} and ${step.id} share Output path ${path}; every agent subtask needs its own output.`);
+      } else {
+        outputOwners.set(path, step.id);
+      }
+    }
+    if (/^(?:none|no change|read-only)\b/iu.test(step.change.trim())) {
+      defects.push(`${step.id} is a read-only planning activity, not an implementable step that writes its Output.`);
+    }
+  }
+
+  const openQuestions = planText.split(/^## Open questions\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
+  const unsettled = openQuestions
+    .split("\n")
+    .flatMap((line) => {
+      const item = line.match(/^\s*[-*]\s+(.+)$/u)?.[1]?.trim();
+      return item === undefined ? [] : [item];
+    })
+    .filter((line) => line !== "" && !/^none\.?$/iu.test(line));
+  if (unsettled.length > 0) {
+    defects.push(
+      "Open questions is not empty; resolve blocking questions before acceptance and move optional follow-ups to Assumptions or Out of scope.",
+    );
+  }
+
+  if (/\bairflow\b/iu.test(taskText) && /\bdag\b/iu.test(taskText)) {
+    defects.push(...airflowSubtaskDefects(steps));
+  }
+  return defects.slice(0, MAX_PLAN_DEFECTS);
+}
+
+function isAbsoluteOutputPath(path) {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(path);
+}
+
+function stepLine(block, label) {
+  return stepLineMatches(block, label)[0]?.trim();
+}
+
+function stepLineMatches(block, label) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return [...block.matchAll(new RegExp(`^${escaped}:[ \\t]*(.+)$`, "gmu"))].map((match) => match[1]);
+}
+
+function airflowSubtaskDefects(steps) {
+  const dagFiles = [
+    ...new Set(
+      steps.flatMap((step) => [...step.files.matchAll(/`([^`]*dags\/[^`]+\.py)`/giu)].map((match) => match[1])),
+    ),
+  ];
+  if (dagFiles.length === 0) {
+    return ["No per-DAG source files appear in Files:, so the Airflow item-to-step contract cannot be executed."];
+  }
+
+  const missing = [];
+  for (const file of dagFiles) {
+    const itemSteps = steps.filter((step) => step.files.includes(`\`${file}\``));
+    const hasPureMetadata = itemSteps.some(
+      (step) =>
+        /\b(?:dag[_ ]?id|owner|email|schedule)\b/iu.test(step.question) &&
+        /(?:^|[-_/])meta(?:data)?(?:[.\-_\/]|$)/iu.test(step.output) &&
+        !asksForDescriptionValue(step.question),
+    );
+    const hasPureDescription = itemSteps.some(
+      (step) =>
+        /\b(?:description|purpose|what does)\b/iu.test(step.question) &&
+        /(?:^|[-_/])desc(?:ription)?(?:[.\-_\/]|$)/iu.test(step.output),
+    );
+    if (!hasPureMetadata || !hasPureDescription) {
+      missing.push(
+        `${file} (${hasPureMetadata ? "metadata ok" : "metadata missing"}, ${hasPureDescription ? "description ok" : "description missing"})`,
+      );
+    }
+  }
+  return missing.length === 0
+    ? []
+    : [
+        `Airflow per-item split is incomplete: ${missing.join("; ")}. Give every DAG one metadata-only step whose Question and Output omit description text entirely (a boolean has_description presence flag is allowed), plus one description-only step with a different output.`,
+      ];
+}
+
+function asksForDescriptionValue(question) {
+  const withoutNegativeInstructions = question
+    .replace(/\bhas(?:_explicit)?_description\b/giu, "")
+    .replace(/\bwhether (?:an? |the )?description(?: parameter| keyword)? (?:exists|is present)\b/giu, "")
+    .replace(/\bdo not\b[^.!?\n]{0,120}\bdescription text\b/giu, "")
+    .replace(/\bwithout (?:the )?description text\b/giu, "");
+  return (
+    /\b(?:extract|infer|copy|store|write|generate|synthesize|produce|return)\b[^.!?\n]{0,120}\bdescription\b/iu.test(
+      withoutNegativeInstructions,
+    ) ||
+    /\bwhat\s+is\b[^?!\n]{0,80}\bdescription\b/iu.test(withoutNegativeInstructions) ||
+    /\bdescription\s+(?:text|value|string|content)\b/iu.test(withoutNegativeInstructions)
+  );
 }
 
 /**
@@ -312,7 +462,8 @@ function declareRoundCapHandoff(dsl, { taskText, contextText, outcome }) {
           prompt:
             `No draft was accepted within ${outcome.rounds} rounds. The retained draft and its open defects are in ` +
             "the run report (plan.md, unresolved-defects.md). Take the retained draft as the plan, or answer with " +
-            "drafting guidance for further rounds.",
+            "drafting guidance for further rounds. Do not edit the retained plan.md or start a fresh plan run; " +
+            "continue this stalled run with custom guidance so your answer is bound separately from the draft.",
           options: [{ label: ACCEPT_LAST_DRAFT_ANSWER }],
           allowCustom: true,
         },
@@ -478,14 +629,38 @@ own place in the order, so a final "integrity pass", "sanity check", or
 "confirm everything is there" re-runs what those verifications proved and
 changes nothing. The plan ends with the last step that changes something.
 
-When the task names several things of the same kind — files, modules, endpoints,
-tables, or document rows — group repetitive work when it shares one decision,
-one implementation pattern, and one meaningful verification. Split it only
-where items carry different behavior, risk, ownership, dependencies, or proof.
-A step per item is not safer when every implementer would repeat the same
-mechanical change; it only multiplies handoffs. A shared destination alone does
-not require either grouping or splitting: choose the boundary that preserves an
-independently understandable change and check.
+One plan step is one agent subtask. Give that agent one semantic question, the
+minimum source context needed to answer it, one explicit output path and shape,
+and one verification. If the task names many similar files, many explicit steps
+are correct when they keep each agent's question and context small. Forty-four
+explicit steps are valid; compressing them into one context-heavy implementer is
+not a virtue.
+
+When repository evidence names the concrete items, create one result-producing
+step and one output per item; do not batch several files into one extraction or
+analysis question just because their syntax is similar. Split one source file
+again when its requested fields require different kinds of reasoning. For every
+Airflow DAG file, one agent extracts cheap literal fields such as DAG id, name,
+and owner into that DAG's metadata output, while another agent reads that same
+file deeply and writes that DAG's description output. A later ordinary step may
+combine those outputs when the operator needs one table or document. Grouping is
+reserved for bounded discovery and deterministic assembly; never use it to batch
+per-item answers.
+
+For an Airflow inventory, use this exact topology: one discovery step writes the
+candidate-file list; every discovered DAG gets one metadata step with its own
+output and one description step with a different output; one final assembly step
+combines those predecessor outputs into the requested inventory. Item agents do
+not append directly to the shared final file. Even an existing literal DAG
+description belongs to that DAG's description step, so the metadata question
+never quietly expands into description analysis. Name concrete repository-relative
+outputs such as \`outputs/dags/customer-sync-metadata.json\`; never emit an
+ellipsis placeholder such as \`.pi/workspaces/...\`.
+
+The metadata subtask may record only a boolean such as \`has_description\`; its
+Question and Output must not request, extract, copy, or store description text.
+The separate description subtask owns that text whether it is literal or
+inferred.
 
 Nobody will answer a question mid-run. Where the task leaves a real choice open,
 take the most defensible option, plan on it, and record it under
@@ -540,12 +715,18 @@ Supporting evidence: Reports, tests, logs, or other secondary material; write \`
 ## Steps
 ### S1 — Short imperative title
 Files: \`path/to/file\`, \`path/to/other\`
+Context: The exact source and predecessor outputs this one agent may rely on.
+Question: The one semantic question this agent answers.
+Output: \`path/to/output\` — the exact format and fields this agent writes.
 Change: What changes, concretely enough to implement without re-deciding it.
 Verify: The command, test, or observation that proves this step worked.
 Depends on: none
 
 ### S2 — Short imperative title
 Files: \`path/to/third\`
+Context: ...
+Question: ...
+Output: \`path/to/another-output\` — ...
 Change: ...
 Verify: ...
 Depends on: S1
@@ -554,7 +735,10 @@ Depends on: S1
 - What this plan deliberately does not do.
 
 ## Open questions
-- What remains unsettled, and what would settle it. Write \`- none\` when nothing does.
+- Only blocking questions whose answer could materially change the plan. A plan
+  with any such question is not acceptable yet; write \`- none\` in an accepted
+  draft. Optional future enhancements and already chosen defaults belong in Out
+  of scope or Assumptions, not here.
 \`\`\`
 
 Step ids are \`S1\`, \`S2\`, … in execution order, assigned once and never
@@ -590,6 +774,23 @@ JSON verdict. You are the critic: you did not write this plan, and you do not
 rewrite it. Do not propose your own alternative design; judge the one in front
 of you.
 
+HARD AGENT-SUBTASK GATE — perform this audit before considering any other defect:
+
+- every step changes or writes its own concrete Output; \`Output: none\`, an
+  ellipsis placeholder such as \`.pi/workspaces/...\`, \`Change: none\`, and a
+  read-only discovery step are automatic revision defects;
+- known collection items have separate result-producing steps and distinct
+  outputs; item agents never append directly to one shared final output;
+- each question asks for one kind of reasoning. For an Airflow inventory, every
+  DAG file has one metadata step and a separate description step, even when a
+  literal description already exists; metadata plus description in one question
+  is always a defect;
+- when the primary result combines item outputs, a final ordinary assembly step
+  consumes those outputs and writes the primary result.
+
+Do not accept based on the planner's claim that its steps are independent. Build
+the item-to-step mapping yourself from \`Files:\`, \`Question:\`, and \`Output:\`.
+
 The plan is a claim about the repository, not evidence about it. Open the files
 it names and check each step against what is actually there. A defect is
 something that would make an implementer stop, guess, or do the wrong thing:
@@ -605,8 +806,9 @@ something that would make an implementer stop, guess, or do the wrong thing:
 - the usability proof checks only that files changed or tests ran, but not the
   user-visible content or behavior promised by the outcome;
 - a step that names a file, symbol, or command that does not exist;
-- a step block missing any of the mandatory \`Files:\`, \`Change:\`, \`Verify:\` or
-  \`Depends on:\` lines — this is a defect and not a formatting nicety, because
+- a step block missing any of the mandatory \`Files:\`, \`Context:\`,
+  \`Question:\`, \`Output:\`, \`Change:\`, \`Verify:\` or \`Depends on:\` lines —
+  this is a defect and not a formatting nicety, because
   the sibling \`plan-implement\` workflow parses these blocks and cannot keep a
   subset of steps consistent without the declared dependencies;
 - a step whose "done" cannot be checked, or whose verification does not test the
@@ -619,16 +821,22 @@ something that would make an implementer stop, guess, or do the wrong thing:
   changes what the primary result means. An unstated assumption is a defect,
   while a choice recorded under \`## Assumptions\` with its reason is not when one
   interpretation is clearly safer;
-- an open question whose answer can change the primary result, the steps, or
-  their verification. An accepted plan resolves it as a justified assumption or
-  leaves the loop to reach the operator handoff;
+- a non-empty Open questions section. An unresolved blocking question means the
+  draft must be revised or retained for operator guidance at the round cap;
+  optional follow-ups belong in Out of scope or Assumptions;
 - a surface the task requires that no step touches — callers, tests,
   configuration, or an existing document that states the contract being changed;
 - a step so large that it hides several independent decisions, risks, owners, or
   proofs;
-- several steps that repeat the same mechanical change under one decision and
-  one verification boundary, multiplying implementer and reviewer handoffs
-  without making the result safer or easier to check;
+- a step that contains more than one semantic question, asks one agent to reason
+  over a collection that should be split into item-sized subtasks, or lacks one
+  explicit output path and shape;
+- a step that batches result-producing extraction or analysis across several
+  known items, or combines cheap literal extraction with deep contextual analysis
+  — such as metadata and a code-derived description for one or more DAGs — when
+  separate per-item agents can answer those questions with smaller context;
+- several steps that repeat a purely mechanical operation even though one bounded
+  agent can perform it without per-item semantic judgment;
 - a step that changes nothing, because reading and confirming are how the plan
   was written rather than work an implementer can be given. A closing step that
   verifies the finished result is this defect and not an exception to it: each
