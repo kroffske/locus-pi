@@ -337,6 +337,8 @@ export interface WorkflowDsl {
   ): Promise<Choices[number]>;
   /** Dynamic choice lists keep runtime validation but cannot expose a literal union. */
   agent(prompt: string, opts: WorkflowAgentChoiceOptions): Promise<string>;
+  /** Discover a bounded runtime list of complete text handoffs for downstream fan-out. */
+  agent(prompt: string, opts: WorkflowAgentHandoffOptions): Promise<string[]>;
   /** Run one child agent under a declared answer shape. Success resolves to the
    *  VALIDATED value (not text); exhausting the retry budget throws SchemaValidationError. */
   agent(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
@@ -458,6 +460,8 @@ export interface WorkflowAgentOptions {
   workspaceHandle?: string;
   /** A choice selects WorkflowAgentChoiceOptions instead of the exact-text overload. */
   choice?: never;
+  /** Handoffs select WorkflowAgentHandoffOptions instead of the exact-text overload. */
+  handoffs?: never;
   /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
   schema?: never;
   /** validate needs a parsed value, which only the shaped overload has. */
@@ -480,17 +484,44 @@ export type WorkflowAgentValidate = (value: unknown) => readonly string[];
  *  semantics. Narrative output remains exact text. */
 export interface WorkflowAgentChoiceOptions<Choices extends readonly string[] = readonly string[]> extends Omit<
   WorkflowAgentOptions,
-  "choice" | "schema" | "validate"
+  "choice" | "handoffs" | "schema" | "validate"
 > {
   choice: Choices;
+  handoffs?: never;
+  schema?: never;
+  validate?: never;
+}
+
+export interface WorkflowAgentHandoffBounds {
+  /** Empty discovery is allowed by default; raise this when at least one unit is required. */
+  minItems?: number;
+  /** Hard cap on runtime-discovered work units. */
+  maxItems: number;
+  /** Per-handoff text bound; defaults to DEFAULT_AGENT_HANDOFF_MAX_CHARS. */
+  maxItemChars?: number;
+}
+
+/** Standard dynamic-decomposition form. Each returned string is one complete,
+ * non-blank, unique downstream handoff. The runtime desugars this to the existing
+ * array-of-strings schema path, including repair, replay and journal semantics. */
+export interface WorkflowAgentHandoffOptions extends Omit<
+  WorkflowAgentOptions,
+  "choice" | "handoffs" | "schema" | "validate"
+> {
+  choice?: never;
+  handoffs: WorkflowAgentHandoffBounds;
   schema?: never;
   validate?: never;
 }
 
 /** Options for the shaped overload. The schema property cannot be smuggled through
  *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
-export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "choice" | "schema" | "validate"> {
+export interface WorkflowAgentSchemaOptions extends Omit<
+  WorkflowAgentOptions,
+  "choice" | "handoffs" | "schema" | "validate"
+> {
   choice?: never;
+  handoffs?: never;
   schema: Record<string, unknown>;
   /** Cross-field rules the schema subset cannot declare. Runs only after schema
    *  validation succeeds; a non-empty return re-asks the child in its own labelled
@@ -498,7 +529,8 @@ export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "
   validate?: WorkflowAgentValidate;
 }
 
-type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentChoiceOptions | WorkflowAgentSchemaOptions;
+type WorkflowAgentAnyOptions =
+  WorkflowAgentOptions | WorkflowAgentChoiceOptions | WorkflowAgentHandoffOptions | WorkflowAgentSchemaOptions;
 
 const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
@@ -1077,6 +1109,9 @@ const SCHEMA_MAX_ATTEMPTS = 2;
 const MIN_AGENT_CHOICES = 2;
 const MAX_AGENT_CHOICES = 32;
 const MAX_AGENT_CHOICE_CHARS = 200;
+const MAX_AGENT_HANDOFFS = 100;
+const DEFAULT_AGENT_HANDOFF_MAX_CHARS = 8_000;
+const MAX_AGENT_HANDOFF_CHARS = 32_000;
 
 /** Validate the small standard routing contract before it enters the existing
  *  schema path. Refuse ambiguity instead of trimming or deduplicating author data. */
@@ -1099,6 +1134,34 @@ function normalizeAgentChoices(value: unknown): readonly string[] {
     seen.add(member);
   }
   return value as readonly string[];
+}
+
+function normalizeAgentHandoffs(value: unknown): Required<WorkflowAgentHandoffBounds> {
+  if (!isRecord(value)) throw new Error("agent handoffs must be an object");
+  const minItems = value.minItems ?? 0;
+  const maxItems = value.maxItems;
+  const maxItemChars = value.maxItemChars ?? DEFAULT_AGENT_HANDOFF_MAX_CHARS;
+  if (!Number.isSafeInteger(minItems) || (minItems as number) < 0) {
+    throw new Error("agent handoffs minItems must be a non-negative safe integer");
+  }
+  if (!Number.isSafeInteger(maxItems) || (maxItems as number) < 1 || (maxItems as number) > MAX_AGENT_HANDOFFS) {
+    throw new Error(`agent handoffs maxItems must be a safe integer between 1 and ${MAX_AGENT_HANDOFFS}`);
+  }
+  if ((minItems as number) > (maxItems as number)) {
+    throw new Error("agent handoffs minItems cannot exceed maxItems");
+  }
+  if (
+    !Number.isSafeInteger(maxItemChars) ||
+    (maxItemChars as number) < 1 ||
+    (maxItemChars as number) > MAX_AGENT_HANDOFF_CHARS
+  ) {
+    throw new Error(`agent handoffs maxItemChars must be a safe integer between 1 and ${MAX_AGENT_HANDOFF_CHARS}`);
+  }
+  return {
+    minItems: minItems as number,
+    maxItems: maxItems as number,
+    maxItemChars: maxItemChars as number,
+  };
 }
 
 /** Upper bounds on what a script validator may hand back. Its strings reach the next
@@ -2880,20 +2943,44 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     opts: WorkflowAgentChoiceOptions<Choices>,
   ): Promise<Choices[number]>;
   function agentDsl(prompt: string, opts: WorkflowAgentChoiceOptions): Promise<string>;
+  function agentDsl(prompt: string, opts: WorkflowAgentHandoffOptions): Promise<string[]>;
   function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
     const declaredChoice = opts?.choice;
+    const declaredHandoffs = opts?.handoffs;
     const declaredValidate = opts?.validate;
     if (declaredChoice !== undefined) {
       if (schema !== undefined) throw new Error("agent choice cannot be combined with schema");
+      if (declaredHandoffs !== undefined) throw new Error("agent choice cannot be combined with handoffs");
       if (declaredValidate !== undefined) throw new Error("agent choice cannot be combined with validate");
       const choices = normalizeAgentChoices(declaredChoice);
       const { choice: _choice, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
       return await agentDsl(prompt, {
         ...baseOptions,
         schema: { type: "string", enum: [...choices] },
+      });
+    }
+    if (declaredHandoffs !== undefined) {
+      if (schema !== undefined) throw new Error("agent handoffs cannot be combined with schema");
+      if (declaredValidate !== undefined) throw new Error("agent handoffs cannot be combined with validate");
+      const bounds = normalizeAgentHandoffs(declaredHandoffs);
+      const { handoffs: _handoffs, ...baseOptions } = opts as WorkflowAgentHandoffOptions;
+      return await agentDsl(prompt, {
+        ...baseOptions,
+        schema: {
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: bounds.maxItemChars,
+            nonBlank: true,
+          },
+          minItems: bounds.minItems,
+          maxItems: bounds.maxItems,
+          uniqueTrimmedItems: true,
+        },
       });
     }
     // Refused before the text overload returns: the text path runs one attempt and has no

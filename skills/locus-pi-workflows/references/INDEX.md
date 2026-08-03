@@ -22,7 +22,7 @@ Choose from the requirement, not from agent count. Read only the selected card.
 | Mixture-of-Agents                                               | Fixed layered fan-out; every layer must be visible                                   |
 | Consilium / expert council / debate                             | Fixed fan-out/fan-in with distinct responsibilities, then synthesis and fresh review |
 | Router / finite-state handoff                                   | `agent({ choice })` followed by visible branches                                     |
-| Supervisor / dynamic orchestrator-workers                       | Unsupported when units are not author-known; read the gap card                       |
+| Supervisor / dynamic orchestrator-workers                       | Dynamic discovery with `agent({ handoffs })`, then explicit workers                  |
 | Blackboard / shared-state coordination                          | Unsupported standard profile; use exact handoffs or redesign                         |
 | Tree/graph search                                               | Usually bounded candidate search; require a proven need before paying its cost       |
 

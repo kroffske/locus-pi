@@ -174,7 +174,11 @@ or borrowed runtime implementation was identified for this source-audit slice.
   validates the declaration and desugars it to the equivalent string-enum schema
   before request canonicalization. It therefore shares the same repair budget,
   replay key, journal evidence, and fail-closed exhaustion without adding a
-  second parsing or retry path. Raw schemas and custom validation remain the
+  second parsing or retry path. `agent({ handoffs: {...} })` is the standard
+  dynamic-decomposition form: runtime validates author bounds and desugars the
+  call to its equivalent non-blank unique string-array schema, returning complete
+  text units for visible `parallel()` or `pipeline()` workers through the same
+  repair/replay/journal path. Raw schemas and custom validation remain the
   compatible advanced surface for existing reviewed scripts.
 - `extensions/workflows/runtime/workflow-artifacts.ts` owns the canonical per-run artifact
   store at `.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record
@@ -540,6 +544,7 @@ surface. The active default package surface remains the `workflows` extension at
   `tests/extensions/workflows/workflow-transcript.test.ts`,
   `tests/extensions/workflows/workflows-launch-gate.test.ts`,
   `tests/extensions/workflows/workflows-progress.test.ts`,
+  `tests/shared/workflows/workflow-agent-handoffs.test.ts`,
   `tests/shared/workflows/workflow-agent-schema.test.ts`,
   `tests/shared/workflows/workflow-replay.test.ts`, and
   `tests/integration/public-registration.test.ts` are the local regression checks for

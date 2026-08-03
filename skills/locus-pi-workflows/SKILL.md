@@ -71,9 +71,9 @@ Pattern: <catalog pattern, or why none fits>
 
 1. <numbered algorithm>
 
-| Node     | Responsibility         | Receives      | Returns                   | Capability        | Next       |
-| -------- | ---------------------- | ------------- | ------------------------- | ----------------- | ---------- |
-| `<node>` | <one coherent subtask> | <exact input> | <complete text or choice> | <tools/read-only> | <consumer> |
+| Node     | Responsibility         | Receives      | Returns                              | Capability        | Next       |
+| -------- | ---------------------- | ------------- | ------------------------------------ | ----------------- | ---------- |
+| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <tools/read-only> | <consumer> |
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
@@ -116,24 +116,36 @@ export default async function run({ agent, parallel, phase, publishPrimaryArtifa
 }
 ```
 
-Standard agent answers have only two forms:
+Standard agent answers have three forms:
 
 - Exact text. Pass it unchanged to the named consumer. A composer or reviewer
   returns the complete replacement document; publish that exact text.
 - `choice`. Use `agent(prompt, { choice: ["accept", "revise"] })` only when
   JavaScript must select a branch. Runtime owns format instructions, one repair,
   parsing, validation, journal evidence, replay, and fail-closed exhaustion.
+- `handoffs`. Use `agent(prompt, { handoffs: { maxItems: 64 } })` when one
+  discovery call must return a bounded runtime list of complete text work units.
+  Runtime owns the array shape, blank/duplicate rejection, bounds, repair,
+  replay, and failure; workflow code receives `string[]` and uses `parallel()`.
 
 `agent()` is the only model-calling primitive. `parallel()` is the fail-closed
 barrier for independent known calls; `pipeline()` handles fixed ordered stages
 per known item; `awaitOperator()` declares a human gate; `promptFile()` may hold
 a long charter but never hide routing.
 
+Give filesystem agents an explicit location contract in their prompt. Read-only
+agents receive `projectRoot()` as their `pwd` and must treat source paths as
+relative to it. Write agents receive the exact `runWorkspaceDir()` or retained
+`workspace()` path and the exact relative output filename. Say explicitly that
+they must not substitute the user's home directory or `/tmp`. This location text
+is part of the task prompt; do not add JavaScript path parsers or collector
+scripts to compensate for a weak model.
+
 Workflow input remains semantic text. Standard source does not encode a hidden
 line/CSV/JSON protocol and then `split`, regex-match, or parse it into branch
 units. Fixed fan-out units are author-known and visible in design/source. When
-units are runtime-discovered, use one agent to return a complete textual result
-for the next agent, or stop and name the dynamic-decomposition gap.
+units are runtime-discovered, use `agent({ handoffs })` to return bounded complete
+text work units, then keep every downstream `parallel()` call and handoff visible.
 
 ## Forbidden in standard generated source
 
@@ -155,13 +167,14 @@ Routine failures stay runtime-owned. A failed `agent()`, `parallel()`, or
 approved design explicitly requires partial results and explains why they remain
 useful.
 
-## Known delegation limit
+## Delegation limit
 
-An SDK child cannot call `spawn_agent` or `task`; a read-only child has an even
-narrower tool set. Therefore a manager agent cannot safely discover arbitrary
-units and delegate them inside one standard workflow today. Use explicit
-`parallel()` over author-known units, or stop and name this runtime gap. Do not
-simulate delegation with domain schemas and JavaScript dispatch machinery.
+An SDK child still cannot call `spawn_agent` or `task`; a read-only child has an
+even narrower tool set. Dynamic decomposition therefore stays in the visible
+harness: one `agent({ handoffs })` discovers bounded text units and explicit
+`parallel()` or `pipeline()` calls process them under the shared workflow budget.
+Do not simulate a recursive manager, capability inheritance, or hidden graph with
+a large structured plan.
 
 ## Build checks
 

@@ -1,33 +1,52 @@
-# Dynamic orchestrator-workers — unsupported standard profile
+# Dynamic discovery and workers
 
-Use this card to identify a runtime gap, not to generate a workaround. The shape
-is needed when the set of worker units cannot be known while authoring.
+Use this card when the set of independent worker units is unknown until one
+discovery agent reads the live project.
 
-Graph: `manager discovers units -> delegated workers under shared budget
--> composer`. Worker count is runtime-selected.
+Graph: `discovery agent({ handoffs }) -> explicit parallel workers -> composer`.
+Worker count is runtime-selected but bounded in the discovery declaration.
 
-Cost: unknown until discovery; this profile cannot reserve or journal the shared
-delegation budget truthfully.
+Cost: `1 + K×W + 1` calls for `K` discovered units, `W` visible workers per
+unit, and one composer. The run-level invocation and concurrency budgets remain
+authoritative.
 
-Handoffs: the desired manager-to-worker task text and worker-to-composer answers
-would be exact text, but the child-spawn edge itself is unavailable.
+Handoff: each `handoffs` array member is one complete non-blank unique text unit.
+Workers receive that string unchanged and return complete text to the composer.
 
-Required primitives: a future bounded delegation primitive with inherited
-capabilities, shared budget, journaling, and recursion prevention. None exists.
+Location: embed `projectRoot()` as the workers' exact `pwd`; require discovered
+paths to remain project-relative and preserve leading dots. A write worker gets
+the exact `runWorkspaceDir()` or retained `workspace()` path and relative output
+name. Do not let a weak model substitute the user's home directory or `/tmp`.
 
-Why unsupported: SDK children cannot call `spawn_agent` or `task`; read-only
-children have stricter capabilities. The current harness can call `parallel()`
-only over units JavaScript already knows. Implementing a structured planner,
-domain validator, dispatcher, and recovery layer would recreate a graph runtime
-inside the workflow and violate the standard profile.
+Required primitives: `agent({ handoffs })`, `parallel()` or `pipeline()`, and an
+exact-text composer.
 
-Failure: authoring stops and names the bounded-delegation gap. Do not silently
-reduce coverage or fake delegation with a large JSON plan.
+Primitive:
 
-Allowed redesigns:
+```js
+const pwd = dsl.projectRoot();
+const units = await agent("Return one complete handoff per discovered unit.", {
+  handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
+  readOnly: true,
+});
 
-- make the units explicit in the approved design, then use fixed fan-out;
-- let one capable agent inspect all units and return one complete textual list;
-- split discovery and execution into separately approved workflows;
-- track a first-class runtime primitive with shared budget, inherited rights,
-  journaling, and recursion prevention.
+const findings = await parallel(
+  units.map(
+    (unit, index) => () =>
+      agent(`Your pwd is ${pwd}. Process this exact project-relative unit:\n${unit}`, {
+        readOnly: true,
+        label: `worker-${index + 1}`,
+      }),
+  ),
+);
+```
+
+Failure: invalid, blank, duplicate, or over-limit discovery is repaired once by
+runtime and then fails closed. Any worker failure rejects the whole barrier.
+
+Avoid these replacements:
+
+- parsing newline/CSV/JSON prose in workflow JavaScript;
+- domain schemas or validators for discovered units;
+- child `spawn_agent`/`task`, which remains unavailable;
+- recursive or hidden manager-agent delegation.
