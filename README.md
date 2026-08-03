@@ -122,8 +122,10 @@ through `package.json#pi.skills`. Pi loads package skills automatically and
 enabled, so its description is in the system prompt from the first session and
 the full text loads on demand — including through `/skill:locus-pi-workflows`. It
 covers finding a workflow, running one, reading the result envelope, the name
-resolution order, and the authoring template with the four rules that decide
-whether a new file runs at all.
+resolution order, and approval-first authoring: a raw request produces a readable
+`.design.md` agent graph, while only `Build approved design: <exact path>` creates
+the matching source. Its compact Markdown pattern cards are loaded only after the
+author selects a topology.
 
 The file is a plain [Agent Skills](https://agentskills.io/specification)
 directory, so other hosts can read it too. Claude Code and Codex discover skills

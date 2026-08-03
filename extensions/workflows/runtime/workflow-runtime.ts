@@ -330,6 +330,13 @@ export interface WorkflowUsage {
 }
 
 export interface WorkflowDsl {
+  /** Run one child agent under a small runtime-owned exact-choice contract. */
+  agent<const Choices extends readonly [string, string, ...string[]]>(
+    prompt: string,
+    opts: WorkflowAgentChoiceOptions<Choices>,
+  ): Promise<Choices[number]>;
+  /** Dynamic choice lists keep runtime validation but cannot expose a literal union. */
+  agent(prompt: string, opts: WorkflowAgentChoiceOptions): Promise<string>;
   /** Run one child agent under a declared answer shape. Success resolves to the
    *  VALIDATED value (not text); exhausting the retry budget throws SchemaValidationError. */
   agent(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
@@ -449,6 +456,8 @@ export interface WorkflowAgentOptions {
   workspaceMode?: WorkspaceMode;
   /** Reuse a runtime-owned workspace allocated by workspace(). */
   workspaceHandle?: string;
+  /** A choice selects WorkflowAgentChoiceOptions instead of the exact-text overload. */
+  choice?: never;
   /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
   schema?: never;
   /** validate needs a parsed value, which only the shaped overload has. */
@@ -466,9 +475,22 @@ export interface WorkflowAgentOptions {
  */
 export type WorkflowAgentValidate = (value: unknown) => readonly string[];
 
+/** Options for the standard machine-routing form. The runtime desugars this to
+ *  the existing string-enum schema path, including its repair, replay and journal
+ *  semantics. Narrative output remains exact text. */
+export interface WorkflowAgentChoiceOptions<Choices extends readonly string[] = readonly string[]> extends Omit<
+  WorkflowAgentOptions,
+  "choice" | "schema" | "validate"
+> {
+  choice: Choices;
+  schema?: never;
+  validate?: never;
+}
+
 /** Options for the shaped overload. The schema property cannot be smuggled through
  *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
-export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "schema" | "validate"> {
+export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "choice" | "schema" | "validate"> {
+  choice?: never;
   schema: Record<string, unknown>;
   /** Cross-field rules the schema subset cannot declare. Runs only after schema
    *  validation succeeds; a non-empty return re-asks the child in its own labelled
@@ -476,7 +498,7 @@ export interface WorkflowAgentSchemaOptions extends Omit<WorkflowAgentOptions, "
   validate?: WorkflowAgentValidate;
 }
 
-type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentSchemaOptions;
+type WorkflowAgentAnyOptions = WorkflowAgentOptions | WorkflowAgentChoiceOptions | WorkflowAgentSchemaOptions;
 
 const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
@@ -1052,6 +1074,32 @@ function defaultWorkflowWorkspaceMode(opts: WorkflowAgentAnyOptions | undefined)
 /** Maximum child-run attempts when agent({schema}) declares an answer shape — one retry
  *  budget for the DSL. */
 const SCHEMA_MAX_ATTEMPTS = 2;
+const MIN_AGENT_CHOICES = 2;
+const MAX_AGENT_CHOICES = 32;
+const MAX_AGENT_CHOICE_CHARS = 200;
+
+/** Validate the small standard routing contract before it enters the existing
+ *  schema path. Refuse ambiguity instead of trimming or deduplicating author data. */
+function normalizeAgentChoices(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) throw new Error("agent choice must be an array of strings");
+  if (value.length < MIN_AGENT_CHOICES || value.length > MAX_AGENT_CHOICES) {
+    throw new Error(`agent choice must contain ${MIN_AGENT_CHOICES}-${MAX_AGENT_CHOICES} values`);
+  }
+  const seen = new Set<string>();
+  for (const [index, member] of value.entries()) {
+    if (typeof member !== "string" || member.trim() === "") {
+      throw new Error(`agent choice value at index ${index} must be a non-empty string`);
+    }
+    if (member.length > MAX_AGENT_CHOICE_CHARS) {
+      throw new Error(
+        `agent choice value at index ${index} is ${member.length} character(s); at most ${MAX_AGENT_CHOICE_CHARS} are allowed`,
+      );
+    }
+    if (seen.has(member)) throw new Error(`agent choice contains duplicate value ${JSON.stringify(member)}`);
+    seen.add(member);
+  }
+  return value as readonly string[];
+}
 
 /** Upper bounds on what a script validator may hand back. Its strings reach the next
  *  child's prompt, the journal verdict and — through the prompt — the replay key, and
@@ -2808,7 +2856,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   }
 
   /**
-   * `agent()` — the exact-text default, plus the opt-in shaped answer.
+   * `agent()` — exact text by default, a small exact choice for standard routing,
+   * plus the advanced compatibility shaped answer.
    *
    * Without `schema` this is one child run resolving to the child's exact final text: no prompt
    * augmentation, no parsing, unchanged journal. With `schema` the runtime owns the contract at
@@ -2817,16 +2866,36 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * fed back, and resolves to the validated value. Every attempt is a real child run and is
    * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
    *
+   * `choice` is only syntax over `{ type: "string", enum: [...] }`; it reaches this
+   * same path before any request is canonicalized. A hand-written equivalent schema
+   * therefore has the same prompt, replay key, journal evidence and failure behavior.
+   *
    * `validate` extends that loop to the rules a declared schema cannot say — referential
    * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
    * validation succeeds, its errors reach the child in their own labelled repair block, and a
    * call that declares it gets one dedicated extra attempt.
    */
+  function agentDsl<const Choices extends readonly [string, string, ...string[]]>(
+    prompt: string,
+    opts: WorkflowAgentChoiceOptions<Choices>,
+  ): Promise<Choices[number]>;
+  function agentDsl(prompt: string, opts: WorkflowAgentChoiceOptions): Promise<string>;
   function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
+    const declaredChoice = opts?.choice;
     const declaredValidate = opts?.validate;
+    if (declaredChoice !== undefined) {
+      if (schema !== undefined) throw new Error("agent choice cannot be combined with schema");
+      if (declaredValidate !== undefined) throw new Error("agent choice cannot be combined with validate");
+      const choices = normalizeAgentChoices(declaredChoice);
+      const { choice: _choice, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
+      return await agentDsl(prompt, {
+        ...baseOptions,
+        schema: { type: "string", enum: [...choices] },
+      });
+    }
     // Refused before the text overload returns: the text path runs one attempt and has no
     // parsed value, so a validator there would silently never run and report success.
     if (declaredValidate !== undefined) {

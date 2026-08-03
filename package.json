@@ -261,6 +261,13 @@
     "extensions/workflows/workflow-tool.ts",
     "extensions/workflows/workflow-transcript.ts",
     "skills/locus-pi-workflows/SKILL.md",
+    "skills/locus-pi-workflows/references/INDEX.md",
+    "skills/locus-pi-workflows/references/bounded-candidate-search.md",
+    "skills/locus-pi-workflows/references/bounded-review-loop.md",
+    "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
+    "skills/locus-pi-workflows/references/fixed-fan-out.md",
+    "skills/locus-pi-workflows/references/human-gate.md",
+    "skills/locus-pi-workflows/references/sequential-text.md",
     "README.md"
   ],
   "bin": {

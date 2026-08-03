@@ -281,6 +281,13 @@ scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
 scripts/materialize-public-repository.ts
 skills/locus-pi-workflows/SKILL.md
+skills/locus-pi-workflows/references/INDEX.md
+skills/locus-pi-workflows/references/bounded-candidate-search.md
+skills/locus-pi-workflows/references/bounded-review-loop.md
+skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md
+skills/locus-pi-workflows/references/fixed-fan-out.md
+skills/locus-pi-workflows/references/human-gate.md
+skills/locus-pi-workflows/references/sequential-text.md
 tests/docs/adr.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts
@@ -332,6 +339,7 @@ tests/extensions/workflows/workflow-live-row-retention.test.ts
 tests/extensions/workflows/workflow-meta-phases.test.ts
 tests/extensions/workflows/workflow-operator-handoff-controller.test.ts
 tests/extensions/workflows/workflow-operator-handoff-service.test.ts
+tests/extensions/workflows/workflow-authoring-contract.test.ts
 tests/extensions/workflows/workflow-replay-live-row.test.ts
 tests/extensions/workflows/workflow-result-text.test.ts
 tests/extensions/workflows/workflow-run-viewer.test.ts
@@ -380,6 +388,7 @@ tests/shared/session/session-core-jsonl.test.ts
 tests/shared/session/session-core.test.ts
 tests/shared/task/tasks-bridge.test.ts
 tests/shared/workflows/workflow-agent-bounds.test.ts
+tests/shared/workflows/workflow-agent-choice.test.ts
 tests/shared/workflows/workflow-agent-schema.test.ts
 tests/shared/workflows/workflow-agent-transport.test.ts
 tests/shared/workflows/workflow-agent-uniqueness.test.ts

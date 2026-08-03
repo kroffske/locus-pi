@@ -170,6 +170,12 @@ or borrowed runtime implementation was identified for this source-audit slice.
   object. It distinguishes valid recovery from exhausted parser/validator
   mismatch, records actual fresh attempts, and mirrors the outcome to terminal
   journal lines; it is protocol accounting, not a domain-quality verdict.
+  `agent({ choice: [...] })` is the standard small routing form: the runtime
+  validates the declaration and desugars it to the equivalent string-enum schema
+  before request canonicalization. It therefore shares the same repair budget,
+  replay key, journal evidence, and fail-closed exhaustion without adding a
+  second parsing or retry path. Raw schemas and custom validation remain the
+  compatible advanced surface for existing reviewed scripts.
 - `extensions/workflows/runtime/workflow-artifacts.ts` owns the canonical per-run artifact
   store at `.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record
   binds `{runId, artifactId, name, sha256}` to media type, size, relative path,

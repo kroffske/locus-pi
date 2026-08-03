@@ -6,6 +6,24 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **New workflow authoring is approval-first and graph-readable.** A raw request
+  to the bundled `workflow-author` now creates only
+  `.pi/workflows/<name>.design.md`, recording the selected pattern, algorithm,
+  nodes, exact handoffs, capabilities, edges, bounds, mechanisms, and failure
+  exits. Only `Build approved design: <exact path>` creates matching source, and
+  Build validates identity and module load without running it. Shipped Markdown
+  pattern cards teach small direct-agent graphs; standard generated source passes
+  complete text replacements and does not emit domain schemas, validators,
+  parsers, renderers, wrappers, or custom recovery.
+
+- **`agent({ choice: [...] })` is the standard machine-routing answer.** The
+  runtime accepts 2–32 unique non-empty exact strings and desugars the call to
+  its existing string-enum validation path before request canonicalization.
+  Choice therefore keeps the same corrective re-ask, replay identity, journal
+  evidence, budget accounting, and fail-closed exhaustion as the equivalent
+  schema, while raw `schema` and `validate` remain compatible for existing
+  advanced trusted scripts.
+
 - **Workflow authors can now call `dsl.fusion()` for one bounded multi-model
   answer.** Fusion validates 2–10 unique member selectors and a separate judge
   before spending, sends no ambient chat history, supports identical or
