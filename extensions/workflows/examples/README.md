@@ -1,9 +1,16 @@
 # Shipped workflow examples
 
-This directory is the only place where a reader can see the authoring shape that
-[`AUTHORING.md`](../AUTHORING.md) and [`references/patterns.md`](../references/patterns.md)
-teach, applied to code that actually runs. This file says what ships, what each
-example is for, which shape it demonstrates, and how far it travels.
+> These are complete supported jobs, not standard authoring templates. Some
+> predate the exact-text/`choice` profile and deliberately retain advanced raw
+> schemas or validators for compatibility. New workflow source starts from the
+> approval-first skill and its compact pattern cards, then keeps only the nodes
+> and mechanisms its approved graph needs.
+
+This directory shows the complete jobs the package supports, including advanced
+compatibility shapes that standard authoring no longer generates. This file says
+what ships, what each example is for, which shape it demonstrates, and how far
+it travels. The standard source profile lives in [`AUTHORING.md`](../AUTHORING.md)
+and the skill-loaded compact pattern cards.
 
 Measured 2026-07-30 against the files in this directory.
 

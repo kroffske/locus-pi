@@ -1,5 +1,11 @@
 # Workflow pattern catalog
 
+> **Advanced compatibility archive.** New standard authoring reads the compact
+> cards under `skills/locus-pi-workflows/references/` after producing an approved
+> design. Do not copy this file's raw schemas, validators, parsers, renderers, or
+> recovery shapes into standard generated source. This catalog remains shipped
+> so existing reviewed workflows can understand their historical techniques.
+
 These are authoring skeletons, not additional Package workflows. Save a reviewed
 copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 `~/.pi/workflows/` before running it. Workflow JavaScript executes with full

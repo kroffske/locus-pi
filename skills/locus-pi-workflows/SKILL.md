@@ -1,312 +1,186 @@
 ---
 name: locus-pi-workflows
-description: Find, run, and author locus-pi workflows — the deterministic multi-stage pipelines this package ships. Use when asked what workflows are available, to run one (review, plan, live-smoke, …), to read a finished run's evidence, to copy a shipped example, or to write a new `<name>.workflow.mjs`. Read this before searching the repository for what a "workflow" is.
+description: Find, run, inspect, design, and build locus-pi workflows. Use for saved `.workflow.mjs` agent graphs, workflow run artifacts, or any request to create a workflow.
 ---
 
 # locus-pi workflows
 
-A workflow here is **one ESM module** named `<name>.workflow.mjs` that runs a
-staged pipeline of child agent calls under the `workflows` extension. The script
-is ordinary deterministic JavaScript; the models are called from inside it,
-through a handle the runtime passes in. That is the point: the structure carries
-the run, so a correctly decomposed workflow still finishes on a weak model.
+A workflow is reviewed trusted JavaScript that makes a visible graph of child
+`agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,
+and publication. Agents own interpretation and complete reader-facing text.
 
-This is not a general term. Do not go looking for CI "workflows" or another
-host's DSL — a script written for another agent framework does not run here,
-even renamed.
+This skill has two jobs: operate existing workflows and author new ones.
 
-## 1. See what is available
+## Operate an existing workflow
 
-```
-/workflows list          # every workflow that resolves right now, plus recent runs
-/workflows list <query>  # filter by name or description
-/workflows info <name>   # one workflow's declared stages and origin path
-```
-
-Each row carries its source: `[P]` project, `[U]` user, `[PKG]` shipped with
-this package, `[R]` immutable run history.
-
-## 2. What ships, and where each file is
-
-The `[PKG]` rows need no setup — they resolve out of the installed package
-itself, from npm or from a source checkout. All six live under
-`extensions/workflows/examples/`, which **is** the Package registry: every
-`<name>.workflow.mjs` there is a Package workflow, discovered by existence, with
-no second allowlist to keep in sync.
-
-| Name                 | Use it for                                                            | Entry file                                   |
-| -------------------- | --------------------------------------------------------------------- | -------------------------------------------- |
-| `live-smoke`         | Prove child sessions actually spawn. Two read-only calls, no schemas. | `live-smoke.workflow.mjs`                    |
-| `requirements-grill` | Interrogate a fuzzy requirement before anyone plans it.               | `requirements-grill.workflow.mjs`            |
-| `review`             | Evidence-backed review of a real target; publishes `review.md`.       | `review/review.workflow.mjs`                 |
-| `review-fix`         | Apply the findings a human kept from an immutable `review.md`.        | `review-fix/review-fix.workflow.mjs`         |
-| `plan`               | Turn a task into an accepted `plan.md` through a draft/critique loop. | `plan/plan.workflow.mjs`                     |
-| `plan-implement`     | Turn that plan into a task ledger and reviewed sequential changes.    | `plan-implement/plan-implement.workflow.mjs` |
-
-`plan` → `plan-implement` and `review` → `review-fix` are pairs. The second run
-consumes the first run's artifact through the host-verified `continuation`
-control — a complete `{ runId, artifactId, name, sha256 }` reference, never a
-path you type. Both receiving workflows require the expected artifact name and
-use the bytes the host verified and copied before their scripts start; they do
-not re-derive source-stage or terminal-result provenance.
-
-One more worked pipeline ships as reference only — **not** registered, not
-launchable by bare name: `extensions/workflows/references/excalidraw-pipeline/`.
-Read it for fan-out over many sections with per-section repair and an explicit
-per-stage model pin; run it by path if you want to watch it move.
-
-## 3. Run one
-
-```
-/workflows run <name|path> [input]             # canonical
-/workflows run <name> --resume <runId> [input] # replay recorded answers
+```text
+/workflows list
+/workflows info <name>
+/workflows run <name|path> [semantic text input]
+/workflows status <runId>
+/workflows result <runId|last>
+/workflows continue <runId>
+/workflows stop [runId|last]
 ```
 
-Flat `/workflow-run` remains a compatibility alias while parity is proven.
+Project workflows resolve first from `.pi/workflows/<name>.workflow.mjs`, then
+`.claude/workflows/`, `.agents/workflows/`, `~/.pi/workflows/`, and finally the
+Package examples. Run evidence lives under
+`.pi/locus-pi/workflows/<runId>/`; `outputs/` contains published documents and
+`result.json` contains the terminal envelope.
 
-The model-callable form is the `workflow` tool: `{ name | scriptPath, input,
-continuation? }`. Both surfaces accept only **optional bounded text** as input —
-at most 16,000 characters. Inline JavaScript is never accepted; a workflow is
-always a reviewed file. Cross-run artifacts arrive only through the tool's
-closed `continuation` control, never encoded inside `input`.
+When a run ends with `awaiting_operator`, inspect its question and artifacts,
+then use `/workflows continue <runId>` to answer the named handoff. Use
+`/workflows stop [runId|last]` for cancellation; stopping is not a continuation
+answer and terminal cancellation follows runtime settlement.
 
-Start `live-smoke` first on an unfamiliar machine. If it fails, nothing else in
-this package will work either, and its failure names the reason.
+## Authoring is two explicit turns
 
-For a one-question multi-model panel from the main session, use the opt-in
-`fusion` tool rather than writing a saved workflow. `/fusion configure` selects
-2–10 concrete models plus a distinct judge from the host's available-model list;
-`/fusion enable` adds the tool to the active model context immediately, and
-`/fusion disable` removes it. `/fusion run <question>` is the manual equivalent.
-Fusion receives only the standalone question and any explicit `context`; it does
-not inherit the parent conversation.
+Never turn a raw request directly into `.workflow.mjs`.
 
-## 4. Read what a run produced
+1. Send the requirement to the bundled `workflow-author` agent as a Design
+   request. It writes only `.pi/workflows/<name>.design.md`.
+2. Show that Markdown design to the user. Stop for explicit approval or revision.
+3. Only the exact request `Build approved design: <exact design path>` authorizes
+   the agent to create the matching `.workflow.mjs`. Build validates identity and
+   module load, but does not run the workflow.
 
+That command approves the design bytes present at the exact path when Build
+reads it. This protocol has no separate approval token or stored digest; review
+the current file immediately before issuing Build.
+
+Use `/agent run workflow-author` or the `task` tool. A plain authoring request is
+always interpreted as Design, never Build. Approval cannot be inferred from
+“create a workflow”, previous conversation, or the existence of a design file.
+
+If the user revises the graph, update the design and ask again. If Build discovers
+a material algorithm change, return to Design instead of hiding the change in
+source.
+
+## Design contract
+
+The design is short Markdown a reader can approve without opening JavaScript:
+
+```markdown
+# Design: <name>
+
+Purpose: <one sentence>
+Input: <semantic text or none>
+Primary output: `<name>.md`
+Pattern: <catalog pattern, or why none fits>
+
+1. <numbered algorithm>
+
+| Node     | Responsibility         | Receives      | Returns                   | Capability        | Next       |
+| -------- | ---------------------- | ------------- | ------------------------- | ----------------- | ---------- |
+| `<node>` | <one coherent subtask> | <exact input> | <complete text or choice> | <tools/read-only> | <consumer> |
+
+Concurrency: <groups or none>
+Loop bounds: <bounds or none>
+Failure exits: <fail-closed exits>
+Mechanisms: <parallel barriers, choices, loops, human gates; no agent-count penalty>
+Status: DRAFT — waiting for operator approval.
 ```
-/workflows status               # recent runs
-/workflows status <runId>       # one run's stage progress
-/workflows result [runId|last]  # the whole terminal text of a finished run
-/workflows continue <runId>     # continue a named handoff
-/workflows                      # open the command menu
-/workflows stop [runId|last]    # explicit cancellation
-```
 
-In interactive TUI, menu `continue` lists eligible handoffs oldest-first and
-lets the operator select one. Typed `continue` names a run directly. RPC,
-print/no-UI, and TUI without interactive select receive help instead. Flat
-`/workflow-continue` and `/workflow-stop` remain compatibility aliases.
+Count orchestration machinery, not agents. More agents are fine when the task
+really decomposes into more coherent subtasks.
 
-On disk, under the project:
+Read [`references/INDEX.md`](./references/INDEX.md), then only the selected
+pattern card. The cards are algorithms and small snippets, not full workflows to
+copy blindly.
 
-- `.pi/locus-pi/workflows/<runId>/result.json` — the run envelope.
-- `.pi/locus-pi/workflows/<runId>/artifacts/index.json` — the canonical
-  artifact inventory. Every `agent()` attempt persists its exact answer there,
-  plus the child transcript for a fresh session.
+## Standard source profile
 
-Top-level `disposition` is the lifecycle truth: `completed`,
-`awaiting_operator`, `cancelled`, or `failed`. A run sitting at
-`awaiting_operator` is waiting for a human answer, not broken — answer it with
-the `/workflows` menu's `continue` entry or `/workflows continue <runId>`.
-Only runs launched by the current Pi session (and their continuations) open a
-question automatically; older handoffs remain durable until explicitly chosen.
-
-Inside the script's own returned value, `ok: false` fails the outer run even
-with no technical error, and `partial: true` is never a success. A run never
-reports success without a real non-empty child answer: fake green is a bug, not
-a degraded pass.
-
-## 5. Where a name resolves from
-
-First match wins, walking up from the working directory to the project root:
-
-1. `.pi/workflows/<name>.workflow.mjs` — the canonical project save target.
-2. `.claude/workflows/`, then `.agents/workflows/` — same pi-native filename,
-   for repositories that already keep agent assets there.
-3. `~/.pi/workflows/<name>.workflow.mjs` — personal, this machine only.
-4. the package's own `extensions/workflows/examples/` — the Package registry,
-   which is why the six above resolve after a plain install.
-
-Only the exact `<name>.workflow.mjs` filename resolves, in every one of these
-directories. A `<name>.js` is invisible to the resolver. Project targets are
-checked lexically and by canonical real path, so a symlink may only point at a
-file that stays inside the project root.
-
-## 6. The handle a workflow is given
-
-The default export receives `(dsl, input)`. Everything a stage needs is on
-`dsl`, and that is the whole authoring surface:
-
-| Member                         | What it does                                                                        |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| `agent(prompt, opts?)`         | Run one child agent; resolves to its exact non-empty final text.                    |
-| `agent(prompt, { schema, … })` | Same, under a declared answer shape; resolves to the **validated value**, not text. |
-| `fusion(question, options)`    | Ask 2–10 explicit models independently; return a separate judge's final answer.     |
-| `promptFile(path, vars?)`      | Render a neighboring `.prompt.md`; snapshotted and hashed once per run.             |
-| `phase(name)` / `log(msg)`     | Move the reader-visible stage; append a journal line.                               |
-| `parallel(thunks)`             | Independent branches behind one fail-closed barrier, input order preserved.         |
-| `pipeline(items, ...stages)`   | Ordered stages per item; a failed item stops before its later stages.               |
-| `publishArtifact(name, text)`  | Persist deterministic workflow-authored text; returns a digest-bound reference.     |
-| `continuationArtifacts()`      | Host-verified prior-run artifacts, bound before any workflow code ran.              |
-| `consumeTextArtifact(ref)`     | Verify and copy one complete prior-run text reference into this run.                |
-| `awaitOperator({ reason, … })` | Declare that an otherwise successful run is waiting for bounded operator input.     |
-| `workspace(label, ref)`        | Allocate one retained linked worktree at an exact Git ref.                          |
-| `projectRoot()`                | Absolute project root captured by the runner.                                       |
-| `now()` / `random()`           | Replay-safe clock and randomness.                                                   |
-| `workflow(subFn, input?)`      | Run a nested workflow function on the same handle.                                  |
-
-Useful `agent()` options: `agent` (catalog name), `readOnly: true`, `tools`,
-`maxToolCalls`, `model`, `timeoutMs`, `maxTurns`, `maxAnswerChars`, `label`,
-`phase`, `artifact` (gives the answer a stable name), `sandbox`, and — on the
-shaped overload — `schema` plus `validate`.
-
-Use `fusion()` for one bounded same-question panel, not general delegation. Each
-member and judge declares exactly one unique `model` or `modelRole`; members are
-read-only and tool-free, run at most four at once, and all must answer before the
-judge runs. The default context is prompt-only. Earlier conversation is never
-inherited: pass only deliberate text with
-`context: { mode: "provided", text }`. `strategy: "replicate"` sends the common
-packet unchanged; `strategy: "roles"` requires a `lens` on every member. The
-return value is only the judge answer, while the packet and every leg remain in
-run artifacts. Supplied context is therefore retained verbatim. Member answers
-default to 8,000 characters, the judge answer to 16,000, and the complete judge
-prompt has a fixed 160,000-character ceiling. Larger panels may need a lower
-member answer bound because preflight reserves worst-case escaping. A judge
-synthesizes; a later `agent()` verifies when correctness needs an independent
-gate. The production runner resolves the whole roster before the first child;
-overlapping Fusion calls reserve their complete worst-case invocation counts.
-Fusion replay is all-or-nothing: a missing or divergent recorded leg stops before
-any fresh child, so run without `--resume` when a new panel is intended.
-
-Every run already applies the package budget contract, so a script that declares
-none of the limits above is still bounded: global agent concurrency, total agent
-invocations, a run wall clock over the agent chain, and per child a wall-clock
-fuse, tool calls, turns and answer characters. Declare an option only where the
-stage needs a different number than the package default; the run's
-`.pi/locus-pi/workflows/<runId>/logs/README.md` prints every axis with the value that applied,
-beside the spend evidence that actually exists. Per-child tool calls, turns and
-answer characters are enforced but counted by nobody, so they print as "not
-recorded" rather than as a number — as does cost, which the host reports as a
-constant zero.
-
-## 7. Author a new one
-
-Save it as `.pi/workflows/<name>.workflow.mjs`. Minimum shape:
+Declare stable agent identity and capability options together near the top. Keep
+every prompt, call, branch, and exact handoff visible where it executes.
 
 ```js
-export const meta = {
-  name: "<name>",
-  description: "<one line>",
-  // Optional, read statically before the run, never enforced:
-  // phases: [{ title: "<phase() name>", detail: "<what this stage owns>" }],
+const AGENTS = {
+  reviewer: { agent: "reviewer", readOnly: true },
+  composer: { tools: [], maxToolCalls: 0 },
 };
 
-export default async function runWorkflow(dsl, input) {
-  const { agent, phase, publishArtifact } = dsl;
+export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {
+  phase("review");
+  const reviews = await parallel([
+    () => agent(`Review contract:\n${input}`, { ...AGENTS.reviewer, label: "contract-review" }),
+    () => agent(`Review evidence:\n${input}`, { ...AGENTS.reviewer, label: "evidence-review" }),
+  ]);
 
-  phase("Read");
-  const notes = await agent("…one stage task…", { readOnly: true, label: "read" });
-
-  phase("Write");
-  const report = await agent(`Turn these notes into a report.\n\n${notes}`, {
-    artifact: "report.md",
+  phase("compose");
+  const document = await agent(`Write the complete review:\n${reviews.join("\n\n")}`, {
+    ...AGENTS.composer,
+    label: "compose-review",
   });
-  publishArtifact("report.md", report);
-
-  return { ok: true, report };
+  return publishPrimaryArtifact("review.md", document);
 }
 ```
 
-A shaped stage, for when the script must branch on the answer instead of
-forwarding it:
+Standard agent answers have only two forms:
 
-```js
-const VERDICT = {
-  type: "object",
-  additionalProperties: false,
-  required: ["decision", "defects"],
-  properties: {
-    decision: { type: "string", enum: ["accept", "revise"] },
-    defects: { type: "array", maxItems: 12, items: { type: "string", maxLength: 600 } },
-  },
-};
+- Exact text. Pass it unchanged to the named consumer. A composer or reviewer
+  returns the complete replacement document; publish that exact text.
+- `choice`. Use `agent(prompt, { choice: ["accept", "revise"] })` only when
+  JavaScript must select a branch. Runtime owns format instructions, one repair,
+  parsing, validation, journal evidence, replay, and fail-closed exhaustion.
 
-const verdict = await agent(prompt, {
-  schema: VERDICT,
-  // Cross-field rules a schema cannot state. Pure, synchronous, returns the
-  // violations it found; a non-empty return re-asks the child in its own
-  // repair block instead of ending the run.
-  validate: (v) => (v.decision === "accept" && v.defects.length > 0 ? ["accept must carry no defects"] : []),
-});
-```
+`agent()` is the only model-calling primitive. `parallel()` is the fail-closed
+barrier for independent known calls; `pipeline()` handles fixed ordered stages
+per known item; `awaitOperator()` declares a human gate; `promptFile()` may hold
+a long charter but never hide routing.
 
-**Put each check at the cheapest layer that can hold it.** Lengths, counts, id
-patterns, enums, uniqueness and blankness belong in `schema`. Cross-field
-agreement, referential integrity, and budgets summed across items belong in
-`validate`. Only two things stay a fatal `throw`: a child's self-reported status
-or its verdict on its own work, and evidence this child did not produce
-(host-owned provenance, prior-run text).
+Workflow input remains semantic text. Standard source does not encode a hidden
+line/CSV/JSON protocol and then `split`, regex-match, or parse it into branch
+units. Fixed fan-out units are author-known and visible in design/source. When
+units are runtime-discovered, use one agent to return a complete textual result
+for the next agent, or stop and name the dynamic-decomposition gap.
 
-**Write stage prompts inline** in the script by default. A neighboring
-`resources/<stage>.prompt.md` rendered through `promptFile()` is the escape
-hatch for a role charter long enough to bury the routing — roughly 80 lines and
-up — or a prompt shared by more than one workflow.
+## Forbidden in standard generated source
 
-### Four rules that decide whether the file runs at all
+- raw `schema` or `validate`;
+- input splitting, JSON/prose parsers, regex gates, coverage assertions, or
+  domain validators;
+- Markdown/table/report renderers;
+- hand-written retries, broad `try/catch`, partial-result envelopes, or custom
+  failure recovery;
+- wrappers or registries around `agent()` that hide prompts and edges;
+- domain-specific runtime helpers;
+- a large structured plan used to fake manager-agent delegation.
 
-- **Use `dsl` only.** The runtime does not enforce this — see the trust note —
-  but it is what keeps a script portable and replayable.
-- **Take time and randomness from `dsl.now()` / `dsl.random()`**, never
-  `Date.now()`, `new Date()`, or `Math.random()`. A direct clock call is not
-  rejected; it silently marks the run unrecordable, so `--resume` can no longer
-  replay it.
-- **Keep the default identity.** Static `node:` imports only. Local, package, or
-  dynamic imports require the literal `meta.identityCoverage: "entry-only"`
-  downgrade, which binds the entry bytes and nothing else. Never call that entry
-  hash full script identity.
-- **Fail closed.** An uncaught group failure from `parallel()`/`pipeline()`
-  fails the outer run, and that is usually the right outcome. Catch
-  `error.code === "WORKFLOW_GROUP_FAILURE"` only when the requirements
-  explicitly accept partial work, then return `partial: true` evidence.
+Raw `schema` and `validate` remain an advanced compatibility surface for existing
+reviewed scripts. They are not standard authoring output.
 
-## 8. Copy from the shipped examples
+Routine failures stay runtime-owned. A failed `agent()`, `parallel()`, or
+`pipeline()` fails the run. Do not catch it into partial success unless the
+approved design explicitly requires partial results and explains why they remain
+useful.
 
-Read the entry file rather than inventing a shape. Each one is the smallest
-place a given technique is visible:
+## Known delegation limit
 
-| Read this                                     | To see                                                                                                                                                  |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke.workflow.mjs` (51 lines)          | The smallest complete workflow: two sequential read-only calls, one input check, no schemas.                                                            |
-| `requirements-grill.workflow.mjs` (350 lines) | The smallest declared roster: three agents in a straight line, no loop, no branch, and so no declared answer shape. The script searches nothing itself. |
-| `review/review.workflow.mjs`                  | A staged text pipeline, two shaped gates, a bounded loop, an operator handoff that splits the run, and both prompt-placement rules in one file.         |
-| `review-fix/review-fix.workflow.mjs`          | A model-planned dependency graph that deterministic code validates and orders before any writer starts; one writer per finding; independent checks.     |
-| `plan/plan.workflow.mjs`                      | A frozen agent roster read before any control flow, and a draft/critique loop whose exit is a shaped verdict rather than a human being asked.           |
-| `plan-implement/plan-implement.workflow.mjs`  | The receiving end of a cross-run handoff: host-verified plan bytes, a persisted task ledger, and a sequential writer/reviewer repair loop per step.     |
+An SDK child cannot call `spawn_agent` or `task`; a read-only child has an even
+narrower tool set. Therefore a manager agent cannot safely discover arbitrary
+units and delegate them inside one standard workflow today. Use explicit
+`parallel()` over author-known units, or stop and name this runtime gap. Do not
+simulate delegation with domain schemas and JavaScript dispatch machinery.
 
-`extensions/workflows/examples/README.md` tabulates the same set with measured
-line counts, prompt placement, and which checks each one declares in a schema
-versus a validator — read it when choosing which file to imitate.
+## Build checks
 
-## 9. Trust boundary, stated plainly
+Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the approved
+design, then checks:
 
-Workflow JavaScript executes as reviewed trusted local code in Pi's main Node.js
-process, with full filesystem, subprocess, and network capability. Worktrees,
-identity hashes, and Pi's `exec` approval are evidence and consent records.
-This package does **not** sandbox workflow code. Run only files you have read.
+- `meta.name` matches both design and filename;
+- source identity policy passes;
+- the module loads and exports `meta` plus a default function;
+- source exposes the approved nodes, edges, handoffs, bounds, and failure exits;
+- no unapproved node or standard-profile bad smell appeared.
 
-## 10. Read next
+Build does not run. The caller runs it separately and evaluates the primary
+artifact against live repository evidence.
 
-Relative to this skill's own directory:
+## Trust boundary
 
-- `../../extensions/workflows/AUTHORING.md` — the authoring pointer, with the
-  full resolution, result, artifact, and replay contract.
-- `../../docs/extensions/active/workflows.md` — the canonical source of truth for
-  the DSL, its options, the trust model, and every command surface.
-- `../../extensions/workflows/references/patterns.md` — stage patterns worth
-  copying.
-- `../../extensions/workflows/examples/README.md` — what each shipped example
-  demonstrates and how far it travels.
-
-To have one written for you, delegate to the catalog agent: `/agent run
-workflow-author`, or the `task` tool with `{ agent: "workflow-author", task:
-"<requirement>" }`. It writes to `.pi/workflows/`.
+Workflow JavaScript runs in Pi’s main Node.js process with host filesystem,
+subprocess, and network authority. Worktrees and approval are evidence and
+consent, not a sandbox. Run only reviewed files. Full DSL, trust, replay, and
+artifact details: [`../../docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md)
+and [`../../extensions/workflows/AUTHORING.md`](../../extensions/workflows/AUTHORING.md).
