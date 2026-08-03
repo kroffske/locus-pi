@@ -24,6 +24,19 @@ This file records user-visible changes to the public package.
   schema, while raw `schema` and `validate` remain compatible for existing
   advanced trusted scripts.
 
+- **`agent({ handoffs: {...} })` enables bounded runtime-discovered fan-out.**
+  A discovery agent can now return 0–100 complete non-blank unique text work
+  units with explicit count and per-item bounds. Runtime desugars the declaration
+  to its existing string-array validation path, so format repair, replay,
+  journaling, budgets, and fail-closed exhaustion remain generic; workflow code
+  passes the returned `string[]` directly to visible `parallel()` or `pipeline()`
+  workers without parsing prose, declaring a domain schema, or simulating a
+  manager agent.
+
+- **Filesystem prompts now state their location explicitly.** Authoring guidance
+  requires the exact `projectRoot()` or write-workspace path, so weaker models do
+  not redirect relative work into the user's home directory or `/tmp`.
+
 - **Workflow authors can now call `dsl.fusion()` for one bounded multi-model
   answer.** Fusion validates 2–10 unique member selectors and a separate judge
   before spending, sends no ambient chat history, supports identical or

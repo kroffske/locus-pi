@@ -169,6 +169,7 @@
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/workflows/workflow-agent-bounds.test.ts",
     "tests/shared/workflows/workflow-agent-choice.test.ts",
+    "tests/shared/workflows/workflow-agent-handoffs.test.ts",
     "tests/shared/workflows/workflow-agent-schema.test.ts",
     "tests/shared/workflows/workflow-agent-uniqueness.test.ts",
     "tests/shared/workflows/workflow-agent-validate.test.ts",

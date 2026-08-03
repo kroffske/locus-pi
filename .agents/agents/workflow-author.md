@@ -70,9 +70,9 @@ Pattern: <catalog pattern, or why none fits>
 
 ## Graph
 
-| Node     | Responsibility         | Receives      | Returns                   | Capability        | Next       |
-| -------- | ---------------------- | ------------- | ------------------------- | ----------------- | ---------- |
-| `<node>` | <one coherent subtask> | <exact input> | <complete text or choice> | <tools/read-only> | <consumer> |
+| Node     | Responsibility         | Receives      | Returns                              | Capability        | Next       |
+| -------- | ---------------------- | ------------- | ------------------------------------ | ----------------- | ---------- |
+| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <tools/read-only> | <consumer> |
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
@@ -96,12 +96,17 @@ Standard generated source is a readable harness:
   corrected replacements. Pass and publish those values unchanged.
 - Treat workflow input as semantic text, not a compact data protocol. Do not
   `split`, regex-match, or parse it into branch units. Fixed fan-out units must be
-  named in the approved design and source; otherwise add an agent text stage or
-  stop and name the runtime-dynamic decomposition gap.
+  named in the approved design and source. Runtime-discovered units use
+  `agent(prompt, { handoffs: { maxItems, maxItemChars } })`; runtime owns the
+  bounded string-array shape and workflow code passes each text unit unchanged.
 - Use `agent(prompt, { choice: ["accept", "revise"] })` only for a small machine
   branch. Runtime owns format repair and fail-closed exhaustion.
 - Use uncaught `parallel()`/`pipeline()` failure by default.
 - Use `promptFile()` only for a long or shared role charter. Routing stays in source.
+- Put the exact filesystem contract in every filesystem prompt: readers get
+  `projectRoot()` as `pwd` and project-relative paths; writers get the exact
+  `runWorkspaceDir()` or retained `workspace()` path and relative output name.
+  Explicitly forbid substituting the user's home directory or `/tmp`.
 
 Standard source must not contain raw `schema`, `validate`, input splitting,
 JSON/prose parsers, regex gates, domain validators, coverage assertions, render helpers, manual
@@ -111,8 +116,9 @@ trusted scripts may still use the advanced compatibility surface; new standard
 source may not.
 
 Do not invent manager-agent delegation. SDK children cannot call `spawn_agent`
-or `task`. Use explicit `parallel()` over units known in the approved design, or
-stop and report the bounded-delegation gap.
+or `task`. Use `agent({ handoffs })` followed by visible `parallel()` or
+`pipeline()` workers for runtime-discovered units; recursive delegation remains
+unsupported.
 
 ## Build checks
 

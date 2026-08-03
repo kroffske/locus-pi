@@ -40,7 +40,7 @@ describe("approval-first readable workflow authoring", () => {
     expect(buildRoute).toContain("and stops");
   });
 
-  it("teaches exact text plus choice as the standard answer forms", () => {
+  it("teaches exact text, choice, and handoffs as the standard answer forms", () => {
     for (const relativePath of [
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
@@ -49,6 +49,7 @@ describe("approval-first readable workflow authoring", () => {
       const text = source(relativePath);
       expect(text).toContain("exact text");
       expect(text).toContain("choice:");
+      expect(text).toContain("handoffs:");
       expect(text).toMatch(/raw `schema`|Raw `schema`/u);
       expect(text).toMatch(/advanced compatibility/u);
     }
@@ -104,11 +105,11 @@ describe("approval-first readable workflow authoring", () => {
     }
   });
 
-  it("states the dynamic-manager gap instead of manufacturing a structured dispatcher", () => {
+  it("teaches bounded dynamic handoffs without manufacturing a recursive manager", () => {
     const card = source("skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md");
-    expect(card).toContain("unsupported standard profile");
-    expect(card).toContain("SDK children cannot call `spawn_agent` or `task`");
-    expect(card).toContain("Do not silently");
+    expect(card).toContain("agent({ handoffs })");
+    expect(card).toContain("complete non-blank unique text unit");
+    expect(card).toContain("child `spawn_agent`/`task`, which remains unavailable");
   });
 
   it("reviews every paid bounded-loop revision and reports truthful call cost", () => {

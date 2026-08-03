@@ -63,6 +63,20 @@ The runtime desugars `choice` to its existing string-enum shape path. It owns
 format instructions, parsing, validation, corrective re-ask, journal evidence,
 replay, budgets, and fail-closed exhaustion. Workflow code does none of those.
 
+When discovery determines the work units at runtime, use bounded text handoffs:
+
+```js
+const units = await agent("Return one complete handoff per discovered unit.", {
+  handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
+  readOnly: true,
+});
+```
+
+Runtime desugars `handoffs` to its bounded unique non-blank string-array path and
+owns the same format instructions, repair, replay, journal, budget, and
+fail-closed behavior. Workflow code passes each returned string unchanged into
+visible `parallel()` or `pipeline()` workers.
+
 The remaining standard orchestration primitives are:
 
 | Primitive                            | Responsibility                                               |
@@ -77,8 +91,8 @@ The remaining standard orchestration primitives are:
 | `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.    |
 
 Trusted raw `schema` and `validate` remain an advanced compatibility surface for
-existing workflows. Standard generated source uses only exact text and `choice`
-answers.
+existing workflows. Standard generated source uses only exact text, `choice`,
+and `handoffs` answers.
 
 ## Target source shape
 
@@ -119,11 +133,18 @@ The workflow orchestrates but does not interpret or format agent results:
 - a reviewer returns the complete corrected replacement;
 - the script passes these values unchanged and publishes accepted text exactly.
 
+Filesystem prompts name their location explicitly. Give a reader the exact
+`projectRoot()` as `pwd` and require project-relative source paths. Give a writer
+the exact `runWorkspaceDir()` or retained `workspace()` path plus the required
+relative output filename. Tell the agent not to redirect work into the user's
+home directory or `/tmp`. The workflow must not repair location mistakes with a
+path parser or an information-gathering script.
+
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. `parallel()` and
-`pipeline()` operate over units named in the approved graph. Runtime-discovered
-units require an agent-authored textual handoff or an honest unsupported-gap
-report, not an input parser plus dynamic dispatch.
+`pipeline()` operate over units named in the approved graph or returned by
+runtime-owned `agent({ handoffs })`. Runtime-discovered units remain complete
+agent-authored text, not an input parser plus domain dispatcher.
 
 ## Standard-profile bad smells
 
@@ -148,14 +169,14 @@ Routine agent and group failure is uncaught and fail-closed. Partial continuatio
 is outside the standard profile unless the approved design explicitly proves
 that surviving results remain useful.
 
-## Unsupported dynamic manager delegation
+## Dynamic decomposition without manager delegation
 
 SDK children cannot call `spawn_agent` or `task`; read-only children have a
-stricter tool set. Therefore a manager child cannot safely discover arbitrary
-units and delegate them under a shared budget today. Use explicit `parallel()`
-over units named in the approved design, let one agent inspect all units, split
-the job across workflows, or stop and name the missing first-class primitive.
-Do not recreate it with a structured planner and JavaScript dispatcher.
+stricter tool set. Keep dynamic decomposition in the visible harness instead:
+one `agent({ handoffs })` discovers bounded text units, then explicit
+`parallel()` or `pipeline()` calls process them under the shared workflow budget.
+Recursive manager delegation and capability inheritance remain unsupported; do
+not recreate them with a structured planner and JavaScript dispatcher.
 
 ## Saved module and identity
 
