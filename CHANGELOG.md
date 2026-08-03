@@ -6,6 +6,11 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow agents no longer accept output-token truncation as success.** If a
+  provider ends a child answer with `stopReason=length`, the host fails the call
+  as a provider error and preserves its transcript instead of publishing or
+  handing off text that may end mid-word.
+
 - **New workflow authoring is approval-first and graph-readable.** A raw request
   to the bundled `workflow-author` now creates only
   `.pi/workflows/<name>.design.md`, recording the selected pattern, algorithm,

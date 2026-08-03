@@ -1440,6 +1440,11 @@ and result envelope. Child metadata and diagnostics stay in journal/result
 evidence; model text is never parsed as status or JSON unless the call opted into
 runtime-owned `choice`/`handoffs` or advanced `schema`.
 
+An assistant turn that ends with provider `stopReason=length` is not exact text:
+the provider stopped at its output-token limit. The host therefore fails that
+agent call as `provider-error` and preserves the transcript evidence instead of
+publishing the partial answer or passing it to the next workflow stage.
+
 Every default above comes from ONE object — `DEFAULT_WORKFLOW_BUDGET` in
 `extensions/workflows/runtime/workflow-budget.ts` — which the runner applies to every run.
 An explicit per-call value always wins: below the default it applies silently,

@@ -262,6 +262,24 @@ describe("agent failure cause — host", () => {
     }
   });
 
+  it("refuses a provider-truncated assistant answer", async () => {
+    agentLiveStore.reset();
+    try {
+      const result = await runHost({
+        lastAssistantText: "This answer ends in the midd",
+        messages: [{ role: "assistant", content: [], stopReason: "length" }],
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.reason).toContain("output-token limit");
+      expect(result.reason).toContain("refusing the truncated answer");
+      expect(result.failureCause).toBe("provider-error");
+      expect(await retriesOn(result.failureCause)).toBe(false);
+    } finally {
+      agentLiveStore.reset();
+    }
+  });
+
   it("names an unreadable final answer", async () => {
     const result = await runHost({ lastAssistantText: undefined });
 

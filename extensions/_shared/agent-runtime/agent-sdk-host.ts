@@ -1682,9 +1682,13 @@ function assistantProviderFailure(messages: readonly unknown[] | undefined): str
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (!isRecord(message) || message.role !== "assistant") continue;
-    return message.stopReason === "error"
-      ? (eventFieldMessage(message.errorMessage) ?? "Child assistant failed with stopReason=error.")
-      : undefined;
+    if (message.stopReason === "error") {
+      return eventFieldMessage(message.errorMessage) ?? "Child assistant failed with stopReason=error.";
+    }
+    if (message.stopReason === "length") {
+      return "Child assistant reached the provider output-token limit (stopReason=length); refusing the truncated answer.";
+    }
+    return undefined;
   }
   return undefined;
 }
