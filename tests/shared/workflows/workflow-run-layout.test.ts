@@ -242,17 +242,22 @@ describe("workflow child task composition", () => {
     assert.match(task, /under the exact name it should have/u);
   });
 
-  it("ignores the legacy read-only option and keeps the writable directory instruction", () => {
-    const task = composeWorkflowChildTask("review the plan", "/tmp/run/workspace", { readOnly: true });
-    assert.match(task, /^## This workflow run's working directory\n\n\/tmp\/run\/workspace\n/u);
-    assert.ok(task.endsWith("review the plan"));
-    assert.doesNotMatch(task, /This call is read-only/u);
-    assert.match(task, /Create any file/u);
+  it("distinguishes a worktree code workspace from shared publication locations", () => {
+    const task = composeWorkflowChildTask("implement the change", "/runs/current", {
+      pwd: "/worktrees/child",
+      projectRoot: "/projects/main",
+      stableOutputDir: "/projects/main/outputs/result",
+    });
+
+    assert.match(task, /pwd \(code workspace\): \/worktrees\/child/u);
+    assert.match(task, /project root \(shared project location\): \/projects\/main/u);
+    assert.match(task, /stable output root \(shared publication location\): \/projects\/main\/outputs\/result/u);
+    assert.match(task, /Use pwd for code work/u);
+    assert.match(task, /intentional shared locations for publication/u);
   });
 
   it("leaves the prompt untouched when no directory is configured", () => {
     assert.equal(composeWorkflowChildTask("draft the plan", undefined), "draft the plan");
     assert.equal(composeWorkflowChildTask("draft the plan", "   "), "draft the plan");
-    assert.equal(composeWorkflowChildTask("draft the plan", undefined, { readOnly: true }), "draft the plan");
   });
 });

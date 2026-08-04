@@ -6,6 +6,55 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Standard workflow source now has an installed, provenance-aware build
+  gate.** `npx @kroffske/locus-pi check-workflow-source <path>` checks a workflow
+  from its consumer project without a local npm script, `tsx`, or a new runtime
+  dependency. The tarball carries a deterministic prebuilt ESM checker, so the
+  command also works from a real `node_modules` install where Node refuses
+  TypeScript stripping. The repository `check` gate still validates standard
+  entries in the unchanged six-workflow Package registry. The grammar treats semantic
+  input, plain agent text, and item aliases as opaque whole values while keeping
+  runtime-owned choices, list identity/status, and counters available for
+  orchestration. It rejects inspection, semantic branching/rendering, item
+  renaming, opaque subscript/member/call intermediaries, duplicate
+  value-bearing binding names, trusted-name assignment, and false DSL bindings
+  from later run parameters. Unused mandatory acknowledgement protocols remain an explicit
+  review prohibition rather than a regex over prompt English.
+  Callback provenance is fail-closed for every map and pipeline parameter,
+  opaque identity maps retain opacity, every computed index is checked, and
+  switch-local literal shadows keep their real lexical boundary. Public
+  examples now document the global unique value-binding rule and pass the same
+  shipped checker used by consumers.
+  Standard source also rejects implicit `arguments` and undeclared ambient value
+  roots, while arrays, objects, spreads, and nested composites preserve contained
+  provenance instead of laundering model/runtime values. Inline callbacks now
+  use arrows only, so named function expressions cannot leak a false ambient
+  binding into the enclosing scope. Sequence expressions are rejected outright,
+  including literal-only sequences, rather than falling through as author-known.
+  `Error` construction also accepts only author-known or literal arguments, so
+  model/runtime values cannot be laundered through messages, causes, options,
+  composites, spreads, or member extraction.
+  Every allowed standard DSL method now has one exhaustive return-provenance
+  category. Only exact choices, list identity/length, and saved-child status are
+  control values; model/file/workspace results are opaque, host
+  clock/random/path/publication results are runtime-owned whole values, and
+  `awaitOperator`/`log`/`phase` are void effects that cannot be used as values.
+
+- **Workflows can now compose one durable saved-child level into stable project
+  output.** The tool accepts a confined project-relative `outputDir`, while the
+  existing run-local evidence directory keeps its prior meaning. Workflow source
+  can invoke a real saved child per predeclared item key and publish one
+  host-verified primary-file reference with path, byte count, and SHA-256 digest.
+  Root and children share cancellation, global concurrency, a 10,000 physical
+  agent-call fuse, a fenced output lease, and atomic source-bound item
+  checkpoints, so retries skip completed work while source changes invalidate
+  it. Saved grandchildren and identity cycles fail before model work; stable
+  files survive failure. Project source remains live and that policy is journaled.
+  New standard source declares profile metadata and uses idempotent file updates;
+  the curated registry remains the same six workflows. Runtime and per-call
+  deadlines are now 24-hour emergency fuses and child requests use the host
+  maximum of 20 turns.
+
 - **The programmatic workflow tool now accepts native text work units.** A main
   agent can pass optional semantic `input` plus exact `items: string[]` in one
   call. Workflow source reads a frozen snapshot with `dsl.items()` and feeds it
@@ -33,7 +82,7 @@ This file records user-visible changes to the public package.
 - **New workflow authoring is approval-first and graph-readable.** A raw request
   to the bundled `workflow-author` now creates only
   `.pi/workflows/<name>.design.md`, recording the selected pattern, algorithm,
-  nodes, exact handoffs, capabilities, edges, bounds, mechanisms, and failure
+  nodes, exact handoffs, roles, edges, bounds, mechanisms, and failure
   exits. Only `Build approved design: <exact path>` creates matching source, and
   Build validates identity and module load without running it. Shipped Markdown
   pattern cards teach small direct-agent graphs; standard generated source passes

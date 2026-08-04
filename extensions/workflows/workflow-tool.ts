@@ -20,6 +20,7 @@ import { runWorkflowScript } from "./runtime/workflow-runner.js";
 import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
+import { WORKFLOW_OUTPUT_DIR_PATTERN } from "./runtime/workflow-output.js";
 import {
   formatOperatorScriptIdentity,
   safeOperatorSourceRef,
@@ -85,6 +86,14 @@ const WorkflowParams = Type.Object(
           "Optional exact text work units exposed unchanged and in order through dsl.items(); empty strings and duplicates are preserved.",
       }),
     ),
+    outputDir: Type.Optional(
+      Type.String({
+        maxLength: 400,
+        pattern: WORKFLOW_OUTPUT_DIR_PATTERN,
+        description:
+          "Optional safe project-relative stable user-output directory; defaults to outputs/<workflow-name> and intentionally selects the resumable namespace.",
+      }),
+    ),
     continuation: Type.Optional(WorkflowContinuationParams),
     resumeFromRunId: Type.Optional(
       Type.String({
@@ -102,6 +111,7 @@ function workflowApprovalDetails(args: unknown): string[] {
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
+    `Stable output: ${typeof record.outputDir === "string" ? record.outputDir : "default outputs/<workflow-name>"}`,
     "Surface: trusted-file workflow runner",
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
@@ -121,7 +131,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     description:
-      "Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), and optional host-verified continuation artifacts. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to `workflow-author`: a raw request writes only .pi/workflows/<name>.design.md, and only `Build approved design: <exact path>` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
+      "Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional stable project-relative outputDir, and optional host-verified continuation artifacts. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Saved workflows may invoke one saved child level through invokeWorkflow(); child work shares the root cancellation, concurrency, physical-call budget, stable output namespace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to `workflow-author`: a raw request writes only .pi/workflows/<name>.design.md, and only `Build approved design: <exact path>` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
@@ -156,6 +166,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.script !== undefined ? { script: valid.value.script } : {}),
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
           ...(valid.value.items !== undefined ? { items: valid.value.items } : {}),
+          ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
           onRunStart: ({ runId, runDir }) => {
@@ -209,6 +220,13 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           runId: res.runId,
           runDir: res.runDir,
           outputDir: workflowRunOutputsDir(res.runDir),
+          ...(res.stableOutputDir !== undefined ? { stableOutputDir: res.stableOutputDir } : {}),
+          ...(res.stableOutputDirRelative !== undefined
+            ? { stableOutputDirRelative: res.stableOutputDirRelative }
+            : {}),
+          ...(res.primaryFile !== undefined ? { primaryFile: res.primaryFile } : {}),
+          ...(res.lineage !== undefined ? { lineage: res.lineage } : {}),
+          ...(res.childRuns !== undefined ? { childRuns: res.childRuns } : {}),
           ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
           ...(res.primaryOutputPath !== undefined ? { primaryOutputPath: res.primaryOutputPath } : {}),
           resultPath: res.resultPersistence.path,
@@ -237,6 +255,11 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         runId: res.runId,
         runDir: res.runDir,
         outputDir: workflowRunOutputsDir(res.runDir),
+        ...(res.stableOutputDir !== undefined ? { stableOutputDir: res.stableOutputDir } : {}),
+        ...(res.stableOutputDirRelative !== undefined ? { stableOutputDirRelative: res.stableOutputDirRelative } : {}),
+        ...(res.primaryFile !== undefined ? { primaryFile: res.primaryFile } : {}),
+        ...(res.lineage !== undefined ? { lineage: res.lineage } : {}),
+        ...(res.childRuns !== undefined ? { childRuns: res.childRuns } : {}),
         ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
         ...(res.primaryOutputPath !== undefined ? { primaryOutputPath: res.primaryOutputPath } : {}),
         resultPath: res.resultPersistence.path,
@@ -275,6 +298,10 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
       ? `workflow ${res.runId} · ${disposition.status} · ${disposition.summary}`
       : `workflow ${res.runId} · ${disposition.status}`;
   const lines = [firstLine, `runDir: ${res.runDir}`, `outputDir: ${workflowRunOutputsDir(res.runDir)}`];
+  if (res.stableOutputDir !== undefined) lines.push(`stable output: ${res.stableOutputDir}`);
+  if (res.primaryFile !== undefined) {
+    lines.push(`primary file: ${res.primaryFile.absolutePath} (sha256 ${res.primaryFile.sha256})`);
+  }
   if (res.resultTextPath !== undefined) lines.push(`result: ${res.resultTextPath}`);
   if (res.primaryOutputPath !== undefined) lines.push(`primary output: ${res.primaryOutputPath}`);
   if (res.scriptIdentity !== undefined) lines.push(formatOperatorScriptIdentity(res.scriptIdentity, res.target?.ref));

@@ -33,9 +33,12 @@ The Markdown draft names:
 - purpose, semantic input, and primary output;
 - selected pattern;
 - numbered algorithm;
-- every node’s responsibility, exact input, complete output, capability, and
+- every node’s responsibility, exact input, complete output, role, and
   consumer;
 - edges, concurrency groups, loop bounds, human gates, and failure exits;
+- stable output directory, complete durable item-key source, idempotent file-update
+  rule, and project-source drift policy;
+- worst-case physical call count, including saved child runs;
 - orchestration mechanisms.
 
 Agent count is not a complexity penalty. Hidden machinery is. Count raw schema,
@@ -85,6 +88,9 @@ The remaining standard orchestration primitives are:
 | `publishPrimaryArtifact(name, text)` | One terminal semantic document.                              |
 | `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.        |
 | `items()`                            | Immutable exact caller-supplied text units.                  |
+| `outputDir()`                        | Stable project-relative output root selected by the host.    |
+| `invokeWorkflow(declaration)`        | One real saved child run with durable item checkpointing.    |
+| `publishPrimaryFile(path)`           | Validate and reference one non-empty stable output file.     |
 | `promptFile(path, variables)`        | Long/shared role charter; never routing.                     |
 | `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.    |
 
@@ -101,6 +107,7 @@ calls, branches, and handoffs visible at their execution edges.
 export const meta = {
   name: "review-task",
   description: "Review one task and publish the complete result.",
+  profile: "standard",
 };
 
 const AGENTS = {
@@ -138,10 +145,12 @@ work by default.
 
 Filesystem prompts name their location explicitly. Give a reader the exact
 `projectRoot()` as `pwd` and require project-relative source paths. Give a writer
-the exact `runWorkspaceDir()` or retained `workspace()` path plus the required
-relative output filename. Tell the agent not to redirect work into the user's
-home directory or `/tmp`. The workflow must not repair location mistakes with a
-path parser or an information-gathering script.
+the exact stable publication root returned by `outputDir()` plus the required
+relative output filename. If code work uses `runWorkspaceDir()` or a retained
+`workspace()`, distinguish that temporary code `pwd` from the shared stable
+publication root. Tell the agent not to redirect work into the user's home
+directory or `/tmp`. The workflow must not repair location mistakes with a path
+parser or an information-gathering script.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. Lists come from one of
@@ -152,23 +161,79 @@ including empty strings and duplicates, with no item-list limits; a workflow
 checks only domain rules it truly needs. Model handoffs retain their separate
 declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
 
-```js
-async function processItem(dsl, item) {
-  const finding = await dsl.agent(`Inspect this unit:\n${item}`, { label: `inspect:${item}` });
-  return dsl.agent(`Write the result:\n${item}\n\n${finding}`, { label: `write:${item}` });
-}
+For durable item work, start from a caller-frozen approved list. The parent then
+invokes one reviewed saved child per key and passes that same full list on every
+call, allowing the host to reject duplicate or unsafe keys before the first
+child starts:
 
-export default function runWorkflow(dsl) {
-  const items = dsl.items(); // Or a file-top array, or await dsl.agent(..., { handoffs }).
+```js
+export const meta = {
+  name: "durable-parent",
+  description: "Run one saved worker per exact caller item.",
+  profile: "standard",
+};
+
+export default async function runWorkflow(dsl) {
+  const items = dsl.items();
   if (items.length === 0) throw new Error("this workflow requires at least one work item");
-  return dsl.pipeline(items, (item) => dsl.workflow((nested) => processItem(nested, item)));
+  const keys = items.map((_, keyIndex) => `item-${keyIndex + 1}`);
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    await dsl.invokeWorkflow({
+      name: "durable-worker",
+      key: keys[index],
+      keys,
+      input: item,
+      items: [item],
+      outputDir: dsl.outputDir(),
+    });
+  }
+  return dsl.publishPrimaryFile("report.md");
 }
 ```
 
-`dsl.workflow()` is an inline readability/journal boundary. It starts no saved
-workflow, child run, budget, workspace, or permission scope. The item appears
-only in prompts that explicitly use it; the runtime does not copy the full list
-into child metadata.
+The child is a real depth-one saved run with its own run directory, source
+snapshot, journal, result envelope, and lineage. It shares root cancellation,
+global concurrency, the 10,000 physical-agent-call fuse, and the stable output
+namespace. A saved child cannot invoke another saved child, and source-identity
+cycles fail before agent work. `dsl.workflow()` remains only an inline
+readability/journal boundary; it starts no child run or checkpoint.
+Keys are compact stable identities, not opaque item payloads. Prefer stable
+caller-owned semantic keys. Position keys such as `item-1` are safe only when
+the exact approved caller list and ordering are intentionally unchanged for the
+reused output namespace. Pass original text unchanged in `input`/`items`; the
+runtime never parses it.
+
+A fresh `agent({ handoffs })` list stays in the same-run, non-resumable inline
+worker pattern. Durable discovery is two runs: discovery first exposes a
+human-readable list for approval, then a separate caller supplies that frozen
+list and its stable identities to the durable parent. Never derive resumable
+positional keys from fresh model output, and never parse a discovery document as
+transport.
+
+Stable user output is distinct from run evidence. The default is
+`outputs/<workflow-name>`; callers may select another safe project-relative
+`outputDir`. Writers receive the exact `dsl.outputDir()` location and replace
+their assigned file atomically or otherwise idempotently—never append blindly.
+`publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty
+file under that root and returns its path, byte count, and SHA-256 digest without
+copying or interpreting the content. Failed runs leave stable files intact for
+inspection and retry.
+
+Completed-item checkpoints are keyed by parent source hash, child source hash,
+stable output directory, and exact item key. A matching checkpoint skips that
+child on retry; any source change invalidates it. This is at-least-once
+execution, so file writes must remain idempotent. One fenced root lease excludes
+concurrent runs using the same stable namespace and prevents a stale owner from
+committing after takeover.
+
+Project files are live during a run. The runtime journals that policy and the
+run boundary; it does not snapshot the repository or infer domain meaning from
+project files. If source consistency matters, the approved design must choose a
+generic policy such as fail on detected drift or accept live reads and record
+that decision. Do not add a workflow-side ledger, discovery-document parser, or
+recovery engine.
 
 ## Standard-profile bad smells
 
@@ -193,6 +258,130 @@ Routine agent and group failure is uncaught and fail-closed. Partial continuatio
 is outside the standard profile unless the approved design explicitly proves
 that surviving results remain useful.
 
+## Machine-enforced standard source shape
+
+The build gate is deliberately a small source grammar, not a second workflow
+engine. For a project workflow, run it against the exact file Build produced:
+
+```bash
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+```
+
+This installed-package command resolves the path from the project where it is
+run; it needs neither a consumer npm script nor `tsx`. The package ships a
+prebuilt ESM checker so Node never has to strip TypeScript under `node_modules`.
+Repository maintainers use `npm run check:workflow-source` with no path to check every `standard` entry
+already present in the six-workflow Package registry. Neither command discovers
+or adds registry entries. The repository-wide `npm run check` gate runs that
+Package check. Source-shape validation does not replace source-identity
+assessment or importing the module.
+
+These are all rules enforced for `meta.profile: "standard"`:
+
+- Source must parse as JavaScript. The module has exactly one literal
+  `export const meta` whose profile is
+  `"standard"`, plus exactly one visible default function or arrow export. A
+  named entry is `run` or `runWorkflow`. Other top-level declarations are
+  `const` values made only from literal arrays, objects, scalars, and static
+  strings; comments and a hashbang are harmless, but there are no other
+  statements or exports.
+- Standard source has no static import, re-export, dynamic `import()`, or
+  `require()` call, including `node:` modules. This is stricter than the general
+  source-identity policy described below.
+- Run bodies use only lexical declarations, expressions, `if`, `switch`,
+  `for`, `for…of`/`for…in`, `while`, `break`, `continue`, `return`, `throw`, and
+  empty statements. Labels, `do…while`, and other statement forms are outside
+  this profile.
+- Calls are direct uses of the bound DSL primitives: `agent`, `awaitOperator`,
+  `consumeTextArtifact`, `continuationArtifacts`, `invokeWorkflow`, `items`,
+  `log`, `now`, `outputDir`, `parallel`, `phase`, `pipeline`, `projectRoot`,
+  `promptFile`, `publishArtifact`, `publishPrimaryArtifact`,
+  `publishPrimaryFile`, `random`, `runWorkspaceDir`, `workflow`, and
+  `workspace`. Computed calls, aliases, `.bind()` wrappers, unknown globals,
+  and other method calls are rejected.
+- Every allowed DSL call has one exhaustive return classification:
+
+  | Classification     | DSL calls                                                                                                                         |
+  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+  | Runtime control    | `agent({ choice })` exact identity only                                                                                           |
+  | Opaque list        | `agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`                                                   |
+  | Saved-child status | `invokeWorkflow`; only its exact `status` identity is control                                                                     |
+  | Opaque value       | ordinary/model `agent`, `consumeTextArtifact`, `promptFile`, `workflow`, `workspace`                                              |
+  | Runtime/host value | `now`, `random`, `outputDir`, `projectRoot`, `runWorkspaceDir`, `publishArtifact`, `publishPrimaryArtifact`, `publishPrimaryFile` |
+  | Void               | `awaitOperator`, `log`, `phase`                                                                                                   |
+
+  Adding an allowed method without a return category fails closed. Only runtime
+  choice, list identity/length, and saved-child status are control primitives.
+  Opaque and runtime/host values may be forwarded whole through documented
+  prompt, log, publication, scheduling, and return sinks, but may not be
+  inspected, branched on, indexed, transformed, or embedded in `Error`.
+  `outputDir()` may flow unchanged into `invokeWorkflow.outputDir`. Publication
+  references and host paths may flow whole into an agent/log/return. Void calls
+  are standalone effects and cannot be bound, nested, or returned as values.
+
+- Only the first run parameter supplies DSL bindings. The second parameter is
+  semantic input, never another DSL object.
+- Every value read by standard source resolves to a declared lexical/literal
+  binding or the approved `Error` language root. Ambient host values and hidden
+  environment input are unavailable. The implicit function `arguments` object
+  is rejected; run and callback values use explicit named parameters.
+- The only extra collection calls are a visible `.map(callback)` over an array
+  or a source-ordered binding derived from an array or collection-producing DSL
+  call, and `.join()` used inside an `agent()` prompt template. The only extra
+  string call is the exact boundary default
+  `typeof input === "string" && input.trim() ? input.trim() : "literal"`.
+- Inline callbacks use arrow functions. Function expressions, including named
+  function expressions, are outside the standard grammar; this keeps callback
+  bindings and their lexical scope explicit.
+- Semantic input, plain `agent()` text, and items/item aliases are opaque.
+  Standard source may forward each whole value into an agent prompt, progress
+  log, exact text publication, return value, or unchanged saved/inline item
+  scheduling. It may not inspect properties, measure or compare the value,
+  branch on it, transform/render it elsewhere, or rename a mapped item.
+  Runtime-owned `agent({ choice })` identities, list identity/length, saved-call
+  status, callback indexes, and declared loop counters may drive control flow.
+  Opaque values may not appear anywhere inside a computed subscript index.
+- Arrays, object values, spreads, and nested composites preserve contained
+  semantic/runtime provenance. Wrapping a value never makes it author-known;
+  unchanged whole values may still reach the documented scheduling,
+  publication, prompt, log, and return sinks.
+- Every value-bearing callback parameter is classified. A `pipeline()` stage
+  receives one opaque value and an optional runtime-owned index; every `.map()`
+  parameter, including its whole-array parameter, retains the collection's
+  provenance. An unrecognized callback parameter is rejected rather than
+  treated as author-known data. Mapping an opaque list remains opaque and cannot
+  make its items author-known. Durable key arrays derived from caller items may
+  flow only unchanged into the matching `invokeWorkflow()` `key`/`keys` fields.
+- No helper function declaration, function-valued variable, object method,
+  class, object/variable function wrapper, hidden edge callback, computed object
+  key, `schema`/`validate` object key, regex, or `try/catch` is allowed. Inline
+  callbacks containing agent edges remain visible only under `parallel`,
+  `pipeline`, or `workflow` calls.
+- Assignments, augmented assignments, and updates are rejected except when the
+  `for` increment mutates one numeric identifier initialized by that same loop.
+  That counter may never be a protected DSL, collection, or `Error` binding;
+  only `++`/`--` or a numeric `+=`/`-=` step is accepted.
+  `new` constructs only the unshadowed global `Error` constructor, and every
+  `Error` argument must remain author-known or literal. Opaque/runtime values
+  are rejected anywhere inside its message, options, cause, arrays, objects,
+  spreads, nesting, or member extraction. Sequence expressions are rejected
+  even when every operand is a literal; use one explicit expression or
+  statement at a time.
+- Run parameters, nested callbacks, lexical declarations, loop bindings, and
+  switch blocks may not shadow trusted DSL bindings, recognized collection
+  bindings, or `Error`. Bare and parenthesized arrow parameters follow the same
+  rule. Assignment targets cannot rebind those trusted names either.
+- Every semantic or runtime-owned value-bearing binding name is globally unique
+  in one standard source file. This intentionally conservative rule keeps
+  provenance independent of JavaScript scope. A nested scalar literal may reuse
+  such a spelling; its real lexical block, including a `switch` body, does not
+  change the outer value's provenance.
+
+The owner contract separately forbids mandatory acknowledgement protocols whose
+answer has no consumer. That is an explicit design/source review rule, not a
+prompt-English parser: the structural checker does not guess intent from words
+such as `DONE`, `OK`, or `WRITTEN`.
+
 ## Dynamic decomposition without manager delegation
 
 The host reserves the recursive `spawn_agent` and `task` entrypoints; this is a
@@ -208,18 +397,21 @@ not recreate them with a structured planner and JavaScript dispatcher.
 A built workflow is one ESM module:
 
 ```js
-export const meta = { name: "<name>", description: "<one line>" };
+export const meta = { name: "<name>", description: "<one line>", profile: "standard" };
 export default async function runWorkflow(dsl, input) {
   // use only the dsl members the approved graph needs
 }
 ```
 
 The filename is exactly `<name>.workflow.mjs`. `.pi/workflows/` is the canonical
-project target. The default `self-contained-static` identity accepts only static
-`node:` imports and runs the retained snapshot. Local, package, or dynamic
-imports require literal `meta.identityCoverage: "entry-only"`, which binds only
-entry bytes. The analyzer cannot infer arbitrary eval or `createRequire` aliases;
-declare the downgrade honestly.
+project target. Source identity and authoring profile are separate gates. The
+general `self-contained-static` identity accepts static `node:` imports, and
+`legacy`, `integration`, or explicitly reviewed non-standard source may use
+that allowance. The `standard` source-shape profile imports nothing. Local,
+package, or dynamic imports require literal
+`meta.identityCoverage: "entry-only"`, which binds only entry bytes and is also
+outside `standard`. The analyzer cannot infer arbitrary eval or `createRequire`
+aliases; declare the downgrade honestly.
 
 Before handoff, run `assessWorkflowSourceIdentity()` against exact source bytes,
 then import the module and require `meta.name` plus a default function. Static
@@ -241,6 +433,17 @@ bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
 `totalAgents` fuse defaults to 10,000: enough for fine-grained finite
 decomposition, while the next physical attempt still fails a runaway run.
+The default per-call and run deadlines are 24-hour emergency fuses, not ordinary
+planning deadlines, and each child request keeps a 20-turn host maximum. The
+root and all saved children consume one shared physical-call counter.
+
+`meta.profile` makes authoring intent explicit. New generated source uses
+`"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end
+portfolio flows may use `"integration"`, and missing metadata is reported as
+`"unclassified"`. Profiles describe source shape; they do not weaken runtime
+validation or trust boundaries. Use ordinary natural-language success evidence
+from the child—never require a magic acknowledgement literal such as a fixed
+one-word token.
 
 ## Trust boundary
 

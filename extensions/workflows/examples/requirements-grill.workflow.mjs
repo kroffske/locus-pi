@@ -117,6 +117,7 @@ const GRILL_AGENTS = Object.freeze({
 
 export const meta = {
   name: "requirements-grill",
+  profile: "legacy",
   description: "Maps repository facts, challenges a request, and returns implementation-ready requirements.",
   // Declared shape, read statically by /workflows info before any run starts.
   // Titles must equal the phase() calls below; a test enforces that.

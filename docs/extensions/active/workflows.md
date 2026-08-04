@@ -19,8 +19,9 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / items / publishArtifact /
-consumeTextArtifact / awaitOperator / parallel / pipeline / workflow / phase / log / promptFile / workspace`)
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / items / outputDir /
+invokeWorkflow / publishPrimaryFile / publishArtifact / consumeTextArtifact / awaitOperator /
+parallel / pipeline / workflow / phase / log / promptFile / workspace`)
 for orchestrating catalog-agent sessions through the existing
 `task / createAgentSession` path and retaining their evidence under one run root.
 The same extension owns an opt-in direct `fusion` tool for the main Pi session;
@@ -92,6 +93,13 @@ with real session ids. See "Run a real workflow (live)" below.
 | `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `plan`               | **Task to outcome-first accepted plan**: planning agents are prompted not to edit. A `scout` maps the repository, then a `planner`/`critic` loop defines one primary result before deriving steps: outcome type, consumer, form and location, required content or behavior, usability proof, and supporting evidence. Every step is one bounded agent subtask with explicit `Context:`, one `Question:`, and one `Output:`; dozens of item-sized steps are valid, and distinct reasoning over one source stays split. The critic rejects plans whose steps can pass without producing the result, hidden meaning-changing assumptions, oversized multi-question steps, and repeated work that is purely mechanical. At the bounded round cap, the operator is told to continue the same run with guidance instead of editing the retained draft.                                                                                                                                                                                                                                                                     |
 | `plan-implement`     | **Accepted plan to verified primary result**: one host-verified continuation artifact, pasted plan text, or one text file supplies the plan. Deterministic code extracts routing structure — one unambiguous `## Outcome`, `### S<n>` blocks, `Depends on:` closure, and the optional legacy-compatible agent-subtask contract — restores selected plan order, and publishes `implementation-tasks.md`; agents own the plan's meaning and the final judgment. Each selected step, up to 80, gets one writer whose prompt repeats only that step's context, semantic question, and required output, followed by an independent reviewer. The final checker returns structured selected-step and repository command statuses; deterministic control flow refuses `complete` after any failed or unrun check, evidence gap, run-attributable unexpected change, or non-ready primary result. One bounded reconciliation may repair any terminal gap, including a missing result after all steps are done. The primary output is `workflow-summary.md`; `implementation-report.md` remains supporting per-step evidence. |
+
+Catalog metadata exposes an authoring profile without changing execution:
+`live-smoke` is `standard`; `requirements-grill`, `plan`, `review`, and
+`review-fix` are `legacy`; `plan-implement` is `integration`. A workflow with no
+literal profile is shown as `unclassified`. New generated source declares
+`meta.profile: "standard"`; the other labels document compatibility or portfolio
+intent and do not weaken runtime checks.
 
 `review` always receives a non-empty semantic string. A shaped
 clarifier decides `continue` or `needs_operator`. Continue starts the five review
@@ -248,8 +256,9 @@ remediates against a review, or answers clarification questions from, some other
 run — which re-running with the right source corrects.
 
 `plan` declares its three participants in one frozen `PLAN_AGENTS` roster —
-`scout`, `planner`, `critic` — carrying each agent's capabilities beside what it
-receives and returns, so the cast is readable without following the control flow.
+`scout`, `planner`, `critic` — carrying each agent's prompt/model identity beside
+what it receives and returns, so the cast is readable without following the
+control flow.
 
 Every accepted plan starts with `## Outcome`. That section names the primary
 result and the evidence that makes it useful, so `plan-implement` carries the
@@ -995,7 +1004,7 @@ Fresh evidence:
 
 Authoring is approval-first. A raw request creates only
 `.pi/workflows/<name>.design.md`: selected pattern, numbered algorithm, graph
-table, node responsibilities, inputs, complete outputs, capabilities, consumers,
+table, node responsibilities, inputs, complete outputs, roles, consumers,
 edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. Show it
 to the operator and stop.
 
@@ -1039,6 +1048,9 @@ const {
   workflow,
   promptFile,
   workspace,
+  outputDir,
+  invokeWorkflow,
+  publishPrimaryFile,
 } = dsl;
 ```
 
@@ -1108,11 +1120,12 @@ One real agent that does a tool action and returns text:
 export const meta = {
   name: "hello",
   description: "One agent lists the cwd and returns readable text.",
+  profile: "standard",
 };
 
 export default async function runWorkflow(dsl, input) {
   const { agent, phase, log } = dsl;
-  const task = (typeof input === "string" && input.trim()) || "list the cwd";
+  const task = typeof input === "string" && input.trim() ? input.trim() : "list the cwd";
 
   phase("work");
   const workerText = await agent(`Task: ${task}. Use a tool once, then return a concise Markdown answer.`, {
@@ -1123,6 +1136,45 @@ export default async function runWorkflow(dsl, input) {
   return workerText;
 }
 ```
+
+This example passes the machine-enforced `standard` grammar. The complete rule
+list is in
+[`extensions/workflows/AUTHORING.md`](../../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape).
+Build checks an authored file with:
+
+```bash
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+```
+
+The command comes from the installed package, resolves the workflow path from
+the current project, and requires no project-local npm script or `tsx`. Its
+checker is prebuilt ESM, including when the package lives under `node_modules`.
+Standard source treats semantic input, plain model text, and items as opaque whole values:
+only exact prompt/publication/return forwarding and unchanged item scheduling
+are allowed. Runtime-owned choices, list identity, status, and counters remain
+valid orchestration controls. Every semantic or runtime-owned value-bearing
+binding, callback parameter, and loop counter uses one globally unique name; a
+nested scalar literal may reuse that spelling within its actual lexical scope.
+Every computed subscript index retains provenance, and unclassified callback
+parameters fail closed. Arrays, objects, spreads, and nested composites retain
+contained provenance. Standard source reads only declared lexical/literal roots,
+never ambient host globals or implicit `arguments`. Inline callbacks use arrow
+functions; function expressions and all sequence expressions, including
+literal-only sequences, are rejected. `Error` accepts only author-known or
+literal arguments; opaque/runtime values cannot be hidden in its message,
+options, cause, composites, spreads, or member access. Mandatory unused
+acknowledgement protocols remain a design/source review prohibition; the checker
+never parses prompt English.
+
+The standard checker classifies every allowed DSL return. Exact
+`agent({ choice })` identity, list results from handoffs/continuations/items/groups,
+and exact saved-child `status` are the only control categories. Ordinary model,
+consumed-file, prompt-file, inline-workflow, and workspace results are opaque.
+Recorded clock/random values, host paths, and publication references are
+runtime/host values. `awaitOperator`, `log`, and `phase` are void effects.
+Opaque/runtime-host values may be forwarded whole through documented sinks but
+never inspected, branched on, indexed, transformed, or put inside `Error`;
+`outputDir()` alone may flow unchanged into `invokeWorkflow.outputDir`.
 
 Notes:
 
@@ -1225,10 +1277,13 @@ and runtime validate the array/string shape, and `dsl.items()` returns a detache
 frozen snapshot. Order and bytes, including whitespace, empty strings, and
 duplicates, are unchanged; transport adds no count, per-item, or aggregate-size
 policy. A source array, caller items, or bounded model-discovered
-`agent({ handoffs })` result feeds the same visible `pipeline()` plus inline
-`dsl.workflow()` mini-flow. Only model handoffs use corrective re-ask and
-blank/duplicate bounds. The full caller list is not automatic child metadata,
-journal/summary identity, or replay identity, and no file parser participates.
+`agent({ handoffs })` result may feed the same visible `pipeline()` plus inline
+`dsl.workflow()` mini-flow. This fresh model-discovery path is non-resumable.
+Durable execution instead begins in a separate invocation with a caller-frozen,
+approved list and stable caller-owned keys. Positional keys are safe only when
+that exact list and ordering are intentionally unchanged for the reused output
+namespace. Only model handoffs use corrective re-ask and blank/duplicate bounds.
+No file or discovery-document parser participates.
 
 Cross-run state travels separately through the tool's closed `continuation`:
 
@@ -1267,16 +1322,18 @@ replay-only `resumeFromRunId`.
   that normalizes to one of those). To run ad-hoc logic, save a `.workflow.mjs` first.
 - **No custom primitives / event kinds / lifecycle states.** The DSL surface below is
   the whole contract; do not invent a primitive the runtime does not expose.
-- **Use `dsl` only as an authoring policy.** Reach the filesystem/model through
-  `agent()` in reviewed workflows. This is not
-  enforced: static Node builtins and explicit `entry-only` scripts retain full
-  Node.js/module capabilities in the Pi host process. Do not run an unreviewed
-  file or treat identity coverage, a worktree or an approval receipt as a
-  security boundary.
-- **No silent dependency downgrade.** Default scripts must stay one source module
-  apart from static `node:` imports. If reviewed code genuinely needs local,
-  package, dynamic or `import.meta` behavior, declare literal
-  `meta.identityCoverage: "entry-only"` and treat its hash as entry-only evidence.
+- **Use `dsl` only as an authoring policy.** The machine-enforced `standard`
+  profile reaches the filesystem/model through direct DSL calls and permits no
+  imports. This is not a sandbox: the broader `legacy`, `integration`, and
+  explicitly reviewed `entry-only` surfaces retain Node.js/module capabilities
+  in the Pi host process. Do not run an unreviewed file or treat identity
+  coverage, a worktree, or an approval receipt as a security boundary.
+- **No silent dependency downgrade.** General identity policy allows a default
+  script to remain one source module apart from static `node:` imports, but the
+  `standard` authoring profile is stricter and imports nothing. If reviewed
+  non-standard code genuinely needs local, package, dynamic, or `import.meta`
+  behavior, declare literal `meta.identityCoverage: "entry-only"` and treat its
+  hash as entry-only evidence.
 
 ### Delegate authoring to the `workflow-author` agent
 
@@ -1301,6 +1358,9 @@ fusion(question, options)     // 2-10 isolated answers -> separate judge; return
 fusion(question, {schema, …}) // Same panel; validates only the judge's final answer
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
+outputDir()                   // Project-relative stable user-output root selected by the host
+invokeWorkflow(declaration)   // Run one saved child level with durable item checkpointing
+publishPrimaryFile(path)      // Validate/reference one non-empty stable output file
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
@@ -1358,6 +1418,44 @@ runtime renames, numbers or moves what an agent writes, so a path a workflow
 prints in a question is a path that exists. Auto-captured readable material goes
 to `outputs/`; machine evidence and transcripts go to `runtime/artifacts/`.
 See `docs/runtime/workflow-run-storage.md`.
+
+`outputDir()` is separate: it returns the project-relative stable namespace for
+user files, defaulting to `outputs/<workflow-name>` or selected through the
+programmatic tool's safe relative `outputDir` field. Its absolute path is added
+to every child filesystem preamble and exposed as `stableOutputDir`; the existing
+tool-detail `outputDir` remains the run-local evidence directory for
+compatibility. Absolute paths, traversal, whitespace tricks, backslashes, and
+symlink ancestors are rejected before a child starts.
+
+`publishPrimaryFile(relativePath)` validates a regular, non-symlink, non-empty
+file beneath the stable root and exposes absolute/relative path, byte count, and
+SHA-256 digest. It neither copies nor parses content. Stable files survive failed
+runs; run-local evidence remains immutable under the run id.
+
+`invokeWorkflow()` accepts exactly one saved `name` or `scriptPath`, optional
+semantic `input` and exact `items`, one safe item `key`, the complete unique
+`keys` list, and the same `outputDir()`. It starts a real depth-one child with an
+independent run directory, source snapshot, journal, result, and parent lineage.
+The root and children share cancellation, global concurrency, one physical-call
+counter, one 24-hour emergency deadline, and one fenced stable-output lease.
+Saved children cannot invoke saved grandchildren; direct or source-identity
+cycles fail before model work.
+
+Before durable execution, the caller supplies the complete frozen work list and
+the runtime validates all keys before the first child. Fresh model discovery
+must remain non-resumable in the same run, or finish in a separate run before a
+human/caller approves and transports the frozen list. Never derive resumable
+positional keys from fresh model output. Terminal-success checkpoints are committed atomically
+and keyed by parent source hash, child source hash, stable output directory, and
+item key. A retry skips a matching child and reruns missing or source-invalidated
+items. Execution is at least once, so assigned files must be replaced
+idempotently rather than appended. The runtime provides no workflow-side ledger,
+domain parser, renderer, or recovery engine.
+
+Project source is read live throughout execution. Each run journals
+`policy=live`, the project root, and its run-boundary timestamp. This makes the
+consistency policy observable without pretending the repository was snapshotted;
+an approved workflow that needs stronger drift behavior must state it explicitly.
 
 `now()` and `random()` exist so a workflow can be nondeterministic AND replayable.
 They return exactly what `Date.now()` / `Math.random()` would, and the runtime
@@ -1431,8 +1529,8 @@ contract, not an enforcement or security boundary.
 | ----------------- | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent`           | string                                 | `"default"`                           | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `maxToolCalls`    | positive safe integer                  | budget `toolCalls` (`1000`)           | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
-| `timeoutMs`       | integer 1..2147383628                  | budget `timeoutMs` (`600000`)         | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. The upper bound reserves room for the SDK backstop at 20 turns while keeping both delays within Node's real timer range; larger delays would be clamped to roughly 1 ms.                                                                                                                                             |
-| `maxTurns`        | integer 1..20                          | budget `turns` (`5`)                  | Assistant turns for one child attempt. A value outside the host clamp is refused before any child starts. It was a hidden constant that multiplied the child's whole wall clock; it is now a declared budget axis.                                                                                                                                                                                                                                                                                                  |
+| `timeoutMs`       | integer 1..2147383628                  | budget `timeoutMs` (`86400000`)       | 24-hour emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                |
+| `maxTurns`        | integer 1..20                          | budget `turns` (`20`)                 | Assistant turns for one child attempt at the host maximum. A value outside the host clamp is refused before any child starts.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `maxAnswerChars`  | positive safe integer                  | budget `answerChars` (`500000`)       | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
 | `attempts`        | safe integer 1–3                       | `1`                                   | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3. Never re-asks an answer the child did produce.                                                                                                                                                                                                                                                                                   |
 | `label`           | string                                 | —                                     | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1617,7 +1715,8 @@ model prose or own a domain schema.
 
 `handoffs` enables dynamic fan-out but not recursive manager delegation. SDK
 children still cannot call `spawn_agent` or `task`; the approved source must
-show the downstream `parallel()`/`pipeline()` calls and their capabilities.
+show the downstream `parallel()`/`pipeline()` calls and their agent identities,
+inputs, outputs, and edges.
 
 ### Advanced compatibility: shaped answers — `agent({ schema })`
 
@@ -1836,14 +1935,14 @@ source, and `runWorkflowScript` applies it to the runtime on every run:
 | ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `concurrency` | `4`               | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
 | `totalAgents` | `10000`           | Total `agent()` invocations, nested and retried ones included. Fine-grained decomposition may legitimately exceed 200 calls; the next attempt above this fuse still throws `WorkflowInvocationCapError` and exits the run.        |
-| `runtimeMs`   | `7200000` (2 h)   | Wall clock over the agent chain. Exceeding it throws `WorkflowRunDeadlineError` and exits the run.                                                                                                                                |
-| `timeoutMs`   | `600000` (10 min) | One child attempt. The SDK host's own child deadline is derived from this, so the workflow-level failure always wins; both timers remain within Node's maximum real delay.                                                        |
+| `runtimeMs`   | `86400000` (24 h) | Emergency wall-clock fuse over the root and saved-child agent chain. Exceeding it throws `WorkflowRunDeadlineError`; it is not an ordinary planning deadline.                                                                     |
+| `timeoutMs`   | `86400000` (24 h) | Emergency fuse for one child attempt. The SDK host's child deadline is derived from this, so the workflow-level failure wins.                                                                                                     |
 | `toolCalls`   | `1000`            | Tool calls per child attempt.                                                                                                                                                                                                     |
-| `turns`       | `5`               | Assistant turns per child attempt, within the host clamp of 1..20.                                                                                                                                                                |
+| `turns`       | `20`              | Assistant turns per child attempt, equal to the host maximum.                                                                                                                                                                     |
 | `answerChars` | `500000`          | Characters in one child answer.                                                                                                                                                                                                   |
 
-**What `runtimeMs` does and does not bound.** It is a deadline check performed
-after a child acquires the run-wide concurrency slot and immediately before the
+**What `runtimeMs` does and does not bound.** It is a shared emergency deadline
+for the root and saved children, checked after a child acquires the run-wide concurrency slot and immediately before the
 child starts — not a timer that
 aborts a child mid-flight, because two abort paths for one child is the same
 defect the single per-child deadline removes. So a run is bounded by `runtimeMs`

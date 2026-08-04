@@ -385,7 +385,8 @@ describe("workflow operator catalog", () => {
       const named = buildWorkflowInfoBlock(root, root, "alpha");
       const namedText = named.body?.join("\n") ?? "";
       expect(namedText).toContain(`resolved path: ${path.join(workflowDir, "alpha.workflow.mjs")}`);
-      expect(namedText).toContain("static top-level export const meta.description and meta.phases only");
+      expect(namedText).toContain("static top-level export const meta.description, meta.profile, and meta.phases only");
+      expect(namedText).toContain("profile: unclassified");
       // A workflow that declares no phases produces no phase lines at all.
       expect(namedText).not.toContain("phases:");
       expect(namedText).toContain("DSL: agent(), parallel(), pipeline(), phase(), log(), workflow()");

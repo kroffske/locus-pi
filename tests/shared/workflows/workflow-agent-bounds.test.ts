@@ -263,10 +263,10 @@ describe("contract-defaulted per-child bounds", () => {
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
     const turnTimeoutMs = factoryOptions[0]?.turnTimeoutMs;
-    expect(turnTimeoutMs).toBe(workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, 5));
+    expect(turnTimeoutMs).toBe(workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, 20));
     // ORDERING, not only the value: the host kills a child at turnTimeoutMs * maxTurns
     // (`agent-sdk-host.ts`), and that moment must come strictly after the workflow fuse.
-    expect(turnTimeoutMs! * 5).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(turnTimeoutMs! * 20).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
     rmSync(root, { recursive: true, force: true });
   });
 

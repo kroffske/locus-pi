@@ -283,6 +283,7 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan-implement",
+  profile: "integration",
   description:
     "Turns an outcome-first accepted plan into a verified primary result, task ledger, and supporting report.",
   phases: [

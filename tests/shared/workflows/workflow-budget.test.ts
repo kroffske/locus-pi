@@ -42,10 +42,10 @@ describe("DEFAULT_WORKFLOW_BUDGET", () => {
     expect(DEFAULT_WORKFLOW_BUDGET).toEqual({
       concurrency: 4,
       totalAgents: 10_000,
-      runtimeMs: 7_200_000,
-      timeoutMs: 600_000,
+      runtimeMs: 86_400_000,
+      timeoutMs: 86_400_000,
       toolCalls: 1_000,
-      turns: 5,
+      turns: 20,
       answerChars: 500_000,
     });
   });
@@ -89,9 +89,9 @@ describe("resolveWorkflowBudget", () => {
   });
 
   it("records a raise instead of refusing it or hiding it", () => {
-    const resolved = resolveWorkflowBudget({ runtimeMs: 14_400_000 });
-    expect(resolved.budget.runtimeMs).toBe(14_400_000);
-    expect(resolved.raises).toEqual([{ axis: "runtimeMs", applied: 7_200_000, requested: 14_400_000 }]);
+    const resolved = resolveWorkflowBudget({ runtimeMs: 172_800_000 });
+    expect(resolved.budget.runtimeMs).toBe(172_800_000);
+    expect(resolved.raises).toEqual([{ axis: "runtimeMs", applied: 86_400_000, requested: 172_800_000 }]);
   });
 
   it("refuses a run-level turns override outside the host clamp before calling it applied", () => {
@@ -183,8 +183,12 @@ describe("workflowSdkTurnTimeoutMs", () => {
     }
   });
 
-  it("lands five seconds above the 120_000 the host used before the contract existed", () => {
-    expect(workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, DEFAULT_WORKFLOW_BUDGET.turns)).toBe(125_000);
+  it("keeps the SDK host backstop after the 24-hour workflow emergency fuse", () => {
+    const turn = workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, DEFAULT_WORKFLOW_BUDGET.turns);
+    expect(turn * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(DEFAULT_WORKFLOW_BUDGET.runtimeMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
+    expect(DEFAULT_WORKFLOW_BUDGET.timeoutMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
+    expect(DEFAULT_WORKFLOW_BUDGET.turns).toBe(WORKFLOW_AGENT_MAX_TURNS);
   });
 });
 
@@ -549,6 +553,24 @@ function answeringRuntime(options: {
 }
 
 describe("run wall clock (runtimeMs)", () => {
+  it("keeps a private invocation cap for direct runtime embeddings without runner coordination", async () => {
+    const runtime = createWorkflowRuntime({
+      runId: "direct-embedding-private-scheduler",
+      maxTotalAgentInvocations: 1,
+      agentRunner: async (request): Promise<WorkflowAgentResult> => ({
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text: "answer",
+        diagnostics: [],
+        agent: request.agent,
+      }),
+    });
+
+    await expect(runtime.dsl.agent("first")).resolves.toBe("answer");
+    await expect(runtime.dsl.agent("second")).rejects.toThrow(/maxTotalAgentInvocations cap of 1/u);
+  });
+
   it("refuses an already-expired attempt before it occupies a concurrency slot", async () => {
     const clock = clockFrom(0);
     const { dsl, requests, peakAgentConcurrency } = answeringRuntime({

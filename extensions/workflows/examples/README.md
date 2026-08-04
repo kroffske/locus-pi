@@ -12,21 +12,33 @@ what ships, what each example is for, which shape it demonstrates, and how far
 it travels. The standard source profile lives in [`AUTHORING.md`](../AUTHORING.md)
 and the skill-loaded compact pattern cards.
 
-Measured 2026-07-30 against the files in this directory.
+Measured 2026-08-04 against the files in this directory. `Profile` is literal
+catalog metadata: `standard` is the current generated-source contract,
+`legacy` preserves reviewed compatibility shapes, and `integration` names a
+portfolio-level end-to-end flow.
+
+`npm run check:workflow-source` validates the existing Package registry without
+discovering or adding entries; today it applies the closed standard grammar to
+`live-smoke`. Build checks a new standard file explicitly with
+`npx @kroffske/locus-pi check-workflow-source <path>` from the project that owns
+the file.
+
+For the standard durable saved-child pattern—`invokeWorkflow()`, `outputDir()`,
+and source-bound item checkpoints—see [`AUTHORING.md`](../AUTHORING.md).
 
 ## What ships
 
 Counts are of real occurrences — `promptFile()` calls, `agent({ schema })` calls,
 and `throw` statements — not of the words where a comment happens to mention one.
 
-| Example                                                                                      | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
-| -------------------------------------------------------------------------------------------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
-| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       |    51 |              0 |            0 |       0 | npm package · public repository |
-| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       |   350 |              0 |            0 |       1 | npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 |   915 |              2 |            2 |       5 | npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 |   696 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         |   477 |              0 |            1 |       1 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) |  1185 |              0 |            4 |      10 | npm package · public repository |
+| Example                                                                                      | Profile       | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
+| -------------------------------------------------------------------------------------------- | ------------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       | `standard`    |    40 |              0 |            0 |       0 | npm package · public repository |
+| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       | `legacy`      |   342 |              0 |            0 |       1 | npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 | `legacy`      |   869 |              2 |            2 |       4 | npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 | `legacy`      |   590 |              0 |            1 |      10 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `legacy`      |   961 |              0 |            1 |       4 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) | `integration` |  1582 |              0 |            6 |      23 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflows run <name>`, discovered by existence on each call
@@ -125,18 +137,19 @@ script code that ends the run. Only two classes stay fatal throws: self-reported
 status, a model's verdict graded against its own findings, and evidence this
 child did not produce (host-owned provenance, prior-run text).
 
-That is why `review` now carries 4 fatal throws and `review-fix` 9, down from 14
-and 18 on 2026-07-26. Every count down to 5 and 10 was a check moved into the DSL
-rather than dropped; the last one each was dropped on purpose, by owner decision
-6 of 2026-07-29 — see the `plan` / `plan-implement` seam above.
+That is why `review` now carries 4 fatal throws and `review-fix` 10, down from 14
+and 18 on 2026-07-26. Every move down to 5 and 10 was a check moved into the DSL
+rather than dropped; `review`'s last one was dropped on purpose, by owner
+decision 6 of 2026-07-29 — see the `plan` / `plan-implement` seam above.
 
-| Example                            | Declared in the schema                                                                                                                                                                                                                                                                         | Passed as `validate`                                                                                                                                                                  | Still a fatal throw                                              |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `review`                           | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings; `QUESTION_COVERAGE_SCHEMA`: `complete`/`more_questions_needed`, ≤8 gaps, 400-character gaps, unique trimmed, non-blank | `clarifierDecisionErrors` and `questionCoverageErrors`: the decision must agree with its list; `recommended` must name a real option; combined budgets                                | Continuation identity, operator-input bounds                     |
-| `review-fix`                       | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                                                                                                                                         | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget                                   | Continuation shape, parsing the prior run's review, input bounds |
-| `plan`                             | `PLAN_VERDICT_SCHEMA`: `accept`/`revise`, ≤12 defects, 600-character defects, unique trimmed, non-blank                                                                                                                                                                                        | `planVerdictErrors`: `accept` with defects and `revise` without them are both unusable; combined defect budget                                                                        | An empty task                                                    |
-| `plan-implement`                   | `STEP_SELECTOR_SCHEMA`: `^S[1-9][0-9]*$` ids, 1–30 steps, 4,000-character notes, unique ids; `STEP_REVIEW_SCHEMA`: `accept`/`repair`/`blocked`, bounded summary and issues                                                                                                                     | `stepSelectionErrors`: every id exists in the accepted plan and combined note budget; `stepReviewErrors`: accepted tasks have no issues, repair/blocked tasks name at least one issue | Continuation shape, parsing the prior run's plan, input bounds   |
-| `live-smoke`, `requirements-grill` | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                     | An empty request                                                 |
+| Example              | Declared in the schema                                                                                                                                                                                                                                                                         | Passed as `validate`                                                                                                                                                                  | Still a fatal throw                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `review`             | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings; `QUESTION_COVERAGE_SCHEMA`: `complete`/`more_questions_needed`, ≤8 gaps, 400-character gaps, unique trimmed, non-blank | `clarifierDecisionErrors` and `questionCoverageErrors`: the decision must agree with its list; `recommended` must name a real option; combined budgets                                | Continuation identity, operator-input bounds                     |
+| `review-fix`         | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                                                                                                                                         | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget                                   | Continuation shape, parsing the prior run's review, input bounds |
+| `plan`               | `PLAN_VERDICT_SCHEMA`: `accept`/`revise`, ≤12 defects, 600-character defects, unique trimmed, non-blank                                                                                                                                                                                        | `planVerdictErrors`: `accept` with defects and `revise` without them are both unusable; combined defect budget                                                                        | An empty task                                                    |
+| `plan-implement`     | `STEP_SELECTOR_SCHEMA`: `^S[1-9][0-9]*$` ids, 1–30 steps, 4,000-character notes, unique ids; `STEP_REVIEW_SCHEMA`: `accept`/`repair`/`blocked`, bounded summary and issues                                                                                                                     | `stepSelectionErrors`: every id exists in the accepted plan and combined note budget; `stepReviewErrors`: accepted tasks have no issues, repair/blocked tasks name at least one issue | Continuation shape, parsing the prior run's plan, input bounds   |
+| `live-smoke`         | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                     | —; blank input uses its documented default                       |
+| `requirements-grill` | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                     | An empty request                                                 |
 
 **Coverage is only as fine as the inventory that keys it.** `review` accounts for
 its work by inventory id, so the id set is the ceiling on how fine every later
