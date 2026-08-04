@@ -84,6 +84,7 @@ The remaining standard orchestration primitives are:
 | `publishArtifact(name, text)`        | Supporting exact text artifact.                              |
 | `publishPrimaryArtifact(name, text)` | One terminal semantic document.                              |
 | `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.        |
+| `items()`                            | Immutable exact caller-supplied text units.                  |
 | `promptFile(path, variables)`        | Long/shared role charter; never routing.                     |
 | `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.    |
 
@@ -143,10 +144,31 @@ home directory or `/tmp`. The workflow must not repair location mistakes with a
 path parser or an information-gathering script.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
-not split, regex-match, or parse input into branch units. `parallel()` and
-`pipeline()` operate over units named in the approved graph or returned by
-runtime-owned `agent({ handoffs })`. Runtime-discovered units remain complete
-agent-authored text, not an input parser plus domain dispatcher.
+not split, regex-match, or parse input into branch units. Lists come from one of
+three explicit sources: an author-known array, exact caller transport through
+`dsl.items()`, or runtime-owned `agent({ handoffs })`. All three feed the same
+visible `pipeline(items, ...)` body. Caller items preserve order and exact bytes,
+including empty strings and duplicates, with no item-list limits; a workflow
+checks only domain rules it truly needs. Model handoffs retain their separate
+declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
+
+```js
+async function processItem(dsl, item) {
+  const finding = await dsl.agent(`Inspect this unit:\n${item}`, { label: `inspect:${item}` });
+  return dsl.agent(`Write the result:\n${item}\n\n${finding}`, { label: `write:${item}` });
+}
+
+export default function runWorkflow(dsl) {
+  const items = dsl.items(); // Or a file-top array, or await dsl.agent(..., { handoffs }).
+  if (items.length === 0) throw new Error("this workflow requires at least one work item");
+  return dsl.pipeline(items, (item) => dsl.workflow((nested) => processItem(nested, item)));
+}
+```
+
+`dsl.workflow()` is an inline readability/journal boundary. It starts no saved
+workflow, child run, budget, workspace, or permission scope. The item appears
+only in prompts that explicitly use it; the runtime does not copy the full list
+into child metadata.
 
 ## Standard-profile bad smells
 
@@ -206,14 +228,19 @@ validation is not evidence that the workflow ran.
 ## Input, artifacts, and failure
 
 `input` is optional bounded semantic text, not a command language or serialized
-object. Cross-run data arrives through host-verified continuation artifacts.
+object. Programmatic callers may separately supply exact `items: string[]`;
+`dsl.items()` exposes a frozen snapshot and returns an empty frozen list when
+absent. The human `/workflows run` grammar is unchanged. Cross-run data arrives
+through host-verified continuation artifacts.
 `agent({ artifact })` names the runtime-captured exact answer;
 `publishPrimaryArtifact()` declares the one successful terminal document.
 
 `parallel()` and `pipeline()` wait for scheduled siblings and then reject on a
 failed branch. Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
-approval, and replay are runtime responsibilities.
+approval, and replay are runtime responsibilities. The package-wide
+`totalAgents` fuse defaults to 10,000: enough for fine-grained finite
+decomposition, while the next physical attempt still fails a runaway run.
 
 ## Trust boundary
 

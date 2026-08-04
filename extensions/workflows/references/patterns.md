@@ -693,6 +693,26 @@ return { ok: true, outputs };
 only `WORKFLOW_GROUP_FAILURE` when requirements explicitly accept partial work,
 and return `partial: true`; partial is never projected as success.
 
+## Caller-supplied item mini-workflows
+
+```js
+async function processItem(dsl, item) {
+  const finding = await dsl.agent(`Inspect ${item}`, { label: `inspect:${item}` });
+  return dsl.agent(`Write ${item}:\n${finding}`, { label: `write:${item}` });
+}
+
+export default function runWorkflow(dsl) {
+  const items = dsl.items();
+  if (items.length === 0) throw new Error("item-pipeline requires caller-supplied items");
+  return dsl.pipeline(items, (item) => dsl.workflow((nested) => processItem(nested, item)));
+}
+```
+
+Caller-supplied items preserve exact order, bytes, whitespace, empty strings,
+and duplicates; source owns any domain-specific guard. Model-discovered handoffs
+keep their distinct bounded repair policy. `dsl.workflow()` stays inline under
+the same run, budget, scheduler, workspace, and replay request keys.
+
 ## Fan-out/fan-in
 
 ```js

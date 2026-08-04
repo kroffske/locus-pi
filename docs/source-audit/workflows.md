@@ -19,8 +19,13 @@ or borrowed runtime implementation was identified for this source-audit slice.
   handoff (`operator-handoff-controller.ts` / `operator-handoff-service.ts`),
   and catalog (`workflow-catalog.ts` / `catalog-viewer.ts`) owners keep their
   own policies; the entrypoint does not redefine them. The
-  model-callable tool (`workflow-tool.ts`) keeps Pi `approval: "exec"` with full-host/no-sandbox
-  warning details; explicit operator `/workflows run` does not pass through that
+  model-callable tool (`workflow-tool.ts`) keeps a closed top-level schema, Pi
+  `approval: "exec"`, and full-host/no-sandbox warning details. Its optional
+  `items: string[]` transport preserves exact values and order without content
+  or quantity policy. A strict `prepareArguments` hook rejects raw invalid
+  members and unknown fields before Pi's TypeBox conversion can coerce them;
+  the tool execute path and runner/runtime revalidate direct callers and expose
+  only a frozen `dsl.items()` snapshot. Explicit operator `/workflows run` does not pass through that
   tool approval and adds no second Locus prompt. Interactive command runs claim
   one stable session/project background identity and return the editor; the programmatic
   tool remains awaited/headless but registers non-exclusive control with the
@@ -155,7 +160,14 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/runtime/workflow-runtime.ts` owns the DSL primitives:
   `agent`, `publishArtifact`, `consumeTextArtifact`,
   `awaitOperator`, `promptFile`, `workspace`,
-  `projectRoot`, `parallel`, `pipeline`, `phase`, `log`, `now`, and `random`.
+  `projectRoot`, `items`, `parallel`, `pipeline`, `phase`, `log`, `now`, and `random`.
+  Caller items are validated as an unrestricted string array, copied once per
+  runtime boundary, and frozen. The runtime does not automatically forward the
+  full list to child metadata, journals, summaries, or replay identity; trusted
+  workflow source can still explicitly return or log item values, or place them
+  in child prompts. `pipeline()` accepts readonly arrays; its scheduling,
+  fail-closed grouping, cancellation, and request-keyed replay behavior are
+  unchanged.
   `agent()` is the
   single model-calling primitive; the former direct-completion node `llm()` and its
   pi-ai bridge were removed, together with the `llm_start`/`llm_end`/`llm_delta`

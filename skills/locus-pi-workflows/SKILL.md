@@ -145,11 +145,16 @@ must not substitute the user's home directory or `/tmp`. This location text is
 part of the task prompt; do not add JavaScript path parsers or collector scripts
 to compensate for a weak model.
 
-Workflow input remains semantic text. Standard source does not encode a hidden
-line/CSV/JSON protocol and then `split`, regex-match, or parse it into branch
-units. Fixed fan-out units are author-known and visible in design/source. When
-units are runtime-discovered, use `agent({ handoffs })` to return bounded complete
-text work units, then keep every downstream `parallel()` call and handoff visible.
+Workflow `input` remains semantic text. A main agent that already knows exact
+work units passes them separately as `workflow({ name, input, items })`; workflow
+source reads the immutable list with `dsl.items()`. Values, order, whitespace,
+empty strings, and duplicates are preserved without count or character policy,
+so source enforces only its real domain rule, such as requiring at least one item.
+Standard source does not encode a hidden line/CSV/JSON protocol. It does not
+`split`, regex-match, or parse semantic input into branch units. Author-known arrays, caller-supplied
+`dsl.items()`, and bounded model-discovered `agent({ handoffs })` lists all feed
+the same visible `pipeline(items, ...)`; model handoffs alone retain runtime
+repair, blank/duplicate rejection, and declared bounds.
 
 ## Forbidden in standard generated source
 
@@ -175,9 +180,11 @@ useful.
 
 The host still reserves the recursive `spawn_agent` and `task` entrypoints; this
 is one system-owned recursion boundary, not a tool list workflow authors manage.
-Dynamic decomposition therefore stays in the visible harness: one
-`agent({ handoffs })` discovers bounded text units and explicit
+Dynamic decomposition therefore stays in the visible harness: caller-supplied
+`dsl.items()` or one `agent({ handoffs })` supplies text units, and explicit
 `parallel()` or `pipeline()` calls process them under the shared workflow budget.
+The default `totalAgents` fuse is 10,000 so fine-grained finite decomposition has
+headroom; exceeding it still fails the run as a genuine runaway loop.
 Do not simulate a recursive manager, capability inheritance, or hidden graph with
 a large structured plan.
 

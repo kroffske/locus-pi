@@ -34,7 +34,12 @@ import {
   resolveWorkflowBudget,
   type WorkflowBudget,
 } from "./workflow-budget.js";
-import { assertWorkflowInput, createWorkflowRuntime, workflowGroupFailureEnvelope } from "./workflow-runtime.js";
+import {
+  assertWorkflowInput,
+  createWorkflowRuntime,
+  snapshotWorkflowItems,
+  workflowGroupFailureEnvelope,
+} from "./workflow-runtime.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowAgentPreflight,
@@ -159,6 +164,8 @@ export interface RunWorkflowScriptOptions {
   script?: string;
   /** Optional bounded human semantic request. */
   input?: string;
+  /** Optional exact text work units, separate from semantic input. */
+  items?: readonly string[];
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
   /** Atomic source-handoff claim. The runner binds it to this run before
@@ -538,6 +545,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const runtimeDir = workflowRunRuntimeDir(runDir);
   const outputDir = workflowReportDir(projectRoot, runId);
   const journal = createWorkflowJournalSink(projectRoot, runId);
+  let items: readonly string[];
   const { budget, raises: budgetRaises } = resolveWorkflowBudget(opts.budget);
   const budgetPrelude: WorkflowJournalLine = {
     ts: new Date().toISOString(),
@@ -547,11 +555,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     message: formatWorkflowBudgetPrelude(budget),
   };
   journal.initialize(budgetPrelude);
-  try {
-    opts.onRunStart?.({ runId, runDir });
-  } catch {
-    // Presentation callback failure must not turn successful workflow execution into a crash.
-  }
 
   const resumeFromRunId = opts.resumeFromRunId?.trim();
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
@@ -911,6 +914,12 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   }
 
   try {
+    items = snapshotWorkflowItems(opts.items);
+    try {
+      opts.onRunStart?.({ runId, runDir });
+    } catch {
+      // Presentation callback failure must not turn successful workflow execution into a crash.
+    }
     assertWorkflowInput(opts.input);
     if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
     if (hasResume && opts.continuation !== undefined) {
@@ -1122,6 +1131,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(hasResume ? { replaySourceRunId: resumeFromRunId! } : {}),
     ...(replayController !== undefined ? { replay: replayController } : {}),
     ...(opts.input !== undefined ? { args: opts.input } : {}),
+    items,
     // Every axis of the contract, unconditionally. A run that declares nothing is
     // bounded on all seven; a `...(x !== undefined ? ...)` guard here is what left
     // global concurrency unlimited for the whole life of the runtime.

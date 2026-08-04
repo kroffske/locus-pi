@@ -371,10 +371,12 @@ export interface WorkflowDsl {
   consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
   /** Host-verified continuation artifacts bound before trusted workflow code starts. */
   continuationArtifacts(): readonly WorkflowContinuationArtifact[];
+  /** Caller-supplied exact text work units as an immutable snapshot. */
+  items(): readonly string[];
   /** Run independent branches behind one fail-closed barrier and preserve input order. */
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
   /** Run ordered stages for every item; a failed item stops before its later stages. */
-  pipeline<T>(items: T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]>;
+  pipeline<T>(items: readonly T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]>;
   /** Change the current reader-visible stage and append a phase line to the run journal. */
   phase(name: string): void;
   /** Append a script-owned journal message tagged with the current phase. */
@@ -768,6 +770,8 @@ export interface WorkflowRuntimeOptions {
   runId: string;
   agentRunner: WorkflowAgentRunner;
   args?: string;
+  /** Exact text work units supplied by the invocation boundary. */
+  items?: readonly string[];
   /** Already consumed and digest-bound by the runner before workflow code starts. */
   continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
@@ -831,6 +835,18 @@ export function assertWorkflowInput(value: unknown, field = "workflow input"): a
   if (typeof value === "string" && value.length > WORKFLOW_INPUT_MAX_CHARS) {
     throw new Error(`${field} exceeds ${WORKFLOW_INPUT_MAX_CHARS} characters`);
   }
+}
+
+const EMPTY_WORKFLOW_ITEMS: readonly string[] = Object.freeze([]);
+
+/** Validate external item transport and detach it from caller-owned mutation. */
+export function snapshotWorkflowItems(value: unknown, field = "workflow items"): readonly string[] {
+  if (value === undefined) return EMPTY_WORKFLOW_ITEMS;
+  if (!Array.isArray(value)) throw new Error(`${field} must be an array of strings when provided`);
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "string") throw new Error(`${field}[${index}] must be a string`);
+  }
+  return Object.freeze([...value]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2143,6 +2159,7 @@ function escapeFusionXml(value: string): string {
 export function createWorkflowRuntime(options: WorkflowRuntimeOptions): WorkflowRuntime {
   const { runId, agentRunner } = options;
   assertWorkflowInput(options.args);
+  const items = snapshotWorkflowItems(options.items);
   assertBoundContinuation(options.continuation, runId);
   const args = options.args;
   const agentConcurrencyGate = createAgentConcurrencyGate(options.maxConcurrentAgents);
@@ -2988,7 +3005,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return runGrouped("parallel", thunks.length, () => runGroupBranches("parallel", thunks));
   }
 
-  async function pipeline<T>(items: T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]> {
+  async function pipeline<T>(items: readonly T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]> {
     const itemThunks: Array<() => Promise<unknown>> = items.map((_item, itemIndex) => {
       const item = _item;
       return async () => {
@@ -3260,6 +3277,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     publishPrimaryArtifact,
     consumeTextArtifact,
     continuationArtifacts,
+    items: () => items,
     parallel,
     pipeline,
     phase,

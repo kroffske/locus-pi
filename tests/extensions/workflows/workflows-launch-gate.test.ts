@@ -31,8 +31,9 @@ describe("/workflows run launch gate", () => {
     expect(tool.approval).toBe("exec");
     expect(tool.description).toContain("full Node.js/module access");
     expect(tool.description).toContain("not sandboxed");
-    expect(tool.formatApprovalDetails?.({ name: "reviewed-workflow" })).toEqual([
+    expect(tool.formatApprovalDetails?.({ name: "reviewed-workflow", items: ["alpha", "beta"] })).toEqual([
       "Workflow: reviewed-workflow",
+      "Items: 2",
       "Surface: trusted-file workflow runner",
       "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
       "Isolation: none — exec approval is consent, not a sandbox",

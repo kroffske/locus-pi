@@ -13,7 +13,7 @@ import { Text } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import type { ToolResult } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
-import { validateParams } from "../_shared/host/validation.js";
+import { prepareValidatedParams, validateParams } from "../_shared/host/validation.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
 import { runWorkflowScript } from "./runtime/workflow-runner.js";
@@ -53,45 +53,55 @@ const WorkflowContinuationParams = Type.Object(
   { additionalProperties: false },
 );
 
-const WorkflowParams = Type.Object({
-  name: Type.Optional(
-    Type.String({
-      description: "Saved workflow name with no path separators",
-      maxLength: 200,
-    }),
-  ),
-  scriptPath: Type.Optional(
-    Type.String({
-      description: "Project-relative .mjs workflow script path",
-      maxLength: 400,
-    }),
-  ),
-  script: Type.Optional(
-    Type.String({
-      description: "Legacy compatibility alias for name or project-relative scriptPath",
-      maxLength: 400,
-    }),
-  ),
-  input: Type.Optional(
-    Type.String({
-      maxLength: WORKFLOW_INPUT_MAX_CHARS,
-      description: "Optional human semantic request passed unchanged to runWorkflow(dsl, input).",
-    }),
-  ),
-  continuation: Type.Optional(WorkflowContinuationParams),
-  resumeFromRunId: Type.Optional(
-    Type.String({
-      description: "Optional prior workflow run id used as persisted retry metadata",
-      maxLength: 200,
-    }),
-  ),
-});
+const WorkflowParams = Type.Object(
+  {
+    name: Type.Optional(
+      Type.String({
+        description: "Saved workflow name with no path separators",
+        maxLength: 200,
+      }),
+    ),
+    scriptPath: Type.Optional(
+      Type.String({
+        description: "Project-relative .mjs workflow script path",
+        maxLength: 400,
+      }),
+    ),
+    script: Type.Optional(
+      Type.String({
+        description: "Legacy compatibility alias for name or project-relative scriptPath",
+        maxLength: 400,
+      }),
+    ),
+    input: Type.Optional(
+      Type.String({
+        maxLength: WORKFLOW_INPUT_MAX_CHARS,
+        description: "Optional human semantic request passed unchanged to runWorkflow(dsl, input).",
+      }),
+    ),
+    items: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Optional exact text work units exposed unchanged and in order through dsl.items(); empty strings and duplicates are preserved.",
+      }),
+    ),
+    continuation: Type.Optional(WorkflowContinuationParams),
+    resumeFromRunId: Type.Optional(
+      Type.String({
+        description: "Optional prior workflow run id used as persisted retry metadata",
+        maxLength: 200,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
 function workflowApprovalDetails(args: unknown): string[] {
   const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const target = String(record.name ?? record.scriptPath ?? record.script ?? "unspecified");
   return [
     `Workflow: ${target}`,
+    `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
     "Surface: trusted-file workflow runner",
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
@@ -111,8 +121,9 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     description:
-      "Run a reviewed trusted-file workflow script by saved name or project-relative path with one optional semantic text request and optional host-verified continuation artifacts. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to `workflow-author`: a raw request writes only .pi/workflows/<name>.design.md, and only `Build approved design: <exact path>` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
+      "Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), and optional host-verified continuation artifacts. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to `workflow-author`: a raw request writes only .pi/workflows/<name>.design.md, and only `Build approved design: <exact path>` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.",
     parameters: WorkflowParams,
+    prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
     formatApprovalDetails: workflowApprovalDetails,
     renderResult: renderWorkflowToolResultCard,
@@ -144,6 +155,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.scriptPath !== undefined ? { scriptPath: valid.value.scriptPath } : {}),
           ...(valid.value.script !== undefined ? { script: valid.value.script } : {}),
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
+          ...(valid.value.items !== undefined ? { items: valid.value.items } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
           onRunStart: ({ runId, runDir }) => {
