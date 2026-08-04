@@ -43,6 +43,25 @@ interface NativeComponentModule {
     updateResult(result: unknown, isPartial?: boolean): void;
     setExpanded(expanded: boolean): void;
   };
+  ExtensionEditorComponent?: new (
+    tui: TUI,
+    keybindings: unknown,
+    title: string,
+    prefill: string | undefined,
+    onSubmit: (value: string) => void,
+    onCancel: () => void,
+    options?: { autocompleteMaxVisible?: number },
+  ) => NativeInputComponent;
+}
+
+interface NativeInputComponent extends Component {
+  focused: boolean;
+  handleInput(data: string): void;
+  dispose?(): void;
+}
+
+interface ViewerKeybindings {
+  matches(data: string, keybinding: string): boolean;
 }
 
 type NativeToolComponent = Component & {
@@ -82,6 +101,21 @@ export class AgentViewerCapability {
 
   invalidate(): void {
     for (const entry of this.#components.values()) entry.component.invalidate();
+  }
+
+  createInput(
+    tui: ViewerTui,
+    keybindings: ViewerKeybindings | undefined,
+    onSubmit: (value: string) => void,
+    onCancel: () => void,
+  ): NativeInputComponent | undefined {
+    const Input = this.module.ExtensionEditorComponent;
+    if (typeof Input !== "function" || keybindings === undefined) return undefined;
+    const input = new Input(tui as TUI, keybindings, "Message this agent", undefined, onSubmit, onCancel, {
+      autocompleteMaxVisible: 4,
+    });
+    input.focused = true;
+    return input;
   }
 
   #component(block: AgentTranscriptBlock, tui: ViewerTui, expanded: boolean): Component {
@@ -150,6 +184,13 @@ export class AgentSessionViewer implements CustomUiComponent {
   #closed = false;
   #expandedTools = false;
   #selection: number;
+  #historyOffset = 0;
+  #lastHistoryLineCount = 0;
+  #lastBodyHeight = 1;
+  #input: NativeInputComponent | undefined;
+  #inputSuppressedAtRows: number | undefined;
+  #submitting = false;
+  #inputNotice: string | undefined;
   readonly #title: string;
   readonly #unsubscribe: () => void;
   #storeAttached = true;
@@ -161,6 +202,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     private readonly done: () => void,
     private readonly capability: AgentViewerCapability,
     private readonly rounds?: DrillRoundsConfig,
+    private readonly keybindings?: ViewerKeybindings,
   ) {
     const row = agentLiveStore.rowForExecution(execution);
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentDrillTitle(row);
@@ -195,33 +237,82 @@ export class AgentSessionViewer implements CustomUiComponent {
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
       : this.#nativeLines(row, snapshot, safeWidth);
-    const visible = content.map((line) => fitLine(line, safeWidth));
-    const footer = dividerLine(`Esc/q close · d tools:${this.#expandedTools ? "expanded" : "compact"}`, safeWidth);
-    return [header, ...visible, footer];
+    const terminalRows = finiteTerminalRows(this.tui.terminal?.rows);
+    let input = this.#syncInput(terminalRows);
+    let inputLines = input?.render(safeWidth).map((line) => fitLine(line, safeWidth)) ?? [];
+    if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 3)) {
+      this.#suppressInputForRows(terminalRows);
+      input = undefined;
+      inputLines = [];
+    }
+    const footer = dividerLine(this.#footerLabel(input !== undefined), safeWidth);
+    if (terminalRows === undefined) {
+      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputLines, footer];
+    }
+    if (terminalRows === 1) return [header];
+    const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
+    this.#lastHistoryLineCount = content.length;
+    this.#lastBodyHeight = Math.max(1, bodyHeight);
+    const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => fitLine(line, safeWidth));
+    return [header, ...visible, ...inputLines, footer];
   }
 
   handleInput(data: string): void {
     if (this.#disposed) return;
-    if (isClose(data)) {
+    if (isClose(data) || (data === "q" && this.#input === undefined)) {
       this.#close();
       return;
     }
-    const selectedRound = this.#selectRound(data);
+    if (this.#matches(data, "app.tools.expand", ["ctrl+o"])) {
+      this.#expandedTools = !this.#expandedTools;
+      this.capability.invalidate();
+      this.tui.requestRender();
+      return;
+    }
+    if (this.#input === undefined && this.#matches(data, "tui.select.pageUp", ["pageup", "pageUp", "\u001b[5~"])) {
+      this.#historyOffset = Math.min(
+        Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight),
+        this.#historyOffset + Math.max(1, this.#lastBodyHeight - 1),
+      );
+      this.tui.requestRender();
+      return;
+    }
+    if (
+      this.#input === undefined &&
+      this.#matches(data, "tui.select.pageDown", ["pagedown", "pageDown", "\u001b[6~"])
+    ) {
+      this.#historyOffset = Math.max(0, this.#historyOffset - Math.max(1, this.#lastBodyHeight - 1));
+      this.tui.requestRender();
+      return;
+    }
+    if (this.#input === undefined && (data === "home" || data === "\u001b[H")) {
+      this.#historyOffset = Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight);
+      this.tui.requestRender();
+      return;
+    }
+    if (this.#input === undefined && (data === "end" || data === "\u001b[F")) {
+      this.#historyOffset = 0;
+      this.tui.requestRender();
+      return;
+    }
+    const selectedRound = this.#selectRound(data, this.#input === undefined);
     if (selectedRound !== undefined) {
       if (selectedRound === this.rounds?.active && agentLiveStore.rowForExecution(this.execution) === undefined) {
         this.#close();
         return;
       }
       this.#selection = selectedRound;
+      this.#historyOffset = 0;
       this.tui.requestRender();
       return;
     }
-    if (data === "d") {
+    if (this.#input === undefined && data === "d") {
       this.#expandedTools = !this.#expandedTools;
       this.capability.invalidate();
       this.tui.requestRender();
       return;
     }
+    if (this.#input !== undefined && !this.#submitting) this.#input.handleInput(data);
   }
 
   invalidate(): void {
@@ -232,6 +323,8 @@ export class AgentSessionViewer implements CustomUiComponent {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#input?.dispose?.();
+    this.#input = undefined;
     this.#detachStore();
     this.#unregisterGlobal();
   }
@@ -277,13 +370,14 @@ export class AgentSessionViewer implements CustomUiComponent {
     return this.rounds !== undefined && this.#selection !== this.rounds.active;
   }
 
-  #selectRound(data: string): number | undefined {
+  #selectRound(data: string, allowPlainArrows: boolean): number | undefined {
     if (this.rounds === undefined || this.rounds.list.length <= 1) return undefined;
     const index = this.rounds.list.indexOf(this.#selection);
-    if (data === "left" || data === "\u001b[D") return this.rounds.list[Math.max(0, index - 1)];
-    if (data === "right" || data === "\u001b[C")
+    if (data === "alt+left" || (allowPlainArrows && (data === "left" || data === "\u001b[D")))
+      return this.rounds.list[Math.max(0, index - 1)];
+    if (data === "alt+right" || (allowPlainArrows && (data === "right" || data === "\u001b[C")))
       return this.rounds.list[Math.min(this.rounds.list.length - 1, Math.max(0, index + 1))];
-    if (/^[1-9]$/u.test(data)) {
+    if (allowPlainArrows && /^[1-9]$/u.test(data)) {
       const round = Number(data);
       return this.rounds.list.includes(round) ? round : undefined;
     }
@@ -293,6 +387,71 @@ export class AgentSessionViewer implements CustomUiComponent {
   private roundsLabel(): string {
     if (this.rounds === undefined || this.rounds.list.length <= 1) return "";
     return `rounds: ${this.rounds.list.map((round) => (round === this.#selection ? `[${round}]` : String(round))).join(" ")}`;
+  }
+
+  #syncInput(terminalRows: number | undefined): NativeInputComponent | undefined {
+    const available =
+      !this.#isHistoricalRound() && agentLiveStore.canSendInputForExecution(this.execution) && !this.#disposed;
+    if (!available) {
+      this.#input?.dispose?.();
+      this.#input = undefined;
+      this.#inputSuppressedAtRows = undefined;
+      return undefined;
+    }
+    if (this.#inputSuppressedAtRows !== undefined) {
+      if (terminalRows === this.#inputSuppressedAtRows) return undefined;
+      this.#inputSuppressedAtRows = undefined;
+    }
+    this.#input ??= this.capability.createInput(
+      this.tui,
+      this.keybindings,
+      (value) => this.#submitInput(value),
+      () => this.#close(),
+    );
+    return this.#input;
+  }
+
+  #suppressInputForRows(terminalRows: number): void {
+    this.#input?.dispose?.();
+    this.#input = undefined;
+    this.#inputSuppressedAtRows = terminalRows;
+  }
+
+  #submitInput(value: string): void {
+    if (this.#submitting) return;
+    this.#submitting = true;
+    this.#inputNotice = "sending…";
+    this.tui.requestRender();
+    void agentLiveStore.sendInputForExecution(this.execution, value).then((result) => {
+      if (this.#disposed) return;
+      this.#submitting = false;
+      this.#inputNotice = result.ok ? "message queued" : result.reason;
+      if (result.ok) {
+        this.#input?.dispose?.();
+        this.#input = undefined;
+        this.#historyOffset = 0;
+      }
+      this.tui.requestRender();
+    });
+  }
+
+  #matches(data: string, keybinding: string, fallbacks: readonly string[]): boolean {
+    try {
+      if (this.keybindings?.matches(data, keybinding) === true) return true;
+    } catch {
+      // A partial host keybinding object degrades to the stable raw-key fallback.
+    }
+    return fallbacks.includes(data);
+  }
+
+  #footerLabel(hasInput: boolean): string {
+    const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
+    const controls = hasInput
+      ? "Enter send"
+      : this.#inputSuppressedAtRows === undefined
+        ? "PgUp/PgDn history"
+        : "resize terminal for input";
+    return `${notice}Esc close · ${controls} · Ctrl+O tools:${this.#expandedTools ? "expanded" : "compact"}`;
   }
 }
 
@@ -401,7 +560,7 @@ function fitLine(value: string, width: number): string {
 }
 
 function isClose(data: string): boolean {
-  return data === "q" || data === "escape" || data === "\u001b";
+  return data === "escape" || data === "\u001b";
 }
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === "object" && value !== null;
@@ -430,4 +589,16 @@ function dividerLine(label: string, width: number): string {
   const labelWidth = width - visibleWidth(left) - visibleWidth(right);
   const fitted = truncateToWidth(label, labelWidth, "…");
   return `${left}${fitted}${"─".repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}${right}`;
+}
+
+function finiteTerminalRows(value: number | undefined): number | undefined {
+  return value === undefined || !Number.isFinite(value) ? undefined : Math.max(1, Math.floor(value));
+}
+
+function historyWindow(lines: readonly string[], height: number, offset: number): string[] {
+  if (height <= 0) return [];
+  const end = Math.max(0, lines.length - Math.max(0, offset));
+  const start = Math.max(0, end - height);
+  const visible = lines.slice(start, end);
+  return [...Array.from({ length: height - visible.length }, () => ""), ...visible];
 }

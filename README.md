@@ -89,12 +89,14 @@ for leaf selection and readable drill-down. A second interactive run in the
 same session/project is rejected until the first run settles. `/workflows stop
 [runId|last]` requests cancellation and remains honest about the run being
 `stopping` until its terminal result is persisted. The programmatic `workflow`
-tool remains awaited and headless. `/ps` drill-down renders the complete
-retained agent transcript, starting with the original task/request, at natural
-height in normal Pi/terminal scrollback. It has no terminal-height internal
-viewport or `Home`/`End`/arrow scrolling mode. Press `d` to toggle tool detail;
-`Esc` or `q` closes the view without aborting the child. Transcript retention
-still applies its documented content, byte, and node bounds.
+tool remains awaited and headless. `/ps` drill-down renders the retained agent
+transcript with Pi's native assistant and tool components in a terminal-height
+viewport that follows live output without clearing terminal scrollback. Use
+`PgUp`/`PgDn` or `Home`/`End` to inspect older output and `Ctrl+O` to toggle tool
+detail. While the SDK child is actively processing, the same view mounts Pi's
+native editor and Enter sends a steering message to that child; after settlement
+the view becomes read-only. `Esc` closes the view without aborting the child.
+Transcript retention still applies its documented content, byte, and node bounds.
 
 When a workflow declares an actionable operator handoff, a run launched by the
 current Pi session (or one of its continuations) opens its oldest pending

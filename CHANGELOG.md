@@ -11,6 +11,18 @@ This file records user-visible changes to the public package.
   agent surface as soon as the child receives its stable display name; the
   child's exact final text still replaces that progress line on completion.
 
+- **Selected-agent `/ps` views no longer clear the terminal scrollback during
+  live updates and can accept input while the child is active.** The viewer now
+  keeps Pi's native assistant and tool rendering inside one terminal-height
+  follow-tail viewport; `PgUp`/`PgDn` and `Home`/`End` expose retained history,
+  while `Ctrl+O` keeps the native tool-detail control. This avoids Pi's
+  clear-screen/full-redraw path when an older assistant block changes above a
+  tall tool result, which was especially visible as flicker under WSL. While the
+  exact SDK child turn is streaming, the view also mounts Pi's native editor and
+  sends Enter submissions to that child as steering input. Input disappears on
+  settlement or execution replacement, and `Esc` still closes the view without
+  aborting the child.
+
 - **Standard workflow source now has an installed, provenance-aware build
   gate.** `npx @kroffske/locus-pi check-workflow-source <path>` checks a workflow
   from its consumer project without a local npm script, `tsx`, or a new runtime
@@ -155,13 +167,11 @@ This file records user-visible changes to the public package.
   source screen, `Tab` or the Left/Right arrows changes the focused action
   before Enter activates it.
 
-- **Selected-agent `/ps` history now uses normal terminal scrollback.** The
-  viewer renders the complete retained transcript, starting with the original
-  task/request, at natural height instead of clipping it into a terminal-height
-  internal viewport. There is no `Home`/`End`/arrow scroll mode: normal
-  Pi/terminal scrollback handles navigation, `d` toggles tool detail, and `Esc`
-  or `q` closes the view without aborting the child. Existing content, byte, and
-  node retention bounds still limit what can be retained and displayed.
+- **Selected-agent `/ps` history includes the original request and every
+  retained transcript block.** The terminal-height viewer described above can
+  page to the beginning without dropping old assistant or tool content. Existing
+  content, byte, and node retention bounds still limit what can be retained and
+  displayed.
 
 - **The public extension catalog now gives operators and planning agents a
   concise English roster of all ten default extensions.** It links each

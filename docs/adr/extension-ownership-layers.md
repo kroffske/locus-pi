@@ -152,7 +152,7 @@ it. Seven registries are declared:
 
 | Registry                                   | Owning module                                      | Cross-entrypoint proof                                                    |
 | ------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------- |
-| `locus-pi.agent-live-store.v4`             | `_shared/agent-runtime/agent-sdk-host.ts`          | `tests/extensions/agents/agent-live-store-entrypoints.test.ts`            |
+| `locus-pi.agent-live-store.v5`             | `_shared/agent-runtime/agent-sdk-host.ts`          | `tests/extensions/agents/agent-live-store-entrypoints.test.ts`            |
 | `locus-pi.command-ui-lifecycle.v2`         | `_shared/operator/command-ui.ts`                   | `tests/integration/command-ui-lifecycle.test.ts`                          |
 | `locus-pi.operator-status.v1`              | `_shared/operator/operator-status.ts`              | `tests/integration/operator-status.test.ts`                               |
 | `locus-pi.fleet-menu-state.v2`             | `_shared/agent-runtime/fleet-menu.ts`              | `tests/extensions/agents/fleet-menu-entrypoints.test.ts`                  |

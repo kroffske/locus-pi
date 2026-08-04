@@ -9,15 +9,21 @@ const CONSUMER_EXECUTION_KEY = Symbol.for("locus-pi.test.shared-store-consumer-e
 
 export default function sharedStoreConsumer(pi: ExtensionAPI): void {
   pi.registerCommand("test-consume-shared-row", {
-    handler: (_args, ctx) => {
+    handler: async (_args, ctx) => {
       const execution = (globalThis as unknown as Record<symbol, unknown>)[PRODUCER_EXECUTION_KEY] as
         AgentLiveExecutionHandle | undefined;
       const sameExecution =
         execution !== undefined && agentLiveStore.captureExecutionAuthority("two-entrypoint-row") === execution;
       const cancellation = agentLiveStore.captureCancellationAuthority("two-entrypoint-row");
       const cancelled = cancellation !== undefined && agentLiveStore.cancelWithAuthority(cancellation);
+      const input =
+        execution === undefined
+          ? { ok: false as const }
+          : await agentLiveStore.sendInputForExecution(execution, "forward");
       ctx.ui.setWidget("shared-store-proof", [
-        sameExecution && cancelled ? "shared execution and cancellation authority" : "shared authority missing",
+        sameExecution && cancelled && input.ok
+          ? "shared execution, cancellation, and input authority"
+          : "shared authority missing",
       ]);
     },
   });
@@ -31,6 +37,9 @@ export default function sharedStoreConsumer(pi: ExtensionAPI): void {
       (globalThis as unknown as Record<symbol, unknown>)[CONSUMER_EXECUTION_KEY] = execution;
       agentLiveStore.registerCancelForExecution(execution, () => {
         ctx.ui.setWidget("shared-store-reverse-cancel", ["consumer cancellation reached"]);
+      });
+      agentLiveStore.registerInputForExecution(execution, async (text) => {
+        ctx.ui.setWidget("shared-store-reverse-input", [`consumer input reached: ${text}`]);
       });
     },
   });
