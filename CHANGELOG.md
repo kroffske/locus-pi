@@ -6,6 +6,11 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **A running `spawn_agent` call now shows the generated agent name immediately.**
+  The tool card streams the same `agent <name> started` line used by the live
+  agent surface as soon as the child receives its stable display name; the
+  child's exact final text still replaces that progress line on completion.
+
 - **Standard workflow source now has an installed, provenance-aware build
   gate.** `npx @kroffske/locus-pi check-workflow-source <path>` checks a workflow
   from its consumer project without a local npm script, `tsx`, or a new runtime

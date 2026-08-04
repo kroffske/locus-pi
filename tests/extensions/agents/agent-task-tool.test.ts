@@ -86,6 +86,36 @@ function mockSdkResult(text: string): void {
 }
 
 describe("agent task tool execution", () => {
+  it("streams the generated live agent name as soon as the child starts", async () => {
+    mockSdkResult("done");
+    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
+    agents(h.pi);
+    const update = vi.fn();
+
+    await h.tools
+      .get("spawn_agent")!
+      .execute(
+        "test-spawn_agent",
+        { task: "Return done", title: "Compute expression" },
+        new AbortController().signal,
+        update,
+        h.ctx,
+      );
+
+    const row = [...agentLiveStore.rows.values()].at(-1);
+    expect(row?.displayName).toBeTypeOf("string");
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]?.[0]).toEqual({
+      content: [
+        {
+          type: "text",
+          text: expect.stringContaining(`agent ${row!.displayName} started — Compute expression`),
+        },
+      ],
+    });
+  });
+
   it("returns one child's exact text and keeps metadata in details", async () => {
     mockSdkResult("  done\nwith details\n");
     const { default: agents } = await import("../../../extensions/agents/index.js");

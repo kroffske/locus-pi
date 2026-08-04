@@ -58,6 +58,7 @@ export interface AgentLiveTaskInput {
   liveModel: { model?: string; thinking?: string } | undefined;
   modelRoleResolution: ModelRoleResolution;
   maxTurns: number;
+  onStarted?: (line: string) => void;
   parentContext?: { inline?: string; artifactPath?: string };
 }
 
@@ -86,7 +87,11 @@ export async function runAgentLiveTask(
   });
   const startedRow = agentLiveStore.rowForExecution(execution);
   // REQ-011: append-only transcript event line at kickoff.
-  if (startedRow !== undefined) emitAgentEventLine(ctx, formatAgentStartedEventLine(startedRow), "info");
+  if (startedRow !== undefined) {
+    const startedLine = formatAgentStartedEventLine(startedRow);
+    input.onStarted?.(startedLine);
+    emitAgentEventLine(ctx, startedLine, "info");
+  }
   // Parity with the workflow bridge (OD2): `/agent run reviewer` and a workflow stage
   // naming `reviewer` resolve their model the same way, so the same agent cannot run
   // on two different models with nothing in the evidence to explain why. The

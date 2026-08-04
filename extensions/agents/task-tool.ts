@@ -8,7 +8,7 @@ import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
 import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
 import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model/model-settings.js";
-import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import type { ExtensionAPI, ToolUpdate } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
 import { errorMessage } from "../_shared/host/error-text.js";
@@ -33,7 +33,7 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
     _toolCallId,
     params,
     signal,
-    _update,
+    update,
     ctx,
   ) => {
     const valid = validateParams(TaskParams, params);
@@ -43,6 +43,7 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
       pi,
       ctx,
       signal,
+      update,
       valid.value.agent,
       valid.value.task,
       valid.value.title,
@@ -86,6 +87,7 @@ async function runTaskTool(
   pi: ExtensionAPI,
   ctx: TaskToolCtx,
   signal: AbortSignal,
+  update: ToolUpdate,
   agentName: string | undefined,
   task: string,
   title: string | undefined,
@@ -126,6 +128,7 @@ async function runTaskTool(
       liveModel,
       modelRoleResolution,
       maxTurns: 5,
+      onStarted: (line) => update({ content: [{ type: "text", text: line }] }),
       ...(parentContextBroker.forwarded && parentContext !== undefined ? { parentContext } : {}),
     });
     if (hasUI) panel?.render(80);
