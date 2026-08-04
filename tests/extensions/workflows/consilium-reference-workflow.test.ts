@@ -115,16 +115,9 @@ describe("consilium reference workflow", () => {
       "verify the synthesis",
     ]);
     expect(calls.map((call) => call.phase)).toEqual(["frame", "advise", "advise", "advise", "synthesize", "verify"]);
-    // Every stage is read-only, which is also what makes `attempts` legal on each.
-    expect(calls.every((call) => call.readOnly === true)).toBe(true);
-    expect(calls.map((call) => call.tools?.join(","))).toEqual([
-      "",
-      "read,grep,find",
-      "read,grep,find",
-      "read,grep,find",
-      "",
-      "",
-    ]);
+    // Workflow source declares no capability subset; runtime supplies all tools.
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
 
     // Independent by construction: no advisor sees another advisor's text.
     const advisorCalls = calls.slice(1, 4);

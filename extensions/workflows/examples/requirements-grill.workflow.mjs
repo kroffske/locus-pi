@@ -13,7 +13,7 @@
 // The script itself does not search the repository. It used to: it extracted
 // keywords from the request against a hard-coded English stop-word list, ran one
 // `rg` with a fixed glob list over a hard-coded directory ordering, and handed
-// the hits to a scout that had no tools of its own. That guess was worse than
+// the hits to a scout instead of letting it use the inherited tool surface. That guess was worse than
 // the search an agent performs with `grep`, `find`, `read`, and `ast_index`, it
 // silently returned the wrong lines for a request written in any other language,
 // and it made ripgrep on `PATH` an install requirement of this package. The
@@ -24,24 +24,23 @@
 // defended and taken, under `## Open questions` when it cannot — so the operator
 // reads it the moment the run finishes instead of answering a halted run.
 //
-// Every stage is host-enforced read-only: this workflow reads a repository and
-// writes nothing to it. The only durable output is runtime-owned text.
+// This workflow reads a repository and writes no project files by instruction.
+// Every child still inherits the parent run's complete tool surface.
 //
 // This is a Package workflow: it lives in the shipped examples directory the
 // resolver scans, so `/workflow-run requirements-grill "<request>"` resolves it
 // without any project file. Workflow JavaScript is trusted local code with full
-// Node.js host access; every stage here is read-only.
+// Node.js host access.
 
 /** Prepended to every stage: one contract, one place to change it. */
 const COMMON = `You are one stage of the \`requirements-grill\` workflow, which turns one rough
 operator request into a requirements handoff a planner can work from. No stage of
 this workflow changes the repository, and no stage plans the implementation.
 
-This stage is host-enforced read-only. You have no shell, write, edit, workflow,
-or unknown custom tool. Use \`git_read\` for Git inspection; it accepts an
-\`args\` array without the leading \`git\`. The workflow runtime owns every
-persisted artifact, so never write a requirements file, a report, or a status
-envelope.
+You inherit every tool available to the parent workflow run. Use the tools needed
+to inspect the repository, but do not modify project files in this requirements
+task. The workflow runtime owns every persisted artifact, so never write a
+requirements file, a report, or a status envelope.
 
 Nobody will answer a question you ask. When a decision is missing, choose the
 most defensible option, say so in writing, and keep going. A question worth an
@@ -63,21 +62,14 @@ with \`{"args":["stats"]}\`; \`{"args":["update"]}\` refreshes a missing or stal
 index. If the tool is unavailable, the file type is unsupported, or a command
 fails, continue with \`grep\`, \`find\`, and direct reads and say so.`;
 
-/** The two stages that open the repository. Read-only is host-enforced. */
+/** The two stages that open the repository. */
 const INSPECT_OPTIONS = Object.freeze({
-  permissionMode: "agent-defined",
   workspaceMode: "project",
-  readOnly: true,
-  tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
-/** The last stage composes two texts it was handed; it has nothing to look up. */
+/** The last stage composes two texts it was handed. */
 const COMPOSE_OPTIONS = Object.freeze({
-  maxToolCalls: 0,
-  permissionMode: "agent-defined",
   workspaceMode: "project",
-  readOnly: true,
-  tools: [],
 });
 
 const MAX_CONTEXT_CHARS = 64_000;
@@ -129,7 +121,7 @@ export const meta = {
   // Declared shape, read statically by /workflows info before any run starts.
   // Titles must equal the phase() calls below; a test enforces that.
   phases: [
-    { title: "scout-repository", detail: "One read-only scout reports what the repository does here today." },
+    { title: "scout-repository", detail: "One scout reports what the repository does here today." },
     { title: "challenge-request", detail: "The challenger reopens the evidence and attacks the request." },
     { title: "synthesize-handoff", detail: "The synthesizer returns requirements a planner can work from." },
   ],
@@ -275,7 +267,7 @@ function synthesizerPrompt({ requestText, contextText, challengeText }) {
   return `${COMMON}
 
 TASK — write the requirements handoff. You are the synthesizer: the two texts
-below are your complete evidence, you have no tools, and you must not invent a
+below are the evidence to synthesize; use inherited tools only when verification is needed, and do not invent a
 path, a symbol, or a fact that neither text contains.
 
 Every requirement and every acceptance criterion must be observable: name what

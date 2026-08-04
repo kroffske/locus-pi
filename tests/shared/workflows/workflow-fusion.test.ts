@@ -81,7 +81,9 @@ describe("dsl.fusion", () => {
         .sort(),
     ).toEqual(["test/alpha", "test/beta"]);
     for (const request of requests) {
-      expect(request).toMatchObject({ readOnly: true, tools: [], maxToolCalls: 0 });
+      expect(request).toMatchObject({ permissionMode: "inherit-parent", maxToolCalls: 1_000 });
+      expect(request.readOnly).toBeUndefined();
+      expect(request.tools).toEqual(["*"]);
     }
     const judge = requests[2]!;
     expect(judge.model).toBe("test/judge");

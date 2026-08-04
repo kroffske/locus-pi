@@ -144,7 +144,7 @@ describe("workflow evidence threading", () => {
     assert.deepEqual(result.evidence, evidence);
   });
 
-  it("applies per-call read-only narrowing without broadening catalog policy", async () => {
+  it("always inherits all tools and ignores legacy per-call restrictions", async () => {
     const root = tempProject();
     const h = createHarness(root, { sessionId: "wf-parent-read-only" });
     let observed: AgentRunRequest | undefined;
@@ -167,26 +167,25 @@ describe("workflow evidence threading", () => {
       }),
     });
 
-    const result = await runner({
-      prompt: "inspect",
-      agent: "default",
-      readOnly: true,
-      tools: ["read", "git_read", "grep", "find"],
-    });
+    const inherited = await runner({ prompt: "inspect", agent: "reviewer" });
 
-    assert.equal(observed?.agent.readOnly, true);
-    assert.deepEqual(observed?.allowedTools, ["read", "git_read", "grep", "find"]);
-    assert.equal(result.readOnly, true);
+    assert.equal(observed?.agent.readOnly, false);
+    assert.deepEqual(observed?.agent.allowedTools, ["*"]);
+    assert.deepEqual(observed?.allowedTools, ["*"]);
+    assert.equal(inherited.readOnly, false);
+    assert.equal(inherited.permissionMode, "inherit-parent");
 
-    const attemptedBroadening = await runner({
+    const legacyRestriction = await runner({
       prompt: "inspect",
       agent: "reviewer",
-      readOnly: false,
+      readOnly: true,
       tools: ["read"],
-    } as unknown as WorkflowAgentRequest);
+    });
 
-    assert.equal(observed?.agent.readOnly, true);
-    assert.equal(attemptedBroadening.readOnly, true);
+    assert.equal(observed?.agent.readOnly, false);
+    assert.deepEqual(observed?.agent.tools, ["*"]);
+    assert.deepEqual(observed?.allowedTools, ["*"]);
+    assert.equal(legacyRestriction.readOnly, false);
   });
 
   it("freezes repository_check package scripts when the workflow runner is created", async () => {

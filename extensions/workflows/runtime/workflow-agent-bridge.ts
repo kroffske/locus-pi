@@ -128,15 +128,14 @@ export const WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR = "\n\n---\n\n";
  * call appends stay the last thing the child reads. Without a configured
  * directory the author's prompt travels alone.
  *
- * A read-only child is told where the directory is and NOT told to create
- * anything in it. The host enforces the boundary either way, so the instruction
- * would not produce a file — it would only ask for work the child cannot do and
- * invite it to report a file it never wrote.
+ * Every workflow child receives the full tool surface. When a run workspace is
+ * configured, say plainly where files belong so write/edit/bash work without an
+ * author-maintained tool list.
  */
 export function composeWorkflowChildTask(
   prompt: string,
   runWorkspaceDir: string | undefined,
-  options: { readOnly?: boolean } = {},
+  _legacyOptions: { readOnly?: boolean } = {},
 ): string {
   if (runWorkspaceDir === undefined || runWorkspaceDir.trim() === "") return prompt;
   const note = [
@@ -144,15 +143,9 @@ export function composeWorkflowChildTask(
     "",
     runWorkspaceDir,
     "",
-    ...(options.readOnly === true
-      ? [
-          "Files earlier stages of this run wrote are there, under the names their authors chose.",
-          "This call is read-only: read from it, and expect to add nothing to it.",
-        ]
-      : [
-          "Create any file this run should leave behind there, under the exact name it should have.",
-          "Names are kept verbatim: nothing renames, numbers or moves what you write.",
-        ]),
+    "Files earlier stages of this run wrote are there, under the names their authors chose.",
+    "Create any file this run should leave behind there, under the exact name it should have.",
+    "Names are kept verbatim: nothing renames, numbers or moves what you write.",
   ].join("\n");
   return `${note}${WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR}${prompt}`;
 }
@@ -162,17 +155,8 @@ export function resolvePermissionMode(input: {
   reqMode: PermissionMode | undefined;
   isDefaultAgent: boolean;
 }): PermissionMode {
-  const hasExplicitTools = input.agent.tools !== undefined && input.agent.tools.length > 0;
-  if (input.reqMode === "restricted") {
-    return input.isDefaultAgent && !hasExplicitTools ? "inherit-parent" : "restricted";
-  }
-  if (input.reqMode !== undefined) return input.reqMode;
-  if (input.agent.permissionMode === "restricted") {
-    return input.isDefaultAgent && !hasExplicitTools ? "inherit-parent" : "restricted";
-  }
-  if (input.agent.permissionMode !== undefined) return input.agent.permissionMode;
-  if (input.isDefaultAgent && !hasExplicitTools && !input.agent.readOnly) return "inherit-parent";
-  return "agent-defined";
+  void input;
+  return "inherit-parent";
 }
 
 export function resolveWorkspaceMode(input: {
@@ -256,12 +240,19 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
     }
-    const agent =
-      req.readOnly === true && !selectedAgent.readOnly ? { ...selectedAgent, readOnly: true } : selectedAgent;
+    // A workflow-selected catalog role contributes its prompt/model identity, not
+    // a hidden capability downgrade. Every workflow child receives the host's
+    // full available tool surface. `allowedTools: ["*"]` is the SDK contract.
+    const agent: AgentDefinition = {
+      ...selectedAgent,
+      allowedTools: ["*"],
+      tools: ["*"],
+      readOnly: false,
+      permissionMode: "inherit-parent",
+    };
 
-    // 2. Pi still owns operator approval. The SDK host separately enforces
-    //    `agent.readOnly` as a capability allowlist: no shell, write/edit,
-    //    nested workflow, or unknown custom tool reaches a read-only child.
+    // 2. Pi still owns operator approval. Workflow source cannot maintain a
+    //    second capability policy: every call uses the wildcard tool set.
     const approvalTier: "allow" = "allow";
     const permissionMode = resolvePermissionMode({
       agent,
@@ -379,16 +370,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // a literal `5` invisible to authors while the child's whole wall clock is
     // computed from it.
     const maxTurns = req.maxTurns ?? DEFAULT_WORKFLOW_BUDGET.turns;
-    // `agent` here is the EFFECTIVE definition, after the per-call `readOnly`
-    // narrowing above — so a call that read-only-ed a writable catalog agent
-    // gets the read-only note too.
-    const childTask = composeWorkflowChildTask(req.prompt, options.runWorkspaceDir, {
-      readOnly: agent.readOnly === true,
-    });
+    const childTask = composeWorkflowChildTask(req.prompt, options.runWorkspaceDir);
     const request = createAgentRunRequest(agent, childTask, {
       maxTurns,
       approvalTier,
-      ...(req.tools !== undefined ? { allowedTools: req.tools } : {}),
+      allowedTools: ["*"],
       modelRoleResolution,
       // Travels on the REQUEST because the run-result artifact is written from the
       // request, inside the boundary, before this bridge ever sees a result.

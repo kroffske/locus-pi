@@ -27,14 +27,12 @@ Primitive:
 const pwd = dsl.projectRoot();
 const units = await agent("Return one complete handoff per discovered unit.", {
   handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
-  readOnly: true,
 });
 
 const findings = await parallel(
   units.map(
     (unit, index) => () =>
       agent(`Your pwd is ${pwd}. Process this exact project-relative unit:\n${unit}`, {
-        readOnly: true,
         label: `worker-${index + 1}`,
       }),
   ),

@@ -35,7 +35,7 @@ One way a workflow reaches a model:
   the runtime-owned repair path. Trusted compatibility scripts may still use
   `opts.schema` for a larger validated value.
 - **`fusion()`** — validates a panel of 2–10 explicit model selectors, runs its
-  isolated tool-free members through ordinary `agent()` calls, and asks a separate
+  isolated members through ordinary full-tool `agent()` calls, and asks a separate
   judge call for one final answer. It receives no ambient conversation history.
 
 There is no direct one-shot completion node: `llm()` existed until 0.2.x and was
@@ -86,14 +86,14 @@ with real session ids. See "Run a real workflow (live)" below.
 
 | Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Minimal **live proof**: 2 read-only agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `requirements-grill` | Read-only **requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with no tools at all. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                                                                                                                                                                                              |
-| `review`             | **Question-led code review**: semantic text first reaches a shaped read-only clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential read-only agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped read-only selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a read-only checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `plan`               | **Task to outcome-first accepted plan**: read-only throughout. A `scout` maps the repository, then a `planner`/`critic` loop defines one primary result before deriving steps: outcome type, consumer, form and location, required content or behavior, usability proof, and supporting evidence. Every step is one bounded agent subtask with explicit `Context:`, one `Question:`, and one `Output:`; dozens of item-sized steps are valid, and distinct reasoning over one source stays split. The critic rejects plans whose steps can pass without producing the result, hidden meaning-changing assumptions, oversized multi-question steps, and repeated work that is purely mechanical. At the bounded round cap, the operator is told to continue the same run with guidance instead of editing the retained draft.                                                                                                                                                                                                                                                                                         |
+| `live-smoke`         | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `requirements-grill` | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `review`             | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `plan`               | **Task to outcome-first accepted plan**: planning agents are prompted not to edit. A `scout` maps the repository, then a `planner`/`critic` loop defines one primary result before deriving steps: outcome type, consumer, form and location, required content or behavior, usability proof, and supporting evidence. Every step is one bounded agent subtask with explicit `Context:`, one `Question:`, and one `Output:`; dozens of item-sized steps are valid, and distinct reasoning over one source stays split. The critic rejects plans whose steps can pass without producing the result, hidden meaning-changing assumptions, oversized multi-question steps, and repeated work that is purely mechanical. At the bounded round cap, the operator is told to continue the same run with guidance instead of editing the retained draft.                                                                                                                                                                                                                                                                     |
 | `plan-implement`     | **Accepted plan to verified primary result**: one host-verified continuation artifact, pasted plan text, or one text file supplies the plan. Deterministic code extracts routing structure — one unambiguous `## Outcome`, `### S<n>` blocks, `Depends on:` closure, and the optional legacy-compatible agent-subtask contract — restores selected plan order, and publishes `implementation-tasks.md`; agents own the plan's meaning and the final judgment. Each selected step, up to 80, gets one writer whose prompt repeats only that step's context, semantic question, and required output, followed by an independent reviewer. The final checker returns structured selected-step and repository command statuses; deterministic control flow refuses `complete` after any failed or unrun check, evidence gap, run-attributable unexpected change, or non-ready primary result. One bounded reconciliation may repair any terminal gap, including a missing result after all steps are done. The primary output is `workflow-summary.md`; `implementation-report.md` remains supporting per-step evidence. |
 
-`review` always receives a non-empty semantic string. A shaped read-only
+`review` always receives a non-empty semantic string. A shaped
 clarifier decides `continue` or `needs_operator`. Continue starts the five review
 stages and publishes the exact intent. Needs-operator publishes exact
 `intent.md` and readable `clarification-questions.md`, returns both complete
@@ -164,24 +164,24 @@ run through the closed `continuation` control and the host verifies what they
 picked; the accepted residual risk is remediating against a review from some other
 run, which re-running with the right source fixes. See `## Curated Package
 workflows` below for the same trade in `plan` → `plan-implement`.
-A no-tool read-only selector receives the operator text and immutable review,
+A full-tool selector receives the operator text and immutable review,
 then returns 1–20 `{id,note,dependsOn}` units through the fail-closed shaped
 agent boundary. Deterministic code bounds all notes and handoffs, parses complete
 `### F<n>` blocks, rejects duplicate/unknown ids, duplicate/self/unknown edges,
 unselected dependencies and cycles, and computes stable Kahn order with original
 review order as its tie-break.
 
-One read-only scope resolver receives only the selected complete finding blocks.
+One scope resolver receives only the selected complete finding blocks.
 Exactly one sequential write-capable agent then owns each selected finding, so
 overlapping mutations have a visible order and one accountable writer. A separate
-host-enforced read-only child reopens the full
+checker reopens the full
 diff and may call `repository_check` with only a `package.json` script whose exact
 command was frozen when the workflow runner was created, before any writer. A
 script-map addition, removal, or modification is refused in both the launch checkout and the
 materialized snapshot. The host, not the model, supplies argv, timeout, output bound, and a
 disposable external Git worktree containing the current tracked/untracked bytes;
 initialized submodule source is recursively materialized without copying Git
-administrative metadata. The operator checkout is never the command cwd. A fresh read-only re-review
+administrative metadata. The operator checkout is never the command cwd. A fresh re-review
 receives the immutable original review, bounded worker answers, and check
 evidence; it reopens the source and reports every original
 finding, dependency, and regression. `agent({ artifact })` gives the automatic answers stable names:
@@ -198,8 +198,8 @@ that the operator starts the workflow explicitly, chooses every finding id,
 receives one writer per finding, and gets independent check evidence plus a
 fresh re-review. Prompts forbid commit, push, merge, deploy, and discarding
 uncommitted work the agent did not create; every change stays uncommitted for an
-ordinary diff review. The scope resolver and re-review are host-enforced
-`readOnly`; the checker has neither edit tools nor shell. A declared package
+ordinary diff review. Scope resolution, checking, and re-review prompts forbid
+project edits, but those agents still receive the full tool set. A declared package
 script is operator-owned executable code, so the disposable worktree is a
 mutation boundary for the checkout, not an OS/network sandbox.
 
@@ -267,10 +267,9 @@ accepts older plans that omit all three lines, but rejects a partial contract, a
 missing concrete output path, or two explicit subtasks sharing one output
 instead of guessing what the boundary meant.
 
-Planning never writes. Every `plan` stage passes `readOnly: true`; in
-`plan-implement` only the per-step writers hold `write`, `edit`, and `bash`, the
-selector holds no tools at all, and both the per-step reviewer and final checker
-add `repository_check` without edit tools. The workflow publishes a deterministic
+Planning prompts forbid project edits. Every `plan` and `plan-implement` child
+still receives `tools: ["*"]`; the stage prompt says whether that agent should
+modify files. The workflow publishes a deterministic
 `implementation-tasks.md` snapshot after selection and after every review
 decision; stable attempt labels let `--resume` replay completed calls instead of
 applying accepted tasks again. Structured check evidence feeds deterministic
@@ -318,7 +317,7 @@ This repository dogfoods that boundary with ignored project files under
 digest-bound split-run execution, and per-unit implementation; `test-code.workflow.mjs`
 separates testcase design, test implementation/execution, and failure
 attribution among independent agents. Their independent final verifier and
-attribution agents are host-enforced read-only and can run only frozen
+attribution agents are instructed not to edit and can run frozen
 `repository_check` scripts; bounded intent, plans, units, predecessor results,
 execution evidence, and final inputs fail closed. They are local operational examples, not
 tracked source, curated names, documentation shipped in the npm tarball, or
@@ -428,7 +427,7 @@ or a selected model is no longer available.
 
 The tool accepts `question`, optional explicit `context`, and an optional final
 `output` instruction. It never forwards ambient session history. A direct run
-uses the same read-only, tool-free Fusion calls and writes the same packet,
+uses the same full-tool Fusion calls and writes the same packet,
 answers, journal, result envelope, and readable output under
 `.pi/locus-pi/workflows/<runId>/` as the Workflow DSL primitive. Disabling removes
 `fusion` from Pi's active tools immediately while leaving `/fusion` available for
@@ -1071,8 +1070,8 @@ The diagram is an ownership map, not a decorative code trace:
   code makes and which a model makes without opening the source.
 - Every agent box says what it **receives** and what it **returns**. The handoffs
   between stages are the pipeline; a box that names only a role explains nothing.
-- Say what constrains each child: host-enforced `readOnly: true`, its tool list,
-  a declared answer shape, an answer cap. A branch on a shaped answer is not the
+- Say what constrains each child: its prompt, declared answer shape, and answer
+  cap. Every child already receives all tools. A branch on a shaped answer is not the
   same claim as a branch on prose, and the picture must not blur them.
 - Every branch and loop carries its real exit condition, including the ones that
   end the run: an operator pause with `disposition: awaiting_operator`, a
@@ -1106,10 +1105,9 @@ export default async function runWorkflow(dsl, input) {
   const task = (typeof input === "string" && input.trim()) || "list the cwd";
 
   phase("work");
-  const workerText = await agent(`Task: ${task}. Use a read tool once, then return a concise Markdown answer.`, {
+  const workerText = await agent(`Task: ${task}. Use a tool once, then return a concise Markdown answer.`, {
     agent: "quick_task",
     label: "work",
-    permissionMode: "agent-defined",
   });
   log("worker returned non-empty text");
   return workerText;
@@ -1140,11 +1138,11 @@ Notes:
   `review` verifier), or a prompt genuinely shared by more than one workflow.
   Keep the stable role and the per-run task in that one prompt. The path is
   source-relative and hash-backed, and it must resolve to a packaged
-  `*.prompt.md`. Runtime policy such as `readOnly`, `tools`, and `workspaceMode`
-  remains visible in the `agent()` options either way.
+  `*.prompt.md`. Workspace isolation remains visible in the `agent()` options;
+  tool policy does not, because every workflow child receives `tools: ["*"]`.
 - `agent()` is the only model-calling step. For a **cheap one-shot decision**
-  (a gate or classification), reuse a no-tool catalog agent with
-  `agent(prompt, { choice: ["accept", "revise"], tools: [], maxToolCalls: 0 })`.
+  (a gate or classification), use
+  `agent(prompt, { choice: ["accept", "revise"] })`.
   Standard source does not wrap that call in a parser or validator.
 
 ### Declared phases — `meta.phases`
@@ -1158,7 +1156,7 @@ imported or evaluated:
 ```js
 export const meta = {
   name: "review",
-  description: "Prepares clarification or runs a read-only question-led review with runtime-owned artifacts.",
+  description: "Prepares clarification or runs a question-led review with runtime-owned artifacts.",
   phases: [
     { title: "prepare-clarification", detail: "Persist exact intent and prepare questions." },
     { title: "consume-clarification", detail: "Verify prior-run refs and persist answers." },
@@ -1335,8 +1333,7 @@ and `/workflows continue <runId>` takes a named run.
 `runWorkspaceDir()` is the absolute path of this run's working directory
 (`.pi/locus-pi/workflows/<runId>/workspace/`), created before the script starts.
 Every child agent's prompt opens by naming the same directory and telling it to
-create the run's files there under their exact names; a `readOnly` call is told
-where the directory is and is not asked to create anything in it. Nothing in the
+create the run's files there under their exact names. Nothing in the
 runtime renames, numbers or moves what an agent writes, so a path a workflow
 prints in a question is a path that exists. Auto-captured readable material goes
 to `outputs/`; machine evidence and transcripts go to `runtime/artifacts/`.
@@ -1410,29 +1407,26 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field             | Type                                   | Default                                                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------- | -------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`           | string                                 | `"default"`                                                            | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `readOnly`        | `true`                                 | selected catalog agent value                                           | Per-call host-enforced narrowing. It cannot turn a catalog read-only agent into a writer.                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `tools`           | string[]                               | selected agent allow-list                                              | Per-call subset of the selected catalog agent's tools. Use `[]` for a no-tool child. A request outside the catalog allow-list fails policy validation.                                                                                                                                                                                                                                                                                                                                                              |
-| `maxToolCalls`    | non-negative safe integer              | budget `toolCalls` (`1000`)                                            | Per-child-attempt runaway safety fuse. `0` requires a no-tool completion. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                 |
-| `timeoutMs`       | integer 1..2147383628                  | budget `timeoutMs` (`600000`)                                          | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. The upper bound reserves room for the SDK backstop at 20 turns while keeping both delays within Node's real timer range; larger delays would be clamped to roughly 1 ms.                                                                                                                                             |
-| `maxTurns`        | integer 1..20                          | budget `turns` (`5`)                                                   | Assistant turns for one child attempt. A value outside the host clamp is refused before any child starts. It was a hidden constant that multiplied the child's whole wall clock; it is now a declared budget axis.                                                                                                                                                                                                                                                                                                  |
-| `maxAnswerChars`  | positive safe integer                  | budget `answerChars` (`500000`)                                        | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
-| `attempts`        | safe integer 1–3                       | `1`                                                                    | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3, and refused unless the call is both replay-eligible and provably unable to write. Never re-asks an answer the child did produce.                                                                                                                                                                                                 |
-| `label`           | string                                 | —                                                                      | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `artifact`        | string                                 | safe label or agent name                                               | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
-| `phase`           | string                                 | current phase                                                          | Overrides the active phase tag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `permissionMode`  | string                                 | `"inherit-parent"` for bare default agent, otherwise `"agent-defined"` | Permission intent: `"inherit-parent"`, `"agent-defined"`, or `"restricted"`. This is trace metadata, not a security boundary.                                                                                                                                                                                                                                                                                                                                                                                       |
-| `workspaceMode`   | string                                 | `"project"`                                                            | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                                                                                                                                                                                                                                                                                                                                                 |
-| `workspaceHandle` | string                                 | —                                                                      | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `sandbox`         | string                                 | —                                                                      | Deprecated alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `permissionMode` / `workspaceMode` fields win.                                                                                                                                                                                                                                                                                                                                |
-| `model`           | string                                 | the resolved tier, else session model                                  | Per-call CONCRETE selector `provider/id` with an optional `:off\|minimal\|low\|medium\|high\|xhigh` child reasoning-effort suffix. The resolved model and requested effort are passed to the child session. A selector this host's registry cannot resolve **fails the call** by name, with no child spawned — it never falls back to `ctx.model`.                                                                                                                                                                  |
-| `modelRole`       | string                                 | the resolved tier, else session model                                  | Per-call TIER: a name in the roles table (`smol`, `slow`, `task`, …), never a provider selector. The package ships no assignments, so an operator layer has to say what the name means; a role nothing assigns degrades to `ctx.model` and records `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run report. A role that IS assigned but whose value is not a parseable selector is a config error, not an unassigned role: it fails the call by name, quoting the value and the layer. |
-| `choice`          | string[] (2–32 unique values)          | none                                                                   | **Standard machine-routing form.** Desugars to a string-enum schema before request canonicalization, so repair, replay, journal evidence, budgets, and fail-closed exhaustion are identical to the existing shape path. Cannot be combined with `schema` or `validate`.                                                                                                                                                                                                                                             |
-| `handoffs`        | `{minItems?, maxItems, maxItemChars?}` | none                                                                   | **Standard dynamic-decomposition form.** Returns 0–100 complete non-blank text units with author-declared bounds; defaults to `minItems: 0` and `maxItemChars: 8000`, with a 32000-character ceiling. Desugars to the existing unique trimmed string-array schema path, so runtime owns repair, replay, evidence, budgets, and fail-closed exhaustion. Cannot be combined with `choice`, `schema`, or `validate`.                                                                                                   |
-| `schema`          | object (JSON Schema)                   | none                                                                   | **Advanced compatibility.** Declare an arbitrary answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion. Standard generated source uses `choice` instead.                                                                                                                                                                                                                                                        |
-| `validate`        | `(value) => string[]`                  | none                                                                   | **Advanced compatibility, requires `schema`.** Cross-field rules the subset cannot declare. Runs only on a schema-valid parsed value; a non-empty return re-asks the child in its own labelled block. Standard generated source does not emit validators.                                                                                                                                                                                                                                                           |
+| Field             | Type                                   | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`           | string                                 | `"default"`                           | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `maxToolCalls`    | positive safe integer                  | budget `toolCalls` (`1000`)           | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
+| `timeoutMs`       | integer 1..2147383628                  | budget `timeoutMs` (`600000`)         | Wall-clock fuse for one child attempt. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. The upper bound reserves room for the SDK backstop at 20 turns while keeping both delays within Node's real timer range; larger delays would be clamped to roughly 1 ms.                                                                                                                                             |
+| `maxTurns`        | integer 1..20                          | budget `turns` (`5`)                  | Assistant turns for one child attempt. A value outside the host clamp is refused before any child starts. It was a hidden constant that multiplied the child's whole wall clock; it is now a declared budget axis.                                                                                                                                                                                                                                                                                                  |
+| `maxAnswerChars`  | positive safe integer                  | budget `answerChars` (`500000`)       | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
+| `attempts`        | safe integer 1–3                       | `1`                                   | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3. Never re-asks an answer the child did produce.                                                                                                                                                                                                                                                                                   |
+| `label`           | string                                 | —                                     | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `artifact`        | string                                 | safe label or agent name              | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `phase`           | string                                 | current phase                         | Overrides the active phase tag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `workspaceMode`   | string                                 | `"project"`                           | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                                                                                                                                                                                                                                                                                                                                                 |
+| `workspaceHandle` | string                                 | —                                     | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `sandbox`         | string                                 | —                                     | Deprecated workspace alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `workspaceMode` wins. It does not restrict tools.                                                                                                                                                                                                                                                                                                                   |
+| `model`           | string                                 | the resolved tier, else session model | Per-call CONCRETE selector `provider/id` with an optional `:off\|minimal\|low\|medium\|high\|xhigh` child reasoning-effort suffix. The resolved model and requested effort are passed to the child session. A selector this host's registry cannot resolve **fails the call** by name, with no child spawned — it never falls back to `ctx.model`.                                                                                                                                                                  |
+| `modelRole`       | string                                 | the resolved tier, else session model | Per-call TIER: a name in the roles table (`smol`, `slow`, `task`, …), never a provider selector. The package ships no assignments, so an operator layer has to say what the name means; a role nothing assigns degrades to `ctx.model` and records `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run report. A role that IS assigned but whose value is not a parseable selector is a config error, not an unassigned role: it fails the call by name, quoting the value and the layer. |
+| `choice`          | string[] (2–32 unique values)          | none                                  | **Standard machine-routing form.** Desugars to a string-enum schema before request canonicalization, so repair, replay, journal evidence, budgets, and fail-closed exhaustion are identical to the existing shape path. Cannot be combined with `schema` or `validate`.                                                                                                                                                                                                                                             |
+| `handoffs`        | `{minItems?, maxItems, maxItemChars?}` | none                                  | **Standard dynamic-decomposition form.** Returns 0–100 complete non-blank text units with author-declared bounds; defaults to `minItems: 0` and `maxItemChars: 8000`, with a 32000-character ceiling. Desugars to the existing unique trimmed string-array schema path, so runtime owns repair, replay, evidence, budgets, and fail-closed exhaustion. Cannot be combined with `choice`, `schema`, or `validate`.                                                                                                   |
+| `schema`          | object (JSON Schema)                   | none                                  | **Advanced compatibility.** Declare an arbitrary answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion. Standard generated source uses `choice` instead.                                                                                                                                                                                                                                                        |
+| `validate`        | `(value) => string[]`                  | none                                  | **Advanced compatibility, requires `schema`.** Cross-field rules the subset cannot declare. Runs only on a schema-valid parsed value; a non-empty return re-asks the child in its own labelled block. Standard generated source does not emit validators.                                                                                                                                                                                                                                                           |
 
 `agent()` resolves to exact non-empty text. The runtime persists that text before
 emitting terminal `agent_end`; fresh sessions also contribute their transcript
@@ -1517,21 +1511,11 @@ A result written
 before the field existed reads as `unclassified` and never retries. Promoting a cause out
 of `unclassified` is its own evidenced change, never a widening of the default.
 
-**Which calls may declare it.** Two conditions, and replay eligibility alone is not one of
-them. Replay asks "may a recorded answer be substituted for this call"; the retry asks "may
-this call be repeated". They coincide for a worktree call and diverge for a
-project-workspace writer: `workspaceMode` defaults to `"project"` and a catalog agent stays
-write-capable unless the call asks otherwise, so a default-options writer is replay-eligible
-while a second attempt could double-apply its edits. So `attempts > 1` requires:
-
-1. a project-workspace call with no `workspaceHandle`, **and**
-2. proof it cannot write — `readOnly: true`, or a `tools` allow-list drawn only from the
-   host's read-only set (`read`, `grep`, `find`, `ls`, `git_read`, `ast_index`,
-   `repository_check`, `yield`).
-
-Anything else is refused at declaration time with the reason named and **zero** children
-spawned — never silently downgraded to one attempt. Retrying a write stage safely needs a
-fresh worktree per attempt, which is a separate feature and is not built.
+**Which calls may declare it.** Ordinary project-workspace calls may declare
+`attempts > 1`; every attempt receives the same full tool set. Calls bound to a
+runtime worktree or `workspaceHandle` are refused because a later attempt would
+inherit filesystem state from the earlier attempt. Nothing silently downgrades
+the requested count.
 
 **What the evidence shows.** Every physical attempt is a real agent call: its own `callId`,
 its own `agent_start` and its own terminal record — an `agent_end`, or an `error` line when
@@ -1577,8 +1561,6 @@ Use `choice` when workflow JavaScript must select one small branch:
 ```js
 const route = await agent("Choose the next step.", {
   choice: ["accept", "revise", "blocked"],
-  tools: [],
-  maxToolCalls: 0,
 });
 ```
 
@@ -1598,13 +1580,10 @@ visible downstream workers:
 ```js
 const dags = await agent("Return one complete text handoff per DAG.", {
   handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
-  readOnly: true,
 });
 
 const descriptions = await parallel(
-  dags.map(
-    (dag, index) => () => agent(`Describe this exact DAG:\n${dag}`, { readOnly: true, label: `describe-${index + 1}` }),
-  ),
+  dags.map((dag, index) => () => agent(`Describe this exact DAG:\n${dag}`, { label: `describe-${index + 1}` })),
 );
 ```
 
@@ -1635,7 +1614,6 @@ larger machine value:
 ```js
 const gate = await agent(await promptFile("resources/gate.prompt.md", { diff }), {
   agent: "reviewer",
-  readOnly: true,
   label: "gate",
   schema: {
     type: "object",
@@ -1903,8 +1881,6 @@ The replacement for a gate, a classification, or a short draft is a shaped child
 ```js
 const gate = await agent(`Does this change need tool work? ${input}`, {
   label: "gate",
-  tools: [], // no-tool child — nothing to call, so nothing to wait for
-  maxToolCalls: 0,
   schema: { type: "object", required: ["needsWork"], properties: { needsWork: { type: "boolean" } } },
 });
 if (gate.needsWork) {
@@ -1933,13 +1909,12 @@ hard cap.
 
 ## Approval / trust discipline
 
-- **Permissions:** `permissionMode` describes the child run's tool-policy intent (`"inherit-parent"`, `"agent-defined"`, or `"restricted"`). It does not allocate a worktree.
-- **Tools:** `tools` can only narrow the selected catalog agent's allow-list. It cannot grant a tool that the agent definition excludes.
-- **Read-only agents:** `readOnly: true` in `agent()` options, or on the selected
-  catalog definition when no per-call override is present, is enforced by the
-  SDK host. The child receives only `read`, `grep`, `find`, `ls`, `yield`, and
-  package-owned bounded tools such as `git_read`, `ast_index`, or
-  `repository_check` when explicitly requested. `repository_check` accepts only
+- **Permissions and tools:** every workflow child uses `permissionMode:
+"inherit-parent"` and `tools: ["*"]`. Selecting a catalog role changes only
+  prompt/model identity. Legacy `tools`, `readOnly`, and `permissionMode` call
+  fields are ignored, so `write`, `edit`, `bash`, and all other available tools
+  work without author-maintained allowlists.
+- **Bounded repository checks:** `repository_check` accepts only
   a baseline `package.json` script name while the complete scripts map remains
   byte-for-byte equivalent to its pre-writer capture; added `pre`/`post` hooks,
   removals, and command changes are refused. It runs with host-owned argv in a
@@ -1955,12 +1930,11 @@ hard cap.
   inside a borrowed dependency root writes to the project's real directory — the
   isolation guarantee covers the repository's own files, not a package manager's
   install tree.
-  `bash`, `write`, `edit`, nested
-  `workflow`, and unknown tools are removed. `git_read` accepts argv for
+  `git_read` accepts argv for
   allowlisted Git queries and rejects mutation, output-file, external-diff,
   textconv, pager, signature, and config options before launch.
 - **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.pi/locus-pi/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
-- **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. Existing workflows still run and receive a deprecation diagnostic. New workflows should use `permissionMode` and `workspaceMode`.
+- **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. It never changes the tool set. New workflows should use `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
   The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
 
@@ -1990,8 +1964,8 @@ the last stage of a long pipeline no longer pays for the earlier stages.
 ### What is compared
 
 The key is the call's ordinal position plus its fully resolved request: the
-prompt, the catalog `agent`, `readOnly`, `tools`, `maxToolCalls`, `model`,
-`label`, `phase`, `permissionMode`, `workspaceMode`, and any `workspaceHandle`.
+prompt, catalog `agent`, `maxToolCalls`, `model`, `label`, `phase`,
+`workspaceMode`, and any `workspaceHandle`.
 A declared `schema` needs no separate field — the shape contract is already part
 of the prompt the child receives, and each schema retry is recorded as its own
 call, so a shaped stage replays its retries exactly as it ran them.
@@ -2177,8 +2151,9 @@ Bare `agent(prompt)` selects `default`. The bridge discovers definitions first-w
 by agent name from the nearest project `.agents/agents/`, then
 `~/.agents/agents/`, then the package's bundled `.agents/agents/`. Unknown names
 return an explicit `ok:false` agent result; they do not silently use `default`.
-Each definition's frontmatter supplies the system prompt, allowed tools,
-permission metadata, and optional `model` preference. The current bundled catalog
+For workflow calls, each definition's frontmatter supplies the system prompt and
+optional `model` preference; catalog capability metadata does not narrow the
+inherited workflow-child surface. The current bundled catalog
 includes `default`, `designer`, `explore`, `librarian`, `local_file_worker`,
 `oracle`, `plan`, `quick_task`, `reviewer`, `task`, and `workflow-author`; project
 or user definitions may shadow these names.

@@ -106,11 +106,10 @@ describe("workflow example: requirements-grill.workflow.mjs", () => {
     // No import at all: the file stays `self-contained-static` with nothing to bind.
     expect(source).not.toMatch(/^import /mu);
 
-    // Refining requirements reads; it never writes.
-    expect(source.match(/readOnly: true/gu)).toHaveLength(2);
-    expect(source).not.toContain('"write"');
-    expect(source).not.toContain('"edit"');
-    expect(source).not.toContain('"bash"');
+    // Runtime supplies the complete tool set; source does not maintain one.
+    expect(source).not.toMatch(/\breadOnly:/u);
+    expect(source).not.toMatch(/\btools:/u);
+    expect(source).not.toMatch(/\bpermissionMode:/u);
 
     expect(source).toContain("const COMMON = ");
     expect(source).not.toContain("promptFile");
@@ -124,12 +123,10 @@ describe("workflow example: requirements-grill.workflow.mjs", () => {
     expect(source).not.toContain("JSON.parse");
   });
 
-  it("takes every agent's capabilities and every label from the one roster", async () => {
+  it("takes every agent identity and every label from the one roster", async () => {
     const source = readFileSync(workflowPath, "utf8");
     expect(source).toContain("const GRILL_AGENTS = Object.freeze({");
-    // Two capability sets, declared once each: the two stages that open the
-    // repository, and the one that only composes what it was handed.
-    expect(source.match(/tools: \[/gu)).toHaveLength(2);
+    expect(source).not.toMatch(/\btools:/u);
     expect(source.match(/\.\.\.GRILL_AGENTS\.\w+\.options,/gu)).toHaveLength(3);
     expect(source.match(/^\s*label: /gmu)).toHaveLength(3);
     for (const id of ["scout", "challenger", "synthesizer"]) {
@@ -148,12 +145,8 @@ describe("workflow example: requirements-grill.workflow.mjs", () => {
 
     expect(calls.map((call) => call.label)).toEqual(["scout", "challenger", "synthesizer"]);
     expect(calls.map((call) => call.phase)).toEqual(["scout-repository", "challenge-request", "synthesize-handoff"]);
-    // The two inspecting stages share one option object; the composer holds nothing.
-    expect(calls[0]?.tools).toEqual(["read", "git_read", "ast_index", "grep", "find"]);
-    expect(calls[1]?.tools).toEqual(calls[0]?.tools);
-    expect(calls[2]?.tools).toEqual([]);
-    expect(calls[2]?.maxToolCalls).toBe(0);
-    expect(calls.map((call) => call.readOnly)).toEqual([true, true, true]);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
   });
 
   it("hands the request and every prior agent text on verbatim, and returns the handoff", async () => {

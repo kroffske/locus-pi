@@ -211,7 +211,7 @@ async function retriesOn(cause: AgentFailureCause | undefined): Promise<boolean>
     ...(cause === undefined ? {} : { failureCause: cause }),
   };
   const { dsl, requests } = scriptedRuntime(`retry-probe-${String(retryProbes)}`, [failure, completed("second")]);
-  await dsl.agent("work", { readOnly: true, attempts: 2 }).catch(() => undefined);
+  await dsl.agent("work", { attempts: 2 }).catch(() => undefined);
   return requests.length > 1;
 }
 
@@ -479,7 +479,6 @@ describe("agent failure cause — bridge", () => {
 
     const pending = dsl.agent("work", {
       agent: "default",
-      readOnly: true,
       attempts: 2,
       timeoutMs: 20,
     });
@@ -542,7 +541,7 @@ describe("agent failure cause — bridge", () => {
     });
 
     // Fail-closed behaviour preserved: the call throws, it is not downgraded to a result.
-    await expect(dsl.agent("work", { readOnly: true })).rejects.toThrow(/Pi SDK host/u);
+    await expect(dsl.agent("work", {})).rejects.toThrow(/Pi SDK host/u);
 
     const read = readWorkflowRunJournalState(root, runId);
     expect(read.diagnostics).toEqual([]);
@@ -635,7 +634,7 @@ describe("agent failure cause — bridge", () => {
       },
     });
 
-    await expect(dsl.agent("work", { readOnly: true })).rejects.toThrow(/host substrate is gone/u);
+    await expect(dsl.agent("work", {})).rejects.toThrow(/host substrate is gone/u);
 
     const read = readWorkflowRunJournalState(root, runId);
     expect(read.diagnostics).toEqual([]);
@@ -763,17 +762,21 @@ function transportFailure(cause: "host-turn-timeout" | "call-timeout" = "host-tu
   };
 }
 
-/** The only shape the retry may repeat: read-only, project workspace, no handle. */
-const RETRYABLE_CALL = { readOnly: true, attempts: 2 } as const;
+/** A project-workspace call with an explicit transport retry budget. */
+const RETRYABLE_CALL = { attempts: 2 } as const;
 
 /** Drive a runtime over a scripted sequence of results and count the child calls. */
 function scriptedRuntime(runId: string, results: WorkflowAgentResult[], extra: Record<string, unknown> = {}) {
-  const requests: Array<{ prompt: string; callId?: string }> = [];
+  const requests: Array<{ prompt: string; callId?: string; tools?: string[] }> = [];
   let index = 0;
   const runtime = createWorkflowRuntime({
     runId,
     agentRunner: async (request): Promise<WorkflowAgentResult> => {
-      requests.push({ prompt: request.prompt, ...(request.callId !== undefined ? { callId: request.callId } : {}) });
+      requests.push({
+        prompt: request.prompt,
+        ...(request.callId !== undefined ? { callId: request.callId } : {}),
+        ...(request.tools !== undefined ? { tools: request.tools } : {}),
+      });
       const next = results[Math.min(index, results.length - 1)]!;
       index += 1;
       return next;
@@ -804,7 +807,7 @@ describe("agent attempts — declaration", () => {
   it("accepts the ceiling exactly", async () => {
     const { dsl, requests } = scriptedRuntime("attempts-ceiling", [completed("fine")]);
 
-    await expect(dsl.agent("work", { readOnly: true, attempts: 3 })).resolves.toBe("fine");
+    await expect(dsl.agent("work", { attempts: 3 })).resolves.toBe("fine");
     expect(requests).toHaveLength(1);
   });
 
@@ -818,7 +821,7 @@ describe("agent attempts — declaration", () => {
       },
     });
 
-    await expect(dsl.agent("edit", { readOnly: true, attempts: 2, workspaceMode: "worktree" })).rejects.toThrow(
+    await expect(dsl.agent("edit", { attempts: 2, workspaceMode: "worktree" })).rejects.toThrow(
       /refused for a worktree workspace call/u,
     );
     expect(children).toBe(0);
@@ -849,64 +852,25 @@ describe("agent attempts — declaration", () => {
       },
     });
 
-    await expect(dsl.agent("edit", { readOnly: true, attempts: 2, workspaceHandle: "ws-1" })).rejects.toThrow(
+    await expect(dsl.agent("edit", { attempts: 2, workspaceHandle: "ws-1" })).rejects.toThrow(
       /refused for a call bound to a workspace handle/u,
     );
     expect(children).toBe(0);
   });
 
-  it("refuses a project-workspace call that could still write, spawning nothing", async () => {
-    let children = 0;
-    const { dsl } = createWorkflowRuntime({
-      runId: "attempts-project-writer",
-      agentRunner: async () => {
-        children += 1;
-        throw new Error("must not run");
-      },
-    });
+  it("allows an explicitly requested retry for a full-tool project call", async () => {
+    const { dsl, requests } = scriptedRuntime("attempts-project-writer", [transportFailure(), completed("second")]);
 
-    // Default options: workspaceMode falls back to "project" and the agent keeps its
-    // catalog write capability, so this call is replay-eligible AND able to edit the repo.
-    await expect(dsl.agent("fix the bug", { attempts: 2 })).rejects.toThrow(/provably cannot write/u);
-    expect(children).toBe(0);
-
-    // A tools allow-list with a writer in it is refused for the same reason.
-    await expect(dsl.agent("fix the bug", { attempts: 2, tools: ["read", "edit"] })).rejects.toThrow(
-      /provably cannot write/u,
-    );
-    expect(children).toBe(0);
-  });
-
-  it("accepts a no-write tools allow-list as proof, without readOnly", async () => {
-    const { dsl, requests } = scriptedRuntime("attempts-tools-proof", [transportFailure(), completed("second")]);
-
-    await expect(dsl.agent("read the file", { attempts: 2, tools: ["read", "grep"] })).resolves.toBe("second");
+    await expect(dsl.agent("fix the bug", { attempts: 2 })).resolves.toBe("second");
     expect(requests).toHaveLength(2);
   });
 
-  it("keeps its no-write tool list a subset of the host's read-only allow-list", () => {
-    // The runtime cannot import the host policy module (fs + child_process) and keeps a copy.
-    // This is the assertion that stops the copy from drifting into permitting a writer — and
-    // it is read from SOURCE rather than from two exported constants, because publishing an
-    // internal allow-list on the packaged surface for a test's convenience is a worse trade
-    // than reading the literal each list is actually written as.
-    const literal = (file: string, declaration: string): string[] => {
-      const source = readFileSync(path.join(process.cwd(), file), "utf8");
-      const start = source.indexOf(declaration);
-      expect(start, `${declaration} not found in ${file}`).toBeGreaterThanOrEqual(0);
-      const open = source.indexOf("[", start);
-      const close = source.indexOf("]", open);
-      expect(close, `${declaration} is not a literal array in ${file}`).toBeGreaterThan(open);
-      const tools = [...source.slice(open, close).matchAll(/"([^"]+)"/gu)].map((match) => match[1]!);
-      expect(tools.length, `${declaration} parsed as empty in ${file}`).toBeGreaterThan(0);
-      return tools;
-    };
-    const hostSafe = new Set(
-      literal("extensions/_shared/agent-runtime/agent-read-only-policy.ts", "const READ_ONLY_SAFE_TOOLS"),
-    );
-    const runtimeNoWrite = literal("extensions/workflows/runtime/workflow-runtime.ts", "const AGENT_NO_WRITE_TOOLS");
+  it("ignores legacy per-call tool lists instead of creating a second tool policy", async () => {
+    const { dsl, requests } = scriptedRuntime("attempts-tools-ignored", [transportFailure(), completed("second")]);
 
-    expect(runtimeNoWrite.filter((tool) => !hostSafe.has(tool))).toEqual([]);
+    await expect(dsl.agent("read the file", { attempts: 2, tools: ["read", "grep"] })).resolves.toBe("second");
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.tools?.join(",") === "*")).toBe(true);
   });
 });
 
@@ -1008,7 +972,7 @@ describe("agent attempts — retry behaviour", () => {
       transportFailure("call-timeout"),
     ]);
 
-    await expect(dsl.agent("summarize", { readOnly: true, attempts: 2 })).rejects.toThrow(/budget and was aborted/u);
+    await expect(dsl.agent("summarize", { attempts: 2 })).rejects.toThrow(/budget and was aborted/u);
     expect(requests).toHaveLength(2);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
     expect(ends.at(-1)?.failureCause).toBe("call-timeout");
@@ -1040,7 +1004,7 @@ describe("agent attempts — retry behaviour", () => {
       completed("must not be reached"),
     ]);
 
-    await expect(dsl.agent("summarize", { readOnly: true, attempts: 3 })).rejects.toThrow(new RegExp(cause, "u"));
+    await expect(dsl.agent("summarize", { attempts: 3 })).rejects.toThrow(new RegExp(cause, "u"));
     expect(requests).toHaveLength(1);
   });
 
@@ -1056,7 +1020,7 @@ describe("agent attempts — retry behaviour", () => {
       completed("must not be reached"),
     ]);
 
-    await expect(dsl.agent("summarize", { readOnly: true, attempts: 3 })).rejects.toThrow(/exceeded its budget/u);
+    await expect(dsl.agent("summarize", { attempts: 3 })).rejects.toThrow(/exceeded its budget/u);
     expect(requests).toHaveLength(1);
   });
 
@@ -1081,7 +1045,7 @@ describe("agent attempts — retry behaviour", () => {
       { maxTotalAgentInvocations: 2 },
     );
 
-    await expect(dsl.agent("summarize", { readOnly: true, attempts: 3 })).rejects.toThrow(
+    await expect(dsl.agent("summarize", { attempts: 3 })).rejects.toThrow(
       /exceeded maxTotalAgentInvocations cap of 2/u,
     );
     // Two children ran and both were counted; the third breached the cap before running.
@@ -1129,11 +1093,11 @@ describe("agent attempts — replay", () => {
   it("keeps attempts out of the recorded request so an old recording still replays", async () => {
     const withoutAttempts = recordingReplay();
     const plain = scriptedRuntime("attempts-key-plain", [completed("x")], { replay: withoutAttempts.controller });
-    await plain.dsl.agent("summarize", { readOnly: true });
+    await plain.dsl.agent("summarize", {});
 
     const withAttempts = recordingReplay();
     const retrying = scriptedRuntime("attempts-key-retry", [completed("x")], { replay: withAttempts.controller });
-    await retrying.dsl.agent("summarize", { readOnly: true, attempts: 3 });
+    await retrying.dsl.agent("summarize", { attempts: 3 });
 
     expect(withAttempts.begun[0]).toBe(withoutAttempts.begun[0]);
   });
@@ -1170,7 +1134,7 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     ];
     const { dsl, requests, getJournal } = scriptedRuntime("attempts-grid", sequence, { replay: controller });
 
-    await expect(dsl.agent("count them", { readOnly: true, attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({
+    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({
       count: 3,
     });
 
@@ -1194,7 +1158,7 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     ]);
 
     // The child never answered, so there is nothing for the shape loop to repair.
-    await expect(dsl.agent("count them", { readOnly: true, attempts: 2, schema: COUNT_SCHEMA })).rejects.toThrow(
+    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).rejects.toThrow(
       /budget and was aborted/u,
     );
     expect(requests).toHaveLength(2);
@@ -1289,7 +1253,6 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
         '    artifact: "review.md",',
         '    label: "scout",',
         '    phase: "review",',
-        "    readOnly: true,",
         "    attempts: 2,",
         "    timeoutMs: 30,",
         "  });",

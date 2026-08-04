@@ -6,6 +6,14 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow children now always receive all available tools.** A
+  selected catalog role contributes its prompt and model identity but no longer
+  silently narrows `tools`, `readOnly`, MCP access, or permission intent.
+  Standard authoring and shipped workflows no longer enumerate tool allowlists
+  or create no-tool stages. Legacy per-call restriction fields are ignored;
+  actual child requests always use `allowedTools: ["*"]` and remain writable.
+  The host-owned direct recursion boundary for `spawn_agent` and `task` is unchanged.
+
 - **Workflow agents no longer accept output-token truncation as success.** If a
   provider ends a child answer with `stopReason=length`, the host fails the call
   as a provider error and preserves its transcript instead of publishing or

@@ -24,23 +24,22 @@
 // with drafting guidance, and the continuation run redrafts from the retained
 // state without re-scouting.
 //
-// Every stage is host-enforced read-only: planning reads the repository and
-// writes nothing to it. The only durable output is runtime-owned text.
+// Planning reads the repository and writes no project files by instruction. The
+// child still inherits the parent run's complete tool surface.
 //
 // This is a Package workflow: it lives in the shipped examples directory the
 // resolver scans, so `/workflow-run plan "<task>"` resolves it without any
 // project file. Workflow JavaScript is trusted local code with full Node.js
-// host access; every stage here is read-only, and the sibling `plan-implement`
-// is the one that writes.
+// host access; the sibling `plan-implement` is the workflow that performs edits.
 
 /** Prepended to every stage: one contract, one place to change it. */
 const COMMON = `You are one stage of the \`plan\` workflow, which turns one operator task into an
 accepted implementation plan. No stage of this workflow changes the repository.
 
-This stage is host-enforced read-only. You have no shell, write, edit, workflow,
-or unknown custom tool. Use \`git_read\` for Git inspection; it accepts an
-\`args\` array without the leading \`git\`. The workflow runtime owns every
-persisted artifact, so never write a plan file, a report, or a status envelope.
+You inherit every tool available to the parent workflow run. Use the tools needed
+to inspect the repository, but do not modify project files in this planning task.
+The workflow runtime owns every persisted artifact, so never write a plan file,
+a report, or a status envelope.
 
 Nobody will answer a question you ask. When a decision is missing, choose the
 most defensible option, say so in writing, and keep going.
@@ -78,10 +77,7 @@ Index never blocks planning.`;
  */
 const PLAN_STAGE_OPTIONS = Object.freeze({
   modelRole: "agent",
-  permissionMode: "agent-defined",
   workspaceMode: "project",
-  readOnly: true,
-  tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
 /** The drafting loop's safety net. The critic is the exit condition. */
@@ -171,7 +167,7 @@ export const meta = {
   description:
     "Defines the primary result, then drafts and critiques its implementation plan; a stalled round cap hands the decision to the operator.",
   phases: [
-    { title: "scout-repository", detail: "One read-only scout maps the surfaces the task depends on." },
+    { title: "scout-repository", detail: "One scout maps the surfaces the task depends on without modifying them." },
     { title: "draft-plan", detail: "The planner writes the complete plan, revising against the previous critique." },
     { title: "critique-plan", detail: "The critic reopens the evidence and returns an accept/revise verdict." },
     // The two operator-facing stages. Only a stalled run reaches the first and

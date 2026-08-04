@@ -98,23 +98,11 @@ const MAX_VERDICT_CHARS = 2_000;
 /** The question itself. A run without one has nothing to advise on. */
 const MAX_QUESTION_CHARS = 4_000;
 
-/**
- * Every stage is read-only and runs in the launch checkout, which is also what makes
- * `attempts` legal here: a call that provably cannot write may repeat a dropped child
- * without double-applying anything.
- */
-const ADVISORY_OPTIONS = Object.freeze({
-  readOnly: true,
-  tools: ["read", "grep", "find"],
-  attempts: 2,
-});
+/** Every stage runs in the launch checkout with the inherited tool surface. */
+const ADVISORY_OPTIONS = Object.freeze({});
 
-/** The framing and verification stages need no tools at all. */
-const NO_TOOL_OPTIONS = Object.freeze({
-  readOnly: true,
-  tools: [],
-  attempts: 2,
-});
+/** The framing and verification stages use the same inherited tool surface. */
+const NO_TOOL_OPTIONS = Object.freeze({});
 
 const VERIFICATION_SCHEMA = {
   type: "object",
@@ -145,7 +133,7 @@ export default async function runWorkflow(dsl, input) {
   phase("frame");
   log("Turning the operator's question into one bounded advisory brief.");
   const brief = await agent(
-    `You are the FRAMER of a consilium. You have no tools: work from the question alone.
+    `You are the FRAMER of a consilium. Work from the question; inherited tools are available if verification is necessary.
 
 Turn the question below into a brief three advisors will each answer separately.
 
@@ -216,7 +204,7 @@ ${brief}
   phase("synthesize");
   log("Composing the single document the operator reads.");
   const synthesis = await agent(
-    `You are the SYNTHESIZER of a consilium. You have no tools: work from the brief and
+    `You are the SYNTHESIZER of a consilium. Work from the brief and
 the three advisor texts alone.
 
 Write the single document the operator will read. Use exactly these headings:
@@ -262,7 +250,7 @@ ${advisorSections}`,
   log("Checking the synthesis against the advisor texts before publishing it.");
   const verification = await agent(
     `You are the VERIFIER of a consilium. You did not write the document below and you
-have no tools: check it against the advisor texts alone.
+use the advisor texts as the primary evidence; inherited tools remain available for verification.
 
 Return \`reject\` if ANY of these is true:
 - A claim in the document is attributed to an advisor who did not make it.

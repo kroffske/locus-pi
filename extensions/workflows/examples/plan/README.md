@@ -2,7 +2,7 @@
 
 `plan` turns one operator task into an accepted implementation plan.
 [`plan-implement`](../plan-implement/README.md) carries that plan out. They are two
-workflows on purpose: planning is read-only and cheap to repeat, implementation
+workflows on purpose: planning prompts forbid edits and cheap to repeat, implementation
 writes to the operator's checkout, and the operator decides — by launching the
 second one — whether a plan is worth executing.
 
@@ -11,7 +11,7 @@ which the resolver scans, so `/workflows run plan "<task>"` and
 `/workflows run plan-implement "<request>"` resolve without any project file, and
 both ship in `package.json#files` and `public-repository.json`. Workflow
 JavaScript is trusted local code with full Node.js host access; it is not
-sandboxed. `plan` is read-only end to end, `plan-implement` writes to the launch
+sandboxed. `plan` agents are instructed not to edit, `plan-implement` writes to the launch
 checkout, and that difference is why they are two workflows rather than one.
 Every stage in this pair declares `modelRole: "agent"` and names no provider.
 A packaged workflow must run on the host it lands on, and a concrete
@@ -165,9 +165,9 @@ stall a state the operator can steer out of.
 ```mermaid
 flowchart LR
     P["verified plan.md reference"] --> S["host: parse ## Steps blocks"]
-    S --> L["no-tool selector: which steps, with notes"]
+    S --> L["selector: which steps, with notes"]
     L --> V["workflow: validate ids, restore plan order, publish task ledger"]
-    V --> R["resolve implementation scope (read-only)"]
+    V --> R["resolve implementation scope"]
     R --> W["writer: current task"]
     W --> K{"independent reviewer"}
     K -->|"repair, once"| W
@@ -175,7 +175,7 @@ flowchart LR
     K -->|"blocked"| E
     N -->|"yes"| W
     N -->|"no"| E["collect check evidence (read-only + repository_check)"]
-    E --> Q["fresh grader: primary result + steps (read-only)"]
+    E --> Q["fresh grader: primary result + steps"]
     Q --> O["runtime workflow-summary.md + supporting implementation-report.md"]
 ```
 
@@ -215,7 +215,7 @@ remain visible as `not-selected`.
 
 Each selected task runs in the plan's order. One write-capable implementer
 receives exactly that step, the shared scope, and the latest ledger. A separate
-host-enforced read-only reviewer reopens the live diff and returns a shaped
+reviewer instructed not to edit reopens the live diff and returns a shaped
 `accept`, `repair`, or `blocked` verdict. `repair` gives the same task one bounded
 incremental attempt with the exact issues, rather than restarting the task or
 advancing to the next one. Every verdict republishes the ledger, and the next
@@ -261,13 +261,10 @@ the same full summary text shown to the operator.
 
 ## Capability boundary
 
-Capability policy lives in the workflow scripts, not in prompt prose. Every stage
-of `plan` passes `readOnly: true`, which the host enforces by removing shell,
-write/edit, nested workflow, and unknown tools — planning cannot change the
-repository. In `plan-implement` only the per-step writers hold `write`, `edit`,
-and `bash`; the selector has no tools at all, and the scope, check, and report
-stages are read-only. The check stage additionally receives `repository_check`,
-which runs an existing `package.json` script in a disposable host-created
-worktree with host-owned argv, timeout, and cleanup.
+Every stage receives the full inherited tool set. `plan` prompts forbid project
+changes; `plan-implement` prompts make one implementer responsible for each
+selected edit and tell review stages not to modify files. `repository_check`
+runs an existing `package.json` script in a disposable host-created worktree
+with host-owned argv, timeout, and cleanup.
 
 Neither workflow commits, pushes, stages, stashes, or touches a remote.
