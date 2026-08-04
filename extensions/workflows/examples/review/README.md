@@ -1,10 +1,10 @@
 # Curated review workflow
 
-`review` is a read-only, question-led review chain. The workflow runtime owns
+`review` is a question-led review chain. The workflow runtime owns
 its durable evidence; no model session writes or republishes reports.
 
 The workflow receives only a non-empty semantic text string. On a fresh call, a
-read-only clarifier returns the shaped decision `{decision, questions}`. A
+clarifier returns the shaped decision `{decision, questions}`. A
 `continue` decision starts the full review. A `needs_operator` decision persists
 the exact intent and readable questions, returns their complete refs, declares a
 generic actionable handoff, and stops. After Pi is idle, the oldest question
@@ -61,7 +61,7 @@ interrogator charter is re-rendered once per round with that round's number,
 prior questions, and reported gaps; the loader snapshots and hashes it once, so
 the loop adds renderings rather than prompt evidence.
 
-Known cost of that split: those two charters restate the read-only capability
+Known cost of that split: those two charters restate the analysis-only behavior
 paragraph and the AST Index paragraph that `COMMON` and `AST_INDEX_NOTE` own in
 the script, so the two copies can drift. `review-workflow.test.ts` pins the
 shared sentences on both sides.
@@ -111,7 +111,7 @@ publications.
 
 ```mermaid
 flowchart LR
-    P["fresh exact intent"] --> C["read-only clarifier decision"]
+    P["fresh exact intent"] --> C["clarifier decision"]
     C -->|"needs operator"| A["intent.md + clarification-questions.md refs"]
     C -->|"continue"| R1
     A --> H["host inline operator question"]
@@ -127,7 +127,7 @@ flowchart LR
 ```
 
 All seven model roles, including the optional clarification planner and the
-coverage assessor, are host-enforced read-only. Scope and inventory use `read`,
+coverage assessor, are instructed not to edit. Scope and inventory use `read`,
 `git_read`, `grep`, and `find`. Unit planning, interrogation, coverage
 assessment, and verification also receive the allowlisted `ast_index` tool, with
 direct-read and text-search fallback.
@@ -172,7 +172,7 @@ inventory id.
 
 Interrogation is a bounded loop rather than a single call, because one reader's
 first pass is not evidence that nothing was missed. After each round a separate
-read-only assessor (R3c) reopens the units and the real code and returns the
+assessor instructed not to edit (R3c) reopens the units and the real code and returns the
 shaped verdict `{decision, gaps}`: `complete`, or `more_questions_needed` with up
 to eight concrete places where a reviewer could still be wrong and no question
 would catch it. Script code branches on that enum — it never scans the
@@ -214,10 +214,9 @@ absolute paths, lexical and symlink escapes, missing files, wrong suffixes,
 missing variables, and unused variables. It snapshots each prompt and records
 digest evidence.
 
-Capability policy lives in `review.workflow.mjs`, not prompt prose.
-`readOnly: true` removes shell, write/edit, nested workflow, and unknown tools.
-The high tool-call limit is a runaway fuse. `workspaceMode: "project"` means
-review agents inspect the launch checkout.
+Every review agent receives the full inherited tool set. Prompts tell analysis
+stages not to modify project files. The high tool-call limit is a runaway fuse.
+`workspaceMode: "project"` means review agents inspect the launch checkout.
 
 `phase()` and `log()` come from the injected `WorkflowDsl`; the entry imports
 no runtime implementation. Plain `agent()` returns exact non-empty text. Two

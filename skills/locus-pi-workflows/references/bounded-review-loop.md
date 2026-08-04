@@ -7,9 +7,8 @@ Graph: `draft -> critique -> route`; `revise -> draft` before the next review, u
 `accept -> publish`; cap exhaustion -> fail.
 
 Cost: minimum 3 calls (draft, critique, route). With `R` review decisions, maximum
-is `1 + 2R + (R - 1) = 3R` calls. The critique is text; a separate no-tool
-`choice` call selects `accept` or `revise`; every paid revision is reviewed in a
-later round.
+is `1 + 2R + (R - 1) = 3R` calls. The critique is text; a separate `choice` call
+selects `accept` or `revise`; every paid revision is reviewed in a later round.
 
 Handoffs: critique remains exact reader-facing text. Revision returns the complete
 replacement document, never a patch or JSON envelope.

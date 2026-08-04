@@ -228,9 +228,9 @@ interface WorkflowFusionPreparation {
 export interface WorkflowAgentRequest {
   prompt: string;
   agent: string; // catalog name; defaults to DEFAULT_WORKFLOW_AGENT
-  /** Per-call host-enforced read-only capability boundary. */
+  /** @deprecated ignored by the workflow bridge; every child receives all tools. */
   readOnly?: true;
-  /** Optional per-call subset of the selected catalog agent's allowed tools. */
+  /** Runtime-owned invariant: every workflow child request carries `["*"]`. */
   tools?: string[];
   /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
   maxToolCalls?: number;
@@ -238,6 +238,8 @@ export interface WorkflowAgentRequest {
   model?: string;
   /** Per-call tier: a name in the roles table, never a provider selector. */
   modelRole?: string;
+  /** Runtime-owned resolved value. Workflow source cannot override it. */
+  permissionMode?: PermissionMode;
   /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
   timeoutMs?: number;
   /** Assistant turns this child attempt may take. Also the multiplier the SDK host
@@ -247,8 +249,6 @@ export interface WorkflowAgentRequest {
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
-  /** Permission intent for the child run. This is trace metadata, not a security boundary. */
-  permissionMode?: PermissionMode;
   /** Workspace isolation intent for the child run. Worktrees isolate file changes for review, not security. */
   workspaceMode?: WorkspaceMode;
   /** Opaque runtime-owned workspace identity. The bridge resolves it to cwd. */
@@ -393,11 +393,11 @@ export interface WorkflowDsl {
 
 export interface WorkflowAgentOptions {
   agent?: string; // catalog name; default DEFAULT_WORKFLOW_AGENT
-  /** Narrow the selected catalog agent with a host-enforced read-only capability boundary. */
+  /** @deprecated ignored; workflow children always receive all tools and can write. */
   readOnly?: true;
-  /** Narrow this child to a subset of its catalog allow-list; [] creates a no-tool child. */
+  /** @deprecated ignored; workflow children always receive `allowedTools: ["*"]`. */
   tools?: string[];
-  /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. 0 requires no tools. */
+  /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. */
   maxToolCalls?: number;
   /**
    * Concrete model for this call, always `provider/id` with an optional
@@ -442,8 +442,8 @@ export interface WorkflowAgentOptions {
    *
    * It never re-asks because an answer was weak: that is a critic agent's job, and an answer
    * whose SHAPE is wrong already has its own bounded repair (`schema` + `validate`). Refused
-   * at declaration time unless the call is both replay-eligible and provably unable to write,
-   * because a child that timed out mid-edit may already have changed the repository.
+   * at declaration time for ordinary project calls because every workflow child can write,
+   * and a child that timed out mid-edit may already have changed the repository.
    */
   attempts?: number;
   label?: string;
@@ -452,7 +452,7 @@ export interface WorkflowAgentOptions {
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
-  /** Permission intent for the child run. This is trace metadata, not a security boundary. */
+  /** @deprecated ignored; workflow children always inherit the parent permission mode. */
   permissionMode?: PermissionMode;
   /** Workspace isolation intent for the child run. Worktrees isolate file changes for review, not security. */
   workspaceMode?: WorkspaceMode;
@@ -1039,35 +1039,11 @@ function normalizeAgentAttempts(attempts: number | undefined): number {
 }
 
 /**
- * Tools this runtime will accept as proof that a child cannot write.
- *
- * Copied deliberately rather than imported: the host's own read-only allowlist lives in
- * `agent-read-only-policy.ts`, which reaches for `node:fs` and `node:child_process`, and this
- * module is the host-agnostic core. `tests/shared/workflows/workflow-agent-transport.test.ts`
- * asserts this list stays a SUBSET of the host's, so the copy cannot drift into permitting
- * something the host does not consider read-only.
- */
-const AGENT_NO_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  "read",
-  "grep",
-  "find",
-  "ls",
-  "git_read",
-  "ast_index",
-  "repository_check",
-  "yield",
-]);
-
-/**
  * Why this call may NOT repeat a dropped child, or `undefined` when it may.
  *
- * Two conditions, and replay eligibility alone is not enough. Replay asks "may a recorded
- * answer be SUBSTITUTED for this call" — a question about the record. A retry asks "may this
- * call be REPEATED" — a question about side effects. They coincide for a worktree call and
- * diverge for a project-workspace writer: `workspaceMode` defaults to `"project"` and the
- * bridge leaves a catalog agent write-capable unless the CALL asks for read-only, so a
- * default-options writer editing the repository in place is replay-eligible while a second
- * attempt could double-apply its edits or edit a half-finished tree.
+ * Worktree-bound calls cannot repeat because a later attempt would inherit filesystem state
+ * from the earlier attempt. Ordinary project calls may use the explicitly requested retry
+ * budget. Workflow agents always have all tools; retries do not create a second tool policy.
  */
 function transportRetryRefusal(req: WorkflowAgentRequest, replayable: boolean): string | undefined {
   if (!replayable) {
@@ -1075,18 +1051,11 @@ function transportRetryRefusal(req: WorkflowAgentRequest, replayable: boolean): 
       ? "agent attempts > 1 is refused for a call bound to a workspace handle: a repeated attempt could act on a tree the first attempt already changed"
       : `agent attempts > 1 is refused for a ${String(req.workspaceMode)} workspace call: a repeated attempt could act on a tree the first attempt already changed`;
   }
-  const provablyNoWrite =
-    req.readOnly === true || (req.tools !== undefined && req.tools.every((tool) => AGENT_NO_WRITE_TOOLS.has(tool)));
-  if (!provablyNoWrite) {
-    return "agent attempts > 1 requires a call that provably cannot write: declare readOnly: true, or a tools allow-list with no write, edit or shell member";
-  }
   return undefined;
 }
 
-function defaultWorkflowPermissionMode(agentName: string, requestedMode: PermissionMode | undefined): PermissionMode {
-  if (agentName === DEFAULT_WORKFLOW_AGENT && requestedMode === "restricted") return "inherit-parent";
-  if (requestedMode !== undefined) return requestedMode;
-  return agentName === DEFAULT_WORKFLOW_AGENT ? "inherit-parent" : "agent-defined";
+function defaultWorkflowPermissionMode(): PermissionMode {
+  return "inherit-parent";
 }
 
 function workspaceModeFromSandbox(sandbox: WorkflowAgentOptions["sandbox"]): WorkspaceMode {
@@ -2353,12 +2322,12 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       turns: { requested: opts?.maxTurns, applied: defaultMaxTurns },
     });
     const agentName = opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
-    const permissionMode = defaultWorkflowPermissionMode(agentName, opts?.permissionMode);
+    const permissionMode = defaultWorkflowPermissionMode();
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
     const req: WorkflowAgentRequest = {
       prompt,
       agent: agentName,
-      ...(opts?.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),
+      tools: ["*"],
       permissionMode,
       workspaceMode,
       ...(opts?.workspaceHandle !== undefined ? { workspaceHandle: opts.workspaceHandle } : {}),
@@ -2372,7 +2341,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       // deadlines can never expire at the same instant.
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
-      ...(opts?.tools !== undefined ? { tools: [...opts.tools] } : {}),
       maxToolCalls,
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
@@ -2494,7 +2462,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "agent_start",
       agent: req.agent,
       ...(replayed ? { replayed: true } : {}),
-      ...(req.readOnly !== undefined ? { readOnly: req.readOnly } : {}),
       permissionMode,
       workspaceMode,
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
@@ -2528,7 +2495,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         agent: req.agent,
         permissionMode,
         workspaceMode,
-        ...(req.readOnly !== undefined ? { readOnly: req.readOnly } : {}),
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
     } else {
@@ -2716,9 +2682,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       callId,
       ...attemptFields,
       ...(replayed ? { replayed: true } : {}),
-      ...((finalResult.readOnly ?? req.readOnly) !== undefined
-        ? { readOnly: finalResult.readOnly ?? req.readOnly }
-        : {}),
+      ...(finalResult.readOnly !== undefined ? { readOnly: finalResult.readOnly } : {}),
       status: finalResult.status,
       // Machine-readable cause on every non-completed call, so a reader never has to
       // match on `summary` prose to tell a timeout from a cancellation.
@@ -2808,9 +2772,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         fusion.members.map((member, index) => {
           const memberOptions: WorkflowInternalAgentOptions = {
             ...member.agentOptions,
-            readOnly: true,
-            tools: [],
-            maxToolCalls: 0,
             attempts: fusion.memberLimits.attempts,
             maxAnswerChars: fusion.memberLimits.maxAnswerChars,
             ...(fusion.memberLimits.timeoutMs !== undefined ? { timeoutMs: fusion.memberLimits.timeoutMs } : {}),
@@ -2835,9 +2796,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       }
       const judgeOptions: WorkflowInternalAgentOptions = {
         ...fusion.judge.agentOptions,
-        readOnly: true,
-        tools: [],
-        maxToolCalls: 0,
         attempts: fusion.judgeLimits.attempts,
         maxAnswerChars: fusion.judgeLimits.maxAnswerChars,
         ...(fusion.judgeLimits.timeoutMs !== undefined ? { timeoutMs: fusion.judgeLimits.timeoutMs } : {}),
@@ -3364,18 +3322,19 @@ export function workflowSlotKey(input: { phase?: string | undefined; label?: str
  *
  * Built from the RESOLVED request rather than the author's `opts`, so a default
  * that later changes value cannot silently reuse a record made under the old
- * default. Every field is listed explicitly: a field added to
+ * default. Every variable execution field is listed explicitly: a field added to
  * `WorkflowAgentRequest` without being added here would widen what counts as
  * "the same call", so the omission has to be a deliberate edit rather than an
- * accident of spreading the object. A declared `schema` needs no field of its
- * own — it is already baked into `prompt` by `withSchemaContract`.
+ * accident of spreading the object. The invariant `tools: ["*"]` and
+ * `permissionMode: "inherit-parent"` need no key fields because workflow source
+ * cannot change them; legacy restriction inputs are ignored. A declared `schema`
+ * needs no field of its own — it is already baked into `prompt` by
+ * `withSchemaContract`.
  */
 function canonicalAgentRequest(req: WorkflowAgentRequest): string {
   return JSON.stringify({
     prompt: req.prompt,
     agent: req.agent,
-    readOnly: req.readOnly ?? null,
-    tools: req.tools ?? null,
     maxToolCalls: req.maxToolCalls ?? null,
     model: req.model ?? null,
     // The tier a stage DECLARED. Two stages on two tiers are two different calls and

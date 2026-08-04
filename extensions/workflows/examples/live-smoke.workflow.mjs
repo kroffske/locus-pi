@@ -1,13 +1,13 @@
 // live-smoke.workflow.mjs
 // Minimal LIVE proof that the runtime really spawns child agent sessions.
-// Two read-only agents each perform a small tool action (so they pass the
+// Two agents each perform a small tool action (so they pass the
 // honesty gate, which rejects "completed" with zero tool activity) and return a
 // one-line note. The workflow returns both exact notes; per-agent status and
 // session evidence remain runtime-owned in journal events and child artifacts.
 //
 export const meta = {
   name: "live-smoke",
-  description: "Checks that the Pi host can spawn read-only workflow agents and collect their reports.",
+  description: "Checks that the Pi host can spawn full-tool workflow agents and collect their reports.",
 };
 
 export default async function runWorkflow(dsl, input) {
@@ -26,10 +26,7 @@ export default async function runWorkflow(dsl, input) {
       {
         agent: who,
         label: "list cwd entries",
-        permissionMode: "agent-defined",
         workspaceMode: "project",
-        readOnly: true,
-        tools: ["find"],
       },
     );
 

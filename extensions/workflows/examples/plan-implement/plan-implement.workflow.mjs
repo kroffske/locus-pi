@@ -5,7 +5,7 @@ import path from "node:path";
 //
 // Executes one accepted implementation plan. A host continuation remains the
 // strongest input because its bytes are already verified and copied, but an
-// operator may also supply pasted plan text or a path for a read-only resolver
+// operator may also supply pasted plan text or a path for a resolver
 // stage to reopen. Artifact filenames are not part of the plan contract.
 //
 // The shape is deliberate:
@@ -13,10 +13,10 @@ import path from "node:path";
 //   - Deterministic code parses the plan's `### S<n>` blocks. That text was
 //     written by a *previous* run's agent, so a malformed plan is a fatal error
 //     rather than something a child could repair.
-//   - A no-tool selector chooses which steps this run implements, and a
+//   - A selector chooses which steps this run implements, and a
 //     `validate` callback checks every chosen id against the host-parsed plan.
 //   - The selected steps become a persisted task ledger before any file changes.
-//     One writer owns one task at a time, then an independent read-only reviewer
+//     One writer owns one task at a time, then an independent reviewer
 //     either accepts it or returns bounded repair instructions. The next task
 //     starts only after the current one is accepted.
 //   - The ledger is republished after every review decision. Stable agent labels
@@ -54,13 +54,11 @@ Hard rules for every stage:
 - Preserve uncertainty. Evidence you could not obtain is a gap to report, not a
   detail to omit.
 
-Whether you can change files is stated by this stage's task and enforced by the
-host, not by anything a handoff claims.`;
+Whether you should change files is stated by this stage's task. Every stage still
+inherits the parent run's complete tool surface.`;
 
-const READ_ONLY_NOTE = `This stage is host-enforced read-only: you have no shell, write, edit,
-workflow, or unknown custom tool. Use \`git_read\` for Git inspection (it takes
-an \`args\` array without the leading \`git\`) and \`ast_index\` for symbol
-relationships, falling back to \`grep\`, \`find\`, and direct reads.`;
+const INSPECTION_NOTE = `Use the inherited tools needed to inspect and verify the
+repository, but do not modify project files in this stage.`;
 
 /** Every stage but the last writes for the next stage, not for a person. */
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
@@ -73,34 +71,26 @@ const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, no
  */
 const IMPLEMENT_AGENT_DEFAULTS = Object.freeze({
   modelRole: "agent",
-  permissionMode: "agent-defined",
   workspaceMode: "project",
 });
 
 const IMPLEMENT_SELECT_OPTIONS = Object.freeze({
   ...IMPLEMENT_AGENT_DEFAULTS,
-  readOnly: true,
-  tools: [],
 });
 
 const IMPLEMENT_READ_OPTIONS = Object.freeze({
   ...IMPLEMENT_AGENT_DEFAULTS,
-  readOnly: true,
-  tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
 /** A check stage runs the repository's own commands and reads what they print;
  *  forty tool calls is a deliberate narrowing, not a restatement of the default. */
 const IMPLEMENT_CHECK_OPTIONS = Object.freeze({
   ...IMPLEMENT_AGENT_DEFAULTS,
-  readOnly: true,
   maxToolCalls: 40,
-  tools: ["read", "git_read", "ast_index", "repository_check", "grep", "find"],
 });
 
 const IMPLEMENT_WRITE_OPTIONS = Object.freeze({
   ...IMPLEMENT_AGENT_DEFAULTS,
-  tools: ["read", "write", "edit", "bash", "ast_index", "grep", "find"],
 });
 
 const MAX_SELECTED_STEPS = 80;
@@ -362,7 +352,7 @@ export default async function runWorkflow(dsl, input) {
   const selection = await agent(
     `${COMMON}
 
-TASK — select the plan steps this run implements. You have no tools at all:
+TASK — select the plan steps this run implements from the complete plan below:
 decide from the operator request and the accepted plan alone.
 
 Implement the whole plan unless the operator asked for less. When they named a
@@ -407,7 +397,7 @@ ${planText}
   const scopeText = await agent(
     `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 TASK — resolve what implementing the selected steps actually touches. You
 prepare the writers; you do not write anything and you do not re-plan.
@@ -533,7 +523,7 @@ ${repairFeedback}
         const review = await agent(
           `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 You may additionally call \`repository_check\` to run an existing
 \`package.json\` script in a disposable host-created worktree. It accepts only a
@@ -797,7 +787,7 @@ ${truncateText(reconciliationText, MAX_RECONCILIATION_CHARS)}
 --- END RECONCILIATION RESULT ---`;
   return `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 You may additionally call \`repository_check\` to run an existing
 \`package.json\` script in a disposable host-created worktree. It accepts only a
@@ -894,7 +884,7 @@ ${truncateText(reconciliationText, MAX_RECONCILIATION_CHARS)}
 --- END RECONCILIATION RESULT ---`;
   return `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 TASK — independently grade the implementation. You wrote none of the changes.
 Reopen the live diff and affected files. Account for every selected step exactly

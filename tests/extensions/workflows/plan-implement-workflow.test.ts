@@ -387,7 +387,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).not.toMatch(/model:\s*"[^"]*\//u);
   });
 
-  it("keeps one write-capable role and persists workflow-owned task state plus runtime-owned agent evidence", () => {
+  it("uses no capability lists and persists workflow-owned task state plus runtime-owned agent evidence", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain("continuationArtifacts()");
@@ -414,10 +414,9 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     expect(source).not.toContain("promptFile");
     expect(source).not.toContain("JSON.parse");
 
-    // Exactly one write-capable options constant, and it is the only place the
-    // edit tools appear.
-    expect(source.match(/readOnly: true/gu)).toHaveLength(3);
-    expect(source.match(/"write", "edit"/gu)).toHaveLength(1);
+    expect(source).not.toMatch(/\breadOnly:/u);
+    expect(source).not.toMatch(/\btools:/u);
+    expect(source).not.toMatch(/\bpermissionMode:/u);
 
     for (const name of ["step-selection.json", "scope.md", "check-evidence.json", "implementation-verdict.json"]) {
       expect(source, name).toContain(`artifact: "${name}"`);
@@ -486,15 +485,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "collect-check-evidence",
       "report-implementation",
     ]);
-    // The selector has no tools at all; every stage but the writers is read-only.
-    expect(calls[0]?.tools).toEqual([]);
-    expect(calls[0]?.readOnly).toBe(true);
-    expect(calls[2]?.readOnly).toBeUndefined();
-    expect(calls[3]?.readOnly).toBe(true);
-    expect(calls[4]?.readOnly).toBeUndefined();
-    expect(calls[5]?.readOnly).toBe(true);
-    expect(calls[6]?.readOnly).toBe(true);
-    expect(calls[7]?.readOnly).toBe(true);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
     // Each writer receives exactly its own step block plus the operator note.
     expect(calls[2]?.prompt).toContain(STEP_S1);
     expect(calls[2]?.prompt).not.toContain("### S2 — Cover the final page");
@@ -704,9 +696,8 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
       "collect-reconciliation-evidence",
       "report-reconciliation",
     ]);
-    expect(calls[6]?.readOnly).toBeUndefined();
-    expect(calls[7]?.readOnly).toBe(true);
-    expect(calls[8]?.readOnly).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
     expect(namedAnswers(artifactStore)).toEqual([
       "step-selection.json",
       "scope.md",

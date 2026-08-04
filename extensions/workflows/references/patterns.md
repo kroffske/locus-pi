@@ -22,7 +22,7 @@ stays yours.
 | Requirement                              | Minimal shape                               |
 | ---------------------------------------- | ------------------------------------------- |
 | One bounded tool-using task              | one `agent()`                               |
-| Cheap classification or draft            | one no-tool `agent({ schema })`             |
+| Cheap classification or draft            | one shaped `agent({ schema })`              |
 | Cheap gate before tool work              | shaped `agent()` then conditional `agent()` |
 | Yes/no answer the script must branch on  | `agent({ schema })` with an `enum`          |
 | A few fixed fields for the next stage    | `agent({ schema })`, closed object          |
@@ -57,7 +57,7 @@ exact text; the workflow never parses that text.
 
 Write the prompts inline, in the script, next to the call they belong to. One
 file is the whole workflow: the contract every stage shares, the per-stage task,
-the capability options, and the routing between them are read in one pass, and
+the agent identities, and the routing between them are read in one pass, and
 the retained script snapshot covers the prompt bytes too.
 
 ```js
@@ -78,17 +78,13 @@ Your final text is the handoff the next stage receives, not a message to a human
 // visible in the source. Drop it, or lower it, when a stage should be cheaper.
 const STAGE_DEFAULTS = Object.freeze({
   maxToolCalls: 1_000,
-  permissionMode: "agent-defined",
   workspaceMode: "project",
 });
 const READ_OPTIONS = Object.freeze({
   ...STAGE_DEFAULTS,
-  readOnly: true,
-  tools: ["read", "git_read", "grep", "find"],
 });
 const PUBLISH_OPTIONS = Object.freeze({
   ...STAGE_DEFAULTS,
-  tools: ["read", "write", "bash", "grep", "find"],
 });
 
 phase("resolve-scope");
@@ -191,9 +187,9 @@ honest answer is "it reformats" or "it restates", delete it.
 
 Rules that make the shape work:
 
-- Inspection stages pass `readOnly: true`, which the host enforces by removing
-  shell, write/edit, nested workflow, and unknown tools. Put every read-only
-  stage before the first stage that writes anything.
+- Every stage inherits the parent run's complete tool surface. Inspection stages
+  are told not to modify the repository; the workflow does not maintain a tool
+  allowlist for them.
 - Separate the two kinds of writing. A stage that mutates source (`review-fix`'s
   implementer, mid-pipeline) and a stage that persists artifacts (the publisher,
   last) are different privileges and different prompts; do not merge them, and
@@ -239,10 +235,9 @@ four decisions and nothing else:
 1. **The one question it answers.** Name it in a sentence. If the sentence needs
    an "and", it is two stages — or the second half only restates the first, and
    then it is one.
-2. **Its capability.** `readOnly: true` with read tools for inspection, `bash`
-   only for a stage that must run something, `write`/`edit` only for the stage
-   that must change something. The `agent()` options are the boundary; the prompt
-   paragraph only explains it.
+2. **Its action boundary.** State whether the stage inspects or changes files and
+   give it the exact working/output directory. Tools stay inherited; only an
+   explicit user request justifies narrowing them.
 3. **What it receives.** The shared `COMMON` contract, then the previous stage's
    exact text interpolated between `--- BEGIN <NAME> ---` / `--- END <NAME> ---`
    markers, plus the original operator intent when later stages must not lose the
@@ -508,7 +503,6 @@ export default async function run({ agent, phase }, input) {
   phase("audit");
   return agent(`Interpret and perform this audit request exactly:\n\n${input}`, {
     agent: "reviewer",
-    readOnly: true,
     label: "audit",
   });
 }
@@ -529,21 +523,18 @@ export default async function run({ agent, phase }, input) {
   const text = await agent(input, {
     agent: "quick_task",
     label: "work",
-    permissionMode: "agent-defined",
   });
   return text;
 }
 ```
 
-## Cheap gate before tool work
+## Cheap gate before further work
 
 ```js
-// A no-tool child is the cheap path: nothing to call, and the declared shape is
-// enforced by the runtime, so the script branches on a value it did not parse.
+// The declared shape is enforced by the runtime, so the script branches on a
+// value it did not parse. The child keeps the inherited tool surface.
 const gate = await agent(`Classify whether tool work is needed: ${input}`, {
   label: "gate",
-  tools: [],
-  maxToolCalls: 0,
   schema: {
     type: "object",
     required: ["needsTools"],
@@ -560,7 +551,7 @@ return work;
 ## Shaped answer from an agent
 
 Use `agent({ schema })` when the script itself must branch on the answer. The
-call runs an ordinary child agent — same catalog agent, same capability options
+call runs an ordinary child agent — same catalog agent and inherited tools
 — but returns the **validated value** instead of text, and throws
 `SchemaValidationError` if the child cannot produce that shape within the retry
 budget. Nothing unshaped ever reaches the script.
@@ -570,7 +561,6 @@ Yes/no answer — an `enum` leaves the child no room to answer "it depends":
 ```js
 const gate = await agent(`Does this diff need a security review?\n${diff}`, {
   agent: "reviewer",
-  readOnly: true,
   label: "security-gate",
   schema: {
     type: "object",
@@ -588,7 +578,6 @@ Small fixed field set — one closed object handed to the next stage:
 ```js
 const triage = await agent(`Triage this failure report:\n${report}`, {
   agent: "reviewer",
-  readOnly: true,
   label: "triage",
   schema: {
     type: "object",
@@ -644,8 +633,6 @@ for (let round = 1; round <= maxRounds; round += 1) {
 
   const judge = await agent(`Is this complete? Reply with done boolean.\n${work}`, {
     label: `judge:${round}`,
-    tools: [],
-    maxToolCalls: 0,
     schema: {
       type: "object",
       required: ["done"],
@@ -753,8 +740,6 @@ for (let round = 1; round <= 5; round += 1) {
   const sweep = await agent(`Find remaining work, round ${round}`, { label: `sweep:${round}` });
   const measured = await agent(`Count evidenced remaining items in this report:\n${sweep}`, {
     label: `measure:${round}`,
-    tools: [],
-    maxToolCalls: 0,
     schema: {
       type: "object",
       required: ["remaining"],
@@ -781,8 +766,6 @@ handoff between them — and the questions themselves are written by an agent, b
 ```js
 // Run 1 — a shaped stage decides whether a human is needed at all.
 const decision = await agent(`${COMMON}\n\nDecide whether this can start.`, {
-  readOnly: true,
-  tools: [],
   label: "decide clarification",
   schema: CLARIFIER_SCHEMA, // { decision: enum["continue","ask"], questions: [...] }
 });
@@ -835,10 +818,8 @@ let round = 0;
 let report = "";
 while (round < MAX_ROUNDS && dsl.now() < deadline) {
   round += 1;
-  report = await agent(`Sweep round ${round}`, { readOnly: true, label: `sweep:${round}` });
+  report = await agent(`Sweep round ${round}`, { label: `sweep:${round}` });
   const verdict = await agent(`Is this sweep dry?\n${report}`, {
-    readOnly: true,
-    tools: [],
     label: `measure:${round}`,
     schema: { type: "object", required: ["dry"], properties: { dry: { type: "boolean" } } },
   });
@@ -889,19 +870,15 @@ advisors, one synthesizer, and a separate reader that checks the synthesis again
 advisor texts before anything is published.
 
 ```js
-const brief = await agent(frameTask(question), { readOnly: true, tools: [], artifact: "brief.md" });
+const brief = await agent(frameTask(question), { artifact: "brief.md" });
 const advice = await dsl.workflow(async (nested) =>
   nested.parallel(ADVISORS.map((a) => () => nested.agent(`${a.charter}\n\n${brief}`, adviceOptions(a)))),
 );
 const synthesis = await agent(synthesizeTask(brief, advice), {
-  readOnly: true,
-  tools: [],
   artifact: "synthesis-draft.md", // NOT the terminal name — see below
   maxAnswerChars: 12_000,
 });
 const check = await agent(verifyTask(synthesis, advice), {
-  readOnly: true,
-  tools: [],
   schema: {
     type: "object",
     required: ["verdict", "reason"],

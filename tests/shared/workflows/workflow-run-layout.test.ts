@@ -174,15 +174,14 @@ describe("workflow run working directory", () => {
     });
 
     assert.equal(result.ok, true, result.error);
-    // The catalog agent is writable; `readOnly: true` narrowed it at the call
-    // site, and the note follows the EFFECTIVE capability rather than the catalog.
+    // Legacy `readOnly` input is ignored: every workflow child remains writable.
     assert.equal(tasks.length, 1);
     assert.match(
       tasks[0] ?? "",
       new RegExp(workflowRunWorkspaceDir(workflowRunDir(root, result.runId)).replace(/[/\\]/gu, "."), "u"),
     );
-    assert.match(tasks[0] ?? "", /This call is read-only/u);
-    assert.doesNotMatch(tasks[0] ?? "", /Create any file/u);
+    assert.doesNotMatch(tasks[0] ?? "", /This call is read-only/u);
+    assert.match(tasks[0] ?? "", /Create any file/u);
   });
 
   it("refuses to create a run directory through a symlink or under an unsafe run id", () => {
@@ -243,13 +242,12 @@ describe("workflow child task composition", () => {
     assert.match(task, /under the exact name it should have/u);
   });
 
-  it("names the directory to a read-only child without telling it to create anything", () => {
+  it("ignores the legacy read-only option and keeps the writable directory instruction", () => {
     const task = composeWorkflowChildTask("review the plan", "/tmp/run/workspace", { readOnly: true });
     assert.match(task, /^## This workflow run's working directory\n\n\/tmp\/run\/workspace\n/u);
     assert.ok(task.endsWith("review the plan"));
-    assert.match(task, /This call is read-only/u);
-    // The instruction a child with no write capability could not carry out.
-    assert.doesNotMatch(task, /Create any file/u);
+    assert.doesNotMatch(task, /This call is read-only/u);
+    assert.match(task, /Create any file/u);
   });
 
   it("leaves the prompt untouched when no directory is configured", () => {

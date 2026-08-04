@@ -54,8 +54,6 @@ When JavaScript must route, use the runtime-owned exact choice:
 ```js
 const route = await agent("Choose the next step.", {
   choice: ["accept", "revise", "blocked"],
-  tools: [],
-  maxToolCalls: 0,
 });
 ```
 
@@ -68,7 +66,6 @@ When discovery determines the work units at runtime, use bounded text handoffs:
 ```js
 const units = await agent("Return one complete handoff per discovered unit.", {
   handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
-  readOnly: true,
 });
 ```
 
@@ -96,7 +93,7 @@ and `handoffs` answers.
 
 ## Target source shape
 
-Keep stable identities and capabilities together near the top. Keep prompts,
+Keep stable identities together near the top. Keep prompts,
 calls, branches, and handoffs visible at their execution edges.
 
 ```js
@@ -106,8 +103,8 @@ export const meta = {
 };
 
 const AGENTS = {
-  reviewer: { agent: "reviewer", readOnly: true },
-  composer: { tools: [], maxToolCalls: 0 },
+  reviewer: { agent: "reviewer" },
+  composer: { agent: "default" },
 };
 
 export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {
@@ -132,6 +129,11 @@ The workflow orchestrates but does not interpret or format agent results:
 - a composer returns the complete Markdown document;
 - a reviewer returns the complete corrected replacement;
 - the script passes these values unchanged and publishes accepted text exactly.
+
+Every child receives the full tool surface through `tools: ["*"]`. Standard
+source contains no capability fields or tool lists. Roles choose only
+prompt/model identity. `write`, `edit`, `bash`, and every other available tool
+work by default.
 
 Filesystem prompts name their location explicitly. Give a reader the exact
 `projectRoot()` as `pwd` and require project-relative source paths. Give a writer
@@ -171,8 +173,9 @@ that surviving results remain useful.
 
 ## Dynamic decomposition without manager delegation
 
-SDK children cannot call `spawn_agent` or `task`; read-only children have a
-stricter tool set. Keep dynamic decomposition in the visible harness instead:
+The host reserves the recursive `spawn_agent` and `task` entrypoints; this is a
+system-owned recursion boundary, not an author-managed allowlist. Keep dynamic
+decomposition in the visible harness instead:
 one `agent({ handoffs })` discovers bounded text units, then explicit
 `parallel()` or `pipeline()` calls process them under the shared workflow budget.
 Recursive manager delegation and capability inheritance remain unsupported; do
@@ -208,7 +211,7 @@ object. Cross-run data arrives through host-verified continuation artifacts.
 `publishPrimaryArtifact()` declares the one successful terminal document.
 
 `parallel()` and `pipeline()` wait for scheduled siblings and then reject on a
-failed branch. Invocation cap, timeout, permissions, read-only policy, answer
+failed branch. Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities.
 

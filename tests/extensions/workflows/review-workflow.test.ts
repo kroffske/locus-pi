@@ -164,7 +164,7 @@ function promptSource(name: string): string {
 }
 
 describe("workflow example: review.workflow.mjs", () => {
-  it("keeps every model stage read-only and removes the model publisher", () => {
+  it("keeps capability lists out of every model stage and removes the model publisher", () => {
     const source = readFileSync(workflowPath, "utf8");
 
     expect(source).toContain('promptFile("./resources/');
@@ -187,9 +187,9 @@ describe("workflow example: review.workflow.mjs", () => {
     // stage that restated the default would silently disagree with it the day it moves.
     expect(source.match(/maxToolCalls:/gu)).toBeNull();
     expect(source.match(/workspaceMode:/gu)).toHaveLength(1);
-    expect(source.match(/readOnly: true/gu)).toHaveLength(2);
-    expect(source).toContain('tools: ["read", "git_read", "grep", "find"]');
-    expect(source).toContain('tools: ["read", "git_read", "ast_index", "grep", "find"]');
+    expect(source).not.toMatch(/\breadOnly:/u);
+    expect(source).not.toMatch(/\btools:/u);
+    expect(source).not.toMatch(/\bpermissionMode:/u);
     expect(source).toContain("const MAX_CLARIFIER_PROMPT_CHARS = 500");
     expect(source).toContain("Each prompt must fit in ${MAX_CLARIFIER_PROMPT_CHARS} characters");
     expect(source).not.toContain("REVIEW_PUBLISH_OPTIONS");
@@ -204,10 +204,9 @@ describe("workflow example: review.workflow.mjs", () => {
     }
     for (const name of CHARTER_PROMPTS) {
       const prompt = promptSource(name);
-      expect(prompt, name).toContain("This stage is host-enforced read-only.");
+      expect(prompt, name).toContain("You inherit every tool available to the parent workflow run.");
       expect(prompt, name).toContain("workflow runtime owns");
-      expect(prompt, name).toContain("You have no shell");
-      expect(prompt, name).toContain("git_read");
+      expect(prompt, name).toContain("do not modify project files");
     }
   });
 
@@ -228,8 +227,8 @@ describe("workflow example: review.workflow.mjs", () => {
     // clarifier, the scope resolver, the inventory, the unit planner, and the
     // question-coverage assessor that decides whether interrogation runs again.
     expect(source.match(/^\s*`\$\{COMMON\}$/gmu)).toHaveLength(5);
-    expect(source).toContain("This stage is host-enforced read-only.");
-    expect(source).toContain("You have no shell");
+    expect(source).toContain("You inherit every tool available to the parent workflow run.");
+    expect(source).toContain("do not modify project files");
 
     // Bounds on free text are per-call runtime gates, not hand-rolled throws.
     for (const bound of [
@@ -409,7 +408,8 @@ describe("workflow example: review.workflow.mjs", () => {
       "assess question coverage round 1",
       "verify and write review",
     ]);
-    expect(calls.every((call) => call.readOnly === true)).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
     expect(calls.every((call) => call.prompt.includes(intent))).toBe(true);
     expect(calls.map((call) => call.phase)).toEqual([
       "prepare-clarification",
@@ -485,7 +485,8 @@ describe("workflow example: review.workflow.mjs", () => {
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.label).toBe("decide clarification");
-    expect(calls[0]?.readOnly).toBe(true);
+    expect(calls[0]?.readOnly).toBeUndefined();
+    expect(calls[0]?.tools).toEqual(["*"]);
     expect(calls[0]?.prompt).toContain(intent);
     expect(answers.map((item) => item.ref.name)).toEqual(["clarifier-decision.json"]);
     expect(awaiting).toEqual([

@@ -82,25 +82,19 @@ const MAX_SECTION_REPAIRS = 2;
 
 const AGENT_DEFAULTS = Object.freeze({
   maxToolCalls: 80,
-  permissionMode: "agent-defined",
   workspaceMode: "project",
 });
-
-/** Every authoring stage may read the repository and write exactly one assigned file. */
-const AUTHOR_TOOLS = Object.freeze(["read", "write", "grep", "find"]);
 
 /** The section authoring and repair stages, on the acceptance tier. */
 const AUTHOR_OPTIONS = Object.freeze({
   ...AGENT_DEFAULTS,
   modelRole: AUTHOR_MODEL_ROLE,
-  tools: [...AUTHOR_TOOLS],
 });
 
 /** The draft stage, on the cheap tier. No stage names a concrete `provider/id`. */
 const DRAFT_OPTIONS = Object.freeze({
   ...AGENT_DEFAULTS,
   modelRole: DRAFT_MODEL_ROLE,
-  tools: [...AUTHOR_TOOLS],
 });
 
 const HOST_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "excalidraw-pipeline.section-host.mjs");

@@ -24,7 +24,7 @@ async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promis
 }
 
 describe("workflow example: live-smoke.workflow.mjs", () => {
-  it("narrows both child agents to one read-only project tool", async () => {
+  it("uses ordinary full-tool children without capability options", async () => {
     const calls: AgentCall[] = [];
     const runWorkflow = await loadWorkflow();
 
@@ -44,11 +44,11 @@ describe("workflow example: live-smoke.workflow.mjs", () => {
     for (const call of calls) {
       expect(call.options).toMatchObject({
         label: "list cwd entries",
-        permissionMode: "agent-defined",
         workspaceMode: "project",
-        readOnly: true,
-        tools: ["find"],
       });
+      expect(call.options).not.toHaveProperty("tools");
+      expect(call.options).not.toHaveProperty("readOnly");
+      expect(call.options).not.toHaveProperty("permissionMode");
       expect(call.prompt).toContain("Use your find tool");
       expect(call.prompt).not.toContain("bash");
     }

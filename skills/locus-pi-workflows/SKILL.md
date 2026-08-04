@@ -71,9 +71,9 @@ Pattern: <catalog pattern, or why none fits>
 
 1. <numbered algorithm>
 
-| Node     | Responsibility         | Receives      | Returns                              | Capability        | Next       |
-| -------- | ---------------------- | ------------- | ------------------------------------ | ----------------- | ---------- |
-| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <tools/read-only> | <consumer> |
+| Node     | Responsibility         | Receives      | Returns                              | Next       |
+| -------- | ---------------------- | ------------- | ------------------------------------ | ---------- |
+| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <consumer> |
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
@@ -91,13 +91,13 @@ copy blindly.
 
 ## Standard source profile
 
-Declare stable agent identity and capability options together near the top. Keep
+Declare stable agent identities together near the top. Keep
 every prompt, call, branch, and exact handoff visible where it executes.
 
 ```js
 const AGENTS = {
-  reviewer: { agent: "reviewer", readOnly: true },
-  composer: { tools: [], maxToolCalls: 0 },
+  reviewer: { agent: "reviewer" },
+  composer: { agent: "default" },
 };
 
 export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {
@@ -133,13 +133,17 @@ barrier for independent known calls; `pipeline()` handles fixed ordered stages
 per known item; `awaitOperator()` declares a human gate; `promptFile()` may hold
 a long charter but never hide routing.
 
-Give filesystem agents an explicit location contract in their prompt. Read-only
-agents receive `projectRoot()` as their `pwd` and must treat source paths as
-relative to it. Write agents receive the exact `runWorkspaceDir()` or retained
-`workspace()` path and the exact relative output filename. Say explicitly that
-they must not substitute the user's home directory or `/tmp`. This location text
-is part of the task prompt; do not add JavaScript path parsers or collector
-scripts to compensate for a weak model.
+Every workflow child receives the full tool surface through `tools: ["*"]`.
+Standard source contains no capability fields or tool lists. Roles choose only
+prompt/model identity. `write`, `edit`, `bash`, and every other available tool
+work by default.
+
+Give filesystem agents an explicit location contract in their prompt. Every
+agent receives the exact `projectRoot()` or output/workspace directory as its
+`pwd`, plus the exact relative source or output filename. Say explicitly that it
+must not substitute the user's home directory or `/tmp`. This location text is
+part of the task prompt; do not add JavaScript path parsers or collector scripts
+to compensate for a weak model.
 
 Workflow input remains semantic text. Standard source does not encode a hidden
 line/CSV/JSON protocol and then `split`, regex-match, or parse it into branch
@@ -169,9 +173,10 @@ useful.
 
 ## Delegation limit
 
-An SDK child still cannot call `spawn_agent` or `task`; a read-only child has an
-even narrower tool set. Dynamic decomposition therefore stays in the visible
-harness: one `agent({ handoffs })` discovers bounded text units and explicit
+The host still reserves the recursive `spawn_agent` and `task` entrypoints; this
+is one system-owned recursion boundary, not a tool list workflow authors manage.
+Dynamic decomposition therefore stays in the visible harness: one
+`agent({ handoffs })` discovers bounded text units and explicit
 `parallel()` or `pipeline()` calls process them under the shared workflow budget.
 Do not simulate a recursive manager, capability inheritance, or hidden graph with
 a large structured plan.

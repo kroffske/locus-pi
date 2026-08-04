@@ -231,9 +231,7 @@ describe("curated review remediation workflow", () => {
 
     expect(fixed.ok, fixed.error).toBe(true);
     expect(fixed.continuation?.originRunId).toBe(reviewed.runId);
-    expect(fixed.continuation?.artifacts).toEqual([
-      expect.objectContaining({ sourceRef: reviewRef }),
-    ]);
+    expect(fixed.continuation?.artifacts).toEqual([expect.objectContaining({ sourceRef: reviewRef })]);
     expect(fixed.result).toBe("# Re-review\nF1 is resolved with focused test evidence.");
   });
 
@@ -287,9 +285,9 @@ describe("curated review remediation workflow", () => {
     expect(existsSync(path.join(path.dirname(workflowPath), "resources"))).toBe(false);
 
     expect(source).toContain("const COMMON = ");
-    expect(source).toContain("const READ_ONLY_NOTE = ");
+    expect(source).toContain("const INSPECTION_NOTE = ");
     expect(source).toContain("Never commit, push, stage, create a pull request, merge, deploy");
-    expect(source).toContain("host-enforced read-only");
+    expect(source).toContain("do not modify project files");
     expect(source).toMatch(/repository_check/u);
     expect(source).toMatch(/apply exactly the one finding block/iu);
     expect(source).toMatch(/callers, dependents, tests, configuration/iu);
@@ -524,15 +522,8 @@ describe("curated review remediation workflow", () => {
       "collect-check-evidence",
       "re-review-fixes",
     ]);
-    expect(calls.map((call) => call.readOnly)).toEqual([true, true, undefined, undefined, true, true]);
-    expect(calls.map((call) => call.tools?.join(","))).toEqual([
-      "",
-      "read,git_read,ast_index,grep,find",
-      "read,write,edit,bash,ast_index,grep,find",
-      "read,write,edit,bash,ast_index,grep,find",
-      "read,git_read,ast_index,repository_check,grep,find",
-      "read,git_read,ast_index,grep,find",
-    ]);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
     expect(calls.every((call) => call.prompt.includes(intent))).toBe(true);
     expect(calls[0]?.prompt).toContain(fixture.reviewText);
     expect(calls[2]?.prompt).toContain(FINDING_F1);
@@ -582,12 +573,11 @@ describe("curated review remediation workflow", () => {
   it("states capability and audience per stage rather than in the shared contract", () => {
     const source = readFileSync(workflowPath, "utf8");
 
-    // A no-tool selector cannot obey "reopen the live checkout", and the terminal
-    // re-reviewer does write for a human, so neither claim belongs in COMMON.
+    // Stage-specific behavior stays outside the shared handoff contract.
     const common = /const COMMON = `([\s\S]*?)`;/u.exec(source)?.[1] ?? "";
     expect(common).not.toContain("Reopen the live checkout");
     expect(common).not.toContain("not a message to a human");
-    expect(source).toContain("const READ_ONLY_NOTE = ");
+    expect(source).toContain("const INSPECTION_NOTE = ");
     expect(source).toContain("const HANDOFF_NOTE = ");
     // scope, writer, and checker hand off; the re-reviewer is terminal.
     expect(source.match(/\$\{HANDOFF_NOTE\}/gu)).toHaveLength(3);

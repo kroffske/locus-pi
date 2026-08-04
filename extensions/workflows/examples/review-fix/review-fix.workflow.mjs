@@ -1,6 +1,6 @@
 // review-fix.workflow.mjs
 // The host supplies one immutable, digest-bound review artifact separately
-// from the operator's text. A read-only selector agent proposes the remediation
+// from the operator's text. A selector agent proposes the remediation
 // graph; deterministic code validates and orders it before any writer starts.
 //
 // Stage prompts are inline: one COMMON contract plus one task next to the
@@ -22,24 +22,17 @@ Hard rules for every stage:
 - Preserve uncertainty. Evidence you could not obtain is a gap to report, not a
   detail to omit.
 
-Only rules that hold for every stage live here. Whether you can open the
-repository, and who reads your answer, are stated by the task below — a stage
-with no tools cannot verify anything, and saying otherwise would give it an
-instruction it cannot obey.`;
+Only rules that hold for every stage live here. Every child inherits the parent
+run's complete tool surface; the task below says whether it should inspect or
+modify the repository and who reads its answer.`;
 
-/** The stages that can open the repository describe their boundary the same
- *  way. The boundary itself is the DSL options below, never this prose. */
-const READ_ONLY_NOTE = `This stage is host-enforced read-only: you have no shell, write, edit,
-workflow, or unknown custom tool. Use \`git_read\` for Git inspection (it takes
-an \`args\` array without the leading \`git\`) and \`ast_index\` for symbol
-relationships, falling back to \`grep\`, \`find\`, and direct reads. Reopen the
-live checkout before you rely on any claim in a handoff.`;
+const INSPECTION_NOTE = `Use the inherited tools needed to inspect and verify the
+live repository, but do not modify project files in this stage.`;
 
 /** Every stage but the last writes for the next stage, not for a person. */
 const HANDOFF_NOTE = `Your final text is the handoff the next stage receives, not a message to a human.`;
 
 const REVIEW_FIX_AGENT_DEFAULTS = Object.freeze({
-  permissionMode: "agent-defined",
   workspaceMode: "project",
 });
 
@@ -107,23 +100,17 @@ function freezeSchema(value) {
 
 const FIX_SELECT_OPTIONS = Object.freeze({
   ...REVIEW_FIX_AGENT_DEFAULTS,
-  readOnly: true,
-  tools: [],
 });
 
 const FIX_READ_OPTIONS = Object.freeze({
   ...REVIEW_FIX_AGENT_DEFAULTS,
-  readOnly: true,
-  tools: ["read", "git_read", "ast_index", "grep", "find"],
 });
 
 /** A check stage runs the repository's own commands and reads what they print;
  *  forty tool calls is a deliberate narrowing, not a restatement of the default. */
 const FIX_CHECK_OPTIONS = Object.freeze({
   ...REVIEW_FIX_AGENT_DEFAULTS,
-  readOnly: true,
   maxToolCalls: 40,
-  tools: ["read", "git_read", "ast_index", "repository_check", "grep", "find"],
 });
 
 export const meta = {
@@ -134,8 +121,11 @@ export const meta = {
   phases: [
     { title: "resolve-fix-scope", detail: "Consume the immutable review and validate an agent-planned finding DAG." },
     { title: "apply-kept-findings", detail: "Run exactly one sequential write-capable agent per selected finding." },
-    { title: "collect-check-evidence", detail: "Inspect the full diff and run repository checks without edit tools." },
-    { title: "re-review-fixes", detail: "Freshly re-review every original finding and affected dependency read-only." },
+    {
+      title: "collect-check-evidence",
+      detail: "Inspect the full diff and run repository checks without modifying files.",
+    },
+    { title: "re-review-fixes", detail: "Freshly re-review every original finding and affected dependency." },
   ],
 };
 
@@ -169,8 +159,8 @@ export default async function runWorkflow(dsl, input) {
   const selection = await agent(
     `${COMMON}
 
-TASK — select and order the findings this remediation will address. You have no
-tools at all: decide from the operator request and the immutable review alone.
+TASK — select and order the findings this remediation will address. Decide from
+the operator request and the immutable review; no repository inspection is needed.
 
 Choose the reported findings the operator is asking to fix, and declare the
 direct dependencies between them. A dependency means the earlier finding's
@@ -213,7 +203,7 @@ ${reviewText}
   const scopeText = await agent(
     `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 TASK — resolve the remediation scope for the validated finding plan below.
 
@@ -298,7 +288,6 @@ ${renderDependencyResults(workerResults, finding.dependsOn)}
           ...REVIEW_FIX_AGENT_DEFAULTS,
           artifact: `worker-${finding.id}.md`,
           label: `apply finding ${finding.id}`,
-          tools: ["read", "write", "edit", "bash", "ast_index", "grep", "find"],
           maxAnswerChars: MAX_WORKER_RESULT_CHARS,
         },
       );
@@ -315,7 +304,7 @@ ${renderDependencyResults(workerResults, finding.dependsOn)}
   const checkText = await agent(
     `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 You may additionally call \`repository_check\` to run an existing
 \`package.json\` script in a disposable host-created worktree. It accepts only a
@@ -357,7 +346,7 @@ ${renderWorkerResults(workerResults, MAX_ALL_WORKER_CONTEXT_CHARS)}
   return agent(
     `${COMMON}
 
-${READ_ONLY_NOTE}
+${INSPECTION_NOTE}
 
 TASK — write the complete reader-facing \`re-review.md\`. You are the fresh
 final reviewer and you did not write any of the changes below.

@@ -5,9 +5,9 @@ produced and its critic accepted. The plan must declare one primary result, who
 uses it, where it will exist, what makes it useful, and how usefulness is
 proved. The workflow first publishes the selected steps as
 `implementation-tasks.md`, then processes one task at a time: a write-capable
-implementer changes the checkout, an independent read-only reviewer accepts,
+implementer changes the checkout, an independent reviewer instructed not to edit accepts,
 requests one bounded repair, or blocks the task, and only an accepted task lets
-the next one start. A final read-only agent returns a validated structured grade
+the next one start. A final checker agent returns a validated structured grade
 for every selected step; deterministic code combines that grade with the full
 task ledger to account for unselected steps in the reader-facing report. The same
 grade updates the authoritative selected-task state. The check stage returns
@@ -36,7 +36,7 @@ read it before running this one. Two things matter most:
 - **This workflow writes to the launch checkout.** It is a Package workflow, so
   `/workflows run plan-implement "<request>"` resolves by name, and
   workflow JavaScript is trusted local code with full Node.js host access. Unlike
-  its read-only `plan` sibling, this one changes files — start it deliberately.
+  its analysis-only `plan` sibling, this one changes files — start it deliberately.
 - **Resume does not apply completed tasks again.** Stable stage labels and
   deterministic task-ledger updates let
   `/workflows run plan-implement --resume <runId> "<request>"` replay recorded

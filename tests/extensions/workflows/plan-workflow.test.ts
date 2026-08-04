@@ -220,15 +220,12 @@ describe("workflow example: plan.workflow.mjs", () => {
     expect(source).not.toMatch(/model:\s*"[^"]*\//u);
   });
 
-  it("keeps every planning stage read-only and lets the runtime own every artifact", () => {
+  it("keeps capability lists out of planning source and lets the runtime own every artifact", () => {
     const source = readFileSync(workflowPath, "utf8");
 
-    // Planning reads; it never writes. If this ever fails, a "plan" run can
-    // change the operator's working tree without the operator asking for it.
-    expect(source.match(/readOnly: true/gu)).toHaveLength(1);
-    expect(source).not.toContain('"write"');
-    expect(source).not.toContain('"edit"');
-    expect(source).not.toContain('"bash"');
+    expect(source).not.toMatch(/\breadOnly:/u);
+    expect(source).not.toMatch(/\btools:/u);
+    expect(source).not.toMatch(/\bpermissionMode:/u);
     // No `maxToolCalls` at all: the package budget contract supplies it, and a
     // stage that restated the default would silently disagree with it the day it moves.
     expect(source.match(/maxToolCalls:/gu)).toBeNull();
@@ -254,13 +251,11 @@ describe("workflow example: plan.workflow.mjs", () => {
     }
   });
 
-  it("takes every agent's capabilities and every label from the one roster", async () => {
-    // The roster is the cast list, and a capability lives in exactly one place: a
-    // tools array copied per call site is how one planning stage quietly becomes
-    // write-capable while the other two stay read-only.
+  it("takes every agent identity and every label from the one roster", async () => {
+    // The roster is a cast list, not a second permission system.
     const source = readFileSync(workflowPath, "utf8");
     expect(source).toContain("const PLAN_AGENTS = Object.freeze({");
-    expect(source.match(/tools: \[/gu)).toHaveLength(1);
+    expect(source).not.toMatch(/\btools:/u);
     expect(source.match(/\.\.\.PLAN_AGENTS\.\w+\.options,/gu)).toHaveLength(3);
     // Each call site adds the label and nothing else, and the label is built from
     // the roster id, so a stage name cannot drift away from the cast list.
@@ -284,18 +279,8 @@ describe("workflow example: plan.workflow.mjs", () => {
     await runWorkflow(dsl, "advance pagination");
 
     expect(calls.map((call) => call.label)).toEqual(["scout", "planner round 1", "critic round 1"]);
-    expect(calls[0]?.tools).toEqual(["read", "git_read", "ast_index", "grep", "find"]);
-    // One shared roster option object means one capability set for all three.
-    const capabilities = calls.map((call) =>
-      JSON.stringify({
-        tools: call.tools,
-        readOnly: call.readOnly,
-        maxToolCalls: call.maxToolCalls,
-        workspaceMode: call.workspaceMode,
-        permissionMode: call.permissionMode,
-      }),
-    );
-    expect(new Set(capabilities).size).toBe(1);
+    expect(calls.every((call) => call.tools?.join(",") === "*")).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
   });
 
   it("makes the planner record what it assumed and the critic treat a hidden decision as a defect", () => {
@@ -411,7 +396,7 @@ describe("workflow example: plan.workflow.mjs", () => {
 
     expect(result).toBe(PLAN_DRAFT);
     expect(calls.map((call) => call.label)).toEqual(["scout", "planner round 1", "critic round 1"]);
-    expect(calls.every((call) => call.readOnly === true)).toBe(true);
+    expect(calls.every((call) => call.readOnly === undefined)).toBe(true);
     // The operator's exact words reach every stage; no stage sees a paraphrase.
     expect(calls.every((call) => call.prompt.includes(task))).toBe(true);
     expect(calls.map((call) => call.phase)).toEqual(["scout-repository", "draft-plan", "critique-plan"]);
