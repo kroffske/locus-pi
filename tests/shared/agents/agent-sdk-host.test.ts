@@ -8,6 +8,7 @@ import {
   AgentSdkUnavailableError,
   agentLiveStore,
   createAgentSdkSessionExecutor,
+  type AgentLiveExecutionHandle,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
@@ -1102,6 +1103,91 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     });
     expect(disposeSpy).toHaveBeenCalledTimes(1);
     expect(existsSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl"))).toBe(true);
+  });
+
+  it("routes viewer input into the active SDK child as a steering message", async () => {
+    agentLiveStore.reset();
+    let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+    let liveExecution: AgentLiveExecutionHandle | undefined;
+    let releasePromptPreflight: () => void = () => {};
+    let releaseInitialPrompt: () => void = () => {};
+    let markPromptInvoked: () => void = () => {};
+    let markPromptStarted: () => void = () => {};
+    const promptPreflightGate = new Promise<void>((resolve) => {
+      releasePromptPreflight = resolve;
+    });
+    const initialPromptGate = new Promise<void>((resolve) => {
+      releaseInitialPrompt = resolve;
+    });
+    const promptStarted = new Promise<void>((resolve) => {
+      markPromptStarted = resolve;
+    });
+    const promptInvoked = new Promise<void>((resolve) => {
+      markPromptInvoked = resolve;
+    });
+    let streaming = false;
+    const promptSpy = vi.fn(async (_text: string, options?: { source?: string; streamingBehavior?: "steer" }) => {
+      if (options?.source === "locus-pi-agent-sdk-host") {
+        markPromptInvoked();
+        await promptPreflightGate;
+        streaming = true;
+        markPromptStarted();
+        await initialPromptGate;
+        listener?.({ type: "agent_end", willRetry: false });
+        streaming = false;
+      }
+    });
+    const session: SdkAgentSessionLike = {
+      sessionId: "interactive-sdk-child",
+      get isStreaming() {
+        return streaming;
+      },
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      prompt: promptSpy,
+      getSessionStats: () => ({ sessionId: "interactive-sdk-child", toolCalls: 0, toolResults: 0 }),
+      getLastAssistantText: () => "Interactive child finished",
+      exportToJsonl(outputPath) {
+        const target = outputPath ?? path.join(tmpReportsDir(), "session.jsonl");
+        writeFileSync(target, "{}\n", "utf8");
+        return target;
+      },
+      dispose: vi.fn(),
+      abort: vi.fn(async () => {}),
+    };
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      onLiveExecution: (execution) => {
+        liveExecution = execution;
+      },
+    });
+
+    const running = executor.run(request(), new AbortController().signal);
+    await promptInvoked;
+    expect(liveExecution).toBeDefined();
+    expect(agentLiveStore.canSendInputForExecution(liveExecution!)).toBe(false);
+    releasePromptPreflight();
+    await promptStarted;
+    expect(agentLiveStore.canSendInputForExecution(liveExecution!)).toBe(true);
+    const input = await agentLiveStore.sendInputForExecution(liveExecution!, "Please also inspect tests.");
+    expect(input).toEqual({ ok: true });
+    expect(promptSpy).toHaveBeenCalledWith("Please also inspect tests.", {
+      source: "locus-pi-agent-viewer",
+      streamingBehavior: "steer",
+    });
+
+    releaseInitialPrompt();
+    await expect(running).resolves.toMatchObject({ status: "completed", text: "Interactive child finished" });
+    await expect(agentLiveStore.sendInputForExecution(liveExecution!, "Too late")).resolves.toEqual({
+      ok: false,
+      reason: "This agent is no longer accepting input.",
+    });
   });
 
   it("accepts a non-empty text completion with no child workload proof", async () => {

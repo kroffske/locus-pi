@@ -5,7 +5,11 @@ import {
   type AgentLiveExecutionHandle,
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import agents from "../../../extensions/agents/index.js";
-import { AgentSessionViewer, createAgentViewerCapability } from "../../../extensions/agents/session-viewer.js";
+import {
+  AgentSessionViewer,
+  createAgentViewerCapability,
+  loadAgentViewerCapability,
+} from "../../../extensions/agents/session-viewer.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 class FakeAssistantComponent {
@@ -58,10 +62,58 @@ class FakeToolComponent {
   invalidate(): void {}
 }
 
+class TallFakeToolComponent extends FakeToolComponent {
+  override render(): string[] {
+    return Array.from({ length: 12 }, (_, index) => `tool-output-${index}`);
+  }
+}
+
+class FakeEditorComponent {
+  focused = false;
+  #value = "";
+  constructor(
+    _tui: unknown,
+    _keybindings: unknown,
+    _title: string,
+    _prefill: string | undefined,
+    private readonly onSubmit: (value: string) => void,
+    private readonly onCancel: () => void,
+  ) {}
+  render(): string[] {
+    return ["input", `> ${this.#value}`, "Enter submit · Esc cancel"];
+  }
+  handleInput(data: string): void {
+    if (data === "enter" || data === "\n") this.onSubmit(this.#value);
+    else if (data === "escape") this.onCancel();
+    else this.#value += data;
+  }
+  invalidate(): void {}
+  dispose(): void {}
+}
+
 function capability() {
   const result = createAgentViewerCapability({
     AssistantMessageComponent: FakeAssistantComponent,
     ToolExecutionComponent: FakeToolComponent,
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return result.capability;
+}
+
+function tallToolCapability() {
+  const result = createAgentViewerCapability({
+    AssistantMessageComponent: FakeAssistantComponent,
+    ToolExecutionComponent: TallFakeToolComponent,
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return result.capability;
+}
+
+function interactiveCapability() {
+  const result = createAgentViewerCapability({
+    AssistantMessageComponent: FakeAssistantComponent,
+    ToolExecutionComponent: FakeToolComponent,
+    ExtensionEditorComponent: FakeEditorComponent,
   });
   if (!result.ok) throw new Error(result.reason);
   return result.capability;
@@ -114,7 +166,7 @@ async function flushForcedRender(tui: TUI): Promise<void> {
 afterEach(() => agentLiveStore.reset());
 
 describe("AgentSessionViewer", () => {
-  it("shows the original request at the start and separates the viewer from surrounding UI", () => {
+  it("keeps a terminal-height live viewport and makes the original request reachable", () => {
     const row = agentLiveStore.begin({
       id: "request-viewer",
       agentName: "reviewer",
@@ -131,19 +183,21 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(32);
-    expect(rendered.length).toBeGreaterThan(tui.terminal.rows);
+    expect(rendered).toHaveLength(tui.terminal.rows);
     expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
     expect(rendered[0]).toMatch(/^── /u);
-    expect(rendered.at(-1)).toMatch(/^── Esc\/q close/u);
-    const fullHistory = rendered.join("\n");
-    expect(fullHistory).toContain("── Request");
-    expect(fullHistory).toContain("Inspect the changed command");
-    expect(fullHistory).toContain("history-0");
-    expect(fullHistory).toContain("history-7");
-    expect(fullHistory.indexOf("── Request")).toBeLessThan(fullHistory.indexOf("── Agent history"));
+    expect(rendered.at(-1)).toMatch(/^── Esc close/u);
+    expect(rendered.join("\n")).toContain("history-7");
+    expect(rendered.join("\n")).not.toContain("history-0");
+
+    viewer.handleInput("home");
+    const historyStart = viewer.render(32).join("\n");
+    expect(historyStart).toContain("── Request");
+    expect(historyStart).toContain("Inspect the changed command");
+    expect(historyStart.indexOf("── Request")).toBeLessThan(historyStart.indexOf("── Agent history"));
     for (const width of [1, 2, 8]) {
       const narrow = viewer.render(width);
-      expect(narrow.length).toBeGreaterThan(tui.terminal.rows);
+      expect(narrow).toHaveLength(tui.terminal.rows);
       expect(narrow.every((line) => visibleWidth(line) === width)).toBe(true);
     }
     viewer.dispose();
@@ -170,7 +224,7 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
-  it("renders every retained block beyond terminal height and includes live additions in the same history", () => {
+  it("follows live additions at the tail and pages through retained history", () => {
     const row = agentLiveStore.begin({ id: "viewer-row", agentName: "reviewer", label: "Review" });
     for (let index = 0; index < 12; index += 1) {
       agentLiveStore.feedSessionEvent(row.id, {
@@ -182,28 +236,28 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const initial = viewer.render(80);
-    expect(initial.length).toBeGreaterThan(tui.terminal.rows);
+    expect(initial).toHaveLength(tui.terminal.rows);
     expect(initial.every((line) => visibleWidth(line) === 80)).toBe(true);
-    expect(initial.join("\n")).toContain("message-0");
     expect(initial.join("\n")).toContain("message-11");
+    expect(initial.join("\n")).not.toContain("message-0");
 
     tui.requestRender.mockClear();
     viewer.handleInput("up");
-    viewer.handleInput("home");
-    viewer.handleInput("end");
     expect(tui.requestRender).not.toHaveBeenCalled();
+    viewer.handleInput("home");
+    expect(viewer.render(80).join("\n")).toContain("message-0");
+    viewer.handleInput("end");
     agentLiveStore.feedSessionEvent(row.id, {
       type: "message_end",
       message: { role: "assistant", content: [{ type: "text", text: "message-12" }], stopReason: "stop" },
     });
     expect(tui.requestRender).toHaveBeenCalled();
     const updated = viewer.render(80).join("\n");
-    expect(updated).toContain("message-0");
     expect(updated).toContain("message-12");
     viewer.dispose();
   });
 
-  it("writes the complete retained history through Pi TUI across live and control redraws", async () => {
+  it("writes a stable terminal-height viewport through Pi TUI across live and control redraws", async () => {
     const row = agentLiveStore.begin({
       id: "tui-scrollback-row",
       agentName: "reviewer",
@@ -232,10 +286,13 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     await flushForcedRender(tui);
-    expect(terminal.output.split("\r\n").length).toBeGreaterThan(terminal.rows);
-    expect(terminal.output).toContain("Inspect every retained message.");
-    for (let index = 0; index < 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+    expect(terminal.output.split("\r\n")).toHaveLength(terminal.rows);
+    expect(terminal.output).toContain("scrollback-11");
     expect(terminal.output).toContain("tool:read:compact");
+
+    viewer.handleInput("home");
+    expect(viewer.render(80).join("\n")).toContain("Inspect every retained message.");
+    viewer.handleInput("end");
 
     agentLiveStore.feedSessionEvent(row.id, {
       type: "message_end",
@@ -247,7 +304,7 @@ describe("AgentSessionViewer", () => {
     viewer.handleInput("d");
     await flushForcedRender(tui);
     expect(terminal.output).toContain("tool:read:expanded");
-    for (let index = 0; index <= 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+    expect(viewer.render(80).join("\n")).toContain("scrollback-12");
 
     terminal.reset();
     viewer.handleInput("left");
@@ -255,8 +312,50 @@ describe("AgentSessionViewer", () => {
     expect(terminal.output).toContain("historical-round-1");
     viewer.handleInput("right");
     await flushForcedRender(tui);
-    for (let index = 0; index <= 12; index += 1) expect(terminal.output).toContain(`scrollback-${index}`);
+    expect(viewer.render(80).join("\n")).toContain("scrollback-12");
 
+    viewer.dispose();
+    tui.stop();
+  });
+
+  it("does not clear the terminal or scrollback when live content above a tall tool changes", async () => {
+    const row = agentLiveStore.begin({ id: "stable-live-viewport", agentName: "reviewer", label: "Review" });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_start",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "draft" },
+          { type: "toolCall", id: "read-1", name: "read", arguments: { path: "README.md" } },
+        ],
+      },
+    });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "tool_execution_start",
+      toolCallId: "read-1",
+      toolName: "read",
+      args: { path: "README.md" },
+    });
+    const terminal = new RecordingTerminal(80, 8);
+    const tui = new TUI(terminal, false);
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), tallToolCapability());
+    tui.addChild(viewer);
+    await flushForcedRender(tui);
+
+    terminal.reset();
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_update",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "revised" },
+          { type: "toolCall", id: "read-1", name: "read", arguments: { path: "README.md" } },
+        ],
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(terminal.output).not.toContain("\u001b[2J\u001b[H\u001b[3J");
     viewer.dispose();
     tui.stop();
   });
@@ -284,6 +383,109 @@ describe("AgentSessionViewer", () => {
 
     expect(done).toHaveBeenCalledTimes(1);
     expect(agentLiveStore.rows.get(row.id)?.status).toBe("working");
+  });
+
+  it("uses Pi's editor surface to send input to the active child", async () => {
+    const row = agentLiveStore.begin({ id: "interactive-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const done = vi.fn();
+    const tui = { terminal: { rows: 14, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(execution, tui, done, interactiveCapability(), undefined, {
+      matches: () => false,
+    });
+
+    expect(viewer.render(80)).toHaveLength(tui.terminal.rows);
+    viewer.handleInput("h");
+    viewer.handleInput("i");
+    viewer.handleInput("enter");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("hi"));
+    await vi.waitFor(() => expect(viewer.render(80).join("\n")).toContain("message queued"));
+    expect(done).not.toHaveBeenCalled();
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("does not capture input through an editor that cannot fit in the terminal", async () => {
+    const row = agentLiveStore.begin({ id: "short-interactive-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const tui = { terminal: { rows: 4, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
+      matches: () => false,
+    });
+
+    const compact = viewer.render(80);
+    expect(compact).toHaveLength(tui.terminal.rows);
+    expect(compact.join("\n")).toContain("resize terminal for input");
+    viewer.handleInput("x");
+    viewer.handleInput("enter");
+    expect(send).not.toHaveBeenCalled();
+
+    tui.terminal.rows = 14;
+    expect(viewer.render(80).join("\n")).toContain("Enter send");
+    viewer.handleInput("x");
+    viewer.handleInput("enter");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("x"));
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("types round-number digits into the active editor instead of changing rounds", async () => {
+    const row = agentLiveStore.begin({ id: "round-input-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const viewer = new AgentSessionViewer(
+      execution,
+      { terminal: { rows: 14, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      { active: 2, list: [1, 2], readBody: () => ["historical round"] },
+      { matches: () => false },
+    );
+
+    viewer.render(80);
+    viewer.handleInput("1");
+    viewer.handleInput("x");
+    viewer.handleInput("enter");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("1x"));
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("mounts the installed Pi native editor inside the fixed viewport", async () => {
+    const { initTheme } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false);
+    const loaded = await loadAgentViewerCapability();
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const row = agentLiveStore.begin({ id: "native-editor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const terminal = new RecordingTerminal(80, 24);
+    const tui = new TUI(terminal, false);
+    const viewer = new AgentSessionViewer(execution, tui, vi.fn(), loaded.capability, undefined, {
+      matches: () => false,
+    });
+    tui.addChild(viewer);
+
+    const rendered = viewer.render(80);
+    expect(rendered).toHaveLength(terminal.rows);
+    expect(rendered.join("\n")).toContain("Message this agent");
+    viewer.handleInput("o");
+    viewer.handleInput("k");
+    viewer.handleInput("\r");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("ok"));
+
+    unregister();
+    viewer.dispose();
+    tui.stop();
   });
 
   it("keeps Escape ownership while leaving terminal navigation to Pi scrollback", async () => {

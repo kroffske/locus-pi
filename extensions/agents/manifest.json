@@ -41,7 +41,8 @@
     "skill names resolve through .agents/skills/<name>/SKILL.md then .pi/skills/<name>/SKILL.md under the project root, preserving Pi progressive-disclosure boundaries",
     "/ps opens the existing fleet selector, /ps <target> opens the canonical resolved row, and /agent ps plus /agent drill remain stable compatibility paths",
     "Pi command-context custom UI plus public AssistantMessageComponent and ToolExecutionComponent are required for the native viewer; missing capability is reported explicitly and RPC/headless modes keep passive text fallback",
-    "the native viewer uses the shared inline editor-replacement surface to render the complete retained transcript at natural height into normal Pi/terminal scrollback, with the original task/request before assistant/tool history; it has no terminal-height internal viewport or Home/End/arrow scroll mode, d toggles tool detail, Esc/q closes without child abort, and the timeline's content, byte, and node retention bounds still apply",
+    "the native viewer uses the shared inline editor-replacement surface and Pi assistant/tool components inside one terminal-height follow-tail viewport, so an update above a tall tool cannot trigger Pi's clear-screen/clear-scrollback full redraw; PgUp/PgDn and Home/End inspect retained history, Ctrl+O toggles tool detail, Esc closes without child abort, and the timeline's content, byte, and node retention bounds still apply",
+    "while an SDK child turn is actively streaming and the host exports Pi's native ExtensionEditorComponent, the viewer accepts editor input and sends Enter submissions through the execution-authority-checked steering seam; settlement or execution replacement removes that seam and returns the retained view to read-only",
     "AgentLiveStore owns live-row lifecycle while _shared/agent-runtime/agent-live-transcript.ts owns one bounded typed timeline with stable block ids, complete assistant snapshots, structured tool lifecycle, cwd, redaction, and latestMessage projection; raw AgentLiveRow.eventLines remain diagnostic data",
     "terminal assistant stopReason=error surfaces errorMessage before the generic empty-result fallback; completed children still require a real non-empty answer and side-effect-only success is not part of the contract",
     "child turn_end assistant usage updates live tokenCount during execution; final getSessionStats tokens replace it with cumulative truth, and workflow parallel/pipeline summary rows show the sum of token-bearing descendants",
@@ -53,7 +54,7 @@
   "stateUsed": [
     "in-memory discovered agent definitions",
     "agent discovery diagnostics",
-    "process-shared agentLiveStore.rows, per-row cancellation handlers, AgentLiveRow.transcript typed blocks and latestMessage projection, and AgentLiveRow.eventLines as diagnostic store data",
+    "process-shared agentLiveStore.rows, per-row cancellation and active-turn input handlers, AgentLiveRow.transcript typed blocks and latestMessage projection, and AgentLiveRow.eventLines as diagnostic store data",
     "process-shared ephemeral fleet selection state",
     "AgentLiveRow optional metadata for source-backed activity/model/path/tool/result fields",
     "runtime result artifacts",

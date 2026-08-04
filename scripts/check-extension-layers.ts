@@ -298,7 +298,7 @@ interface RegistryEntry {
  * and the independent-entrypoint invariant each one carries.
  */
 const REGISTRIES: readonly RegistryEntry[] = [
-  { symbol: "locus-pi.agent-live-store.v4", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
+  { symbol: "locus-pi.agent-live-store.v5", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
   { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-journal.ts" },
   { symbol: "locus-pi.fleet-menu-state.v2", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },

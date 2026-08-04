@@ -150,8 +150,15 @@ export async function executeAgentDrillCommand(
   let viewer: AgentSessionViewer | undefined;
   try {
     try {
-      await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, _keybindings, done) => {
-        viewer = new AgentSessionViewer(executionAuthority, tui, done, capability.capability, rounds);
+      await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, keybindings, done) => {
+        viewer = new AgentSessionViewer(
+          executionAuthority,
+          tui,
+          done,
+          capability.capability,
+          rounds,
+          keybindings as { matches(data: string, keybinding: string): boolean },
+        );
         return viewer;
       });
     } catch (error) {

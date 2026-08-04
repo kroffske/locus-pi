@@ -75,6 +75,8 @@ export interface SdkAgentSessionEventLike {
 }
 export interface SdkAgentSessionLike {
   readonly sessionId: string;
+  /** True while Pi can accept a steering message into the active child turn. */
+  readonly isStreaming?: boolean;
   /**
    * The model this session actually runs on, as the host reports it.
    *
@@ -88,7 +90,7 @@ export interface SdkAgentSessionLike {
   /** Pi 0.82.0 conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
-  prompt(text: string, options?: { source?: string }): Promise<void>;
+  prompt(text: string, options?: { source?: string; streamingBehavior?: "steer" | "followUp" }): Promise<void>;
   getSessionStats(): SdkSessionStatsLike;
   getLastAssistantText(): string | undefined;
   exportToJsonl(outputPath?: string): string; // SYNC
@@ -244,6 +246,14 @@ interface AgentLiveCancelRegistration {
   execution: AgentLiveExecutionHandle;
 }
 
+interface AgentLiveInputRegistration {
+  execution: AgentLiveExecutionHandle;
+  send: (text: string) => Promise<void>;
+  available: () => boolean;
+}
+
+export type AgentLiveInputResult = { ok: true } | { ok: false; reason: string };
+
 class AgentLiveStore {
   readonly rows = new Map<string, AgentLiveRow>();
   readonly emitter = new EventEmitter();
@@ -253,6 +263,7 @@ class AgentLiveStore {
   readonly #executionAuthorityRows = new WeakMap<AgentLiveExecutionHandle, string>();
   readonly #cancelRegistrations = new Map<string, AgentLiveCancelRegistration>();
   readonly #cancellationAuthorityRows = new WeakMap<AgentLiveCancellationAuthority, string>();
+  readonly #inputRegistrations = new Map<string, AgentLiveInputRegistration>();
   readonly #transcripts = new Map<string, AgentLiveTranscript>();
   #nextId = 0;
 
@@ -262,6 +273,7 @@ class AgentLiveStore {
     this.#petnames.reset();
     this.#executionAuthorities.clear();
     this.#cancelRegistrations.clear();
+    this.#inputRegistrations.clear();
     this.#transcripts.clear();
     this.#emit();
   }
@@ -275,6 +287,7 @@ class AgentLiveStore {
       this.#petnames.release(id);
       this.#executionAuthorities.delete(id);
       this.#cancelRegistrations.delete(id);
+      this.#inputRegistrations.delete(id);
       this.#transcripts.delete(id);
       removed += 1;
     }
@@ -307,6 +320,45 @@ class AgentLiveStore {
     return () => {
       if (this.#cancelRegistrations.get(rowId) === registration) this.#cancelRegistrations.delete(rowId);
     };
+  }
+
+  /** Attach the live child prompt seam while one SDK turn is accepting input. */
+  registerInputForExecution(
+    execution: AgentLiveExecutionHandle,
+    send: (text: string) => Promise<void>,
+    available: () => boolean = () => true,
+  ): () => void {
+    const rowId = this.#currentExecutionRowId(execution);
+    if (rowId === undefined) return () => {};
+    const registration: AgentLiveInputRegistration = { execution, send, available };
+    this.#inputRegistrations.set(rowId, registration);
+    this.#emit();
+    return () => {
+      if (this.#inputRegistrations.get(rowId) !== registration) return;
+      this.#inputRegistrations.delete(rowId);
+      this.#emit();
+    };
+  }
+
+  canSendInputForExecution(execution: AgentLiveExecutionHandle): boolean {
+    const rowId = this.#currentExecutionRowId(execution);
+    const registration = rowId === undefined ? undefined : this.#inputRegistrations.get(rowId);
+    return registration?.execution === execution && registration.available();
+  }
+
+  async sendInputForExecution(execution: AgentLiveExecutionHandle, text: string): Promise<AgentLiveInputResult> {
+    if (text.trim() === "") return { ok: false, reason: "Enter a message before submitting." };
+    const rowId = this.#currentExecutionRowId(execution);
+    const registration = rowId === undefined ? undefined : this.#inputRegistrations.get(rowId);
+    if (registration?.execution !== execution || !registration.available()) {
+      return { ok: false, reason: "This agent is no longer accepting input." };
+    }
+    try {
+      await registration.send(text);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: `Agent input failed: ${errorMessage(error)}` };
+    }
   }
 
   captureExecutionAuthority(rowId: string): AgentLiveExecutionHandle | undefined {
@@ -523,6 +575,7 @@ class AgentLiveStore {
     this.#executionAuthorityRows.set(executionAuthority, id);
     this.#executionAuthorities.set(id, executionAuthority);
     this.#cancelRegistrations.delete(id);
+    this.#inputRegistrations.delete(id);
     if (options.agentName !== undefined) this.#agentNames.set(id, options.agentName);
     this.#emit();
     return { row, execution: executionAuthority };
@@ -690,9 +743,9 @@ function transcriptPatch(snapshot: AgentLiveTranscriptSnapshot): Pick<AgentLiveR
  * file. Keep exactly one process-local store behind a versioned global symbol so
  * separately loaded entrypoints observe and control the same live rows.
  */
-const AGENT_LIVE_STORE_GLOBAL_KEY = Symbol.for("locus-pi.agent-live-store.v4");
+const AGENT_LIVE_STORE_GLOBAL_KEY = Symbol.for("locus-pi.agent-live-store.v5");
 interface SharedAgentLiveStoreSlot {
-  version: 4;
+  version: 5;
   store: AgentLiveStore;
 }
 
@@ -708,7 +761,7 @@ function sharedAgentLiveStore(): AgentLiveStore {
     // shared contract to this separately evaluated copy of the class.
     return existing.store as AgentLiveStore;
   }
-  const slot: SharedAgentLiveStoreSlot = { version: 4, store: new AgentLiveStore() };
+  const slot: SharedAgentLiveStoreSlot = { version: 5, store: new AgentLiveStore() };
   Object.defineProperty(runtimeGlobal, AGENT_LIVE_STORE_GLOBAL_KEY, {
     value: slot,
     enumerable: false,
@@ -719,7 +772,7 @@ function sharedAgentLiveStore(): AgentLiveStore {
 }
 
 function isSharedAgentLiveStoreSlot(value: unknown): value is SharedAgentLiveStoreSlot {
-  if (!isRecord(value) || value.version !== 4 || !isRecord(value.store)) return false;
+  if (!isRecord(value) || value.version !== 5 || !isRecord(value.store)) return false;
   return (
     value.store.rows instanceof Map &&
     typeof value.store.begin === "function" &&
@@ -730,6 +783,9 @@ function isSharedAgentLiveStoreSlot(value: unknown): value is SharedAgentLiveSto
     typeof value.store.applyExecutionStats === "function" &&
     typeof value.store.replaceExecutionTranscript === "function" &&
     typeof value.store.registerCancelForExecution === "function" &&
+    typeof value.store.registerInputForExecution === "function" &&
+    typeof value.store.canSendInputForExecution === "function" &&
+    typeof value.store.sendInputForExecution === "function" &&
     typeof value.store.cancelWithAuthority === "function" &&
     typeof value.store.captureExecutionAuthority === "function"
   );
@@ -1317,6 +1373,13 @@ async function driveChildTurn(
         if (maxToolCalls !== undefined && toolCallCount > maxToolCalls) resolveToolLimit();
       }
       agentLiveStore.feedExecutionEvent(execution, event);
+      // Pi emits `agent_end` after each model cycle, including a cycle followed
+      // by queued steering input. The SDK prompt still owns the live run until
+      // it settles, so keep the row active here; the terminal result path below
+      // applies the genuine final status after prompt() returns.
+      if (eventTypeName(event) === "agent_end" && session.isStreaming === true) {
+        agentLiveStore.patchExecution(execution, { status: "working" });
+      }
       if (isRecord(event) && event.type === "agent_end" && event.willRetry !== true) resolveEnd();
     } catch {
       // A malformed/late event must not crash the host from the SDK's emit path.
@@ -1324,6 +1387,20 @@ async function driveChildTurn(
       // the failedResult mapping; this guard only prevents an out-of-band throw.
     }
   });
+  const unregisterInput =
+    "isStreaming" in session
+      ? agentLiveStore.registerInputForExecution(
+          execution,
+          async (text) => {
+            if (session.isStreaming !== true) throw new Error("Agent turn is no longer accepting input.");
+            await session.prompt(text, {
+              source: "locus-pi-agent-viewer",
+              streamingBehavior: "steer",
+            });
+          },
+          () => session.isStreaming === true,
+        )
+      : () => {};
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
@@ -1346,6 +1423,7 @@ async function driveChildTurn(
     const settlement = await Promise.race([completed, aborted, timedOut, toolLimited]);
     return { settlement, recordedToolNames: [...recordedToolNames].sort(), promptAccepted };
   } finally {
+    unregisterInput();
     unsubscribe();
     if (timer !== undefined) clearTimeout(timer);
     if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
