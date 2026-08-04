@@ -80,6 +80,41 @@ describe("approval-first readable workflow authoring", () => {
     expect(card).toContain("Do not encode them as newline/CSV/JSON");
   });
 
+  it("teaches native caller items as one exact list source for the existing pipeline", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/extensions/active/workflows.md",
+      "extensions/workflows/references/patterns.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toContain("dsl.items()");
+      expect(text).toContain("pipeline");
+    }
+    const authoring = source("extensions/workflows/AUTHORING.md");
+    expect(authoring).toContain("author-known array");
+    expect(authoring).toContain("agent({ handoffs })");
+    expect(authoring).toContain("requires at least one work item");
+    expect(authoring).not.toContain("requires at least one caller-supplied item");
+    expect(authoring).not.toContain("[...items]");
+    expect(source("docs/extensions/active/workflows.md")).toContain("`totalAgents` | `10000`");
+  });
+
+  it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {
+    const patterns = source("extensions/workflows/references/patterns.md");
+    const ordered =
+      patterns.split("## Ordered pipeline\n")[1]?.split("## Caller-supplied item mini-workflows\n")[0] ?? "";
+    const callerItems =
+      patterns.split("## Caller-supplied item mini-workflows\n")[1]?.split("## Fan-out/fan-in\n")[0] ?? "";
+
+    expect(ordered).toContain("extracted: await agent");
+    expect(ordered).toContain("classified: await agent");
+    expect(callerItems).toContain("const items = dsl.items()");
+    expect(callerItems).toContain("dsl.pipeline(items");
+    expect(callerItems).toContain("dsl.workflow((nested) => processItem(nested, item))");
+    expect(callerItems).toContain("requires caller-supplied items");
+  });
+
   it("ships compact progressive-disclosure cards with the required decision facts", () => {
     const referencesDir = path.join(root, "skills/locus-pi-workflows/references");
     const cards = readdirSync(referencesDir)

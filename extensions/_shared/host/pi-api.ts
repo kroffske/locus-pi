@@ -49,6 +49,8 @@ export interface ToolDefinition {
   name: string;
   description?: string;
   parameters: TSchema;
+  /** Prepares raw tool-call arguments before Pi applies schema conversion. */
+  prepareArguments?: (args: unknown) => unknown;
   approval?: ToolApproval;
   formatApprovalDetails?: (args: unknown) => string | string[] | undefined;
   execute: (

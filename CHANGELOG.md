@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The programmatic workflow tool now accepts native text work units.** A main
+  agent can pass optional semantic `input` plus exact `items: string[]` in one
+  call. Workflow source reads a frozen snapshot with `dsl.items()` and feeds it
+  directly to readonly `pipeline()` plus inline `dsl.workflow()` mini-flows.
+  Order, whitespace, empty strings, duplicates, and large lists are preserved;
+  non-string or unknown fields fail before execution, and no file/parser,
+  generic argument object, child metadata copy, item digest, or nested saved run
+  was added. The package `totalAgents` runaway fuse is now 10,000 so finite
+  fine-grained decomposition can exceed 200 calls while an injected smaller cap
+  and the same `WorkflowInvocationCapError` behavior remain available.
+
 - **Workflow children now always receive all available tools.** A
   selected catalog role contributes its prompt and model identity but no longer
   silently narrows `tools`, `readOnly`, MCP access, or permission intent.

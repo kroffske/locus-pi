@@ -41,7 +41,7 @@ describe("DEFAULT_WORKFLOW_BUDGET", () => {
   it("carries the seven owner-approved values", () => {
     expect(DEFAULT_WORKFLOW_BUDGET).toEqual({
       concurrency: 4,
-      totalAgents: 200,
+      totalAgents: 10_000,
       runtimeMs: 7_200_000,
       timeoutMs: 600_000,
       toolCalls: 1_000,
@@ -317,7 +317,25 @@ export default async function runWorkflow(dsl) {
 }
 `;
 
+const ATOMIC_DECOMPOSITION_WORKFLOW = `export const meta = { name: "atomic-decomposition", description: "exceeds the old ordinary-workload cap" };
+export default async function runWorkflow(dsl) {
+  for (let i = 0; i < 201; i += 1) await dsl.agent("atomic call " + String(i));
+  return { calls: 201 };
+}
+`;
+
 describe("the runner applies the budget contract", () => {
+  it("allows more than 200 finite fake calls under the package default", async () => {
+    const root = scratchProject();
+    saveWorkflow(root, "atomic-decomposition", ATOMIC_DECOMPOSITION_WORKFLOW);
+
+    const { result, children } = await runSaved(root, "atomic-decomposition");
+
+    expect(result.ok, result.error).toBe(true);
+    expect(result.result).toEqual({ calls: 201 });
+    expect(children).toHaveLength(201);
+  });
+
   it("bounds a script that declares nothing with the contract tool-call fuse", async () => {
     const root = scratchProject();
     saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);

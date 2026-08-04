@@ -15,9 +15,13 @@ all texts unchanged and returns the complete document.
 Failure: `parallel()` is one fail-closed barrier. Do not catch it into partial
 success in standard source.
 
-Input boundary: put fixed unit names/paths directly in the approved design and
-source. Do not encode them as newline/CSV/JSON workflow input and parse them in
-JavaScript. If units are not author-known, this pattern does not fit.
+Input boundary: fixed unit names/paths may live directly in approved source.
+When the main agent already knows them, pass exact `items: string[]` through the
+workflow tool and read `dsl.items()`; when a discovery agent must find them, use
+bounded `agent({ handoffs })`. All three sources converge on the same visible
+`pipeline(items, ...)` or `parallel()` body. Do not encode them as newline/CSV/JSON
+input and parse them in JavaScript. Caller items
+preserve empty strings and duplicates; model handoffs separately reject them.
 
 Primitives: `agent`, `parallel`, `phase`, `publishPrimaryArtifact`.
 

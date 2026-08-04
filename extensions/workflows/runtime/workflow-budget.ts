@@ -52,11 +52,11 @@ export const DEFAULT_WORKFLOW_BUDGET: Readonly<WorkflowBudget> = Object.freeze({
   // identically and only NESTED fan-out is newly bounded. There is no correctness
   // failure on this axis — too low only makes a run slow — which is why it can be tight.
   concurrency: 4,
-  // A runaway loop is the failure this axis exists for. The largest genuine run
-  // observed in this repository was 25 agents and curated pipelines are 6-50, so
-  // 200 is an order of magnitude of headroom and still turns an infinite loop into
-  // a named failure within minutes.
-  totalAgents: 200,
+  // A runaway loop is the failure this axis exists for. Fine-grained decomposition
+  // can legitimately reach 10 scripts x 10 questions x 2 stages before discovery,
+  // review, or retries, so 200 is ordinary-workload territory. 10,000 leaves that
+  // work unconstrained while retaining a named finite stop for a genuine loop.
+  totalAgents: 10_000,
   // Two hours: roughly ten times the longest observed curated run (a live `review`
   // took about eleven minutes), so it cannot kill honest work — a weak model is
   // slower per stage — while still ending an abandoned run the same working day.

@@ -19,8 +19,8 @@
 
 ## What it is
 
-A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / publishArtifact /
-consumeTextArtifact / awaitOperator / parallel / pipeline / phase / log / promptFile / workspace`)
+A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / items / publishArtifact /
+consumeTextArtifact / awaitOperator / parallel / pipeline / workflow / phase / log / promptFile / workspace`)
 for orchestrating catalog-agent sessions through the existing
 `task / createAgentSession` path and retaining their evidence under one run root.
 The same extension owns an opt-in direct `fusion` tool for the main Pi session;
@@ -920,11 +920,20 @@ The tool stays headless. It validates the launch target and executes the workflo
 opening a human launch prompt.
 
 ```json
-{ "name": "live-smoke", "input": "hello" }
+{ "name": "item-pipeline", "input": "Write concise results.", "items": ["a.ts", "b.ts"] }
 ```
 
 The tool's `input` is the same optional semantic string as `/workflows run`,
-bounded at 16000 characters and preserved unchanged. Cross-run state is a
+bounded at 16000 characters and preserved unchanged. `items` is a separate
+optional array of strings exposed as a frozen snapshot by `dsl.items()`. It
+preserves order and exact values, including whitespace, empty strings, and
+duplicates, and adds no count or character limit. The tool's strict
+`prepareArguments` hook rejects non-array `items`, non-string members, nested
+arrays, `null`, and unknown top-level fields before Pi's schema conversion can
+coerce them; direct `execute` and runner/runtime callers are revalidated as well.
+An absent list becomes an empty frozen list; a workflow that requires units owns
+a named pre-pipeline guard. The human `/workflows run` grammar is unchanged.
+Cross-run state is a
 separate closed `continuation` control with one origin and 1–8 complete artifact
 refs. `continuation` and replay-only `resumeFromRunId` are mutually exclusive.
 
@@ -1021,6 +1030,7 @@ const {
   publishArtifact,
   consumeTextArtifact,
   continuationArtifacts,
+  items,
   awaitOperator,
   phase,
   log,
@@ -1209,6 +1219,16 @@ have the same string-only bound before their callback starts.
 Agents interpret meaning. Trusted JavaScript owns orchestration, branches,
 bounded loops, and deterministic invariants; workflow authors must not smuggle a
 second object-input protocol into the string with JSON or marker parsing.
+
+A programmatic caller may separately provide exact `items: string[]`. The runner
+and runtime validate the array/string shape, and `dsl.items()` returns a detached
+frozen snapshot. Order and bytes, including whitespace, empty strings, and
+duplicates, are unchanged; transport adds no count, per-item, or aggregate-size
+policy. A source array, caller items, or bounded model-discovered
+`agent({ handoffs })` result feeds the same visible `pipeline()` plus inline
+`dsl.workflow()` mini-flow. Only model handoffs use corrective re-ask and
+blank/duplicate bounds. The full caller list is not automatic child metadata,
+journal/summary identity, or replay identity, and no file parser participates.
 
 Cross-run state travels separately through the tool's closed `continuation`:
 
@@ -1815,7 +1835,7 @@ source, and `runWorkflowScript` applies it to the runtime on every run:
 | Axis          | Default           | What it bounds                                                                                                                                                                                                                    |
 | ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `concurrency` | `4`               | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
-| `totalAgents` | `200`             | Total `agent()` invocations, nested and retried ones included. Exceeding it throws `WorkflowInvocationCapError` and exits the run.                                                                                                |
+| `totalAgents` | `10000`           | Total `agent()` invocations, nested and retried ones included. Fine-grained decomposition may legitimately exceed 200 calls; the next attempt above this fuse still throws `WorkflowInvocationCapError` and exits the run.        |
 | `runtimeMs`   | `7200000` (2 h)   | Wall clock over the agent chain. Exceeding it throws `WorkflowRunDeadlineError` and exits the run.                                                                                                                                |
 | `timeoutMs`   | `600000` (10 min) | One child attempt. The SDK host's own child deadline is derived from this, so the workflow-level failure always wins; both timers remain within Node's maximum real delay.                                                        |
 | `toolCalls`   | `1000`            | Tool calls per child attempt.                                                                                                                                                                                                     |
