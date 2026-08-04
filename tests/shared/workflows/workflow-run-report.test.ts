@@ -874,10 +874,10 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /## Budget/u);
     assert.match(readme, /\| `concurrency` \| 4 \|/u);
     assert.match(readme, /\| `totalAgents` \| 10000 \|/u);
-    assert.match(readme, /\| `runtimeMs` \| 7200000 ms \|/u);
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \|/u);
+    assert.match(readme, /\| `runtimeMs` \| 86400000 ms \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `toolCalls` \| 1000 \|/u);
-    assert.match(readme, /\| `turns` \| 5 \|/u);
+    assert.match(readme, /\| `turns` \| 20 \|/u);
     assert.match(readme, /\| `answerChars` \| 500000 \|/u);
   });
 
@@ -927,8 +927,8 @@ describe("workflow run report budget section", () => {
     );
 
     assert.match(readme, /\| `totalAgents` \| 10000 \| 2 invocations \|/u);
-    assert.match(readme, /\| `runtimeMs` \| 7200000 ms \| 11000 ms over the journal \|/u);
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 7000 ms longest child \|/u);
+    assert.match(readme, /\| `runtimeMs` \| 86400000 ms \| 11000 ms over the journal \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| 7000 ms longest child \|/u);
     assert.match(readme, /\| `concurrency` \| 4 \| 2 peak \(gate-owned\) \|/u);
     assert.match(readme, /\| tokens \| not enforced \| 155 observed \|/u);
   });
@@ -954,7 +954,7 @@ describe("workflow run report budget section", () => {
       }),
     );
 
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 30000 ms longest child \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| 30000 ms longest child \|/u);
     assert.match(readme, /\| tokens \| not enforced \| 100 observed \|/u);
   });
 
@@ -1007,7 +1007,7 @@ describe("workflow run report budget section", () => {
 
     assert.match(readme, /\| `totalAgents` \| 10000 \| 2 invocations \(1 replayed, no child ran\) \|/u);
     // The FRESH child's 6000 ms, not the longer replay projection.
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| 6000 ms longest child \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| 6000 ms longest child \|/u);
     // A replayed call reports no usage, so only the fresh child's tokens are observed.
     assert.match(readme, /\| tokens \| not enforced \| 15 observed \|/u);
   });
@@ -1040,7 +1040,7 @@ describe("workflow run report budget section", () => {
 
     assert.match(readme, /\| `totalAgents` \| 10000 \| 1 invocations \(1 replayed, no child ran\) \|/u);
     // "3 ms longest child" would claim a child ran for 3 ms when none ran at all.
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \| not recorded \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| not recorded \|/u);
   });
 
   it("says tokens are not recorded when the host reported none, rather than 0", () => {
@@ -1150,9 +1150,9 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /## Budget/u);
     assert.match(readme, /\| `concurrency` \| 4 \| 1 peak \(gate-owned\) \|/u);
     assert.match(readme, /\| `totalAgents` \| 10000 \| 1 invocations \|/u);
-    assert.match(readme, /\| `timeoutMs` \| 600000 ms \|/u);
+    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `toolCalls` \| 1000 \| not recorded \|/u);
-    assert.match(readme, /\| `turns` \| 5 \| not recorded \|/u);
+    assert.match(readme, /\| `turns` \| 20 \| not recorded \|/u);
   });
 
   it("journals a failed report write instead of letting the budget evidence vanish silently", async () => {

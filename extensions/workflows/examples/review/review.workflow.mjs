@@ -161,6 +161,7 @@ const REVIEW_NAVIGATE_OPTIONS = Object.freeze({
 
 export const meta = {
   name: "review",
+  profile: "legacy",
   description: "Prepares clarification or runs a question-led review with runtime-owned artifacts.",
   phases: [
     { title: "prepare-clarification", detail: "Persist the exact intent and prepare clarification questions." },

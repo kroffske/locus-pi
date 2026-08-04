@@ -39,6 +39,7 @@ import {
 } from "./workflow-handoff.js";
 import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
+import type { WorkflowPrimaryFileReference } from "./workflow-output.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
 // this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
@@ -363,10 +364,14 @@ export interface WorkflowDsl {
    * readable documents go under `outputs/`.
    */
   runWorkspaceDir(): string;
+  /** Project-relative stable user-output directory, shared by this execution tree. */
+  outputDir(): string;
   /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
   publishArtifact(name: string, text: string): WorkflowArtifactRef;
   /** Publish the one semantic document that represents a successful terminal result. */
   publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef;
+  /** Validate and publish one non-empty regular file by reference without copying its content. */
+  publishPrimaryFile(relativePath: string): WorkflowPrimaryFileReference;
   /** Verify and copy one complete prior-run text reference into this run. */
   consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact;
   /** Host-verified continuation artifacts bound before trusted workflow code starts. */
@@ -391,7 +396,34 @@ export interface WorkflowDsl {
   random(): number;
   /** Run a nested workflow function with the same typed DSL handle. */
   workflow<T = unknown>(subFn: (dsl: WorkflowDsl, input?: string) => Promise<T>, input?: string): Promise<T>;
+  /** Start one reviewed saved child workflow under the root execution's coordination context. */
+  invokeWorkflow(input: WorkflowSavedChildInvocation): Promise<WorkflowSavedChildResult>;
 }
+
+export interface WorkflowSavedChildInvocation {
+  name?: string;
+  scriptPath?: string;
+  input?: string;
+  items?: readonly string[];
+  /** Stable semantic identity for this item. Opaque payload does not redefine it. */
+  key: string;
+  /** Complete key set, validated before the first child starts. */
+  keys: readonly string[];
+  /** Must equal this execution tree's project-relative stable output directory. */
+  outputDir: string;
+}
+
+export interface WorkflowSavedChildResult {
+  status: "completed" | "skipped";
+  key: string;
+  outputDir: string;
+  runId?: string;
+  /** Completed run whose checkpoint caused this invocation to skip. */
+  sourceRunId?: string;
+  primaryFile?: WorkflowPrimaryFileReference;
+}
+
+export type WorkflowSavedChildRunner = (input: WorkflowSavedChildInvocation) => Promise<WorkflowSavedChildResult>;
 
 export interface WorkflowAgentOptions {
   agent?: string; // catalog name; default DEFAULT_WORKFLOW_AGENT
@@ -777,6 +809,15 @@ export interface WorkflowRuntimeOptions {
   projectRoot?: string;
   /** Absolute agent workspace for this run; the runner creates it before the script starts. */
   runWorkspaceDir?: string;
+  /** Project-relative stable user-output directory. */
+  outputDir?: string;
+  /** Host-owned regular-file validator/reference publisher. */
+  publishPrimaryFile?: (relativePath: string) => WorkflowPrimaryFileReference;
+  /** Host-owned saved-child runner. Absent in bare runtime embeddings. */
+  invokeWorkflow?: WorkflowSavedChildRunner;
+  /** Root-owned physical-agent counter, concurrency gate, and deadline.
+   *  Required by runWorkflowScript; optional only for direct host-agnostic runtime embeddings. */
+  sharedExecution?: WorkflowSharedExecutionState;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
   maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
@@ -821,10 +862,27 @@ export interface WorkflowRuntimeOptions {
 export interface WorkflowRuntime {
   dsl: WorkflowDsl;
   getJournal(): WorkflowJournalLine[]; // in-memory mirror (for tests / final render)
+  /** Append one host-owned runtime record in exact order with script events. */
+  recordRuntimeLog(message: string): void;
   getArgs(): string | undefined;
   currentPhase(): string | undefined;
   /** Gate-owned high-water mark of simultaneously executing leaf agents. The only
    *  honest source for this number; the journal cannot produce it (see AgentConcurrencyGate). */
+  peakAgentConcurrency(): number;
+}
+
+/** Shared by every real saved child. Workflow source receives only the DSL. */
+export interface WorkflowSharedExecutionState {
+  readonly maxTotalAgentInvocations: number;
+  readonly runtimeMs: number | undefined;
+  reserve(count: number): WorkflowInvocationReservation;
+  consumeReservation(reservation: WorkflowInvocationReservation): void;
+  releaseReservation(reservation: WorkflowInvocationReservation): void;
+  remainingAgentInvocations(): number;
+  spendInvocation(): number;
+  assertDeadline(): void;
+  acquireAgent(): Promise<void>;
+  releaseAgent(): void;
   peakAgentConcurrency(): number;
 }
 
@@ -960,6 +1018,69 @@ function createAgentConcurrencyGate(maxConcurrentAgents: number | undefined): Ag
     throw new Error("maxConcurrentAgents must be a positive integer when provided");
   }
   return new CountingAgentConcurrencyGate(maxConcurrentAgents);
+}
+
+/** Create the one physical execution budget shared by a root and every saved child. */
+export function createWorkflowSharedExecutionState(input: {
+  maxConcurrentAgents?: number;
+  maxTotalAgentInvocations?: number;
+  runtimeMs?: number;
+  nowMs?: () => number;
+}): WorkflowSharedExecutionState {
+  const gate = createAgentConcurrencyGate(input.maxConcurrentAgents);
+  const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(input.maxTotalAgentInvocations);
+  const nowMs = input.nowMs ?? (() => Date.now());
+  let total = 0;
+  let reserved = 0;
+  let started: number | undefined;
+  let deadline: number | undefined;
+  if (input.runtimeMs !== undefined) {
+    assertWorkflowBudgetValue("runtimeMs", input.runtimeMs);
+    started = nowMs();
+    deadline = started + input.runtimeMs;
+  }
+
+  return {
+    maxTotalAgentInvocations,
+    runtimeMs: input.runtimeMs,
+    reserve(count) {
+      const remaining = maxTotalAgentInvocations - total - reserved;
+      if (count > remaining) {
+        throw new Error(`fusion needs up to ${count} agent invocation(s), but only ${remaining} remain in this run`);
+      }
+      reserved += count;
+      return { remaining: count, active: true };
+    },
+    consumeReservation(reservation) {
+      if (!reservation.active || reservation.remaining < 1) {
+        throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
+      }
+      reservation.remaining -= 1;
+      reserved -= 1;
+    },
+    releaseReservation(reservation) {
+      if (!reservation.active) return;
+      reserved -= reservation.remaining;
+      reservation.remaining = 0;
+      reservation.active = false;
+    },
+    remainingAgentInvocations: () => maxTotalAgentInvocations - total - reserved,
+    spendInvocation() {
+      if (total + reserved >= maxTotalAgentInvocations) {
+        throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
+      }
+      total += 1;
+      return total;
+    },
+    assertDeadline() {
+      if (deadline === undefined || started === undefined) return;
+      const current = nowMs();
+      if (current > deadline) throw new WorkflowRunDeadlineError(input.runtimeMs!, current - started);
+    },
+    acquireAgent: () => gate.acquire(),
+    releaseAgent: () => gate.release(),
+    peakAgentConcurrency: () => gate.peak(),
+  };
 }
 
 function resolveMaxTotalAgentInvocations(maxTotalAgentInvocations: number | undefined): number {
@@ -2162,7 +2283,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   const items = snapshotWorkflowItems(options.items);
   assertBoundContinuation(options.continuation, runId);
   const args = options.args;
-  const agentConcurrencyGate = createAgentConcurrencyGate(options.maxConcurrentAgents);
   const defaultMaxToolCalls = normalizeMaxToolCalls(
     options.defaultMaxToolCalls ?? DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
     "defaultMaxToolCalls",
@@ -2176,48 +2296,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     options.defaultTimeoutMs === undefined ? undefined : normalizeTimeoutMs(options.defaultTimeoutMs);
   const defaultMaxTurns =
     options.defaultMaxTurns === undefined ? undefined : normalizeMaxTurns(options.defaultMaxTurns);
-  // Distinct from the DSL's own `nowMs()` below: that one is REPLAYED on a resume,
-  // and a replayed clock would let a resumed run inherit the original run's elapsed
-  // time. The budget deadline reads real time.
-  const deadlineNowMs = options.nowMs ?? (() => Date.now());
-  // Armed ONCE, here, so a nested parallel()/pipeline() child is checked on the same
-  // clock as a top-level one instead of restarting the budget per group.
-  let runtimeMs: number | undefined;
-  let runDeadlineMs: number | undefined;
-  let runStartedMs: number | undefined;
-  if (options.runtimeMs !== undefined) {
-    assertWorkflowBudgetValue("runtimeMs", options.runtimeMs);
-    runtimeMs = options.runtimeMs;
-    runStartedMs = deadlineNowMs();
-    runDeadlineMs = runStartedMs + runtimeMs;
-  }
-  const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(options.maxTotalAgentInvocations);
-  let totalAgentInvocations = 0;
-  let reservedAgentInvocations = 0;
+  // Direct runtime embeddings predate saved-child execution and own no runner
+  // coordination object, so they retain a private scheduler. runWorkflowScript
+  // always supplies the root-owned state and fails before constructing a runtime
+  // if that invariant is broken.
+  const sharedExecution =
+    options.sharedExecution ??
+    createWorkflowSharedExecutionState({
+      ...(options.maxConcurrentAgents === undefined ? {} : { maxConcurrentAgents: options.maxConcurrentAgents }),
+      ...(options.maxTotalAgentInvocations === undefined
+        ? {}
+        : { maxTotalAgentInvocations: options.maxTotalAgentInvocations }),
+      ...(options.runtimeMs === undefined ? {} : { runtimeMs: options.runtimeMs }),
+      ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
+    });
 
-  function reserveAgentInvocations(count: number): WorkflowInvocationReservation {
-    const remaining = maxTotalAgentInvocations - totalAgentInvocations - reservedAgentInvocations;
-    if (count > remaining) {
-      throw new Error(`fusion needs up to ${count} agent invocation(s), but only ${remaining} remain in this run`);
-    }
-    reservedAgentInvocations += count;
-    return { remaining: count, active: true };
-  }
-
-  function consumeAgentInvocationReservation(reservation: WorkflowInvocationReservation): void {
-    if (!reservation.active || reservation.remaining < 1) {
-      throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
-    }
-    reservation.remaining -= 1;
-    reservedAgentInvocations -= 1;
-  }
-
-  function releaseAgentInvocationReservation(reservation: WorkflowInvocationReservation): void {
-    if (!reservation.active) return;
-    reservedAgentInvocations -= reservation.remaining;
-    reservation.remaining = 0;
-    reservation.active = false;
-  }
   /**
    * Logical `agent()` calls, so every physical attempt of one call can name the call it
    * belongs to.
@@ -2253,14 +2346,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       onEvent?.(line);
     } catch {
       // never throw into the DSL
-    }
-  }
-
-  function assertRunDeadline(): void {
-    if (runDeadlineMs === undefined) return;
-    const currentMs = deadlineNowMs();
-    if (currentMs > runDeadlineMs) {
-      throw new WorkflowRunDeadlineError(runtimeMs!, currentMs - runStartedMs!);
     }
   }
 
@@ -2458,16 +2543,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // contexts to exit the run. Cyclic workflows are allowed up to the cap.
     const reservation = opts?.[FUSION_INVOCATION_RESERVATION];
     if (reservation !== undefined) {
-      consumeAgentInvocationReservation(reservation);
-    } else if (totalAgentInvocations + reservedAgentInvocations >= maxTotalAgentInvocations) {
-      throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
+      sharedExecution.consumeReservation(reservation);
     }
-    totalAgentInvocations += 1;
+    const physicalInvocation = sharedExecution.spendInvocation();
     // Refuse an already-expired attempt before it occupies a concurrency slot or
     // inflates the gate-owned peak. Fresh work checks again after any queue wait,
     // immediately before execution; a replay has no gate and this is its only check.
-    assertRunDeadline();
-    const callId = `call-${String(totalAgentInvocations).padStart(4, "0")}`;
+    sharedExecution.assertDeadline();
+    const callId = `call-${String(physicalInvocation).padStart(4, "0")}`;
     // `callId` is deliberately absent from `canonicalAgentRequest`, so giving each physical
     // attempt its own identity leaves the logical call's replay key untouched.
     const req: WorkflowAgentRequest = { ...input.req, callId };
@@ -2518,13 +2601,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       try {
         const [result] = await runScheduled<WorkflowAgentResult>([
           async () => {
-            await agentConcurrencyGate.acquire();
+            await sharedExecution.acquireAgent();
             try {
               executionStartedAtMs = Date.now();
-              assertRunDeadline();
+              sharedExecution.assertDeadline();
               return await agentRunner(req);
             } finally {
-              agentConcurrencyGate.release();
+              sharedExecution.releaseAgent();
             }
           },
         ]);
@@ -2874,9 +2957,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       memberLimits,
       judgeLimits,
       judgeShapeAttempts,
-      remainingAgentInvocations: maxTotalAgentInvocations - totalAgentInvocations - reservedAgentInvocations,
+      remainingAgentInvocations: sharedExecution.remainingAgentInvocations(),
     });
-    const reservation = reserveAgentInvocations(fusion.maximumPhysicalInvocations);
+    const reservation = sharedExecution.reserve(fusion.maximumPhysicalInvocations);
     try {
       // A resume needs no currently configured model because every internal call
       // must replay. FUSION_REPLAY_REQUIRED turns any missing/divergent leg into a
@@ -2889,7 +2972,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       }
       return await runPreparedFusion(fusion, reservation);
     } finally {
-      releaseAgentInvocationReservation(reservation);
+      sharedExecution.releaseReservation(reservation);
     }
   }
 
@@ -3131,6 +3214,24 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return result;
   }
 
+  async function invokeWorkflow(input: WorkflowSavedChildInvocation): Promise<WorkflowSavedChildResult> {
+    if (options.invokeWorkflow === undefined) {
+      throw new Error("saved child workflow invocation is not configured by the workflow runner");
+    }
+    return options.invokeWorkflow(input);
+  }
+
+  function recordRuntimeLog(message: string): void {
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message,
+      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+    });
+  }
+
   async function runGrouped<T extends unknown[]>(
     kind: "parallel" | "pipeline",
     total: number,
@@ -3229,6 +3330,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.runWorkspaceDir;
   }
 
+  function outputDir(): string {
+    if (options.outputDir === undefined || options.outputDir.trim() === "") {
+      throw new Error("workflow stable output directory is not configured");
+    }
+    return options.outputDir;
+  }
+
   function publishArtifact(name: string, text: string): WorkflowArtifactRef {
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
     return options.artifactPorts.publishText(name, text, _currentPhase);
@@ -3241,6 +3349,25 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     const ref = options.artifactPorts.publishText(name, text, stage ?? _currentPhase, "primary");
     primaryArtifactPublished = true;
     return ref;
+  }
+
+  let primaryFilePublished = false;
+  function publishPrimaryFile(relativePath: string): WorkflowPrimaryFileReference {
+    if (primaryFilePublished) throw new Error("workflow already published its primary file");
+    if (options.publishPrimaryFile === undefined) {
+      throw new Error("workflow primary-file publication is not configured");
+    }
+    const reference = options.publishPrimaryFile(relativePath);
+    primaryFilePublished = true;
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: `[workflow:primary-file] path=${JSON.stringify(reference.relativePath)} sha256=${reference.sha256} bytes=${reference.bytes}`,
+      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+    });
+    return reference;
   }
 
   function consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact {
@@ -3273,8 +3400,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     workspace,
     projectRoot,
     runWorkspaceDir,
+    outputDir,
     publishArtifact,
     publishPrimaryArtifact,
+    publishPrimaryFile,
     consumeTextArtifact,
     continuationArtifacts,
     items: () => items,
@@ -3286,14 +3415,16 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     now: nowMs,
     random,
     workflow: workflowDsl,
+    invokeWorkflow,
   };
 
   return {
     dsl,
     getJournal: () => [...journalMirror],
+    recordRuntimeLog,
     getArgs: () => args,
     currentPhase: () => _currentPhase,
-    peakAgentConcurrency: () => agentConcurrencyGate.peak(),
+    peakAgentConcurrency: () => sharedExecution.peakAgentConcurrency(),
   };
 }
 

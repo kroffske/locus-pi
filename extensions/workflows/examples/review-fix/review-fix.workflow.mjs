@@ -115,6 +115,7 @@ const FIX_CHECK_OPTIONS = Object.freeze({
 
 export const meta = {
   name: "review-fix",
+  profile: "legacy",
   description:
     "Plans a validated remediation graph from one continued review, applies one writer per finding, then independently re-reviews the result.",
   identityCoverage: "self-contained-static",

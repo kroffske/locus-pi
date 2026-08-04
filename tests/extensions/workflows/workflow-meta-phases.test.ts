@@ -71,7 +71,7 @@ describe("static meta.phases", () => {
       `${" ".repeat(70 * 1024)}export const meta = { description: "too late", phases: [{ title: "late" }] };\n`,
     );
 
-    expect(readWorkflowMeta(file)).toEqual({ description: "no description", phases: [] });
+    expect(readWorkflowMeta(file)).toEqual({ description: "no description", profile: "unclassified", phases: [] });
   });
 
   it("discards the whole declaration when any entry is not literal", () => {
@@ -95,7 +95,11 @@ describe("static meta.phases", () => {
   it("leaves a workflow that declares nothing exactly as it was", () => {
     const file = fixture('export const meta = { name: "plain", description: "No declaration." };\n');
 
-    expect(readWorkflowMeta(file)).toEqual({ description: "No declaration.", phases: [] });
+    expect(readWorkflowMeta(file)).toEqual({
+      description: "No declaration.",
+      profile: "unclassified",
+      phases: [],
+    });
     expect(staticWorkflowMetaPhases('export const meta = { description: "x." };')).toEqual([]);
   });
 });

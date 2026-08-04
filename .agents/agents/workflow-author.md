@@ -48,8 +48,10 @@ change, update the design back to `DRAFT`, explain the change, and do not build.
    it is not a simplicity score.
 2. Select one documented pattern, or explain why none fits.
 3. Write the numbered algorithm and explicit graph.
-4. State inputs, complete outputs, exact consumers, capabilities, concurrency,
-   loop bounds, human gates, and failure exits.
+4. State inputs, complete outputs, exact consumers, roles, concurrency,
+   loop bounds, human gates, and failure exits. For durable decomposition, also
+   state the stable output directory, complete item-key source, idempotent update
+   rule, live project-source drift policy, and worst-case physical-call formula.
 5. Count orchestration mechanisms: raw schema, validator, parser, custom retry or
    recovery, local wrapper, renderer, hidden state, loop, judge, and barrier.
    Agent calls are listed but not penalized by count.
@@ -62,6 +64,7 @@ Use this exact design shape:
 Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
+Stable output: `outputs/<name>` or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
 ## Algorithm
@@ -70,12 +73,16 @@ Pattern: <catalog pattern, or why none fits>
 
 ## Graph
 
-| Node     | Responsibility         | Receives      | Returns                              | Capability        | Next       |
+| Node     | Responsibility         | Receives      | Returns                              | Role              | Next       |
 | -------- | ---------------------- | ------------- | ------------------------------------ | ----------------- | ---------- |
-| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <tools/read-only> | <consumer> |
+| `<node>` | <one coherent subtask> | <exact input> | <complete text, choice, or handoffs> | <reader/reviewer> | <consumer> |
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
+Durable items: <complete key source, or none>
+Idempotence: <safe replace rule, or none>
+Project source: <live-read drift policy>
+Worst-case calls: <exact formula including saved child runs>
 Failure exits: <fail-closed exits>
 Mechanisms: <barriers, choices, loops, human gates; say `none` when empty>
 Status: DRAFT — waiting for operator approval.
@@ -88,7 +95,8 @@ outputs, and edges is not a graph.
 
 Standard generated source is a readable harness:
 
-- Declare stable agent identities and capability options together near the top.
+- Export `meta.profile: "standard"`.
+- Declare stable agent identities and role labels together near the top.
 - Keep direct `agent()` calls, prompts, exact text handoffs, branches, and edges
   visible in execution order.
 - Use exact text for narrative outputs. Extraction agents return complete textual
@@ -102,11 +110,28 @@ Standard generated source is a readable harness:
 - Use `agent(prompt, { choice: ["accept", "revise"] })` only for a small machine
   branch. Runtime owns format repair and fail-closed exhaustion.
 - Use uncaught `parallel()`/`pipeline()` failure by default.
+- Give every semantic or runtime-owned value-bearing binding, callback
+  parameter, and loop counter one globally unique name. A nested scalar literal
+  may reuse the spelling without changing the outer value's provenance.
+- Use only declared lexical/literal value roots. Never read ambient host globals
+  or implicit `arguments`, and never use arrays, objects, spreads, or nesting to
+  erase semantic/runtime provenance.
 - Use `promptFile()` only for a long or shared role charter. Routing stays in source.
 - Put the exact filesystem contract in every filesystem prompt: readers get
   `projectRoot()` as `pwd` and project-relative paths; writers get the exact
-  `runWorkspaceDir()` or retained `workspace()` path and relative output name.
+  `outputDir()` for durable user files, or `runWorkspaceDir()`/retained
+  `workspace()` for run-local or isolated work, plus the relative output name.
   Explicitly forbid substituting the user's home directory or `/tmp`.
+- For durable item work, start from a caller-frozen approved list, then call one
+  saved child with `invokeWorkflow()` per exact key. Pass the complete key list,
+  unchanged item, and `outputDir()`. Return `publishPrimaryFile()` for the final
+  regular, non-empty durable file. Prefer caller-owned semantic keys. Position
+  keys are safe only when the caller intentionally reuses the exact same list
+  and ordering for the output namespace. Fresh `agent({ handoffs })` discovery
+  stays in the non-resumable inline worker pattern; to make it durable, finish a
+  separate discovery run and have the caller approve and transport the frozen
+  list. Never derive resumable positional keys from fresh model output. Make
+  each assigned file update idempotent.
 
 Standard source must not contain raw `schema`, `validate`, input splitting,
 JSON/prose parsers, regex gates, domain validators, coverage assertions, render helpers, manual
@@ -115,22 +140,47 @@ retries, branch-local `try/catch`, custom failure envelopes, wrappers around
 trusted scripts may still use the advanced compatibility surface; new standard
 source may not.
 
+The exhaustive source grammar is the “Machine-enforced standard source shape”
+section of `extensions/workflows/AUTHORING.md`. It also closes top-level shape,
+imports, statements, calls, collections, helpers, mutation/construction, and
+lexical shadowing; do not treat the shorter smell list above as the whole gate.
+Use arrow functions for inline callbacks; function expressions and all sequence
+expressions are outside the standard grammar. Construct `Error` only from
+author-known or literal arguments; opaque/runtime values remain forbidden inside
+messages, options, causes, composites, spreads, and member access.
+Every DSL return is classified: exact choices, list identity/length, and saved
+child status are the only controls; model/file/workspace results are opaque;
+clock/random/path/publication results are runtime-host values; `awaitOperator`,
+`log`, and `phase` are void effects. Forward opaque/runtime-host values only
+whole, and use only `outputDir()` unchanged for `invokeWorkflow.outputDir`.
+Semantic input, plain agent text, and item aliases remain opaque whole values;
+only runtime-owned choices/list identity/status and counters drive control.
+Review also rejects a mandatory acknowledgement protocol whose answer has no
+consumer. Do not attempt to enforce that prose rule by matching prompt English.
+
 Do not invent manager-agent delegation. SDK children cannot call `spawn_agent`
 or `task`. Use `agent({ handoffs })` followed by visible `parallel()` or
 `pipeline()` workers for runtime-discovered units; recursive delegation remains
 unsupported.
+Saved workflow composition is the single host-owned exception: one parent may
+invoke one level of reviewed saved children through `invokeWorkflow()`. It is not
+recursive delegation. The runtime owns lineage, checkpoints, cycle rejection,
+shared cancellation/concurrency/call budget, and the stable-output lease.
 
 ## Build checks
 
 After writing the one source file:
 
 1. Confirm `meta.name`, design name, and filename match.
-2. Run the repository source-identity assessment against the exact bytes.
-3. Import the module and require `meta` plus a default function.
-4. Reconstruct nodes, edges, handoffs, concurrency, loop caps, and failure exits
+2. Confirm `meta.profile` is `"standard"`.
+3. Run the repository source-identity assessment against the exact bytes.
+4. Import the module and require `meta` plus a default function.
+5. Reconstruct nodes, edges, handoffs, concurrency, loop caps, and failure exits
    from source; compare them to the design.
-5. Search for every forbidden standard-profile smell, including new wrappers or
-   helpers not named above.
+6. Run
+   `npx @kroffske/locus-pi check-workflow-source
+.pi/workflows/<name>.workflow.mjs`, then search for every forbidden smell,
+   including new wrappers or helpers not named above.
 
 Return the design path or built source path, selected pattern, graph summary, and
 checks performed. For Design or Revise, explicitly say source was not created.

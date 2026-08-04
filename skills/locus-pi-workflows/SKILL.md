@@ -67,6 +67,7 @@ The design is short Markdown a reader can approve without opening JavaScript:
 Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
+Stable output: `outputs/<name>` or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
 1. <numbered algorithm>
@@ -77,6 +78,10 @@ Pattern: <catalog pattern, or why none fits>
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
+Durable items: <complete key source, or none>
+Idempotence: <how each assigned file is replaced safely>
+Project source: <live-read drift policy>
+Worst-case calls: <exact formula including saved children>
 Failure exits: <fail-closed exits>
 Mechanisms: <parallel barriers, choices, loops, human gates; no agent-count penalty>
 Status: DRAFT — waiting for operator approval.
@@ -93,6 +98,7 @@ copy blindly.
 
 Declare stable agent identities together near the top. Keep
 every prompt, call, branch, and exact handoff visible where it executes.
+Declare `meta.profile: "standard"` in every newly generated workflow.
 
 ```js
 const AGENTS = {
@@ -146,7 +152,7 @@ part of the task prompt; do not add JavaScript path parsers or collector scripts
 to compensate for a weak model.
 
 Workflow `input` remains semantic text. A main agent that already knows exact
-work units passes them separately as `workflow({ name, input, items })`; workflow
+work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow
 source reads the immutable list with `dsl.items()`. Values, order, whitespace,
 empty strings, and duplicates are preserved without count or character policy,
 so source enforces only its real domain rule, such as requiring at least one item.
@@ -156,7 +162,86 @@ Standard source does not encode a hidden line/CSV/JSON protocol. It does not
 the same visible `pipeline(items, ...)`; model handoffs alone retain runtime
 repair, blank/duplicate rejection, and declared bounds.
 
+For durable work, use a real saved mini workflow for each caller-frozen item.
+Pass the complete key list so the runtime validates every key before the first
+child starts:
+
+```js
+const items = dsl.items();
+const keys = items.map((_, keyIndex) => `item-${keyIndex + 1}`);
+for (let index = 0; index < items.length; index += 1) {
+  const item = items[index];
+  await dsl.invokeWorkflow({
+    name: "saved-worker",
+    key: keys[index],
+    keys,
+    input: item,
+    items: [item],
+    outputDir: dsl.outputDir(),
+  });
+}
+return dsl.publishPrimaryFile("report.md");
+```
+
+Keys are stable compact identities, not semantic payload. Prefer caller-owned
+semantic keys. Position keys are safe only when the caller intentionally reuses
+the exact same approved item list and ordering for the same output namespace;
+pass item text unchanged as child input.
+
+Fresh model discovery stays in the non-resumable inline
+`agent({ handoffs }) -> parallel()/pipeline()` pattern. To make discovered work
+durable, finish that discovery run, expose the list for human approval, then let
+a separate caller pass the frozen list and stable keys to the durable parent.
+Never derive resumable positional keys from fresh model output.
+
+`invokeWorkflow()` starts a real depth-one saved run with its own evidence and
+lineage. It shares root cancellation, concurrency, stable output namespace, and
+the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
+work on retry; parent or child source changes invalidate them. Saved children
+cannot nest, and source cycles fail before model work.
+
+Run evidence remains under `.pi/locus-pi/workflows/<runId>/`. Durable user files
+belong under the exact `dsl.outputDir()` root, defaulting to
+`outputs/<workflow-name>`. Tell writers to replace their assigned relative file
+idempotently, never append blindly, and never substitute home or `/tmp`.
+`publishPrimaryFile()` returns a host-validated path, byte count, and digest for
+one regular non-empty file. Stable files survive failed runs. Project source is
+read live; record a drift policy in the approved design instead of building a
+workflow-side snapshot, ledger, parser, or recovery layer.
+
 ## Forbidden in standard generated source
+
+The exhaustive machine-enforced grammar is
+[`../../extensions/workflows/AUTHORING.md`](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape).
+It closes the module to literal metadata/constants plus one visible run export,
+forbids every import, permits only direct bound DSL calls plus visible collection
+mapping/prompt joining and the documented input-default ternary, restricts
+statements and mutation, removes helpers/policy wrappers, and prevents lexical
+shadowing of trusted DSL, collection, and `Error` bindings. Bare and
+parenthesized arrow parameters are checked identically. Only the first run
+parameter supplies DSL trust. Semantic input, plain agent text, and item aliases
+remain opaque whole values; choices, list identity/status, and counters are the
+machine-consumed control values. Give every semantic or runtime-owned
+value-bearing binding one globally unique name, including map/pipeline
+parameters and loop counters. A nested scalar literal may reuse the spelling
+without changing the outer value's provenance. Use only declared lexical or
+literal roots: ambient host globals and implicit `arguments` are outside the
+standard profile. Arrays, objects, spreads, and nested composites retain the
+provenance of every contained semantic/runtime value. Inline callbacks use
+arrows, not function expressions. Sequence expressions are outside the grammar,
+including literal-only sequences. Construct `Error` only from author-known or
+literal arguments; nesting a semantic/runtime value inside its message, options,
+cause, arrays, objects, spreads, or member access remains forbidden.
+
+Return provenance is exhaustive: exact `agent({ choice })` identity, list results
+(`agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`),
+and `invokeWorkflow().status` are the only control categories. Ordinary `agent`,
+`consumeTextArtifact`, `promptFile`, `workflow`, and `workspace` are opaque.
+`now`, `random`, all three host path calls, and all three publication calls are
+runtime/host values. `awaitOperator`, `log`, and `phase` are void effects and may
+not be used as values. Opaque/runtime-host values flow only whole through the
+documented sinks; only `outputDir()` may flow unchanged to
+`invokeWorkflow.outputDir`.
 
 - raw `schema` or `validate`;
 - input splitting, JSON/prose parsers, regex gates, coverage assertions, or
@@ -185,6 +270,11 @@ Dynamic decomposition therefore stays in the visible harness: caller-supplied
 `parallel()` or `pipeline()` calls process them under the shared workflow budget.
 The default `totalAgents` fuse is 10,000 so fine-grained finite decomposition has
 headroom; exceeding it still fails the run as a genuine runaway loop.
+Per-call and run timeouts default to 24-hour emergency fuses, while each child
+keeps a 20-turn host maximum. Use natural task evidence, not a fixed one-word
+acknowledgement protocol. Build review rejects a mandatory acknowledgement whose
+answer has no consumer; the structural checker deliberately does not parse
+prompt English to guess that intent.
 Do not simulate a recursive manager, capability inheritance, or hidden graph with
 a large structured plan.
 
@@ -194,10 +284,14 @@ Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the approv
 design, then checks:
 
 - `meta.name` matches both design and filename;
+- `meta.profile` is `"standard"`;
 - source identity policy passes;
 - the module loads and exports `meta` plus a default function;
 - source exposes the approved nodes, edges, handoffs, bounds, and failure exits;
 - no unapproved node or standard-profile bad smell appeared.
+- `npx @kroffske/locus-pi check-workflow-source
+.pi/workflows/<name>.workflow.mjs` reports no standard source-shape violations
+  from the project containing the built file.
 
 Build does not run. The caller runs it separately and evaluates the primary
 artifact against live repository evidence.

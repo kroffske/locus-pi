@@ -181,6 +181,37 @@ describe("string-only workflow input", () => {
     expect(Value.Check(schema, { name: "demo", unexpected: true })).toBe(false);
   });
 
+  it("accepts only confined project-relative stable output directories in the tool schema", () => {
+    const { tool } = registerTool();
+    const schema = tool.parameters;
+
+    expect(Value.Check(schema, { name: "demo", outputDir: "outputs/demo" })).toBe(true);
+    expect(Value.Check(schema, { name: "demo", outputDir: "results.v2/task_1" })).toBe(true);
+    for (const outputDir of ["/tmp/demo", "../demo", "outputs/../demo", " outputs/demo", "outputs/demo/"]) {
+      expect(Value.Check(schema, { name: "demo", outputDir })).toBe(false);
+    }
+  });
+
+  it("rejects an unsafe stable output directory before the workflow runner is called", async () => {
+    const { harness, tool } = registerTool();
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockRejectedValue(new Error("must not call runner"));
+    try {
+      const result = await tool.execute(
+        "tool-output-invalid",
+        { name: "live-smoke", outputDir: "../escape" },
+        new AbortController().signal,
+        () => void 0,
+        harness.ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Validation failed") });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("accepts any string list in the closed tool schema without content or quantity policy", () => {
     const { tool } = registerTool();
     const schema = tool.parameters;

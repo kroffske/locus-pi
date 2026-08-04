@@ -1,11 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
+import { standardWorkflowSourceShapeErrors } from "../../extensions/workflows/workflow-source-shape.js";
 
 interface PackageJson {
   files: string[];
@@ -50,6 +61,201 @@ const PACKAGE_WORKFLOW_PATHS = {
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
 } as const;
+
+function installedStandardSource(run: string, declarations = ""): string {
+  return [
+    'export const meta = { name: "installed-probe", profile: "standard", description: "Installed probe." };',
+    declarations,
+    run,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+const CLOSED_GRAMMAR_PROBES = [
+  {
+    name: "named-process-outer-ambient",
+    source: installedStandardSource(
+      'export default async function run({ agent, parallel }) { await parallel(KNOWN.map(function process(item) { return () => agent(item); })); if (process.env.DEPLOY === "yes") return agent("Deploy"); return agent("Hold"); }',
+      'const KNOWN = ["one"];',
+    ),
+  },
+  {
+    name: "named-buffer-outer-ambient",
+    source: installedStandardSource(
+      'export default async function run({ agent, parallel }) { await parallel(KNOWN.map(function Buffer(item) { return () => agent(item); })); if (Buffer.poolSize > 0) return agent("Deploy"); return agent("Hold"); }',
+      'const KNOWN = ["one"];',
+    ),
+  },
+  {
+    name: "named-callback-inner-scope",
+    source: installedStandardSource(
+      "export default function run({ agent, parallel }) { return parallel(KNOWN.map(function process(item) { if (process) return () => agent(item); return () => agent(item); })); }",
+      'const KNOWN = ["one"];',
+    ),
+  },
+  {
+    name: "sequence-opaque-scalar",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { const answer = (0, await agent(input)); if (answer === "deploy") return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "sequence-opaque-array",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { const copied = [(0, await agent(input))]; if (copied[0] === "deploy") return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "sequence-opaque-object",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { const box = { value: (0, await agent(input)) }; if (box.value === "deploy") return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "sequence-nested-composite",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { const copied = ((["known"]), [await agent(input)]); if (copied[0] === "deploy") return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "sequence-literals",
+    source: installedStandardSource(
+      'export default function run({ agent }) { const known = (1, 2); if (known === 2) return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "error-opaque-scalar",
+    source: installedStandardSource(
+      "export default async function run({ agent }, input) { return new Error(await agent(input)); }",
+    ),
+  },
+  {
+    name: "error-message-inspection",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { const answer = new Error(await agent(input)); if (answer.message === "deploy") return agent("Deploy"); return agent("Hold"); }',
+    ),
+  },
+  {
+    name: "error-array-spread",
+    source: installedStandardSource(
+      'export default function run({ items }) { throw new Error("stop", { cause: [...items()] }); }',
+    ),
+  },
+  {
+    name: "error-nested-options",
+    source: installedStandardSource(
+      'export default async function run({ agent }, input) { throw new Error("stop", { cause: { details: [await agent(input)] } }); }',
+    ),
+  },
+  {
+    name: "error-member-extraction",
+    source: installedStandardSource(
+      "export default async function run({ agent }, input) { const answer = await agent(input); throw new Error(answer.message); }",
+    ),
+  },
+] as const;
+
+const LITERAL_ERROR_PROBE = {
+  name: "error-literal-control",
+  source: installedStandardSource('export default function run() { throw new Error("stop"); }'),
+} as const;
+
+const STANDARD_DSL_RETURN_CASES = [
+  { method: "agent", call: 'dsl.agent("x")', category: "opaque" },
+  { method: "awaitOperator", call: 'dsl.awaitOperator({ reason: "stop" })', category: "void" },
+  {
+    method: "consumeTextArtifact",
+    call: 'dsl.consumeTextArtifact({ path: "x", bytes: 1, sha256: "x" })',
+    category: "opaque",
+  },
+  { method: "continuationArtifacts", call: "dsl.continuationArtifacts()", category: "list" },
+  {
+    method: "invokeWorkflow",
+    call: 'dsl.invokeWorkflow({ name: "child", key: "one", keys: ["one"], outputDir: dsl.outputDir() })',
+    category: "status",
+  },
+  { method: "items", call: "dsl.items()", category: "list" },
+  { method: "log", call: 'dsl.log("x")', category: "void" },
+  { method: "now", call: "dsl.now()", category: "runtime" },
+  { method: "outputDir", call: "dsl.outputDir()", category: "runtime" },
+  { method: "parallel", call: 'dsl.parallel([() => dsl.agent("x")])', category: "list" },
+  { method: "phase", call: 'dsl.phase("x")', category: "void" },
+  { method: "pipeline", call: 'dsl.pipeline(["x"], (item) => dsl.agent(item))', category: "list" },
+  { method: "projectRoot", call: "dsl.projectRoot()", category: "runtime" },
+  { method: "promptFile", call: 'dsl.promptFile("x.prompt.md")', category: "opaque" },
+  { method: "publishArtifact", call: 'dsl.publishArtifact("x.md", "x")', category: "runtime" },
+  {
+    method: "publishPrimaryArtifact",
+    call: 'dsl.publishPrimaryArtifact("x.md", "x")',
+    category: "runtime",
+  },
+  { method: "publishPrimaryFile", call: 'dsl.publishPrimaryFile("x.md")', category: "runtime" },
+  { method: "random", call: "dsl.random()", category: "runtime" },
+  { method: "runWorkspaceDir", call: "dsl.runWorkspaceDir()", category: "runtime" },
+  { method: "workflow", call: 'dsl.workflow(() => dsl.agent("x"))', category: "opaque" },
+  { method: "workspace", call: 'dsl.workspace("work", "HEAD")', category: "opaque" },
+] as const;
+
+function installedDslReturnSource(call: string, body: string): string {
+  return installedStandardSource(`export default async function run(dsl) {
+  const value = await ${call};
+  ${body}
+}`);
+}
+
+const DSL_RETURN_PROVENANCE_PROBES = [
+  ...STANDARD_DSL_RETURN_CASES.filter(({ category }) => category !== "void").flatMap(({ method, call }) => [
+    { accepted: true, name: `dsl-${method}-whole-return`, source: installedDslReturnSource(call, "return value;") },
+    {
+      accepted: false,
+      name: `dsl-${method}-branch`,
+      source: installedDslReturnSource(call, 'if (value) return dsl.agent("yes"); return dsl.agent("no");'),
+    },
+    {
+      accepted: false,
+      name: `dsl-${method}-member`,
+      source: installedDslReturnSource(call, "return value.detail;"),
+    },
+    {
+      accepted: false,
+      name: `dsl-${method}-error`,
+      source: installedDslReturnSource(call, 'throw new Error("stop", { cause: [value] });'),
+    },
+  ]),
+  ...STANDARD_DSL_RETURN_CASES.filter(({ category }) => category === "void").flatMap(({ method, call }) => [
+    {
+      accepted: true,
+      name: `dsl-${method}-discarded`,
+      source: installedStandardSource(`export default async function run(dsl) { await ${call}; return true; }`),
+    },
+    {
+      accepted: false,
+      name: `dsl-${method}-value`,
+      source: installedDslReturnSource(call, "return value;"),
+    },
+  ]),
+  ...STANDARD_DSL_RETURN_CASES.filter(({ category }) => category === "list").map(({ method, call }) => ({
+    accepted: true,
+    name: `dsl-${method}-length-control`,
+    source: installedDslReturnSource(call, 'if (value.length === 0) dsl.log("empty"); return value;'),
+  })),
+  {
+    accepted: true,
+    name: "dsl-choice-status-controls",
+    source: installedStandardSource(
+      'export default async function run(dsl) { const route = await dsl.agent("route", { choice: ["yes", "no"] }); if (route === "yes") dsl.log(route); const child = await dsl.invokeWorkflow({ name: "child", key: "one", keys: ["one"], outputDir: dsl.outputDir() }); if (child.status === "completed") return route; return child.status; }',
+    ),
+  },
+  {
+    accepted: true,
+    name: "dsl-bound-output-dir-scheduling",
+    source: installedStandardSource(
+      'export default async function run(dsl) { const stableOutputDir = dsl.outputDir(); return dsl.invokeWorkflow({ name: "child", key: "one", keys: ["one"], outputDir: stableOutputDir }); }',
+    ),
+  },
+] as const;
+
 const forbiddenPackedPaths = [
   /^\.agents\/(skills|workflows)\//,
   /^\.(locus|tasks|planning|pi)\//,
@@ -64,6 +270,7 @@ const forbiddenPackedPaths = [
 let dryRun: PackResult;
 
 beforeAll(() => {
+  execFileSync("npm", ["run", "build:workflow-source"], { cwd: root, encoding: "utf8" });
   const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: root,
     encoding: "utf8",
@@ -74,6 +281,17 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
+  it("keeps the generated checker byte-for-byte aligned on closed grammar probes", async () => {
+    const generated = (await import(pathToFileURL(path.join(root, "dist/workflow-source-shape.mjs")).href)) as {
+      standardWorkflowSourceShapeErrors(source: string): string[];
+    };
+    for (const probe of [...CLOSED_GRAMMAR_PROBES, LITERAL_ERROR_PROBE, ...DSL_RETURN_PROVENANCE_PROBES]) {
+      expect(generated.standardWorkflowSourceShapeErrors(probe.source), probe.name).toEqual(
+        standardWorkflowSourceShapeErrors(probe.source),
+      );
+    }
+  });
+
   it("requires Pi 0.82.0 in both the published peer contract and exact development baseline", () => {
     for (const packageName of PI_PACKAGES) {
       expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.82.0");
@@ -258,6 +476,196 @@ describe("npm public package boundary", () => {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("runs the source checker from a real consumer install and foreign cwd", () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-installed-checker-"));
+    try {
+      const packOutput = execFileSync("npm", ["pack", "--silent", "--json", "--pack-destination", temporaryRoot], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      const [packed] = JSON.parse(packOutput) as PackResult[];
+      if (!packed) throw new Error("npm pack returned no package result");
+
+      const consumerRoot = path.join(temporaryRoot, "consumer-project");
+      const workflowDirectory = path.join(consumerRoot, ".pi", "workflows");
+      mkdirSync(workflowDirectory, { recursive: true });
+      writeFileSync(path.join(consumerRoot, "package.json"), '{"private":true,"type":"module"}\n');
+      writeFileSync(
+        path.join(workflowDirectory, "consumer.workflow.mjs"),
+        readFileSync(path.join(root, PACKAGE_WORKFLOW_PATHS["live-smoke"]), "utf8"),
+      );
+      execFileSync(
+        "npm",
+        [
+          "install",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          "--legacy-peer-deps",
+          path.join(temporaryRoot, packed.filename),
+        ],
+        { cwd: consumerRoot, encoding: "utf8" },
+      );
+      const checkerOutput = execFileSync(
+        path.join(consumerRoot, "node_modules", ".bin", "locus-pi"),
+        ["check-workflow-source", ".pi/workflows/consumer.workflow.mjs"],
+        { cwd: consumerRoot, encoding: "utf8" },
+      );
+      expect(checkerOutput).toContain("standard source shape passed");
+
+      const installedMatrix = [
+        {
+          accepted: true,
+          name: "runtime-choice-index",
+          source: installedStandardSource(
+            'export default async function run({ agent }) { return agent(ROUTES[await agent("Route?", { choice: ["deploy", "hold"] })]); }',
+            'const ROUTES = { deploy: "Deploy", hold: "Hold" };',
+          ),
+        },
+        {
+          accepted: true,
+          name: "pipeline-forwarding",
+          source: installedStandardSource(
+            'export default function run({ agent, pipeline }) { return pipeline(["one"], (item, itemIndex) => agent(`${itemIndex}: ${item}`)); }',
+          ),
+        },
+        {
+          accepted: true,
+          name: "bound-opaque-for-of-forwarding",
+          source: installedStandardSource(
+            "export default async function run({ agent, items }) { const workItems = items(); for (const workItem of workItems) await agent(`Handle: ${workItem}`); return true; }",
+          ),
+        },
+        { ...LITERAL_ERROR_PROBE, accepted: true as const },
+        {
+          accepted: false,
+          name: "pipeline-item-branch",
+          source: installedStandardSource(
+            'export default function run({ agent, items, pipeline }) { return pipeline(items(), (item) => agent(item === "deploy" ? "Deploy" : "Hold")); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "pipeline-later-stage-measurement",
+          source: installedStandardSource(
+            'export default function run({ agent, pipeline }) { return pipeline(["one"], (item) => agent(item), (draft) => agent(draft.length > 10 ? "short" : "long")); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "map-whole-array-branch",
+          source: installedStandardSource(
+            'export default function run({ agent, items, parallel }) { const list = items(); return parallel(list.map((item, itemIndex, allItems) => () => agent(allItems[0] === "deploy" ? item : `${itemIndex}`))); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "identity-map-laundering",
+          source: installedStandardSource(
+            'export default function run({ agent, items }) { const clean = items().map((item) => { return item; }); for (const candidate of clean) { if (candidate === "deploy") return agent("Deploy"); } return agent("Hold"); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "direct-opaque-index",
+          source: installedStandardSource(
+            "export default async function run({ agent }, input) { return agent(ROUTES[await agent(input)]); }",
+            'const ROUTES = { deploy: "Deploy", hold: "Hold" };',
+          ),
+        },
+        {
+          accepted: false,
+          name: "switch-outer-opaque",
+          source: installedStandardSource(
+            'export default function run({ agent, log }, input) { switch ("local") { case "local": const input = "local"; log(input); break; default: break; } if (input === "deploy") return agent("Deploy"); return input; }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "arguments-run-input",
+          source: installedStandardSource(
+            'export default function run({ agent }, input) { if (arguments[1] === "deploy") return agent("Deploy"); return agent(input); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "arguments-map-item",
+          source: installedStandardSource(
+            'export default function run({ agent, items, parallel }) { return parallel(items().map(function () { return () => agent(arguments[0] === "deploy" ? "Deploy" : "Hold"); })); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "arguments-map-index",
+          source: installedStandardSource(
+            'export default function run({ agent, items, parallel }) { return parallel(items().map(function () { return () => agent(arguments[1] > 0 ? "Later" : "First"); })); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "arguments-map-array",
+          source: installedStandardSource(
+            'export default function run({ agent, items, parallel }) { return parallel(items().map(function () { return () => agent(arguments[2][0] === "deploy" ? "Deploy" : "Hold"); })); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "arguments-pipeline-value",
+          source: installedStandardSource(
+            'export default function run({ agent, items, pipeline }) { return pipeline(items(), function () { return agent(arguments[0] === "deploy" ? "Deploy" : "Hold"); }); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "composite-spread-laundering",
+          source: installedStandardSource(
+            'export default function run({ agent, items }) { const copied = [...items()]; for (const candidate of copied) if (candidate === "deploy") return agent("Deploy"); return agent("Hold"); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "composite-object-laundering",
+          source: installedStandardSource(
+            'export default async function run({ agent }, input) { const box = { value: await agent(input) }; if (box.value === "deploy") return agent("Deploy"); return agent("Hold"); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "ambient-process",
+          source: installedStandardSource(
+            'export default function run({ agent }) { if (process.env.DEPLOY === "yes") return agent("Deploy"); return agent("Hold"); }',
+          ),
+        },
+        {
+          accepted: false,
+          name: "ambient-arbitrary",
+          source: installedStandardSource(
+            'export default function run({ agent }) { return mystery === "deploy" ? agent("Deploy") : agent("Hold"); }',
+          ),
+        },
+        ...CLOSED_GRAMMAR_PROBES.map((probe) => ({ ...probe, accepted: false as const })),
+        ...DSL_RETURN_PROVENANCE_PROBES,
+      ] as const;
+      for (const probe of installedMatrix) {
+        const probePath = path.join(workflowDirectory, `${probe.name}.workflow.mjs`);
+        writeFileSync(probePath, probe.source);
+        const invoke = (): string =>
+          execFileSync(
+            path.join(consumerRoot, "node_modules", ".bin", "locus-pi"),
+            ["check-workflow-source", path.relative(consumerRoot, probePath)],
+            { cwd: consumerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+          );
+        if (probe.accepted) {
+          expect(invoke(), probe.name).toContain("standard source shape passed");
+        } else {
+          expect(invoke, probe.name).toThrow();
+        }
+      }
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 function supportsPiVersion(range: string, version: string): boolean {

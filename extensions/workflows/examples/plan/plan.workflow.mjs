@@ -164,6 +164,7 @@ function freezeSchema(value) {
 
 export const meta = {
   name: "plan",
+  profile: "legacy",
   description:
     "Defines the primary result, then drafts and critiques its implementation plan; a stalled round cap hands the decision to the operator.",
   phases: [

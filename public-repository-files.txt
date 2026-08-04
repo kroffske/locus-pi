@@ -257,6 +257,7 @@ extensions/workflows/runtime/workflow-budget.ts
 extensions/workflows/runtime/workflow-failure.ts
 extensions/workflows/runtime/workflow-handoff.ts
 extensions/workflows/runtime/workflow-journal.ts
+extensions/workflows/runtime/workflow-output.ts
 extensions/workflows/runtime/workflow-replay.ts
 extensions/workflows/runtime/workflow-resources.ts
 extensions/workflows/runtime/workflow-result.ts
@@ -267,6 +268,7 @@ extensions/workflows/runtime/workflow-runtime.ts
 extensions/workflows/runtime/workflow-script-identity.ts
 extensions/workflows/runtime/workflow-worktree.ts
 extensions/workflows/workflow-catalog.ts
+extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-command-launcher.ts
 extensions/workflows/workflow-tool.ts
 extensions/workflows/workflow-transcript.ts
@@ -275,10 +277,12 @@ package.json
 public-repository-files.txt
 public-repository.json
 scripts/audit-sources.ts
+scripts/build-workflow-source-shape.ts
 scripts/check-extension-layers.ts
 scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
+scripts/check-workflow-source-shape.ts
 scripts/materialize-public-repository.ts
 skills/locus-pi-workflows/SKILL.md
 skills/locus-pi-workflows/references/INDEX.md
@@ -397,6 +401,7 @@ tests/shared/workflows/workflow-agent-validate.test.ts
 tests/shared/workflows/workflow-artifacts.test.ts
 tests/shared/workflows/workflow-budget.test.ts
 tests/shared/workflows/workflow-continuation.test.ts
+tests/shared/workflows/workflow-durable-execution.test.ts
 tests/shared/workflows/workflow-evidence.test.ts
 tests/shared/workflows/workflow-failure-diagnostic.test.ts
 tests/shared/workflows/workflow-fusion.test.ts

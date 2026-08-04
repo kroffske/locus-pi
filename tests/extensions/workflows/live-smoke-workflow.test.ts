@@ -61,4 +61,27 @@ describe("workflow example: live-smoke.workflow.mjs", () => {
       },
     });
   });
+
+  it.each([undefined, " \t "])("preserves the default topic for missing or blank input", async (input) => {
+    const prompts: string[] = [];
+    const logs: string[] = [];
+    const runWorkflow = await loadWorkflow();
+
+    const result = await runWorkflow(
+      {
+        phase: () => undefined,
+        log: (message: string) => logs.push(message),
+        async agent(prompt: string, options: AgentCall["options"]) {
+          prompts.push(prompt);
+          return `${options.agent} inspected the directory`;
+        },
+      },
+      input,
+    );
+
+    expect(logs).toEqual(["Live smoke for: runtime smoke test"]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((prompt) => prompt.endsWith("Topic: runtime smoke test."))).toBe(true);
+    expect(result).toMatchObject({ topic: "runtime smoke test", ok: true });
+  });
 });

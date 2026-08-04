@@ -57,22 +57,19 @@ export const DEFAULT_WORKFLOW_BUDGET: Readonly<WorkflowBudget> = Object.freeze({
   // review, or retries, so 200 is ordinary-workload territory. 10,000 leaves that
   // work unconstrained while retaining a named finite stop for a genuine loop.
   totalAgents: 10_000,
-  // Two hours: roughly ten times the longest observed curated run (a live `review`
-  // took about eleven minutes), so it cannot kill honest work — a weak model is
-  // slower per stage — while still ending an abandoned run the same working day.
-  runtimeMs: 7_200_000,
-  // Exactly the ceiling that already existed implicitly: the SDK host stopped a
-  // child at DEFAULT_AGENT_SDK_TURN_TIMEOUT_MS (120_000) x maxTurns (5). Choosing
-  // any other number would be inventing one; this converts a hidden bound into a
-  // declared one, which is the entire point.
-  timeoutMs: 600_000,
+  // Emergency host fuse, not an authoring deadline. Progressing weak-model and
+  // fine-grained runs must not inherit the former two-hour ordinary stop.
+  runtimeMs: 86_400_000,
+  // Emergency per-child host fuse. Explicit tighter operator/call limits remain
+  // supported and journaled; ordinary work gets a full day before time is a stop.
+  timeoutMs: 86_400_000,
   // Unchanged from DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS. A different value would
   // invalidate every replay record for no observed benefit: no stage approaches it,
   // and stages that need less already narrow to 40 or 0.
   toolCalls: 1_000,
-  // Unchanged from the value the bridge hardcoded, now visible and overridable
-  // within the host clamp of 1..20 (`agent-runner.ts`).
-  turns: 5,
+  // Host maximum. Turn count no longer ends ordinary long reasoning at the old
+  // hidden five-turn default; explicit tighter limits remain available.
+  turns: 20,
   // Above the largest curated per-stage bound (256_000) or the shipped examples
   // would break on their first run. This is a fuse against a pathological answer,
   // not a work target; per-stage narrowing stays the script's job.
@@ -125,8 +122,8 @@ export const WORKFLOW_MAX_TIMEOUT_MS =
  *
  * `turnBudgetMs = workflowSdkTurnTimeoutMs(t, n) * n >= t + n * MARGIN > t` for
  * every `n >= 1`, so the workflow fuse is always the first deadline to expire.
- * With the package defaults (600_000 ms over 5 turns) this returns 125_000 —
- * five seconds above the 120_000 the host used before this contract existed.
+ * With the package defaults this is a host backstop strictly later than the
+ * workflow's 24-hour emergency fuse.
  */
 export function workflowSdkTurnTimeoutMs(timeoutMs: number, maxTurns: number): number {
   assertWorkflowBudgetValue("timeoutMs", timeoutMs);

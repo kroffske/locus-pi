@@ -7,6 +7,7 @@
 //
 export const meta = {
   name: "live-smoke",
+  profile: "standard",
   description: "Checks that the Pi host can spawn full-tool workflow agents and collect their reports.",
 };
 
@@ -17,21 +18,16 @@ export default async function runWorkflow(dsl, input) {
   phase("smoke");
   log(`Live smoke for: ${topic}`);
 
-  const ask = (who) =>
-    agent(
-      `Use your find tool to list the files in the current working directory, ` +
-        `then reply in ONE short sentence: name yourself ("${who}") and say how many entries you found. Topic: ${topic}.`,
-      // Label describes the TASK (glossary standard), not the agent — the actor is
-      // already shown as `agentName#id` in the live row (T-188 W3).
-      {
-        agent: who,
-        label: "list cwd entries",
-        workspaceMode: "project",
-      },
-    );
-
-  const explore = await ask("explore");
-  const quick = await ask("quick_task");
+  const explore = await agent(
+    `Use your find tool to list the files in the current working directory, ` +
+      `then reply in ONE short sentence: name yourself ("explore") and say how many entries you found. Topic: ${topic}.`,
+    { agent: "explore", label: "list cwd entries", workspaceMode: "project" },
+  );
+  const quick = await agent(
+    `Use your find tool to list the files in the current working directory, ` +
+      `then reply in ONE short sentence: name yourself ("quick_task") and say how many entries you found. Topic: ${topic}.`,
+    { agent: "quick_task", label: "list cwd entries", workspaceMode: "project" },
+  );
 
   return {
     topic,

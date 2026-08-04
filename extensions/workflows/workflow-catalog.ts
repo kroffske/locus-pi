@@ -31,9 +31,12 @@ export interface WorkflowMetaPhase {
 /** Everything the bounded static scan accepts from one literal exported `meta`. */
 export interface WorkflowStaticMeta {
   description: string;
+  profile: WorkflowAuthoringProfile;
   /** Empty when nothing was declared, or when a declaration was not fully literal. */
   phases: WorkflowMetaPhase[];
 }
+
+export type WorkflowAuthoringProfile = "standard" | "legacy" | "integration" | "unclassified";
 
 export interface WorkflowCatalogRow {
   name: string;
@@ -41,6 +44,7 @@ export interface WorkflowCatalogRow {
   sourceLabel: "Project" | "User" | "Package";
   originPath: string;
   description: string;
+  profile: WorkflowAuthoringProfile;
   phases: WorkflowMetaPhase[];
 }
 
@@ -116,6 +120,7 @@ export function buildWorkflowCatalogModel(
         sourceLabel: workflowSourceLabel(target.source),
         originPath: target.path,
         description: meta.description,
+        profile: meta.profile,
         phases: meta.phases,
       };
     },
@@ -300,7 +305,8 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
       body: [
         `source: ${row.sourceLabel} (${row.source})`,
         `target: ${row.target.kind}:${row.target.ref}`,
-        "metadata: static top-level export const meta.description and meta.phases only; the module was not imported or evaluated",
+        `profile: ${row.profile}`,
+        "metadata: static top-level export const meta.description, meta.profile, and meta.phases only; the module was not imported or evaluated",
         ...declaredPhaseLines(row.phases),
         ...workflowContractLines(projectRoot, workingDirectory),
         `resolved path: ${row.target.path}`,
@@ -348,7 +354,8 @@ function workflowContractLines(projectRoot: string, workingDirectory: string): s
     'agents: agent() is the single model-calling primitive and returns exact non-empty child text; opts.agent selects a discovered catalog prompt/model role, omitted agent uses role "default", and every workflow child always receives tools ["*"] with write/edit/bash available; legacy capability fields are ignored; opts.schema opts into a validated shaped answer instead of text',
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
-    "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), promptFile(), workspace()",
+    "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), outputDir(), invokeWorkflow(), publishPrimaryFile(), promptFile(), workspace()",
+    "durability: outputDir() selects a confined stable project namespace distinct from run evidence; invokeWorkflow() runs one saved child level with source-bound item checkpoints and shared cancellation/concurrency/physical-call budget; publishPrimaryFile() exposes a verified non-empty file reference",
     `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then the packaged examples directory, currently ${packagedWorkflowNames().join(", ")}`,
     "registration: every directory including the packaged examples directory is scanned on every call, so a workflow is registered by the existence of its <name>.workflow.mjs file",
   ];
@@ -425,11 +432,12 @@ export function readWorkflowMeta(file: string): WorkflowStaticMeta {
   try {
     source = readBoundedSource(file);
   } catch {
-    return { description: "description unavailable", phases: [] };
+    return { description: "description unavailable", profile: "unclassified", phases: [] };
   }
   const meta = staticWorkflowMeta(source);
   return {
     description: meta.description ?? "no description",
+    profile: meta.profile,
     phases: meta.phases,
   };
 }
@@ -476,6 +484,7 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
       sourceLabel: workflowSourceLabel(target.source),
       originPath: snapshot.path ?? `(snapshot unavailable for run ${runId})`,
       description: meta?.description ?? HISTORICAL_WORKFLOW_DESCRIPTION,
+      profile: meta?.profile ?? "unclassified",
       phases: meta?.phases ?? [],
     });
     if (recent.length >= RECENT_WORKFLOW_LIMIT) break;
@@ -488,8 +497,13 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
  * field. Both fields come from the same parse; a source with no literal `meta`
  * yields an undefined description and no phases.
  */
-export function staticWorkflowMeta(source: string): { description: string | undefined; phases: WorkflowMetaPhase[] } {
+export function staticWorkflowMeta(source: string): {
+  description: string | undefined;
+  profile: WorkflowAuthoringProfile;
+  phases: WorkflowMetaPhase[];
+} {
   let description: string | undefined;
+  let profile: WorkflowAuthoringProfile = "unclassified";
   let phases: WorkflowMetaPhase[] = [];
   try {
     const root = parse(Lang.JavaScript, source).root();
@@ -505,6 +519,12 @@ export function staticWorkflowMeta(source: string): { description: string | unde
           description = compactCatalogText(literal.replace(/\s+/gu, " ").trim());
         }
       }
+      const declaredProfile = staticStringValue(
+        pairs.find((pair) => staticObjectKey(pair.field("key")) === "profile")?.field("value"),
+      );
+      if (declaredProfile === "standard" || declaredProfile === "legacy" || declaredProfile === "integration") {
+        profile = declaredProfile;
+      }
       if (phases.length === 0) {
         phases = staticMetaPhases(
           pairs.find((pair) => staticObjectKey(pair.field("key")) === "phases")?.field("value"),
@@ -512,9 +532,9 @@ export function staticWorkflowMeta(source: string): { description: string | unde
       }
     }
   } catch {
-    return { description: undefined, phases: [] };
+    return { description: undefined, profile: "unclassified", phases: [] };
   }
-  return { description, phases };
+  return { description, profile, phases };
 }
 
 /** Declared phases from one bounded source prefix; empty when nothing literal was declared. */
@@ -701,7 +721,7 @@ function passiveCatalogRowLine(row: WorkflowCatalogCurrentRow | WorkflowCatalogH
   // Stage count only: the full declaration belongs to /workflows info, and a
   // catalog row that grows with the pipeline stops being scannable.
   const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
-  return `${row.name}${run} · ${workflowSourceBadge(row.source)} · ${row.description}${phases} · ${row.originPath}`;
+  return `${row.name}${run} · ${workflowSourceBadge(row.source)} · ${row.description}${phases} · profile=${row.profile} · ${row.originPath}`;
 }
 
 export function workflowSourceBadge(source: WorkflowCatalogRow["source"]): "[P]" | "[U]" | "[PKG]" {

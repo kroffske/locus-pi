@@ -69,6 +69,13 @@ the typed help fallback. Flat `/workflow-*` commands remain compatibility
 aliases while their behavior reaches parity with the unified command; they are
 not removed yet.
 
+Check a newly authored standard workflow from its project directory with the
+installed package command; no project-local script or `tsx` is required:
+
+```bash
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+```
+
 In the interactive catalog, each row leads with the workflow name and uses a
 compact `[P]`, `[U]`, or `[PKG]` badge for its Project, User, or Package source.
 History rows lead with the workflow name, then run id, then source badge. On a
