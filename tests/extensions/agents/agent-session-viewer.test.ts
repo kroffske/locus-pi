@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  clearViewerExternalRows,
+  setViewerExternalRows,
+} from "../../../extensions/_shared/operator/viewer-geometry.js";
 import { TUI, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
@@ -183,24 +187,37 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(32);
-    expect(rendered).toHaveLength(tui.terminal.rows);
+    expect(rendered).toHaveLength(tui.terminal.rows - 1);
     expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
-    expect(rendered[0]).toMatch(/^── /u);
-    expect(rendered.at(-1)).toMatch(/^── Esc close/u);
+    expect(rendered[0]).toMatch(/^┌─ \[agent .+\] started work/u);
+    expect(rendered.at(-1)).toMatch(/^╘═ STATUS: queued/u);
     expect(rendered.join("\n")).toContain("history-7");
     expect(rendered.join("\n")).not.toContain("history-0");
 
     viewer.handleInput("home");
     const historyStart = viewer.render(32).join("\n");
-    expect(historyStart).toContain("── Request");
+    expect(historyStart).toContain("├─ REQUEST");
     expect(historyStart).toContain("Inspect the changed command");
-    expect(historyStart.indexOf("── Request")).toBeLessThan(historyStart.indexOf("── Agent history"));
+    expect(historyStart.indexOf("├─ REQUEST")).toBeLessThan(historyStart.indexOf("├─ RUNTIME"));
     for (const width of [1, 2, 8]) {
       const narrow = viewer.render(width);
-      expect(narrow).toHaveLength(tui.terminal.rows);
+      expect(narrow).toHaveLength(tui.terminal.rows - 1);
       expect(narrow.every((line) => visibleWidth(line) === width)).toBe(true);
     }
     viewer.dispose();
+  });
+
+  it("reserves both the permanent footer and an active workflow widget", () => {
+    const row = agentLiveStore.begin({ id: "reserved-viewer", agentName: "reviewer", label: "Review" });
+    const tui = { terminal: { rows: 12, columns: 80 }, requestRender: vi.fn() };
+    setViewerExternalRows("test-active-workflow", 3);
+    try {
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+      expect(viewer.render(80)).toHaveLength(12 - 1 - 3);
+      viewer.dispose();
+    } finally {
+      clearViewerExternalRows("test-active-workflow");
+    }
   });
 
   it("renders request control characters as text instead of terminal control sequences", () => {
@@ -236,7 +253,7 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const initial = viewer.render(80);
-    expect(initial).toHaveLength(tui.terminal.rows);
+    expect(initial).toHaveLength(tui.terminal.rows - 1);
     expect(initial.every((line) => visibleWidth(line) === 80)).toBe(true);
     expect(initial.join("\n")).toContain("message-11");
     expect(initial.join("\n")).not.toContain("message-0");
@@ -286,7 +303,7 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     await flushForcedRender(tui);
-    expect(terminal.output.split("\r\n")).toHaveLength(terminal.rows);
+    expect(terminal.output.split("\r\n")).toHaveLength(terminal.rows - 1);
     expect(terminal.output).toContain("scrollback-11");
     expect(terminal.output).toContain("tool:read:compact");
 
@@ -396,7 +413,10 @@ describe("AgentSessionViewer", () => {
       matches: () => false,
     });
 
-    expect(viewer.render(80)).toHaveLength(tui.terminal.rows);
+    const initial = viewer.render(80);
+    expect(initial).toHaveLength(tui.terminal.rows - 1);
+    expect(initial.join("\n")).toContain("╞═ MESSAGE TO AGENT");
+    expect(initial.at(-1)).toMatch(/^╘═ STATUS: queued/u);
     viewer.handleInput("h");
     viewer.handleInput("i");
     viewer.handleInput("enter");
@@ -419,7 +439,7 @@ describe("AgentSessionViewer", () => {
     });
 
     const compact = viewer.render(80);
-    expect(compact).toHaveLength(tui.terminal.rows);
+    expect(compact).toHaveLength(tui.terminal.rows - 1);
     expect(compact.join("\n")).toContain("resize terminal for input");
     viewer.handleInput("x");
     viewer.handleInput("enter");
@@ -476,7 +496,7 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(terminal.rows);
+    expect(rendered).toHaveLength(terminal.rows - 1);
     expect(rendered.join("\n")).toContain("Message this agent");
     viewer.handleInput("o");
     viewer.handleInput("k");
@@ -608,7 +628,7 @@ describe("AgentSessionViewer", () => {
     });
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 8, columns: 100 }, requestRender: vi.fn() },
+      { terminal: { rows: 9, columns: 100 }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );

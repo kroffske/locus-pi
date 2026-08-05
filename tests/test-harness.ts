@@ -14,6 +14,7 @@ import type {
   LifecycleEvent,
   ModelLike,
   ProviderConfigLike,
+  FooterFactory,
   SendMessageOptions,
   ShortcutOptions,
   ThemeLike,
@@ -86,6 +87,8 @@ export interface Harness {
   editorText: string;
   /** The latest custom editor factory installed via ctx.ui.setEditorComponent. */
   editorFactory?: EditorFactory;
+  /** The latest custom footer factory installed via ctx.ui.setFooter. */
+  footerFactory?: FooterFactory;
 }
 
 export function createHarness(
@@ -136,6 +139,7 @@ export function createHarness(
   let selectedModel: ModelLike | undefined;
   let thinkingLevel: ThinkingLevel | undefined;
   let editorFactory: EditorFactory | undefined;
+  let footerFactory: FooterFactory | undefined;
   let editorText = "";
   let harness: Harness;
   const ctx: ExtensionCommandContext = {
@@ -218,6 +222,11 @@ export function createHarness(
         if (text === undefined) statuses.delete(key);
         else statuses.set(key, text);
       },
+      setFooter(factory) {
+        footerFactory = factory;
+        if (factory === undefined) delete harness.footerFactory;
+        else harness.footerFactory = factory;
+      },
       setWidget(key, content, options) {
         widgetPayloads.set(key, content);
         widgetOptions.set(key, options);
@@ -289,6 +298,12 @@ export function createHarness(
         return sessionId;
       },
       getSessionFile() {
+        return undefined;
+      },
+      getCwd() {
+        return projectRoot;
+      },
+      getSessionName() {
         return undefined;
       },
     },
@@ -398,6 +413,7 @@ export function createHarness(
     abortCalls: 0,
     editorText,
   };
+  if (footerFactory) harness.footerFactory = footerFactory;
   if (selectedModel) harness.selectedModel = selectedModel;
   if (thinkingLevel) harness.thinkingLevel = thinkingLevel;
   return harness;

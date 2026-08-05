@@ -5,6 +5,10 @@ import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderOperatorBlock, type OperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
+import {
+  clearViewerExternalRows,
+  setViewerExternalRows,
+} from "../../../extensions/_shared/operator/viewer-geometry.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "../../../extensions/workflows/catalog-viewer.js";
 import {
@@ -24,6 +28,7 @@ const roots: string[] = [];
 const originalHome = process.env.HOME;
 
 afterEach(() => {
+  clearViewerExternalRows("test-workflow-catalog");
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -273,6 +278,15 @@ describe("focused workflow catalog", () => {
     for (const width of [146, 80, 48]) {
       expect(viewer.render(width)).toHaveLength(expected);
     }
+  });
+
+  it("also reserves the active workflow widget beneath the focused catalog", () => {
+    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer } = createViewer(model, root, 24);
+    setViewerExternalRows("test-workflow-catalog", 2);
+
+    expect(viewer.render(80)).toHaveLength(24 - 3 - 2);
   });
 
   it.each([3, 4, 5, 6])("shows the exact compact target Enter inspects at %i terminal rows", (rows) => {

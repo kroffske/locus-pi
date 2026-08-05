@@ -357,9 +357,9 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships ten active entrypoints, their manifests, and complete local imports", () => {
+  it("ships eleven active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    expect(pkg.pi.extensions).toHaveLength(10);
+    expect(pkg.pi.extensions).toHaveLength(11);
 
     for (const entrypoint of pkg.pi.extensions) {
       const normalizedEntrypoint = entrypoint.replace(/^\.\//, "");

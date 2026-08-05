@@ -20,16 +20,18 @@ import {
   type WorkflowResultPersistence,
 } from "./runtime/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../_shared/operator/widget-render.js";
+import { clearViewerExternalRows, setViewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 
 export interface ThemeLike {
   fg?: (color: string, text: string) => string;
+  bg?: (color: string, text: string) => string;
   bold?: (s: string) => string;
 }
 
 export function coerceTheme(t: unknown): ThemeLike {
   if (typeof t !== "object" || t === null) return {};
-  const theme = t as { fg?: unknown; bold?: unknown };
+  const theme = t as { fg?: unknown; bg?: unknown; bold?: unknown };
   const result: ThemeLike = {};
   if (typeof theme.fg === "function") {
     const fg = theme.fg as (this: unknown, color: string, text: string) => unknown;
@@ -39,12 +41,20 @@ export function coerceTheme(t: unknown): ThemeLike {
     const bold = theme.bold as (this: unknown, s: string) => unknown;
     result.bold = (s: string) => String(bold.call(theme, s));
   }
+  if (typeof theme.bg === "function") {
+    const bg = theme.bg as (this: unknown, color: string, text: string) => unknown;
+    result.bg = (color: string, text: string) => String(bg.call(theme, color, text));
+  }
   return result;
 }
 
 export const WORKFLOW_LIVE_WIDGET_KEY = "workflows-live";
 
 const LIVE_TICK_MS = 1000;
+const WORKFLOW_RAIL_BACKGROUND = "\u001b[48;2;88;61;121m";
+const WORKFLOW_RAIL_FOREGROUND = "\u001b[38;2;248;241;255m";
+const WORKFLOW_RAIL_RESET = "\u001b[0m";
+const WORKFLOW_VIEWER_RESERVATION_OWNER = "workflow-live";
 const NOOP_TUI: WidgetFactoryTui = { requestRender: () => {} };
 const OBSERVER_ROW_LIMIT = 2;
 const OBSERVER_EVENT_DIGEST_LIMIT = 5;
@@ -109,6 +119,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   }
 
   dispose(): void {
+    clearViewerExternalRows(WORKFLOW_VIEWER_RESERVATION_OWNER);
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#onStoreChange);
@@ -174,7 +185,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       return [...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length), fleetFooter];
     }
 
-    const stageLine = [this.renderStageFrontier(width)];
     const passiveDiagnostics = this.journal
       .filter(
         (line) =>
@@ -183,14 +193,15 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       )
       .slice(-2)
       .map((line) => truncate(formatProgressTailLine(line), width));
-    const hint = truncate("  /ps inspect agents", width);
-    // The roster owns the variable-height middle: fixed lines (header, stages,
-    // verdict, diagnostics, hint) are reserved first, so the roster clamps itself
-    // instead of pushing the verdict off a short terminal.
-    const fixedCount = 1 + stageLine.length + doneLines.length + passiveDiagnostics.length + 1;
+    // One workflow rail owns workflow identity, stage, counters, tokens, and
+    // commands. Agent rows begin immediately beneath it; no detached hint/stage
+    // rows can be mistaken for another footer.
+    const fixedCount = 1 + doneLines.length + passiveDiagnostics.length;
     const rowLines = this.renderRoster(liveRows, width, Math.max(1, budget - fixedCount));
-    const body = [header, ...stageLine, ...rowLines, ...doneLines];
-    return [...fitLines(body, passiveDiagnostics, Math.max(0, budget - 1), width, doneLines.length), hint];
+    const body = [header, ...rowLines, ...doneLines];
+    const rendered = fitLines(body, passiveDiagnostics, budget, width, doneLines.length);
+    setViewerExternalRows(WORKFLOW_VIEWER_RESERVATION_OWNER, rendered.length);
+    return rendered;
   }
 
   private progressTailLines(width: number): string[] {
@@ -235,30 +246,38 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     }
     const statusMark = workflowProgressStatusMark(headerStatus);
     const frontier = workflowStageFrontier(this.options.declaredStages ?? [], this.journal);
-    const progress =
-      this.options.scope === "workflow" && frontier.length > 0
-        ? `  ${frontier.filter((stage) => stage.state !== "declared").length}/${frontier.length}`
-        : "";
+    const current =
+      frontier.find((stage) => stage.state === "current") ??
+      frontier.filter((stage) => stage.state === "reached").at(-1);
+    const stageIndex = current === undefined ? 0 : frontier.indexOf(current) + 1;
+    const stage =
+      frontier.length === 0 ? "stage —" : `stage ${stageIndex}/${frontier.length} · ${current?.title ?? "waiting"}`;
     const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
-    const replayedText = replayedCount > 0 ? `  replayed=${replayedCount}` : "";
-    const runSuffix = shortWorkflowRunId(this.runId);
-    const owner = `workflow ${this.scriptRef} #${runSuffix}`;
-    const text = `agents · ${owner}  ${statusMark} ${headerLabel}${progress}${replayedText}`;
-    return this.#bold(truncate(text, width));
-  }
-
-  private renderStageFrontier(width: number): string {
-    const stages = workflowStageFrontier(this.options.declaredStages ?? [], this.journal);
-    if (stages.length === 0) return this.#fg("dim", truncate("stages · none declared", width));
-    const full = `stages · ${stages.map((stage) => `${stage.title} (${stage.state})`).join(" — ")}`;
-    if (full.length <= width) return full;
-    const current = stages.find((stage) => stage.state === "current");
-    const reached = stages.filter((stage) => stage.state === "reached").length;
-    const declared = stages.filter((stage) => stage.state === "declared").length;
-    if (current === undefined) return truncate(`stages · reached ${reached} · declared ${declared}`, width);
-    const suffix = ` · reached ${reached} · declared ${declared}`;
-    const currentLine = `stages · current ${current.title}`;
-    return currentLine.length + suffix.length <= width ? `${currentLine}${suffix}` : truncate(currentLine, width);
+    const replayedText = replayedCount > 0 ? ` · replayed ${replayedCount}` : "";
+    const leaves = selectFleetMenuLeafRows(rows);
+    const counts = countAgentLiveStatuses(leaves);
+    const terminalCount = counts.done + counts.cancelled + counts.error;
+    const tokenTotal = leaves.reduce(
+      (sum, row) => sum + (row.tokenCount === undefined ? 0 : row.tokenCount.input + row.tokenCount.output),
+      0,
+    );
+    const tokenText = tokenTotal > 0 ? ` · tok ${formatCompactTokenCount(tokenTotal)}` : "";
+    const state = `${statusMark} ${headerLabel}`;
+    const countsText = `${counts.working} active · ${terminalCount}/${leaves.length} done${tokenText}${replayedText}`;
+    const fullCommands =
+      this.done === undefined
+        ? "/ps inspect agents · /workflows status last · /workflows stop last"
+        : "/ps inspect agents · /workflows status last";
+    const mediumCommands =
+      this.done === undefined ? "/ps inspect agents · /workflows stop last" : "/workflows status last";
+    const full = `◆ WORKFLOW · ${this.scriptRef} │ ${stage} · ${state} │ ${countsText} │ ${fullCommands}`;
+    const medium = `◆ WORKFLOW · ${this.scriptRef} │ ${stage} · ${state} │ ${countsText} │ ${mediumCommands}`;
+    const commandCompact = `◆ WF ${this.scriptRef} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${counts.working} active${tokenText} │ ${mediumCommands}`;
+    const compact = `◆ ${this.scriptRef} │ ${stage} · ${state} │ ${countsText}`;
+    const text =
+      [full, medium, commandCompact, compact].find((candidate) => candidate.length <= width) ??
+      truncate(compact, width);
+    return this.#rail(text, width);
   }
 
   /**
@@ -386,6 +405,23 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   #bold(text: string): string {
     return this.theme.bold ? this.theme.bold(text) : text;
   }
+
+  #rail(text: string, width: number): string {
+    const fitted = truncate(text, width);
+    const padded = `${fitted}${" ".repeat(Math.max(0, width - fitted.length))}`;
+    if (this.theme.fg === undefined && this.theme.bg === undefined) return padded;
+    return `${WORKFLOW_RAIL_BACKGROUND}${WORKFLOW_RAIL_FOREGROUND}${padded}${WORKFLOW_RAIL_RESET}`;
+  }
+}
+
+function formatCompactTokenCount(tokens: number): string {
+  if (tokens < 1000) return String(Math.max(0, Math.trunc(tokens)));
+  if (tokens < 1_000_000) return `${trimCompactTokenCount((tokens / 1000).toFixed(1))}k`;
+  return `${trimCompactTokenCount((tokens / 1_000_000).toFixed(1))}M`;
+}
+
+function trimCompactTokenCount(value: string): string {
+  return value.endsWith(".0") ? value.slice(0, -2) : value;
 }
 
 function workflowProgressStatusMark(status: WorkflowProjectedStatus | "running"): string {

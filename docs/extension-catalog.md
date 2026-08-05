@@ -1,7 +1,7 @@
 # Public extension catalog
 
 This catalog is the operator- and planning-facing roster of the public extensions
-shipped by this package. It covers exactly `package.json#pi.extensions` (ten
+shipped by this package. It covers exactly `package.json#pi.extensions` (eleven
 extensions). The extension index remains the detailed source map; this page is
 the concise catalog of names, public roles, paths, and dependency boundaries.
 
@@ -24,6 +24,7 @@ not feature dependencies.
 | `model`               | Persisted model-role routing and `/effort`; Pi retains operator-owned `/model` and `/models`.                | `extensions/model/index.ts`               | `extensions/model/manifest.json`               | `docs/extensions/active/model.md`               | none                                  | `host`, `model`, `operator`, `runtime`                  | `@earendil-works/pi-tui`                                                                           |
 | `plan`                | Behavioral plan mode, goal runtime, prompt shelves, planning/review/todo commands, and the `goal` tool.      | `extensions/plan/index.ts`                | `extensions/plan/manifest.json`                | `docs/extensions/active/plan.md`                | none                                  | `host`, `operator`, `project`                           | `@earendil-works/pi-coding-agent`, `@sinclair/typebox`                                             |
 | `security-gate`       | `/security-audit` and an audit-only `tool_call` observer.                                                    | `extensions/security-gate/index.ts`       | `extensions/security-gate/manifest.json`       | `docs/extensions/active/security-gate.md`       | none                                  | `host`, `operator`                                      | `@earendil-works/pi-tui`                                                                           |
+| `status-line`         | One-row violet TUI footer for location, model, context, tokens, compaction, and extension status.            | `extensions/status-line/index.ts`         | `extensions/status-line/manifest.json`         | `docs/extensions/active/status-line.md`         | none                                  | `agent-runtime`, `host`                                 | `@earendil-works/pi-tui`                                                                           |
 | `todo-context`        | Session todos, `todo_write`, bounded opt-in settled continuation, and operator `/todo`.                      | `extensions/todo-context/index.ts`        | `extensions/todo-context/manifest.json`        | `docs/extensions/active/todo-context.md`        | none                                  | `host`, `operator`, `project`, `runtime`                | `@sinclair/typebox`                                                                                |
 | `workflows`           | Workflow runtime, `workflow`, opt-in Fusion, and shipped Package workflows.                                  | `extensions/workflows/index.ts`           | `extensions/workflows/manifest.json`           | `docs/extensions/active/workflows.md`           | none                                  | `agent-runtime`, `host`, `model`, `operator`            | `@ast-grep/napi`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@sinclair/typebox` |
 
@@ -36,8 +37,8 @@ The direct feature graph has exactly two edges:
 - `loop → workflows/run-read.ts`, the read-only persisted-run facade used to
   build a bounded continuation.
 
-The other eight public extensions—`ask-user-question`, `ast-structural-edit`,
-`devext-doctor`, `model`, `plan`, `security-gate`, `todo-context`, and
+The other nine public extensions—`ask-user-question`, `ast-structural-edit`,
+`devext-doctor`, `model`, `plan`, `security-gate`, `status-line`, `todo-context`, and
 `workflows`—have no direct feature-extension imports. Their shared-layer and
 external-package imports remain listed separately in the roster above.
 

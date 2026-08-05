@@ -186,7 +186,9 @@ describe("agent drill command and inline interaction", () => {
     agents(byShortId.pi);
     await byShortId.commands.get("agent")!.handler("drill 440000", byShortId.ctx as ExtensionCommandContext);
     const shortFrame = byShortId.customRenderFrames[0] ?? [];
-    expect(shortFrame[0]).toContain(`${agentLiveStore.rows.get("run:reviewer:1")?.displayName} — review the diff`);
+    expect(shortFrame[0]).toContain(
+      `[agent ${agentLiveStore.rows.get("run:reviewer:1")?.displayName}] started work · review the diff`,
+    );
     expect(shortFrame.join("\n")).toContain("Agent completed without assistant output.");
 
     // A child-session id fragment resolves the same completed row.

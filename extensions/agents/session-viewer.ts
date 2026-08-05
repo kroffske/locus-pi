@@ -10,8 +10,9 @@ import type {
   AgentTranscriptToolBlock,
 } from "../_shared/agent-runtime/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
-import { formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
+import { agentLiveDisplayName, agentLiveTitle } from "../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../_shared/host/error-text.js";
+import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
 interface ViewerTui extends CustomUiTui {
@@ -83,6 +84,9 @@ type NativeComponentEntry =
       resultKey?: string;
       expanded: boolean;
     };
+
+// Pi renders the default-loaded Locus footer beneath custom views.
+const PI_HOST_FOOTER_ROWS = 1;
 
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
@@ -205,7 +209,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     private readonly keybindings?: ViewerKeybindings,
   ) {
     const row = agentLiveStore.rowForExecution(execution);
-    this.#title = row === undefined ? "Agent execution unavailable" : formatAgentDrillTitle(row);
+    this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
     this.#selection = rounds?.active ?? 1;
     const requestRender = () => {
       if (this.#disposed) return;
@@ -232,29 +236,32 @@ export class AgentSessionViewer implements CustomUiComponent {
       return [];
     }
     const rounds = this.roundsLabel();
-    const header = dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth);
+    const header = dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth, "top");
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
       : this.#nativeLines(row, snapshot, safeWidth);
-    const terminalRows = finiteTerminalRows(this.tui.terminal?.rows);
+    const hostRows = finiteTerminalRows(this.tui.terminal?.rows);
+    const terminalRows =
+      hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
     let input = this.#syncInput(terminalRows);
     let inputLines = input?.render(safeWidth).map((line) => fitLine(line, safeWidth)) ?? [];
-    if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 3)) {
+    if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 4)) {
       this.#suppressInputForRows(terminalRows);
       input = undefined;
       inputLines = [];
     }
-    const footer = dividerLine(this.#footerLabel(input !== undefined), safeWidth);
+    const inputDivider = input === undefined ? [] : [dividerLine("MESSAGE TO AGENT", safeWidth, "strong")];
+    const footer = dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
     if (terminalRows === undefined) {
-      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputLines, footer];
+      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputDivider, ...inputLines, footer];
     }
     if (terminalRows === 1) return [header];
-    const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
+    const bodyHeight = Math.max(0, terminalRows - inputDivider.length - inputLines.length - 2);
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
     const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => fitLine(line, safeWidth));
-    return [header, ...visible, ...inputLines, footer];
+    return [header, ...visible, ...inputDivider, ...inputLines, footer];
   }
 
   handleInput(data: string): void {
@@ -359,9 +366,9 @@ export class AgentSessionViewer implements CustomUiComponent {
             ...this.capability.render(snapshot.blocks, this.tui, width, this.#expandedTools),
           ];
     return [
-      dividerLine("Request", width),
+      dividerLine("REQUEST", width),
       ...requestLines(row?.request, width),
-      dividerLine("Agent history", width),
+      dividerLine("RUNTIME", width),
       ...transcript,
     ];
   }
@@ -444,14 +451,15 @@ export class AgentSessionViewer implements CustomUiComponent {
     return fallbacks.includes(data);
   }
 
-  #footerLabel(hasInput: boolean): string {
+  #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
     const controls = hasInput
       ? "Enter send"
       : this.#inputSuppressedAtRows === undefined
         ? "PgUp/PgDn history"
         : "resize terminal for input";
-    return `${notice}Esc close · ${controls} · Ctrl+O tools:${this.#expandedTools ? "expanded" : "compact"}`;
+    const status = this.#isHistoricalRound() ? "history" : (row?.status ?? "unavailable");
+    return `STATUS: ${status} · ${notice}Esc close · ${controls} · Ctrl+O tools:${this.#expandedTools ? "expanded" : "compact"}`;
   }
 }
 
@@ -582,13 +590,22 @@ function requestLines(request: string | undefined, width: number): string[] {
   return safe.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width)));
 }
 
-function dividerLine(label: string, width: number): string {
-  if (width < 7) return "─".repeat(width);
-  const left = "── ";
-  const right = " ──";
-  const labelWidth = width - visibleWidth(left) - visibleWidth(right);
+type DividerStyle = "top" | "section" | "strong" | "bottom";
+
+function dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
+  const strong = style === "strong" || style === "bottom";
+  const fill = strong ? "═" : "─";
+  const left = style === "top" ? "┌─ " : style === "strong" ? "╞═ " : style === "bottom" ? "╘═ " : "├─ ";
+  if (width <= visibleWidth(left)) return fill.repeat(width);
+  const labelWidth = width - visibleWidth(left) - 1;
   const fitted = truncateToWidth(label, labelWidth, "…");
-  return `${left}${fitted}${"─".repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}${right}`;
+  return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
+}
+
+function formatAgentSessionStart(row: AgentLiveRow): string {
+  const start = `[agent ${agentLiveDisplayName(row)}] started work`;
+  const title = agentLiveTitle(row);
+  return title === "" ? start : `${start} · ${title}`;
 }
 
 function finiteTerminalRows(value: number | undefined): number | undefined {

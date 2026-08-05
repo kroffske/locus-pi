@@ -2,7 +2,7 @@ import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
-import { clamp } from "../_shared/operator/viewer-geometry.js";
+import { clamp, viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
@@ -16,7 +16,8 @@ import {
 } from "./workflow-catalog.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
-// Pi 0.82.0 keeps two footer rows plus an optional extension-status row.
+// Keep two rows of breathing room above the one-row Locus footer so focused
+// browsers never collide with host redraws on short terminals.
 const PI_HOST_FOOTER_ROWS = 3;
 const COMPACT_FOOTER_ROWS = 2;
 const SOURCE_FRAME_ROWS = 2;
@@ -653,7 +654,7 @@ function terminalRows(tui: CustomUiTui): number {
 }
 
 function viewerRows(tui: CustomUiTui): number {
-  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS);
+  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS - viewerExternalRows());
 }
 
 function identityBodyHeight(tui: CustomUiTui): number {

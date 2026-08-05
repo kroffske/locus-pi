@@ -9,6 +9,7 @@
 .agents/agents/extension-model.md
 .agents/agents/extension-plan.md
 .agents/agents/extension-security-gate.md
+.agents/agents/extension-status-line.md
 .agents/agents/extension-todo-context.md
 .agents/agents/extension-workflows.md
 .agents/agents/librarian.md
@@ -56,6 +57,7 @@ docs/extensions/active/loop.md
 docs/extensions/active/model.md
 docs/extensions/active/plan.md
 docs/extensions/active/security-gate.md
+docs/extensions/active/status-line.md
 docs/extensions/active/todo-context.md
 docs/extensions/active/workflows.md
 docs/milestones.md
@@ -69,6 +71,7 @@ docs/source-audit/model.md
 docs/source-audit/omp-tools.md
 docs/source-audit/plan.md
 docs/source-audit/security-gate.md
+docs/source-audit/status-line.md
 docs/source-audit/todo-write.md
 docs/source-audit/workflows.md
 extension-manifest.schema.json
@@ -193,6 +196,9 @@ extensions/plan/system-prompt.ts
 extensions/security-gate/index.ts
 extensions/security-gate/manifest.json
 extensions/security-gate/permissions.ts
+extensions/status-line/footer.ts
+extensions/status-line/index.ts
+extensions/status-line/manifest.json
 extensions/todo-context/command-parser.ts
 extensions/todo-context/command-router.ts
 extensions/todo-context/index.ts
@@ -316,6 +322,7 @@ tests/extensions/model/model.test.ts
 tests/extensions/plan/plan-behavioral-mode.test.ts
 tests/extensions/plan/plan-command-surfaces.test.ts
 tests/extensions/plan/plan-prompt-commands.test.ts
+tests/extensions/status-line/status-line.test.ts
 tests/extensions/todo-context/todo-command-surfaces.test.ts
 tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/consilium-reference-workflow.test.ts
@@ -387,6 +394,7 @@ tests/shared/operator-ui/operator-interaction.test.ts
 tests/shared/operator-ui/operator-question.test.ts
 tests/shared/operator-ui/operator-ui.test.ts
 tests/shared/operator-ui/prompt-shelf-ui.test.ts
+tests/shared/operator-ui/viewer-geometry.test.ts
 tests/shared/security/security.test.ts
 tests/shared/session/session-core-jsonl.test.ts
 tests/shared/session/session-core.test.ts

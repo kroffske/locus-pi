@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  clearViewerExternalRows,
+  setViewerExternalRows,
+} from "../../../extensions/_shared/operator/viewer-geometry.js";
 import { createWorkflowArtifactStore } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
@@ -18,10 +22,25 @@ import { createHarness } from "../../test-harness.js";
 const roots: string[] = [];
 
 afterEach(() => {
+  clearViewerExternalRows("test-workflow-run");
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("workflow persisted evidence viewer", () => {
+  it("reserves the active workflow widget beneath the focused run viewer", () => {
+    const root = makeRoot();
+    const viewer = new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 24, columns: 80 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+    );
+    setViewerExternalRows("test-workflow-run", 2);
+
+    expect(viewer.render(80)).toHaveLength(24 - 3 - 2);
+  });
+
   it("navigates runs to stages, distinct repeated calls, and readable Markdown/JSON evidence", () => {
     const root = makeRoot();
     const runId = "20260722-010101-ab12";

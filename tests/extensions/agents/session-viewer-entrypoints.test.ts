@@ -142,12 +142,12 @@ process.stdout.write(JSON.stringify({
     expect(proof).toEqual({
       ok: true,
       loads: 2,
-      producerOpened: "has=true\nrendered=6",
+      producerOpened: "has=true\nrendered=5",
       // The guard invariant: the peer instance sees the terminal-owning viewer.
       consumerObserved: "has=true",
       consumerDisposed: "has=false",
       producerAfterPeerDispose: "has=false\nrendered=0\ndone=false",
-      consumerOpened: "has=true\nrendered=6",
+      consumerOpened: "has=true\nrendered=5",
       producerDisposed: "has=false",
       consumerAfterPeerDispose: "has=false\nrendered=0\ndone=false",
       // A viewer opened by the reloaded instance is visible to the first pass's instance.

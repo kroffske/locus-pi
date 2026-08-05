@@ -16,41 +16,41 @@ drafts and one-off artifacts are not part of this map.
 - `extensions/<name>/manifest.json` — machine-readable metadata for an
   extension: commands, tools, hooks, permissions, risk and review/source status.
 - [extension-catalog.md](extension-catalog.md) — concise operator and planning
-  catalog of the ten public extensions, their paths, roles, and dependency
+  catalog of the eleven public extensions, their paths, roles, and dependency
   boundaries.
 - [extension-index.md](extension-index.md) — detailed public source map for the
-  ten retained active extensions and six curated workflows, including
+  eleven retained active extensions and six curated workflows, including
   entrypoint, manifest, manual, and dependency paths plus the direct feature
   dependency graph.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
   promotion decisions. If an extension changes the default surface, the decision
   must show up there.
-- [extensions/active/](extensions/active/README.md) — manual pages for the ten
+- [extensions/active/](extensions/active/README.md) — manual pages for the eleven
   default extensions.
 - `docs/prd/todo-session-auto-continuation.md` — repository product contract for
   bounded session queue execution. Repository-only; it is not packed.
 
-Registered extensions: 10 active by default: `agents`, `ask-user-question`, `ast-structural-edit`, `devext-doctor`, `loop`, `model`, `plan`, `security-gate`, `todo-context`, `workflows`.
+Registered extensions: 11 active by default: `agents`, `ask-user-question`, `ast-structural-edit`, `devext-doctor`, `loop`, `model`, `plan`, `security-gate`, `status-line`, `todo-context`, `workflows`.
 
 ## Public Map
 
-| Surface                                                    | Public home                                                                                                                                          |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install, trust, `npx` smoke and quick operator checks      | [../README.md](../README.md).                                                                                                                        |
-| Repository-only release policies                           | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed.   |
-| Default extension list                                     | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                        |
-| Active extension manuals                                   | [extensions/active/](extensions/active/README.md).                                                                                                   |
-| Todo queue execution product contract                      | `docs/prd/todo-session-auto-continuation.md`, repository-only and intentionally not packed.                                                          |
-| Extension catalog for operators and planning agents        | [extension-catalog.md](extension-catalog.md).                                                                                                        |
-| Extension source, status, risk, paths and dependency graph | [extension-index.md](extension-index.md).                                                                                                            |
-| Ownership and promotion decisions                          | [extension-ownership-matrix.md](extension-ownership-matrix.md).                                                                                      |
-| Package/runtime boundary                                   | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                            |
-| Agent execution trust model                                | [adr/agent-execution-trust-model.md](adr/agent-execution-trust-model.md).                                                                            |
-| Curated workflow portfolio                                 | [adr/curated-workflow-portfolio.md](adr/curated-workflow-portfolio.md).                                                                              |
-| Extension ownership layers under `extensions/_shared/`     | [adr/extension-ownership-layers.md](adr/extension-ownership-layers.md).                                                                              |
-| Source attribution and borrowed behavior                   | [Repository-only source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit) named by active manifests.                    |
-| Bundled agent catalog used by `agents` and `workflows`     | `.agents/agents/`, which ships in the tarball as ten agent files with no index page. This is package runtime surface, not private planning material. |
-| Shipped skill an agent loads to use workflows              | [../skills/locus-pi-workflows/SKILL.md](../skills/locus-pi-workflows/SKILL.md), declared by `package.json#pi.skills`.                                |
+| Surface                                                    | Public home                                                                                                                                                           |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install, trust, `npx` smoke and quick operator checks      | [../README.md](../README.md).                                                                                                                                         |
+| Repository-only release policies                           | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed.                    |
+| Default extension list                                     | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                                         |
+| Active extension manuals                                   | [extensions/active/](extensions/active/README.md).                                                                                                                    |
+| Todo queue execution product contract                      | `docs/prd/todo-session-auto-continuation.md`, repository-only and intentionally not packed.                                                                           |
+| Extension catalog for operators and planning agents        | [extension-catalog.md](extension-catalog.md).                                                                                                                         |
+| Extension source, status, risk, paths and dependency graph | [extension-index.md](extension-index.md).                                                                                                                             |
+| Ownership and promotion decisions                          | [extension-ownership-matrix.md](extension-ownership-matrix.md).                                                                                                       |
+| Package/runtime boundary                                   | [runtime/locus-workspace.md](runtime/locus-workspace.md).                                                                                                             |
+| Agent execution trust model                                | [adr/agent-execution-trust-model.md](adr/agent-execution-trust-model.md).                                                                                             |
+| Curated workflow portfolio                                 | [adr/curated-workflow-portfolio.md](adr/curated-workflow-portfolio.md).                                                                                               |
+| Extension ownership layers under `extensions/_shared/`     | [adr/extension-ownership-layers.md](adr/extension-ownership-layers.md).                                                                                               |
+| Source attribution and borrowed behavior                   | [Repository-only source-audit notes](https://github.com/kroffske/locus-pi/tree/main/docs/source-audit) named by active manifests.                                     |
+| Bundled agent catalog used by `agents` and `workflows`     | `.agents/agents/`, which ships the generic profiles plus one dedicated profile per default extension. This is package runtime surface, not private planning material. |
+| Shipped skill an agent loads to use workflows              | [../skills/locus-pi-workflows/SKILL.md](../skills/locus-pi-workflows/SKILL.md), declared by `package.json#pi.skills`.                                                 |
 
 ## Excluded from the clean release
 
@@ -75,7 +75,7 @@ promotion decision says otherwise:
 
 ## Package Boundary
 
-The npm package intentionally ships only the ten default entrypoints and their
+The npm package intentionally ships only the eleven default entrypoints and their
 explicit local import closure, the six curated Package workflows
 (`live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
 `review-fix`), active manifests, the
