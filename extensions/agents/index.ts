@@ -45,6 +45,7 @@ export default function agents(pi: ExtensionAPI): void {
   });
   pi.on("session_shutdown", () => {
     agentSessionEpoch += 1;
+    disposeAgentSessionViewers();
     fleetMenu.invalidate();
   });
   // The catalog the caller reads must be current at the moment it picks a name,
