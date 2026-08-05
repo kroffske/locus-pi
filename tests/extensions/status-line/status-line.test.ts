@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import statusLine from "../../../extensions/status-line/index.js";
 import {
   LocusFooterComponent,
-  renderStatusLine,
+  renderStatusLines,
   type StatusLineSnapshot,
 } from "../../../extensions/status-line/footer.js";
+import { clearViewerExternalRows, viewerExternalRows } from "../../../extensions/_shared/operator/viewer-geometry.js";
 import { createHarness, emit } from "../../test-harness.js";
+
+afterEach(() => clearViewerExternalRows("status-line-overflow"));
 
 function snapshot(overrides: Partial<StatusLineSnapshot> = {}): StatusLineSnapshot {
   return {
@@ -22,31 +25,34 @@ function snapshot(overrides: Partial<StatusLineSnapshot> = {}): StatusLineSnapsh
 }
 
 describe("status-line footer", () => {
-  it("projects one readable line at wide, medium, and narrow widths", () => {
-    const wide = renderStatusLine(snapshot(), 240);
-    expect(wide.startsWith("~/projects/locus-pi (codex/subagent-interactive-view)")).toBe(true);
-    expect(wide.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
-    expect(wide).not.toContain("tok:");
-    expect(wide).not.toContain("ctx:");
-    expect(wide).not.toContain("git:");
+  it("uses one row when the full groups fit and two rows only on overflow", () => {
+    const wide = renderStatusLines(snapshot(), 240);
+    expect(wide).toHaveLength(1);
+    expect(wide[0]).toMatch(/^~\/projects\/locus-pi \(codex\/subagent-interactive-view\)/u);
+    expect(wide[0]).toMatch(/31\.6%\/200k \(pi:auto\) gpt-5\.6-sol high$/u);
+    expect(wide[0]).not.toContain("tok:");
+    expect(wide[0]).not.toContain("ctx:");
+    expect(wide[0]).not.toContain("git:");
 
-    const medium = renderStatusLine(snapshot(), 100);
-    expect(medium.startsWith("~/projects/locus-pi (codex/subagent-interactive-view)")).toBe(true);
-    expect(medium.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
+    const overflow = renderStatusLines(snapshot(), 80);
+    expect(overflow).toHaveLength(2);
+    expect(overflow[0]).toBe("~/projects/locus-pi (codex/subagent-interactive-view)");
+    expect(overflow[1]).toMatch(/31\.6%\/200k \(pi:auto\) gpt-5\.6-sol high$/u);
 
-    const narrow = renderStatusLine(snapshot(), 48);
-    expect(narrow).toHaveLength(48);
-    expect(narrow.startsWith("locus-pi")).toBe(true);
-    expect(narrow.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
+    const narrow = renderStatusLines(snapshot(), 48);
+    expect(narrow).toHaveLength(2);
+    expect(narrow[0]).toMatch(/^locus-pi/u);
+    expect(narrow[1]).toHaveLength(48);
+    expect(narrow[1]).toMatch(/31\.6%\/200k \(pi:auto\) gpt-5\.6-sol high$/u);
   });
 
   it("renders honest compacting and post-compaction measuring states", () => {
-    expect(renderStatusLine(snapshot({ compaction: { kind: "compacting" } }), 180)).toContain("COMPACTING");
+    expect(renderStatusLines(snapshot({ compaction: { kind: "compacting" } }), 180).join("\n")).toContain("COMPACTING");
     expect(
-      renderStatusLine(
+      renderStatusLines(
         snapshot({ contextTokens: null, compaction: { kind: "compacted", tokensBefore: 182_000, completedAt: 1 } }),
         180,
-      ),
+      ).join("\n"),
     ).toContain("(COMPACTED 182k→measuring…)");
   });
 
@@ -71,18 +77,24 @@ describe("status-line footer", () => {
         onBranchChange: () => unsubscribe,
       },
     );
-    const rendered = component?.render(120) ?? [];
+    const rendered = component?.render(240) ?? [];
     expect(rendered).toHaveLength(1);
     expect(rendered[0]).toContain("\u001b[48;2;42;27;61m");
     expect(rendered[0]).toContain("5%/200k (pi:auto) gpt-5.6-sol high");
-    expect(component?.render(40)[0]?.match(/\u001b\[0m/gu)).toHaveLength(1);
+    const narrow = component?.render(40) ?? [];
+    expect(narrow).toHaveLength(2);
+    expect(narrow.every((line) => line.match(/\u001b\[0m/gu)?.length === 1)).toBe(true);
+    expect(viewerExternalRows()).toBe(1);
+    expect(component?.render(240)).toHaveLength(1);
+    expect(viewerExternalRows()).toBe(0);
 
     await emit(harness, "session_before_compact", { reason: "threshold" });
-    expect(component?.render(120)[0]).toContain("COMPACTING");
+    expect(component?.render(240).join("\n")).toContain("COMPACTING");
     await emit(harness, "session_compact", { compactionEntry: { tokensBefore: 182_000 } });
-    expect(component?.render(160)[0]).toContain("COMPACTED");
+    expect(component?.render(240).join("\n")).toContain("COMPACTED");
     await emit(harness, "session_shutdown");
     expect(harness.footerFactory).toBeUndefined();
     expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(viewerExternalRows()).toBe(0);
   });
 });

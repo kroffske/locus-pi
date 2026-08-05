@@ -38,6 +38,8 @@ This file records user-visible changes to the public package.
   noisy `active` count, and right-align their available commands. The lighter
   workflow rail is followed immediately by agent rows with elapsed time and
   separate input/output tokens; no workflow rail is shown when no run is active.
+  The footer stays on one row while both sides fit and uses a second row only on
+  overflow, preserving the location and runtime groups instead of dropping one.
 
 - **A running `spawn_agent` call now shows the generated agent name immediately.**
   The tool card streams the same `agent <name> started` line used by the live

@@ -9,7 +9,7 @@ registry, and compaction mechanics.
 
 ## Upstream contracts used
 
-- `ctx.ui.setFooter` installs one footer factory and supplies Pi's read-only
+- `ctx.ui.setFooter` installs the footer factory and supplies Pi's read-only
   footer data provider.
 - `ctx.getContextUsage()` supplies current context use and can report unknown
   tokens immediately after compaction.
@@ -26,3 +26,8 @@ remains legible as plain text when ANSI styling is removed.
 The implementation does not claim that automatic compaction is enabled or that
 Locus owns a custom policy. `(pi:auto)` names the actual owner and current mode.
 Missing post-compaction context stays unknown rather than becoming zero.
+
+The footer publishes only its overflow row to the shared viewer-geometry
+registry. Full-screen agent and workflow viewers therefore reserve one extra
+terminal row only while the footer actually wraps, and the reservation is
+cleared as soon as the footer returns to one row or shuts down.
