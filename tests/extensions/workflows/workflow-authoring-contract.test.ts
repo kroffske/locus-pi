@@ -508,14 +508,16 @@ ${skill[1] ?? ""}
 
     expect(profiles).toEqual({
       "live-smoke": "standard",
-      "plan-implement": "integration",
-      plan: "legacy",
+      "plan-implement": "standard",
+      plan: "standard",
       "requirements-grill": "legacy",
       "review-fix": "legacy",
       review: "legacy",
     });
     expect(packagedWorkflowNames()).toHaveLength(6);
-    expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath("live-smoke"), "utf8"))).toEqual([]);
+    for (const name of ["live-smoke", "plan", "plan-implement"]) {
+      expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);
+    }
   });
 
   it.each([

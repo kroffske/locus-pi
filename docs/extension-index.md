@@ -68,8 +68,8 @@ there resolves by name. It currently holds:
 | `requirements-grill` | Produces a bounded requirements challenge and handoff.                                                |
 | `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.    |
 | `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports. |
-| `plan`               | Clarifies one task, then drafts and critiques a plan until a read-only critic accepts it.             |
-| `plan-implement`     | Implements one accepted plan with a writer per step, then checks and reports independently.           |
+| `plan`               | Maps one task with a reconnaissance agent, then writes `plan.md` and dynamic `steps.md`.              |
+| `plan-implement`     | Gives one exact step to one implementation agent and records its changes, checks, and status.         |
 
 Every workflow directory is scan-based, including this one. What separates a
 Package workflow from a project file is not the mechanism but the promise: the

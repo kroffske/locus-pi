@@ -224,7 +224,6 @@ extensions/workflows/examples/live-smoke.workflow.mjs
 extensions/workflows/examples/plan-implement/README.md
 extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs
 extensions/workflows/examples/plan/README.md
-extensions/workflows/examples/plan/plan-pipeline.svg
 extensions/workflows/examples/plan/plan.workflow.mjs
 extensions/workflows/examples/requirements-grill-pipeline.svg
 extensions/workflows/examples/requirements-grill.workflow.mjs
@@ -298,6 +297,7 @@ skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md
 skills/locus-pi-workflows/references/fixed-fan-out.md
 skills/locus-pi-workflows/references/human-gate.md
 skills/locus-pi-workflows/references/sequential-text.md
+skills/locus-task-workflow/SKILL.md
 tests/docs/adr.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts

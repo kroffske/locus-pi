@@ -422,7 +422,7 @@ describe("npm public package boundary", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `skills/${entry.name}/SKILL.md`)
       .sort();
-    expect(skillEntries).toEqual(["skills/locus-pi-workflows/SKILL.md"]);
+    expect(skillEntries).toEqual(["skills/locus-pi-workflows/SKILL.md", "skills/locus-task-workflow/SKILL.md"]);
 
     for (const skillPath of skillEntries) {
       expect(existsSync(path.join(root, skillPath)), `declared skill is missing: ${skillPath}`).toBe(true);
@@ -445,6 +445,33 @@ describe("npm public package boundary", () => {
         expect(packedPaths.has(target), `${skillPath} points at an unpacked file: ${target}`).toBe(true);
       }
     }
+  });
+
+  it("ships the thin task workflow protocol without moving orchestration into workflow JavaScript", () => {
+    const skillPath = "skills/locus-task-workflow/SKILL.md";
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+    const source = readFileSync(path.join(root, skillPath), "utf8");
+
+    expect(packedPaths.has(skillPath)).toBe(true);
+    for (const contract of [
+      'name: "plan"',
+      'name: "plan-implement"',
+      "tmp/<select-name>",
+      "resumeFromRunId",
+      "todo_write",
+      "autoContinue",
+      "history/S<n>.md",
+      "Status: blocked",
+    ]) {
+      expect(source, contract).toContain(contract);
+    }
+    expect(source).toContain("The main Pi agent owns orchestration");
+    expect(source).toContain('"op": "append"');
+    expect(source).not.toContain('"op": "init"');
+    expect(source).toContain("do not put\nmultiline text into todo items");
+    expect(source).toContain("preserves unrelated session\ntodos");
+    expect(source).toContain("20-continuation safety limit");
+    expect(source).toContain("Do not call another workflow from inside either Package workflow");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

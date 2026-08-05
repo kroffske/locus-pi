@@ -209,7 +209,7 @@ describe("curated workflow declarations", () => {
 
       // Without this, a renamed stage leaves the declaration quietly lying.
       expect(declared, name).toEqual(phaseCallTitles(file));
-      expect(declared.length, name).toBeGreaterThan(1);
+      expect(declared.length, name).toBeGreaterThan(0);
     }
   });
 

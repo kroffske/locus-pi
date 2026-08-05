@@ -6,6 +6,22 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The shipped planning pair is now a minimal, resumable agent graph.** `plan`
+  runs one reconnaissance agent and one planning agent, which write
+  `context.md`, `plan.md`, and dynamic complete steps in `steps.md` under one
+  caller-selected `tmp/<select-name>` workspace. `plan-implement` now gives one
+  exact step to one implementation agent, which changes and verifies only that
+  scope and writes `history/S<n>.md`. Both workflows use the machine-checked
+  `standard` profile, use Pi's default workflow agent and configured model
+  route, and contain no model pin, plan parser, critic loop, task ledger, step selector, reviewer,
+  grader, report renderer, or nested workflow. The new installed
+  `locus-task-workflow` skill keeps dynamic routing in the main Pi agent: it
+  appends one single-line todo reference per step without replacing unrelated
+  todos, reads the exact step block from `steps.md` for one top-level workflow
+  run, pauses on blocked history, and reconstructs work from steps plus history
+  after a session restart. The host's 20-continuation safety pause resumes with
+  `/todo run`.
+
 - **The supported and tested Pi baseline is now 0.83.0.** All four Pi peer
   ranges start at 0.83.0, development dependencies and the lockfile use exact
   0.83.0 packages, and current host-contract documentation is synchronized.
