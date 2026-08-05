@@ -3,7 +3,7 @@
   "name": "status-line",
   "agent": {
     "name": "extension-status-line",
-    "description": "Maintain the single-line Locus footer without hiding Pi session evidence."
+    "description": "Maintain the responsive Locus footer without hiding Pi session evidence."
   },
   "version": "0.1.0",
   "defaultEnabled": true,

@@ -9,11 +9,13 @@ import type {
   WidgetFactoryTui,
 } from "../_shared/host/pi-api.js";
 import { formatTokenCount } from "../_shared/agent-runtime/agent-live-panel.js";
+import { clearViewerExternalRows, setViewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 
 const BAR_BACKGROUND = "\u001b[48;2;42;27;61m";
 const BAR_FOREGROUND = "\u001b[38;2;222;201;255m";
 const BAR_RESET = "\u001b[0m";
 const COMPACTED_VISIBLE_MS = 12_000;
+const STATUS_LINE_OVERFLOW_OWNER = "status-line-overflow";
 
 export type CompactionDisplayState =
   { kind: "idle" } | { kind: "compacting" } | { kind: "compacted"; tokensBefore?: number; completedAt: number };
@@ -67,15 +69,19 @@ export class LocusFooterComponent implements CustomUiComponent {
     this.#unsubscribeBranch = undefined;
     if (this.#clearCompactedTimer !== undefined) clearTimeout(this.#clearCompactedTimer);
     this.#clearCompactedTimer = undefined;
+    clearViewerExternalRows(STATUS_LINE_OVERFLOW_OWNER);
   }
 
   render(width: number): string[] {
     const safeWidth = Math.max(1, Math.floor(width));
-    const plain = renderStatusLine(snapshotStatusLine(this.ctx, this.footerData, this.#compaction), safeWidth);
-    const padded = `${plain}${" ".repeat(Math.max(0, safeWidth - visibleWidth(plain)))}`;
+    const plainLines = renderStatusLines(snapshotStatusLine(this.ctx, this.footerData, this.#compaction), safeWidth);
+    setViewerExternalRows(STATUS_LINE_OVERFLOW_OWNER, Math.max(0, plainLines.length - 1));
     // Stable violet identity. Semantic content remains plain text and survives
     // terminals/themes that strip ANSI styling.
-    return [`${BAR_BACKGROUND}${BAR_FOREGROUND}${padded}${BAR_RESET}`];
+    return plainLines.map((plain) => {
+      const padded = `${plain}${" ".repeat(Math.max(0, safeWidth - visibleWidth(plain)))}`;
+      return `${BAR_BACKGROUND}${BAR_FOREGROUND}${padded}${BAR_RESET}`;
+    });
   }
 }
 
@@ -100,28 +106,29 @@ export function snapshotStatusLine(
   };
 }
 
-export function renderStatusLine(snapshot: StatusLineSnapshot, width: number): string {
+export function renderStatusLines(snapshot: StatusLineSnapshot, width: number): string[] {
   const safeWidth = Math.max(1, Math.floor(width));
   const context = formatContext(snapshot);
   const compaction = formatCompaction(snapshot);
   const cwdBase = path.basename(snapshot.cwd) || snapshot.cwd;
   const branch = snapshot.branch === undefined ? "" : ` (${snapshot.branch})`;
   const shortBranch = snapshot.branch === undefined ? "" : ` (${shortTail(snapshot.branch, 24)})`;
-  const leftCandidates = [`${snapshot.cwd}${branch}`, `${cwdBase}${shortBranch}`, cwdBase, ""];
+  const leftCandidates = [`${snapshot.cwd}${branch}`, `${cwdBase}${shortBranch}`, cwdBase];
   const rightCandidates = [
     `${context} ${compaction} ${snapshot.model} ${snapshot.effort}`,
     `${context} ${snapshot.model} ${snapshot.effort}`,
     `${context} ${snapshot.effort}`,
   ];
 
-  for (const right of rightCandidates) {
-    if (visibleWidth(right) > safeWidth) continue;
-    for (const left of leftCandidates) {
-      const aligned = alignStatusGroups(left, right, safeWidth);
-      if (aligned !== undefined) return aligned;
-    }
-  }
-  return truncatePlain(rightCandidates.at(-1) ?? "", safeWidth).padStart(safeWidth);
+  const fullLine = alignStatusGroups(leftCandidates[0] ?? "", rightCandidates[0] ?? "", safeWidth);
+  if (fullLine !== undefined) return [fullLine];
+
+  const left =
+    leftCandidates.find((candidate) => visibleWidth(candidate) <= safeWidth) ?? truncatePlain(cwdBase, safeWidth);
+  const right =
+    rightCandidates.find((candidate) => visibleWidth(candidate) <= safeWidth) ??
+    truncatePlain(rightCandidates.at(-1) ?? "", safeWidth);
+  return [left, right.padStart(safeWidth)];
 }
 
 function formatStatusCwd(cwd: string): string {
