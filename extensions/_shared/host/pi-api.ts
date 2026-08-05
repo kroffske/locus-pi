@@ -40,6 +40,26 @@ export interface ToolExecuteOptions {
   ctx: ExtensionContext;
 }
 
+export interface ToolRenderResultOptions {
+  expanded: boolean;
+  isPartial: boolean;
+}
+
+export interface ToolRenderContext<TArgs = unknown, TState = Record<string, unknown>> {
+  args: TArgs;
+  toolCallId: string;
+  invalidate: () => void;
+  lastComponent: CustomUiComponent | undefined;
+  state: TState;
+  cwd: string;
+  executionStarted: boolean;
+  argsComplete: boolean;
+  isPartial: boolean;
+  expanded: boolean;
+  showImages: boolean;
+  isError: boolean;
+}
+
 export type ToolUpdate = (partial: Partial<ToolResult>) => void;
 export type ToolApprovalTier = "read" | "write" | "exec";
 export type ToolApprovalDecision = ToolApprovalTier | { tier: ToolApprovalTier; override?: boolean; reason?: string };
@@ -47,8 +67,11 @@ export type ToolApproval = ToolApprovalDecision | ((args: unknown) => ToolApprov
 
 export interface ToolDefinition {
   name: string;
+  label?: string;
   description?: string;
   parameters: TSchema;
+  /** Let a custom renderer own the complete tool surface instead of Pi's default shell. */
+  renderShell?: "default" | "self";
   /** Prepares raw tool-call arguments before Pi applies schema conversion. */
   prepareArguments?: (args: unknown) => unknown;
   approval?: ToolApproval;
@@ -68,7 +91,13 @@ export interface ToolDefinition {
    * seam in the shim. The host requires a renderable component here; returning
    * raw `string[]` crashes the live TUI after a tool completes.
    */
-  renderResult?: (result: ToolResult, ctx?: ExtensionContext) => CustomUiComponent;
+  renderCall?: (args: unknown, theme: ThemeLike, context: ToolRenderContext) => CustomUiComponent;
+  renderResult?: (
+    result: ToolResult,
+    options: ToolRenderResultOptions,
+    theme: ThemeLike,
+    context: ToolRenderContext,
+  ) => CustomUiComponent;
 }
 
 export interface CommandOptions {

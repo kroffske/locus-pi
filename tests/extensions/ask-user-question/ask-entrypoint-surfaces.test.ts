@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import askUserQuestion from "../../../extensions/ask-user-question/index.js";
-import { createHarness, runTool } from "../../test-harness.js";
+import { createHarness, renderToolResult, runTool } from "../../test-harness.js";
 
 /**
  * Characterization coverage for the ask surfaces the existing suite never
@@ -100,7 +100,7 @@ describe("ask-user-question uncovered surfaces", () => {
       type: "text",
       text: "User provided custom input:\n  first line\n  second line",
     });
-    const rendered = h.tools.get("ask")!.renderResult!(result, h.ctx);
+    const rendered = renderToolResult(h.tools.get("ask")!, result, h.ctx);
     // The redrawn card collapses the same answer onto one line.
     expect(rendered.render(80).join("\n")).toContain("(o) (custom) first line second line");
   });

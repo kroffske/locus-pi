@@ -275,6 +275,7 @@ extensions/workflows/runtime/workflow-worktree.ts
 extensions/workflows/workflow-catalog.ts
 extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-command-launcher.ts
+extensions/workflows/workflow-tool-card.ts
 extensions/workflows/workflow-tool.ts
 extensions/workflows/workflow-transcript.ts
 package-lock.json
@@ -355,6 +356,7 @@ tests/extensions/workflows/workflow-replay-live-row.test.ts
 tests/extensions/workflows/workflow-result-text.test.ts
 tests/extensions/workflows/workflow-run-viewer.test.ts
 tests/extensions/workflows/workflow-transcript.test.ts
+tests/extensions/workflows/workflow-tool-card.test.ts
 tests/extensions/workflows/workflows-launch-gate.test.ts
 tests/extensions/workflows/workflows-progress.test.ts
 tests/fixtures/extensions/command-ui-alpha.ts

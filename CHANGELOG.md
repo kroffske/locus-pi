@@ -6,6 +6,16 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Main-agent `workflow` tool calls now read as one Locus workflow card.** The
+  card names the real workflow and its `RUNNING`, `COMPLETED`,
+  `AWAITING OPERATOR`, `CANCELLED`, or `FAILED` state in one stable header;
+  partial updates are no longer mislabeled `[RESULT] Workflow`. Explicit
+  `[agent <name>] <state> · <work>` rows make the child-agent hierarchy visible.
+  A theme-colored left rail contains Locus state, diagnostics, and paths, while
+  persisted workflow-produced model text starts outside the rail. Compact,
+  expanded, multi-agent, and narrow-terminal projections preserve identity and
+  state without hardcoded ANSI colors.
+
 - **The shipped planning pair is now a minimal, resumable agent graph.** `plan`
   runs one reconnaissance agent and one planning agent, which write
   `context.md`, `plan.md`, and dynamic complete steps in `steps.md` under one
