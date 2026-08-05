@@ -32,12 +32,12 @@ This file records user-visible changes to the public package.
   acknowledgement gates, or answer-repair functions.
 
 - **Pi now has one permanent violet Locus footer and one compact workflow rail.**
-  The footer keeps model/effort, real working directory and linked-worktree
-  identity, branch, context use, cumulative input/output tokens, compaction
-  state, and existing extension statuses on one line. Active workflows add one
-  lighter rail below the editor, followed immediately by agent rows with
-  elapsed time and separate input/output tokens; no workflow rail is shown when
-  no run is active.
+  The footer keeps `working directory (branch)` on the left and right-aligns
+  `context (pi:auto) model effort`, without redundant `ctx:`, `tok:`, or `git:`
+  labels. Active workflows put aggregate tokens before stage/state, omit the
+  noisy `active` count, and right-align their available commands. The lighter
+  workflow rail is followed immediately by agent rows with elapsed time and
+  separate input/output tokens; no workflow rail is shown when no run is active.
 
 - **A running `spawn_agent` call now shows the generated agent name immediately.**
   The tool card streams the same `agent <name> started` line used by the live

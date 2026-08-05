@@ -11,7 +11,6 @@ registry, and compaction mechanics.
 
 - `ctx.ui.setFooter` installs one footer factory and supplies Pi's read-only
   footer data provider.
-- `ctx.sessionManager.getEntries()` supplies cumulative session usage evidence.
 - `ctx.getContextUsage()` supplies current context use and can report unknown
   tokens immediately after compaction.
 - `session_before_compact` and `session_compact` expose lifecycle state without
@@ -19,12 +18,11 @@ registry, and compaction mechanics.
 
 ## Local behavior
 
-`extensions/status-line/footer.ts` owns rendering, width projections, session
-usage aggregation, and linked-worktree detection. `extensions/status-line/index.ts`
-owns lifecycle registration and restores the native footer on shutdown. The
-violet bar is presentation only; every state remains legible as plain text when
-ANSI styling is removed.
+`extensions/status-line/footer.ts` owns rendering and width projections.
+`extensions/status-line/index.ts` owns lifecycle registration and restores the
+native footer on shutdown. The violet bar is presentation only; every state
+remains legible as plain text when ANSI styling is removed.
 
 The implementation does not claim that automatic compaction is enabled or that
-Locus owns a custom policy. `compact:Pi` names the actual owner. Missing usage
-or post-compaction context stays absent or unknown rather than becoming zero.
+Locus owns a custom policy. `(pi:auto)` names the actual owner and current mode.
+Missing post-compaction context stays unknown rather than becoming zero.

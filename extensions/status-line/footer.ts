@@ -1,4 +1,3 @@
-import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -6,7 +5,6 @@ import type {
   CustomUiComponent,
   ExtensionContext,
   FooterDataProviderLike,
-  ReplacementSessionEntryLike,
   ThemeLike,
   WidgetFactoryTui,
 } from "../_shared/host/pi-api.js";
@@ -15,27 +13,19 @@ import { formatTokenCount } from "../_shared/agent-runtime/agent-live-panel.js";
 const BAR_BACKGROUND = "\u001b[48;2;42;27;61m";
 const BAR_FOREGROUND = "\u001b[38;2;222;201;255m";
 const BAR_RESET = "\u001b[0m";
-const SEPARATOR = " │ ";
 const COMPACTED_VISIBLE_MS = 12_000;
 
 export type CompactionDisplayState =
   { kind: "idle" } | { kind: "compacting" } | { kind: "compacted"; tokensBefore?: number; completedAt: number };
 
-interface UsageTotals {
-  input: number;
-  output: number;
-}
-
 export interface StatusLineSnapshot {
   model: string;
+  effort: string;
   cwd: string;
-  worktree?: string;
   branch?: string;
   contextTokens: number | null;
   contextWindow: number;
   contextPercent: number | null;
-  usage: UsageTotals;
-  extensionStatuses: string[];
   compaction: CompactionDisplayState;
 }
 
@@ -95,125 +85,43 @@ export function snapshotStatusLine(
   compaction: CompactionDisplayState = { kind: "idle" },
 ): StatusLineSnapshot {
   const cwd = ctx.sessionManager?.getCwd?.() ?? ctx.session?.workingDirectory ?? ctx.cwd ?? process.cwd();
-  const entries = ctx.sessionManager?.getEntries() ?? [];
-  const usage = aggregateSessionUsage(Array.isArray(entries) ? entries : []);
   const context = ctx.getContextUsage?.();
   const modelName = ctx.model?.id ?? "no-model";
-  const effort = ctx.thinkingLevel;
-  const worktree = detectLinkedWorktree(cwd);
   const branch = footerData.getGitBranch();
   return {
-    model: effort === undefined || effort === "off" ? modelName : `${modelName} ${effort}`,
+    model: modelName,
+    effort: ctx.thinkingLevel ?? "off",
     cwd: formatStatusCwd(cwd),
-    ...(worktree === undefined ? {} : { worktree }),
     ...(branch === null ? {} : { branch }),
     contextTokens: context?.tokens ?? null,
     contextWindow: context?.contextWindow ?? numericField(ctx.model, "contextWindow") ?? 0,
     contextPercent: context?.percent ?? null,
-    usage,
-    extensionStatuses: [...footerData.getExtensionStatuses().entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([, value]) => sanitizeSingleLine(value))
-      .filter((value) => value !== ""),
     compaction,
   };
 }
 
 export function renderStatusLine(snapshot: StatusLineSnapshot, width: number): string {
   const safeWidth = Math.max(1, Math.floor(width));
-  const fullContext = formatContext(snapshot, true);
-  const compactContext = formatContext(snapshot, false);
-  const tokens = formatUsage(snapshot.usage);
-  const compact = formatCompaction(snapshot);
+  const context = formatContext(snapshot);
+  const compaction = formatCompaction(snapshot);
   const cwdBase = path.basename(snapshot.cwd) || snapshot.cwd;
-  const full = [
-    snapshot.model,
-    snapshot.cwd,
-    ...(snapshot.worktree === undefined ? [] : [`wt:${snapshot.worktree}`]),
-    ...(snapshot.branch === undefined ? [] : [`git:${snapshot.branch}`]),
-    fullContext,
-    tokens,
-    compact,
-    ...snapshot.extensionStatuses,
+  const branch = snapshot.branch === undefined ? "" : ` (${snapshot.branch})`;
+  const shortBranch = snapshot.branch === undefined ? "" : ` (${shortTail(snapshot.branch, 24)})`;
+  const leftCandidates = [`${snapshot.cwd}${branch}`, `${cwdBase}${shortBranch}`, cwdBase, ""];
+  const rightCandidates = [
+    `${context} ${compaction} ${snapshot.model} ${snapshot.effort}`,
+    `${context} ${snapshot.model} ${snapshot.effort}`,
+    `${context} ${snapshot.effort}`,
   ];
-  const medium = [
-    snapshot.model,
-    cwdBase,
-    ...(snapshot.worktree === undefined ? [] : [`wt:${snapshot.worktree}`]),
-    ...(snapshot.branch === undefined ? [] : [`git:${shortTail(snapshot.branch, 24)}`]),
-    compactContext,
-    tokens,
-    compact,
-  ];
-  const mediumEssential = [
-    snapshot.model,
-    cwdBase,
-    ...(snapshot.worktree === undefined ? [] : [`wt:${shortTail(snapshot.worktree, 16)}`]),
-    compactContext,
-    tokens,
-    compact,
-  ];
-  const wideEssential = [
-    snapshot.model,
-    snapshot.cwd,
-    ...(snapshot.worktree === undefined ? [] : [`wt:${snapshot.worktree}`]),
-    ...(snapshot.branch === undefined ? [] : [`git:${shortTail(snapshot.branch, 24)}`]),
-    fullContext,
-    tokens,
-    compact,
-  ];
-  const narrow = [
-    snapshot.model,
-    `ctx${snapshot.contextPercent === null ? "?" : `${snapshot.contextPercent.toFixed(1)}%`}`,
-    formatShortUsage(snapshot.usage),
-    compact === "compact:Pi" ? "Pi" : compact,
-  ];
-  for (const segments of [full, wideEssential, medium, mediumEssential, narrow]) {
-    const candidate = segments.filter((value) => value !== "").join(SEPARATOR);
-    if (visibleWidth(candidate) <= safeWidth) return candidate;
-  }
-  return truncatePlain(narrow.join(SEPARATOR), safeWidth);
-}
 
-export function aggregateSessionUsage(entries: readonly ReplacementSessionEntryLike[]): UsageTotals {
-  const totals: UsageTotals = { input: 0, output: 0 };
-  for (const entry of entries) {
-    const usage = entryUsage(entry);
-    if (usage === undefined) continue;
-    totals.input += numericField(usage, "input") ?? 0;
-    totals.output += numericField(usage, "output") ?? 0;
-  }
-  return totals;
-}
-
-export function detectLinkedWorktree(start: string): string | undefined {
-  let cursor = path.resolve(start);
-  while (true) {
-    const gitPath = path.join(cursor, ".git");
-    try {
-      if (statSync(gitPath).isFile()) {
-        const match = /^gitdir:\s*(.+)$/imu.exec(readFileSync(gitPath, "utf8"));
-        if (match?.[1] === undefined) return undefined;
-        const normalized = match[1].trim().replaceAll("\\", "/");
-        const worktreeMatch = /\/worktrees\/([^/]+)\/?$/u.exec(normalized);
-        return worktreeMatch?.[1];
-      }
-      if (statSync(gitPath).isDirectory()) return undefined;
-    } catch {
-      // Not a repository root; continue upward.
+  for (const right of rightCandidates) {
+    if (visibleWidth(right) > safeWidth) continue;
+    for (const left of leftCandidates) {
+      const aligned = alignStatusGroups(left, right, safeWidth);
+      if (aligned !== undefined) return aligned;
     }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) return undefined;
-    cursor = parent;
   }
-}
-
-function entryUsage(entry: ReplacementSessionEntryLike): Record<string, unknown> | undefined {
-  if ((entry.type === "compaction" || entry.type === "branch_summary") && isRecord(entry.usage)) return entry.usage;
-  if (entry.type !== "message" || !isRecord(entry.message)) return undefined;
-  const role = entry.message.role;
-  if (role !== "assistant" && role !== "toolResult") return undefined;
-  return isRecord(entry.message.usage) ? entry.message.usage : undefined;
+  return truncatePlain(rightCandidates.at(-1) ?? "", safeWidth).padStart(safeWidth);
 }
 
 function formatStatusCwd(cwd: string): string {
@@ -226,39 +134,19 @@ function formatStatusCwd(cwd: string): string {
   return cwd;
 }
 
-function formatContext(snapshot: StatusLineSnapshot, includeTokens: boolean): string {
-  const percent = snapshot.contextPercent === null ? "?" : `${snapshot.contextPercent.toFixed(1)}%`;
-  if (!includeTokens)
-    return snapshot.contextWindow > 0 ? `ctx:${percent}/${formatTokenCount(snapshot.contextWindow)}` : `ctx:${percent}`;
-  const current = snapshot.contextTokens === null ? "?" : formatTokenCount(snapshot.contextTokens);
-  const window = snapshot.contextWindow > 0 ? formatTokenCount(snapshot.contextWindow) : "?";
-  return `ctx:${current}/${window} ${percent}`;
-}
-
-function formatUsage(usage: UsageTotals): string {
-  if (usage.input === 0 && usage.output === 0) return "tok:—";
-  return `↑${formatTokenCount(usage.input)} ↓${formatTokenCount(usage.output)}`;
-}
-
-function formatShortUsage(usage: UsageTotals): string {
-  if (usage.input === 0 && usage.output === 0) return "tok:—";
-  return `↑${formatRoundedTokens(usage.input)} ↓${formatRoundedTokens(usage.output)}`;
-}
-
-function formatRoundedTokens(tokens: number): string {
-  if (tokens < 1000) return String(Math.max(0, Math.trunc(tokens)));
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
-  return `${Math.round(tokens / 1_000_000)}M`;
+function formatContext(snapshot: StatusLineSnapshot): string {
+  const percent = snapshot.contextPercent === null ? "?" : `${trimDecimal(snapshot.contextPercent)}%`;
+  return snapshot.contextWindow > 0 ? `${percent}/${formatTokenCount(snapshot.contextWindow)}` : percent;
 }
 
 function formatCompaction(snapshot: StatusLineSnapshot): string {
-  if (snapshot.compaction.kind === "compacting") return "COMPACTING";
-  if (snapshot.compaction.kind === "idle") return "compact:Pi";
+  if (snapshot.compaction.kind === "compacting") return "(COMPACTING)";
+  if (snapshot.compaction.kind === "idle") return "(pi:auto)";
   const before = snapshot.compaction.tokensBefore;
   const after = snapshot.contextTokens;
   if (before === undefined)
-    return after === null ? "COMPACTED · measuring…" : `COMPACTED · → ${formatTokenCount(after)}`;
-  return `COMPACTED · ${formatTokenCount(before)} → ${after === null ? "measuring…" : formatTokenCount(after)}`;
+    return after === null ? "(COMPACTED measuring…)" : `(COMPACTED →${formatTokenCount(after)})`;
+  return `(COMPACTED ${formatTokenCount(before)}→${after === null ? "measuring…" : formatTokenCount(after)})`;
 }
 
 function shortTail(value: string, max: number): string {
@@ -266,11 +154,17 @@ function shortTail(value: string, max: number): string {
   return `…${value.slice(-(max - 1))}`;
 }
 
-function sanitizeSingleLine(value: string): string {
-  return value
-    .replace(/[\r\n\t\u0000-\u001f\u007f]/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
+function alignStatusGroups(left: string, right: string, width: number): string | undefined {
+  const leftWidth = visibleWidth(left);
+  const rightWidth = visibleWidth(right);
+  const gap = left === "" ? width - rightWidth : width - leftWidth - rightWidth;
+  if (gap < (left === "" ? 0 : 2)) return undefined;
+  return `${left}${" ".repeat(gap)}${right}`;
+}
+
+function trimDecimal(value: number): string {
+  const rounded = value.toFixed(1);
+  return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
 }
 
 function truncatePlain(value: string, width: number): string {

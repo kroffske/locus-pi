@@ -1,34 +1,21 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import statusLine from "../../../extensions/status-line/index.js";
 import {
-  aggregateSessionUsage,
-  detectLinkedWorktree,
   LocusFooterComponent,
   renderStatusLine,
   type StatusLineSnapshot,
 } from "../../../extensions/status-line/footer.js";
 import { createHarness, emit } from "../../test-harness.js";
 
-const roots: string[] = [];
-
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function snapshot(overrides: Partial<StatusLineSnapshot> = {}): StatusLineSnapshot {
   return {
-    model: "gpt-5.6-sol high",
+    model: "gpt-5.6-sol",
+    effort: "high",
     cwd: "~/projects/locus-pi",
-    worktree: "codex-subagent-interactive-view",
     branch: "codex/subagent-interactive-view",
     contextTokens: 63_200,
     contextWindow: 200_000,
     contextPercent: 31.6,
-    usage: { input: 182_400, output: 24_800 },
-    extensionStatuses: ["PLAN · doing"],
     compaction: { kind: "idle" },
     ...overrides,
   };
@@ -37,47 +24,20 @@ function snapshot(overrides: Partial<StatusLineSnapshot> = {}): StatusLineSnapsh
 describe("status-line footer", () => {
   it("projects one readable line at wide, medium, and narrow widths", () => {
     const wide = renderStatusLine(snapshot(), 240);
-    expect(wide).toContain("~/projects/locus-pi");
-    expect(wide).toContain("wt:codex-subagent-interactive-view");
-    expect(wide).toContain("git:codex/subagent-interactive-view");
-    expect(wide).toContain("ctx:63.2k/200k 31.6%");
-    expect(wide).toContain("↑182.4k ↓24.8k");
-    expect(wide).toContain("compact:Pi");
-    expect(wide).toContain("PLAN · doing");
+    expect(wide.startsWith("~/projects/locus-pi (codex/subagent-interactive-view)")).toBe(true);
+    expect(wide.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
+    expect(wide).not.toContain("tok:");
+    expect(wide).not.toContain("ctx:");
+    expect(wide).not.toContain("git:");
 
     const medium = renderStatusLine(snapshot(), 100);
-    expect(medium).toContain("locus-pi");
-    expect(medium).toContain("ctx:31.6%/200k");
-    expect(medium).toContain("compact:Pi");
+    expect(medium.startsWith("~/projects/locus-pi (codex/subagent-interactive-view)")).toBe(true);
+    expect(medium.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
 
     const narrow = renderStatusLine(snapshot(), 48);
-    expect(narrow.length).toBeLessThanOrEqual(48);
-    expect(narrow).toContain("gpt-5.6-sol high");
-    expect(narrow).toContain("ctx31.6%");
-    expect(narrow).not.toContain("PLAN");
-  });
-
-  it("aggregates assistant, tool-result, compaction, and branch-summary usage", () => {
-    expect(
-      aggregateSessionUsage([
-        { type: "message", message: { role: "assistant", usage: { input: 100, output: 25 } } },
-        { type: "message", message: { role: "toolResult", usage: { input: 10, output: 5 } } },
-        { type: "compaction", usage: { input: 40, output: 12 } },
-        { type: "branch_summary", usage: { input: 30, output: 8 } },
-        { type: "message", message: { role: "user", usage: { input: 999, output: 999 } } },
-      ]),
-    ).toEqual({ input: 180, output: 50 });
-  });
-
-  it("detects only linked Git worktrees from the .git indirection file", () => {
-    const linked = mkdtempSync(path.join(tmpdir(), "locus-status-linked-"));
-    const ordinary = mkdtempSync(path.join(tmpdir(), "locus-status-main-"));
-    roots.push(linked, ordinary);
-    mkdirSync(path.join(linked, "nested"));
-    writeFileSync(path.join(linked, ".git"), "gitdir: /repo/.git/worktrees/work-3\n", "utf8");
-    mkdirSync(path.join(ordinary, ".git"));
-    expect(detectLinkedWorktree(path.join(linked, "nested"))).toBe("work-3");
-    expect(detectLinkedWorktree(ordinary)).toBeUndefined();
+    expect(narrow).toHaveLength(48);
+    expect(narrow.startsWith("locus-pi")).toBe(true);
+    expect(narrow.endsWith("31.6%/200k (pi:auto) gpt-5.6-sol high")).toBe(true);
   });
 
   it("renders honest compacting and post-compaction measuring states", () => {
@@ -87,7 +47,7 @@ describe("status-line footer", () => {
         snapshot({ contextTokens: null, compaction: { kind: "compacted", tokensBefore: 182_000, completedAt: 1 } }),
         180,
       ),
-    ).toContain("COMPACTED · 182k → measuring…");
+    ).toContain("(COMPACTED 182k→measuring…)");
   });
 
   it("installs one violet footer in TUI mode and restores Pi's footer on shutdown", async () => {
@@ -114,7 +74,7 @@ describe("status-line footer", () => {
     const rendered = component?.render(120) ?? [];
     expect(rendered).toHaveLength(1);
     expect(rendered[0]).toContain("\u001b[48;2;42;27;61m");
-    expect(rendered[0]).toContain("gpt-5.6-sol high");
+    expect(rendered[0]).toContain("5%/200k (pi:auto) gpt-5.6-sol high");
     expect(component?.render(40)[0]?.match(/\u001b\[0m/gu)).toHaveLength(1);
 
     await emit(harness, "session_before_compact", { reason: "threshold" });
