@@ -92,6 +92,12 @@ describe("workflow progress widget", () => {
       component,
       line({ kind: "agent_start", agent: "quick_task", label: "note:quick", ts: 26, runId: "r1" }),
     );
+    agentLiveStore.patch(
+      workflowAgentLiveRowId(
+        line({ kind: "agent_start", agent: "quick_task", label: "note:quick", ts: 26, runId: "r1" }),
+      ),
+      { tokenCount: { input: 12, output: 3 } },
+    );
     pushProgress(
       component,
       line({
@@ -104,12 +110,12 @@ describe("workflow progress widget", () => {
         runId: "r1",
       }),
     );
-
     const rendered = component.render(100);
     const text = rendered.join("\n");
 
     expect(rendered.length).toBeLessThanOrEqual(Math.max(6, Math.min(30 - 6, 24)));
-    expect(text).toContain("◆ WF live-smoke │ 1/2 smoke · ● RUNNING");
+    expect(text).toContain("◆ live-smoke │ tok 15 │ 1/2 smoke · ● RUNNING");
+    expect(text).not.toContain(" active");
     // The roster shows the whole run: settled agents keep their outcome marker and
     // duration, and a declared stage the run has not reached yet stays visible as
     // planned work instead of being hidden until it starts.
@@ -122,9 +128,11 @@ describe("workflow progress widget", () => {
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
     expect(viewerExternalRows()).toBe(rendered.length);
 
-    const commandRail = component.render(120)[0];
+    const commandRail = component.render(120)[0] ?? "";
     expect(commandRail).toContain("/ps inspect agents");
     expect(commandRail).toContain("/workflows stop last");
+    expect(commandRail.trimEnd().endsWith("/workflows stop last")).toBe(true);
+    expect(commandRail.indexOf("/ps inspect agents")).toBe(120 - "/ps inspect agents · /workflows stop last".length);
 
     fleetMenuState.setFocused(true);
     const focused = component.render(100).join("\n");
@@ -277,7 +285,7 @@ describe("workflow progress widget", () => {
     stage(1, true);
     stage(2, true);
     stage(3, false);
-    expect(component.render(120).join("\n")).toContain("◆ WORKFLOW · stages │ stage — · ● RUNNING");
+    expect(component.render(120).join("\n")).toContain("◆ WORKFLOW · stages │ tok — │ stage — · ● RUNNING");
     expect(component.render(120).join("\n")).toContain("replayed 2");
 
     agentLiveStore.reset();
@@ -296,7 +304,7 @@ describe("workflow progress widget", () => {
       }),
     );
     const freshText = fresh.render(120).join("\n");
-    expect(freshText).toContain("◆ WORKFLOW · stages │ stage — · ● RUNNING");
+    expect(freshText).toContain("◆ WORKFLOW · stages │ tok — │ stage — · ● RUNNING");
     expect(freshText).not.toContain("replayed=");
   });
 
@@ -325,7 +333,7 @@ describe("workflow progress widget", () => {
       component.finish({ ok: true, result: { summary: "child status reviewer cancelled" } });
 
       const text = component.render(120).join("\n");
-      expect(text).toContain("◆ WORKFLOW · cancel-smoke │ stage — · ✓ OK");
+      expect(text).toContain("◆ WORKFLOW · cancel-smoke │ tok — │ stage — · ✓ OK");
       expect(text).toContain("⊘");
       expect(text).toContain("sleep 60");
       expect(text).toContain("✓ child status reviewer cancelled");

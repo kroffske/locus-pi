@@ -12,15 +12,11 @@
   "sourceMode": "local",
   "runtimeRequirements": [
     "Pi 0.82.0 custom footer API",
-    "Pi footer data provider for Git branch and extension statuses",
-    "Pi session manager and context-usage APIs",
+    "Pi footer data provider for Git branch",
+    "Pi context-usage API",
     "session_before_compact and session_compact lifecycle events"
   ],
-  "stateUsed": [
-    "read-only Pi session entries",
-    "read-only current working directory and .git worktree indirection",
-    "ephemeral compaction display state"
-  ],
+  "stateUsed": ["read-only current working directory and Git branch", "ephemeral compaction display state"],
   "tier": "core-owned",
   "provides": {
     "tools": [],
@@ -29,7 +25,7 @@
   },
   "permissions": {
     "filesystem": {
-      "read": ["ancestor .git file/directory for linked-worktree identity"],
+      "read": [],
       "write": []
     },
     "subprocess": [],

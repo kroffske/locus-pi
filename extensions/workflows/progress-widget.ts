@@ -1,4 +1,5 @@
 import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/host/pi-api.js";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 import {
   AgentLivePanel,
@@ -261,22 +262,30 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       (sum, row) => sum + (row.tokenCount === undefined ? 0 : row.tokenCount.input + row.tokenCount.output),
       0,
     );
-    const tokenText = tokenTotal > 0 ? ` · tok ${formatCompactTokenCount(tokenTotal)}` : "";
+    const tokenText = tokenTotal > 0 ? `tok ${formatCompactTokenCount(tokenTotal)}` : "tok —";
     const state = `${statusMark} ${headerLabel}`;
-    const countsText = `${counts.working} active · ${terminalCount}/${leaves.length} done${tokenText}${replayedText}`;
+    const progressText = `${terminalCount}/${leaves.length} done${replayedText}`;
     const fullCommands =
       this.done === undefined
         ? "/ps inspect agents · /workflows status last · /workflows stop last"
         : "/ps inspect agents · /workflows status last";
     const mediumCommands =
       this.done === undefined ? "/ps inspect agents · /workflows stop last" : "/workflows status last";
-    const full = `◆ WORKFLOW · ${this.scriptRef} │ ${stage} · ${state} │ ${countsText} │ ${fullCommands}`;
-    const medium = `◆ WORKFLOW · ${this.scriptRef} │ ${stage} · ${state} │ ${countsText} │ ${mediumCommands}`;
-    const commandCompact = `◆ WF ${this.scriptRef} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${counts.working} active${tokenText} │ ${mediumCommands}`;
-    const compact = `◆ ${this.scriptRef} │ ${stage} · ${state} │ ${countsText}`;
+    const shortCommands = this.done === undefined ? "/workflows stop last" : "/workflows status last";
+    const full = `◆ WORKFLOW · ${this.scriptRef} │ ${tokenText} │ ${stage} · ${state} │ ${progressText}`;
+    const medium = `◆ WF ${this.scriptRef} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${progressText}`;
+    const compact = `◆ ${this.scriptRef} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state}`;
+    const projections: ReadonlyArray<readonly [string, string]> = [
+      [full, fullCommands],
+      [full, mediumCommands],
+      [medium, mediumCommands],
+      [compact, mediumCommands],
+      [compact, shortCommands],
+    ];
     const text =
-      [full, medium, commandCompact, compact].find((candidate) => candidate.length <= width) ??
-      truncate(compact, width);
+      projections
+        .map(([left, right]) => alignWorkflowRail(left, right, width))
+        .find((candidate) => candidate !== undefined) ?? truncate(compact, width);
     return this.#rail(text, width);
   }
 
@@ -418,6 +427,12 @@ function formatCompactTokenCount(tokens: number): string {
   if (tokens < 1000) return String(Math.max(0, Math.trunc(tokens)));
   if (tokens < 1_000_000) return `${trimCompactTokenCount((tokens / 1000).toFixed(1))}k`;
   return `${trimCompactTokenCount((tokens / 1_000_000).toFixed(1))}M`;
+}
+
+function alignWorkflowRail(left: string, right: string, width: number): string | undefined {
+  const gap = width - visibleWidth(left) - visibleWidth(right);
+  if (gap < 2) return undefined;
+  return `${left}${" ".repeat(gap)}${right}`;
 }
 
 function trimCompactTokenCount(value: string): string {
