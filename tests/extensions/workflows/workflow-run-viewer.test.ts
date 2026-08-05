@@ -63,13 +63,13 @@ describe("workflow persisted evidence viewer", () => {
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "trusted answer" }]);
     const index = JSON.parse(
       readFileSync(
-        path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)), "index.json"),
+        path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), "index.json"),
         "utf8",
       ),
     ) as { artifacts: Array<{ kind: string; relativePath: string }> };
     const answer = index.artifacts.find((record) => record.kind === "answer")!;
     writeFileSync(
-      path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)), answer.relativePath),
+      path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), answer.relativePath),
       "changed after indexing",
       "utf8",
     );
@@ -104,7 +104,7 @@ describe("workflow persisted evidence viewer", () => {
     viewer.handleInput("enter");
 
     const indexPath = path.join(
-      workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "workflows", runId)),
+      workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
       "index.json",
     );
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {

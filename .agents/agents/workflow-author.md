@@ -50,7 +50,7 @@ change, update the design back to `DRAFT`, explain the change, and do not build.
 3. Write the numbered algorithm and explicit graph.
 4. State inputs, complete outputs, exact consumers, roles, concurrency,
    loop bounds, human gates, and failure exits. For durable decomposition, also
-   state the stable output directory, complete item-key source, idempotent update
+   state the workflow workspace, complete item-key source, idempotent update
    rule, live project-source drift policy, and worst-case physical-call formula.
 5. Count orchestration mechanisms: raw schema, validator, parser, custom retry or
    recovery, local wrapper, renderer, hidden state, loop, judge, and barrier.
@@ -64,7 +64,7 @@ Use this exact design shape:
 Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
-Stable output: `outputs/<name>` or <explicit project-relative directory>
+Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
 ## Algorithm
@@ -117,11 +117,10 @@ Standard generated source is a readable harness:
   or implicit `arguments`, and never use arrays, objects, spreads, or nesting to
   erase semantic/runtime provenance.
 - Use `promptFile()` only for a long or shared role charter. Routing stays in source.
-- Put the exact filesystem contract in every filesystem prompt: readers get
-  `projectRoot()` as `pwd` and project-relative paths; writers get the exact
-  `outputDir()` for durable user files, or `runWorkspaceDir()`/retained
-  `workspace()` for run-local or isolated work, plus the relative output name.
-  Explicitly forbid substituting the user's home directory or `/tmp`.
+- Rely on the runtime-injected absolute workflow workspace for filesystem work.
+  It defaults to `<pwd>/tmp/<workflow-name>/`; name each assigned relative file
+  and require idempotent replacement. Use `projectRoot()` only for source
+  context. Do not invent another writable root or add permission/tool fields.
 - For durable item work, start from a caller-frozen approved list, then call one
   saved child with `invokeWorkflow()` per exact key. Pass the complete key list,
   unchanged item, and `outputDir()`. Return `publishPrimaryFile()` for the final
@@ -165,7 +164,7 @@ unsupported.
 Saved workflow composition is the single host-owned exception: one parent may
 invoke one level of reviewed saved children through `invokeWorkflow()`. It is not
 recursive delegation. The runtime owns lineage, checkpoints, cycle rejection,
-shared cancellation/concurrency/call budget, and the stable-output lease.
+shared cancellation/concurrency/call budget, and the workflow-workspace lease.
 
 ## Build checks
 

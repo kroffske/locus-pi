@@ -36,7 +36,7 @@ The Markdown draft names:
 - every node’s responsibility, exact input, complete output, role, and
   consumer;
 - edges, concurrency groups, loop bounds, human gates, and failure exits;
-- stable output directory, complete durable item-key source, idempotent file-update
+- workflow workspace, complete durable item-key source, idempotent file-update
   rule, and project-source drift policy;
 - worst-case physical call count, including saved child runs;
 - orchestration mechanisms.
@@ -88,11 +88,16 @@ The remaining standard orchestration primitives are:
 | `publishPrimaryArtifact(name, text)` | One terminal semantic document.                              |
 | `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.        |
 | `items()`                            | Immutable exact caller-supplied text units.                  |
-| `outputDir()`                        | Stable project-relative output root selected by the host.    |
+| `outputDir()`                        | Project-relative workflow workspace selected by the host.    |
 | `invokeWorkflow(declaration)`        | One real saved child run with durable item checkpointing.    |
-| `publishPrimaryFile(path)`           | Validate and reference one non-empty stable output file.     |
+| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.    |
 | `promptFile(path, variables)`        | Long/shared role charter; never routing.                     |
 | `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.    |
+
+`runWorkspaceDir()` is removed. Existing source that calls it fails with
+`WorkflowRunWorkspaceRemovedError`; migrate to `outputDir()` and the single
+project-local workflow workspace. The runtime does not create a run-local
+`workspace/` directory.
 
 Trusted raw `schema` and `validate` remain an advanced compatibility surface for
 existing workflows. Standard generated source uses only exact text, `choice`,
@@ -143,14 +148,13 @@ source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
 work by default.
 
-Filesystem prompts name their location explicitly. Give a reader the exact
-`projectRoot()` as `pwd` and require project-relative source paths. Give a writer
-the exact stable publication root returned by `outputDir()` plus the required
-relative output filename. If code work uses `runWorkspaceDir()` or a retained
-`workspace()`, distinguish that temporary code `pwd` from the shared stable
-publication root. Tell the agent not to redirect work into the user's home
-directory or `/tmp`. The workflow must not repair location mistakes with a path
-parser or an information-gathering script.
+The runtime prepends one exact absolute workflow workspace to every child
+prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
+session working directory inside the project. Source may call `outputDir()` when
+it needs the project-relative identity, but authors should only need to name the
+assigned relative file and the idempotent replacement rule. Use `projectRoot()`
+for source context. Do not add permission/tool fields, another default writable
+root, a path parser, or an information-gathering script.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. Lists come from one of
@@ -195,8 +199,8 @@ export default async function runWorkflow(dsl) {
 
 The child is a real depth-one saved run with its own run directory, source
 snapshot, journal, result envelope, and lineage. It shares root cancellation,
-global concurrency, the 10,000 physical-agent-call fuse, and the stable output
-namespace. A saved child cannot invoke another saved child, and source-identity
+global concurrency, the 10,000 physical-agent-call fuse, and the workflow
+workspace. A saved child cannot invoke another saved child, and source-identity
 cycles fail before agent work. `dsl.workflow()` remains only an inline
 readability/journal boundary; it starts no child run or checkpoint.
 Keys are compact stable identities, not opaque item payloads. Prefer stable
@@ -212,17 +216,17 @@ list and its stable identities to the durable parent. Never derive resumable
 positional keys from fresh model output, and never parse a discovery document as
 transport.
 
-Stable user output is distinct from run evidence. The default is
-`outputs/<workflow-name>`; callers may select another safe project-relative
-`outputDir`. Writers receive the exact `dsl.outputDir()` location and replace
-their assigned file atomically or otherwise idempotently—never append blindly.
+The workflow workspace is distinct from run evidence. Its default is
+`<pwd>/tmp/<workflow-name>/`; callers may select another safe project-relative
+`outputDir`. Every child receives the resolved absolute path once. Writers
+replace their assigned file atomically or otherwise idempotently—never append blindly.
 `publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty
 file under that root and returns its path, byte count, and SHA-256 digest without
-copying or interpreting the content. Failed runs leave stable files intact for
+copying or interpreting the content. Failed runs leave workspace files intact for
 inspection and retry.
 
 Completed-item checkpoints are keyed by parent source hash, child source hash,
-stable output directory, and exact item key. A matching checkpoint skips that
+workflow workspace, and exact item key. A matching checkpoint skips that
 child on retry; any source change invalidates it. This is at-least-once
 execution, so file writes must remain idempotent. One fenced root lease excludes
 concurrent runs using the same stable namespace and prevents a stale owner from
@@ -296,19 +300,19 @@ These are all rules enforced for `meta.profile: "standard"`:
   `consumeTextArtifact`, `continuationArtifacts`, `invokeWorkflow`, `items`,
   `log`, `now`, `outputDir`, `parallel`, `phase`, `pipeline`, `projectRoot`,
   `promptFile`, `publishArtifact`, `publishPrimaryArtifact`,
-  `publishPrimaryFile`, `random`, `runWorkspaceDir`, `workflow`, and
+  `publishPrimaryFile`, `random`, `workflow`, and
   `workspace`. Computed calls, aliases, `.bind()` wrappers, unknown globals,
   and other method calls are rejected.
 - Every allowed DSL call has one exhaustive return classification:
 
-  | Classification     | DSL calls                                                                                                                         |
-  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-  | Runtime control    | `agent({ choice })` exact identity only                                                                                           |
-  | Opaque list        | `agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`                                                   |
-  | Saved-child status | `invokeWorkflow`; only its exact `status` identity is control                                                                     |
-  | Opaque value       | ordinary/model `agent`, `consumeTextArtifact`, `promptFile`, `workflow`, `workspace`                                              |
-  | Runtime/host value | `now`, `random`, `outputDir`, `projectRoot`, `runWorkspaceDir`, `publishArtifact`, `publishPrimaryArtifact`, `publishPrimaryFile` |
-  | Void               | `awaitOperator`, `log`, `phase`                                                                                                   |
+  | Classification     | DSL calls                                                                                                      |
+  | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+  | Runtime control    | `agent({ choice })` exact identity only                                                                        |
+  | Opaque list        | `agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`                                |
+  | Saved-child status | `invokeWorkflow`; only its exact `status` identity is control                                                  |
+  | Opaque value       | ordinary/model `agent`, `consumeTextArtifact`, `promptFile`, `workflow`, `workspace`                           |
+  | Runtime/host value | `now`, `random`, `outputDir`, `projectRoot`, `publishArtifact`, `publishPrimaryArtifact`, `publishPrimaryFile` |
+  | Void               | `awaitOperator`, `log`, `phase`                                                                                |
 
   Adding an allowed method without a return category fails closed. Only runtime
   choice, list identity/length, and saved-child status are control primitives.

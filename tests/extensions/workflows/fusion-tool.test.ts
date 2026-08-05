@@ -25,7 +25,8 @@ function temporaryRoot(): string {
 function completedDirectResult(root: string): DirectFusionRunResult {
   return {
     runId: "20260731-120000-test",
-    runDir: path.join(root, ".pi", "locus-pi", "workflows", "20260731-120000-test"),
+    runDir: path.join(root, ".pi", "locus-pi", "runs", "20260731-120000-test"),
+    workspaceDir: path.join(root, "tmp", "fusion"),
     ok: true,
     disposition: { status: "completed" },
     result: "The judge answer.",
@@ -266,5 +267,61 @@ describe("direct Fusion runner", () => {
     );
     const envelope = JSON.parse(readFileSync(path.join(result.runDir, "runtime", "result.json"), "utf8"));
     expect(envelope).toMatchObject({ ok: true, disposition: { status: "completed" } });
+  });
+
+  it("releases the shared workflow workspace when failure reporting throws", async () => {
+    const root = temporaryRoot();
+    const agentsDir = path.join(root, ".agents", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      path.join(agentsDir, "default.md"),
+      "---\nname: default\ndescription: Fusion test agent\nevidence:\n  mode: none\n---\nAnswer the task.\n",
+      "utf8",
+    );
+    const harness = createHarness(root, {
+      models: [
+        { provider: "test", id: "alpha" },
+        { provider: "test", id: "beta" },
+        { provider: "test", id: "judge" },
+      ],
+    });
+    const createExecutor: NonNullable<DirectFusionRunOptions["createExecutor"]> = ({ model }): AgentExecutor => ({
+      async run(request: AgentRunRequest) {
+        const id = (model as { id?: string } | undefined)?.id ?? "unknown";
+        if (id === "alpha") throw new Error("member failed");
+        return {
+          status: "completed",
+          agentName: request.agent.name,
+          reason: "answered",
+          text: id === "judge" ? "Recovered answer." : `${id} evidence`,
+          executedModel: `test/${id}`,
+          diagnostics: [],
+          lifecycleEntryIds: [],
+        };
+      },
+    });
+    const common = {
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      question: "Which migration is safer?",
+      members: [
+        { label: "member-01", model: "test/alpha" },
+        { label: "member-02", model: "test/beta" },
+      ],
+      judge: { label: "judge", model: "test/judge" },
+      createExecutor,
+    } satisfies DirectFusionRunOptions;
+
+    await expect(
+      runDirectFusion({
+        ...common,
+        onEvent: (line) => {
+          if (line.kind === "error") throw new Error("observer failed");
+        },
+      }),
+    ).rejects.toThrow("observer failed");
+
+    await expect(runDirectFusion(common)).resolves.toMatchObject({ ok: false });
   });
 });

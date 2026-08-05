@@ -25,6 +25,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { workflowExtensionRootDir } from "./workflow-run-layout.js";
 
 const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
@@ -90,10 +91,28 @@ export interface WorkflowRootLease {
   readonly record: WorkflowLeaseRecord;
 }
 
-function defaultWorkflowOutputDir(workflowBaseName: string): string {
-  if (OUTPUT_COMPONENT.test(workflowBaseName)) return `outputs/${workflowBaseName}`;
+function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string, workflowBaseName: string): string {
+  const lexicalRoot = path.resolve(projectRoot);
+  const lexicalWorkingDirectory = path.resolve(workingDirectory);
+  if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalWorkingDirectory)) {
+    throw new Error("workflow working directory must be inside the project root");
+  }
+  let physicalRoot: string;
+  let physicalWorkingDirectory: string;
+  try {
+    physicalRoot = realpathSync(lexicalRoot);
+    physicalWorkingDirectory = realpathSync(lexicalWorkingDirectory);
+  } catch (error) {
+    throw new Error(`workflow working directory physical identity is unavailable: ${String(error)}`);
+  }
+  if (!isWorkflowPathWithinRoot(physicalRoot, physicalWorkingDirectory)) {
+    throw new Error("workflow working directory physical target escapes the project root");
+  }
+  const relativeWorkingDirectory = path.relative(lexicalRoot, lexicalWorkingDirectory).split(path.sep).join("/");
+  const prefix = relativeWorkingDirectory === "" ? "tmp" : `${relativeWorkingDirectory}/tmp`;
+  if (OUTPUT_COMPONENT.test(workflowBaseName)) return `${prefix}/${workflowBaseName}`;
   const identity = createHash("sha256").update(workflowBaseName).digest("hex");
-  return `outputs/by-workflow-name/${identity}`;
+  return `${prefix}/by-workflow-name/${identity}`;
 }
 
 /** Resolve and create a confined project-relative output directory. */
@@ -101,9 +120,10 @@ export function resolveWorkflowOutputDirectory(
   projectRoot: string,
   requested: string | undefined,
   workflowName: string,
+  workingDirectory: string,
 ): WorkflowOutputDirectory {
-  const relativePath =
-    requested === undefined ? defaultWorkflowOutputDir(workflowName) : assertRelativeOutputPath(requested);
+  const defaultPath = defaultWorkflowOutputDir(projectRoot, workingDirectory, workflowName);
+  const relativePath = requested === undefined ? defaultPath : assertRelativeOutputPath(requested);
   const root = path.resolve(projectRoot);
   const absolutePath = path.resolve(root, ...relativePath.split("/"));
   if (!isWorkflowPathWithinRoot(root, absolutePath)) throw new Error("workflow outputDir escapes the project root");
@@ -143,7 +163,7 @@ export function assertUniqueWorkflowItemKeys(keys: readonly string[]): readonly 
   return Object.freeze([...keys]);
 }
 
-/** Validate a regular, non-empty, non-symlink file inside the stable output root. */
+/** Validate a regular, non-empty, non-symlink file inside the workflow workspace. */
 export function referenceWorkflowPrimaryFile(
   output: WorkflowOutputDirectory,
   relativeFile: string,
@@ -183,7 +203,7 @@ export function revalidateWorkflowPrimaryFile(
   return current;
 }
 
-/** Atomically acquire exclusive ownership of one stable output namespace. */
+/** Atomically acquire exclusive ownership of one workflow workspace. */
 export function acquireWorkflowRootLease(input: {
   projectRoot: string;
   output: WorkflowOutputDirectory;
@@ -313,7 +333,7 @@ export function commitWorkflowCompletedCheckpoint(
 
 export function workflowOutputStateDir(projectRoot: string, canonicalOutputIdentity: string): string {
   const namespace = createHash("sha256").update(canonicalOutputIdentity).digest("hex");
-  return path.join(path.resolve(projectRoot), ".pi", "locus-pi", "workflow-state", "v1", namespace);
+  return path.join(workflowExtensionRootDir(path.resolve(projectRoot)), "workflow-state", "v1", namespace);
 }
 
 function checkpointFile(lease: WorkflowRootLease, identity: WorkflowCheckpointIdentity): string {

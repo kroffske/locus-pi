@@ -10,9 +10,10 @@ package surface or changes `package.json#pi.extensions`.
 - `package.json#pi.extensions` remains the default Pi extension source truth.
 - `.locus/runtime/**` stores generated non-workflow runtime state for the current
   project.
-- `.pi/locus-pi/workflows/<runId>/**` stores each workflow in three zones:
-  readable `outputs/`, deliberate agent `workspace/`, and machine-owned
-  `runtime/` state including journals, results, artifacts, resources, and snapshots.
+- `.pi/locus-pi/runs/<runId>/**` stores automatic workflow evidence in two
+  zones: readable `outputs/` and machine-owned `runtime/` state.
+- `<pwd>/tmp/<workflow-name>/**` is the default project-local workspace for
+  deliberate agent-authored workflow files. It is never the run-evidence root.
 - `.locus/AGENTS.md` is the local registry for saved `.locus/**` files in this
   checkout. It must list real files, not template-only expectations.
 - `.tasks/**`, when present, remains project task truth. `.locus/runtime/artifacts/**` can feed `.tasks/**` only through explicit bridge logic.
@@ -21,7 +22,8 @@ package surface or changes `package.json#pi.extensions`.
 ## Expected runtime directories
 
 ```text
-.pi/locus-pi/workflows/  # workflow runs, one direct child directory per RunID
+.pi/locus-pi/runs/         # automatic workflow evidence, one child per RunID
+<pwd>/tmp/<workflow-name>/ # default agent-authored workflow files
 .locus/runtime/artifacts/   # prompt-planning drafts, handoff artifacts, future structured artifacts
 .locus/runtime/reports/     # generated scratch reports, inventories, non-package research output
 .locus/runtime/runs/        # future agent run envelopes/results/transcripts
@@ -65,7 +67,8 @@ this checkout unless a later task creates them.
 ## Current integration
 
 - `prompt-planning` writes approved prepared-task artifacts under `.locus/runtime/artifacts/*.json` when manually loaded.
-- `workflows` writes only under `.pi/locus-pi/workflows/<runId>/`.
+- `workflows` writes automatic evidence under `.pi/locus-pi/runs/<runId>/` and
+  creates the selected project-local workflow workspace separately.
 - `devext-doctor` reports `.locus` root, runtime subdirectories, and `.locus/agents` presence.
 - No default extension currently writes `.locus/runtime/runs/**` or `.locus/runtime/reviews/**`.
 

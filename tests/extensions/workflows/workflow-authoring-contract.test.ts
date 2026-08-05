@@ -60,7 +60,6 @@ const STANDARD_DSL_RETURN_CASES = [
   },
   { method: "publishPrimaryFile", call: 'dsl.publishPrimaryFile("x.md")', category: "runtime" },
   { method: "random", call: "dsl.random()", category: "runtime" },
-  { method: "runWorkspaceDir", call: "dsl.runWorkspaceDir()", category: "runtime" },
   { method: "workflow", call: 'dsl.workflow(() => dsl.agent("x"))', category: "opaque" },
   { method: "workspace", call: 'dsl.workspace("work", "HEAD")', category: "opaque" },
 ] as const;
@@ -118,6 +117,40 @@ describe("approval-first readable workflow authoring", () => {
     for (const { index, relativePath, snippet } of snippets) {
       expect(standardWorkflowSourceShapeErrors(snippet), `${relativePath} standard snippet ${index + 1}`).toEqual([]);
     }
+  });
+
+  it("keeps standard teaching free of author-side capability and answer engineering", () => {
+    const documents = [
+      "extensions/workflows/AUTHORING.md",
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "docs/extensions/active/workflows.md",
+      "extensions/workflows/examples/README.md",
+      "README.md",
+    ];
+    const snippets = documents.flatMap((relativePath) => declaredStandardDocSnippets(relativePath));
+    for (const snippet of snippets) {
+      expect(snippet).not.toMatch(/\b(?:tools|readOnly|permissionMode|sandbox|schema|validate)\s*:/u);
+      expect(snippet).not.toMatch(/function\s+(?:parse|validate|render|repair|acknowledge)\w*/iu);
+    }
+  });
+
+  it("teaches one project-local workflow workspace separate from two-zone run evidence", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/runtime/workflow-run-storage.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toContain("<pwd>/tmp/<workflow-name>");
+      expect(text).not.toContain("outputs/<workflow-name>");
+    }
+    const storage = source("docs/runtime/workflow-run-storage.md");
+    expect(storage).toContain("runs/<runId>/");
+    expect(storage).toContain("outputs/    human-readable host projection");
+    expect(storage).toContain("runtime/    machine evidence and continuation authority");
+    expect(storage).toContain("must never resolve to the same directory");
   });
 
   it("checks every AUTHORING and installed-SKILL standard teaching fragment", () => {
@@ -192,10 +225,17 @@ ${skill[1] ?? ""}
       "publishPrimaryArtifact",
       "publishPrimaryFile",
       "random",
-      "runWorkspaceDir",
       "workflow",
       "workspace",
     ]);
+  });
+
+  it("rejects the removed runWorkspaceDir from standard source", () => {
+    expect(
+      standardWorkflowSourceShapeErrors(
+        standardSource("export default function run(dsl) { return dsl.runWorkspaceDir(); }"),
+      ),
+    ).toContain("standard profile calls only direct DSL primitives and visible map/prompt-join operations");
   });
 
   it.each(STANDARD_DSL_RETURN_CASES.filter(({ category }) => category !== "void"))(

@@ -215,7 +215,7 @@ export default async function runWorkflow(dsl) {
 describe("workflow --resume replays recorded agent calls", () => {
   it("projects an unreadable persisted result envelope as unknown", () => {
     const root = temporaryProject();
-    const runDir = path.join(root, ".pi", "locus-pi", "workflows", "corrupt-result");
+    const runDir = path.join(root, ".pi", "locus-pi", "runs", "corrupt-result");
     ensureWorkflowRunDir(root, "corrupt-result");
     writeFileSync(workflowResultFile(runDir), "{not-json", "utf8");
 

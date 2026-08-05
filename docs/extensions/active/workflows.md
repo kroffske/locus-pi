@@ -77,7 +77,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | Seam                                | Location                                                                                                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bounded concurrency                 | `extensions/workflows/runtime/workflow-runtime.ts` `runScheduled()`                                         | DONE. `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering; width bounds each `runScheduled` call, not globally, so nested fan-out used to multiply. The **global limiter** now exists: every run applies `DEFAULT_WORKFLOW_BUDGET.concurrency` to the leaf `AgentConcurrencyGate` (see "Run budget"). `SCHEDULER_WIDTH` tuning and worktree-isolated real concurrency remain a future scheduler task.                                                                                                                             |
-| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.pi/locus-pi/workflows/<runId>/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                                  |
+| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.pi/locus-pi/runs/<runId>/runtime/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                               |
 | Trusted script execution            | `extensions/workflows/runtime/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
 | Owner-default agent + model routing | `extensions/workflows/runtime/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
 
@@ -221,7 +221,7 @@ failure remains fail-closed.
 Runtime-owned Markdown under `outputs/` is the human-facing evidence. Mandatory
 `runtime/result.json`
 remains the machine-readable run envelope, while
-`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json` is the canonical map from
+`.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
 These six names are what `extensions/workflows/examples/` currently holds, and
@@ -438,7 +438,7 @@ The tool accepts `question`, optional explicit `context`, and an optional final
 `output` instruction. It never forwards ambient session history. A direct run
 uses the same full-tool Fusion calls and writes the same packet,
 answers, journal, result envelope, and readable output under
-`.pi/locus-pi/workflows/<runId>/` as the Workflow DSL primitive. Disabling removes
+`.pi/locus-pi/runs/<runId>/` as the Workflow DSL primitive. Disabling removes
 `fusion` from Pi's active tools immediately while leaving `/fusion` available for
 configuration.
 
@@ -538,18 +538,19 @@ mounting. Pi exposes no global custom-UI lock for unrelated third-party
 extensions, so `/workflows` opens the recovery menu if another extension
 displaces the question.
 
-Every run is persisted to `.pi/locus-pi/workflows/<runId>/`. The runner creates
-the non-symlink `outputs/`, `workspace/`, and `runtime/` directories and writes
+Every run is persisted to `.pi/locus-pi/runs/<runId>/`. The runner creates
+only the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
-child. The start surface reports the resolved run directory, which matters when
+child. Agent-authored files use a separate project-local workspace, defaulting
+to `<pwd>/tmp/<workflow-name>/`. The start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
 ### Persisted run artifacts and viewer
 
 The canonical artifact inventory is
-`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record includes a
+`.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json`. Every record includes a
 logical id/name, media type, byte size, relative path, stage, provenance, and
 SHA-256. Its portable identity is always the complete object
 `{ runId, artifactId, name, sha256 }`; a run id or path alone is not an artifact
@@ -595,7 +596,7 @@ The artifact index is single-owner and append-only during a run. External index
 changes, duplicate identities, symlink escapes, unsafe names, oversized text,
 tampered bytes, or malformed transcript headers fail closed.
 The same owner resolves the project root and rejects symlinks in every ancestor
-through `.pi/locus-pi/workflows/<runId>` before any artifact read, write, or
+through `.pi/locus-pi/runs/<runId>` before any artifact read, write, or
 consume, preventing a redirected canonical root.
 
 At run completion, `runtime/result.json` and the model-callable `workflow` tool project
@@ -969,7 +970,7 @@ working model in a scratch project so child agents actually spawn:
    ```
 3. Verify it actually spawned child agents — don't trust the chat summary, read the journal:
    ```
-   cat .test_pi/.pi/locus-pi/workflows/<runId>/runtime/result.json
+   cat .test_pi/.pi/locus-pi/runs/<runId>/runtime/result.json
    ```
    A real run shows `agent_end` events with `status: "completed"` and a non-empty
    `childSessions.*` session id. If the host cannot spawn a child, the run fails closed
@@ -1099,7 +1100,7 @@ The diagram is an ownership map, not a decorative code trace:
   end the run: an operator pause with `disposition: awaiting_operator`, a
   fail-closed stop, and the terminal result a later run may consume.
 - Draw each persisted artifact under the exact name the code publishes it with,
-  so the picture and `.pi/locus-pi/workflows/<runId>/runtime/artifacts/` agree.
+  so the picture and `.pi/locus-pi/runs/<runId>/runtime/artifacts/` agree.
 - Include a legend explaining every visual type used.
 
 Keep the file self-contained and diffable: no `<script>`, no embedded or remote
@@ -1358,15 +1359,14 @@ fusion(question, options)     // 2-10 isolated answers -> separate judge; return
 fusion(question, {schema, …}) // Same panel; validates only the judge's final answer
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
-outputDir()                   // Project-relative stable user-output root selected by the host
+outputDir()                   // Project-relative workflow workspace selected by the host
 invokeWorkflow(declaration)   // Run one saved child level with durable item checkpointing
-publishPrimaryFile(path)      // Validate/reference one non-empty stable output file
+publishPrimaryFile(path)      // Validate/reference one non-empty workflow workspace file
 consumeTextArtifact(ref)      // Verify/copy prior-run text; return current ref + exact text
 awaitOperator({reason})       // Declare a successful operator handoff without changing result
 promptFile(path, variables?)  // Render a neighboring .prompt.md resource
 workspace(label, ref)         // Allocate one retained workspace; returns opaque handle
 projectRoot()                 // Absolute launch project root
-runWorkspaceDir()             // Absolute working directory for this run; agent file names kept verbatim
 parallel(thunks)              // Full barrier; success returns ordered T[], ordinary failed branches reject typed evidence
 pipeline(items, ...stages)    // Per-item staged chains; a failed item stops before its later stages, then typed reject
 phase(name)                   // Progress grouping + journal line
@@ -1410,26 +1410,24 @@ Those questions stay in their run's evidence and reopen on request: the
 `/workflows` menu's `continue` entry takes the oldest pending one project-wide,
 and `/workflows continue <runId>` takes a named run.
 
-`runWorkspaceDir()` is the absolute path of this run's working directory
-(`.pi/locus-pi/workflows/<runId>/workspace/`), created before the script starts.
-Every child agent's prompt opens by naming the same directory and telling it to
-create the run's files there under their exact names. Nothing in the
-runtime renames, numbers or moves what an agent writes, so a path a workflow
-prints in a question is a path that exists. Auto-captured readable material goes
-to `outputs/`; machine evidence and transcripts go to `runtime/artifacts/`.
-See `docs/runtime/workflow-run-storage.md`.
+`outputDir()` returns the project-relative workflow workspace. It defaults to
+`tmp/<workflow-name>` beneath Pi's verified session working directory, or to the
+programmatic tool's explicit safe project-relative `outputDir`. The runtime
+creates its absolute path before the first child and names it exactly once in
+every child task. Agent files keep their exact names; the runtime does not
+rename, move, or clean them. Absolute overrides, traversal, whitespace tricks,
+backslashes, out-of-project working directories, and symlink escapes fail before
+a child starts.
 
-`outputDir()` is separate: it returns the project-relative stable namespace for
-user files, defaulting to `outputs/<workflow-name>` or selected through the
-programmatic tool's safe relative `outputDir` field. Its absolute path is added
-to every child filesystem preamble and exposed as `stableOutputDir`; the existing
-tool-detail `outputDir` remains the run-local evidence directory for
-compatibility. Absolute paths, traversal, whitespace tricks, backslashes, and
-symlink ancestors are rejected before a child starts.
+`runWorkspaceDir()` is removed and throws
+`WorkflowRunWorkspaceRemovedError`. New run evidence has no `workspace/`
+directory. Auto-captured readable material goes to `outputs/`; machine evidence
+and transcripts go to `runtime/artifacts/`. See
+`docs/runtime/workflow-run-storage.md`.
 
 `publishPrimaryFile(relativePath)` validates a regular, non-symlink, non-empty
-file beneath the stable root and exposes absolute/relative path, byte count, and
-SHA-256 digest. It neither copies nor parses content. Stable files survive failed
+file beneath the workflow workspace and exposes absolute/relative path, byte count, and
+SHA-256 digest. It neither copies nor parses content. Workspace files survive failed
 runs; run-local evidence remains immutable under the run id.
 
 `invokeWorkflow()` accepts exactly one saved `name` or `scriptPath`, optional
@@ -1437,7 +1435,7 @@ semantic `input` and exact `items`, one safe item `key`, the complete unique
 `keys` list, and the same `outputDir()`. It starts a real depth-one child with an
 independent run directory, source snapshot, journal, result, and parent lineage.
 The root and children share cancellation, global concurrency, one physical-call
-counter, one 24-hour emergency deadline, and one fenced stable-output lease.
+counter, one 24-hour emergency deadline, and one fenced workflow-workspace lease.
 Saved children cannot invoke saved grandchildren; direct or source-identity
 cycles fail before model work.
 
@@ -1446,7 +1444,7 @@ the runtime validates all keys before the first child. Fresh model discovery
 must remain non-resumable in the same run, or finish in a separate run before a
 human/caller approves and transports the frozen list. Never derive resumable
 positional keys from fresh model output. Terminal-success checkpoints are committed atomically
-and keyed by parent source hash, child source hash, stable output directory, and
+and keyed by parent source hash, child source hash, workflow workspace, and
 item key. A retry skips a matching child and reruns missing or source-invalidated
 items. Execution is at least once, so assigned files must be replaced
 idempotently rather than appended. The runtime provides no workflow-side ledger,
@@ -1641,7 +1639,7 @@ the attempt **threw** instead of answering — both carrying `attempt`, `attempt
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
 `[workflow:retry]` line names the boundary between attempts, and the run's journal folder
-`.pi/locus-pi/workflows/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
+`.pi/locus-pi/runs/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
 `callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
@@ -1969,7 +1967,7 @@ package values. Giving scripts a run-level surface means deciding where
 operator-changeable knobs live, which is an open owner decision.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.pi/locus-pi/workflows/<runId>/outputs/README.md` carries a `## Budget` section
+applied budget, and `.pi/locus-pi/runs/<runId>/outputs/README.md` carries a `## Budget` section
 with each axis, its applied value, and the spend the run evidence can measure:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
@@ -2052,7 +2050,7 @@ hard cap.
   `git_read` accepts argv for
   allowlisted Git queries and rejects mutation, output-file, external-diff,
   textconv, pager, signature, and config options before launch.
-- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.pi/locus-pi/workflows/<runId>/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
+- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.pi/locus-pi/runs/<runId>/runtime/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. It never changes the tool set. New workflows should use `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
   The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
@@ -2223,9 +2221,8 @@ A replayed call reports **no** token usage, so the run budget shown by
 ## Journal layout
 
 ```
-.pi/locus-pi/workflows/<runId>/
+.pi/locus-pi/runs/<runId>/
   outputs/           — README, semantic documents, exact workflow-result.md prose
-  workspace/         — files deliberately written by workflow agents
   runtime/
     script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
     journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
@@ -2242,6 +2239,10 @@ A replayed call reports **no** token usage, so the run budget shown by
       published/       — Text written through publishArtifact()/publishPrimaryArtifact()
       inputs/          — Verified copies consumed from prior runs, with source refs
 ```
+
+Files deliberately written by workflow agents are outside this tree, under the
+selected project-local workflow workspace (default
+`<pwd>/tmp/<workflow-name>/`).
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared

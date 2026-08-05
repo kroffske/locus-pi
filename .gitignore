@@ -9,7 +9,7 @@ test-results/
 .cache/
 .tasks/
 .locus/
-# Retired: workflow run reports moved into .pi/locus-pi/workflows/<runId>/logs/.
+# Retired: workflow run reports moved into .pi/locus-pi/runs/<runId>/outputs/.
 # Kept so a checkout that predates the move stays clean.
 .locus-pi/
 .locus/_archive/.hermes/

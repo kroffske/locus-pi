@@ -6,6 +6,20 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow files now use one project-local workspace, separate from run
+  evidence.** The default is `<pwd>/tmp/<workflow-name>/`, derived from Pi's
+  verified session working directory; every child receives its absolute path
+  exactly once, saved children inherit it, and the existing physical-root lease
+  prevents concurrent runs from sharing it accidentally. Automatic evidence now
+  lives under `.pi/locus-pi/runs/<runId>/` with only `outputs/` and `runtime/`.
+  Old `.pi/locus-pi/workflows/<runId>/` directories remain untouched and exact
+  lookup returns a migration message instead of silently reading them.
+  `runWorkspaceDir()` now throws `WorkflowRunWorkspaceRemovedError`; use
+  `outputDir()` and `publishPrimaryFile()`. Standard authoring remains a visible
+  graph of direct agent calls and exact text/file handoffs, with no author-side
+  capability fields, raw schemas/validators, parsers, renderers,
+  acknowledgement gates, or answer-repair functions.
+
 - **A running `spawn_agent` call now shows the generated agent name immediately.**
   The tool card streams the same `agent <name> started` line used by the live
   agent surface as soon as the child receives its stable display name; the

@@ -107,8 +107,8 @@ describe("stable workflow output paths", () => {
     });
 
     expect(result.ok, result.error).toBe(true);
-    expect(result.stableOutputDirRelative).toBe("outputs/default-output");
-    expect(result.stableOutputDir).toBe(path.join(root, "outputs", "default-output"));
+    expect(result.workspaceDirRelative).toBe("tmp/default-output");
+    expect(result.workspaceDir).toBe(path.join(root, "tmp", "default-output"));
   });
 
   it("derives distinct safe default namespaces for legacy names beginning with underscore or hyphen", async () => {
@@ -130,13 +130,13 @@ describe("stable workflow output paths", () => {
 
     for (const result of results) {
       expect(result.ok, result.error).toBe(true);
-      expect(result.stableOutputDirRelative).toMatch(/^outputs(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+$/u);
+      expect(result.workspaceDirRelative).toMatch(/^tmp(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+$/u);
     }
-    const namespaces = results.map((result) => result.stableOutputDirRelative!);
+    const namespaces = results.map((result) => result.workspaceDirRelative!);
     expect(new Set(namespaces).size).toBe(names.length);
-    expect(namespaces[2]).toBe("outputs/legacy");
-    expect(namespaces[0]).toMatch(/^outputs\/by-workflow-name\/[a-f0-9]{64}$/u);
-    expect(namespaces[1]).toMatch(/^outputs\/by-workflow-name\/[a-f0-9]{64}$/u);
+    expect(namespaces[2]).toBe("tmp/legacy");
+    expect(namespaces[0]).toMatch(/^tmp\/by-workflow-name\/[a-f0-9]{64}$/u);
+    expect(namespaces[1]).toMatch(/^tmp\/by-workflow-name\/[a-f0-9]{64}$/u);
   });
 
   it.each(["/tmp/escape", "../escape", "outputs/../escape", " outputs/task", "outputs/task/"])(
@@ -329,6 +329,8 @@ describe("saved child execution and item checkpoints", () => {
         parentItemKey: child.key,
         depth: 1,
       });
+      expect(persisted.workspaceDir).toBe(path.join(root, "outputs", "resume"));
+      expect(persisted.workspaceDirRelative).toBe("outputs/resume");
       expect(persisted.stableOutputDirRelative).toBe("outputs/resume");
     }
     expect(first.journal.filter((line) => line.message?.includes("[workflow:child-start]"))).toHaveLength(2);
@@ -476,7 +478,7 @@ describe("saved child execution and item checkpoints", () => {
       });
 
     expect((await run()).ok).toBe(true);
-    const output = resolveWorkflowOutputDirectory(root, "outputs/corrupt-checkpoint", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/corrupt-checkpoint", "unused", root);
     const checkpoints = path.join(workflowOutputStateDir(root, output.identity), "checkpoints");
     const checkpointFile = path.join(
       checkpoints,
@@ -515,7 +517,7 @@ describe("saved child execution and item checkpoints", () => {
       });
 
     expect((await run()).ok).toBe(true);
-    const output = resolveWorkflowOutputDirectory(root, "outputs/checkpoint-io-error", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/checkpoint-io-error", "unused", root);
     const checkpoints = path.join(workflowOutputStateDir(root, output.identity), "checkpoints");
     const checkpointName = readdirSync(checkpoints).find((name) => name.endsWith(".json"));
     expect(checkpointName).toBeDefined();
@@ -556,7 +558,7 @@ describe("saved child execution and item checkpoints", () => {
       });
 
     expect((await run()).ok).toBe(true);
-    const output = resolveWorkflowOutputDirectory(root, "outputs/checkpoint-permission", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/checkpoint-permission", "unused", root);
     const checkpoints = path.join(workflowOutputStateDir(root, output.identity), "checkpoints");
     const checkpointName = readdirSync(checkpoints).find((name) => name.endsWith(".json"));
     expect(checkpointName).toBeDefined();
@@ -827,7 +829,7 @@ describe("saved child execution and item checkpoints", () => {
 describe("fenced output leases and atomic checkpoints", () => {
   it("retries the live mkdir-to-owner-write acquisition window", async () => {
     const root = project();
-    const output = resolveWorkflowOutputDirectory(root, "outputs/racing-owner", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/racing-owner", "unused", root);
     const leaseDir = path.join(workflowOutputStateDir(root, output.identity), "lease");
     const ownerFile = path.join(leaseDir, "owner.json");
     const child = spawn(
@@ -860,8 +862,8 @@ setTimeout(() => process.exit(0), 150);`,
 
   it("conflicts for one live namespace while independent namespaces remain ownable", () => {
     const root = project();
-    const firstOutput = resolveWorkflowOutputDirectory(root, "outputs/one", "unused");
-    const secondOutput = resolveWorkflowOutputDirectory(root, "outputs/two", "unused");
+    const firstOutput = resolveWorkflowOutputDirectory(root, "outputs/one", "unused", root);
+    const secondOutput = resolveWorkflowOutputDirectory(root, "outputs/two", "unused", root);
     const first = acquireWorkflowRootLease({ projectRoot: root, output: firstOutput, rootRunId: "run-one" });
 
     expect(() =>
@@ -879,8 +881,8 @@ setTimeout(() => process.exit(0), 150);`,
 
   it("keys leases by the physical output target across platform case aliases", () => {
     const root = project();
-    const stored = resolveWorkflowOutputDirectory(root, "outputs/CaseAlias", "unused");
-    const alias = resolveWorkflowOutputDirectory(root, "outputs/casealias", "unused");
+    const stored = resolveWorkflowOutputDirectory(root, "outputs/CaseAlias", "unused", root);
+    const alias = resolveWorkflowOutputDirectory(root, "outputs/casealias", "unused", root);
     const first = acquireWorkflowRootLease({ projectRoot: root, output: stored, rootRunId: "stored-case" });
 
     if (alias.physicalPath === stored.physicalPath) {
@@ -900,7 +902,7 @@ setTimeout(() => process.exit(0), 150);`,
 
   it("reclaims a provably dead local owner and refuses an unreadable owner", () => {
     const root = project();
-    const output = resolveWorkflowOutputDirectory(root, "outputs/reclaim", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/reclaim", "unused", root);
     const state = workflowOutputStateDir(root, output.identity);
     const leaseDir = path.join(state, "lease");
     mkdirSync(leaseDir, { recursive: true });
@@ -928,7 +930,7 @@ setTimeout(() => process.exit(0), 150);`,
 
   it("fences a delayed former owner from checkpoint commit or release", () => {
     const root = project();
-    const output = resolveWorkflowOutputDirectory(root, "outputs/fenced", "unused");
+    const output = resolveWorkflowOutputDirectory(root, "outputs/fenced", "unused", root);
     const former = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "former" });
     releaseWorkflowRootLease(former);
     const current = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "current" });

@@ -25,8 +25,8 @@ describe("workflow failure diagnostic", () => {
   it("names the failing stage, owning script, and the answer that stage produced", () => {
     const diagnostic = buildWorkflowFailureDiagnostic({
       projectRoot: "/repo",
-      runDir: "/repo/.pi/locus-pi/workflows/run-1",
-      journalPath: "/repo/.pi/locus-pi/workflows/run-1/journal.ndjson",
+      runDir: "/repo/.pi/locus-pi/runs/run-1",
+      journalPath: "/repo/.pi/locus-pi/runs/run-1/journal.ndjson",
       journal: journal("run-1", ["resolve-scope", "inventory-changes"]),
       origin: "script",
       error: "review inventory returned neither a coverage entry nor the declaration",
@@ -45,14 +45,14 @@ describe("workflow failure diagnostic", () => {
       stage: "inventory-changes",
       workflow: "review",
       scriptPath: "extensions/workflows/examples/review/review.workflow.mjs",
-      evidencePath: ".pi/locus-pi/workflows/run-1/artifacts/answers/call-0003-inventory.md.md",
-      journalPath: ".pi/locus-pi/workflows/run-1/journal.ndjson",
+      evidencePath: ".pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md",
+      journalPath: ".pi/locus-pi/runs/run-1/journal.ndjson",
       repairRequest:
         'Fix the "review" workflow: its script rejected the run at stage "inventory-changes" — review inventory ' +
         "returned neither a coverage entry nor the declaration. " +
         "Script: extensions/workflows/examples/review/review.workflow.mjs. " +
-        "Failing stage answer: .pi/locus-pi/workflows/run-1/artifacts/answers/call-0003-inventory.md.md. " +
-        "Run journal: .pi/locus-pi/workflows/run-1/journal.ndjson.",
+        "Failing stage answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md. " +
+        "Run journal: .pi/locus-pi/runs/run-1/journal.ndjson.",
     });
     // The repair request survives a round trip through result.json unchanged.
     expect(parseWorkflowFailureDiagnostic(JSON.parse(JSON.stringify(diagnostic)))).toEqual(diagnostic);
@@ -61,8 +61,8 @@ describe("workflow failure diagnostic", () => {
   it("states what it cannot prove instead of guessing a stage, script, or answer", () => {
     const diagnostic = buildWorkflowFailureDiagnostic({
       projectRoot: "/repo",
-      runDir: "/repo/.pi/locus-pi/workflows/run-2",
-      journalPath: "/repo/.pi/locus-pi/workflows/run-2/journal.ndjson",
+      runDir: "/repo/.pi/locus-pi/runs/run-2",
+      journalPath: "/repo/.pi/locus-pi/runs/run-2/journal.ndjson",
       journal: [],
       error: "  Pi SDK host: connection refused  ",
     });
@@ -73,10 +73,10 @@ describe("workflow failure diagnostic", () => {
     expect(diagnostic).not.toHaveProperty("evidencePath");
     expect(diagnostic.repairRequest).toBe(
       "Diagnose this workflow: the workflow runtime failed — Pi SDK host: connection refused. " +
-        "Run journal: .pi/locus-pi/workflows/run-2/journal.ndjson.",
+        "Run journal: .pi/locus-pi/runs/run-2/journal.ndjson.",
     );
     expect(formatWorkflowFailureDiagnosticLines(diagnostic)).toEqual([
-      "journal: .pi/locus-pi/workflows/run-2/journal.ndjson",
+      "journal: .pi/locus-pi/runs/run-2/journal.ndjson",
     ]);
     expect(formatWorkflowFailureDiagnosticLines(diagnostic, { repairRequest: true }).at(-1)).toBe(
       `copy: ${diagnostic.repairRequest}`,

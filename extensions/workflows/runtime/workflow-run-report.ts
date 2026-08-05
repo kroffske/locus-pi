@@ -1,11 +1,11 @@
 /**
  * workflow-run-report.ts — the human-readable outputs of one workflow run,
- * under `<projectRoot>/.pi/locus-pi/workflows/<runId>/outputs/`.
+ * under `<projectRoot>/.pi/locus-pi/runs/<runId>/outputs/`.
  *
  * Everything here is deliberate: the workflow publishes supporting documents
  * and at most one primary document, while the mandatory result owner persists
  * exact terminal prose. Automatic child answers remain runtime evidence. Files
- * an agent writes itself stay under their own names in `../workspace/`.
+ * an agent writes itself stay in the separate project-local workflow workspace.
  *
  * Documents are projected as an update cycle, not an accumulation: an artifact
  * NAME is one document, and a name that was written several times (a plan
@@ -33,7 +33,6 @@ import {
   writeWorkflowRunFile,
   workflowRunDir,
   workflowRunOutputsDir,
-  WORKFLOW_RUN_WORKSPACE_DIRECTORY,
 } from "./workflow-run-layout.js";
 import type { WorkflowBudget } from "./workflow-budget.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
@@ -48,6 +47,8 @@ export function workflowReportDir(projectRoot: string, runId: string): string {
 export interface WorkflowRunReportInput {
   projectRoot: string;
   runId: string;
+  /** Project-local directory where agents write workflow-owned files. */
+  workspaceDir?: string;
   /** Terminal disposition status: completed / awaiting_operator / cancelled / failed. */
   status: string;
   target?: { kind: string; ref: string; source: string };
@@ -388,8 +389,9 @@ function reportReadme(options: {
     lines.push(`- Error: ${singleLine(input.error)}`);
   }
   lines.push(
-    `- Files this run's agents wrote: \`../${WORKFLOW_RUN_WORKSPACE_DIRECTORY}/\` — under their own names, ` +
-      `never renamed or numbered`,
+    ...(input.workspaceDir === undefined
+      ? []
+      : [`- Workflow workspace: \`${input.workspaceDir}\` — agent-owned files under their exact names`]),
     "- Machine records: `../runtime/` — journal.ndjson, replay record, result envelope, script snapshot, " +
       "transcripts and call envelopes",
   );

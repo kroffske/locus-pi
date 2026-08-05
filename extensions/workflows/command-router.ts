@@ -18,6 +18,7 @@ import {
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { listWorkflowRunIds, readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
+import { WORKFLOW_RUN_STORAGE_PATTERN } from "./runtime/workflow-run-layout.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "./command-completions.js";
 import {
@@ -281,6 +282,14 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       const resolved = resolveWorkflowRunId(projectRoot, selector);
       if (resolved.status === "ambiguous") {
         setOperatorWidget(ctx, "workflows", ambiguousWorkflowRunBlock(selector, resolved));
+        return;
+      }
+      if (resolved.status === "legacy") {
+        setOperatorWidget(
+          ctx,
+          "workflows",
+          workflowWarningBlock(resolved.message, `New runs are stored under ${WORKFLOW_RUN_STORAGE_PATTERN}`),
+        );
         return;
       }
       const runId = resolved.status === "resolved" ? resolved.runId : selector;
@@ -806,6 +815,14 @@ async function presentWorkflowRunResultText(
   const resolved = resolveWorkflowRunId(projectRoot, selector);
   if (resolved.status === "ambiguous") {
     setOperatorWidget(ctx, "workflows", ambiguousWorkflowRunBlock(selector, resolved));
+    return;
+  }
+  if (resolved.status === "legacy") {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock(resolved.message, `New runs are stored under ${WORKFLOW_RUN_STORAGE_PATTERN}`),
+    );
     return;
   }
   if (resolved.status === "not-found") {

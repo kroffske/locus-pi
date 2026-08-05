@@ -103,15 +103,8 @@ export interface WorkflowAgentBridgeOptions {
   defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
   workspaceManager?: WorkflowWorkspaceManager;
   evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
-  /**
-   * This run's working directory, named to every child so a file it writes is
-   * findable afterwards. Injected HERE and not in the runtime, because the
-   * runtime's prompt is part of the replay key: a run-specific absolute path in
-   * it would make every recorded call miss on the next resume.
-   */
-  runWorkspaceDir?: string;
-  /** Stable user-output directory shared by the root and saved children. */
-  stableOutputDir?: string;
+  /** Project-local workflow workspace shared by the root and saved children. */
+  workflowWorkspaceDir?: string;
 }
 
 /**
@@ -136,47 +129,29 @@ export const WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR = "\n\n---\n\n";
  */
 export function composeWorkflowChildTask(
   prompt: string,
-  runWorkspaceDir: string | undefined,
-  locations: { pwd?: string; projectRoot?: string; stableOutputDir?: string } = {},
+  workflowWorkspaceDir: string | undefined,
+  locations: { pwd?: string; projectRoot?: string } = {},
 ): string {
   if (
-    (runWorkspaceDir === undefined || runWorkspaceDir.trim() === "") &&
-    locations.projectRoot === undefined &&
-    locations.stableOutputDir === undefined
+    (workflowWorkspaceDir === undefined || workflowWorkspaceDir.trim() === "") &&
+    locations.projectRoot === undefined
   ) {
     return prompt;
   }
-  const sections: string[] = [];
-  if (runWorkspaceDir !== undefined && runWorkspaceDir.trim() !== "") {
-    sections.push(
-      [
-        "## This workflow run's working directory",
-        "",
-        runWorkspaceDir,
-        "",
-        "Create any file for this run there under the exact name it should have.",
-      ].join("\n"),
-    );
-  }
-  sections.push(
-    [
-      "## Workflow filesystem locations",
-      "",
-      ...(locations.pwd === undefined ? [] : [`pwd (code workspace): ${locations.pwd}`]),
-      ...(locations.projectRoot === undefined
-        ? []
-        : [`project root (shared project location): ${locations.projectRoot}`]),
-      ...(locations.stableOutputDir === undefined
-        ? []
-        : [`stable output root (shared publication location): ${locations.stableOutputDir}`]),
-      ...(runWorkspaceDir === undefined ? [] : [`run-local workspace: ${runWorkspaceDir}`]),
-      "",
-      "Use pwd for code work. The project and stable output roots are intentional shared locations for publication.",
-      "Use the exact paths above. Do not substitute the user home directory or /tmp.",
-      "Stable output files keep their exact names; runtime records references and does not reconstruct their content.",
-    ].join("\n"),
-  );
-  const note = sections.join("\n\n");
+  const note = [
+    "## Workflow filesystem locations",
+    "",
+    ...(workflowWorkspaceDir === undefined
+      ? []
+      : [`workflow workspace (write intermediate and final workflow files here): ${workflowWorkspaceDir}`]),
+    ...(locations.pwd === undefined ? [] : [`pwd (code workspace): ${locations.pwd}`]),
+    ...(locations.projectRoot === undefined ? [] : [`project root (source context): ${locations.projectRoot}`]),
+    "",
+    "Use pwd for code work. Use the workflow workspace for workflow artifacts; replace assigned files idempotently.",
+    "Treat the project root as source context, not as a default artifact destination.",
+    "Use the exact paths above. Do not substitute the user home directory or /tmp.",
+    "Workflow files keep their exact names; runtime records references and does not reconstruct their content.",
+  ].join("\n");
   return `${note}${WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR}${prompt}`;
 }
 
@@ -400,10 +375,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // a literal `5` invisible to authors while the child's whole wall clock is
     // computed from it.
     const maxTurns = req.maxTurns ?? DEFAULT_WORKFLOW_BUDGET.turns;
-    const childTask = composeWorkflowChildTask(req.prompt, options.runWorkspaceDir, {
+    const childTask = composeWorkflowChildTask(req.prompt, options.workflowWorkspaceDir, {
       pwd: worktreePath ?? projectRoot,
       projectRoot,
-      ...(options.stableOutputDir === undefined ? {} : { stableOutputDir: options.stableOutputDir }),
     });
     const request = createAgentRunRequest(agent, childTask, {
       maxTurns,

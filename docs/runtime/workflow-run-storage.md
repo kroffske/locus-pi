@@ -1,114 +1,99 @@
-# Workflow run storage
+# Workflow file and run storage
 
-Every workflow run owns one direct child of the project-local runtime root:
-
-```text
-.pi/locus-pi/workflows/<runId>/
-  outputs/     readable run results produced from the terminal result and evidence
-  workspace/   files written deliberately by workflow agents
-  runtime/     machine state used by replay, continuation, status, and diagnostics
-```
-
-`extensions/workflows/runtime/workflow-run-layout.ts` owns every directory name,
-path constructor, initialization rule, and confinement check. Callers must use
-that module instead of rebuilding the layout with string literals.
-
-The runner creates all three directories and initializes
-`runtime/journal.ndjson` before announcing the RunID. Initialization failure
-announces no start and launches no child. Every path is confined below the
-physical project root; unsafe run ids, symlinks, and non-directory components
-fail closed.
-
-No compatibility reader exists for the former flat layout or its `files/` and
-`logs/` directories. Old local runs may be deleted.
-
-## `outputs/`: results for people
-
-`outputs/` is the first directory to open after a run:
+Workflow-owned files and automatic run evidence are separate locations. They
+must never resolve to the same directory.
 
 ```text
-outputs/
-  README.md             run status, task, documents, revisions, budget, and links
-  workflow-result.md    exact terminal prose, when the workflow returns text
-  plan.md               latest semantic document named `plan.md`, when present
-  task.md               input/task document, when present
-  <artifact-name>       latest revision of another workflow-published document
+<pwd>/tmp/<workflow-name>/
+  <agent-authored intermediate and final files>
+
+<projectRoot>/.pi/locus-pi/
+  runs/<runId>/
+    outputs/    human-readable host projection
+    runtime/    machine evidence and continuation authority
+  workflow-state/v1/    workspace leases and completed-item checkpoints
 ```
 
-`workflow-result.md` is runtime-owned and always means “the exact text returned
-by the workflow.” A successful prose run must persist it; failure to do so makes
-the run fail. The interactive workflow tool renders the same full text for the
-operator without truncation, while the tool content sent back into model context
-remains bounded.
+`pwd` is Pi's session working directory. The runtime verifies both its lexical
+and physical location inside the project root before creating the default
+workspace. An explicit `outputDir` remains a safe project-relative override.
 
-Only text deliberately published by workflow code becomes a readable document.
-Automatic child answers and consumed continuation copies remain evidence under
-`runtime/artifacts/`; this prevents call-by-call traces from crowding the result
-folder. Repeated published names are revisions of one document: the newest
-revision occupies the readable file and `README.md` links every digest-bound
-historical revision. `publishPrimaryArtifact(name, text)` explicitly marks one
-semantic result; identity is never inferred by comparing its bytes with the
-terminal answer. A completed `plan` workflow therefore exposes
-`outputs/plan.md` and also keeps its exact terminal answer in
-`outputs/workflow-result.md`. Duplication here is deliberate: one file is the
-semantic document, the other is the workflow boundary result.
+`extensions/workflows/runtime/workflow-run-layout.ts` owns `.pi/locus-pi/`, the
+`runs/` and `workflow-state/` names, and every run-evidence path. Other runtime
+modules use its constructors instead of rebuilding the prefix.
 
-Structured terminal results stay in `runtime/result.json`. A failed or stalled
-draft is not marked as the final result. Report materialization is best effort;
-failure is recorded in the journal and result envelope. Exact terminal prose and
-the machine result envelope are mandatory finalization records.
+## Workflow workspace: agent-owned files
 
-## `workspace/`: agent working files
+`dsl.outputDir()` returns the project-relative workspace identity. The default
+is `tmp/<workflow-name>` below the verified Pi working directory. The runtime
+creates the resolved absolute directory before the first child and prepends it
+exactly once to every child task.
 
-`workspace/` replaces the former `files/` directory. The runtime creates it
-before workflow code runs, returns its absolute path from
-`dsl.runWorkspaceDir()`, and includes that path in every child prompt.
+Agents write intermediate and final files there under their assigned names.
+Workflow JavaScript passes exact text or file names between agents; it does not
+parse, validate, render, repair, or reconstruct their semantic output. Writers
+replace assigned files idempotently. The runtime does not clean, rename, or
+move workspace files.
 
-The runtime never renames, numbers, or projects files in this directory. An
-agent that writes `plan.md` leaves `workspace/plan.md`; an empty workspace means
-no agent deliberately wrote a working file. Read-only calls are told where the
-directory is but are not asked to write there.
+`publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty
+file below the workspace and returns its absolute/relative path, byte count, and
+SHA-256 digest without copying or interpreting content.
 
-Workflow scripts should use `workspace/` for files they explicitly ask an agent
-to create. They should use `publishArtifact()` for readable supporting documents,
-`publishPrimaryArtifact()` for the single semantic result, and digest-bound
-artifact references for continuation.
+One fenced lease owns each physical workspace. Concurrent runs targeting the
+same default or explicit workspace fail closed. Parallel callers choose distinct
+explicit directories. Saved children inherit the root workspace and lease.
 
-## `runtime/`: machine state
+`runWorkspaceDir()` is removed and throws
+`WorkflowRunWorkspaceRemovedError`. A run-local `workspace/` directory is not
+created.
 
-Everything needed by the host, replay, continuation, status, or forensic
-inspection stays below `runtime/`:
+## `outputs/`: human projection
 
-| Path                                   | Purpose                                                                                     | Owner                         |
-| -------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------- |
-| `runtime/journal.ndjson`               | append-only phases, logs, agent starts/ends, usage, and errors                              | `workflow-journal.ts`         |
-| `runtime/replay.ndjson`                | replay-safe agent answers plus `dsl.now()`/`dsl.random()` values                            | `workflow-replay.ts`          |
-| `runtime/result.json`                  | terminal machine envelope, disposition, journal copy, identity, and projected artifact refs | `workflow-result.ts`          |
-| `runtime/script-<sha256>.workflow.mjs` | immutable hash-named executed script snapshot                                               | `workflow-script-identity.ts` |
-| `runtime/resources/`                   | immutable copies of loaded prompt resources                                                 | `workflow-resources.ts`       |
-| `runtime/operator-handoff-claim.json`  | mutable continuation claim metadata; never answer content                                   | `workflow-handoff.ts`         |
-| `runtime/artifacts/index.json`         | canonical digest-bound artifact inventory                                                   | `workflow-artifacts.ts`       |
-| `runtime/artifacts/answers/`           | exact final answer from each agent attempt                                                  | `workflow-artifacts.ts`       |
-| `runtime/artifacts/published/`         | deterministic text published by workflow code                                               | `workflow-artifacts.ts`       |
-| `runtime/artifacts/inputs/`            | verified copies consumed from prior runs                                                    | `workflow-artifacts.ts`       |
-| `runtime/artifacts/transcripts/`       | fresh child Pi JSONL transcripts and readable HTML renders                                  | `workflow-artifacts.ts`       |
-| `runtime/artifacts/results/`           | fresh child result envelopes                                                                | `workflow-artifacts.ts`       |
+`outputs/` is runtime-owned and may contain:
 
-The artifact index, not `outputs/`, is continuation authority. A later run must
-receive the complete terminally projected `{ runId, artifactId, name, sha256 }`
-reference. The host then verifies projection membership, index identity, size,
-digest, confinement, and bytes before copying the input into the new run.
+```text
+README.md             status, workspace path, budget, documents, and links
+workflow-result.md    exact terminal prose, when the workflow returns text
+<artifact-name>       newest text explicitly published by workflow code
+```
 
-## Finding and retaining runs
+Only `publishArtifact()` and `publishPrimaryArtifact()` project semantic text
+here. Automatic child answers remain under `runtime/artifacts/`.
+`publishPrimaryFile()` records a safe file reference; it does not copy the file
+into `outputs/`.
 
-- The canonical root is always
-  `<projectRoot>/.pi/locus-pi/workflows/<runId>/`, where `projectRoot` comes from
-  the Pi session rather than necessarily the terminal's current directory.
-- `/workflows status <runId>` shows machine status and evidence.
-- `/workflows result <runId>` opens the exact prose result from
-  `outputs/workflow-result.md`.
-- Nothing is pruned automatically. Live UI retention limits do not delete run
-  directories.
-- Deleting an entire run removes its readable outputs, working files, replay
-  records, and continuation evidence. Delete only runs that are no longer needed
-  as continuation sources.
+`/workflows result <runId>` reads `outputs/workflow-result.md` first and falls
+back to `runtime/result.json` when the readable copy is missing.
+
+## `runtime/`: machine evidence
+
+| Path                                   | Purpose                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `runtime/journal.ndjson`               | phases, logs, agent starts/ends, usage, and errors                                         |
+| `runtime/replay.ndjson`                | replay-safe answers plus recorded `dsl.now()`/`dsl.random()` values                        |
+| `runtime/result.json`                  | terminal envelope, workspace/run paths, disposition, journal, identity, and projected refs |
+| `runtime/script-<sha256>.workflow.mjs` | retained executed script snapshot                                                          |
+| `runtime/resources/`                   | retained prompt resources                                                                  |
+| `runtime/operator-handoff-claim.json`  | mutable continuation claim metadata; never answer content                                  |
+| `runtime/worktrees/`                   | retained Git worktrees created by explicit isolation APIs                                  |
+| `runtime/artifacts/index.json`         | canonical digest-bound artifact inventory                                                  |
+| `runtime/artifacts/answers/`           | exact final answer from each agent attempt                                                 |
+| `runtime/artifacts/published/`         | deterministic text explicitly published by workflow code                                   |
+| `runtime/artifacts/inputs/`            | verified copies consumed from prior runs                                                   |
+| `runtime/artifacts/transcripts/`       | fresh child Pi transcripts                                                                 |
+| `runtime/artifacts/results/`           | fresh child result envelopes                                                               |
+
+The artifact index, not `outputs/`, is continuation authority.
+
+## Lookup and retention
+
+- `/workflows status <runId>` shows both `workspaceDir` and `runDir` when the
+  persisted envelope is available.
+- New readers inspect only `.pi/locus-pi/runs/<runId>/`.
+- Old `.pi/locus-pi/workflows/<runId>/` directories are left untouched. An exact
+  lookup returns a named migration message; there is no fallback read or
+  automatic migration.
+- Removing a run directory removes automatic evidence but not its project-local
+  workflow workspace. Removing a workspace does not remove run evidence.
+- `tmp/` is a project convention in this repository. The runtime does not claim
+  that every foreign repository ignores it.

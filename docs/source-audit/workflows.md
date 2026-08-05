@@ -193,7 +193,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   repair/replay/journal path. Raw schemas and custom validation remain the
   compatible advanced surface for existing reviewed scripts.
 - `extensions/workflows/runtime/workflow-artifacts.ts` owns the canonical per-run artifact
-  store at `.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Every record
+  store at `.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json`. Every record
   binds `{runId, artifactId, name, sha256}` to media type, size, relative path,
   stage, provenance, and optional source lineage. It assigns confined
   answer/transcript/result, published, and consumed-input destinations; verifies
@@ -204,7 +204,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   prior run's terminal artifact projection, verifies and copies the source
   bytes, and records the original ref. An index-only record is not consumable.
   The confinement check starts at the physical project root and rejects a
-  symlink in any `.pi/locus-pi/workflows/<runId>` ancestor before read, write,
+  symlink in any `.pi/locus-pi/runs/<runId>` ancestor before read, write,
   or consume. It also returns the verified source workflow target, source
   artifact kind/stage, structured terminal result, and terminal artifact refs so
   compositions can bind a handoff to the producer's result rather than mutable
@@ -221,9 +221,19 @@ or borrowed runtime implementation was identified for this source-audit slice.
   full inventory remains the per-run artifact index.
 - `extensions/workflows/runtime/workflow-worktree.ts` owns disposable linked-worktree
   creation and the retained workflow workspace manager: detached worktrees at
-  exact refs under the run directory, verification of the original checkout and
+  exact refs under the run's `runtime/worktrees/` directory, verification of the original checkout and
   of each workspace's HEAD and realpath on every resolve, and workspace
   evidence for the run envelope.
+- `extensions/workflows/runtime/workflow-run-layout.ts` owns the complete
+  `.pi/locus-pi/` prefix, the `runs/` evidence tree, the `workflow-state/v1/`
+  coordination tree, and the retired `workflows/` lookup message. New run roots
+  contain only `outputs/` and `runtime/`; no other TypeScript module retypes the
+  prefix.
+- `extensions/workflows/runtime/workflow-output.ts` owns the separate
+  project-local workflow workspace. It derives the default
+  `<pwd>/tmp/<workflow-name>/` from Pi's lexically and physically confined
+  working directory, validates explicit project-relative overrides, and owns
+  physical-root leases, checkpoints, and primary-file references.
 - `extensions/workflows/runtime/workflow-journal.ts` owns run discovery/order and
   immutable executed-snapshot reads as well as journal-to-live status mapping.
   Status/catalog consumers see only evidenced directories with a canonical UTC

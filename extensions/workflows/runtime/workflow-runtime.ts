@@ -59,6 +59,17 @@ export type {
   WorkflowOperatorQuestion,
 } from "./workflow-handoff.js";
 
+export class WorkflowRunWorkspaceRemovedError extends Error {
+  readonly code = "WORKFLOW_RUN_WORKSPACE_REMOVED";
+
+  constructor() {
+    super(
+      "runWorkspaceDir() was removed: use outputDir() for the project-local workflow workspace; run evidence now contains no writable workspace directory",
+    );
+    this.name = "WorkflowRunWorkspaceRemovedError";
+  }
+}
+
 /** The single agent-execution callback the runtime depends on. The bridge supplies
  *  the real implementation; tests supply a fake. The runtime never imports the SDK. */
 export type WorkflowAgentRunner = (req: WorkflowAgentRequest) => Promise<WorkflowAgentResult>;
@@ -356,15 +367,9 @@ export interface WorkflowDsl {
   workspace(label: string, ref: string): Promise<string>;
   /** Absolute project root captured by the workflow runner. */
   projectRoot(): string;
-  /**
-   * Absolute agent workspace for THIS run, created before the script
-   * starts. Every child agent is told the same path, and a file written there
-   * keeps the exact name its author chose — the runtime never renames or
-   * numbers it. Auto-captured evidence goes under `runtime/`; workflow-owned
-   * readable documents go under `outputs/`.
-   */
+  /** @deprecated Removed. Use outputDir(); calling this throws WorkflowRunWorkspaceRemovedError. */
   runWorkspaceDir(): string;
-  /** Project-relative stable user-output directory, shared by this execution tree. */
+  /** Project-relative workflow workspace, shared by this execution tree. */
   outputDir(): string;
   /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
   publishArtifact(name: string, text: string): WorkflowArtifactRef;
@@ -409,7 +414,7 @@ export interface WorkflowSavedChildInvocation {
   key: string;
   /** Complete key set, validated before the first child starts. */
   keys: readonly string[];
-  /** Must equal this execution tree's project-relative stable output directory. */
+  /** Must equal this execution tree's project-relative workflow workspace. */
   outputDir: string;
 }
 
@@ -807,9 +812,7 @@ export interface WorkflowRuntimeOptions {
   /** Already consumed and digest-bound by the runner before workflow code starts. */
   continuation?: WorkflowBoundContinuation;
   projectRoot?: string;
-  /** Absolute agent workspace for this run; the runner creates it before the script starts. */
-  runWorkspaceDir?: string;
-  /** Project-relative stable user-output directory. */
+  /** Project-relative workflow workspace. */
   outputDir?: string;
   /** Host-owned regular-file validator/reference publisher. */
   publishPrimaryFile?: (relativePath: string) => WorkflowPrimaryFileReference;
@@ -3323,16 +3326,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return options.projectRoot;
   }
 
-  function runWorkspaceDir(): string {
-    if (options.runWorkspaceDir === undefined || options.runWorkspaceDir.trim() === "") {
-      throw new Error("workflow run workspace directory is not configured");
-    }
-    return options.runWorkspaceDir;
+  function runWorkspaceDir(): never {
+    throw new WorkflowRunWorkspaceRemovedError();
   }
 
   function outputDir(): string {
     if (options.outputDir === undefined || options.outputDir.trim() === "") {
-      throw new Error("workflow stable output directory is not configured");
+      throw new Error("workflow output directory is not configured");
     }
     return options.outputDir;
   }

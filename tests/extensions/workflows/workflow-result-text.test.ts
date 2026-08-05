@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -121,6 +121,29 @@ describe("workflow result text persistence", () => {
     if (resolution.status !== "ambiguous") return;
     expect(resolution.candidates).toHaveLength(2);
     expect(resolution.matched).toBe(2);
+  });
+
+  it("names retired workflows storage without reading or migrating it", async () => {
+    const root = makeRoot();
+    const runId = "20260720-101010-old1";
+    const legacyDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
+    mkdirSync(legacyDir, { recursive: true });
+    const marker = path.join(legacyDir, "marker.txt");
+    writeFileSync(marker, "leave this untouched", "utf8");
+
+    const resolution = resolveWorkflowRunId(root, runId);
+    expect(resolution).toMatchObject({ status: "legacy", runId });
+    if (resolution.status !== "legacy") return;
+    expect(resolution.message).toContain("retired storage location");
+    expect(resolution.message).toContain(legacyDir);
+    expect(readWorkflowRunResultText(root, runId)).toMatchObject({ status: "none", message: resolution.message });
+
+    const h = createHarness(root, { mode: "rpc" });
+    workflows(h.pi);
+    await h.commands.get("workflows")!.handler(`result ${runId}`, h.ctx);
+    expect(h.widgets.get("workflows") ?? "").toContain("retired storage location");
+    expect(readFileSync(marker, "utf8")).toBe("leave this untouched");
+    expect(existsSync(workflowRunDir(root, runId))).toBe(false);
   });
 
   it("reports the real number of matching runs even when the listed candidates are capped", async () => {

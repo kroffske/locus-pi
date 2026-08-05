@@ -25,7 +25,7 @@ Reviewed source paths:
 - The OMP loop-limit split informed the local `status` / `once` split.
 - The OMP interactive loop test informed the decision to keep continuation manual and bounded instead of auto-dispatched.
 - The OMP goal continuation prompt shape was reused for `/loop once goal` through the existing `/goal continue` contract, and the local artifact retains goal source metadata (`goalId`, `objective`) plus bounded prompt text.
-- Workflow continuation is handled by local `.pi/locus-pi/workflows/<runId>/` metadata; this is a bounded wrapper, not a port of OMP auto-submit. When that metadata is missing, `/loop once workflow <runId>` fails closed and does not create a continuation artifact.
+- Workflow continuation is handled by local `.pi/locus-pi/runs/<runId>/` metadata; this is a bounded wrapper, not a port of OMP auto-submit. When that metadata is missing, `/loop once workflow <runId>` fails closed and does not create a continuation artifact.
 - Bare `/loop` is a Locus-owned typed input flow. It intentionally keeps the local one-submit/one-artifact semantics and does not imitate OMP auto-repeat.
 - Typed `INPUT`, `VIEW`, `RUN`, `RESULT`, and `WARN` presentation plus the bounded shared-status contribution are local operator-UI behavior, not copied OMP rendering code.
 

@@ -1,5 +1,5 @@
 /**
- * workflow-journal.ts — runId generation + .pi/locus-pi/workflows/<runId>/ layout
+ * workflow-journal.ts — runId generation + .pi/locus-pi/runs/<runId>/ layout
  * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
  *
  * Owns journal persistence and read-side run discovery while workflow-runtime.ts
@@ -33,12 +33,13 @@ import {
   writeWorkflowRunFile,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowJournalFile,
+  workflowLegacyRunMigrationMessage,
   workflowRunDir,
   workflowRunRuntimeDir,
-  workflowsRootDir,
+  workflowRunsRootDir,
 } from "./workflow-run-layout.js";
 
-export { workflowJournalFile, workflowRunDir, workflowsRootDir } from "./workflow-run-layout.js";
+export { workflowJournalFile, workflowRunDir, workflowRunsRootDir } from "./workflow-run-layout.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
 const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
@@ -505,6 +506,8 @@ export interface WorkflowJournalRead {
 
 export interface WorkflowRunResultEnvelope {
   ok?: boolean;
+  workspaceDir?: string;
+  workspaceDirRelative?: string;
   disposition?: unknown;
   result?: unknown;
   error?: string;
@@ -555,7 +558,7 @@ export type WorkflowRunScriptSnapshot =
 /** Run ids newest-first, ordered by a proven start timestamp. */
 export function listWorkflowRunIds(projectRoot: string): string[] {
   try {
-    return readdirSync(workflowsRootDir(projectRoot), { withFileTypes: true })
+    return readdirSync(workflowRunsRootDir(projectRoot), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => ({ runId: entry.name, startedAt: workflowRunStartedAt(projectRoot, entry.name) }))
       .filter((entry): entry is { runId: string; startedAt: number } => entry.startedAt !== undefined)
@@ -1095,6 +1098,7 @@ function isWorkflowRunSummary(value: unknown): boolean {
  */
 export type WorkflowRunIdResolution =
   | { status: "resolved"; runId: string }
+  | { status: "legacy"; runId: string; message: string }
   | { status: "not-found" }
   | { status: "ambiguous"; matched: number; candidates: string[] };
 
@@ -1106,6 +1110,8 @@ export function resolveWorkflowRunId(projectRoot: string, selector: string): Wor
     return newest === undefined ? { status: "not-found" } : { status: "resolved", runId: newest };
   }
   if (runIds.includes(wanted)) return { status: "resolved", runId: wanted };
+  const legacyMessage = workflowLegacyRunMigrationMessage(projectRoot, wanted);
+  if (legacyMessage !== undefined) return { status: "legacy", runId: wanted, message: legacyMessage };
   const needle = wanted.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
   if (needle === "") return { status: "not-found" };
   const matches = runIds.filter((runId) =>
@@ -1145,7 +1151,12 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
   const envelope = readWorkflowRunResult(projectRoot, runId);
   const jsonPath = workflowResultFile(runDir);
   if (envelope === null) {
-    return { status: "none", runId, message: `No persisted result was found for run ${runId}.` };
+    return {
+      status: "none",
+      runId,
+      message:
+        workflowLegacyRunMigrationMessage(projectRoot, runId) ?? `No persisted result was found for run ${runId}.`,
+    };
   }
   if (typeof envelope.result === "string" && envelope.result.trim() !== "") {
     return { status: "ready", runId, path: jsonPath, text: envelope.result };
@@ -1176,6 +1187,8 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     const failureDiagnostic = parseWorkflowFailureDiagnostic(record.failureDiagnostic);
     return {
       ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
+      ...(typeof record.workspaceDir === "string" ? { workspaceDir: record.workspaceDir } : {}),
+      ...(typeof record.workspaceDirRelative === "string" ? { workspaceDirRelative: record.workspaceDirRelative } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "disposition") ? { disposition: record.disposition } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "result") ? { result: record.result } : {}),
       ...(typeof record.error === "string" ? { error: record.error } : {}),
@@ -1245,13 +1258,13 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   }
 
   const lexicalProjectRoot = path.resolve(projectRoot);
-  const lexicalWorkflowsRoot = path.resolve(workflowsRootDir(lexicalProjectRoot));
-  const lexicalRunDir = path.resolve(lexicalWorkflowsRoot, runId);
+  const lexicalRunsRoot = path.resolve(workflowRunsRootDir(lexicalProjectRoot));
+  const lexicalRunDir = path.resolve(lexicalRunsRoot, runId);
   const lexicalRuntimeDir = workflowRunRuntimeDir(lexicalRunDir);
   const expectedName = `script-${identity.scriptSha256}.workflow.mjs`;
   const lexicalSnapshot = path.resolve(identity.snapshotPath);
   if (
-    path.dirname(lexicalRunDir) !== lexicalWorkflowsRoot ||
+    path.dirname(lexicalRunDir) !== lexicalRunsRoot ||
     path.dirname(lexicalSnapshot) !== lexicalRuntimeDir ||
     path.basename(lexicalSnapshot) !== expectedName ||
     identity.snapshotPath !== path.join(lexicalRuntimeDir, expectedName)
