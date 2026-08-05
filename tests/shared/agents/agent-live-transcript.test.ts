@@ -96,6 +96,19 @@ describe("AgentLiveTranscript", () => {
     expect(snapshot.latestMessage).toBe("Done");
   });
 
+  it("keeps the viewer transcript limited to child assistant and tool output", () => {
+    const snapshot = new AgentLiveTranscript().replaceMessages([
+      { role: "system", content: "PARENT_SYSTEM_SENTINEL" },
+      { role: "user", content: [{ type: "text", text: "PARENT_CHAT_SENTINEL" }] },
+      { role: "assistant", content: [{ type: "text", text: "Child output" }], stopReason: "stop" },
+    ]);
+
+    expect(snapshot.blocks).toHaveLength(1);
+    expect(snapshot.latestMessage).toBe("Child output");
+    expect(JSON.stringify(snapshot)).not.toContain("PARENT_SYSTEM_SENTINEL");
+    expect(JSON.stringify(snapshot)).not.toContain("PARENT_CHAT_SENTINEL");
+  });
+
   it("ignores repeated tool observations without a stable toolCallId", () => {
     const transcript = new AgentLiveTranscript("/repo");
     const incompleteAssistant = {

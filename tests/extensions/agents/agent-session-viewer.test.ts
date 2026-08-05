@@ -12,6 +12,7 @@ import agents from "../../../extensions/agents/index.js";
 import {
   AgentSessionViewer,
   createAgentViewerCapability,
+  disposeAgentSessionViewers,
   loadAgentViewerCapability,
 } from "../../../extensions/agents/session-viewer.js";
 import { createHarness, emit } from "../../test-harness.js";
@@ -167,7 +168,10 @@ async function flushForcedRender(tui: TUI): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-afterEach(() => agentLiveStore.reset());
+afterEach(() => {
+  disposeAgentSessionViewers();
+  agentLiveStore.reset();
+});
 
 describe("AgentSessionViewer", () => {
   it("keeps a terminal-height live viewport and makes the original request reachable", () => {
@@ -272,6 +276,90 @@ describe("AgentSessionViewer", () => {
     const updated = viewer.render(80).join("\n");
     expect(updated).toContain("message-12");
     viewer.dispose();
+  });
+
+  it("captures wheel history, keeps the selected child output anchored, and returns to the live tail", () => {
+    const row = agentLiveStore.begin({ id: "wheel-viewer", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 12; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `wheel-${index}` }], stopReason: "stop" },
+      });
+    }
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    const write = vi.fn();
+    const tui = { terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
+      matches: () => false,
+    });
+
+    expect(write).toHaveBeenCalledWith("\u001b[?1000h\u001b[?1006h");
+    const initial = viewer.render(80).join("\n");
+    expect(initial).toContain("wheel-11");
+    expect(initial).toContain("MESSAGE TO AGENT");
+
+    viewer.handleInput("\u001b[<64;10;5M");
+    const scrolled = viewer.render(80).join("\n");
+    expect(scrolled).toContain("wheel-5");
+    expect(scrolled).not.toContain("wheel-11");
+
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "wheel-12" }], stopReason: "stop" },
+    });
+    const anchored = viewer.render(80).join("\n");
+    expect(anchored).toContain("wheel-5");
+    expect(anchored).not.toContain("wheel-12");
+
+    viewer.handleInput("\u001b[<65;10;5M");
+    viewer.handleInput("\u001b[<65;10;5M");
+    expect(viewer.render(80).join("\n")).toContain("wheel-12");
+
+    viewer.handleInput("\u001b[<0;10;5M");
+    viewer.handleInput("x");
+    expect(viewer.render(80).join("\n")).toContain("> x");
+
+    viewer.dispose();
+    expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
+    unregister();
+  });
+
+  it("keeps mouse capture until the last overlapping viewer releases the shared terminal", () => {
+    const first = agentLiveStore.begin({ id: "mouse-owner-a", agentName: "reviewer", label: "A" });
+    const second = agentLiveStore.begin({ id: "mouse-owner-b", agentName: "reviewer", label: "B" });
+    const write = vi.fn();
+    const tui = { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() };
+    const firstViewer = new AgentSessionViewer(executionFor(first.id), tui, vi.fn(), capability());
+    const secondViewer = new AgentSessionViewer(executionFor(second.id), tui, vi.fn(), capability());
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenLastCalledWith("\u001b[?1000h\u001b[?1006h");
+    firstViewer.dispose();
+    expect(write).toHaveBeenCalledTimes(1);
+    secondViewer.dispose();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
+  });
+
+  it("releases mouse capture when the owning Pi session shuts down", async () => {
+    const h = createHarness(process.cwd());
+    agents(h.pi);
+    await emit(h, "session_start");
+    const row = agentLiveStore.begin({ id: "shutdown-viewer", agentName: "reviewer", label: "Shutdown" });
+    const write = vi.fn();
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(write).toHaveBeenLastCalledWith("\u001b[?1000h\u001b[?1006h");
+
+    await emit(h, "session_shutdown", { reason: "exit" });
+
+    expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
+    expect(viewer.render(80)).toEqual([]);
   });
 
   it("writes a stable terminal-height viewport through Pi TUI across live and control redraws", async () => {
@@ -508,7 +596,7 @@ describe("AgentSessionViewer", () => {
     tui.stop();
   });
 
-  it("keeps Escape ownership while leaving terminal navigation to Pi scrollback", async () => {
+  it("keeps Escape ownership without treating bare arrow keys as transcript scrolling", async () => {
     const h = createHarness(process.cwd(), { isStreaming: true });
     h.ctx.hasUI = true;
     agents(h.pi);

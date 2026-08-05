@@ -16,7 +16,7 @@ import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
 interface ViewerTui extends CustomUiTui {
-  terminal?: { rows: number; columns: number };
+  terminal?: { rows: number; columns: number; write?(data: string): void };
 }
 
 interface NativeComponentModule {
@@ -87,6 +87,9 @@ type NativeComponentEntry =
 
 // Pi renders the default-loaded Locus footer beneath custom views.
 const PI_HOST_FOOTER_ROWS = 1;
+const MOUSE_SCROLL_LINES = 3;
+const ENABLE_MOUSE_SCROLL = "\u001b[?1000h\u001b[?1006h";
+const DISABLE_MOUSE_SCROLL = "\u001b[?1000l\u001b[?1006l";
 
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
@@ -198,6 +201,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   readonly #title: string;
   readonly #unsubscribe: () => void;
   #storeAttached = true;
+  #releaseMouseScroll = () => {};
   #unregisterGlobal = () => {};
 
   constructor(
@@ -211,6 +215,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     const row = agentLiveStore.rowForExecution(execution);
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
     this.#selection = rounds?.active ?? 1;
+    this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
     const requestRender = () => {
       if (this.#disposed) return;
       if (agentLiveStore.rowForExecution(this.execution) === undefined) {
@@ -258,6 +263,11 @@ export class AgentSessionViewer implements CustomUiComponent {
     }
     if (terminalRows === 1) return [header];
     const bodyHeight = Math.max(0, terminalRows - inputDivider.length - inputLines.length - 2);
+    if (this.#historyOffset > 0 && this.#lastHistoryLineCount > 0) {
+      this.#historyOffset +=
+        content.length - this.#lastHistoryLineCount + (this.#lastBodyHeight - Math.max(1, bodyHeight));
+    }
+    this.#historyOffset = Math.min(Math.max(0, content.length - bodyHeight), Math.max(0, this.#historyOffset));
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
     const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => fitLine(line, safeWidth));
@@ -270,26 +280,24 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#close();
       return;
     }
+    const mouse = mouseEvent(data);
+    if (mouse !== undefined) {
+      if (mouse === "wheel-up") this.#scrollHistory(MOUSE_SCROLL_LINES);
+      if (mouse === "wheel-down") this.#scrollHistory(-MOUSE_SCROLL_LINES);
+      return;
+    }
     if (this.#matches(data, "app.tools.expand", ["ctrl+o"])) {
       this.#expandedTools = !this.#expandedTools;
       this.capability.invalidate();
       this.tui.requestRender();
       return;
     }
-    if (this.#input === undefined && this.#matches(data, "tui.select.pageUp", ["pageup", "pageUp", "\u001b[5~"])) {
-      this.#historyOffset = Math.min(
-        Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight),
-        this.#historyOffset + Math.max(1, this.#lastBodyHeight - 1),
-      );
-      this.tui.requestRender();
+    if (this.#matches(data, "tui.select.pageUp", ["pageup", "pageUp", "\u001b[5~"])) {
+      this.#scrollHistory(Math.max(1, this.#lastBodyHeight - 1));
       return;
     }
-    if (
-      this.#input === undefined &&
-      this.#matches(data, "tui.select.pageDown", ["pagedown", "pageDown", "\u001b[6~"])
-    ) {
-      this.#historyOffset = Math.max(0, this.#historyOffset - Math.max(1, this.#lastBodyHeight - 1));
-      this.tui.requestRender();
+    if (this.#matches(data, "tui.select.pageDown", ["pagedown", "pageDown", "\u001b[6~"])) {
+      this.#scrollHistory(-Math.max(1, this.#lastBodyHeight - 1));
       return;
     }
     if (this.#input === undefined && (data === "home" || data === "\u001b[H")) {
@@ -330,6 +338,8 @@ export class AgentSessionViewer implements CustomUiComponent {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#releaseMouseScroll();
+    this.#releaseMouseScroll = () => {};
     this.#input?.dispose?.();
     this.#input = undefined;
     this.#detachStore();
@@ -442,6 +452,12 @@ export class AgentSessionViewer implements CustomUiComponent {
     });
   }
 
+  #scrollHistory(delta: number): void {
+    const maxOffset = Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight);
+    this.#historyOffset = Math.min(maxOffset, Math.max(0, this.#historyOffset + delta));
+    this.tui.requestRender();
+  }
+
   #matches(data: string, keybinding: string, fallbacks: readonly string[]): boolean {
     try {
       if (this.keybindings?.matches(data, keybinding) === true) return true;
@@ -454,7 +470,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
     const controls = hasInput
-      ? "Enter send"
+      ? "wheel/PgUp/PgDn history · Enter send"
       : this.#inputSuppressedAtRows === undefined
         ? "PgUp/PgDn history"
         : "resize terminal for input";
@@ -501,12 +517,21 @@ function noTranscriptLines(row: AgentLiveRow | undefined): string[] {
 }
 
 const ACTIVE_SESSION_VIEWERS_KEY = Symbol.for("locus-pi.active-agent-session-viewers.v1");
+const MOUSE_SCROLL_LEASES_PROPERTY = "__locusPiMouseScrollLeases";
 
-function activeSessionViewers(): Set<() => void> {
+interface MouseScrollLease {
+  owners: number;
+}
+
+interface ActiveSessionViewerRegistry extends Set<() => void> {
+  [MOUSE_SCROLL_LEASES_PROPERTY]?: Map<object, MouseScrollLease>;
+}
+
+function activeSessionViewers(): ActiveSessionViewerRegistry {
   const runtimeGlobal = globalThis as unknown as Record<symbol, unknown>;
   const existing = runtimeGlobal[ACTIVE_SESSION_VIEWERS_KEY];
-  if (existing instanceof Set) return existing as Set<() => void>;
-  const registry = new Set<() => void>();
+  if (existing instanceof Set) return existing as ActiveSessionViewerRegistry;
+  const registry: ActiveSessionViewerRegistry = new Set<() => void>();
   Object.defineProperty(runtimeGlobal, ACTIVE_SESSION_VIEWERS_KEY, {
     value: registry,
     enumerable: false,
@@ -610,6 +635,64 @@ function formatAgentSessionStart(row: AgentLiveRow): string {
 
 function finiteTerminalRows(value: number | undefined): number | undefined {
   return value === undefined || !Number.isFinite(value) ? undefined : Math.max(1, Math.floor(value));
+}
+
+function writeTerminalControl(tui: ViewerTui, sequence: string): boolean {
+  const terminal = tui.terminal;
+  if (terminal?.write === undefined) return false;
+  try {
+    terminal.write(sequence);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireTerminalMouseScroll(tui: ViewerTui): () => void {
+  const terminal = tui.terminal;
+  if (terminal?.write === undefined) return () => {};
+  const registry = activeSessionViewers();
+  const leases = terminalMouseScrollLeases(registry);
+  const existing = leases.get(terminal);
+  if (existing === undefined) {
+    if (!writeTerminalControl(tui, ENABLE_MOUSE_SCROLL)) return () => {};
+    leases.set(terminal, { owners: 1 });
+  } else {
+    existing.owners += 1;
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const lease = leases.get(terminal);
+    if (lease === undefined) return;
+    lease.owners -= 1;
+    if (lease.owners > 0) return;
+    leases.delete(terminal);
+    writeTerminalControl(tui, DISABLE_MOUSE_SCROLL);
+  };
+}
+
+function terminalMouseScrollLeases(registry: ActiveSessionViewerRegistry): Map<object, MouseScrollLease> {
+  const existing = registry[MOUSE_SCROLL_LEASES_PROPERTY];
+  if (existing !== undefined) return existing;
+  const leases = new Map<object, MouseScrollLease>();
+  Object.defineProperty(registry, MOUSE_SCROLL_LEASES_PROPERTY, {
+    value: leases,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return leases;
+}
+
+function mouseEvent(data: string): "wheel-up" | "wheel-down" | "other" | undefined {
+  const match = /^\u001b\[<(\d+);\d+;\d+[Mm]$/u.exec(data);
+  if (match === null) return undefined;
+  const button = Number(match[1]) & ~28;
+  if (button === 64) return "wheel-up";
+  if (button === 65) return "wheel-down";
+  return "other";
 }
 
 function historyWindow(lines: readonly string[], height: number, offset: number): string[] {

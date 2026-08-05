@@ -70,8 +70,13 @@ This file records user-visible changes to the public package.
 - **Selected-agent `/ps` views no longer clear the terminal scrollback during
   live updates and can accept input while the child is active.** The viewer now
   keeps Pi's native assistant and tool rendering inside one terminal-height
-  follow-tail viewport; `PgUp`/`PgDn` and `Home`/`End` expose retained history,
-  while `Ctrl+O` keeps the native tool-detail control. This avoids Pi's
+  follow-tail viewport; trackpad/wheel scrolling and `PgUp`/`PgDn` browse only
+  the selected child's retained transcript, preserve the chosen position while
+  live output arrives, and return to follow-tail at the bottom. `Home`/`End`
+  remain available when the input editor is absent, while `Ctrl+O` keeps the
+  native tool-detail control. Mouse capture is shared across overlapping viewers
+  and released when the last viewer closes or the Pi session shuts down. This
+  avoids exposing the parent chat as if it belonged to the child and avoids Pi's
   clear-screen/full-redraw path when an older assistant block changes above a
   tall tool result, which was especially visible as flicker under WSL. While the
   exact SDK child turn is streaming, the view also mounts Pi's native editor and
