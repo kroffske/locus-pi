@@ -48,7 +48,7 @@ describe("workflow startup persistence", () => {
 
     expect(result.ok).toBe(true);
     expect(announcedRunDir).toBe(result.runDir);
-    expect(result.runDir).toBe(path.join(root, ".pi", "locus-pi", "workflows", result.runId));
+    expect(result.runDir).toBe(path.join(root, ".pi", "locus-pi", "runs", result.runId));
     expect(journalExistedAtAnnouncement).toBe(true);
     expect(journalAtAnnouncement).toContain("[workflow:budget]");
   });

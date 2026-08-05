@@ -166,6 +166,9 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
           WORKFLOW_SOURCE_LEGEND,
           ...(journalCorruptionLine === null ? [] : [compactWorkflowLine(journalCorruptionLine)]),
           compactWorkflowLine(`runDir: ${workflowRunDir(projectRoot, runId)}`),
+          ...(persisted?.workspaceDir === undefined
+            ? []
+            : [compactWorkflowLine(`workspaceDir: ${persisted.workspaceDir}`)]),
           ...(scriptIdentity === undefined
             ? []
             : [compactWorkflowLine(formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref))]),
@@ -181,6 +184,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
           `Source: [R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`}`,
           ...(journalCorruptionLine === null ? [] : [journalCorruptionLine]),
           `runDir: ${workflowRunDir(projectRoot, runId)}`,
+          ...(persisted?.workspaceDir === undefined ? [] : [`workspaceDir: ${persisted.workspaceDir}`]),
           ...(scriptIdentity === undefined
             ? []
             : [formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref)]),

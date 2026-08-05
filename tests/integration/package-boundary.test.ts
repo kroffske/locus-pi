@@ -33,6 +33,14 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
+
+function recursiveTypeScriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) return recursiveTypeScriptFiles(absolute);
+    return entry.isFile() && entry.name.endsWith(".ts") ? [absolute] : [];
+  });
+}
 /**
  * The Package registry is the examples directory itself, so this list is not the
  * registry — it is the reviewed snapshot of what that directory currently holds.
@@ -192,7 +200,6 @@ const STANDARD_DSL_RETURN_CASES = [
   },
   { method: "publishPrimaryFile", call: 'dsl.publishPrimaryFile("x.md")', category: "runtime" },
   { method: "random", call: "dsl.random()", category: "runtime" },
-  { method: "runWorkspaceDir", call: "dsl.runWorkspaceDir()", category: "runtime" },
   { method: "workflow", call: 'dsl.workflow(() => dsl.agent("x"))', category: "opaque" },
   { method: "workspace", call: 'dsl.workspace("work", "HEAD")', category: "opaque" },
 ] as const;
@@ -281,6 +288,28 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
+  it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
+    const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
+    const violations: string[] = [];
+    for (const file of recursiveTypeScriptFiles(path.join(root, "extensions"))) {
+      if (file === owner) continue;
+      const source = readFileSync(file, "utf8");
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const visit = (node: ts.Node): void => {
+        const ownsPrefix =
+          (ts.isStringLiteralLike(node) && node.text.includes(".pi/locus-pi/")) ||
+          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".pi/locus-pi/"));
+        if (ownsPrefix) {
+          const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+          violations.push(`${path.relative(root, file)}:${line}`);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+    }
+    expect(violations).toEqual([]);
+  });
+
   it("keeps the generated checker byte-for-byte aligned on closed grammar probes", async () => {
     const generated = (await import(pathToFileURL(path.join(root, "dist/workflow-source-shape.mjs")).href)) as {
       standardWorkflowSourceShapeErrors(source: string): string[];

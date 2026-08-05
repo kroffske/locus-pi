@@ -325,7 +325,7 @@ describe("loop bounded continuation runtime", () => {
         sourceMetadata: {
           runId,
           runStatus: "completed",
-          sourcePath: path.join(projectRoot, ".pi", "locus-pi", "workflows", runId),
+          sourcePath: path.join(projectRoot, ".pi", "locus-pi", "runs", runId),
         },
       });
       expect(String(result.details?.sourceSummary ?? "")).toContain("status: completed");

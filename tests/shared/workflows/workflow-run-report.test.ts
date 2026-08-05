@@ -139,6 +139,7 @@ describe("workflow run report", () => {
       {
         projectRoot: root,
         runId: RUN_ID,
+        workspaceDir: path.join(root, "tmp", "plan"),
         status: "completed",
         target: { kind: "name", ref: "plan", source: "package" },
         result: "# Accepted plan\n",
@@ -187,8 +188,7 @@ describe("workflow run report", () => {
     assert.match(readme, /- Status: completed/u);
     assert.match(readme, /- Task: \[task\.md\]\(task\.md\)/u);
     assert.match(readme, /- Result: \[workflow-result\.md\]\(workflow-result\.md\)/u);
-    // The report sits inside the run directory, so it points at its siblings.
-    assert.match(readme, /- Files this run's agents wrote: `\.\.\/workspace\/`/u);
+    assert.ok(readme.includes(`- Workflow workspace: \`${path.join(root, "tmp", "plan")}\``));
     assert.match(readme, /- Machine records: `\.\.\/runtime\/`/u);
     assert.equal(reportDir, path.join(workflowRunDir(root, RUN_ID), "outputs"));
     // One Documents list ordered by first publication; the revised document

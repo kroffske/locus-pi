@@ -95,7 +95,7 @@ interface PlanFixture {
 function createPlanFixture(options: { steps?: string[]; name?: string } = {}): PlanFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-"));
   const sourceRunId = "plan-source";
-  const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
+  const sourceRunDir = path.join(root, ".pi", "locus-pi", "runs", sourceRunId);
   mkdirSync(sourceRunDir, { recursive: true });
   const sourceStore = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
   const text = planText(options.steps);
@@ -164,7 +164,7 @@ function runtimeWith(
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
 ) {
   const runId = `plan-implement-test-${++runtimeOrdinal}`;
-  const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
+  const runDir = path.join(fixture.root, ".pi", "locus-pi", "runs", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
   const consumedPlan = artifactStore.consumeText(fixture.planRef);
@@ -189,7 +189,7 @@ function runtimeWithoutContinuation(
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
 ) {
   const runId = `plan-implement-direct-test-${++runtimeOrdinal}`;
-  const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
+  const runDir = path.join(fixture.root, ".pi", "locus-pi", "runs", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
   return {
@@ -1073,7 +1073,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
     // The plan was written by a previous run's agent: nobody in *this* run can be
     // re-asked for it, which is what makes a fatal error the right tier here.
     const root = mkdtempSync(path.join(tmpdir(), "locus-plan-implement-broken-"));
-    const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", "plan-source");
+    const sourceRunDir = path.join(root, ".pi", "locus-pi", "runs", "plan-source");
     mkdirSync(sourceRunDir, { recursive: true });
     const sourceStore = createWorkflowArtifactStore({
       projectRoot: root,
@@ -1149,7 +1149,7 @@ describe("workflow example: plan-implement.workflow.mjs", () => {
   it("refuses missing plan input and empty continuation intent", async () => {
     const fixture = createPlanFixture();
     const runId = "plan-implement-no-continuation";
-    const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
+    const runDir = path.join(fixture.root, ".pi", "locus-pi", "runs", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
     const { dsl } = createWorkflowRuntime({

@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -17,22 +16,12 @@ import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared
 import { composeWorkflowChildTask } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import { readWorkflowRunResultText, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import {
-  ensureWorkflowRunWorkspaceDir,
+  ensureWorkflowRunDir,
   workflowRunOutputsDir,
   workflowRunRuntimeDir,
-  workflowRunWorkspaceDir,
 } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createHarness } from "../../test-harness.js";
-
-/**
- * T-136 — the run working directory.
- *
- * One question from three sides: can a person find the file an agent wrote,
- * under the name the agent gave it? That needs the directory to exist before the
- * first child starts, its path to reach both the script and the child prompt,
- * and the run's own bookkeeping to stay out of it.
- */
 
 const roots: string[] = [];
 
@@ -52,32 +41,42 @@ function project(): string {
   return root;
 }
 
-/** The directory line of the working-directory note, exactly as the child reads it. */
-function runWorkspaceDirFromChildTask(task: string): string {
-  const line = task.split("\n")[2];
-  assert.ok(line !== undefined && path.isAbsolute(line), `child task must name an absolute directory: ${task}`);
-  return line;
+function workflowWorkspaceFromChildTask(task: string): string {
+  const line = task
+    .split("\n")
+    .find((candidate) =>
+      candidate.startsWith("workflow workspace (write intermediate and final workflow files here): "),
+    );
+  const directory = line?.split(": ").slice(1).join(": ");
+  assert.ok(
+    directory !== undefined && path.isAbsolute(directory),
+    `child task must name an absolute workspace: ${task}`,
+  );
+  return directory;
 }
 
-describe("workflow run working directory", () => {
-  it("hands the script and every child one directory, and keeps agent file names verbatim", async () => {
+describe("workflow workspace and run evidence", () => {
+  it("uses <pwd>/tmp/<workflow-name>, gives every child that path once, and keeps run evidence separate", async () => {
     const root = project();
+    const workingDirectory = path.join(root, "packages", "docs site");
+    mkdirSync(workingDirectory, { recursive: true });
     writeFileSync(
       path.join(root, ".pi", "workflows", "files.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
-        '  const answer = await dsl.agent("write the plan", { artifact: "review.md", label: "scout" });',
-        "  return `${dsl.runWorkspaceDir()}\\n${answer}`;",
+        '  const answer = await dsl.agent("write the plan", { label: "writer" });',
+        "  return `${dsl.outputDir()}\\n${answer}`;",
         "}",
         "",
       ].join("\n"),
     );
     const harness = createHarness(root, { sessionId: "run-files" });
-    // The child learns the directory from its prompt and from nothing else, so a
-    // file appearing there proves the prompt carried the path.
+    harness.ctx.session = { ...harness.ctx.session!, workingDirectory };
+    const tasks: string[] = [];
     const createExecutor = (): AgentExecutor => ({
       async run(request: AgentRunRequest) {
-        writeFileSync(path.join(runWorkspaceDirFromChildTask(request.task), "plan.md"), "the plan body", "utf8");
+        tasks.push(request.task);
+        writeFileSync(path.join(workflowWorkspaceFromChildTask(request.task), "plan.md"), "the plan body", "utf8");
         return {
           status: "completed",
           agentName: request.agent.name,
@@ -97,28 +96,29 @@ describe("workflow run working directory", () => {
       createExecutor,
     });
 
+    const workspaceDir = path.join(workingDirectory, "tmp", "files");
     assert.equal(result.ok, true, result.error);
-    const workspaceDir = workflowRunWorkspaceDir(workflowRunDir(root, result.runId));
-    assert.equal(String(result.result).split("\n")[0], workspaceDir);
-    assert.equal(realpathSync(workspaceDir), realpathSync(workflowRunWorkspaceDir(workflowRunDir(root, result.runId))));
-    // The exact name the agent chose, and nothing the runtime added beside it.
+    assert.equal(result.workspaceDir, workspaceDir);
+    assert.equal(result.workspaceDirRelative, "packages/docs site/tmp/files");
+    assert.equal(String(result.result).split("\n")[0], "packages/docs site/tmp/files");
     assert.deepEqual(readdirSync(workspaceDir), ["plan.md"]);
     assert.equal(readFileSync(path.join(workspaceDir, "plan.md"), "utf8"), "the plan body");
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0]!.split(workspaceDir).length - 1, 1);
 
-    // Auto-captured material is somewhere else, one document per artifact name;
-    // the file the agent wrote is never projected into it.
     const outputNames = readdirSync(workflowRunOutputsDir(workflowRunDir(root, result.runId))).sort();
     assert.deepEqual(outputNames, ["README.md", "workflow-result.md"]);
     assert.ok(!outputNames.includes("plan.md"));
-    assert.deepEqual(readdirSync(realpathSync(result.runDir)).sort(), ["outputs", "runtime", "workspace"]);
-    assert.ok(readdirSync(workflowRunRuntimeDir(workflowRunDir(root, result.runId))).includes("journal.ndjson"));
+    assert.deepEqual(readdirSync(result.runDir).sort(), ["outputs", "runtime"]);
+    assert.ok(readdirSync(workflowRunRuntimeDir(result.runDir)).includes("journal.ndjson"));
+    assert.match(result.runDir, /\.pi\/locus-pi\/runs\//u);
   });
 
-  it("creates the working directory before the script runs, even when nothing writes to it", async () => {
+  it("creates the default workflow workspace before the script runs", async () => {
     const root = project();
     writeFileSync(
       path.join(root, ".pi", "workflows", "empty.workflow.mjs"),
-      ["export default async function runWorkflow(dsl) {", "  return dsl.runWorkspaceDir();", "}", ""].join("\n"),
+      "export default function runWorkflow(dsl) { return dsl.outputDir(); }\n",
     );
     const harness = createHarness(root, { sessionId: "run-files-empty" });
 
@@ -127,78 +127,83 @@ describe("workflow run working directory", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       name: "empty",
-      createExecutor: (): AgentExecutor => ({
-        async run() {
-          throw new Error("this workflow starts no child");
-        },
-      }),
     });
 
     assert.equal(result.ok, true, result.error);
-    assert.equal(existsSync(workflowRunWorkspaceDir(workflowRunDir(root, result.runId))), true);
-    assert.deepEqual(readdirSync(workflowRunWorkspaceDir(workflowRunDir(root, result.runId))), []);
+    assert.equal(result.workspaceDir, path.join(root, "tmp", "empty"));
+    assert.equal(existsSync(result.workspaceDir!), true);
+    assert.deepEqual(readdirSync(result.workspaceDir!), []);
   });
 
-  it("gives a read-only child the read-only note, narrowed at the call site", async () => {
+  it("fails runWorkspaceDir() with the named migration error", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "readonly.workflow.mjs"),
-      [
-        "export default async function runWorkflow(dsl) {",
-        '  return await dsl.agent("review the plan", { readOnly: true });',
-        "}",
-        "",
-      ].join("\n"),
+      path.join(root, ".pi", "workflows", "legacy-workspace.workflow.mjs"),
+      "export default function runWorkflow(dsl) { return dsl.runWorkspaceDir(); }\n",
     );
-    const harness = createHarness(root, { sessionId: "run-files-readonly" });
-    const tasks: string[] = [];
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "legacy-workspace",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /runWorkspaceDir\(\) was removed/u);
+    assert.match(result.error ?? "", /use outputDir\(\)/u);
+  });
+
+  it("rejects a Pi working directory outside the project before an agent starts", async () => {
+    const root = project();
+    const outside = mkdtempSync(path.join(tmpdir(), "workflow-outside-pwd-"));
+    roots.push(outside);
+    writeFileSync(path.join(root, ".pi", "workflows", "outside.workflow.mjs"), 'export default () => "ok";\n');
+    const harness = createHarness(root);
+    harness.ctx.session = { ...harness.ctx.session!, workingDirectory: outside };
 
     const result = await runWorkflowScript({
       pi: harness.pi,
       ctx: harness.ctx,
       signal: new AbortController().signal,
-      name: "readonly",
-      createExecutor: (): AgentExecutor => ({
-        async run(request: AgentRunRequest) {
-          tasks.push(request.task);
-          return {
-            status: "completed",
-            agentName: request.agent.name,
-            reason: "reviewed",
-            text: "reviewed",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
+      name: "outside",
     });
 
-    assert.equal(result.ok, true, result.error);
-    // Legacy `readOnly` input is ignored: every workflow child remains writable.
-    assert.equal(tasks.length, 1);
-    assert.match(
-      tasks[0] ?? "",
-      new RegExp(workflowRunWorkspaceDir(workflowRunDir(root, result.runId)).replace(/[/\\]/gu, "."), "u"),
-    );
-    assert.doesNotMatch(tasks[0] ?? "", /This call is read-only/u);
-    assert.match(tasks[0] ?? "", /Create any file/u);
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /working directory must be inside the project root/u);
   });
 
-  it("refuses to create a run directory through a symlink or under an unsafe run id", () => {
+  it("rejects a physically escaping symlinked Pi working directory", async () => {
     const root = project();
-    assert.throws(() => ensureWorkflowRunWorkspaceDir(root, "../escape"), /Invalid workflow run id/u);
+    const outside = mkdtempSync(path.join(tmpdir(), "workflow-symlink-pwd-"));
+    roots.push(outside);
+    const linked = path.join(root, "linked");
+    symlinkSync(outside, linked, "dir");
+    writeFileSync(path.join(root, ".pi", "workflows", "linked.workflow.mjs"), 'export default () => "ok";\n');
+    const harness = createHarness(root);
+    harness.ctx.session = { ...harness.ctx.session!, workingDirectory: linked };
 
-    const elsewhere = path.join(root, "elsewhere");
-    mkdirSync(elsewhere);
-    const runId = "20260731-010203-abcd";
-    mkdirSync(workflowRunDir(root, runId), { recursive: true });
-    symlinkSync(elsewhere, path.join(workflowRunDir(root, runId), "workspace"));
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "linked",
+    });
 
-    assert.throws(() => ensureWorkflowRunWorkspaceDir(root, runId), /unsafe/u);
-    assert.equal(readdirSync(elsewhere).length, 0);
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /physical target escapes the project root/u);
+    assert.deepEqual(readdirSync(outside), []);
   });
 
-  it("refuses a replaced outputs symlink for both terminal writes and later reads", async () => {
+  it("creates only outputs and runtime for a safe run id", () => {
+    const root = project();
+    const runId = "20260731-010203-abcd";
+    const runDir = ensureWorkflowRunDir(root, runId);
+    assert.deepEqual(readdirSync(runDir).sort(), ["outputs", "runtime"]);
+    assert.throws(() => ensureWorkflowRunDir(root, "../escape"), /Invalid workflow run id/u);
+  });
+
+  it("refuses a replaced outputs symlink for terminal writes and later reads", async () => {
     const root = project();
     writeFileSync(
       path.join(root, ".pi", "workflows", "symlink-output.workflow.mjs"),
@@ -217,11 +222,6 @@ describe("workflow run working directory", () => {
         rmSync(workflowRunOutputsDir(runDir), { recursive: true });
         symlinkSync(elsewhere, workflowRunOutputsDir(runDir));
       },
-      createExecutor: (): AgentExecutor => ({
-        async run() {
-          throw new Error("this workflow starts no child");
-        },
-      }),
     });
 
     assert.equal(result.ok, false);
@@ -235,28 +235,28 @@ describe("workflow run working directory", () => {
 });
 
 describe("workflow child task composition", () => {
-  it("puts the working-directory note first and leaves the workflow prompt last", () => {
-    const task = composeWorkflowChildTask("draft the plan", "/tmp/run/workspace");
-    assert.match(task, /^## This workflow run's working directory\n\n\/tmp\/run\/workspace\n/u);
+  it("names the workflow workspace exactly once and leaves the workflow prompt last", () => {
+    const task = composeWorkflowChildTask("draft the plan", "/project/tmp/plan");
+    assert.match(task, /^## Workflow filesystem locations/u);
+    assert.equal(task.split("/project/tmp/plan").length - 1, 1);
     assert.ok(task.endsWith("draft the plan"));
-    assert.match(task, /under the exact name it should have/u);
+    assert.match(task, /replace assigned files idempotently/u);
   });
 
-  it("distinguishes a worktree code workspace from shared publication locations", () => {
-    const task = composeWorkflowChildTask("implement the change", "/runs/current", {
+  it("distinguishes a worktree code workspace from the workflow workspace and project context", () => {
+    const task = composeWorkflowChildTask("implement the change", "/projects/main/tmp/review", {
       pwd: "/worktrees/child",
       projectRoot: "/projects/main",
-      stableOutputDir: "/projects/main/outputs/result",
     });
 
+    assert.match(task, /workflow workspace .*: \/projects\/main\/tmp\/review/u);
     assert.match(task, /pwd \(code workspace\): \/worktrees\/child/u);
-    assert.match(task, /project root \(shared project location\): \/projects\/main/u);
-    assert.match(task, /stable output root \(shared publication location\): \/projects\/main\/outputs\/result/u);
+    assert.match(task, /project root \(source context\): \/projects\/main/u);
     assert.match(task, /Use pwd for code work/u);
-    assert.match(task, /intentional shared locations for publication/u);
+    assert.match(task, /not as a default artifact destination/u);
   });
 
-  it("leaves the prompt untouched when no directory is configured", () => {
+  it("leaves the prompt untouched when no directory or location is configured", () => {
     assert.equal(composeWorkflowChildTask("draft the plan", undefined), "draft the plan");
     assert.equal(composeWorkflowChildTask("draft the plan", "   "), "draft the plan");
   });

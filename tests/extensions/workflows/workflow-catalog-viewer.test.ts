@@ -561,7 +561,7 @@ describe("focused workflow catalog", () => {
     expect(harness.editorText).toBe("/workflows run alpha");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "runs"))).toBe(false);
   });
 
   it("never calls setEditorText before the custom browser promise resolves", async () => {
@@ -662,7 +662,7 @@ describe("focused workflow catalog", () => {
     expect(setEditorText).not.toHaveBeenCalled();
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".pi", "locus-pi", "workflows"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi", "locus-pi", "runs"))).toBe(false);
   });
 
   it.each(["rpc", "print"] as const)("keeps %s passive even if a host object exposes custom UI", async (mode) => {

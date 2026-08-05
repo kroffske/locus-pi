@@ -158,7 +158,7 @@ cases out is documentation plus a pinning test in
 apart, and this ADR says so rather than claiming a guarantee it does not have.
 
 The canonical evidence owner is
-`.pi/locus-pi/workflows/<runId>/runtime/artifacts/index.json`. Automatic answers and
+`.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json`. Automatic answers and
 fresh child transcripts/result envelopes share the same digest-bound index with
 workflow-published and consumed text. This makes the report inspectable through
 the persisted run viewer and makes cross-run approval immutable without requiring
@@ -166,7 +166,7 @@ the reviewed working tree itself to be committed. Writers still leave source
 changes uncommitted and do not commit, push, create a pull request, merge,
 deploy, or discard unrelated work.
 The artifact owner validates every physical directory from the resolved project
-root through `.pi/locus-pi/workflows/<runId>` before artifact I/O; symlinked
+root through `.pi/locus-pi/runs/<runId>` before artifact I/O; symlinked
 ancestors cannot relocate the canonical evidence root outside the project.
 
 ## Amendment 2026-07-21 — the portfolio drops to four with `llm-smoke`

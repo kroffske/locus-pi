@@ -26,8 +26,9 @@ This skill has two jobs: operate existing workflows and author new ones.
 Project workflows resolve first from `.pi/workflows/<name>.workflow.mjs`, then
 `.claude/workflows/`, `.agents/workflows/`, `~/.pi/workflows/`, and finally the
 Package examples. Run evidence lives under
-`.pi/locus-pi/workflows/<runId>/`; `outputs/` contains published documents and
-`result.json` contains the terminal envelope.
+`.pi/locus-pi/runs/<runId>/`; `outputs/` contains the human projection and
+`runtime/result.json` contains the terminal envelope. Agent-authored files are
+separate, under the workflow workspace described below.
 
 When a run ends with `awaiting_operator`, inspect its question and artifacts,
 then use `/workflows continue <runId>` to answer the named handoff. Use
@@ -67,7 +68,7 @@ The design is short Markdown a reader can approve without opening JavaScript:
 Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
-Stable output: `outputs/<name>` or <explicit project-relative directory>
+Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
 1. <numbered algorithm>
@@ -144,12 +145,12 @@ Standard source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
 work by default.
 
-Give filesystem agents an explicit location contract in their prompt. Every
-agent receives the exact `projectRoot()` or output/workspace directory as its
-`pwd`, plus the exact relative source or output filename. Say explicitly that it
-must not substitute the user's home directory or `/tmp`. This location text is
-part of the task prompt; do not add JavaScript path parsers or collector scripts
-to compensate for a weak model.
+The runtime injects one exact absolute workflow workspace into every child
+prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
+session working directory inside the project. Name the assigned relative file
+and tell writers to replace it idempotently. Use `projectRoot()` only when an
+agent needs source context. Do not add JavaScript path parsers, directory
+collectors, permission fields, or alternate writable roots.
 
 Workflow `input` remains semantic text. A main agent that already knows exact
 work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow
@@ -195,17 +196,18 @@ a separate caller pass the frozen list and stable keys to the durable parent.
 Never derive resumable positional keys from fresh model output.
 
 `invokeWorkflow()` starts a real depth-one saved run with its own evidence and
-lineage. It shares root cancellation, concurrency, stable output namespace, and
+lineage. It shares root cancellation, concurrency, workflow workspace, and
 the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
 work on retry; parent or child source changes invalidate them. Saved children
 cannot nest, and source cycles fail before model work.
 
-Run evidence remains under `.pi/locus-pi/workflows/<runId>/`. Durable user files
-belong under the exact `dsl.outputDir()` root, defaulting to
-`outputs/<workflow-name>`. Tell writers to replace their assigned relative file
-idempotently, never append blindly, and never substitute home or `/tmp`.
+Run evidence remains under `.pi/locus-pi/runs/<runId>/` and contains only
+`outputs/` plus `runtime/`. Durable user files belong under the project-local
+workspace returned by `dsl.outputDir()`, defaulting to
+`<pwd>/tmp/<workflow-name>/`. Tell writers to replace their assigned relative
+file idempotently and never create workflow artifacts in the project root.
 `publishPrimaryFile()` returns a host-validated path, byte count, and digest for
-one regular non-empty file. Stable files survive failed runs. Project source is
+one regular non-empty file. Workspace files survive failed runs. Project source is
 read live; record a drift policy in the approved design instead of building a
 workflow-side snapshot, ledger, parser, or recovery layer.
 
@@ -237,7 +239,7 @@ Return provenance is exhaustive: exact `agent({ choice })` identity, list result
 (`agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`),
 and `invokeWorkflow().status` are the only control categories. Ordinary `agent`,
 `consumeTextArtifact`, `promptFile`, `workflow`, and `workspace` are opaque.
-`now`, `random`, all three host path calls, and all three publication calls are
+`now`, `random`, both host path calls, and all three publication calls are
 runtime/host values. `awaitOperator`, `log`, and `phase` are void effects and may
 not be used as values. Opaque/runtime-host values flow only whole through the
 documented sinks; only `outputDir()` may flow unchanged to

@@ -11,14 +11,14 @@ const diagnostic: WorkflowFailureDiagnostic = {
   stage: "inventory-changes",
   workflow: "review",
   scriptPath: "extensions/workflows/examples/review/review.workflow.mjs",
-  evidencePath: ".pi/locus-pi/workflows/run-1/artifacts/answers/call-0003-inventory.md.md",
-  journalPath: ".pi/locus-pi/workflows/run-1/journal.ndjson",
+  evidencePath: ".pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md",
+  journalPath: ".pi/locus-pi/runs/run-1/journal.ndjson",
   repairRequest:
     'Fix the "review" workflow: its script rejected the run at stage "inventory-changes" — review inventory ' +
     "returned neither a coverage entry nor the declaration. " +
     "Script: extensions/workflows/examples/review/review.workflow.mjs. " +
-    "Failing stage answer: .pi/locus-pi/workflows/run-1/artifacts/answers/call-0003-inventory.md.md. " +
-    "Run journal: .pi/locus-pi/workflows/run-1/journal.ndjson.",
+    "Failing stage answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md. " +
+    "Run journal: .pi/locus-pi/runs/run-1/journal.ndjson.",
 };
 
 describe("workflow failure surfaces", () => {
@@ -31,7 +31,7 @@ describe("workflow failure surfaces", () => {
       error: diagnostic.message,
       result: null,
       disposition: { status: "failed" },
-      runDir: ".pi/locus-pi/workflows/run-1",
+      runDir: ".pi/locus-pi/runs/run-1",
       failureDiagnostic: diagnostic,
     });
 
@@ -40,8 +40,8 @@ describe("workflow failure surfaces", () => {
     expect(text).toContain(
       "stage: inventory-changes · script: extensions/workflows/examples/review/review.workflow.mjs",
     );
-    expect(text).toContain("answer: .pi/locus-pi/workflows/run-1/artifacts/answers/call-0003-inventory.md.md");
-    expect(text).toContain("journal: .pi/locus-pi/workflows/run-1/journal.ndjson");
+    expect(text).toContain("answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md");
+    expect(text).toContain("journal: .pi/locus-pi/runs/run-1/journal.ndjson");
     // A width-clamped widget cannot carry a copyable request; the transcript does.
     expect(text).not.toContain("copy:");
     expect(component.render(120).every((line) => line.length <= 120)).toBe(true);

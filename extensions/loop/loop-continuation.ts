@@ -27,6 +27,7 @@ import {
   workflowJournalFile,
   workflowResultFile,
   workflowRunDir,
+  workflowRunsRootDir,
   type WorkflowRunSummary,
 } from "../workflows/run-read.js";
 import { runtimeStateDir } from "../_shared/host/files.js";
@@ -279,7 +280,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
     return {
       source: "workflow",
       availability: "missing",
-      reason: "no workflow run metadata found under .pi/locus-pi/workflows",
+      reason: `no workflow run metadata found under ${workflowRunsRootDir(projectRoot)}`,
     };
   }
 

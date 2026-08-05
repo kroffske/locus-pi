@@ -94,17 +94,9 @@ describe("persisted workflow run source snapshot", () => {
     const runId = "20260713-010105-ancestor-link";
     const source = "ancestor symlink\n";
     const sha256 = digest(source);
-    const externalRunDir = path.join(external, "workflows", runId);
+    const externalRunDir = path.join(external, "runs", runId);
     mkdirSync(externalRunDir, { recursive: true });
-    const snapshotPath = path.join(
-      root,
-      ".pi",
-      "locus-pi",
-      "workflows",
-      runId,
-      "runtime",
-      `script-${sha256}.workflow.mjs`,
-    );
+    const snapshotPath = path.join(root, ".pi", "locus-pi", "runs", runId, "runtime", `script-${sha256}.workflow.mjs`);
     mkdirSync(path.dirname(path.join(externalRunDir, "runtime", path.basename(snapshotPath))), { recursive: true });
     writeFileSync(path.join(externalRunDir, "runtime", path.basename(snapshotPath)), source);
     writeResult(externalRunDir, snapshotPath, sha256);
@@ -177,7 +169,7 @@ function writeResult(runDir: string, snapshotPath: string, sha256: string): void
 }
 
 function workflowRunDirectory(root: string, runId: string): string {
-  return path.join(root, ".pi", "locus-pi", "workflows", runId);
+  return path.join(root, ".pi", "locus-pi", "runs", runId);
 }
 
 function temporaryRoot(): string {

@@ -131,7 +131,7 @@ import {
   type WorkflowContinuation,
   type WorkflowContinuationJournal,
 } from "./workflow-artifacts.js";
-import { ensureWorkflowRunWorkspaceDir, readWorkflowRunTextFile } from "./workflow-run-layout.js";
+import { readWorkflowRunTextFile, workflowLegacyRunMigrationMessage } from "./workflow-run-layout.js";
 import { workflowRunRuntimeDir } from "./workflow-run-layout.js";
 import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
 import {
@@ -223,7 +223,7 @@ export interface RunWorkflowScriptOptions {
   input?: string;
   /** Optional exact text work units, separate from semantic input. */
   items?: readonly string[];
-  /** Optional project-relative stable output namespace. */
+  /** Optional project-relative workflow workspace. */
   outputDir?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
@@ -269,8 +269,12 @@ export interface RunWorkflowScriptResult {
   resultTextPath?: string;
   /** Semantic named document whose newest revision equals the terminal prose. */
   primaryOutputPath?: string;
-  /** Stable user-output root, distinct from the existing run-local outputDir projection. */
+  /** Project-local workflow workspace, distinct from run evidence. */
+  workspaceDir?: string;
+  workspaceDirRelative?: string;
+  /** @deprecated Use workspaceDir. */
   stableOutputDir?: string;
+  /** @deprecated Use workspaceDirRelative. */
   stableOutputDirRelative?: string;
   primaryFile?: WorkflowPrimaryFileReference;
   lineage?: WorkflowRunLineage;
@@ -992,6 +996,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     | "resumeSourceRunSummary"
     | "continuation"
     | "target"
+    | "workspaceDir"
+    | "workspaceDirRelative"
     | "stableOutputDir"
     | "stableOutputDirRelative"
     | "primaryFile"
@@ -1019,6 +1025,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ...(stableOutput === undefined
         ? {}
         : {
+            workspaceDir: stableOutput.absolutePath,
+            workspaceDirRelative: stableOutput.relativePath,
             stableOutputDir: stableOutput.absolutePath,
             stableOutputDirRelative: stableOutput.relativePath,
           }),
@@ -1184,7 +1192,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         journal: [...enrichedFields.journal, outputFailure],
       });
     }
-    // No stable-output mutation follows this point. Release before writing the
+    // No workflow-workspace mutation follows this point. Release before writing the
     // run report/result envelope so a release failure becomes terminal evidence
     // instead of escaping after a persisted success.
     if (inheritedCoordination === undefined && rootLease !== undefined && !leaseReleased) {
@@ -1192,7 +1200,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         releaseWorkflowRootLease(rootLease);
         leaseReleased = true;
       } catch (error) {
-        const message = `Workflow stable-output lease release failed: ${error instanceof Error ? error.message : String(error)}`;
+        const message = `Workflow workspace lease release failed: ${error instanceof Error ? error.message : String(error)}`;
         const leaseFailure: WorkflowJournalLine = {
           ts: new Date().toISOString(),
           runId,
@@ -1215,7 +1223,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // result, budget-versus-spend, and workflow-published documents under their
     // semantic names. Agent call answers remain evidence under runtime/ unless
     // the workflow explicitly publishes one. Files agents wrote themselves stay
-    // under their own names in <runDir>/workspace/. The envelope below stays the durable truth, and a report failure never fails
+    // under their own names in the separate project-local workflow workspace.
+    // The envelope below stays the durable truth, and a report failure never fails
     // the run. It runs BEFORE result.json so a failed write can still be recorded
     // in the journal that result.json persists.
     if (artifactStore !== undefined) {
@@ -1223,6 +1232,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         {
           projectRoot,
           runId,
+          ...(enrichedFields.workspaceDir === undefined ? {} : { workspaceDir: enrichedFields.workspaceDir }),
           status: enrichedFields.disposition?.status ?? (enrichedFields.ok ? "completed" : "failed"),
           ...(enrichedFields.target === undefined
             ? {}
@@ -1312,6 +1322,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         {
           projectRoot,
           runId,
+          ...(failedFields.workspaceDir === undefined ? {} : { workspaceDir: failedFields.workspaceDir }),
           status: failedFields.disposition?.status ?? "failed",
           ...(failedFields.target === undefined
             ? {}
@@ -1399,7 +1410,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const source = readWorkflowRunSummary(projectRoot, sourceRunId);
     if (source.status === "unknown") {
       resumeSourceRunSummary = null;
-      const error = `Cannot resume workflow: source run not found or unusable: ${sourceRunId}`;
+      const error =
+        workflowLegacyRunMigrationMessage(projectRoot, sourceRunId) ??
+        `Cannot resume workflow: source run not found or unusable: ${sourceRunId}`;
       emitPrelude({
         ts: new Date().toISOString(),
         runId,
@@ -1460,6 +1473,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       projectRoot,
       opts.outputDir,
       path.basename(target.path, WORKFLOW_ENTRY_SUFFIX),
+      workingDirectory,
     );
     if (
       inheritedCoordination !== undefined &&
@@ -1577,13 +1591,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     runId,
   });
-  let runWorkspaceDir: string;
   try {
     artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
-    // The run's working directory exists BEFORE any child starts: its path is
-    // named in every agent prompt, and a prompt that points at a missing
-    // directory is the defect this layout replaced.
-    runWorkspaceDir = ensureWorkflowRunWorkspaceDir(projectRoot, runId);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -1648,8 +1657,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     workflowRunId: runId,
     workspaceManager,
     evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
-    runWorkspaceDir,
-    stableOutputDir: stableOutput!.absolutePath,
+    workflowWorkspaceDir: stableOutput!.absolutePath,
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
@@ -1677,7 +1685,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     preflightAgentRequests,
     journal,
     projectRoot,
-    runWorkspaceDir,
     outputDir: stableOutput!.relativePath,
     publishPrimaryFile: (relativePath) => {
       primaryFile = referenceWorkflowPrimaryFile(stableOutput!, relativePath);

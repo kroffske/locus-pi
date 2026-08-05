@@ -91,7 +91,7 @@ interface ReviewFixture {
 function createReviewFixture(findings?: string[], targetRef = "review", stage = "verify-review"): ReviewFixture {
   const root = mkdtempSync(path.join(tmpdir(), "locus-review-fix-"));
   const sourceRunId = "review-source";
-  const sourceRunDir = path.join(root, ".pi", "locus-pi", "workflows", sourceRunId);
+  const sourceRunDir = path.join(root, ".pi", "locus-pi", "runs", sourceRunId);
   mkdirSync(sourceRunDir, { recursive: true });
   const sourceStore = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
   const text = reviewText(findings);
@@ -153,7 +153,7 @@ function runtimeWith(
   agentRunner: (request: WorkflowAgentRequest) => Promise<WorkflowAgentResult>,
 ) {
   const runId = `review-fix-test-${++runtimeOrdinal}`;
-  const runDir = path.join(root, ".pi", "locus-pi", "workflows", runId);
+  const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
   mkdirSync(runDir, { recursive: true });
   const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   const consumedReview = artifactStore.consumeText(reviewRef);
@@ -314,7 +314,7 @@ describe("curated review remediation workflow", () => {
     // reference is verified against the source run's terminal projection while the
     // continuation is bound, so an unprojected ref never reaches the module at all.
     const fixture = createReviewFixture();
-    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "runs", fixture.reviewRef.runId);
     writeFileSync(
       workflowResultFile(sourceRunDir),
       `${JSON.stringify({
@@ -339,7 +339,7 @@ describe("curated review remediation workflow", () => {
     // The other half of what the script used to re-derive: the stored bytes are
     // digest-bound, and rewriting them under a valid reference is refused on consume.
     const fixture = createReviewFixture();
-    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "runs", fixture.reviewRef.runId);
     const stored = fixture.sourceStore.list().find(({ artifactId }) => artifactId === fixture.reviewRef.artifactId);
     expect(stored, "the fixture must have persisted the review artifact").toBeDefined();
     const storedPath = path.join(workflowRunArtifactsDir(sourceRunDir), stored!.relativePath);
@@ -416,7 +416,7 @@ describe("curated review remediation workflow", () => {
     // index cannot speak for. This is the exact case the deleted script check claimed
     // to own, asserted against the authority that actually owns it.
     const fixture = createReviewFixture(undefined, "review", "resolve-scope");
-    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", fixture.reviewRef.runId);
+    const sourceRunDir = path.join(fixture.root, ".pi", "locus-pi", "runs", fixture.reviewRef.runId);
     const indexPath = path.join(workflowRunArtifactsDir(sourceRunDir), "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ artifactId: string; stage?: string }>;
@@ -869,7 +869,7 @@ describe("curated review remediation workflow", () => {
     const fixture = createReviewFixture();
     const workflow = await loadWorkflow();
     const runId = "review-fix-without-continuation";
-    const runDir = path.join(fixture.root, ".pi", "locus-pi", "workflows", runId);
+    const runDir = path.join(fixture.root, ".pi", "locus-pi", "runs", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: fixture.root, runId, runDir });
     const { dsl } = createWorkflowRuntime({

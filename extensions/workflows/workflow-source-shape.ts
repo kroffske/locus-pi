@@ -51,7 +51,6 @@ const STANDARD_DSL_METHOD_NAMES = [
   "publishPrimaryArtifact",
   "publishPrimaryFile",
   "random",
-  "runWorkspaceDir",
   "workflow",
   "workspace",
 ] as const;
@@ -599,7 +598,6 @@ const STANDARD_DSL_RETURN_CATEGORIES = {
   publishPrimaryArtifact: "runtime-value",
   publishPrimaryFile: "runtime-value",
   random: "runtime-value",
-  runWorkspaceDir: "runtime-value",
   workflow: "opaque-value",
   workspace: "opaque-value",
 } as const satisfies Record<StandardDslMethod, StandardDslReturnCategory>;

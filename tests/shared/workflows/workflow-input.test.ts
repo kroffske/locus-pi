@@ -181,7 +181,7 @@ describe("string-only workflow input", () => {
     expect(Value.Check(schema, { name: "demo", unexpected: true })).toBe(false);
   });
 
-  it("accepts only confined project-relative stable output directories in the tool schema", () => {
+  it("accepts only confined project-relative workflow workspaces in the tool schema", () => {
     const { tool } = registerTool();
     const schema = tool.parameters;
 
@@ -192,7 +192,7 @@ describe("string-only workflow input", () => {
     }
   });
 
-  it("rejects an unsafe stable output directory before the workflow runner is called", async () => {
+  it("rejects an unsafe workflow workspace before the workflow runner is called", async () => {
     const { harness, tool } = registerTool();
     const spy = vi.spyOn(runner, "runWorkflowScript").mockRejectedValue(new Error("must not call runner"));
     try {

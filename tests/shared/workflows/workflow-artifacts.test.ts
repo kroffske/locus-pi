@@ -37,7 +37,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const dir = path.join(root, ".pi", "locus-pi", "workflows", runId);
+  const dir = path.join(root, ".pi", "locus-pi", "runs", runId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -294,8 +294,8 @@ describe("workflow run artifact store", () => {
       const externalLocusPi = path.join(external, "external-locus-pi");
       const externalRunDir =
         linkedAncestor === ".pi"
-          ? path.join(externalPi, "locus-pi", "workflows", id)
-          : path.join(externalLocusPi, "workflows", id);
+          ? path.join(externalPi, "locus-pi", "runs", id)
+          : path.join(externalLocusPi, "runs", id);
       mkdirSync(externalRunDir, { recursive: true });
 
       if (linkedAncestor === ".pi") {
@@ -311,7 +311,7 @@ describe("workflow run artifact store", () => {
           createWorkflowArtifactStore({
             projectRoot: root,
             runId: id,
-            runDir: path.join(root, ".pi", "locus-pi", "workflows", id),
+            runDir: path.join(root, ".pi", "locus-pi", "runs", id),
           }),
         /directory is unsafe/u,
       );
