@@ -161,7 +161,7 @@ package behavior.
 ## Requirements
 
 - Node.js `>=22.19.0`.
-- Pi `0.82.x`; the package peer floor is `0.82.0`.
+- Pi `0.83.x`; the package peer floor is `0.83.0`.
 - A trusted project and reviewed local workflow sources.
 
 ## Install

@@ -321,12 +321,12 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("requires Pi 0.82.0 in both the published peer contract and exact development baseline", () => {
+  it("requires Pi 0.83.0 in both the published peer contract and exact development baseline", () => {
     for (const packageName of PI_PACKAGES) {
-      expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.82.0");
-      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe("0.82.0");
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.82.0")).toBe(true);
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.80.3")).toBe(false);
+      expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.83.0");
+      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe("0.83.0");
+      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.83.0")).toBe(true);
+      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.82.0")).toBe(false);
     }
   });
 

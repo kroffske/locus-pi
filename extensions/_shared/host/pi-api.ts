@@ -330,10 +330,10 @@ export interface ExtensionContext {
   /** Real Pi run mode. Terminal component factories/custom UI are valid only in `tui`. */
   mode?: "tui" | "rpc" | "json" | "print";
   model?: ModelLike;
-  /** Current host thinking level, exposed by Pi 0.82.0. */
+  /** Current host thinking level, exposed by Pi 0.83.0. */
   thinkingLevel?: ThinkingLevel;
   modelRegistry?: ModelRegistryLike;
-  /** Real Pi 0.82.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
+  /** Real Pi 0.83.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
   /** Abort the active parent agent turn (real Pi: ctx.abort()). */
   abort?(): void;

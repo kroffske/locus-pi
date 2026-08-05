@@ -2,7 +2,7 @@
 
 ## Decision
 
-The extension is a local Locus implementation over public Pi 0.82.0 extension
+The extension is a local Locus implementation over public Pi 0.83.0 extension
 APIs. It replaces only the rendered footer component; Pi remains the owner of
 the editor, session history, context accounting, Git watcher, extension-status
 registry, and compaction mechanics.
