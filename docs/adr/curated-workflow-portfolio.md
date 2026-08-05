@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05
 
 ## Decision
 
@@ -21,8 +21,8 @@ The accepted Package portfolio is:
 | `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
 | `review`             | Evidence-backed code review | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
 | `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
-| `plan`               | Task to accepted plan       | It turns one free-form task into an ordered plan no reader has to trust, because a read-only critic accepted it against the repository, and it stays read-only throughout.        |
-| `plan-implement`     | Accepted plan to changes    | It executes one host-verified plan with a writer per step in the plan's own order, then checks and reports independently of the writers.                                          |
+| `plan`               | Task to plan files          | It uses one reconnaissance agent and one planning agent to write a repository map, plan, and dynamic list of complete implementation steps.                                       |
+| `plan-implement`     | One step to changes         | It gives one exact step to one implementation agent, which changes only that scope, verifies it, and records durable step history.                                                |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
 evidence adapter. Since the 2026-07-26 amendment to the prompt-resource ADR
@@ -657,14 +657,64 @@ nobody accepted still never flows into implementation on its own. What changed
 is who ends the stall — the operator, by an explicit recorded decision, instead
 of the clock.
 
+## Amendment 2026-08-05 — the planning pair becomes a minimal agent graph
+
+The owner replaced the accepted-plan critic loop and the script-owned
+implementation pipeline with a smaller Package contract. This amendment
+supersedes the current behavior described by the 2026-07-27, 2026-07-28, and
+2026-07-30 planning-pair amendments; those sections remain as history.
+
+`plan` now has exactly two direct child calls. A reconnaissance agent reads the
+live repository and writes `context.md`. A planning agent receives that exact
+text and writes `plan.md` plus `steps.md`, where every complete `## S<n>` block
+is one fresh implementation agent's work unit. The runtime publishes `plan.md`
+by validated workspace reference. There is no critic, verdict schema, drafting
+loop, round cap, operator handoff, or script-side plan contract.
+
+`plan-implement` now has exactly one direct child call and accepts one complete
+step as semantic text. The implementation agent reads the shared plan workspace,
+changes only that step's project scope, runs its checks, and fully replaces
+`history/S<n>.md` with completed or blocked status. The script does not accept a
+whole plan for selection and owns no parser, dependency graph, ledger, reviewer,
+repair loop, checker, terminal grader, reconciliation, or report renderer.
+
+Dynamic execution moves to the installed `locus-task-workflow` skill and the
+main Pi agent. The main agent selects one reusable `tmp/<select-name>` workspace,
+runs `plan`, reads `steps.md`, appends single-line step references without
+replacing unrelated session todos, and starts one top-level `plan-implement` run
+with the exact matching block from disk per active todo. It advances only after
+the corresponding history says completed and required checks passed. A blocked
+third step therefore leaves the first two histories intact and prevents the
+fourth from starting. A new session reconstructs todos by reading `steps.md` and
+`history/*.md`; this is agent reasoning, not JavaScript parsing.
+
+Recovery is split at the same boundary. A failed planning run resumes with the
+same source, input, and output directory, allowing runtime replay to reuse the
+completed reconnaissance answer and rerun the unfinished planner. Each
+implementation step already has an independent run, so only the failed step is
+retried. The workspace name is a caller-selected stable name, not a generated
+run or audit identifier.
+
+Both entries use the machine-checked `standard` source profile and name no
+provider, model, model role, or specialized agent. Calls use Pi's default
+workflow agent and its configured model route. Internal development-review
+model choices are outside this public package contract.
+
+The trade is explicit: JavaScript no longer independently accepts a plan or
+grades an implementation result. The main agent reads the same durable files a
+human can inspect and owns the semantic decision to advance. This is preferred
+here because the workflow's product is agent orchestration; reintroducing a
+parser or ledger would create a second task manager and make dynamic recovery
+depend on script logic the owner explicitly rejected.
+
 ## Consequences
 
 The Package surface grew from three to five names, back to four when `llm-smoke`
 retired with the primitive it proved (2026-07-21 amendment), and to six with the
 planning pair (2026-07-27 amendment). It is
 not a general automation catalog. The four non-diagnostic names expose two
-deliberate sequences — question-led evidence then a human-directed fix, and an
-accepted plan then a step-by-step implementation — while
+deliberate sequences — question-led evidence then a human-directed fix, and a
+plan workspace then main-agent-driven one-step runs — while
 keeping source mutation uncommitted and deployment outside the workflow boundary.
 
 The remediation binding now covers the review artifact, not an editable path or a

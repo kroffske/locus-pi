@@ -42,14 +42,14 @@ repository rather than the npm artifact.
 
 Only these names are registered as Package workflows:
 
-| Workflow             | Intended use                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.   |
-| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.     |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.              |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.           |
-| `plan`               | Scouts the repository, then drafts and critiques until a shaped verdict accepts `plan.md`.                      |
-| `plan-implement`     | Turns an accepted `plan.md` into a task ledger, then writes, reviews, and if needed repairs each task in order. |
+| Workflow             | Intended use                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.  |
+| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.    |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.             |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.          |
+| `plan`               | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`. |
+| `plan-implement`     | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.         |
 
 Use the canonical `/workflows` command menu to inspect and run them:
 
@@ -116,7 +116,7 @@ here. Files that merely exist under the repository's workflow examples are not
 Package workflows and cannot be launched by bare name unless they are in the
 curated registry.
 
-## The shipped skill
+## The shipped skills
 
 Nothing has to be copied anywhere for the six workflows above to be runnable:
 they resolve out of the installed package, so `/workflows list` shows them the
@@ -126,7 +126,8 @@ from a local checkout.
 What an agent could not previously find is the _concept_. A model asked to "run
 the review workflow" had no document telling it what a workflow is here, which
 names exist, or how to read a finished run, so it went looking for a repository
-that is not on the machine. The package therefore ships one skill,
+that is not on the machine. The package therefore ships two skills. The
+authoring and operation skill is
 [`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md), declared
 through `package.json#pi.skills`. Pi loads package skills automatically and
 enabled, so its description is in the system prompt from the first session and
@@ -144,6 +145,14 @@ host uses instead of copying it — a copy stops matching the package on the nex
 update. Pi writes user installs under `~/.pi/agent/npm/` and project installs
 under `.pi/npm/`; `pi list` prints the source of every registration, and the
 skill is at `skills/locus-pi-workflows/` inside whichever one applies.
+
+[`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
+the thin execution protocol for the shipped planning pair. The main Pi agent
+uses one shared `tmp/<select-name>` workspace, appends single-line step
+references to session todos, and starts one top-level `plan-implement` run with
+the exact matching block from `steps.md`. A failed
+step stops the queue; a later session reconstructs it by reading `steps.md` and
+`history/*.md`.
 
 ## Trust and safety boundary
 

@@ -85,18 +85,18 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ## Curated Package workflows
 
-| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `requirements-grill` | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result.                                                                                                                                                                                                                                                                                                                                                                                            |
-| `review`             | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `plan`               | **Task to outcome-first accepted plan**: planning agents are prompted not to edit. A `scout` maps the repository, then a `planner`/`critic` loop defines one primary result before deriving steps: outcome type, consumer, form and location, required content or behavior, usability proof, and supporting evidence. Every step is one bounded agent subtask with explicit `Context:`, one `Question:`, and one `Output:`; dozens of item-sized steps are valid, and distinct reasoning over one source stays split. The critic rejects plans whose steps can pass without producing the result, hidden meaning-changing assumptions, oversized multi-question steps, and repeated work that is purely mechanical. At the bounded round cap, the operator is told to continue the same run with guidance instead of editing the retained draft.                                                                                                                                                                                                                                                                     |
-| `plan-implement`     | **Accepted plan to verified primary result**: one host-verified continuation artifact, pasted plan text, or one text file supplies the plan. Deterministic code extracts routing structure — one unambiguous `## Outcome`, `### S<n>` blocks, `Depends on:` closure, and the optional legacy-compatible agent-subtask contract — restores selected plan order, and publishes `implementation-tasks.md`; agents own the plan's meaning and the final judgment. Each selected step, up to 80, gets one writer whose prompt repeats only that step's context, semantic question, and required output, followed by an independent reviewer. The final checker returns structured selected-step and repository command statuses; deterministic control flow refuses `complete` after any failed or unrun check, evidence gap, run-attributable unexpected change, or non-ready primary result. One bounded reconciliation may repair any terminal gap, including a missing result after all steps are done. The primary output is `workflow-summary.md`; `implementation-report.md` remains supporting per-step evidence. |
+| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `requirements-grill` | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
+| `review`             | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                            |
+| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
+| `plan`               | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit. The script owns only those two visible calls and their text handoff.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `plan-implement`     | **One exact step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                       |
 
 Catalog metadata exposes an authoring profile without changing execution:
-`live-smoke` is `standard`; `requirements-grill`, `plan`, `review`, and
-`review-fix` are `legacy`; `plan-implement` is `integration`. A workflow with no
+`live-smoke`, `plan`, and `plan-implement` are `standard`;
+`requirements-grill`, `review`, and `review-fix` are `legacy`. A workflow with no
 literal profile is shown as `unclassified`. New generated source declares
 `meta.profile: "standard"`; the other labels document compatibility or portfolio
 intent and do not weaken runtime checks.
@@ -231,83 +231,32 @@ because it is a public surface: `package.json#files` still decides what an
 install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
 
-`plan` and `plan-implement` are the second curated pair, and the seam between
-them is the same shape as `review` → `review-fix`, which since 2026-07-29 makes
-the same trade described below. `plan` returns the accepted
-plan text, which the runtime retains as `plan.md`; `plan-implement` takes that
-artifact's complete `{ runId, artifactId, name, sha256 }` reference through host
-continuation, and reads the bytes the host verified and copied, at any length.
-Entry code used
-to re-derive that proof and additionally require the bytes to equal the source
-run's terminal result — which distinguished the accepted plan from a same-named
-draft of an earlier round. That check was removed on 2026-07-28 as an accepted
-trade: it cost every reader of the entry, and the failure it prevented is a run
-implementing an unaccepted draft, which replanning corrects.
+`plan` and `plan-implement` are a pair, but they never invoke one another. The
+installed `locus-task-workflow` skill tells the main Pi agent to select one
+shared `tmp/<select-name>` workspace, run `plan`, read `steps.md`, append one
+single-line step reference to `todo_write` per complete block, and start one
+top-level `plan-implement` run with the exact matching block read from disk.
+Using `append` preserves unrelated session todos; explicitly starting each next
+workflow reference keeps them outside the workflow sequence. The main agent marks a todo complete
+only after `history/S<n>.md` says `Status: completed` and required checks passed.
+A failed or blocked step pauses automatic continuation before the next step,
+and the host's 20-continuation safety pause resumes through `/todo run`.
 
-`review` and `review-fix` carried the same duplicate and one further check on top
-of it: that the consumed bytes were the terminal answer of a Package `review`
-stage of a named phase. Both were removed on 2026-07-29 by owner decision. The
-digest half was the host's job already — an unprojected reference, or bytes whose
-digest no longer matches, is refused while the continuation is bound, before the
-module starts. The semantic half asserted provenance the host does not check and
-no agent can; the operator picks the source run through the closed `continuation`
-control and the host verifies what they picked. The accepted cost is a run that
-remediates against a review, or answers clarification questions from, some other
-run — which re-running with the right source corrects.
+This split is what makes the dynamic list recoverable without a JavaScript plan
+parser. Planning resume replays the completed reconnaissance call and reruns the
+unfinished planner. Implementation steps are already separate top-level runs;
+after a session restart, a main agent reconstructs todos by reading `steps.md`
+and `history/*.md` semantically. Old history remains evidence when a plan is
+replaced.
 
-`plan` declares its three participants in one frozen `PLAN_AGENTS` roster —
-`scout`, `planner`, `critic` — carrying each agent's prompt/model identity beside
-what it receives and returns, so the cast is readable without following the
-control flow.
+Planning prompts forbid project edits. The implementation prompt permits only
+the current step and forbids stage/commit/push/PR/merge/deploy/remote mutation,
+stash, and destructive cleanup. Every call uses Pi's default workflow agent and
+its configured model route; neither workflow source names a provider, model,
+model role, or specialized agent.
 
-Every accepted plan starts with `## Outcome`. That section names the primary
-result and the evidence that makes it useful, so `plan-implement` carries the
-operator's intended result through every writer, check, and terminal grade. A
-technical completion report is supporting evidence unless the task explicitly
-asked for one.
-
-Each new `### S<n>` block also carries `Context:`, `Question:`, and `Output:`.
-That is the execution boundary: one agent receives the smallest useful context,
-answers one semantic question, and writes one uniquely named result. A source may
-therefore appear in several steps when extraction and interpretation need
-different reasoning. Combining those results is not hidden runtime behavior; it
-is another ordinary step with declared dependencies. `plan-implement` still
-accepts older plans that omit all three lines, but rejects a partial contract, a
-missing concrete output path, or two explicit subtasks sharing one output
-instead of guessing what the boundary meant.
-
-Planning prompts forbid project edits. Every `plan` and `plan-implement` child
-still receives `tools: ["*"]`; the stage prompt says whether that agent should
-modify files. The workflow publishes a deterministic
-`implementation-tasks.md` snapshot after selection and after every review
-decision; stable attempt labels let `--resume` replay completed calls instead of
-applying accepted tasks again. Structured check evidence feeds deterministic
-terminal validation: no failed or unrun observed check, evidence gap,
-run-attributable unexpected change, or missing primary result can be projected
-as complete. The final checker agent owns whether that result satisfies the
-accepted outcome. The primary terminal document is
-`workflow-summary.md`, which points to the result and its proof;
-`implementation-report.md` remains the detailed step record. `plan`'s one loop ends on a declared enum rather
-than on a scan of model prose, and the run journal records whether the critic or
-the round cap stopped it. The operator-clarification round it used to run first
-was removed on the same day: the loop no longer stops to ask, and an open decision
-is recorded as a stated assumption only when one interpretation is clearly
-safer; an ambiguity that changes the primary result prevents acceptance. The
-round cap is the one operator pause left, added 2026-07-30: a stalled loop retains the
-draft with its open defects and declares a handoff, so the operator accepts the
-last draft or steers the same run with continuation guidance. Editing the
-retained `plan.md` and starting a fresh `plan` run does not bind those answers as
-operator guidance and is explicitly discouraged by the handoff.
-
-Pipeline maps:
-
-- `plan`:
-  [SVG](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
-
-The generated Excalidraw triple every curated workflow used to carry — a
-generator, an `.excalidraw` document, and an exported PNG — was removed on
-2026-07-28 together with its contract. The remaining five maps are being
-re-authored as hand-written SVG in the shape `plan` now sets.
+The old `plan` critic-loop SVG was removed with the loop. The remaining
+hand-authored workflow diagram documents `requirements-grill`.
 
 ## Authoring patterns
 
@@ -1078,8 +1027,8 @@ A workflow with several stages, agents, branches, parallel groups, or persisted
 handoffs keeps a visual map beside its source: exactly one hand-authored
 `<name>-pipeline.svg`. It is edited directly. There is no generator, no
 rendering dependency, and no exported preview to keep in sync;
-[`extensions/workflows/examples/plan/plan-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/plan/plan-pipeline.svg)
-is the reference shape.
+[`extensions/workflows/examples/requirements-grill-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.svg)
+is the remaining reference shape.
 
 This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,
 its `.excalidraw` document, and a rendered PNG — on 2026-07-28. Three files had

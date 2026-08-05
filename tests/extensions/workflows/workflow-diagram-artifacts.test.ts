@@ -12,8 +12,8 @@ import { packagedExamplesDir, packagedWorkflowPath } from "../../../extensions/w
  */
 const RETIRED_DIAGRAM_SUFFIXES = [".diagram.mjs", ".excalidraw", ".png"];
 
-/** Every example that has been redrawn in the hand-authored shape so far. */
-const DRAWN = ["plan", "requirements-grill"] as const;
+/** Every example that still has a hand-authored diagram. */
+const DRAWN = ["requirements-grill"] as const;
 
 function diagramPath(name: string): string {
   const workflowPath = packagedWorkflowPath(name);
@@ -97,11 +97,8 @@ describe("curated workflow diagrams", () => {
     for (const agent of agents) expect(svg, `${name} diagram omits agent ${agent}`).toContain(agent);
   });
 
-  it("shows both ways a plan run can end", () => {
-    const svg = readFileSync(diagramPath("plan"), "utf8");
-
-    expect(svg).toMatch(/round cap|4th revise/u);
-    expect(svg).toMatch(/plan-implement/u);
+  it("does not retain the removed critic-loop diagram for the minimal plan graph", () => {
+    expect(() => readFileSync(diagramPath("plan"), "utf8")).toThrow();
   });
 
   it("shows that requirements-grill refuses an empty request before it spends an agent", () => {

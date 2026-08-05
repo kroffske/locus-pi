@@ -391,32 +391,21 @@ or borrowed runtime implementation was identified for this source-audit slice.
   review entry imports nothing and retains `self-contained-static` identity.
 - `extensions/workflows/examples/plan/plan.workflow.mjs` and
   `extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs` are
-  the second curated pair and add no runtime primitive. `plan` is read-only end to
-  end and declares its three participants in one frozen `PLAN_AGENTS` roster:
-  `scout` maps the repository once, then a `planner`/`critic` pair loops on a
-  declared `accept`/`revise` enum with the critic's exact defects forwarded to the
-  next round, and the previous round's defects handed back to the critic so each
-  round converges on closing them. The loop never pauses for an operator; an
-  undecided choice is recorded by
-  the planner under `## Assumptions` and judged by the critic, so an unstated
-  assumption is a defect and a stated one is not. Reaching the round cap without
-  an acceptance retains the stalled state (`task.md`, `context.md`, `plan.md`,
-  `unresolved-defects.md`) and declares an operator handoff — `accept last draft`
-  takes the retained draft on operator authority, any other answer is guidance a
-  continuation redrafts under without re-scouting. An unaccepted draft still
-  reaches implementation only through an explicit operator decision.
-  `plan-implement` accepts one host continuation artifact regardless of
-  filename, pasted plan text, or one file path. Continuation bytes stay
-  uncapped; deterministic script code passes multiline input through as plan
-  text or reads the named text file, then extracts only the Outcome routing
-  fields and `### S<n>` blocks. Agents own their meaning. A no-tool
-  selector chooses the steps, the plan's own order is restored, and one
-  write-capable session owns each step in the launch checkout. A read-only
-  checker and a fresh reporter
-  follow; a failed writer skips the remaining steps and the run returns
-  `partial: true`. Both entries retain `self-contained-static` identity; the
-  implementation entry uses only static Node.js built-ins for its direct file
-  input.
+  the second curated pair and add no runtime primitive. Both now use the
+  machine-checked `standard` source profile. `plan` makes two direct default-agent
+  calls: the reconnaissance prompt writes and returns `context.md`, then the
+  planning prompt receives that exact text and writes `plan.md` plus dynamic complete `## S<n>` blocks in
+  `steps.md`. It publishes `plan.md` by host-validated workspace reference.
+  `plan-implement` makes one direct default-agent call with one exact step; that
+  agent owns the project change, verification, and full replacement of
+  `history/S<n>.md`. Neither script names a model or contains a critic, schema,
+  parser, step selector, todo manager, loop, reviewer, grader, report renderer,
+  or nested workflow. The installed `locus-task-workflow` skill keeps the
+  dynamic queue in the main Pi agent: it uses one shared `tmp/<select-name>`
+  workspace, appends one single-line todo reference per `steps.md` block,
+  passes the exact matching block to one top-level run per active step,
+  preserves unrelated todos, pauses on blocked history, and reconstructs a new session by
+  reading `steps.md` and `history/*.md` semantically.
 - `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
   curated remediation exception. It accepts only semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner

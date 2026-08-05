@@ -31,14 +31,14 @@ and source-bound item checkpoints—see [`AUTHORING.md`](../AUTHORING.md).
 Counts are of real occurrences — `promptFile()` calls, `agent({ schema })` calls,
 and `throw` statements — not of the words where a comment happens to mention one.
 
-| Example                                                                                      | Profile       | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
-| -------------------------------------------------------------------------------------------- | ------------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
-| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       | `standard`    |    40 |              0 |            0 |       0 | npm package · public repository |
-| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       | `legacy`      |   342 |              0 |            0 |       1 | npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 | `legacy`      |   869 |              2 |            2 |       4 | npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 | `legacy`      |   590 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `legacy`      |   961 |              0 |            1 |       4 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) | `integration` |  1582 |              0 |            6 |      23 | npm package · public repository |
+| Example                                                                                      | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
+| -------------------------------------------------------------------------------------------- | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
+| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `standard` |    88 |              0 |            0 |       0 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflows run <name>`, discovered by existence on each call
@@ -78,31 +78,23 @@ so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                                                         | Read it for                                                                                                                                                                                                                                   |
-| --------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                                                                                        |
-| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                                                  |
-| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                                                          |
-| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                                                         |
-| `plan`                | Task → outcome-first accepted plan                                   | A read-only `scout`, `planner`, and `critic`, plus a bounded draft/critique loop that names the primary result, its consumer, location, required behavior, and usability proof before deriving steps.                                         |
-| `plan-implement`      | Accepted plan → verified primary result                              | Host-verified plan bytes, a persisted task ledger, one sequential writer/reviewer repair loop per step, structured command evidence, fail-closed terminal grading, and primary `workflow-summary.md` plus a supporting implementation report. |
-| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                                                   |
+| Example               | Product role                                                         | Read it for                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential read-only `agent()` calls, one input check, no schemas.                                                                               |
+| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.         |
+| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
+| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
+| `plan`                | Task → repository map, plan, and dynamic steps                       | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`.                                                       |
+| `plan-implement`      | One exact step → changes, checks, and history                        | One implementation agent receives one complete step, changes only that scope, verifies it, and writes `history/S<n>.md`.                                                             |
+| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
-`plan` and `plan-implement` are a pair, and the seam between them is the point:
-`plan` ends by returning the accepted plan text, which the runtime retains as
-`plan.md`; `plan-implement` can take that artifact's complete
-`{ runId, artifactId, name, sha256 }` reference through the workflow tool's
-closed `continuation` control, which the host verifies and copies before any
-workflow code runs. It also accepts pasted plan text or one file path through a
-read-only resolver. A continuation artifact's name is descriptive metadata, not
-an execution requirement.
-The accepted cost is recorded in
-[`docs/adr/curated-workflow-portfolio.md`](../../../docs/adr/curated-workflow-portfolio.md) —
-a run can now start from a same-named draft of an earlier round rather than the
-plan the critic accepted. `review` → `review-fix` is the older version of the
-same seam, and since 2026-07-29 it makes the same trade: `review-fix` requires
-exactly one non-empty `review.md` reference and reads it, instead of re-deriving
-the host's digest proof and then asserting provenance the host cannot check.
+`plan` and `plan-implement` are a pair, but no workflow calls the other. The
+installed `locus-task-workflow` skill gives the main Pi agent one explicit
+`tmp/<select-name>` workspace, appends one single-line todo reference per
+dynamic `steps.md` block without replacing unrelated todos, and starts one
+top-level `plan-implement` run with the exact matching block for each active todo. This
+keeps dynamic routing and recovery in an agent that can read the documents
+semantically instead of in JavaScript that would need to parse them.
 
 ## Which authoring shape each one demonstrates
 
@@ -117,8 +109,8 @@ lines and up — or a prompt shared by more than one workflow.
 | `requirements-grill`  | Inline.                                                                                                                                                                                                                             |
 | `review`              | Inline `COMMON` contract plus five stage tasks; `resources/interrogator.prompt.md` (136 lines) and `resources/verifier.prompt.md` (139 lines) stay external. This is the example to read when you need to see _both_ rules at once. |
 | `review-fix`          | Inline `COMMON` plus every stage task. No `resources/` directory.                                                                                                                                                                   |
-| `plan`                | Inline `COMMON` plus every stage task, including both loop bodies. No `resources/` directory.                                                                                                                                       |
-| `plan-implement`      | Inline `COMMON` plus every stage task. No `resources/` directory.                                                                                                                                                                   |
+| `plan`                | Two inline stage prompts. No `resources/` directory.                                                                                                                                                                                |
+| `plan-implement`      | One inline implementation prompt. No `resources/` directory.                                                                                                                                                                        |
 | `excalidraw-pipeline` | Three external prompt files, unmigrated.                                                                                                                                                                                            |
 
 A prompt rendered inside a loop is still one prompt file: `promptFile()` snapshots
@@ -142,14 +134,14 @@ and 18 on 2026-07-26. Every move down to 5 and 10 was a check moved into the DSL
 rather than dropped; `review`'s last one was dropped on purpose, by owner
 decision 6 of 2026-07-29 — see the `plan` / `plan-implement` seam above.
 
-| Example              | Declared in the schema                                                                                                                                                                                                                                                                         | Passed as `validate`                                                                                                                                                                  | Still a fatal throw                                              |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `review`             | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings; `QUESTION_COVERAGE_SCHEMA`: `complete`/`more_questions_needed`, ≤8 gaps, 400-character gaps, unique trimmed, non-blank | `clarifierDecisionErrors` and `questionCoverageErrors`: the decision must agree with its list; `recommended` must name a real option; combined budgets                                | Continuation identity, operator-input bounds                     |
-| `review-fix`         | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                                                                                                                                         | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget                                   | Continuation shape, parsing the prior run's review, input bounds |
-| `plan`               | `PLAN_VERDICT_SCHEMA`: `accept`/`revise`, ≤12 defects, 600-character defects, unique trimmed, non-blank                                                                                                                                                                                        | `planVerdictErrors`: `accept` with defects and `revise` without them are both unusable; combined defect budget                                                                        | An empty task                                                    |
-| `plan-implement`     | `STEP_SELECTOR_SCHEMA`: `^S[1-9][0-9]*$` ids, 1–30 steps, 4,000-character notes, unique ids; `STEP_REVIEW_SCHEMA`: `accept`/`repair`/`blocked`, bounded summary and issues                                                                                                                     | `stepSelectionErrors`: every id exists in the accepted plan and combined note budget; `stepReviewErrors`: accepted tasks have no issues, repair/blocked tasks name at least one issue | Continuation shape, parsing the prior run's plan, input bounds   |
-| `live-smoke`         | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                     | —; blank input uses its documented default                       |
-| `requirements-grill` | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                     | An empty request                                                 |
+| Example              | Declared in the schema                                                                                                                                                                                                                                                                         | Passed as `validate`                                                                                                                                   | Still a fatal throw                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `review`             | `CLARIFIER_SCHEMA`: question id pattern, ≤8 questions, ≤8 options, 500-character prompts, 200-character options, unique ids, unique trimmed options, non-blank strings; `QUESTION_COVERAGE_SCHEMA`: `complete`/`more_questions_needed`, ≤8 gaps, 400-character gaps, unique trimmed, non-blank | `clarifierDecisionErrors` and `questionCoverageErrors`: the decision must agree with its list; `recommended` must name a real option; combined budgets | Continuation identity, operator-input bounds                     |
+| `review-fix`         | `FINDING_SELECTOR_SCHEMA`: `^F[1-9][0-9]*$` ids, 1–20 findings, 8,000-character notes, unique ids, unique dependencies                                                                                                                                                                         | `findingPlanErrors`: every id exists in the immutable review; no self-edge; dependencies must themselves be selected; acyclic; combined note budget    | Continuation shape, parsing the prior run's review, input bounds |
+| `plan`               | — (no shaped stage)                                                                                                                                                                                                                                                                            | —; planning text stays opaque to JavaScript                                                                                                            | —; blank input becomes an explicit blocking task                 |
+| `plan-implement`     | — (no shaped stage)                                                                                                                                                                                                                                                                            | —; one implementation result stays opaque to JavaScript                                                                                                | —; blank input becomes an explicit blocked step                  |
+| `live-smoke`         | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                      | —; blank input uses its documented default                       |
+| `requirements-grill` | — (no shaped stage)                                                                                                                                                                                                                                                                            | —                                                                                                                                                      | An empty request                                                 |
 
 **Coverage is only as fine as the inventory that keys it.** `review` accounts for
 its work by inventory id, so the id set is the ceiling on how fine every later
@@ -165,9 +157,9 @@ count. The two caps exist because the opposite failure is real on a weak model:
 the interrogator must repeat the entire question set verbatim every round, and a
 set it cannot reproduce exactly corrupts the ledger it feeds.
 
-**Loops need a declared exit, not a scan.** Two shipped loops — `review`'s
-interrogation rounds and `plan`'s drafting rounds — decide "again or done?" the
-same way: the round's own reader returns a shaped verdict with the concrete gaps
+**Loops need a declared exit, not a scan.** The remaining shipped assessed loop —
+`review`'s interrogation rounds — decides "again or done?" through a shaped
+verdict with the concrete gaps
 or defects that justify another round, script code branches on the enum, and the
 free text is handed to the next round verbatim. Neither greps the previous
 round's Markdown, and both record which condition stopped them — the measured
@@ -200,10 +192,9 @@ as such at its definition.
 A diagram here is **one hand-authored SVG** named `<name>-pipeline.svg`, checked
 in beside the entry it describes — inside the workflow's directory when it has
 one, next to the entry file when it does not.
-[`plan/plan-pipeline.svg`](./plan/plan-pipeline.svg) sets the shape and
-[`requirements-grill-pipeline.svg`](./requirements-grill-pipeline.svg) follows
-it. The remaining examples are undrawn; each is redrawn when its entry is next
-reworked, not in a batch.
+[`requirements-grill-pipeline.svg`](./requirements-grill-pipeline.svg) is the
+remaining diagram. The other examples are undrawn; the obsolete `plan` critic
+loop diagram was removed with that loop.
 
 This replaces the generated triple that used to sit beside every example — a
 generator, an Excalidraw document, and an exported PNG. Three files had to agree,
