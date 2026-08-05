@@ -6,6 +6,13 @@ import { createHarness } from "../../test-harness.js";
 import workflows from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import type { ThemeLike } from "../../../extensions/_shared/host/pi-api.js";
+
+const renderTheme: ThemeLike = {
+  fg: (_tone, text) => text,
+  bg: (_tone, text) => text,
+  bold: (text) => text,
+};
 
 function registerHarness() {
   const h = createHarness();
@@ -399,11 +406,30 @@ describe("/workflows run launch gate", () => {
       expect(modelText).not.toContain("UNTRUNCATED_TERMINAL_SENTINEL");
       expect(result.details).not.toHaveProperty("humanResultText");
 
-      const operatorText = tool.renderResult!(result, h.ctx).render(80).join("\n");
+      const operatorText = tool.renderResult!(result, { expanded: true, isPartial: false }, renderTheme, {
+        args: { name: "plan" },
+        toolCallId: "tool-full-result",
+        invalidate() {},
+        lastComponent: undefined,
+        state: {},
+        cwd: h.ctx.cwd ?? process.cwd(),
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: false,
+        expanded: true,
+        showImages: true,
+        isError: false,
+      })
+        .render(80)
+        .join("\n");
       expect(operatorText).toContain("outputs:");
       expect(operatorText).toContain("primary output:");
       expect(operatorText).toContain("workflow-result.md");
       expect(operatorText).toContain("UNTRUNCATED_TERMINAL_SENTINEL");
+      const sentinelLine = operatorText.split("\n").find((line) => line.includes("UNTRUNCATED_TERMINAL_SENTINEL"));
+      expect(sentinelLine).toBeDefined();
+      expect(sentinelLine?.startsWith("│")).toBe(false);
+      expect(operatorText).not.toContain("[RESULT] Workflow");
     } finally {
       spy.mockRestore();
       rmSync(runDir, { recursive: true, force: true });
@@ -437,7 +463,22 @@ describe("/workflows run launch gate", () => {
         h.ctx,
       );
 
-      const operatorText = tool.renderResult!(result, h.ctx).render(80).join("\n");
+      const operatorText = tool.renderResult!(result, { expanded: true, isPartial: false }, renderTheme, {
+        args: { name: "plan" },
+        toolCallId: "tool-result-symlink",
+        invalidate() {},
+        lastComponent: undefined,
+        state: {},
+        cwd: h.ctx.cwd ?? process.cwd(),
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: false,
+        expanded: true,
+        showImages: true,
+        isError: false,
+      })
+        .render(80)
+        .join("\n");
       expect(operatorText).toContain("full workflow result unavailable");
       expect(operatorText).not.toContain("DO_NOT_RENDER");
     } finally {

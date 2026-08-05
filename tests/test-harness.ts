@@ -20,9 +20,41 @@ import type {
   ThemeLike,
   ThinkingLevel,
   ToolDefinition,
+  ToolResult,
 } from "../extensions/_shared/host/pi-api.js";
 
 const MAX_WIDGET_LINES = 10;
+
+const PLAIN_THEME: ThemeLike = {
+  fg: (_tone, text) => text,
+  bg: (_tone, text) => text,
+  bold: (text) => text,
+};
+
+export function renderToolResult(
+  tool: ToolDefinition,
+  result: ToolResult,
+  ctx: ExtensionCommandContext,
+  args: Record<string, unknown> = {},
+  options: { expanded?: boolean; isPartial?: boolean } = {},
+): CustomUiComponent {
+  const expanded = options.expanded ?? true;
+  const isPartial = options.isPartial ?? false;
+  return tool.renderResult!(result, { expanded, isPartial }, ctx.ui.theme ?? PLAIN_THEME, {
+    args,
+    toolCallId: "test-tool-call",
+    invalidate() {},
+    lastComponent: undefined,
+    state: {},
+    cwd: ctx.cwd ?? process.cwd(),
+    executionStarted: true,
+    argsComplete: true,
+    isPartial,
+    expanded,
+    showImages: true,
+    isError: result.isError === true,
+  });
+}
 
 /**
  * Parent directory for every default harness project root, removed when the

@@ -9,7 +9,7 @@ import {
 } from "../../../extensions/_shared/operator/operator-interaction.js";
 import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
 import { JsonlSessionStore } from "../../../extensions/_shared/runtime/session-core.js";
-import { createHarness, runTool } from "../../test-harness.js";
+import { createHarness, renderToolResult, runTool } from "../../test-harness.js";
 
 describe("ask-user-question decision journal", () => {
   const tempRoots: string[] = [];
@@ -406,7 +406,7 @@ describe("ask-user-question decision journal", () => {
 
     const tool = h.tools.get("ask");
     expect(tool?.renderResult).toBeTypeOf("function");
-    const rendered = tool!.renderResult!(result, h.ctx);
+    const rendered = renderToolResult(tool!, result, h.ctx);
     expect(Array.isArray(rendered)).toBe(false);
     expect(rendered.render).toBeTypeOf("function");
     const text = rendered.render(80).join("\n");
@@ -433,7 +433,7 @@ describe("ask-user-question decision journal", () => {
       ],
     });
 
-    const rendered = h.tools.get("ask")!.renderResult!(result, h.ctx);
+    const rendered = renderToolResult(h.tools.get("ask")!, result, h.ctx);
     const text = rendered.render(80).join("\n");
 
     expect(text).toContain("First?");
@@ -459,7 +459,7 @@ describe("ask-user-question decision journal", () => {
       ],
     });
 
-    const rendered = h.tools.get("ask")!.renderResult!(result, h.ctx);
+    const rendered = renderToolResult(h.tools.get("ask")!, result, h.ctx);
     const text = rendered.render(80).join("\n");
     // Cancelled OMP results carry no option set, so the card falls back to the
     // plain status string rather than fabricating an empty question.

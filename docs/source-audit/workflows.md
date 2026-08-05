@@ -20,7 +20,11 @@ or borrowed runtime implementation was identified for this source-audit slice.
   and catalog (`workflow-catalog.ts` / `catalog-viewer.ts`) owners keep their
   own policies; the entrypoint does not redefine them. The
   model-callable tool (`workflow-tool.ts`) keeps a closed top-level schema, Pi
-  `approval: "exec"`, and full-host/no-sandbox warning details. Its optional
+  `approval: "exec"`, and full-host/no-sandbox warning details. Its companion
+  renderer (`workflow-tool-card.ts`) owns one self-rendered Locus card: the
+  workflow identity and lifecycle share one header, child-agent rows stay under
+  a theme-colored technical rail, and only verified persisted workflow prose
+  crosses the rail into ordinary output. Its optional
   `items: string[]` transport preserves exact values and order without content
   or quantity policy. A strict `prepareArguments` hook rejects raw invalid
   members and unknown fields before Pi's TypeBox conversion can coerce them;

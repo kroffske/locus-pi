@@ -3,15 +3,14 @@
  *
  * Owns its TypeBox parameter schema, the exec-approval detail lines, the
  * launch through the shared command launcher, and the single native toolResult
- * the run is reported through. The tool never renders a widget: the operator
- * surfaces belong to `/workflows`.
+ * the run is reported through. Its custom result card owns the tool-call
+ * hierarchy; command widgets and overlays still belong to `/workflows`.
  */
 
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import type { ToolResult } from "../_shared/host/pi-api.js";
+import type { ThemeLike, ToolRenderContext, ToolRenderResultOptions, ToolResult } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { prepareValidatedParams, validateParams } from "../_shared/host/validation.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
@@ -28,6 +27,13 @@ import {
   type OperatorScriptIdentityInput,
 } from "./operator-ui.js";
 import { renderAgentLiveRowsText } from "./progress-widget.js";
+import {
+  EmptyWorkflowToolCallComponent,
+  renderWorkflowToolCard,
+  snapshotWorkflowToolCardAgents,
+  type WorkflowToolCardAgent,
+  type WorkflowToolCardStatus,
+} from "./workflow-tool-card.js";
 import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { createWorkflowTranscript } from "./workflow-transcript.js";
 import {
@@ -131,11 +137,14 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   const { commandLauncher } = deps;
   pi.registerTool({
     name: "workflow",
+    label: "workflow",
     description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional project-relative workflow workspace, and optional host-verified continuation artifacts. The workspace defaults to <pwd>/tmp/<workflow-name>; automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Saved workflows may invoke one saved child level through invokeWorkflow(); child work shares the root cancellation, concurrency, physical-call budget, workflow workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes only .pi/workflows/<name>.design.md, and only \`Build approved design: <exact path>\` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
     formatApprovalDetails: workflowApprovalDetails,
+    renderShell: "self",
+    renderCall: () => new EmptyWorkflowToolCallComponent(),
     renderResult: renderWorkflowToolResultCard,
     async execute(_toolCallId, params, signal, update, ctx) {
       const valid = validateParams(WorkflowParams, params);
@@ -156,6 +165,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       const transcript = createWorkflowTranscript(ctx, workflowTargetLabel(valid.value), "tool", {
         ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
       });
+      const workflowName = workflowTargetLabel(valid.value);
       const launched = commandLauncher.attach<RunWorkflowScriptResult>(ctx, signal, async (background) =>
         runWorkflowScript({
           pi,
@@ -175,7 +185,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
             transcript.start(runId, runDir);
             update({
               content: [{ type: "text", text: `workflow started\nrunDir: ${runDir}` }],
-              details: { runId, runDir },
+              details: { workflowName, status: "running", runId, runDir, agentRows: [] },
             });
           },
           onEvent: (line: WorkflowJournalLine) => {
@@ -187,7 +197,17 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
             // workflow host-net then mis-attributes as ok:false on an otherwise-successful run. The live
             // agent rows double as the progress text the model/user see for this tool call.
             const liveAgents = renderAgentLiveRowsText();
-            update({ content: [{ type: "text", text: liveAgents }], details: { lastEvent: line, liveAgents } });
+            update({
+              content: [{ type: "text", text: liveAgents }],
+              details: {
+                workflowName,
+                status: "running",
+                runId: line.runId,
+                lastEvent: line,
+                liveAgents,
+                agentRows: snapshotWorkflowToolCardAgents(line.runId),
+              },
+            });
           },
         }),
       );
@@ -200,6 +220,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       if (settlement.status === "rejected") throw settlement.error;
       const res = settlement.value;
       const transcriptCompletion = transcript.finish(res);
+      const cardAgents = snapshotWorkflowToolCardAgents(res.runId);
       deps.onRunCompleted(res.runId);
 
       // Tool execution may still be inside Pi's streaming turn. Persist the
@@ -212,9 +233,16 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         lineCount: transcriptCompletion.lineCount,
       };
       const disposition = workflowResultDisposition(res);
+      const workflowCardDetails = {
+        workflowName,
+        status: disposition.status,
+        summary: disposition.summary,
+        agentRows: cardAgents,
+      };
       if (disposition.status === "completed" || disposition.status === "awaiting_operator") {
         return textResult(summary, {
           owner: "workflows",
+          ...workflowCardDetails,
           disposition: res.disposition,
           transcript: transcriptDetails,
           runId: res.runId,
@@ -251,6 +279,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       }
       return errorResult(summary, {
         owner: "workflows",
+        ...workflowCardDetails,
         disposition: res.disposition,
         transcript: transcriptDetails,
         runId: res.runId,
@@ -323,24 +352,56 @@ function renderWorkflowToolResult(res: RunWorkflowScriptResult, digest: string):
 }
 
 /** Human-only transcript card. The model still receives the bounded `content` digest. */
-function renderWorkflowToolResultCard(result: ToolResult): Text {
+function renderWorkflowToolResultCard(
+  result: ToolResult,
+  options: ToolRenderResultOptions,
+  theme: ThemeLike,
+  context: ToolRenderContext,
+) {
   const details = (result.details ?? {}) as Record<string, unknown>;
-  const lines = [result.isError === true ? "[ERROR] Workflow" : "[RESULT] Workflow"];
-  if (typeof details.runId === "string") lines.push(`run: ${details.runId}`);
-  if (typeof details.outputDir === "string") lines.push(`outputs: ${details.outputDir}`);
-  if (typeof details.primaryOutputPath === "string") lines.push(`primary output: ${details.primaryOutputPath}`);
-  if (typeof details.resultTextPath === "string") lines.push(`workflow result: ${details.resultTextPath}`);
-  const persistedResult = readPersistedWorkflowResult(details);
-  if (persistedResult !== undefined) {
-    lines.push("", persistedResult);
-  } else {
-    const firstText = result.content.find((part) => part.type === "text");
-    if (firstText?.type === "text") lines.push("", firstText.text);
+  const workflowName =
+    typeof details.workflowName === "string" ? details.workflowName : workflowTargetLabel(renderContextArgs(context));
+  const status = workflowToolCardStatus(details.status, options.isPartial, context.isError || result.isError === true);
+  const technicalLines: string[] = [];
+  if (options.expanded) {
+    if (typeof details.runId === "string") technicalLines.push(`run: ${details.runId}`);
+    if (typeof details.outputDir === "string") technicalLines.push(`outputs: ${details.outputDir}`);
+    if (typeof details.primaryOutputPath === "string")
+      technicalLines.push(`primary output: ${details.primaryOutputPath}`);
+    if (typeof details.resultTextPath === "string") technicalLines.push(`workflow result: ${details.resultTextPath}`);
   }
-  return new Text(lines.join("\n"), 0, 0);
+  if (
+    typeof details.summary === "string" &&
+    status !== "running" &&
+    status !== "completed" &&
+    details.summary.trim() !== ""
+  ) {
+    technicalLines.push(`reason: ${details.summary}`);
+  }
+  const persistedResult = readPersistedWorkflowResult(details);
+  if (persistedResult?.kind === "technical") technicalLines.push(persistedResult.text);
+  if (persistedResult === undefined && details.workflowName === undefined) {
+    const firstText = result.content.find((part) => part.type === "text");
+    if (firstText?.type === "text")
+      technicalLines.push(...firstText.text.split(/\r?\n/u).filter((line) => line !== ""));
+  }
+  return renderWorkflowToolCard(
+    {
+      workflowName,
+      status,
+      agents: readWorkflowToolCardAgents(details.agentRows),
+      technicalLines,
+      ...(persistedResult?.kind === "model" ? { modelText: persistedResult.text } : {}),
+    },
+    options,
+    theme,
+    context,
+  );
 }
 
-function readPersistedWorkflowResult(details: Record<string, unknown>): string | undefined {
+function readPersistedWorkflowResult(
+  details: Record<string, unknown>,
+): { kind: "model" | "technical"; text: string } | undefined {
   if (
     typeof details.runDir !== "string" ||
     typeof details.outputDir !== "string" ||
@@ -350,17 +411,69 @@ function readPersistedWorkflowResult(details: Record<string, unknown>): string |
   const runDir = path.resolve(details.runDir);
   const outputDir = workflowRunOutputsDir(runDir);
   if (path.resolve(details.outputDir) !== outputDir) {
-    return "[full workflow result unavailable: invalid output path]";
+    return { kind: "technical", text: "full workflow result unavailable: invalid output path" };
   }
   const resultPath = path.resolve(details.resultTextPath);
   if (resultPath !== path.join(outputDir, "workflow-result.md")) {
-    return "[full workflow result unavailable: invalid result path]";
+    return { kind: "technical", text: "full workflow result unavailable: invalid result path" };
   }
   try {
-    return readWorkflowRunTextFile(runDir, resultPath).replace(/\n$/u, "");
+    return { kind: "model", text: readWorkflowRunTextFile(runDir, resultPath).replace(/\n$/u, "") };
   } catch {
-    return "[full workflow result unavailable: result file cannot be read]";
+    return { kind: "technical", text: "full workflow result unavailable: result file cannot be read" };
   }
+}
+
+function renderContextArgs(context: ToolRenderContext): { name?: string; scriptPath?: string; script?: string } {
+  if (context.args === null || typeof context.args !== "object") return {};
+  const args = context.args as Record<string, unknown>;
+  return {
+    ...(typeof args.name === "string" ? { name: args.name } : {}),
+    ...(typeof args.scriptPath === "string" ? { scriptPath: args.scriptPath } : {}),
+    ...(typeof args.script === "string" ? { script: args.script } : {}),
+  };
+}
+
+function workflowToolCardStatus(value: unknown, isPartial: boolean, isError: boolean): WorkflowToolCardStatus {
+  if (isPartial) return "running";
+  if (
+    value === "completed" ||
+    value === "awaiting_operator" ||
+    value === "cancelled" ||
+    value === "failed" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return isError ? "failed" : "completed";
+}
+
+function readWorkflowToolCardAgents(value: unknown): WorkflowToolCardAgent[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (entry === null || typeof entry !== "object") return [];
+    const row = entry as Record<string, unknown>;
+    if (
+      typeof row.name !== "string" ||
+      typeof row.work !== "string" ||
+      (row.status !== "queued" &&
+        row.status !== "working" &&
+        row.status !== "done" &&
+        row.status !== "cancelled" &&
+        row.status !== "error")
+    ) {
+      return [];
+    }
+    return [
+      {
+        name: row.name,
+        work: row.work,
+        status: row.status,
+        ...(typeof row.startedAt === "number" ? { startedAt: row.startedAt } : {}),
+        ...(typeof row.elapsedMs === "number" ? { elapsedMs: row.elapsedMs } : {}),
+      },
+    ];
+  });
 }
 
 function operatorScriptIdentity(
