@@ -731,8 +731,7 @@ async function resolveWorkflowTier(input: {
         req.modelRole,
       );
     }
-    // The DECLARED role only. `resolveModelRoleForPurpose`'s
-    // `preferred → agent → task → default` walk would answer a question the author
+    // The DECLARED role only. Purpose resolution would answer a question the author
     // did not ask, and `modelRole: "smol"` would run whatever `agent` holds.
     const declared = resolveDeclaredModelRole(modelRoles, req.modelRole);
     if (declared.malformed !== undefined) {

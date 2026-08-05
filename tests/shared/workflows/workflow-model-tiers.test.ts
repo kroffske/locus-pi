@@ -375,10 +375,43 @@ describe("the declared tier reaches the child session", () => {
     expect(probe.captured[0]?.model).toEqual(FAST);
   });
 
+  it("routes a model-less agent through AGENT instead of the current session model", async () => {
+    const h = await harnessWithRoles({ agent: "test/fast", task: "test/strong", default: "test/strong" });
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "bare" });
+
+    expect(result.status).toBe("completed");
+    expect(probe.captured[0]?.model).toEqual(FAST);
+  });
+
+  it("inherits CURRENT when AGENT is unset, ignoring TASK and DEFAULT routes", async () => {
+    const h = await harnessWithRoles({ task: "test/fast", default: "test/fast" });
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({ prompt: "work", agent: "bare" });
+
+    expect(result.status).toBe("completed");
+    expect(result.modelRoleFallback).toBeUndefined();
+    expect(probe.captured[0]?.model).toEqual(STRONG);
+  });
+
   it("resolves a declared role WITHOUT the purpose fallback chain", async () => {
-    // `resolveModelRoleForPurpose` walks preferred → agent → task → default. An
-    // author who wrote `modelRole: "smol"` asked about `smol`; answering with the
-    // `agent` tier would run a different model under the requested tier's name.
+    // Purpose resolution may choose a purpose-owned route. An author who wrote
+    // `modelRole: "smol"` asked about `smol`; answering with `agent` would run a
+    // different model under the requested tier's name.
     const h = await harnessWithRoles({ agent: "test/fast", task: "test/fast", default: "test/fast" });
     const probe = sdkProbe();
     const runner = createWorkflowAgentRunner({
@@ -391,8 +424,8 @@ describe("the declared tier reaches the child session", () => {
     const result = await runner({ prompt: "work", agent: "bare", modelRole: "smol" });
 
     expect(result.status).toBe("completed");
-    // `agent`/`task`/`default` all resolve to test/fast; `smol` does not resolve at
-    // all, so the child must inherit the session model rather than borrow theirs.
+    // Other roles resolve to test/fast; `smol` does not resolve at all, so the child
+    // must inherit the session model rather than borrow theirs.
     expect(probe.captured[0]?.model).toEqual(STRONG);
     expect(result.modelRoleFallback).toContain('"smol"');
   });
@@ -752,8 +785,7 @@ describe("an unassigned role degrades and records the degradation", () => {
 
   it("does not let a declared frontmatter role fall through to another assigned tier", async () => {
     // The regression this closes: `resolveAgentModelPreference` used to answer a
-    // bare frontmatter role through `resolveModelRoleForPurpose`'s
-    // `preferred → agent → task → default` walk. So `roled` (frontmatter
+    // bare frontmatter role through purpose resolution. So `roled` (frontmatter
     // `model: smol`) with `smol` UNASSIGNED but `task` assigned would run the
     // `task` tier — a different model under the requested tier's name, which is the
     // silent substitution D3a exists to stop and which no evidence surface would

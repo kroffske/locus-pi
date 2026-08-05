@@ -3,21 +3,26 @@
 Continuous model-route selection and effort assignment for Pi sessions.
 
 This extension registers `/model-roles` and `/effort`; it does not shadow Pi's
-built-in `/model` or `/models`. `/model-roles` is one custom `SELECT` flow:
-model → routing role → capability-backed effort → inline receipt. Successful
-assignment returns to the model list without closing the selector, so several
-routes can be changed without reopening it. Assigned route markers and model
-values use the warning color and routing roles render one per line. `q` closes;
-`Esc`/left walks back before closing at the model list.
+built-in `/model` or `/models`. `/model-roles` is one model-first custom
+`SELECT` flow: model → “Set as …” action → capability-backed effort → inline
+receipt. The full model list opens first; provider filtering is an optional
+`Tab` action rather than a selection step. After choosing a model, the model
+list stays visible and its role actions open below it. Successful assignment
+returns to the model list without closing the selector, so several routes can
+be changed without reopening it. Assigned route markers and model values use
+the warning color and routing roles render one per line. `q` closes; `Esc`/left
+walks back before closing at the model list.
 
-`Current session model` and persisted `DEFAULT route` are separate values.
-Only `DEFAULT` calls `pi.setModel` and verified `pi.setThinkingLevel`; host
-`/model` may later make Current diverge without rewriting the route. Other
-roles only save `model:effort` to project-local
-`.pi/model-roles/config.json`. `AGENT` is an active agents/workflows route and
-`TASK` its fallback; since T-129 both are executed — the resolved route becomes
-the child session's model rather than metadata beside it. `PLAN`, `SUMMARY`, and `SMOL` remain visible only with
-explicit beta/resolver/fallback capability labels.
+`CURRENT` is the live model of the main Pi session. `DEFAULT` is the action that
+switches that live model and persists the choice; it is not an agent fallback.
+The host `/model` command may later change `CURRENT` without rewriting the saved
+choice. Other roles only save `model:effort` to project-local
+`.pi/model-roles/config.json`. A profile with no `model:` uses `AGENT`; when
+`AGENT` is unset, its child inherits `CURRENT`. `TASK` is consulted only when an
+agent profile or workflow explicitly names that role. Since T-129 resolved
+routes are executed — the resolved route becomes the child session's model
+rather than metadata beside it. `PLAN`, `SUMMARY`, and `SMOL` remain visible
+only with explicit beta/resolver/fallback capability labels.
 
 Provider rows are real filters. Effort options come from Pi model
 `reasoning`/`thinkingLevelMap`; unknown capability exposes only `off` instead

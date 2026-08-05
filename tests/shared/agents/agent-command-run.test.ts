@@ -468,6 +468,42 @@ describe("interactive children resolve the same tier as workflow children", () =
     expect(captured[0]?.model).toEqual({ provider: "test", id: "fast", name: "Test Fast" });
   });
 
+  it("uses AGENT for a slash-command alias whose profile declares no model", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents, agentLiveStore } = await loadAgents();
+    const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    await h.ctx.settings?.set("modelRoles", {
+      agent: "test/fast",
+      task: "test/strong",
+      default: "test/strong",
+    });
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
+
+    expect(reviewerRow(agentLiveStore)).toMatchObject({ status: "done" });
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.model).toEqual({ provider: "test", id: "fast", name: "Test Fast" });
+  });
+
+  it("lets the task tool inherit CURRENT when AGENT is unset", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    mockSdkSessionCapturing(captured);
+    const { agents } = await loadAgents();
+    const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
+    h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
+    await h.ctx.settings?.set("modelRoles", { task: "test/fast", default: "test/fast" });
+    agents(h.pi);
+
+    const result = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
+
+    expect(result.isError).not.toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.model).toEqual({ provider: "test", id: "strong", name: "Test Strong" });
+  });
+
   it("inherits the session model when the agent's tier is unassigned", async () => {
     const captured: Array<Record<string, unknown>> = [];
     mockSdkSessionCapturing(captured);

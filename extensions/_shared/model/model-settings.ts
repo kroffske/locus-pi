@@ -250,12 +250,12 @@ export function splitRoleSelector(token: string): { role: string; thinking?: Thi
 /**
  * Resolve ONE declared role, with no purpose fallback chain.
  *
- * `resolveModelRoleForPurpose` walks `preferred → agent → task → default`, which is
- * right for "give me something reasonable for this purpose" and wrong for an author
- * who wrote `modelRole: "smol"`: falling through to `agent` would answer a question
- * nobody asked and run a different tier under the requested tier's name. So a
- * declared role resolves to its own assignment or to none at all, and the caller
- * decides what "none" means (today: degrade to the parent model and record it).
+ * Purpose resolution may choose a purpose-owned fallback, which is right for "give
+ * me the configured model for this purpose" and wrong for an author who wrote
+ * `modelRole: "smol"`: falling through to `agent` would answer a question nobody
+ * asked and run a different tier under the requested tier's name. So a declared role
+ * resolves to its own assignment or to none at all, and the caller decides what
+ * "none" means (today: degrade to the parent model and record it).
  */
 export function resolveDeclaredModelRole(state: ModelRolesState, role: string): ModelRoleResolution {
   const { role: declaredRole, thinking } = splitRoleSelector(role);
@@ -426,7 +426,7 @@ export function resolveAgentModelPreference(state: ModelRolesState, agentModels:
       };
     }
     // A DECLARED role resolves to its own assignment or to none — never through
-    // `resolveModelRoleForPurpose`'s `preferred → agent → task → default` walk.
+    // purpose resolution.
     // An agent whose frontmatter says `model: smol` must not run the `task` tier
     // because `smol` happens to be unassigned and `task` happens not to be: that is
     // a different model under the requested tier's name, which is the silent
@@ -436,9 +436,9 @@ export function resolveAgentModelPreference(state: ModelRolesState, agentModels:
     // the parity OD2 asked for.
     return resolveDeclaredModelRole(state, first);
   }
-  // No frontmatter tier at all — "no tier declared". The purpose chain is the right
-  // answer to "give me something reasonable for an agent", and it is the only case
-  // that may reach it.
+  // No frontmatter tier at all — "no tier declared". AGENT is the one configurable
+  // default for a child. If it is unset, execution inherits the live parent session
+  // model; TASK and DEFAULT must not silently replace CURRENT.
   return resolveModelRoleForPurpose(state, "agent");
 }
 
@@ -510,7 +510,7 @@ function defaultRolesForPurpose(purpose: ModelRolePurpose): string[] {
     case "summary":
       return ["summary", "smol", "default"];
     case "agent":
-      return ["agent", "task", "default"];
+      return ["agent"];
     case "default":
       return ["default"];
   }

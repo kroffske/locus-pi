@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Model-role assignment now starts from the model, like OMP's model picker.**
+  `/model-roles` opens the complete model list, keeps provider filtering as an
+  optional `Tab` shortcut, and shows “Set as …” role actions below the selected
+  model. The old standalone “Available roles” inventory is gone; effort choice,
+  persistence, and the six existing role names remain available.
+
+- **Model-less agents now use `AGENT`, then the live `CURRENT` model.** `TASK`
+  and the saved `DEFAULT` choice no longer silently replace the main session
+  model when `AGENT` is unset. Agents that explicitly declare `TASK` or another
+  role still use that role.
+
 - **Workflow files now use one project-local workspace, separate from run
   evidence.** The default is `<pwd>/tmp/<workflow-name>/`, derived from Pi's
   verified session working directory; every child receives its absolute path
