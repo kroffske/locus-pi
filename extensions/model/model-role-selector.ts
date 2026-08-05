@@ -25,34 +25,34 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "default",
     tag: "DEFAULT",
-    label: "Set DEFAULT route",
-    capability: "active · session + route fallback",
-    narrowCapability: "active · session/fallback",
+    label: "Set as DEFAULT",
+    capability: "active · main/current model",
+    narrowCapability: "active · current model",
     support: "active",
     appliesCurrentModel: true,
   },
   {
     role: "agent",
     tag: "AGENT",
-    label: "Set AGENT route",
-    capability: "active · agents/workflows primary",
-    narrowCapability: "active · agents",
+    label: "Set as AGENT",
+    capability: "active · model-less agents/workflows",
+    narrowCapability: "active · model-less agents",
     support: "active",
     appliesCurrentModel: false,
   },
   {
     role: "task",
     tag: "TASK",
-    label: "Set TASK route",
-    capability: "fallback · agents/workflows",
-    narrowCapability: "fallback · agents",
-    support: "fallback",
+    label: "Set as TASK",
+    capability: "active · explicit task role",
+    narrowCapability: "active · task role",
+    support: "active",
     appliesCurrentModel: false,
   },
   {
     role: "plan",
     tag: "PLAN",
-    label: "Set PLAN route",
+    label: "Set as PLAN",
     capability: "dormant · beta prompt planning",
     narrowCapability: "dormant · beta",
     support: "dormant",
@@ -61,7 +61,7 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "summary",
     tag: "SUMMARY",
-    label: "Set SUMMARY route",
+    label: "Set as SUMMARY",
     capability: "dormant · resolver only",
     narrowCapability: "dormant · resolver",
     support: "dormant",
@@ -70,7 +70,7 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "smol",
     tag: "SMOL",
-    label: "Set SMOL route",
+    label: "Set as SMOL",
     capability: "fallback-only · summary resolver",
     narrowCapability: "fallback-only",
     support: "fallback",
@@ -276,14 +276,14 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       return;
     }
     if (isLeft(data)) {
-      if (this.#stage === "models") this.#moveProvider(-1);
-      else this.#back();
+      if (this.#stage !== "models") this.#back();
       return;
     }
-    if (this.#stage === "models" && (isRight(data) || data === "\t")) {
+    if (this.#stage === "models" && data === "\t") {
       this.#moveProvider(1);
       return;
     }
+    if (this.#stage === "models" && isRight(data)) return;
     if (isDown(data)) {
       this.#moveFocus(1);
       return;
@@ -324,10 +324,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       type: "SELECT",
       subject: "Model roles",
       primary: `${semanticText(this.#theme, "warning", "Current", true)} session model: ${semanticText(this.#theme, "accent", current, true)}${effort}`,
-      badges: [
-        { text: this.#stage, tone: "accent" },
-        { text: `filter:${this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER}`, tone: "success" },
-      ],
+      badges: [{ text: this.#stage, tone: "accent" }],
       body,
       controls: [this.#controls()],
     };
@@ -346,7 +343,6 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const end = Math.min(start + limit, rows.length);
     return [
       this.#filterLine(width),
-      this.#rolesLine(width),
       `Models ${rows.length === 0 ? "0" : `${start + 1}-${end}`} of ${rows.length}`,
       ...rows
         .slice(start, end)
@@ -356,17 +352,18 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #roleBody(width: number): string[] {
     const row = this.#selectedRow();
-    if (row === undefined) return ["Selected model: none"];
+    if (row === undefined) return ["Action for: no selected model"];
     return [
-      `Selected model: ${semanticText(this.#theme, "accent", row.selector, true)}`,
-      "Choose routing role:",
+      ...this.#modelBody(width),
+      "",
+      `Action for ${semanticText(this.#theme, "accent", row.selector, true)}:`,
       ...MODEL_ROLE_ACTIONS.map((action, index) => {
         const selected = index === this.#roleIndex;
         const marker = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
         const capability = width < 60 ? action.narrowCapability : action.capability;
-        const role = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.tag, selected);
+        const label = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.label, selected);
         return truncateToWidth(
-          `${marker} ${role} · ${semanticText(this.#theme, "dim", capability)}`,
+          `${marker} ${label} · ${semanticText(this.#theme, "dim", capability)}`,
           Math.max(1, width - 4),
         );
       }),
@@ -380,8 +377,8 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const capability = modelEffortCapability(row.model);
     const capabilityLabel = capability.known ? capability.source : "unknown; off only";
     return [
-      `Selected model: ${semanticText(this.#theme, "accent", row.selector, true)}`,
-      `Route: ${semanticText(this.#theme, roleTone(action.tag), action.tag, true)} · ${width < 60 ? action.narrowCapability : action.capability}`,
+      `Action for ${semanticText(this.#theme, "accent", row.selector, true)}:`,
+      `${semanticText(this.#theme, roleTone(action.tag), action.label, true)} · ${width < 60 ? action.narrowCapability : action.capability}`,
       `Effort capability: ${capabilityLabel}`,
       ...(capability.levels.length === 0
         ? ["[ERROR] Model advertises no supported effort levels."]
@@ -420,24 +417,14 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const active = this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER;
     if (width < 60) {
       const selected = semanticText(this.#theme, "success", `[${formatProvider(active)}]`, true);
-      return `Provider filter ${this.#activeProviderIndex + 1}/${this.#providers.length}: ${selected}`;
+      return `Models: ${selected} (${this.#activeProviderIndex + 1}/${this.#providers.length}, Tab)`;
     }
     const filters = this.#providers.map((provider, index) =>
       index === this.#activeProviderIndex
         ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
         : semanticText(this.#theme, "dim", formatProvider(provider)),
     );
-    return truncateToWidth(`Provider filters: ${filters.join("  ")}`, Math.max(1, width - 4));
-  }
-
-  #rolesLine(width: number): string {
-    const actions = width < 60 ? MODEL_ROLE_ACTIONS.slice(0, 2) : MODEL_ROLE_ACTIONS;
-    const roles = actions.map((action) => semanticText(this.#theme, roleTone(action.tag), action.tag, true));
-    const hidden = MODEL_ROLE_ACTIONS.length - actions.length;
-    return truncateToWidth(
-      `Available roles: ${roles.join(" · ")}${hidden > 0 ? ` · +${hidden}` : ""}`,
-      Math.max(1, width - 4),
-    );
+    return truncateToWidth(`Models: ${filters.join("  ")}  (Tab to cycle)`, Math.max(1, width - 4));
   }
 
   #modelRow(row: ModelRow, selected: boolean, width: number): string {
@@ -457,14 +444,15 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
   }
 
   #controls(): string {
-    if (this.#stage === "models") return "↑↓/jk models · Tab/←→ filters · Enter roles · q/Esc close";
-    if (this.#stage === "roles") return "↑↓/jk roles · Enter effort · Esc/← models · q close";
-    return "↑↓/jk effort · Enter apply · Esc/← roles · q close";
+    if (this.#stage === "models") return "↑↓/jk models · Tab provider · Enter actions · q/Esc close";
+    if (this.#stage === "roles") return "↑↓/jk actions · Enter effort · Esc/← models · q close";
+    return "↑↓/jk effort · Enter apply · Esc/← actions · q close";
   }
 
   async #advance(): Promise<void> {
     if (this.#stage === "models") {
       if (this.#selectedRow() === undefined) return;
+      this.#roleIndex = 0;
       this.#stage = "roles";
       this.#receipt = undefined;
       this.#requestRender();

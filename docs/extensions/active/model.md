@@ -11,8 +11,8 @@ built-in Pi selector still owns ordinary model switching for the current session
 
 `/model-roles` opens a single typed `SELECT` flow:
 
-1. **Model** — pick a model through a real provider filter.
-2. **Role** — pick a route with an explicit runtime capability.
+1. **Model** — pick from the full model list; use `Tab` to cycle an optional provider filter.
+2. **Action** — choose the `Set as …` route for that model.
 3. **Effort** — pick only a thinking level supported by the model.
 4. **Receipt** — see the saved route or a clear error.
 
@@ -25,24 +25,23 @@ Every frame has an explicit `[SELECT] Model roles` container. Inside it, the
 following are shown separately:
 
 - `Current session model` — the current model of the Pi session;
-- `DEFAULT route` — the persisted fallback from the model-role config;
+- `DEFAULT route` — the saved main-model choice made by `Set as DEFAULT`;
 - `Routing roles` — saved non-default routes, one per line;
-- `Provider filters` — list control, not yet another status line;
-- `Available roles` — a bounded legend of all six routes, shortened on narrow;
+- `Models` — the full model list plus the optional `Tab`-cycled provider filter;
 - the selected model/role/effort and an inline `[OK]`, `[WARN]` or `[ERROR]` receipt;
 - the keyboard controls of the current step.
 
 ## Current session and DEFAULT route
 
-`Current session model` and `DEFAULT route` are not one value. Only a `DEFAULT`
-assignment calls `pi.setModel`, then applies and verifies
+`CURRENT` is the main Pi session's live model. `Set as DEFAULT` changes that
+model, then applies and verifies
 `pi.setThinkingLevel`, and only then saves the route. If the host did not accept
 the model or clamped the effort, the route is not saved silently: the selector
 stays usable and shows the error.
 
-The built-in host `/model` can later change Current without changing the
-persisted `DEFAULT route`. On the next open the selector shows that divergence
-on two separate lines.
+The built-in host `/model` can later change `CURRENT` without rewriting the
+saved `DEFAULT` choice. The saved value remains persistence evidence, not a
+fallback used to replace the live model for an agent.
 
 A non-default role assignment does not change the session model or the session
 effort. It saves an explicit `provider/model:effort` route.
@@ -54,25 +53,24 @@ role nothing assigns degrades to the session model and the degradation is
 recorded in the run evidence; a role assigned to a `provider/id` this host cannot
 resolve fails the call by name.
 
-Two consequences worth stating plainly. First, an unassigned table is a working
-configuration, not a broken one: children inherit the session model, so a local
-provider selected with `/model` is already what every workflow child runs on.
-Assign `task` and `agent` here to make that choice explicit and independent of
-the parent session. Second, an agent whose frontmatter still writes its tier in
+Two consequences worth stating plainly. First, an agent profile with no
+`model:` uses `AGENT`; if `AGENT` is unassigned, it inherits `CURRENT`. It does
+not fall through to `TASK` or the saved `DEFAULT` choice. A profile that
+explicitly names `TASK` still uses `TASK`. Second, an agent whose frontmatter still writes its tier in
 the pre-tier `pi/<role>` namespace is read as that role rather than as a provider
 named `pi`, so a catalog copied from an older release keeps working; the
 degradation note names the spelling to fix.
 
 ## Runtime capability of roles
 
-| Role      | Capability                           | Actual consumer                                                                                                              |
-| --------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT` | `active · session + route fallback`  | Current session action and the last fallback of every resolver chain.                                                        |
-| `AGENT`   | `active · agents/workflows executor` | Default-loaded `agents` and the workflow agent bridge — this route selects the child session's model, not just its metadata. |
-| `TASK`    | `fallback · agents/workflows`        | Fallback after `AGENT` for the same active consumers.                                                                        |
-| `PLAN`    | `dormant · beta prompt planning`     | Only the disabled beta `prompt-planning`; no default-loaded consumer.                                                        |
-| `SUMMARY` | `dormant · resolver only`            | Resolver contract and tests; no default-loaded consumer.                                                                     |
-| `SMOL`    | `fallback-only · summary resolver`   | Fallback in `SUMMARY → SMOL → DEFAULT`; no active summary caller yet.                                                        |
+| Role      | Capability                             | Actual consumer                                                                    |
+| --------- | -------------------------------------- | ---------------------------------------------------------------------------------- |
+| `DEFAULT` | `active · main/current model`          | Changes the main session model and saves that choice; it is not an agent fallback. |
+| `AGENT`   | `active · model-less agents/workflows` | Selects the child model when an agent profile declares no model.                   |
+| `TASK`    | `active · explicit task role`          | Selects the child model only when a profile or workflow explicitly names `TASK`.   |
+| `PLAN`    | `dormant · beta prompt planning`       | Only the disabled beta `prompt-planning`; no default-loaded consumer.              |
+| `SUMMARY` | `dormant · resolver only`              | Resolver contract and tests; no default-loaded consumer.                           |
+| `SMOL`    | `fallback-only · summary resolver`     | Fallback in `SUMMARY → SMOL → DEFAULT`; no active summary caller yet.              |
 
 The selector deliberately does not present a dormant/resolver-only role as a
 fully active capability. The full source map is recorded in the task-local
@@ -80,12 +78,11 @@ consumer audit T-203.
 
 ## Provider filters and responsive layout
 
-`ALL` and provider names are list filters. On a wide/regular terminal they are
-shown as a single labelled `Provider filters:` line. At 48 columns the selector
-shows the current filter and the position in the carousel, for example
-`Provider filter 2/4: [OPENAI]`. The model window is bounded to 8/6/4 lines for
-wide/regular/narrow width, and the selected row and stage focus are kept
-deterministically after a mutation.
+`ALL` and provider names are optional list filters. The selector opens on the
+full model list; `Tab` cycles filters while arrow keys remain dedicated to model
+navigation. At 48 columns the active filter includes its carousel position. The
+model window is bounded to 8/6/4 lines for wide/regular/narrow width, and the
+selected row and stage focus are kept deterministically after a mutation.
 
 The active filter is highlighted with the Pi theme token `success`; any assigned
 model and its markers (`Current`, `DEFAULT`, `AGENT`, `TASK`, `PLAN`, `SUMMARY`,

@@ -84,7 +84,7 @@ describe("agent replacement-session host", () => {
       {},
       {},
       {},
-      { version: 1, roles: { task: "test/strong:medium" } },
+      { version: 1, roles: { agent: "test/strong:medium" } },
     );
     const capsule = createAgentExecutionPromptCapsule(
       {
@@ -99,7 +99,7 @@ describe("agent replacement-session host", () => {
     );
 
     expect(capsule.modelRole).toMatchObject({
-      role: "task",
+      role: "agent",
       model: "test/strong",
       thinking: "medium",
     });

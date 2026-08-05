@@ -33,7 +33,6 @@ import { createHarness, emit, type Harness } from "../../test-harness.js";
 const ENTER = "\r";
 const ESC = "\x1b";
 const DOWN = "\x1b[B";
-const RIGHT = "\x1b[C";
 
 const REASONING_MODELS = [
   {
@@ -84,15 +83,15 @@ describe("model extension", () => {
     ).toEqual([
       { role: "default", support: "active", appliesCurrentModel: true },
       { role: "agent", support: "active", appliesCurrentModel: false },
-      { role: "task", support: "fallback", appliesCurrentModel: false },
+      { role: "task", support: "active", appliesCurrentModel: false },
       { role: "plan", support: "dormant", appliesCurrentModel: false },
       { role: "summary", support: "dormant", appliesCurrentModel: false },
       { role: "smol", support: "fallback", appliesCurrentModel: false },
     ]);
     expect(MODEL_ROLE_ACTIONS.map((action) => action.capability)).toEqual([
-      "active · session + route fallback",
-      "active · agents/workflows primary",
-      "fallback · agents/workflows",
+      "active · main/current model",
+      "active · model-less agents/workflows",
+      "active · explicit task role",
       "dormant · beta prompt planning",
       "dormant · resolver only",
       "fallback-only · summary resolver",
@@ -146,8 +145,8 @@ describe("model extension", () => {
     const frames = joinFrames(harness);
     expect(frames).toContain("[OK] DEFAULT → test/fast:high saved; Current session updated.");
     expect(frames).toContain("[OK] AGENT → test/strong:low saved.");
-    expect(frames).toContain("Provider filters:");
-    expect(frames).toContain("Selected model: test/strong");
+    expect(frames).toContain("Models: [ALL]");
+    expect(frames).toContain("Action for test/strong:");
   });
 
   it.each([
@@ -195,7 +194,7 @@ describe("model extension", () => {
     });
   });
 
-  it("renders real provider filters instead of status-like tabs", async () => {
+  it("keeps provider filtering optional behind Tab after opening the model list", async () => {
     harness = createHarness(join(root, "project"), {
       models: [
         { provider: "openai", id: "gpt-5", name: "GPT 5", reasoning: true },
@@ -204,27 +203,31 @@ describe("model extension", () => {
       ],
     });
     model(harness.pi);
-    harness.customInputQueue.push(RIGHT, RIGHT, "q");
+    harness.customInputQueue.push("\t", "\t", "q");
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     const openaiFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("[OPENAI]"));
-    expect(openaiFrame?.join("\n")).toContain("Provider filters:");
+    expect(openaiFrame?.join("\n")).toContain("Models:");
     expect(openaiFrame?.join("\n")).toContain("openai/gpt-5");
     expect(openaiFrame?.join("\n")).not.toContain("deepseek/v4 —");
   });
 
-  it("shows active, fallback, and dormant capability labels in the role step", async () => {
+  it("keeps the selected model visible above OMP-style role actions", async () => {
     harness.customInputQueue.push(ENTER, "q");
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const rolesFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("Choose routing role:"));
+    const rolesFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("Action for test/fast:"));
     const text = rolesFrame?.join("\n") ?? "";
-    expect(text).toContain("DEFAULT · active · session + route fallback");
-    expect(text).toContain("AGENT · active · agents/workflows primary");
-    expect(text).toContain("PLAN · dormant · beta prompt planning");
-    expect(text).toContain("SMOL · fallback-only · summary resolver");
+    expect(text).toContain("Models: [ALL]");
+    expect(text).toContain("test/fast");
+    expect(text).toContain("Set as DEFAULT · active · main/current model");
+    expect(text).toContain("Set as AGENT · active · model-less agents/workflows");
+    expect(text).toContain("Set as TASK · active · explicit task role");
+    expect(text).toContain("Set as PLAN · dormant · beta prompt planning");
+    expect(text).toContain("Set as SMOL · fallback-only · summary resolver");
+    expect(text).not.toContain("Available roles:");
   });
 
   it("deduplicates registry rows with the same canonical selector", async () => {
@@ -328,7 +331,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    expect(joinFrames(harness)).toContain("Selected model: test/strong");
+    expect(joinFrames(harness)).toContain("Action for test/strong:");
     expect(harness.entries).toEqual([]);
   });
 
@@ -435,7 +438,7 @@ describe("model extension", () => {
     });
   });
 
-  it("keeps PLAN/SUMMARY dormant resolver truth and AGENT/TASK active fallback truth", async () => {
+  it("keeps PLAN/SUMMARY dormant while AGENT and explicit TASK routes stay active", async () => {
     await harness.ctx.settings!.set("modelRoles", {
       default: "test/fast",
       smol: "test/fast:low",
@@ -446,7 +449,13 @@ describe("model extension", () => {
 
     expect(resolvePromptPlanningModelRole(state)).toMatchObject({ role: "plan", fallback: false });
     expect(resolveSummaryModelRole(state)).toMatchObject({ role: "smol", fallback: true });
-    expect(resolveAgentModelPreference(state)).toMatchObject({ role: "task", fallback: true });
+    const modelLessAgent = resolveAgentModelPreference(state);
+    expect(modelLessAgent).toMatchObject({
+      role: "agent",
+      requestedRoles: ["agent"],
+      fallback: true,
+    });
+    expect(modelLessAgent.assignment).toBeUndefined();
     expect(resolveAgentModelPreference(state, ["test/fast:xhigh"])).toMatchObject({
       source: "agent",
       assignment: { model: "test/fast", thinking: "xhigh" },
@@ -746,11 +755,10 @@ describe("ModelRoleSelectorComponent", () => {
     const text = component.render(146).join("\n");
     expect(text).toContain("\x1b[32m[ALL]\x1b[39m");
     expect(text).toContain("\x1b[33mDEFAULT\x1b[39m");
-    expect(text).toContain("\x1b[33mSMOL\x1b[39m");
     expect(text).toContain("\x1b[33mtest/fast:high\x1b[39m");
     expect(text).toContain("\x1b[36mtest/fast\x1b[39m");
     expect(text).toContain("\x1b[36m>\x1b[39m");
-    expect(text).toContain("Available roles:");
+    expect(text).not.toContain("Available roles:");
   });
 
   it("renders assigned routing roles and their models in warning color on separate lines", () => {
@@ -800,7 +808,7 @@ describe("ModelRoleSelectorComponent", () => {
     expect(lines.join("\n")).toContain("\x1b[33mtest/strong\x1b[39m");
   });
 
-  it("renders typed, width-safe SELECT hierarchy at 146/80/48 columns", () => {
+  it("renders typed, width-safe model and action hierarchy at 146/80/48 columns", async () => {
     const { rows, summaries } = selectorFixture();
     const component = new ModelRoleSelectorComponent(
       { requestRender: vi.fn() },
@@ -821,7 +829,16 @@ describe("ModelRoleSelectorComponent", () => {
       expect(text).toContain("Model roles");
       expect(text).toContain("Current session model:");
       expect(text).toContain("DEFAULT route:");
-      expect(text).toContain(width < 60 ? "Provider filter" : "Provider filters:");
+      expect(text).toContain("Models:");
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
+
+    await component.handleInput(ENTER);
+    for (const width of [146, 80, 48]) {
+      const lines = component.render(width);
+      const text = lines.join("\n");
+      expect(text).toContain("Action for test/fast:");
+      expect(text).toContain("Set as DEFAULT");
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     }
   });
@@ -844,14 +861,15 @@ describe("ModelRoleSelectorComponent", () => {
     );
 
     await component.handleInput(ENTER);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
+    expect(component.render(80).join("\n")).toContain("Set as DEFAULT");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Provider filters:");
+    expect(component.render(80).join("\n")).toContain("Models: [ALL]");
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
     expect(component.render(80).join("\n")).toContain("Effort capability:");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
     component.invalidate();
     await component.handleInput("q");
 
@@ -920,7 +938,7 @@ describe("ModelRoleSelectorComponent", () => {
     expect(component.render(80).join("\n")).toContain("[ERROR] Persistence denied");
     expect(component.render(80).join("\n")).toContain("Effort capability:");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
     await component.handleInput("q");
     expect(done).toHaveBeenCalledTimes(1);
   });
@@ -951,8 +969,8 @@ describe("ModelRoleSelectorComponent", () => {
     await component.handleInput(ENTER);
 
     const text = component.render(80).join("\n");
-    expect(text).toContain("Provider filters:");
-    expect(text).not.toContain("Choose routing role:");
+    expect(text).toContain("Models: [ALL]");
+    expect(text).not.toContain("Action for test/fast:");
     expect(text).not.toContain("Effort capability:");
     expect(text).toContain("[OK] SUMMARY saved");
   });

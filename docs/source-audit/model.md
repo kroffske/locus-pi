@@ -37,9 +37,10 @@ typed presentation and persistence remain locus-pi-owned.
 ## Retained contract
 
 - Active `model` extension registers `/model-roles` and `/effort`, no tools.
-- `/model-roles` uses one continuous custom selector: model → role → effort →
-  inline receipt. Successful apply returns to the model list without closing
-  the selector; assigned routes render one per line with a shared warning-state
+- `/model-roles` uses one continuous model-first selector: full model list →
+  `Set as …` action → effort → inline receipt. `Tab` optionally cycles provider
+  filters. Successful apply returns to the model list without closing the
+  selector; assigned routes render one per line with a shared warning-state
   color for both role marker and model value.
 - `/effort` keeps Pi's host-owned selection surface with an explicit `[SELECT]`
   title. The host API exposes no initial-index option, so the current supported
@@ -49,10 +50,13 @@ typed presentation and persistence remain locus-pi-owned.
   fallback; noninteractive no-arg `/effort` returns an explicit-level recovery
   and never opens a synthetic selector.
 - Cancelling `/effort` performs no mutation and emits no settled-result block.
-- Provider labels are actual filters; narrow mode uses a filter carousel/count.
-- `Current session model` and persisted `DEFAULT route` remain distinct.
-- Only `DEFAULT` applies `pi.setModel` and verified session effort. Other roles
-  save route effort without changing the session.
+- Provider labels are optional filters; the full model list opens first and
+  narrow mode uses a filter carousel/count.
+- `CURRENT` is the live main-session model. `DEFAULT` applies `pi.setModel` and
+  saves that main-model choice; other roles save route effort without changing
+  the session.
+- A model-less agent resolves only `AGENT`, then inherits `CURRENT` when that
+  role is unset. `TASK` and saved `DEFAULT` never substitute in that path.
 - Route assignments persist to project `.pi/model-roles/config.json`.
 - User config remains read-only fallback; effective precedence is
   `session → settings → project → user` with project-null inheritance.
@@ -63,9 +67,9 @@ typed presentation and persistence remain locus-pi-owned.
 
 ## Consumer audit (T-203)
 
-- `DEFAULT`: active current-session action and final resolver fallback.
-- `AGENT`: active primary route in default-loaded agents and workflow bridge.
-- `TASK`: active fallback inside the same agent/workflow consumer chain.
+- `DEFAULT`: active action for the main/current session model; not an agent fallback.
+- `AGENT`: active route for agent profiles that declare no model.
+- `TASK`: active only when a profile or workflow explicitly names that role.
 - `PLAN`: beta-only prompt-planning consumer; dormant in default package.
 - `SUMMARY`: resolver contract only; no default-loaded caller.
 - `SMOL`: fallback inside dormant summary chain; no independent active caller.
