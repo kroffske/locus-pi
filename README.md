@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides ten default extensions, a bundled agent catalog, six curated
+It provides eleven default extensions, a bundled agent catalog, six curated
 Package workflows, and one skill that teaches an agent how to use them, through
 a deliberately narrow npm artifact.
 
@@ -12,7 +12,7 @@ a deliberately narrow npm artifact.
 ## What the package includes
 
 The machine-owned default list is `package.json#pi.extensions`. The package
-contains exactly these ten entrypoints:
+contains exactly these eleven entrypoints:
 
 | Extension             | Purpose and public surface                                                                                                                                                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -24,6 +24,7 @@ contains exactly these ten entrypoints:
 | `model`               | Provides `/model-roles` and `/effort` for role routing. Pi's operator-owned `/model` and `/models` selection surfaces are not model-callable tools from this package.                                                                                  |
 | `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
+| `status-line`         | Replaces Pi's interactive footer with one violet row for model, working directory/worktree, branch, context, cumulative tokens, compaction state, and existing extension statuses.                                                                     |
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
 | `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, flat `/workflow-*` compatibility aliases, and the `workflow` tool for trusted JavaScript orchestration.                                                              |
 
@@ -252,7 +253,7 @@ alone unless you mean to discard that history.
 pi install .
 pi list
 npm run check
-./bin/locus-pi doctor  # expects: 10 extensions, all ok
+./bin/locus-pi doctor  # expects: 11 extensions, all ok
 ```
 
 `pi install .` registers the checkout at user scope, so Pi loads these

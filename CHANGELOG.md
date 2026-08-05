@@ -31,6 +31,14 @@ This file records user-visible changes to the public package.
   capability fields, raw schemas/validators, parsers, renderers,
   acknowledgement gates, or answer-repair functions.
 
+- **Pi now has one permanent violet Locus footer and one compact workflow rail.**
+  The footer keeps model/effort, real working directory and linked-worktree
+  identity, branch, context use, cumulative input/output tokens, compaction
+  state, and existing extension statuses on one line. Active workflows add one
+  lighter rail below the editor, followed immediately by agent rows with
+  elapsed time and separate input/output tokens; no workflow rail is shown when
+  no run is active.
+
 - **A running `spawn_agent` call now shows the generated agent name immediately.**
   The tool card streams the same `agent <name> started` line used by the live
   agent surface as soon as the child receives its stable display name; the
@@ -47,6 +55,13 @@ This file records user-visible changes to the public package.
   sends Enter submissions to that child as steering input. Input disappears on
   settlement or execution replacement, and `Esc` still closes the view without
   aborting the child.
+
+- **Selected-agent `/ps` views now separate identity, request, runtime, input,
+  and status at a glance.** The first line says `[agent <name>] started work`,
+  the retained body labels `REQUEST` and `RUNTIME`, a double rule isolates the
+  live `MESSAGE TO AGENT` editor, and the bottom double rule begins with the
+  current `STATUS`. The layout remains one terminal-height viewport, including
+  when the editor is unavailable or the terminal is too short to show it.
 
 - **Standard workflow source now has an installed, provenance-aware build
   gate.** `npx @kroffske/locus-pi check-workflow-source <path>` checks a workflow

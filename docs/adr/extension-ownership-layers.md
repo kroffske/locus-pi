@@ -158,6 +158,7 @@ it. Seven registries are declared:
 | `locus-pi.fleet-menu-state.v2`             | `_shared/agent-runtime/fleet-menu.ts`              | `tests/extensions/agents/fleet-menu-entrypoints.test.ts`                  |
 | `locus-pi.workflow-live-executions.v1`     | `extensions/workflows/runtime/workflow-journal.ts` | `tests/extensions/workflows/workflow-live-executions-entrypoints.test.ts` |
 | `locus-pi.active-agent-session-viewers.v1` | `extensions/agents/session-viewer.ts`              | `tests/extensions/agents/session-viewer-entrypoints.test.ts`              |
+| `locus-pi.viewer-external-rows.v1`         | `_shared/operator/viewer-geometry.ts`              | `tests/shared/operator-ui/viewer-geometry.test.ts`                        |
 | `locus-pi.workflow-background-runs.v1`     | `extensions/workflows/background-run-registry.ts`  | none                                                                      |
 
 Six of the seven are proved across two separately registered entrypoints loaded

@@ -21,6 +21,7 @@ The manifest's `agent.name` identifies the bundled profile. Its
 | `model`               | `extension-model`               | `.agents/agents/extension-model.md`               | `extensions/model/manifest.json`               |
 | `plan`                | `extension-plan`                | `.agents/agents/extension-plan.md`                | `extensions/plan/manifest.json`                |
 | `security-gate`       | `extension-security-gate`       | `.agents/agents/extension-security-gate.md`       | `extensions/security-gate/manifest.json`       |
+| `status-line`         | `extension-status-line`         | `.agents/agents/extension-status-line.md`         | `extensions/status-line/manifest.json`         |
 | `todo-context`        | `extension-todo-context`        | `.agents/agents/extension-todo-context.md`        | `extensions/todo-context/manifest.json`        |
 | `workflows`           | `extension-workflows`           | `.agents/agents/extension-workflows.md`           | `extensions/workflows/manifest.json`           |
 

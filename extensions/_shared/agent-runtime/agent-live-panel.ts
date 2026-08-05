@@ -3,7 +3,7 @@ import type { AgentLiveRow, AgentLiveStatus } from "./agent-sdk-host.js";
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"];
 export const AGENT_LIVE_SPINNER_FRAME_COUNT = SPINNER_FRAMES.length;
 
-/** `<icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↓<tok>` (REQ-001). */
+/** `<icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↑<in> ↓<out>` (REQ-001). */
 const ROW_SEP = "  ·  ";
 /** Petname column budget (REQ-001 width rule: name ≤ 12 cols). */
 const AGENT_NAME_MAX_COLS = 12;
@@ -136,7 +136,7 @@ export function formatAgentIdentity(row: AgentLiveRow): string {
 /**
  * The fleet row grammar (REQ-001), normative per spec "### Agent row anatomy":
  *
- *   `<icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↓<tok>`
+ *   `<icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↑<in> ↓<out>`
  *
  * The status icon+color carries the state, so the row deliberately omits
  * `[Working]`, `on task`, `activity=`, `args=`, `steps=…`, `tokens=…`,
@@ -234,7 +234,7 @@ function shortModelName(model: string): string {
 
 function formatRowTokens(row: AgentLiveRow): string | undefined {
   if (row.tokenCount === undefined) return undefined;
-  return `↓${formatTokenCount(row.tokenCount.input + row.tokenCount.output)}`;
+  return `↑${formatTokenCount(row.tokenCount.input)} ↓${formatTokenCount(row.tokenCount.output)}`;
 }
 
 /**

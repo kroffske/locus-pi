@@ -31,3 +31,39 @@ export function terminalRows(tui: TerminalRowsSource, minimumRows: number, fallb
   const rows = tui.terminal?.rows;
   return typeof rows === "number" && Number.isFinite(rows) ? Math.max(minimumRows, Math.floor(rows)) : fallbackRows;
 }
+
+const VIEWER_EXTERNAL_ROWS_KEY = Symbol.for("locus-pi.viewer-external-rows.v1");
+
+interface ViewerExternalRowsRegistry {
+  readonly rowsByOwner: Map<string, number>;
+}
+
+function viewerExternalRowsRegistry(): ViewerExternalRowsRegistry {
+  const root = globalThis as typeof globalThis & { [VIEWER_EXTERNAL_ROWS_KEY]?: ViewerExternalRowsRegistry };
+  const existing = root[VIEWER_EXTERNAL_ROWS_KEY];
+  if (existing !== undefined) return existing;
+  const created: ViewerExternalRowsRegistry = { rowsByOwner: new Map() };
+  Object.defineProperty(root, VIEWER_EXTERNAL_ROWS_KEY, {
+    value: created,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  return created;
+}
+
+/** Publish rows that remain outside a focused custom viewer (for example a below-editor workflow widget). */
+export function setViewerExternalRows(owner: string, rows: number): void {
+  const normalized = Number.isFinite(rows) ? Math.max(0, Math.floor(rows)) : 0;
+  if (normalized === 0) viewerExternalRowsRegistry().rowsByOwner.delete(owner);
+  else viewerExternalRowsRegistry().rowsByOwner.set(owner, normalized);
+}
+
+export function clearViewerExternalRows(owner: string): void {
+  viewerExternalRowsRegistry().rowsByOwner.delete(owner);
+}
+
+/** Total rows Pi still renders above/below the editor container replaced by ctx.ui.custom(). */
+export function viewerExternalRows(): number {
+  return [...viewerExternalRowsRegistry().rowsByOwner.values()].reduce((total, rows) => total + rows, 0);
+}

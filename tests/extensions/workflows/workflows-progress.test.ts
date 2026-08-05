@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
@@ -26,6 +26,9 @@ import {
 } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
+import { clearViewerExternalRows, viewerExternalRows } from "../../../extensions/_shared/operator/viewer-geometry.js";
+
+afterEach(() => clearViewerExternalRows("workflow-live"));
 
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {
   return input as WorkflowJournalLine;
@@ -106,8 +109,7 @@ describe("workflow progress widget", () => {
     const text = rendered.join("\n");
 
     expect(rendered.length).toBeLessThanOrEqual(Math.max(6, Math.min(30 - 6, 24)));
-    expect(text).toContain("agents · workflow live-smoke #r1  ● RUNNING  1/2");
-    expect(text).toContain("stages · smoke (current) — verify (declared)");
+    expect(text).toContain("◆ WF live-smoke │ 1/2 smoke · ● RUNNING");
     // The roster shows the whole run: settled agents keep their outcome marker and
     // duration, and a declared stage the run has not reached yet stays visible as
     // planned work instead of being hidden until it starts.
@@ -117,15 +119,20 @@ describe("workflow progress widget", () => {
     expect(text).toContain("note:explore");
     expect(text).toContain("22s");
     expect(text).toContain("○ verify  ·  planned");
-    expect(text).toContain("/ps inspect agents");
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
+    expect(viewerExternalRows()).toBe(rendered.length);
+
+    const commandRail = component.render(120)[0];
+    expect(commandRail).toContain("/ps inspect agents");
+    expect(commandRail).toContain("/workflows stop last");
 
     fleetMenuState.setFocused(true);
     const focused = component.render(100).join("\n");
     expect(focused).toContain("note:explore");
     expect(focused).toContain("note:quick");
-    expect(focused).toContain("/ps inspect agents");
     fleetMenuState.setFocused(false);
+    component.dispose();
+    expect(viewerExternalRows()).toBe(0);
   });
 
   it("rosters finished, running, and still-planned work, and keeps one row per re-entered slot", () => {
@@ -270,7 +277,8 @@ describe("workflow progress widget", () => {
     stage(1, true);
     stage(2, true);
     stage(3, false);
-    expect(component.render(120).join("\n")).toContain("agents · workflow stages #run1  ● RUNNING  replayed=2");
+    expect(component.render(120).join("\n")).toContain("◆ WORKFLOW · stages │ stage — · ● RUNNING");
+    expect(component.render(120).join("\n")).toContain("replayed 2");
 
     agentLiveStore.reset();
     const fresh = new WorkflowProgressComponent(tui, {}, "stages", "run-2", { scope: "workflow" });
@@ -288,7 +296,7 @@ describe("workflow progress widget", () => {
       }),
     );
     const freshText = fresh.render(120).join("\n");
-    expect(freshText).toContain("agents · workflow stages #run2  ● RUNNING");
+    expect(freshText).toContain("◆ WORKFLOW · stages │ stage — · ● RUNNING");
     expect(freshText).not.toContain("replayed=");
   });
 
@@ -317,7 +325,7 @@ describe("workflow progress widget", () => {
       component.finish({ ok: true, result: { summary: "child status reviewer cancelled" } });
 
       const text = component.render(120).join("\n");
-      expect(text).toContain("agents · workflow cancel-smoke #elr1  ✓ OK");
+      expect(text).toContain("◆ WORKFLOW · cancel-smoke │ stage — · ✓ OK");
       expect(text).toContain("⊘");
       expect(text).toContain("sleep 60");
       expect(text).toContain("✓ child status reviewer cancelled");
@@ -481,7 +489,7 @@ describe("workflow progress widget", () => {
       expect(rendered).toContain("parallel (2)");
       expect(rendered).toContain("1/2 done");
       expect(rendered).toContain("1 failed");
-      expect(rendered).toMatch(/parallel \(2\).*↓15/);
+      expect(rendered).toMatch(/parallel \(2\).*↑7 ↓8/);
       // SDK child agent row: petname + title, model+effort badge (provider stripped),
       // no `on task`/`/effort=`/`args=`/`turns=`/`flags=`/`[current task]` sub-line.
       expect(rendered).toContain("SDK child session");
@@ -587,7 +595,7 @@ describe("workflow progress widget", () => {
     fleetMenuState.setFocused(false);
   });
 
-  it("labels only declared, reached, and current stages without inferring completion", () => {
+  it("projects only the current normalized stage and its stable position into the rail", () => {
     agentLiveStore.reset();
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 160 } };
     const component = new WorkflowProgressComponent(tui, {}, "review", "stage-r1", {
@@ -610,14 +618,10 @@ describe("workflow progress widget", () => {
     pushProgress(component, line({ kind: "phase", phase: "questions", ts: 2, runId: "stage-r1" }));
     pushProgress(component, line({ kind: "phase", phase: "dynamic-check", ts: 3, runId: "stage-r1" }));
 
-    const stageLine = component.render(160).find((renderedLine) => renderedLine.startsWith("stages ·"));
-    expect(stageLine).toBe(
-      "stages · clarify (reached) — scope (declared) — questions (reached) — review (declared) — dynamic-check (current)",
-    );
-    expect(stageLine).not.toMatch(/completed|failed|✓|✗/u);
-    const narrowStageLine = component.render(50).find((renderedLine) => renderedLine.startsWith("stages ·"));
-    expect(narrowStageLine).toContain("current");
-    expect(narrowStageLine).toContain("dynamic-check");
+    const rail = component.render(160)[0];
+    expect(rail).toContain("stage 5/5 · dynamic-check · ● RUNNING");
+    expect(rail).not.toMatch(/completed|failed|✓|✗/u);
+    expect(component.render(50)[0]).toContain("dynamic-check");
     component.dispose();
   });
 
@@ -646,9 +650,7 @@ describe("workflow progress widget", () => {
     pushProgress(component, line({ kind: "phase", phase: " verify ", ts: 4, runId: "normalized-r1" }));
     pushProgress(component, line({ kind: "phase", phase: "", ts: 5, runId: "normalized-r1" }));
 
-    expect(component.render(160).find((renderedLine) => renderedLine.startsWith("stages ·"))).toBe(
-      "stages · review (reached) — verify (current)",
-    );
+    expect(component.render(160)[0]).toContain("stage 2/2 · verify · ● RUNNING");
     component.dispose();
   });
 

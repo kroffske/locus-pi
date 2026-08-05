@@ -15,10 +15,12 @@ import {
 } from "./runtime/workflow-journal.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import { clamp } from "../_shared/operator/viewer-geometry.js";
+import { clamp, viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
+// Keep two rows of breathing room above the one-row Locus footer so focused
+// browsers never collide with host redraws on short terminals.
 const PI_HOST_FOOTER_ROWS = 3;
 const VIEWER_FOOTER_ROWS = 2;
 const MAX_EVIDENCE_BYTES = 512 * 1024;
@@ -650,7 +652,7 @@ function terminalRows(tui: CustomUiTui): number {
 }
 
 function viewerRows(tui: CustomUiTui): number {
-  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS);
+  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS - viewerExternalRows());
 }
 
 function contentBodyHeight(tui: CustomUiTui): number {

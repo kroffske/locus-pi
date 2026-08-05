@@ -224,7 +224,7 @@ function packageWorkflowNamesFromIndex(markdown: string): string[] {
 }
 
 describe("public registration contract", () => {
-  it("declares the ten supported active entrypoints", () => {
+  it("declares the eleven supported active entrypoints", () => {
     expect(pkg.pi.extensions).toEqual([
       "./extensions/agents/index.ts",
       "./extensions/ask-user-question/index.ts",
@@ -234,6 +234,7 @@ describe("public registration contract", () => {
       "./extensions/model/index.ts",
       "./extensions/plan/index.ts",
       "./extensions/security-gate/index.ts",
+      "./extensions/status-line/index.ts",
       "./extensions/todo-context/index.ts",
       "./extensions/workflows/index.ts",
     ]);

@@ -1,6 +1,6 @@
 # Extension ownership matrix
 
-This matrix records ownership of the ten `0.2.1` default extensions. `Locus`
+This matrix records ownership of the eleven `0.2.1` default extensions. `Locus`
 means locally owned behavior. `compat-wrapper` means a bounded Pi-facing surface
 whose source audit records the upstream contract and license context.
 
@@ -14,6 +14,7 @@ whose source audit records the upstream contract and license context.
 | `model`               | active | compat-wrapper | Local role-routing state and UI. Pi owns active model selection through `/model` and `/models`.                                                          |
 | `plan`                | active | Locus          | Behavioral planning/goal runtime. It guides the model but does not silently restrict tools or shell access.                                              |
 | `security-gate`       | active | Locus          | Audit-only observer. Pi approval remains the enforcement owner.                                                                                          |
+| `status-line`         | active | Locus          | One-row TUI footer over public Pi data. Pi retains editor, session, Git watcher, status registry, and compaction ownership.                              |
 | `todo-context`        | active | compat-wrapper | `todo_write` mutates session task state; explicit autonomous mode may trigger one bounded settled follow-up per recorded progress transition.            |
 | `workflows`           | active | Locus          | Reviewed JavaScript executes with full Node.js host access. Only six Package workflow names are curated; project/user sources remain trusted local code. |
 

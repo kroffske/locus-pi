@@ -142,7 +142,7 @@ describe("token counter (REQ-006)", () => {
     expect(formatTokenCount(1000)).toBe("1k");
   });
 
-  it("wires cumulative usage into tokenCount (input+output) and shows ↓ in the row", () => {
+  it("wires cumulative usage into tokenCount and shows separate input/output counters", () => {
     agentLiveStore.begin({
       id: "run:reviewer:1",
       agentName: "reviewer",
@@ -158,7 +158,7 @@ describe("token counter (REQ-006)", () => {
       tokens: { input: 9100, output: 3300, total: 20000, cacheRead: 7600 },
     });
     expect(updated?.tokenCount).toEqual({ input: 9100, output: 3300 });
-    expect(formatAgentLiveRowLine(updated!)).toContain("↓12.4k");
+    expect(formatAgentLiveRowLine(updated!)).toContain("↑9.1k ↓3.3k");
   });
 
   it("omits the token field entirely when there is no usage (never 0)", () => {
@@ -194,8 +194,10 @@ describe("fleet row grammar (REQ-001)", () => {
   });
   const line = formatAgentLiveRowLine(row, statusMeta("working", 0));
 
-  it("matches the <icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↓<tok> grammar", () => {
-    expect(line).toMatch(/^⠿ Anscombe\s+review auth middleware\s+·\s+claude-fable-5 medium\s+·\s+12s\s+·\s+↓1\.8k$/);
+  it("matches the <icon> <name>  <title>  ·  <model> <effort>  ·  <elapsed>  ·  ↑<in> ↓<out> grammar", () => {
+    expect(line).toMatch(
+      /^⠿ Anscombe\s+review auth middleware\s+·\s+claude-fable-5 medium\s+·\s+12s\s+·\s+↑1\.2k ↓600$/,
+    );
   });
 
   it("drops [Working], on task, activity=, args={, /effort=, steps=, and the #hash tail", () => {
@@ -252,10 +254,10 @@ describe("fleet row grammar (REQ-001)", () => {
     // the sacrifice while model/elapsed/tokens on the right survive (REQ-001).
     const narrow = formatAgentLiveRowLine(row, statusMeta("working", 0), 64);
     expect(narrow.length).toBeLessThanOrEqual(64);
-    expect(narrow).toContain("↓1.8k");
+    expect(narrow).toContain("↑1.2k ↓600");
     expect(narrow).toContain("12s");
     expect(narrow).toContain("claude-fable-5 medium");
-    expect(narrow).toContain("...");
+    expect(narrow).toContain("rev");
     expect(narrow).not.toContain("review auth middleware");
   });
 });
@@ -271,7 +273,7 @@ describe("transcript event lines (REQ-011)", () => {
     expect(formatAgentStartedEventLine(row)).toBe("● agent Anscombe started — sum batch 1 (claude-fable-5 medium)");
   });
 
-  it("formats the finished line: ✓ agent <Name> finished · <elapsed> · ↓<tok> — <first result line>", () => {
+  it("formats the finished line with separate input/output tokens", () => {
     const row = makeRow({
       displayName: "Anscombe",
       status: "done",
@@ -279,7 +281,7 @@ describe("transcript event lines (REQ-011)", () => {
       tokenCount: { input: 2600, output: 1600 },
       finalAnswer: "1225\ntrailing detail",
     });
-    expect(formatAgentFinishedEventLine(row)).toBe("✓ agent Anscombe finished · 1m12s · ↓4.2k — 1225");
+    expect(formatAgentFinishedEventLine(row)).toBe("✓ agent Anscombe finished · 1m12s · ↑2.6k ↓1.6k — 1225");
   });
 
   it("uses the ✗ error variant with the error message as the tail", () => {

@@ -29,7 +29,7 @@ function loadBundledAgent(name: string): AgentDefinition {
 describe("bundled extension-agent catalog", () => {
   it("covers every default extension and resolves its manifest description", () => {
     const entries = loadExtensionAgentCatalog();
-    expect(entries).toHaveLength(10);
+    expect(entries).toHaveLength(11);
     expect(new Set(entries.map((entry) => entry.extensionId)).size).toBe(entries.length);
     expect(new Set(entries.map((entry) => entry.agentName)).size).toBe(entries.length);
 
@@ -64,7 +64,10 @@ describe("bundled extension-agent catalog", () => {
     try {
       await mkdir(join(root, "extensions", "one"), { recursive: true });
       await mkdir(join(root, ".agents", "agents"), { recursive: true });
-      await writeFile(join(root, "package.json"), JSON.stringify({ pi: { extensions: ["./extensions/one/index.ts"] } }));
+      await writeFile(
+        join(root, "package.json"),
+        JSON.stringify({ pi: { extensions: ["./extensions/one/index.ts"] } }),
+      );
       await writeFile(
         join(root, "extensions", "one", "manifest.json"),
         JSON.stringify({ id: "one", agent: { name: "extension-one", description: "Manifest description." } }),

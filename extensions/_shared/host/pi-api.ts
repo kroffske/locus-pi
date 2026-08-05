@@ -98,6 +98,7 @@ export type CommandArgs =
 export type LifecycleEvent =
   | "session_start"
   | "session_shutdown"
+  | "session_before_compact"
   | "session_compact"
   | "resources_discover"
   | "input"
@@ -296,6 +297,8 @@ export interface ReplacementSessionManagerLike {
   getBranch?(): Promise<ReplacementSessionEntryLike[]> | ReplacementSessionEntryLike[];
   getSessionId?(): string;
   getSessionFile?(): string | undefined;
+  getCwd?(): string;
+  getSessionName?(): string | undefined;
 }
 
 /** Live context-budget signal (real Pi: ContextUsage). */
@@ -327,6 +330,8 @@ export interface ExtensionContext {
   /** Real Pi run mode. Terminal component factories/custom UI are valid only in `tui`. */
   mode?: "tui" | "rpc" | "json" | "print";
   model?: ModelLike;
+  /** Current host thinking level, exposed by Pi 0.82.0. */
+  thinkingLevel?: ThinkingLevel;
   modelRegistry?: ModelRegistryLike;
   /** Real Pi 0.82.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
@@ -361,6 +366,8 @@ export interface ExtensionContext {
       content: string[] | WidgetFactory | undefined,
       options?: { placement?: "aboveEditor" | "belowEditor" },
     ): void;
+    /** Replace Pi's interactive footer. Last registered factory owns the single footer slot. */
+    setFooter?(factory: FooterFactory | undefined): void;
     setTitle(title: string): void;
     setWorkingIndicator(active: boolean): void;
     custom?<T>(
@@ -417,6 +424,19 @@ export interface ExtensionCommandContext extends ExtensionContext {
 }
 
 export type WidgetFactory = (...args: unknown[]) => unknown;
+
+export interface FooterDataProviderLike {
+  getGitBranch(): string | null;
+  getExtensionStatuses(): ReadonlyMap<string, string>;
+  getAvailableProviderCount(): number;
+  onBranchChange(callback: () => void): () => void;
+}
+
+export type FooterFactory = (
+  tui: WidgetFactoryTui,
+  theme: ThemeLike,
+  footerData: FooterDataProviderLike,
+) => CustomUiComponent;
 
 export interface CustomEntry {
   type: string;

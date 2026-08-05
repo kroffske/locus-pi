@@ -89,3 +89,4 @@ tmp/
 # stray demo output from .pi/workflows/test-two-files-with-agents.workflow.mjs
 /test1.md
 /test2.md
+.gstack/
