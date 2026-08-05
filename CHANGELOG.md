@@ -6,6 +6,11 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The supported and tested Pi baseline is now 0.83.0.** All four Pi peer
+  ranges start at 0.83.0, development dependencies and the lockfile use exact
+  0.83.0 packages, and current host-contract documentation is synchronized.
+  Locus does not use the deprecated TypeBox APIs removed by Pi 0.83.0.
+
 - **Model-role assignment now starts from the model, like OMP's model picker.**
   `/model-roles` opens the complete model list, keeps provider filtering as an
   optional `Tab` shortcut, and shows “Set as …” role actions below the selected

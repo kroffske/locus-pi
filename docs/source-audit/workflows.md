@@ -461,9 +461,9 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `docs/extensions/active/workflows.md` is the canonical workflow DSL and
   authoring contract.
 
-## Pi 0.82.0 command, lifecycle, and custom-UI contracts
+## Pi 0.83.0 command, lifecycle, and custom-UI contracts
 
-The installed `@earendil-works/pi-coding-agent` package is version `0.82.0`.
+The installed `@earendil-works/pi-coding-agent` package is version `0.83.0`.
 Its local source establishes the launch guard:
 
 - `dist/core/agent-session.js:785-932` executes registered extension commands

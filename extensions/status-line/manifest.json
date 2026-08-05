@@ -11,7 +11,7 @@
   "ownershipStatus": "locus-owned",
   "sourceMode": "local",
   "runtimeRequirements": [
-    "Pi 0.82.0 custom footer API",
+    "Pi 0.83.0 custom footer API",
     "Pi footer data provider for Git branch",
     "Pi context-usage API",
     "session_before_compact and session_compact lifecycle events"

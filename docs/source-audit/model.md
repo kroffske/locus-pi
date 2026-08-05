@@ -25,8 +25,8 @@ Official Pi evidence:
 - [Custom models](https://pi.dev/docs/latest/models) — `reasoning` and
   `thinkingLevelMap` capability fields.
 
-Installed host evidence: `@earendil-works/pi-coding-agent@0.82.0` and
-`@earendil-works/pi-ai@0.82.0`. Pi AI's
+Installed host evidence: `@earendil-works/pi-coding-agent@0.83.0` and
+`@earendil-works/pi-ai@0.83.0`. Pi AI's
 `getSupportedThinkingLevels(model)` returns `off` for non-reasoning models,
 excludes `null` mappings and exposes `xhigh` only when mapped.
 
