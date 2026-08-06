@@ -20,6 +20,10 @@ import { workflowJournalFile } from "../../../extensions/workflows/runtime/workf
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { parseRunCommand } from "../../../extensions/workflows/command-parser.js";
 import workflows from "../../../extensions/workflows/index.js";
+import {
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+  WORKFLOW_RUN_CUSTOM_TYPE,
+} from "../../../extensions/workflows/workflow-transcript.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -168,6 +172,75 @@ describe("/workflows help and unknown commands", () => {
     await run.commands.get("workflows")!.handler("", run.ctx);
     expect(run.editorText).toBe("/workflows run alpha");
     expect(run.selectCalls.flatMap((call) => call.options).every((option) => typeof option === "string")).toBe(true);
+  });
+
+  it("waits for the native selector teardown before filling the editor", async () => {
+    const root = makeRoot();
+    const workflowDir = path.join(root, ".pi", "workflows");
+    mkdirSync(workflowDir, { recursive: true });
+    writeFileSync(
+      path.join(workflowDir, "alpha.workflow.mjs"),
+      'export const meta={name:"alpha",description:"Alpha workflow"}; export default async()=>null;\n',
+      "utf8",
+    );
+    const target = deferred<string>();
+    const run = createHarness(root);
+    const setEditorText = vi.fn();
+    const setStatus = vi.spyOn(run.ctx.ui, "setStatus");
+    run.ctx.ui.setEditorText = setEditorText;
+    let selectCount = 0;
+    run.ctx.ui.select = vi.fn(async () => {
+      selectCount += 1;
+      if (selectCount === 1) return "run — start a workflow";
+      return target.promise;
+    });
+    workflows(run.pi);
+
+    const pending = run.commands.get("workflows")!.handler("", run.ctx);
+    while (selectCount < 2) await Promise.resolve();
+    target.resolve("alpha");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(setEditorText).not.toHaveBeenCalled();
+    await pending;
+    expect(setEditorText).toHaveBeenCalledWith("/workflows run alpha");
+    expect(setStatus).toHaveBeenCalledWith("workflows:editor-prefill-render", undefined);
+  });
+
+  it("registers distinct readable renderers for workflow lifecycle and result messages", () => {
+    const h = createHarness(makeRoot());
+    workflows(h.pi);
+
+    expect([...h.messageRenderers.keys()].sort()).toEqual(
+      [WORKFLOW_RESULT_CUSTOM_TYPE, WORKFLOW_RUN_CUSTOM_TYPE].sort(),
+    );
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      bg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const runRenderer = h.messageRenderers.get(WORKFLOW_RUN_CUSTOM_TYPE)!;
+    const start = runRenderer(
+      {
+        customType: WORKFLOW_RUN_CUSTOM_TYPE,
+        content: "── workflow plan · run #1234 · started 05:03 ──",
+        details: { eventKind: "workflow_start" },
+      },
+      { expanded: true, outputPad: 0 },
+      theme,
+    );
+    const end = runRenderer(
+      {
+        customType: WORKFLOW_RUN_CUSTOM_TYPE,
+        content: "── workflow plan · run #1234 · finished 05:06 ──",
+        details: { eventKind: "workflow_end" },
+      },
+      { expanded: true, outputPad: 0 },
+      theme,
+    );
+
+    expect(start?.render(100).join("\n")).toContain("Workflow started");
+    expect(end?.render(100).join("\n")).toContain("Workflow finished");
   });
 
   it("routes info, result, and continue through contextual menu paths", async () => {

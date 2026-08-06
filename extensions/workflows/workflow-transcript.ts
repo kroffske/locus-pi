@@ -1,9 +1,11 @@
 import path from "node:path";
+import { Box, Text } from "@earendil-works/pi-tui";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
   ExtensionMessage,
+  ThemeLike,
 } from "../_shared/host/pi-api.js";
 import { formatDuration } from "../_shared/agent-runtime/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
@@ -55,6 +57,26 @@ export interface WorkflowTranscript {
   start(runId: string, runDir?: string): WorkflowTranscriptAnnouncement | undefined;
   event(line: WorkflowJournalLine): void;
   finish(res: RunWorkflowScriptResult): WorkflowTranscriptCompletion;
+}
+
+/** Replace Pi's raw `[custom-type]` fallback with distinct operator-facing cards. */
+export function registerWorkflowTranscriptRenderers(pi: ExtensionAPI): void {
+  if (pi.registerMessageRenderer === undefined) return;
+  pi.registerMessageRenderer(WORKFLOW_RUN_CUSTOM_TYPE, (message, { outputPad }, theme) => {
+    if (typeof message.content !== "string") return undefined;
+    const eventKind = message.details?.eventKind;
+    const title =
+      eventKind === "workflow_start"
+        ? "Workflow started"
+        : eventKind === "workflow_end"
+          ? "Workflow finished"
+          : "Workflow run";
+    return workflowTranscriptCard(title, message.content, outputPad, theme);
+  });
+  pi.registerMessageRenderer(WORKFLOW_RESULT_CUSTOM_TYPE, (message, { outputPad }, theme) => {
+    if (typeof message.content !== "string") return undefined;
+    return workflowTranscriptCard("Workflow result", message.content, outputPad, theme);
+  });
 }
 
 interface PendingAgentRow {
@@ -207,6 +229,17 @@ export function createWorkflowTranscript(
         // non-prose result, so pointing there would send them to a dead end.
         bodyLines.push(firstTranscriptLine(`read the full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
       }
+      if (res.workspaceDir !== undefined && res.workspaceDir !== "") {
+        bodyLines.push(firstTranscriptLine(`workspace: ${res.workspaceDir}`));
+        if (res.workspaceDirRelative !== undefined && res.workspaceDirRelative !== "") {
+          bodyLines.push(
+            firstTranscriptLine(`workspace reuse: reused when outputDir remains ${res.workspaceDirRelative}`),
+          );
+        }
+      }
+      if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
+        bodyLines.push(firstTranscriptLine(`primary file: ${res.primaryFile.absolutePath}`));
+      }
       if (res.failureDiagnostic !== undefined) {
         for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {
           bodyLines.push(firstTranscriptLine(line));
@@ -254,6 +287,12 @@ export function createWorkflowTranscript(
     agentRowCount += 1;
     pushLine(formatWorkflowAgentLifecycle(line, replaySourceRunId));
   }
+}
+
+function workflowTranscriptCard(title: string, content: string, outputPad: number, theme: ThemeLike): Box {
+  const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
+  box.addChild(new Text(`${theme.fg("accent", theme.bold(title))}\n${content}`, 0, 0));
+  return box;
 }
 
 /**

@@ -113,5 +113,13 @@ ${contextText}
     { label: "planning", workspaceMode: "project" },
   );
 
-  return publishPrimaryFile("plan.md");
+  publishPrimaryFile("plan.md");
+  return `Plan and steps are ready in the workflow workspace shown in the completion card.
+
+Default next action: ask main Pi to execute the frozen steps.md catalog with the locus-task-workflow skill. It will run plan-implement once per exact step.
+
+Optional generated workflow:
+1. Send workflow-author: Design workflow: create a sequential project-local workflow from the approved plan.md and steps.md in this workflow workspace.
+2. After approving the design, send: Build approved design: <exact design path>
+3. Run the exact command returned by workflow-author: /workflows run <generated workflow path>`;
 }

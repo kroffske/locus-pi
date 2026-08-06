@@ -50,6 +50,32 @@ describe("workflow persistent transcript", () => {
     expect(harness.notifications).toEqual([]);
   });
 
+  it("separates the reusable workflow workspace from unique run evidence", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "plan", "tool");
+    transcript.start("20260806-020358-988a", "/repo/.pi/locus-pi/runs/20260806-020358-988a");
+    const completion = transcript.finish({
+      runId: "20260806-020358-988a",
+      runDir: "/repo/.pi/locus-pi/runs/20260806-020358-988a",
+      ok: true,
+      result: "Plan ready",
+      workspaceDir: "/repo/tmp/checkout-fix",
+      workspaceDirRelative: "tmp/checkout-fix",
+      primaryFile: {
+        relativePath: "plan.md",
+        absolutePath: "/repo/tmp/checkout-fix/plan.md",
+        sha256: "abc123",
+        bytes: 42,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/20260806-020358-988a/runtime/result.json" },
+    });
+
+    expect(completion.digest).toContain("workspace: /repo/tmp/checkout-fix");
+    expect(completion.digest).toContain("reused when outputDir remains tmp/checkout-fix");
+    expect(completion.digest).toContain("primary file: /repo/tmp/checkout-fix/plan.md");
+    expect(completion.digest).toContain("journal: /repo/.pi/locus-pi/runs/20260806-020358-988a/runtime/journal.ndjson");
+  });
+
   it("persists exactly one final command failure in one workflow_end digest", async () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "broken", "command");

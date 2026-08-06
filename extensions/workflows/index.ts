@@ -41,9 +41,11 @@ import {
   announceCommandWorkflowStart,
   createWorkflowTranscript,
   persistCommandWorkflowTranscript,
+  registerWorkflowTranscriptRenderers,
 } from "./workflow-transcript.js";
 
 export default function workflows(pi: ExtensionAPI): void {
+  registerWorkflowTranscriptRenderers(pi);
   const completedRunIds = new Set<string>();
   /**
    * Runs THIS Pi session launched — command, tool, and continuations alike.

@@ -13,6 +13,7 @@ import type {
   ExtensionMessage,
   LifecycleEvent,
   ModelLike,
+  MessageRenderer,
   ProviderConfigLike,
   FooterFactory,
   SendMessageOptions,
@@ -91,6 +92,7 @@ export interface Harness {
   notifications: string[];
   notificationEvents: Array<{ message: string; level?: "info" | "warning" | "error" }>;
   sentMessages: Array<{ message: ExtensionMessage; options?: SendMessageOptions }>;
+  messageRenderers: Map<string, MessageRenderer>;
   /** Pi 0.83.0 sendCustomMessage routing: streaming defaults to steer; idle/no-trigger appends. */
   customMessageDeliveries: Array<"steer" | "followUp" | "nextTurn" | "turn" | "append">;
   isStreaming: boolean;
@@ -141,6 +143,7 @@ export function createHarness(
   const notifications: string[] = [];
   const notificationEvents: Array<{ message: string; level?: "info" | "warning" | "error" }> = [];
   const sentMessages: Array<{ message: ExtensionMessage; options?: SendMessageOptions }> = [];
+  const messageRenderers = new Map<string, MessageRenderer>();
   const customMessageDeliveries: Array<"steer" | "followUp" | "nextTurn" | "turn" | "append"> = [];
   const sentUserMessages: Array<{ message: string; options?: Record<string, unknown> }> = [];
   const widgets = new Map<string, string>();
@@ -356,6 +359,9 @@ export function createHarness(
     registerTool(tool) {
       tools.set(tool.name, tool);
     },
+    registerMessageRenderer(customType, renderer) {
+      messageRenderers.set(customType, renderer);
+    },
     registerShortcut(shortcut, opts) {
       shortcuts.set(shortcut, opts);
     },
@@ -415,6 +421,7 @@ export function createHarness(
     notifications,
     notificationEvents,
     sentMessages,
+    messageRenderers,
     customMessageDeliveries,
     isStreaming,
     waitForIdleCalls: 0,
