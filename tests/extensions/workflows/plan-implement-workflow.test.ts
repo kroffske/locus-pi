@@ -33,8 +33,14 @@ describe("Package workflow: plan-implement", () => {
     const calls: Array<{ prompt: string; options: { label: string } }> = [];
     const step = [
       "## S3 — Add the DAG configuration",
-      "Goal: create the project config.",
-      "Verify: npm test -- dag-config",
+      "Work unit: W2 — Project configuration",
+      "Boundary: ownership — configuration module",
+      "Goal: Create the project config.",
+      "Paths and evidence: src/dag-config.ts and its tests.",
+      "Dependencies: S1 completed.",
+      "Allowed ownership: src/dag-config.ts and tests/dag-config.test.ts.",
+      "Verification: npm test -- dag-config",
+      "Done when: the configuration behavior passes its focused test.",
     ].join("\n");
     const history = [
       "# S3 — Add the DAG configuration",
@@ -59,6 +65,10 @@ describe("Package workflow: plan-implement", () => {
     expect(calls[0]?.prompt).toContain(step);
     expect(calls[0]?.prompt).toContain("`history/S<n>.md`");
     expect(calls[0]?.prompt).toContain("Execute exactly the one step below");
+    expect(calls[0]?.prompt).toContain("one complete flat `## S<n> — ...` block");
+    expect(calls[0]?.prompt).toContain("form one coherent task contract");
+    expect(calls[0]?.prompt).toContain("Respect `Allowed ownership:`");
+    expect(calls[0]?.prompt).toMatch(/Do not\s+decompose it into nested tasks/u);
     expect(result).toBe(history);
   });
 

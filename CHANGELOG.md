@@ -6,6 +6,13 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Plan now freezes a boundary-driven task catalog before execution.**
+  `plan.md` defines coherent top-level work units, while `steps.md` remains the
+  only executable catalog and carries complete flat exact-step blocks for fresh
+  agents. The default todo-driven Plan Implement path is unchanged; approved
+  artifacts may instead be handed to workflow-author Design for an
+  approval-first project-local sequential workflow.
+
 - **Main-agent `workflow` tool calls now read as one Locus workflow card.** The
   card names the real workflow and its `RUNNING`, `COMPLETED`,
   `AWAITING OPERATOR`, `CANCELLED`, or `FAILED` state in one stable header;

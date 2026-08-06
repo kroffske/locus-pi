@@ -31,10 +31,19 @@ files. Read \`plan.md\`, \`steps.md\`, and any relevant existing
 \`history/*.md\` before acting. Reinspect the live project; the plan is context,
 not authority.
 
+The input is one complete flat \`## S<n> — ...\` block from the frozen
+\`steps.md\` catalog. Its work-unit identity, boundary, goal, paths and
+evidence, dependencies, allowed ownership, verification, and done condition
+form one coherent task contract. Implement that contract directly. Do not
+decompose it into nested tasks or reinterpret labeled fields as permission to
+widen ownership.
+
 Rules:
 - Preserve unrelated dirty work. Never stage, commit, push, create a pull
   request, merge, deploy, mutate a remote, stash, or discard user changes.
 - Stay inside this step. Do not execute later steps or rewrite the full plan.
+- Respect \`Allowed ownership:\`. If the goal cannot be completed within it,
+  record a blocker instead of editing another owner.
 - Run the narrowest meaningful checks for the work you perform.
 - Take the stable \`S<n>\` key from the step heading. Fully replace
   \`history/S<n>.md\` in the workflow workspace; create \`history/\` when

@@ -472,6 +472,13 @@ describe("npm public package boundary", () => {
     expect(source).toContain("preserves unrelated session\ntodos");
     expect(source).toContain("20-continuation safety limit");
     expect(source).toContain("Do not call another workflow from inside either Package workflow");
+    expect(source).toContain("`plan.md` first defines coherent top-level work units");
+    expect(source).toMatch(/`steps\.md`\s+is the only executable task catalog/u);
+    expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
+    expect(source).toContain("the exact step catalog is frozen");
+    expect(source).toMatch(/hand the approved `plan\.md` and `steps\.md` to\s+`workflow-author` for Design only/u);
+    expect(source).toContain("`Build approved design: <exact path>`");
+    expect(source).toMatch(/optional reviewer after a generated\s+step belongs to that Design/u);
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {
