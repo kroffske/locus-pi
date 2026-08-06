@@ -117,6 +117,7 @@
     "extensions/_shared/operator/viewer-geometry.ts",
     "extensions/_shared/operator/widget-render.ts",
     "extensions/_shared/model/workflow-model-resolve.ts",
+    "extensions/agents/agent-tool-card.ts",
     "extensions/agents/catalog-state.ts",
     "extensions/agents/catalog.ts",
     "extensions/agents/command-parser.ts",

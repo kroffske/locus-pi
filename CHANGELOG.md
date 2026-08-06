@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Fixed
 
+- **One agent, one name: the workflow card, `/ps`, and drill now agree.** A
+  workflow agent is backed by two live rows — the journal anchor and the SDK
+  executor child it spawns — and each minted its own petname, so the workflow
+  tool card could say `[agent Wren] working` while the drill-close notice said
+  "Perrin continues running" about the same agent, and the card listed that one
+  agent twice under two names. The executor row now adopts its anchor's petname
+  (shared names are refcounted and released only when the last holder row
+  retires), and the workflow tool card collapses anchors in favour of their
+  executor children exactly as the fleet panel does, so each logical agent
+  renders exactly once under one stable name on every surface.
+
 - **Live agent surfaces no longer flicker on slow terminals (notably Windows/WSL).**
   The agent live store emits once per child-agent SDK event, and every live
   surface turned each emission straight into a terminal repaint. Across the WSL
@@ -24,6 +35,27 @@ This file records user-visible changes to the public package.
   update once a second.
 
 ### Changed
+
+- **The workflow tool card names the task it is working on.** A `task:` line
+  under the `LOCUS · workflow <name>` header shows the first line of the
+  workflow's semantic input, so the operator sees what the run is about without
+  opening the drill. The title travels through tool details; cards for older
+  persisted results derive it from the call arguments.
+
+- **Directly spawned agents own their own transcript block, answer included.**
+  `spawn_agent`/`task` now render a per-agent LOCUS card — petname, live
+  status, task title, and elapsed, resolved from the live row while the run is
+  in flight — instead of Pi's default tool shell, so a directly launched agent
+  is never folded into another tool's block. The child's returned text lands in
+  the main window marked with a left bar (`▌`) so it reads as the agent's own
+  words: the first line when collapsed, the complete answer when expanded.
+  Failures surface their reason as a dim technical line, never as an answer.
+  The workflow card marks each completed agent's answer the same way (one line
+  collapsed, a bounded block expanded).
+
+- **`spawn_agent`/`task` titles may now be 128 characters (was 48).** The
+  48-character schema cap rejected legitimate task titles outright; the stored
+  title now clamps at 128 and narrow surfaces keep truncating at render time.
 
 - **Planning now stops for review instead of rolling into implementation.**
   A finished `plan` run reported a "default next action", and the reading agent

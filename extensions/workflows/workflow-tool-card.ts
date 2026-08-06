@@ -12,6 +12,7 @@ import {
   orderAgentLiveRows,
 } from "../_shared/agent-runtime/agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { compactWorkflowParentRows } from "./progress-widget.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
 /**
@@ -20,9 +21,17 @@ const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
  * without a visible difference. This also matches the fleet panel's tick, which
  * stops the two live surfaces beating against each other.
  */
-const CARD_TICK_MS = 1000;
+export const CARD_TICK_MS = 1000;
 const COMPACT_AGENT_LIMIT = 4;
-const TECHNICAL_TONE = "syntaxKeyword";
+export const TECHNICAL_TONE = "syntaxKeyword";
+/** Left bar marking agent-answer lines so they read as the agent's own words. */
+export const AGENT_ANSWER_BAR = "▌";
+/** Indent that seats an answer under its agent row (marker + space width). */
+const AGENT_ANSWER_INDENT = "  ";
+/** Expanded per-agent answer budget; the drill overlay owns the full transcript. */
+const AGENT_ANSWER_EXPANDED_MAX_LINES = 12;
+/** Answers travel inside persisted tool details; keep the snapshot bounded. */
+const AGENT_ANSWER_SNAPSHOT_MAX_CHARS = 2000;
 
 export type WorkflowToolCardStatus = "running" | "completed" | "awaiting_operator" | "cancelled" | "failed" | "unknown";
 
@@ -32,30 +41,48 @@ export interface WorkflowToolCardAgent {
   status: AgentLiveStatus;
   startedAt?: number;
   elapsedMs?: number;
+  /** The agent's returned text (completed rows only), bounded for persistence. */
+  answer?: string;
 }
 
 export interface WorkflowToolCardModel {
   workflowName: string;
   status: WorkflowToolCardStatus;
+  /** The operator-facing task the workflow is working on (its semantic input). */
+  taskTitle?: string;
   agents: readonly WorkflowToolCardAgent[];
   technicalLines?: readonly string[];
   modelText?: string;
 }
 
+/**
+ * One entry per LOGICAL agent: the journal anchor row and the SDK executor row it
+ * spawned are the same actor, so anchors with a live child collapse away exactly
+ * as they do in the fleet panel (`compactWorkflowParentRows`). Group summaries
+ * render through the workflow rail, not as agent rows.
+ */
 export function snapshotWorkflowToolCardAgents(runId: string): WorkflowToolCardAgent[] {
-  return orderAgentLiveRows(
-    [...agentLiveStore.rows.values()].filter((row) => row.workflowRunId === runId && row.groupKind === undefined),
-  ).map(snapshotAgent);
+  const scoped = [...agentLiveStore.rows.values()].filter((row) => row.workflowRunId === runId);
+  return orderAgentLiveRows(compactWorkflowParentRows(scoped).filter((row) => row.groupKind === undefined)).map(
+    snapshotAgent,
+  );
 }
 
 function snapshotAgent(row: AgentLiveRow): WorkflowToolCardAgent {
+  const answer = row.status === "done" ? (row.finalAnswer?.trim() ?? "") : "";
   return {
     name: singleLine(agentLiveDisplayName(row)) || "agent",
     work: singleLine(agentLiveTitle(row)),
     status: row.status,
     ...(row.startedAt === undefined ? {} : { startedAt: row.startedAt }),
     ...(row.elapsedMs === undefined ? {} : { elapsedMs: row.elapsedMs }),
+    ...(answer === "" ? {} : { answer: clampAnswerSnapshot(answer) }),
   };
+}
+
+function clampAnswerSnapshot(answer: string): string {
+  if (answer.length <= AGENT_ANSWER_SNAPSHOT_MAX_CHARS) return answer;
+  return `${answer.slice(0, AGENT_ANSWER_SNAPSHOT_MAX_CHARS - 1)}…`;
 }
 
 export function renderWorkflowToolCard(
@@ -110,6 +137,7 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
     const technicalWidth = Math.max(1, safeWidth - 2);
     const lines = [
       this.#rail(this.#renderHeader(technicalWidth), safeWidth),
+      ...this.#renderTaskTitle(technicalWidth, safeWidth),
       ...this.#renderAgentRows(technicalWidth, safeWidth),
       ...(this.#model.technicalLines ?? []).flatMap((line) =>
         wrapTextWithAnsi(this.#fg("dim", singleLine(line)), technicalWidth).map((part) => this.#rail(part, safeWidth)),
@@ -143,6 +171,15 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
     return fitIdentityBeforeState(name, status.label, width, this.#theme, status.tone);
   }
 
+  /** `task: <title>` directly under the LOCUS header — what this run is working on. */
+  #renderTaskTitle(width: number, totalWidth: number): string[] {
+    const title = singleLine(this.#model.taskTitle ?? "");
+    if (title === "") return [];
+    const label = this.#fg("dim", "task: ");
+    const room = Math.max(1, width - visibleWidth("task: "));
+    return [this.#rail(`${label}${truncateToWidth(title, room)}`, totalWidth)];
+  }
+
   #renderAgentRows(width: number, totalWidth: number): string[] {
     if (this.#model.agents.length === 0) {
       if (this.#model.status === "running") {
@@ -159,11 +196,29 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
       ...(hidden > 0
         ? [this.#rail(this.#fg("dim", truncateToWidth(`… +${hidden} other agents`, width)), totalWidth)]
         : []),
-      ...selected.map((agent) => this.#rail(this.#renderAgent(agent, width), totalWidth)),
+      ...selected.flatMap((agent) => [
+        this.#rail(this.#renderAgent(agent, width), totalWidth),
+        ...this.#renderAgentAnswer(agent, width, totalWidth),
+      ]),
       ...(this.#model.status === "awaiting_operator"
         ? [this.#rail(this.#fg("warning", truncateToWidth("◐ waiting for operator decision", width)), totalWidth)]
         : []),
     ];
+  }
+
+  /**
+   * The agent's returned text, seated under its row and marked with a left bar so
+   * it reads as the agent's own answer: one line collapsed, a bounded block when
+   * the card is expanded.
+   */
+  #renderAgentAnswer(agent: WorkflowToolCardAgent, width: number, totalWidth: number): string[] {
+    const answerLines = agentAnswerLines(agent.answer, this.#options.expanded);
+    if (answerLines.length === 0) return [];
+    const bar = this.#fg(TECHNICAL_TONE, AGENT_ANSWER_BAR);
+    const room = Math.max(1, width - visibleWidth(`${AGENT_ANSWER_INDENT}${AGENT_ANSWER_BAR} `));
+    return answerLines.map((line) =>
+      this.#rail(`${AGENT_ANSWER_INDENT}${bar} ${this.#fg("toolOutput", truncateToWidth(line, room))}`, totalWidth),
+    );
   }
 
   #renderAgent(agent: WorkflowToolCardAgent, width: number): string {
@@ -252,7 +307,7 @@ function workflowStatusPresentation(status: WorkflowToolCardStatus): {
   }
 }
 
-function agentStatusPresentation(
+export function agentStatusPresentation(
   status: AgentLiveStatus,
   spinner: number,
 ): {
@@ -274,6 +329,25 @@ function agentStatusPresentation(
   }
 }
 
+/**
+ * Project an answer into displayable lines: collapsed → the first non-empty line;
+ * expanded → up to {@link AGENT_ANSWER_EXPANDED_MAX_LINES} lines plus an honest
+ * `… (+N lines)` tail. Empty answers yield nothing.
+ */
+export function agentAnswerLines(answer: string | undefined, expanded: boolean): string[] {
+  const text = answer?.replace(/\n+$/u, "") ?? "";
+  if (text.trim() === "") return [];
+  const lines = text.split(/\r?\n/u);
+  if (!expanded) {
+    const first = lines.find((line) => line.trim() !== "") ?? "";
+    const omitted = lines.length - 1;
+    return [omitted > 0 ? `${first} … (+${omitted} lines)` : first];
+  }
+  if (lines.length <= AGENT_ANSWER_EXPANDED_MAX_LINES) return lines;
+  const visible = lines.slice(0, AGENT_ANSWER_EXPANDED_MAX_LINES);
+  return [...visible, `… (+${lines.length - visible.length} lines)`];
+}
+
 function selectAgentRows(rows: readonly WorkflowToolCardAgent[], expanded: boolean): WorkflowToolCardAgent[] {
   if (expanded || rows.length <= COMPACT_AGENT_LIMIT) return [...rows];
   const selected = new Set<WorkflowToolCardAgent>();
@@ -287,7 +361,7 @@ function selectAgentRows(rows: readonly WorkflowToolCardAgent[], expanded: boole
   return rows.filter((row) => selected.has(row)).slice(-COMPACT_AGENT_LIMIT);
 }
 
-function formatAgentElapsed(agent: WorkflowToolCardAgent): string {
+export function formatAgentElapsed(agent: Pick<WorkflowToolCardAgent, "startedAt" | "elapsedMs">): string {
   if (agent.elapsedMs !== undefined) return formatDuration(agent.elapsedMs);
   if (agent.startedAt === undefined) return "";
   return formatDuration(Math.max(0, Date.now() - agent.startedAt));
@@ -314,10 +388,10 @@ function fitAgentIdentityBeforeState(
   return truncateToWidth(`${marker} agent ${identity}${suffix}`, width);
 }
 
-function spinnerIndex(now = Date.now()): number {
+export function spinnerIndex(now = Date.now()): number {
   return Math.floor(now / CARD_TICK_MS) % SPINNER_FRAMES.length;
 }
 
-function singleLine(value: string): string {
+export function singleLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }

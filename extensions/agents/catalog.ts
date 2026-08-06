@@ -29,7 +29,7 @@ export const TaskParams = Type.Object({
   title: Type.Optional(
     Type.String({
       description: "Short work title shown in the live agent row; falls back to the first words of task",
-      maxLength: 48,
+      maxLength: 128,
     }),
   ),
   parentContext: Type.Optional(

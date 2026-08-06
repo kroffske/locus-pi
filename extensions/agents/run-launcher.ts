@@ -206,7 +206,9 @@ async function resolveAgentExecutorModel(
 
 /**
  * Resolve the live-row title (REQ-003): explicit `title` wins, else the UI label,
- * else the first words of the prompt; the result is clamped to ≤48 columns.
+ * else the first words of the prompt; the result is clamped to ≤128 characters.
+ * Narrow surfaces (fleet rows) truncate further at render time, so the stored
+ * title can stay long enough for the transcript card and drill header.
  */
 export function resolveAgentTitle(explicit: string | undefined, fallbackLabel: string, prompt: string): string {
   const fromExplicit = explicit?.trim();
@@ -216,7 +218,7 @@ export function resolveAgentTitle(explicit: string | undefined, fallbackLabel: s
   return clampTitle(headOfPrompt(prompt));
 }
 
-const AGENT_TITLE_MAX_COLS = 48;
+const AGENT_TITLE_MAX_COLS = 128;
 
 function clampTitle(value: string): string {
   if (value.length <= AGENT_TITLE_MAX_COLS) return value;

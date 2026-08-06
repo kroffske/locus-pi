@@ -119,6 +119,7 @@ extensions/_shared/runtime/artifacts.ts
 extensions/_shared/runtime/event-bus.ts
 extensions/_shared/runtime/runtime-capabilities.ts
 extensions/_shared/runtime/session-core.ts
+extensions/agents/agent-tool-card.ts
 extensions/agents/catalog-state.ts
 extensions/agents/catalog.ts
 extensions/agents/command-parser.ts
@@ -275,8 +276,8 @@ extensions/workflows/runtime/workflow-runtime.ts
 extensions/workflows/runtime/workflow-script-identity.ts
 extensions/workflows/runtime/workflow-worktree.ts
 extensions/workflows/workflow-catalog.ts
-extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-command-launcher.ts
+extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-tool-card.ts
 extensions/workflows/workflow-tool.ts
 extensions/workflows/workflow-transcript.ts
@@ -311,6 +312,7 @@ tests/extensions/agents/agent-live-store-entrypoints.test.ts
 tests/extensions/agents/agent-observer.test.ts
 tests/extensions/agents/agent-session-viewer.test.ts
 tests/extensions/agents/agent-task-tool.test.ts
+tests/extensions/agents/agent-tool-card.test.ts
 tests/extensions/agents/agents-discovery.test.ts
 tests/extensions/agents/agents-parent-context-tool.test.ts
 tests/extensions/agents/bundled-agent-profiles.test.ts
@@ -339,6 +341,7 @@ tests/extensions/workflows/requirements-grill-workflow.test.ts
 tests/extensions/workflows/review-prompt-config.test.ts
 tests/extensions/workflows/review-remediation-workflows.test.ts
 tests/extensions/workflows/review-workflow.test.ts
+tests/extensions/workflows/workflow-authoring-contract.test.ts
 tests/extensions/workflows/workflow-background-runs.test.ts
 tests/extensions/workflows/workflow-catalog-viewer.test.ts
 tests/extensions/workflows/workflow-catalog.test.ts
@@ -354,12 +357,11 @@ tests/extensions/workflows/workflow-live-row-retention.test.ts
 tests/extensions/workflows/workflow-meta-phases.test.ts
 tests/extensions/workflows/workflow-operator-handoff-controller.test.ts
 tests/extensions/workflows/workflow-operator-handoff-service.test.ts
-tests/extensions/workflows/workflow-authoring-contract.test.ts
 tests/extensions/workflows/workflow-replay-live-row.test.ts
 tests/extensions/workflows/workflow-result-text.test.ts
 tests/extensions/workflows/workflow-run-viewer.test.ts
-tests/extensions/workflows/workflow-transcript.test.ts
 tests/extensions/workflows/workflow-tool-card.test.ts
+tests/extensions/workflows/workflow-transcript.test.ts
 tests/extensions/workflows/workflows-launch-gate.test.ts
 tests/extensions/workflows/workflows-progress.test.ts
 tests/fixtures/extensions/command-ui-alpha.ts
@@ -386,6 +388,7 @@ tests/shared/agents/agent-fleet-rows.test.ts
 tests/shared/agents/agent-live-identity-ordering.test.ts
 tests/shared/agents/agent-live-transcript.test.ts
 tests/shared/agents/agent-parent-context.test.ts
+tests/shared/agents/agent-petname-inheritance.test.ts
 tests/shared/agents/agent-read-only-policy.test.ts
 tests/shared/agents/agent-runner.test.ts
 tests/shared/agents/agent-sdk-host-evidence.test.ts
