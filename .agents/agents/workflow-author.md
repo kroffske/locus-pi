@@ -51,6 +51,13 @@ complete `## S<n>` block as one frozen task prompt. Design an optional
 project-local sequential workflow only; the ordinary main-agent todo path
 remains available and is usually more recoverable.
 
+Check first whether the request needs a Design at all. The Package `plan` run
+already wrote `execute.workflow.mjs` beside those files from a fixed template:
+one literal implementation node per block, then a summary node. When that is the
+whole graph the owner wants, say so and point at the existing file instead of
+designing a duplicate. Design for what the template omits — a reviewer between
+steps, a bounded revision loop, concurrency, a different publication.
+
 The Design records the exact Plan/catalog paths, task count, literal-versus-caller
 transport, task order/dependencies, idempotence/history rule, attempt formula,
 and whether a visibly separate reviewer follows each implementer. The reviewer

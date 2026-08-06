@@ -476,9 +476,22 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/`steps\.md`\s+is the only executable task catalog/u);
     expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
     expect(source).toContain("the exact step catalog is frozen");
-    expect(source).toMatch(/hand the approved `plan\.md` and `steps\.md` to\s+`workflow-author` for Design only/u);
+    expect(source).toMatch(
+      /hand the approved `plan\.md`\s+and\s+`steps\.md`\s+to\s+`workflow-author`\s+for\s+Design only/u,
+    );
     expect(source).toContain("`Build approved design: <exact path>`");
-    expect(source).toMatch(/optional reviewer after a generated\s+step belongs to that Design/u);
+    expect(source).toMatch(/optional\s+reviewer\s+after\s+a\s+generated\s+step\s+belongs\s+to\s+that\s+Design/u);
+
+    // Planning must not roll into execution. Without these, one confident
+    // paraphrase turns "here is the plan" back into an unattended run.
+    expect(source).toContain("Planning and execution are two separate user turns");
+    expect(source).toContain("## Stop and hand the plan to the user");
+    expect(source).toMatch(/Do not create todos\. Do not call\s+`plan-implement`/u);
+    expect(source).toMatch(/not an instruction to you/u);
+    expect(source).toMatch(/Approval is a new user turn/u);
+    expect(source).toContain("Only after the user approved the todo route");
+    expect(source).toContain("Resuming is still execution");
+    expect(source).toContain("execute.workflow.mjs");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

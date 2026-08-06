@@ -91,7 +91,7 @@ with real session ids. See "Run a real workflow (live)" below.
 | `requirements-grill` | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
 | `review`             | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                            |
 | `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
-| `plan`               | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit. The script owns only those two visible calls and their text handoff.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `plan`               | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator.                                                                                                                                                                                                  |
 | `plan-implement`     | **One exact step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                       |
 
 Catalog metadata exposes an authoring profile without changing execution:
@@ -231,16 +231,38 @@ because it is a public surface: `package.json#files` still decides what an
 install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
 
-`plan` and `plan-implement` are a pair, but they never invoke one another. The
-installed `locus-task-workflow` skill tells the main Pi agent to select one
-shared `tmp/<select-name>` workspace, run `plan`, read `steps.md`, append one
-single-line step reference to `todo_write` per complete block, and start one
-top-level `plan-implement` run with the exact matching block read from disk.
-Using `append` preserves unrelated session todos; explicitly starting each next
-workflow reference keeps them outside the workflow sequence. The main agent marks a todo complete
-only after `history/S<n>.md` says `Status: completed` and required checks passed.
-A failed or blocked step pauses automatic continuation before the next step,
-and the host's 20-continuation safety pause resumes through `/todo run`.
+`plan` and `plan-implement` are a pair, but they never invoke one another, and
+planning never continues into execution by itself. The installed
+`locus-task-workflow` skill tells the main Pi agent to select one shared
+`tmp/<select-name>` workspace, run `plan`, read `plan.md`, `steps.md`, and the
+generated `execute.workflow.mjs` — and then stop, present them, and end the turn.
+The `plan` result text lists the operator's next actions; it is a description of
+those options, not an instruction to the reading agent, and neither it nor a
+plausible-looking plan is approval. Execution begins only when the operator asks
+for it in a later turn.
+
+Once they do, the skill appends one single-line step reference to `todo_write`
+per complete block and starts one top-level `plan-implement` run with the exact
+matching block read from disk. Using `append` preserves unrelated session todos;
+explicitly starting each next workflow reference keeps them outside the workflow
+sequence. The main agent marks a todo complete only after `history/S<n>.md` says
+`Status: completed` and required checks passed. A failed or blocked step pauses
+automatic continuation before the next step, and the host's 20-continuation
+safety pause resumes through `/todo run`.
+
+The generated `execute.workflow.mjs` is the operator's second route. `plan`'s
+third agent renders it from the fixed template in
+`examples/plan/resources/execute-template.prompt.md`, loaded through
+`promptFile()`: one `phase()`/`log()`/`agent()` group per `## S<n>` block in
+catalog order, then a summary agent that writes `result.md`, then
+`publishPrimaryFile("result.md")`. Every step prompt is literal author-known
+text, so the generated script parses no catalog at runtime, and each step prompt
+reads its own `history/S<n>.md` first so a rerun skips credibly completed work.
+It is written to the workflow workspace and never to `.pi/workflows/`,
+`.claude/workflows/`, or `.agents/workflows/`, so it is not a registered workflow
+and resolves only as `/workflows run <workspace>/execute.workflow.mjs`. Running
+it executes trusted JavaScript with full host authority: the operator reads it
+first, and plan approval is not run approval.
 
 This split is what makes the dynamic list recoverable without a JavaScript plan
 parser. Planning resume replays the completed reconnaissance call and reruns the
@@ -249,7 +271,8 @@ after a session restart, a main agent reconstructs todos by reading `steps.md`
 and `history/*.md` semantically. Old history remains evidence when a plan is
 replaced.
 
-Planning prompts forbid project edits. The implementation prompt permits only
+Planning and scripting prompts forbid project edits, forbid running any step,
+and forbid executing the script they write. The implementation prompt permits only
 the current step and forbids stage/commit/push/PR/merge/deploy/remote mutation,
 stash, and destructive cleanup. Every call uses Pi's default workflow agent and
 its configured model route; neither workflow source names a provider, model,
@@ -977,6 +1000,12 @@ whether review is advisory or blocking and whether any finite retry exists.
 Plan approval does not imply workflow Build approval, no runtime parser reads
 `steps.md`, and this path adds no Package workflow. See the
 [Plan-to-sequential pattern card](../../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+
+Design and Build are for a graph the fixed template cannot express — a reviewer
+between steps, a bounded revision loop, concurrency, a different publication. The
+plain sequential shape needs neither turn: `plan` already renders it into its own
+workflow workspace as an unregistered `execute.workflow.mjs` that resolves only
+by explicit path.
 
 New standard source omits `maxToolCalls` and `timeoutMs`: package defaults are
 the emergency policy. A Design emits a narrower or raised per-attempt override
