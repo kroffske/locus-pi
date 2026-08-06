@@ -275,6 +275,7 @@
     "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
     "skills/locus-pi-workflows/references/fixed-fan-out.md",
     "skills/locus-pi-workflows/references/human-gate.md",
+    "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
     "skills/locus-pi-workflows/references/sequential-text.md",
     "skills/locus-task-workflow/SKILL.md",
     "README.md"

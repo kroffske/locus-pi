@@ -26,6 +26,16 @@ Use `/agent run workflow-author` or delegate to the bundled `workflow-author`
 catalog agent. A raw request is always Design. The agent’s exact design template
 and standard source profile live in its prompt and the skill above.
 
+An owner-approved `plan.md` plus its canonical `steps.md` may be supplied as
+Design input for an optional sequential project-local workflow. Each complete
+`## S<n>` block remains one exact task prompt. The preferred operator-facing
+Build renders those blocks as literal author-known prompts in generated source; a programmatic
+embedder may instead transport the same frozen list through caller `items`.
+Neither path parses Plan prose at runtime, adds a Package example, or skips the
+ordinary Design -> explicit owner approval -> Build boundary. Plan approval does
+not imply workflow Build approval. The selected card
+is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+
 ## What the design must expose
 
 The Markdown draft names:
@@ -67,15 +77,19 @@ replay, budgets, and fail-closed exhaustion. Workflow code does none of those.
 When discovery determines the work units at runtime, use bounded text handoffs:
 
 ```js
+const MAX_DAGS_IN_SCOPE = 12;
 const units = await agent("Return one complete handoff per discovered unit.", {
-  handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
+  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
 });
 ```
 
 Runtime desugars `handoffs` to its bounded unique non-blank string-array path and
 owns the same format instructions, repair, replay, journal, budget, and
 fail-closed behavior. Workflow code passes each returned string unchanged into
-visible `parallel()` or `pipeline()` workers.
+visible `parallel()` or `pipeline()` workers. The approved Design derives and
+names a small `maxItems` in the runtime range `1..100`; the bound protects one
+structured response and is not a default business limit. Runtime allows one
+repair, then fails closed.
 
 The remaining standard orchestration primitives are:
 
@@ -102,6 +116,11 @@ project-local workflow workspace. The runtime does not create a run-local
 Trusted raw `schema` and `validate` remain an advanced compatibility surface for
 existing workflows. Standard generated source uses only exact text, `choice`,
 and `handoffs` answers.
+
+Standard generated source omits `maxToolCalls` and `timeoutMs`. The package
+already supplies emergency per-attempt defaults. Emit one of those fields only
+when the operator explicitly requests a narrower or raised per-attempt fuse and
+the approved Design records why. Do not mechanically sweep legacy workflows.
 
 ## Target source shape
 
@@ -161,7 +180,8 @@ not split, regex-match, or parse input into branch units. Lists come from one of
 three explicit sources: an author-known array, exact caller transport through
 `dsl.items()`, or runtime-owned `agent({ handoffs })`. All three feed the same
 visible `pipeline(items, ...)` body. Caller items preserve order and exact bytes,
-including empty strings and duplicates, with no item-list limits; a workflow
+including empty strings and duplicates, with no Locus items count or character
+policy; a workflow
 checks only domain rules it truly needs. Model handoffs retain their separate
 declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
 
@@ -435,11 +455,12 @@ through host-verified continuation artifacts.
 failed branch. Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
-`totalAgents` fuse defaults to 10,000: enough for fine-grained finite
-decomposition, while the next physical attempt still fails a runaway run.
-The default per-call and run deadlines are 24-hour emergency fuses, not ordinary
-planning deadlines, and each child request keeps a 20-turn host maximum. The
-root and all saved children consume one shared physical-call counter.
+budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+characters per child attempt. One run admits at most 10,000 physical attempts,
+starts no new child after its 24-hour gate, and executes at most four attempts
+concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
+all consume the shared `totalAgents` counter across the root and saved children.
+The SDK timeout is a later transport backstop, not authored workflow policy.
 
 `meta.profile` makes authoring intent explicit. New generated source uses
 `"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end
