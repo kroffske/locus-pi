@@ -553,6 +553,18 @@ separate reviewer after each task. Plan approval does not replace workflow
 Design -> explicit owner approval -> Build, and no file was added under the
 Package workflow registry.
 
+Package `plan` gained a third `scripting` agent that renders
+`execute.workflow.mjs` into the run's workflow workspace from the fixed template
+`examples/plan/resources/execute-template.prompt.md`, loaded through
+`promptFile()`. The generated file is standard-profile source with one literal
+node per canonical `## S<n>` block plus a summary node; the workflow itself
+neither builds nor runs it. It is written only under the workflow workspace, never
+under `.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`, so it is
+unregistered and reachable only as `/workflows run <workspace>/execute.workflow.mjs`.
+Running it remains an operator act against trusted host-authority JavaScript, and
+`plan`'s terminal text states that execution waits for operator review rather
+than naming a default the reading agent should start.
+
 ## Review basis
 
 - `extensions/workflows/manifest.json` records the active command/tool surfaces,

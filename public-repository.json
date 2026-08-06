@@ -46,6 +46,7 @@
     "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
     "extensions/workflows/examples/plan/README.md",
     "extensions/workflows/examples/plan/plan.workflow.mjs",
+    "extensions/workflows/examples/plan/resources/execute-template.prompt.md",
     "extensions/workflows/examples/requirements-grill-pipeline.svg",
     "extensions/workflows/examples/requirements-grill.workflow.mjs",
     "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",

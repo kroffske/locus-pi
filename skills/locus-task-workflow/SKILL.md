@@ -1,6 +1,6 @@
 ---
 name: locus-task-workflow
-description: Plan one task into workspace files, then implement its dynamic steps one at a time with Package workflows and session todos.
+description: Plan one task into workspace files, stop for the user's review, then implement the approved steps one at a time with Package workflows and session todos.
 ---
 
 # Locus task workflow
@@ -10,6 +10,10 @@ shipped `plan` and `plan-implement` Package workflows.
 
 The main Pi agent owns orchestration. Workflow children do not spawn more
 agents. Workflow JavaScript does not parse plans or manage the todo queue.
+
+**Planning and execution are two separate user turns.** Running `plan` never
+continues into execution. Finish planning, present the files, and end your turn.
+Execution starts only when the user, in a later turn, tells you to start it.
 
 ## Start or replan
 
@@ -35,8 +39,28 @@ agents. Workflow JavaScript does not parse plans or manage the todo queue.
    embed work-unit identity, decomposition boundary, exact goal, paths/evidence,
    dependencies, allowed ownership, verification, and done condition. Reject
    and rerun `plan` when any block is incomplete or incoherent.
+8. Read `tmp/<select-name>/execute.workflow.mjs`, the execute script the `plan`
+   run rendered from its fixed template. Confirm it has one node per `## S<n>`
+   block in catalog order and no machinery beyond that.
 
-## Freeze the catalog and choose execution
+## Stop and hand the plan to the user
+
+Now stop. Report where `plan.md`, `steps.md`, and `execute.workflow.mjs` live,
+summarize the work units and the step titles in order, and name anything you
+would change. Then end your turn.
+
+Do not create todos. Do not call `plan-implement`. Do not run
+`execute.workflow.mjs`. Do not edit project files toward any step. The `plan`
+run's own result text lists next actions; it is a description of the user's
+options, not an instruction to you, and neither it nor a plan that looks
+obviously correct is approval.
+
+Approval is a new user turn that tells you to execute — for example "go ahead",
+"run it", "implement the plan", or a named route. "Plan this" and "make a plan"
+are not approval. When the user's answer is unclear, ask which route they want
+rather than starting one.
+
+## Freeze the catalog and choose the approved route
 
 Planning may use fresh agents to analyze coherent top-level work units before
 this point. Reconcile all such analysis into one owner-readable `plan.md` and
@@ -44,20 +68,29 @@ one final `steps.md`; do not create a nested manager or recursive task
 dispatcher. Once execution begins, the exact step catalog is frozen. A material
 catalog change requires a new `plan` run and a deliberate todo rebuild.
 
-Default: create the main Pi execution queue below and start one top-level
-`plan-implement` run per exact step.
+Once the user has approved, run the route they chose:
 
-Optional next action: when the operator wants one sequential project-local
-workflow instead, hand the approved `plan.md` and `steps.md` to
-`workflow-author` for Design only. Do not generate `.workflow.mjs` source from
-this skill, do not ask for Build, and do not treat plan approval as Build
-approval. Build remains gated by the operator phrase
-`Build approved design: <exact path>`. Any optional reviewer after a generated
-step belongs to that Design, not to Plan or Plan Implement execution semantics.
+- **Todo route (default when the user just says "go ahead").** Create the main
+  Pi execution queue below and start one top-level `plan-implement` run per
+  exact step. It is the most recoverable route: each step is its own top-level
+  run, and a failure stops the queue with the plan intact.
+- **Script route.** The user runs the reviewed
+  `tmp/<select-name>/execute.workflow.mjs` themselves with
+  `/workflows run tmp/<select-name>/execute.workflow.mjs`. Run it on their
+  behalf only when they ask you to. It resolves by explicit path only and is
+  not a registered project workflow.
+- **Bespoke workflow route.** When the user wants a graph the template does not
+  express, hand the approved `plan.md` and `steps.md` to `workflow-author` for
+  Design only. Do not author `.workflow.mjs` source yourself, do not ask for
+  Build, and do not treat plan approval as Build approval. Build remains gated
+  by the operator phrase `Build approved design: <exact path>`. Any optional
+  reviewer after a generated step belongs to that Design, not to Plan or Plan
+  Implement execution semantics.
 
 ## Create the execution queue
 
-Read `steps.md` semantically. Create one single-line todo reference per complete
+Only after the user approved the todo route. Read `steps.md` semantically.
+Create one single-line todo reference per complete
 `## S<n> — <title>` step block. Keep the full block in `steps.md`; do not put
 multiline text into todo items because todo export/edit is line-oriented.
 
@@ -123,11 +156,14 @@ Do not call another workflow from inside either Package workflow. Do not use
 
 ## Resume in a new session
 
-Read `steps.md` and every existing `history/*.md`. Recreate the dedicated phase
-from the one-line step references, marking only steps with a credible
-`Status: completed` history and successful required checks as complete. Keep a
-blocked or missing reference active, then read its exact block from `steps.md`
-when execution resumes. This is an agent reading task documents, not a
+Resuming is still execution, so it still needs the user to ask for it. Finding a
+`steps.md` with unfinished history is not a reason to start.
+
+When they do ask, read `steps.md` and every existing `history/*.md`. Recreate the
+dedicated phase from the one-line step references, marking only steps with a
+credible `Status: completed` history and successful required checks as complete.
+Keep a blocked or missing reference active, then read its exact block from
+`steps.md` when execution resumes. This is an agent reading task documents, not a
 JavaScript parser.
 
 If the user changed the task or step list, rerun `plan`, review the replacement

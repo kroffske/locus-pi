@@ -66,6 +66,13 @@ author-known prompts in generated source, or uses caller `items` only when a
 programmatic embedder owns the frozen list. Plan approval never implies workflow
 Build approval.
 
+The Package `plan` workflow already renders `execute.workflow.mjs` into its own
+workflow workspace from a fixed template — one literal implementation node per
+`## S<n>` block, then a summary node. That file is an unregistered draft that
+resolves only by explicit path, and the owner reviews it before running it. Use
+Design and Build for a graph the fixed template cannot express, such as a
+reviewer between steps, a bounded revision loop, or concurrency.
+
 ## Design contract
 
 The design is short Markdown a reader can approve without opening JavaScript:

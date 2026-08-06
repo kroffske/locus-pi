@@ -12,7 +12,7 @@ what ships, what each example is for, which shape it demonstrates, and how far
 it travels. The standard source profile lives in [`AUTHORING.md`](../AUTHORING.md)
 and the skill-loaded compact pattern cards.
 
-Measured 2026-08-04 against the files in this directory. `Profile` is literal
+Measured 2026-08-06 against the files in this directory. `Profile` is literal
 catalog metadata: `standard` is the current generated-source contract,
 `legacy` preserves reviewed compatibility shapes, and `integration` names a
 portfolio-level end-to-end flow.
@@ -37,7 +37,7 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `standard` |    88 |              0 |            0 |       0 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
 | [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
@@ -84,17 +84,25 @@ so a copy placed there works on one machine and exists in no clone.
 | `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.         |
 | `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file. |
 | `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
-| `plan`                | Task → repository map, plan, and dynamic steps                       | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`.                                                       |
+| `plan`                | Task → repository map, plan, dynamic steps, and the execute script   | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`; one scripting agent renders `execute.workflow.mjs`.   |
 | `plan-implement`      | One exact step → changes, checks, and history                        | One implementation agent receives one complete step, changes only that scope, verifies it, and writes `history/S<n>.md`.                                                             |
 | `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
-`plan` and `plan-implement` are a pair, but no workflow calls the other. The
-installed `locus-task-workflow` skill gives the main Pi agent one explicit
-`tmp/<select-name>` workspace, appends one single-line todo reference per
-dynamic `steps.md` block without replacing unrelated todos, and starts one
-top-level `plan-implement` run with the exact matching block for each active todo. This
-keeps dynamic routing and recovery in an agent that can read the documents
-semantically instead of in JavaScript that would need to parse them.
+`plan` and `plan-implement` are a pair, but no workflow calls the other, and a
+finished `plan` run starts nothing. The installed `locus-task-workflow` skill
+presents the planning files and stops; only after the operator approves in a
+later turn does it give the main Pi agent one explicit `tmp/<select-name>`
+workspace, append one single-line todo reference per dynamic `steps.md` block
+without replacing unrelated todos, and start one top-level `plan-implement` run
+with the exact matching block for each active todo. This keeps dynamic routing
+and recovery in an agent that can read the documents semantically instead of in
+JavaScript that would need to parse them.
+
+`plan` also renders `execute.workflow.mjs` into that same workspace from the
+fixed template in `plan/resources/execute-template.prompt.md`: one literal
+implementation node per `## S<n>` block, then a summary node. It is an
+unregistered draft that resolves only by explicit path, and the operator reviews
+it before running it.
 
 ## Which authoring shape each one demonstrates
 
@@ -109,7 +117,7 @@ lines and up — or a prompt shared by more than one workflow.
 | `requirements-grill`  | Inline.                                                                                                                                                                                                                             |
 | `review`              | Inline `COMMON` contract plus five stage tasks; `resources/interrogator.prompt.md` (136 lines) and `resources/verifier.prompt.md` (139 lines) stay external. This is the example to read when you need to see _both_ rules at once. |
 | `review-fix`          | Inline `COMMON` plus every stage task. No `resources/` directory.                                                                                                                                                                   |
-| `plan`                | Two inline stage prompts. No `resources/` directory.                                                                                                                                                                                |
+| `plan`                | Two inline stage prompts; `resources/execute-template.prompt.md` (167 lines) holds the scripting charter and the fixed execute-script template it fills.                                                                            |
 | `plan-implement`      | One inline implementation prompt. No `resources/` directory.                                                                                                                                                                        |
 | `excalidraw-pipeline` | Three external prompt files, unmigrated.                                                                                                                                                                                            |
 

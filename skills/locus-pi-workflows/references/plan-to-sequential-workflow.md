@@ -6,6 +6,13 @@ frozen catalog as one visible sequential graph. Avoid this card when the Plan is
 still changing, approval is missing, or the ordinary main-agent todo path is
 more recoverable.
 
+Avoid it too when the plain `implement each step in order, then summarize` graph
+is all that is wanted: the Package `plan` workflow already renders exactly that
+into `execute.workflow.mjs` in its workflow workspace from a fixed template, with
+no Design or Build turn. Use this card for what the template deliberately omits —
+a reviewer between steps, a bounded revision loop, concurrency, or a different
+publication.
+
 Design input: the approved Plan plus every complete canonical `## S<n>` block
 from `steps.md`. Design proposes the graph only. Ordinary Design -> explicit
 owner approval -> Build remains mandatory; approving the Plan does not approve

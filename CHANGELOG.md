@@ -6,6 +6,34 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Planning now stops for review instead of rolling into implementation.**
+  A finished `plan` run reported a "default next action", and the reading agent
+  treated that description of the operator's options as an instruction, so
+  `plan-implement` could start before anyone had read `plan.md`. The `plan`
+  result now states that the run stops, that reading it is not approval, and
+  that implementation, implementation todos, and step runs all wait. The
+  `locus-task-workflow` skill makes planning and execution two separate user
+  turns: it presents the files and ends its turn, creates no todos and calls no
+  workflow until the user asks in a later turn, and treats resuming an
+  unfinished catalog in a new session as execution that also needs asking for.
+
+- **`plan` now renders the execute script the operator runs next.** A third
+  `scripting` agent fills a fixed template — shipped as
+  `extensions/workflows/examples/plan/resources/execute-template.prompt.md` and
+  loaded through `promptFile()` — with the frozen `## S<n>` blocks, producing
+  `execute.workflow.mjs` in the workflow workspace: one literal implementation
+  node per step in catalog order, then a summary node that writes `result.md`.
+  Every prompt is author-known text, so the generated script parses no catalog
+  at runtime, and each step prompt reads its own `history/S<n>.md` first so a
+  rerun skips credibly completed work. The file is written only under the
+  workflow workspace, never under `.pi/workflows/`, `.claude/workflows/`, or
+  `.agents/workflows/`: it is not a registered workflow, resolves only as
+  `/workflows run <workspace>/execute.workflow.mjs`, and running it stays an
+  explicit operator act against trusted host-authority JavaScript. Plan
+  approval is still not run approval, and a graph the template does not express
+  — a reviewer between steps, a bounded loop, concurrency — still goes through
+  `workflow-author` Design -> explicit approval -> Build.
+
 - **Workflow selection and planning handoff now preserve operator context.**
   Native workflow menus let Pi finish restoring the editor before inserting a
   run or stop command, preventing the transcript from jumping out of view. The
