@@ -34,6 +34,15 @@ This file records user-visible changes to the public package.
   change. Liveness cadence is unchanged: spinners and elapsed counters still
   update once a second.
 
+  On consoles where every repaint itself blinks, throttling alone is not
+  enough, so a **calm rendering mode** removes the reason to repaint at all:
+  the spinner freezes, elapsed counters move in 10-second/minute buckets, and
+  the per-second tool timer is dropped — so an idle fleet renders byte-identical
+  frames and the identity gates (now also on the focused `/ps` selector) keep
+  them off the terminal entirely. Live surfaces then write only on real state
+  transitions. Calm mode turns on automatically under WSL and can be forced
+  either way with `LOCUS_PS_CALM=1` / `LOCUS_PS_CALM=0`.
+
 ### Changed
 
 - **The workflow tool card names the task it is working on.** A `task:` line

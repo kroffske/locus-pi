@@ -804,6 +804,37 @@ describe("workflow progress widget", () => {
     }
   });
 
+  it("calm mode stops all repaints while nothing visible changes, yet still paints transitions", () => {
+    // The WSL guarantee: frozen spinner + coarse elapsed keep idle frames
+    // byte-identical, so the liveness tick keeps firing but nothing reaches the
+    // terminal until a real state transition.
+    vi.useFakeTimers();
+    try {
+      const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
+      const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "calm-r1", { calm: true });
+      pushProgress(component, line({ kind: "agent_start", agent: "slow", ts: 1, runId: "calm-r1" }));
+      component.render(100);
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
+      tui.requestRender.mockClear();
+
+      // Three liveness ticks with a frozen spinner and an unchanged elapsed
+      // bucket: zero terminal writes.
+      vi.advanceTimersByTime(3000);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+
+      // A real transition still paints.
+      pushProgress(
+        component,
+        line({ kind: "agent_end", agent: "slow", status: "completed", durationMs: 3000, ts: 4, runId: "calm-r1" }),
+      );
+      expect(tui.requestRender).toHaveBeenCalled();
+
+      component.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("skips repaints when the projection is unchanged", () => {
     vi.useFakeTimers();
     try {

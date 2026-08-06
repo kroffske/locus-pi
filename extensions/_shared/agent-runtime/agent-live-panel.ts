@@ -22,6 +22,14 @@ export interface AgentLivePanelOptions {
    * rows in a long list; the status icon still carries the state.
    */
   statusColors?: Partial<Record<AgentLiveStatus, string>>;
+  /**
+   * Calm rendering (render-profile.ts): live elapsed text is coarsened to
+   * 10-second/minute buckets and the per-second tool timer is dropped, so a row
+   * whose state is not changing renders byte-identical frames. The caller is
+   * expected to also stop advancing `spinnerIndex`. Terminal rows keep their
+   * exact recorded duration — it no longer changes, so it costs nothing.
+   */
+  calm?: boolean;
 }
 
 export class AgentLivePanel {
@@ -40,12 +48,15 @@ export class AgentLivePanel {
 
   renderRow(row: AgentLiveRow, width: number): string {
     const meta = statusMeta(row.status, this.options.spinnerIndex ?? 0);
-    return this.#fg(this.options.statusColors?.[row.status] ?? meta.color, formatAgentLiveRowLine(row, meta, width));
+    return this.#fg(
+      this.options.statusColors?.[row.status] ?? meta.color,
+      formatAgentLiveRowLine(row, meta, width, { calm: this.options.calm === true }),
+    );
   }
 
   /** Indented, dimmed `└ <verb> · <gist>[ · <t-elapsed>]`, or nothing when idle. */
   #renderToolActivitySubLine(row: AgentLiveRow, width: number): string | undefined {
-    const activity = formatToolActivity(row);
+    const activity = formatToolActivity(row, Date.now(), { showElapsed: this.options.calm !== true });
     if (activity === undefined) return undefined;
     const line = `${TOOL_ACTIVITY_INDENT}${TOOL_ACTIVITY_HOOK} ${activity}`;
     return this.#fg("dim", clampLine(line, width));
@@ -148,12 +159,14 @@ export function formatAgentLiveRowLine(
   row: AgentLiveRow,
   meta = statusMeta(row.status, 0),
   width = Number.POSITIVE_INFINITY,
+  options: { calm?: boolean } = {},
 ): string {
-  if (row.groupKind !== undefined) return formatAgentGroupRowLine(row, meta, width);
+  const calm = options.calm === true;
+  if (row.groupKind !== undefined) return formatAgentGroupRowLine(row, meta, width, calm);
   const prefix = row.parentRowId !== undefined ? "↳ " : "";
   const name = truncate(agentRowName(row), AGENT_NAME_MAX_COLS);
   const title = agentRowTitle(row);
-  return assembleRowLine(prefix, meta.icon, name, title, agentRowRightSegments(row), width);
+  return assembleRowLine(prefix, meta.icon, name, title, agentRowRightSegments(row, calm), width);
 }
 
 /** Petname is the row's name; falls back to the agent name, then a generic label. */
@@ -192,7 +205,7 @@ function cleanRowLabel(row: AgentLiveRow): string {
 }
 
 /** Right-hand meta segments: model+effort, round badge, elapsed, token counter (each optional). */
-function agentRowRightSegments(row: AgentLiveRow): string[] {
+function agentRowRightSegments(row: AgentLiveRow, calm = false): string[] {
   const segments: string[] = [];
   const badge = formatModelBadge(row);
   if (badge !== "") segments.push(badge);
@@ -200,11 +213,22 @@ function agentRowRightSegments(row: AgentLiveRow): string[] {
   // elapsed. Rendered only from r2 up — r1 is implicit, so a linear run shows no badge.
   const round = formatRoundBadge(row);
   if (round !== undefined) segments.push(round);
-  const elapsed = formatDuration(row.elapsedMs ?? elapsedSinceStart(row));
+  const elapsed = formatRowElapsed(row, calm);
   if (elapsed !== "") segments.push(elapsed);
   const tokens = formatRowTokens(row);
   if (tokens !== undefined) segments.push(tokens);
   return segments;
+}
+
+/**
+ * Elapsed column text. A recorded `elapsedMs` (terminal rows) is fixed and stays
+ * exact even in calm mode; only the live wall-clock reading is coarsened, since
+ * that is the value whose text otherwise changes every second.
+ */
+function formatRowElapsed(row: AgentLiveRow, calm: boolean): string {
+  if (row.elapsedMs !== undefined) return formatDuration(row.elapsedMs);
+  const live = elapsedSinceStart(row);
+  return calm ? formatDurationCoarse(live) : formatDuration(live);
 }
 
 /**
@@ -279,10 +303,10 @@ function clampLine(line: string, width: number): string {
 }
 
 /** Workflow group summary row (parallel/pipeline): label + elapsed + k/n done. */
-function formatAgentGroupRowLine(row: AgentLiveRow, meta: StatusMeta, width: number): string {
+function formatAgentGroupRowLine(row: AgentLiveRow, meta: StatusMeta, width: number, calm = false): string {
   const prefix = row.parentRowId !== undefined ? "↳ " : "";
   const segments: string[] = [];
-  const elapsed = formatDuration(row.elapsedMs ?? elapsedSinceStart(row));
+  const elapsed = formatRowElapsed(row, calm);
   if (elapsed !== "") segments.push(elapsed);
   if (row.groupTotal !== undefined) segments.push(`${row.groupCompleted ?? 0}/${row.groupTotal} done`);
   if ((row.groupFailed ?? 0) > 0) segments.push(`${row.groupFailed} failed`);
@@ -446,7 +470,11 @@ const TOOL_ARG_PRIORITY_KEYS = ["command", "file_path", "path", "pattern", "quer
  *
  * The caller prepends the `└ ` hook + indent (see `#renderToolActivitySubLine`).
  */
-export function formatToolActivity(row: AgentLiveRow, now: number = Date.now()): string | undefined {
+export function formatToolActivity(
+  row: AgentLiveRow,
+  now: number = Date.now(),
+  options: { showElapsed?: boolean } = {},
+): string | undefined {
   const verb = activeToolVerb(row);
   if (verb === undefined) return undefined; // kind (a): no active tool → no sub-line
   // Resolution seam (REQ-004): `gist = intent ?? heuristic(args)`. model-intent
@@ -455,7 +483,9 @@ export function formatToolActivity(row: AgentLiveRow, now: number = Date.now()):
   const gist = toolActivityGist(row.currentToolArgs);
   const parts = [verb];
   if (gist !== "") parts.push(gist);
-  const elapsed = toolElapsedLabel(row.currentToolStartMs, now);
+  // Calm rendering drops the running timer: it is the one part of the sub-line
+  // whose text changes every second with no state transition behind it.
+  const elapsed = options.showElapsed === false ? undefined : toolElapsedLabel(row.currentToolStartMs, now);
   if (elapsed !== undefined) parts.push(elapsed);
   return parts.join(TOOL_ACTIVITY_SEP);
 }
@@ -611,6 +641,25 @@ export function formatDuration(ms: number | undefined): string {
   const totalMinutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   if (totalMinutes < 60) return seconds > 0 ? `${totalMinutes}m${seconds}s` : `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
+}
+
+/**
+ * Coarse elapsed for calm rendering: the text holds still for whole buckets so
+ * an otherwise-idle row renders byte-identical frames. Under a minute the value
+ * moves in 10-second steps (`<10s`, `10s`, `20s`…); above it, whole minutes
+ * (`1m`, `2m`, `1h5m`). Exactness returns on the terminal row, which records
+ * its final duration.
+ */
+export function formatDurationCoarse(ms: number | undefined): string {
+  if (ms === undefined) return "";
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 10) return "<10s";
+  if (totalSeconds < 60) return `${Math.floor(totalSeconds / 10) * 10}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;

@@ -120,3 +120,14 @@ export class RenderScheduler {
     this.#timer = undefined;
   }
 }
+
+/**
+ * Byte-identity of two frames. The companion to the scheduler: throttling
+ * bounds how often a surface may repaint, this decides whether the repaint is
+ * worth requesting at all. On consoles where every repaint blinks (WSL), a
+ * frame equal to what is already on screen must never reach the terminal.
+ */
+export function framesEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((line, index) => line === b[index]);
+}
