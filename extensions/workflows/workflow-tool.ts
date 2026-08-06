@@ -166,6 +166,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
       });
       const workflowName = workflowTargetLabel(valid.value);
+      const taskTitle = workflowTaskTitle(valid.value.input);
       const launched = commandLauncher.attach<RunWorkflowScriptResult>(ctx, signal, async (background) =>
         runWorkflowScript({
           pi,
@@ -185,7 +186,14 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
             transcript.start(runId, runDir);
             update({
               content: [{ type: "text", text: `workflow started\nrunDir: ${runDir}` }],
-              details: { workflowName, status: "running", runId, runDir, agentRows: [] },
+              details: {
+                workflowName,
+                status: "running",
+                runId,
+                runDir,
+                agentRows: [],
+                ...(taskTitle === undefined ? {} : { taskTitle }),
+              },
             });
           },
           onEvent: (line: WorkflowJournalLine) => {
@@ -206,6 +214,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
                 lastEvent: line,
                 liveAgents,
                 agentRows: snapshotWorkflowToolCardAgents(line.runId),
+                ...(taskTitle === undefined ? {} : { taskTitle }),
               },
             });
           },
@@ -238,6 +247,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         status: disposition.status,
         summary: disposition.summary,
         agentRows: cardAgents,
+        ...(taskTitle === undefined ? {} : { taskTitle }),
       };
       if (disposition.status === "completed" || disposition.status === "awaiting_operator") {
         return textResult(summary, {
@@ -361,6 +371,8 @@ function renderWorkflowToolResultCard(
   const details = (result.details ?? {}) as Record<string, unknown>;
   const workflowName =
     typeof details.workflowName === "string" ? details.workflowName : workflowTargetLabel(renderContextArgs(context));
+  const taskTitle =
+    typeof details.taskTitle === "string" ? details.taskTitle : workflowTaskTitle(renderContextInput(context));
   const status = workflowToolCardStatus(details.status, options.isPartial, context.isError || result.isError === true);
   const technicalLines: string[] = [];
   if (options.expanded) {
@@ -389,6 +401,7 @@ function renderWorkflowToolResultCard(
     {
       workflowName,
       status,
+      ...(taskTitle === undefined ? {} : { taskTitle }),
       agents: readWorkflowToolCardAgents(details.agentRows),
       technicalLines,
       ...(persistedResult?.kind === "model" ? { modelText: persistedResult.text } : {}),
@@ -434,6 +447,22 @@ function renderContextArgs(context: ToolRenderContext): { name?: string; scriptP
   };
 }
 
+function renderContextInput(context: ToolRenderContext): string | undefined {
+  if (context.args === null || typeof context.args !== "object") return undefined;
+  const input = (context.args as Record<string, unknown>).input;
+  return typeof input === "string" ? input : undefined;
+}
+
+const WORKFLOW_TASK_TITLE_MAX_CHARS = 96;
+
+/** First line of the workflow's semantic input, clamped to one card-friendly title. */
+function workflowTaskTitle(input: string | undefined): string | undefined {
+  const firstLine = (input ?? "").split(/\r?\n/u, 1)[0]?.trim() ?? "";
+  if (firstLine === "") return undefined;
+  if (firstLine.length <= WORKFLOW_TASK_TITLE_MAX_CHARS) return firstLine;
+  return `${firstLine.slice(0, WORKFLOW_TASK_TITLE_MAX_CHARS - 1).trimEnd()}…`;
+}
+
 function workflowToolCardStatus(value: unknown, isPartial: boolean, isError: boolean): WorkflowToolCardStatus {
   if (isPartial) return "running";
   if (
@@ -471,6 +500,7 @@ function readWorkflowToolCardAgents(value: unknown): WorkflowToolCardAgent[] {
         status: row.status,
         ...(typeof row.startedAt === "number" ? { startedAt: row.startedAt } : {}),
         ...(typeof row.elapsedMs === "number" ? { elapsedMs: row.elapsedMs } : {}),
+        ...(typeof row.answer === "string" && row.answer !== "" ? { answer: row.answer } : {}),
       },
     ];
   });

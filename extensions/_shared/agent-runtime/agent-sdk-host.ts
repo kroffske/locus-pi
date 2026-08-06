@@ -156,7 +156,7 @@ export interface AgentLiveRow {
   /** Memorable, deterministic petname for this row (REQ-002); assigned in `begin`. */
   displayName?: string;
   label: string;
-  /** Short work description shown in the live row (≤48 cols, REQ-003); falls back to the label. */
+  /** Short work description shown in the live row (≤128 chars, REQ-003); falls back to the label. */
   title?: string;
   /** Bounded original task sent to the child, kept separate from the internal kickoff capsule. */
   request?: string;
@@ -492,7 +492,9 @@ class AgentLiveStore {
     // Petname is stable per row: assigned once (never re-derived), and skipped for
     // group summary rows which render from their own label, not a petname.
     const isGroupRow = (options.groupKind ?? existing?.groupKind) !== undefined;
-    const displayName = existing?.displayName ?? (isGroupRow ? undefined : this.#petnames.assign(id));
+    const displayName =
+      existing?.displayName ??
+      (isGroupRow ? undefined : this.#displayNameFor(id, existing?.parentRowId ?? options.parentRowId));
     // Slot rounds (REQ-009): the SAME row is reused when a workflow slot is re-invoked.
     // A strictly higher round means a new iteration began — reset the per-round transient
     // fields (tools/args/tool-start/tokens/elapsed) so the row shows THIS round, not the
@@ -579,6 +581,19 @@ class AgentLiveStore {
     if (options.agentName !== undefined) this.#agentNames.set(id, options.agentName);
     this.#emit();
     return { row, execution: executionAuthority };
+  }
+
+  /**
+   * One petname per LOGICAL agent, not per row. A row whose parent is a plain
+   * (non-group) row is the same actor as its parent — the workflow anchor row and
+   * the SDK executor row it spawns — so it adopts the parent's petname instead of
+   * minting a second name for the same agent. Group summaries carry no petname
+   * and never donate one; a parentless (or parent-unknown) row assigns fresh.
+   */
+  #displayNameFor(id: string, parentRowId: string | undefined): string {
+    const parent = parentRowId === undefined ? undefined : this.rows.get(parentRowId);
+    const inherited = parent !== undefined && parent.groupKind === undefined ? parent.displayName : undefined;
+    return inherited === undefined ? this.#petnames.assign(id) : this.#petnames.adopt(id, inherited);
   }
 
   claimQueuedExecution(agentName: string, fallbackLabel: string): AgentLiveExecutionHandle {

@@ -285,10 +285,16 @@ export function petname(id: string): string {
  * (same id → same name for the lifetime of the registry) and appends `-2`, `-3`,
  * … when a fresh id collides with a surname already handed out in this session,
  * so no two live rows share a name (REQ-002).
+ *
+ * `adopt` is the deliberate exception to uniqueness: a workflow agent is one
+ * logical actor backed by two rows (the journal anchor and its SDK executor
+ * child), and showing two surnames for it reads as two agents. Adoption shares
+ * the parent's name with the child id; holders are refcounted so releasing one
+ * row keeps the name reserved until every holder is released.
  */
 export class PetnameRegistry {
   readonly #byId = new Map<string, string>();
-  readonly #used = new Set<string>();
+  readonly #holdersByName = new Map<string, Set<string>>();
 
   assign(id: string): string {
     const existing = this.#byId.get(id);
@@ -296,13 +302,24 @@ export class PetnameRegistry {
     const base = petname(id);
     let candidate = base;
     let suffix = 2;
-    while (this.#used.has(candidate)) {
+    while (this.#holdersByName.has(candidate)) {
       candidate = `${base}-${suffix}`;
       suffix += 1;
     }
-    this.#used.add(candidate);
-    this.#byId.set(id, candidate);
+    this.#hold(id, candidate);
     return candidate;
+  }
+
+  /**
+   * Share an already-visible name with a second id (one logical agent, two rows).
+   * Idempotent per id: an id that already holds a name keeps it — a later adopt
+   * cannot rename a row that has been rendered.
+   */
+  adopt(id: string, name: string): string {
+    const existing = this.#byId.get(id);
+    if (existing !== undefined) return existing;
+    this.#hold(id, name);
+    return name;
   }
 
   /** Release one retired row so bounded live-store pruning also bounds names. */
@@ -310,12 +327,21 @@ export class PetnameRegistry {
     const assigned = this.#byId.get(id);
     if (assigned === undefined) return false;
     this.#byId.delete(id);
-    this.#used.delete(assigned);
+    const holders = this.#holdersByName.get(assigned);
+    holders?.delete(id);
+    if (holders !== undefined && holders.size === 0) this.#holdersByName.delete(assigned);
     return true;
   }
 
   reset(): void {
     this.#byId.clear();
-    this.#used.clear();
+    this.#holdersByName.clear();
+  }
+
+  #hold(id: string, name: string): void {
+    this.#byId.set(id, name);
+    const holders = this.#holdersByName.get(name) ?? new Set<string>();
+    holders.add(id);
+    this.#holdersByName.set(name, holders);
   }
 }

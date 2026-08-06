@@ -113,6 +113,13 @@ describe("agent task tool execution", () => {
           text: expect.stringContaining(`agent ${row!.displayName} started — Compute expression`),
         },
       ],
+      // Partial identity for the transcript card: it resolves the live row by id.
+      details: {
+        rowId: row!.id,
+        agent: "task",
+        title: "Compute expression",
+        status: "running",
+      },
     });
   });
 

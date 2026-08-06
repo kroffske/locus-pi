@@ -8,6 +8,8 @@ import type {
 } from "../../../extensions/_shared/host/pi-api.js";
 import type { ToolDefinition } from "../../../extensions/_shared/host/pi-api.js";
 import workflows from "../../../extensions/workflows/index.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { snapshotWorkflowToolCardAgents } from "../../../extensions/workflows/workflow-tool-card.js";
 import { createHarness } from "../../test-harness.js";
 
 const theme: ThemeLike = {
@@ -292,5 +294,146 @@ describe("workflow tool card", () => {
     vi.advanceTimersByTime(1_000);
     expect(invalidate).toHaveBeenCalledTimes(settledInvalidations);
     completed.dispose?.();
+  });
+});
+
+describe("workflow tool card task title and agent answers", () => {
+  it("renders the workflow's task title under the LOCUS header", () => {
+    const lines = plain(
+      render(
+        workflowTool(),
+        {
+          content: [{ type: "text", text: "streaming" }],
+          details: {
+            workflowName: "plan",
+            status: "running",
+            taskTitle: "Создать план переезда merch_check_by_urls",
+            agentRows: [{ name: "Nernst", work: "reconnaissance", status: "working", elapsedMs: 400 }],
+          },
+        },
+        { expanded: false, isPartial: true },
+      ),
+    );
+    expect(lines[0]).toBe("│ LOCUS · workflow plan · RUNNING");
+    expect(lines[1]).toBe("│ task: Создать план переезда merch_check_by_urls");
+    expect(lines[2]).toMatch(/\[agent Nernst\] working/u);
+  });
+
+  it("derives the task title from the tool-call input when details predate it", () => {
+    const lines = plain(
+      render(
+        workflowTool(),
+        {
+          content: [{ type: "text", text: "streaming" }],
+          details: { workflowName: "plan", status: "running", agentRows: [] },
+        },
+        { expanded: false, isPartial: true },
+        { name: "plan", input: "migrate the script\nsecond line is ignored" },
+      ),
+    );
+    expect(lines[1]).toBe("│ task: migrate the script");
+  });
+
+  it("marks a completed agent's answer with a left bar: one line collapsed, bounded block expanded", () => {
+    const answer = ["Report ready.", "- reuse fetch", "- rewrite mail_error"].join("\n");
+    const details = {
+      workflowName: "plan",
+      status: "completed",
+      agentRows: [{ name: "Nernst", work: "reconnaissance", status: "done", elapsedMs: 18_000, answer }],
+    };
+    const collapsed = plain(
+      render(
+        workflowTool(),
+        { content: [{ type: "text", text: "d" }], details },
+        { expanded: false, isPartial: false },
+      ),
+    );
+    expect(collapsed).toContain("│   ▌ Report ready. … (+2 lines)");
+    expect(collapsed.join("\n")).not.toContain("reuse fetch");
+
+    const expanded = plain(
+      render(workflowTool(), { content: [{ type: "text", text: "d" }], details }, { expanded: true, isPartial: false }),
+    );
+    expect(expanded).toContain("│   ▌ Report ready.");
+    expect(expanded).toContain("│   ▌ - reuse fetch");
+    expect(expanded).toContain("│   ▌ - rewrite mail_error");
+  });
+
+  it("bounds an expanded answer to twelve lines with an honest remainder", () => {
+    const answer = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+    const expanded = plain(
+      render(
+        workflowTool(),
+        {
+          content: [{ type: "text", text: "d" }],
+          details: {
+            workflowName: "plan",
+            status: "completed",
+            agentRows: [{ name: "Nernst", work: "scan", status: "done", elapsedMs: 1_000, answer }],
+          },
+        },
+        { expanded: true, isPartial: false },
+      ),
+    );
+    expect(expanded).toContain("│   ▌ line 12");
+    expect(expanded.join("\n")).not.toContain("line 13");
+    expect(expanded).toContain("│   ▌ … (+8 lines)");
+  });
+});
+
+describe("workflow tool card agent snapshot", () => {
+  afterEach(() => {
+    agentLiveStore.reset();
+  });
+
+  it("shows one entry per logical agent: the anchor collapses in favour of its executor row", () => {
+    const runId = "run-snap-1";
+    const anchor = agentLiveStore.begin({
+      id: `workflow:${runId}:explore:reconnaissance:`,
+      workflowRunId: runId,
+      agentName: "explore",
+      label: "explore (reconnaissance)",
+      isolated: false,
+      noMcp: false,
+    });
+    agentLiveStore.patch(anchor.id, { status: "working", startedAt: Date.now() });
+    const child = agentLiveStore.begin({
+      id: `workflow-agent:${runId}:explore:reconnaissance:`,
+      parentRowId: anchor.id,
+      workflowRunId: runId,
+      agentName: "explore",
+      label: "reconnaissance",
+      isolated: false,
+      noMcp: false,
+    });
+    agentLiveStore.patch(child.id, { status: "working", startedAt: Date.now() });
+
+    const agents = snapshotWorkflowToolCardAgents(runId);
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.name).toBe(anchor.displayName);
+    expect(agents[0]?.work).toBe("reconnaissance");
+    expect(agents[0]?.status).toBe("working");
+  });
+
+  it("captures a completed agent's final answer, bounded for persistence", () => {
+    const runId = "run-snap-2";
+    const row = agentLiveStore.begin({
+      id: `workflow:${runId}:task:report:`,
+      workflowRunId: runId,
+      agentName: "task",
+      label: "task (report)",
+      isolated: false,
+      noMcp: false,
+    });
+    agentLiveStore.patch(row.id, { status: "done", finalAnswer: `ready\n${"x".repeat(3000)}` });
+
+    const agents = snapshotWorkflowToolCardAgents(runId);
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.answer?.startsWith("ready")).toBe(true);
+    expect(agents[0]?.answer?.length).toBeLessThanOrEqual(2000);
+
+    // A working row never leaks a stale answer into the card.
+    agentLiveStore.patch(row.id, { status: "working" });
+    expect(snapshotWorkflowToolCardAgents(runId)[0]?.answer).toBeUndefined();
   });
 });

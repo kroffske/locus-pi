@@ -4,7 +4,7 @@
  * Both route through the same createAgentSession host + honesty-gate and report
  * requestedSurface:"task" internally, so only the registered tool name differs.
  */
-import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
 import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
 import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model/model-settings.js";
@@ -13,6 +13,7 @@ import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.
 import { validateParams } from "../_shared/host/validation.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
+import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-tool-card.js";
 import {
   DEFAULT_TASK_AGENT_NAME,
   refreshAgents,
@@ -57,6 +58,12 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
     parameters: TaskParams,
     approval: "exec",
     formatApprovalDetails: taskApprovalDetails,
+    // Each spawned agent owns its own transcript block (never folded into another
+    // tool's card): a LOCUS rail with petname, live status, task title, and the
+    // returned answer marked with a left bar.
+    renderShell: "self",
+    renderCall: () => new EmptyAgentToolCallComponent(),
+    renderResult: renderAgentToolResultCard,
     execute: spawnAgentExecute,
   });
   pi.registerTool({
@@ -66,6 +73,9 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
     parameters: TaskParams,
     approval: "exec",
     formatApprovalDetails: taskApprovalDetails,
+    renderShell: "self",
+    renderCall: () => new EmptyAgentToolCallComponent(),
+    renderResult: renderAgentToolResultCard,
     execute: spawnAgentExecute,
   });
 }
@@ -105,6 +115,8 @@ async function runTaskTool(
   const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution.assignment });
   const hasUI = ctx.hasUI === true;
   const panel = hasUI ? installWorkflowProgress(ctx, "agents", `task ${resolvedAgent}`, "task") : undefined;
+  const rowId = `task:${resolvedAgent}:${nextAgentRunSequence()}`;
+  const resolvedTitle = resolveAgentTitle(title, "", task);
   let boundary: Awaited<ReturnType<typeof runAgentLiveTask>>;
   // Pin the "agents" progress key for the duration of the live run so a chat
   // message (which clears transient command UI) cannot dispose the progress
@@ -120,15 +132,21 @@ async function runTaskTool(
       signal,
       agent,
       resolvedAgent,
-      rowId: `task:${resolvedAgent}:${nextAgentRunSequence()}`,
-      label: resolveAgentTitle(title, "", task),
-      title: resolveAgentTitle(title, "", task),
+      rowId,
+      label: resolvedTitle,
+      title: resolvedTitle,
       task,
       approvalTier: "allow",
       liveModel,
       modelRoleResolution,
       maxTurns: 5,
-      onStarted: (line) => update({ content: [{ type: "text", text: line }] }),
+      onStarted: (line) =>
+        update({
+          content: [{ type: "text", text: line }],
+          // The card resolves the live row by id while the run is in flight, so
+          // the partial update only needs the row identity + static labels.
+          details: { rowId, agent: resolvedAgent, title: resolvedTitle, status: "running" },
+        }),
       ...(parentContextBroker.forwarded && parentContext !== undefined ? { parentContext } : {}),
     });
     if (hasUI) panel?.render(80);
@@ -153,6 +171,8 @@ async function runTaskTool(
     );
   }
   const parentContextBroker = summarizeParentContextBroker(parentContext, agentDefault);
+  // Terminal row facts for the transcript card once the live row is pruned.
+  const finishedRow = agentLiveStore.rows.get(rowId);
   const details = {
     owner: "agents-catalog",
     requestedSurface: "task",
@@ -163,6 +183,11 @@ async function runTaskTool(
     executor: "agent-sdk-session-host",
     parentContextBroker,
     status: boundary.status,
+    rowId,
+    title: resolvedTitle,
+    ...(finishedRow?.displayName === undefined ? {} : { displayName: finishedRow.displayName }),
+    ...(finishedRow?.startedAt === undefined ? {} : { startedAt: finishedRow.startedAt }),
+    ...(finishedRow?.elapsedMs === undefined ? {} : { elapsedMs: finishedRow.elapsedMs }),
     diagnostics: boundary.diagnostics,
     evidence: boundary.evidence,
     childSessionId: boundary.childSession?.id,
