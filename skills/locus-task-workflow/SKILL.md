@@ -28,6 +28,32 @@ agents. Workflow JavaScript does not parse plans or manage the todo queue.
    Do not invent a planning ledger: replay owns completed agent calls.
 5. Read `tmp/<select-name>/plan.md` and `tmp/<select-name>/steps.md`. Stop if
    either file is missing, empty, or does not describe an executable task.
+6. Confirm `plan.md` first defines coherent top-level work units and `steps.md`
+   is the only executable task catalog. Do not create `tasks.md`.
+7. Confirm every executable task is one complete flat
+   `## S<n> — <title>` block with no nested structural headings. Each block must
+   embed work-unit identity, decomposition boundary, exact goal, paths/evidence,
+   dependencies, allowed ownership, verification, and done condition. Reject
+   and rerun `plan` when any block is incomplete or incoherent.
+
+## Freeze the catalog and choose execution
+
+Planning may use fresh agents to analyze coherent top-level work units before
+this point. Reconcile all such analysis into one owner-readable `plan.md` and
+one final `steps.md`; do not create a nested manager or recursive task
+dispatcher. Once execution begins, the exact step catalog is frozen. A material
+catalog change requires a new `plan` run and a deliberate todo rebuild.
+
+Default: create the main Pi execution queue below and start one top-level
+`plan-implement` run per exact step.
+
+Optional next action: when the operator wants one sequential project-local
+workflow instead, hand the approved `plan.md` and `steps.md` to
+`workflow-author` for Design only. Do not generate `.workflow.mjs` source from
+this skill, do not ask for Build, and do not treat plan approval as Build
+approval. Build remains gated by the operator phrase
+`Build approved design: <exact path>`. Any optional reviewer after a generated
+step belongs to that Design, not to Plan or Plan Implement execution semantics.
 
 ## Create the execution queue
 
@@ -105,8 +131,8 @@ when execution resumes. This is an agent reading task documents, not a
 JavaScript parser.
 
 If the user changed the task or step list, rerun `plan`, review the replacement
-files, and deliberately rebuild todos. Keep old history as evidence unless the
-user asks to remove it.
+files, freeze the replacement catalog, and deliberately rebuild todos. Keep old
+history as evidence unless the user asks to remove it.
 
 ## Finish
 

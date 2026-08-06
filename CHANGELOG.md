@@ -6,6 +6,25 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Plan now freezes a boundary-driven task catalog before execution.**
+  `plan.md` defines coherent top-level work units, while `steps.md` remains the
+  only executable catalog and carries complete flat exact-step blocks for fresh
+  agents. The default todo-driven Plan Implement path is unchanged; approved
+  artifacts may instead be handed to workflow-author Design for an
+  approval-first project-local sequential workflow.
+
+- **Standard workflow authoring now separates transport safety from work size.**
+  New generated source omits per-attempt `maxToolCalls` and `timeoutMs` unless
+  the operator explicitly requests an override; package defaults and legacy
+  workflows are unchanged. Model-discovered `handoffs` examples now use a
+  named, domain-derived `maxItems` in the existing `1..100` contract instead of
+  teaching `64` as a generic limit. Large approved catalogs use complete
+  canonical `steps.md` blocks rendered literally in an optional project-local
+  sequential workflow, or exact caller `items` for programmatic embedders. Each
+  task gets one implementer and may get one visibly separate reviewer, while
+  Design -> explicit approval -> Build and the six-workflow Package registry
+  remain unchanged.
+
 - **Main-agent `workflow` tool calls now read as one Locus workflow card.** The
   card names the real workflow and its `RUNNING`, `COMPLETED`,
   `AWAITING OPERATOR`, `CANCELLED`, or `FAILED` state in one stable header;

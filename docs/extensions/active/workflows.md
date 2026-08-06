@@ -625,7 +625,7 @@ The programmatic `workflow` tool never calls `sendMessage` while its tool output
 
 The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the whole run in the order it happened: settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, its `warning` color, and its activity sub-line; and every declared stage the run has not reached yet follows as a dim `○ <title> · planned · <detail>` row, with the detail read statically from `meta.phases`. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the roster does not fit the terminal, the oldest settled rows collapse behind an announced `(+N earlier agents)` line — the current row, the pending stages, and the final verdict are never the part that is dropped. It does not publish or expand the global fleet selection. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: a bare result remains script-controlled, while a result returned directly from a `parallel()` branch or `pipeline()` stage with `status: "failed" | "blocked" | "cancelled"` becomes typed group failure after the barrier. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows remain visible status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
 
-`dsl.log()` records `source: "script"` and appears in the live panel as
+`dsl.log()` records one readable script event with `source: "script"` and appears in the live panel as
 `│ script · <message>`. Internal workflow enter/exit and resume metadata record
 `source: "runtime"`; old journal lines without `source` remain neutral journal
 messages and are never relabeled as script output. The completion line prefers a
@@ -966,6 +966,23 @@ reads them; there is no separate approval token or persisted design digest, so
 the operator reviews the current file immediately before issuing Build. The bundled `workflow-author` agent and
 `skills/locus-pi-workflows/SKILL.md` own the exact protocol.
 
+An owner-approved `plan.md` plus its canonical `steps.md` may be the Design
+input for an optional project-local sequential workflow. `workflow-author`
+preserves every complete `## S<n>` block as one task: Build preferably renders
+those blocks as literal author-known prompts in generated source, while a
+programmatic embedder may pass the same frozen blocks through caller `items`.
+One implementer receives one complete block per iteration; an optional reviewer
+is a visibly separate child after that implementer. The approved Design states
+whether review is advisory or blocking and whether any finite retry exists.
+Plan approval does not imply workflow Build approval, no runtime parser reads
+`steps.md`, and this path adds no Package workflow. See the
+[Plan-to-sequential pattern card](../../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+
+New standard source omits `maxToolCalls` and `timeoutMs`: package defaults are
+the emergency policy. A Design emits a narrower or raised per-attempt override
+only when the operator explicitly requests it and records why. This rule does
+not mechanically rewrite legacy workflows.
+
 A workflow is a single ESM module `<name>.workflow.mjs` with two exports:
 
 - `export const meta = { name, description, phases? }` — catalog metadata only.
@@ -1161,7 +1178,8 @@ Notes:
 
 A run's shape is otherwise only knowable by executing it, because phases are
 declared imperatively by `phase()` calls inside the body. Optional `meta.phases`
-states the pipeline up front, and it is read by the same bounded catalog scan
+is presentation metadata that states the pipeline up front; `phase()` is the
+call that journals actual execution. The declaration is read by the same bounded catalog scan
 that already extracts `description` — first 64 KiB, AST only, module never
 imported or evaluated:
 
@@ -1225,8 +1243,9 @@ second object-input protocol into the string with JSON or marker parsing.
 A programmatic caller may separately provide exact `items: string[]`. The runner
 and runtime validate the array/string shape, and `dsl.items()` returns a detached
 frozen snapshot. Order and bytes, including whitespace, empty strings, and
-duplicates, are unchanged; transport adds no count, per-item, or aggregate-size
-policy. A source array, caller items, or bounded model-discovered
+duplicates, are unchanged; there is no Locus items count or character policy.
+Physical constraints still include caller/tool JSON, context, memory, total
+attempts, and time. A source array, caller items, or bounded model-discovered
 `agent({ handoffs })` result may feed the same visible `pipeline()` plus inline
 `dsl.workflow()` mini-flow. This fresh model-discovery path is non-resumable.
 Durable execution instead begins in a separate invocation with a caller-frozen,
@@ -1475,10 +1494,10 @@ contract, not an enforcement or security boundary.
 | Field             | Type                                   | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------- | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent`           | string                                 | `"default"`                           | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `maxToolCalls`    | positive safe integer                  | budget `toolCalls` (`1000`)           | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
-| `timeoutMs`       | integer 1..2147383628                  | budget `timeoutMs` (`86400000`)       | 24-hour emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                |
-| `maxTurns`        | integer 1..20                          | budget `turns` (`20`)                 | Assistant turns for one child attempt at the host maximum. A value outside the host clamp is refused before any child starts.                                                                                                                                                                                                                                                                                                                                                                                       |
-| `maxAnswerChars`  | positive safe integer                  | budget `answerChars` (`500000`)       | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
+| `maxToolCalls`    | positive safe integer                  | 1,000 tool calls per attempt          | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
+| `timeoutMs`       | integer 1..2147383628                  | 24 hours per attempt                  | Emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                        |
+| `maxTurns`        | integer 1..20                          | 20 turns per attempt                  | Assistant turns for one child attempt at the host maximum. A value outside the host clamp is refused before any child starts.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `maxAnswerChars`  | positive safe integer                  | 500,000 characters per answer         | Upper bound on the child's answer. An oversized handoff breaks the next stage's prompt, so the call fails here instead of downstream. Enforced on replayed answers too.                                                                                                                                                                                                                                                                                                                                             |
 | `attempts`        | safe integer 1–3                       | `1`                                   | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3. Never re-asks an answer the child did produce.                                                                                                                                                                                                                                                                                   |
 | `label`           | string                                 | —                                     | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `artifact`        | string                                 | safe label or agent name              | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1492,6 +1511,11 @@ contract, not an enforcement or security boundary.
 | `handoffs`        | `{minItems?, maxItems, maxItemChars?}` | none                                  | **Standard dynamic-decomposition form.** Returns 0–100 complete non-blank text units with author-declared bounds; defaults to `minItems: 0` and `maxItemChars: 8000`, with a 32000-character ceiling. Desugars to the existing unique trimmed string-array schema path, so runtime owns repair, replay, evidence, budgets, and fail-closed exhaustion. Cannot be combined with `choice`, `schema`, or `validate`.                                                                                                   |
 | `schema`          | object (JSON Schema)                   | none                                  | **Advanced compatibility.** Declare an arbitrary answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion. Standard generated source uses `choice` instead.                                                                                                                                                                                                                                                        |
 | `validate`        | `(value) => string[]`                  | none                                  | **Advanced compatibility, requires `schema`.** Cross-field rules the subset cannot declare. Runs only on a schema-valid parsed value; a non-empty return re-asks the child in its own labelled block. Standard generated source does not emit validators.                                                                                                                                                                                                                                                           |
+
+Standard workflows inherit the full host-exposed tool surface and the parent
+permission mode; agent catalog roles choose prompt/model identity, not
+capabilities. `workspaceMode` expresses filesystem isolation intent for review
+UX. It is not authorization, a sandbox, or a tool allowlist.
 
 `agent()` resolves to exact non-empty text. The runtime persists that text before
 emitting terminal `agent_end`; fresh sessions also contribute their transcript
@@ -1643,8 +1667,9 @@ Use `handoffs` when a discovery agent must define bounded runtime work units for
 visible downstream workers:
 
 ```js
+const MAX_DAGS_IN_SCOPE = 12;
 const dags = await agent("Return one complete text handoff per DAG.", {
-  handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
+  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
 });
 
 const descriptions = await parallel(
@@ -1658,7 +1683,10 @@ trimming, then desugars the declaration to the equivalent array schema before
 request canonicalization. Its prompt, repair attempts, replay key, journal
 evidence, budget accounting, and fail-closed error are therefore identical to
 that existing path. Workflow JavaScript receives `string[]`; it does not parse
-model prose or own a domain schema.
+model prose or own a domain schema. The Design derives a clearly named small
+maximum from the domain. It is transport safety for one structured response,
+not a default business limit; the runtime repairs one invalid value response,
+then fails closed.
 
 `handoffs` enables dynamic fan-out but not recursive manager delegation. SDK
 children still cannot call `spawn_agent` or `task`; the approved source must
@@ -1878,15 +1906,26 @@ Every run is bounded on seven axes without the script saying anything.
 `DEFAULT_WORKFLOW_BUDGET` (`extensions/workflows/runtime/workflow-budget.ts`) is the single
 source, and `runWorkflowScript` applies it to the runtime on every run:
 
-| Axis          | Default           | What it bounds                                                                                                                                                                                                                    |
-| ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `concurrency` | `4`               | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
-| `totalAgents` | `10000`           | Total `agent()` invocations, nested and retried ones included. Fine-grained decomposition may legitimately exceed 200 calls; the next attempt above this fuse still throws `WorkflowInvocationCapError` and exits the run.        |
-| `runtimeMs`   | `86400000` (24 h) | Emergency wall-clock fuse over the root and saved-child agent chain. Exceeding it throws `WorkflowRunDeadlineError`; it is not an ordinary planning deadline.                                                                     |
-| `timeoutMs`   | `86400000` (24 h) | Emergency fuse for one child attempt. The SDK host's child deadline is derived from this, so the workflow-level failure wins.                                                                                                     |
-| `toolCalls`   | `1000`            | Tool calls per child attempt.                                                                                                                                                                                                     |
-| `turns`       | `20`              | Assistant turns per child attempt, equal to the host maximum.                                                                                                                                                                     |
-| `answerChars` | `500000`          | Characters in one child answer.                                                                                                                                                                                                   |
+| Axis          | Default                       | What it bounds                                                                                                                                                                                                                    |
+| ------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concurrency` | 4 attempts at once            | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
+| `totalAgents` | 10,000 physical attempts/run  | Every implementation, review, transport-retry, and value-repair attempt across the root and saved children. The next attempt above this fuse throws `WorkflowInvocationCapError` and exits the run.                               |
+| `runtimeMs`   | 24-hour new-child-start gate  | Emergency wall-clock gate over the root and saved-child agent chain. It is checked before a new child starts; it does not abort an in-flight child.                                                                               |
+| `timeoutMs`   | 24 hours per child attempt    | Emergency fuse for one child attempt. The workflow aborts first; the SDK timeout is a later transport backstop.                                                                                                                   |
+| `toolCalls`   | 1,000 calls per child attempt | Tool calls per child attempt.                                                                                                                                                                                                     |
+| `turns`       | 20 turns per child attempt    | Assistant turns per child attempt, equal to the host maximum.                                                                                                                                                                     |
+| `answerChars` | 500,000 characters per answer | Characters in one child answer.                                                                                                                                                                                                   |
+
+The SDK transport backstop is a per-host-turn timer computed as
+`ceil(timeoutMs / maxTurns) + 5_000` milliseconds. The `5_000` is a five-second
+safety **margin per turn**, not a five-second workflow timeout. With the shipped
+defaults, each host turn gets 4,325,000 ms (72 minutes 5 seconds); across 20
+turns that is 24 hours plus 100 seconds, so the workflow's own 24-hour
+per-attempt fuse remains the first named deadline.
+
+Review and retry attempts consume `totalAgents` exactly like implementation
+attempts. The budget counts physical attempts, not only authored `agent()` call
+sites.
 
 **What `runtimeMs` does and does not bound.** It is a shared emergency deadline
 for the root and saved children, checked after a child acquires the run-wide concurrency slot and immediately before the
@@ -2216,8 +2255,9 @@ await agent("Apply the bounded edit.", { agent: "quick_task" });
 ```
 
 `opts.agent` is a catalog name, not a model name or an inline role definition.
-Bare `agent(prompt)` selects `default`. The bridge discovers definitions first-wins
-by agent name from the nearest project `.agents/agents/`, then
+Bare `agent(prompt)` and `agent(prompt, { agent: "default" })` both select the
+catalog slot named `default`; neither pins the bundled default prompt or model.
+The bridge discovers definitions first-wins by agent name from the nearest project `.agents/agents/`, then
 `~/.agents/agents/`, then the package's bundled `.agents/agents/`. Unknown names
 return an explicit `ok:false` agent result; they do not silently use `default`.
 For workflow calls, each definition's frontmatter supplies the system prompt and

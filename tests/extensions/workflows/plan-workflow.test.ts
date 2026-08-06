@@ -99,6 +99,37 @@ describe("Package workflow: plan", () => {
     expect(calls[1]?.prompt).toContain("Fully replace both files");
     expect(calls[1]?.prompt).toContain("`plan.md`");
     expect(calls[1]?.prompt).toContain("`steps.md`");
+    expect(calls[1]?.prompt).toContain("first define coherent top-level work units");
+    expect(calls[1]?.prompt).toContain("the only executable task catalog");
+    expect(calls[1]?.prompt).toMatch(/Do not create\s+`tasks\.md`/u);
+    expect(calls[1]?.prompt).toContain("one complete flat block");
+    expect(calls[1]?.prompt).toContain("use no nested structural headings");
+    for (const field of [
+      "Work unit:",
+      "Boundary:",
+      "Goal:",
+      "Paths and evidence:",
+      "Dependencies:",
+      "Allowed ownership:",
+      "Verification:",
+      "Done when:",
+    ]) {
+      expect(calls[1]?.prompt, field).toContain(field);
+    }
+    for (const boundary of [
+      /file boundary for isolated file ownership/u,
+      /function boundary for one\s+behavior with local callers/u,
+      /behavior boundary when one observable contract\s+crosses files/u,
+      /side-effect boundary for database, API, email, file, or\s+subprocess operations/u,
+      /ownership boundary for configuration, common, or\s+platform modules/u,
+    ]) {
+      expect(calls[1]?.prompt, boundary.source).toMatch(boundary);
+    }
+    expect(calls[1]?.prompt).toMatch(/one frozen\s+`steps\.md` catalog before execution/u);
+    expect(calls[1]?.prompt).toContain("one top-level Plan Implement run per exact step");
+    expect(calls[1]?.prompt).toContain("`workflow-author` Design");
+    expect(calls[1]?.prompt).toMatch(/Plan must not generate or build\s+workflow source/u);
+    expect(calls[1]?.prompt).toMatch(/optional reviewer after a generated step belongs to that\s+Design/u);
     expect(published).toEqual(["plan.md"]);
     expect(result).toEqual({ relativePath: "plan.md" });
   });

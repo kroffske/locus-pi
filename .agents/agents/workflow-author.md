@@ -42,6 +42,35 @@ Build creates one matching `.pi/workflows/<name>.workflow.mjs`, validates source
 identity and module load, and stops. If the approved graph needs a material
 change, update the design back to `DRAFT`, explain the change, and do not build.
 
+### Approved Plan/catalog Design input
+
+A Design request may name an owner-approved `plan.md` and its canonical
+`steps.md`. Read both plus
+`skills/locus-pi-workflows/references/plan-to-sequential-workflow.md`. Treat each
+complete `## S<n>` block as one frozen task prompt. Design an optional
+project-local sequential workflow only; the ordinary main-agent todo path
+remains available and is usually more recoverable.
+
+The Design records the exact Plan/catalog paths, task count, literal-versus-caller
+transport, task order/dependencies, idempotence/history rule, attempt formula,
+and whether a visibly separate reviewer follows each implementer. The reviewer
+is advisory or blocking exactly as the Design says; review does not imply an
+automatic retry. Plan approval authorizes neither this Design nor Build. Keep the
+ordinary Design -> explicit owner approval -> Build protocol. Plan approval does
+not imply workflow Build approval.
+
+For the operator-facing path, Build renders every complete approved task block
+as a literal author-known prompt in generated project-local source. Use caller
+`items` only when a programmatic embedder owns and transports the frozen list.
+Never parse `steps.md` or semantic task prose at runtime, and never add a
+workflow under `extensions/workflows/examples/`.
+
+Each implementer receives exactly one complete task block. Its prompt must check
+the matching `history/S<n>.md`, skip only credible completed work, stay inside
+that task, and deterministically write or replace its own history record. A
+reviewer receives the implementation result and durable evidence separately; it
+never replaces or silently merges with the implementer.
+
 ## Design method
 
 1. Decompose the job into coherent subtasks. Agent count follows decomposition;
@@ -99,14 +128,21 @@ Standard generated source is a readable harness:
 - Declare stable agent identities and role labels together near the top.
 - Keep direct `agent()` calls, prompts, exact text handoffs, branches, and edges
   visible in execution order.
+- Omit `maxToolCalls` and `timeoutMs` from standard generated source. Emit a
+  per-attempt override only when the operator explicitly requested a narrower
+  or raised fuse and the approved Design records why. Do not rewrite legacy
+  workflows merely to remove explicit values.
 - Use exact text for narrative outputs. Extraction agents return complete textual
   findings/lists; composers return complete Markdown; reviewers return complete
   corrected replacements. Pass and publish those values unchanged.
 - Treat workflow input as semantic text, not a compact data protocol. Do not
   `split`, regex-match, or parse it into branch units. Fixed fan-out units must be
   named in the approved design and source. Runtime-discovered units use
-  `agent(prompt, { handoffs: { maxItems, maxItemChars } })`; runtime owns the
-  bounded string-array shape and workflow code passes each text unit unchanged.
+  `agent(prompt, { handoffs: { maxItems, maxItemChars } })` with a clearly named,
+  domain-derived `maxItems` in `1..100`; that bound protects one structured
+  transport response and is not a default business limit. Runtime owns one
+  repair and fail-closed exhaustion, and workflow code passes each text unit
+  unchanged.
 - Use `agent(prompt, { choice: ["accept", "revise"] })` only for a small machine
   branch. Runtime owns format repair and fail-closed exhaustion.
 - Use uncaught `parallel()`/`pipeline()` failure by default.
@@ -165,6 +201,13 @@ Saved workflow composition is the single host-owned exception: one parent may
 invoke one level of reviewed saved children through `invokeWorkflow()`. It is not
 recursive delegation. The runtime owns lineage, checkpoints, cycle rejection,
 shared cancellation/concurrency/call budget, and the workflow-workspace lease.
+
+Budget source stays host-owned unless the operator requests a per-attempt
+override: 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+characters per attempt; 10,000 physical attempts per run; a 24-hour gate before
+starting a new child; concurrency four. Implementers, reviewers, transport
+retries, and value-repair attempts all consume the shared `totalAgents` capacity.
+The SDK timeout is a later transport backstop, not authored workflow policy.
 
 ## Build checks
 

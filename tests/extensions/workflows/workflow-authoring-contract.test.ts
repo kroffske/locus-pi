@@ -415,7 +415,110 @@ ${skill[1] ?? ""}
     expect(authoring).toContain("requires at least one work item");
     expect(authoring).not.toContain("requires at least one caller-supplied item");
     expect(authoring).not.toContain("[...items]");
-    expect(source("docs/extensions/active/workflows.md")).toContain("`totalAgents` | `10000`");
+    expect(source("docs/extensions/active/workflows.md")).toContain("10,000 physical attempts/run");
+  });
+
+  it("omits default per-attempt fuse fields from standard authoring output", () => {
+    const standardSnippets = [
+      "extensions/workflows/AUTHORING.md",
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "docs/extensions/active/workflows.md",
+    ].flatMap((relativePath) => declaredStandardDocSnippets(relativePath));
+
+    for (const snippet of standardSnippets) {
+      expect(snippet).not.toMatch(/\b(?:maxToolCalls|timeoutMs)\s*:/u);
+    }
+
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/extensions/active/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toMatch(/omit(?:s)? `maxToolCalls` and `timeoutMs`/iu);
+      expect(text).toMatch(/operator explicitly request/u);
+      expect(text).toMatch(/narrower\s+or\s+raised/u);
+    }
+
+    expect(source("extensions/workflows/references/patterns.md")).not.toMatch(/\b(?:maxToolCalls|timeoutMs)\s*:/u);
+  });
+
+  it("uses design-derived handoff bounds instead of a magic authoring limit", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/extensions/active/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).not.toMatch(/maxItems\s*:\s*64/u);
+      expect(text).toContain("MAX_DAGS_IN_SCOPE");
+      expect(text).toMatch(/transport safety|protects one\s+structured/u);
+      expect(text).toMatch(/not\s+a default business limit/u);
+      expect(text).toMatch(/1\.\.100|1–100/u);
+      expect(text).toMatch(/one\s+repair|repairs\s+one/u);
+      expect(text).toMatch(/fail(?:s|ure)?[- ]closed/u);
+    }
+  });
+
+  it("offers an approval-first Plan catalog to sequential project workflow path", () => {
+    const card = source("skills/locus-pi-workflows/references/plan-to-sequential-workflow.md");
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/extensions/active/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toContain("plan.md");
+      expect(text).toContain("steps.md");
+      expect(text).toMatch(/literal\s+author-known/u);
+      expect(text).toMatch(/caller\s+`items`|caller\s+items/u);
+      expect(text).toMatch(/Plan approval.*(?:not|never).*Build approval/isu);
+    }
+    expect(card).toMatch(/one\s+complete task block/u);
+    expect(card).toMatch(/visibly\s+separate child/u);
+    expect(card).toMatch(/no Locus items count or\s+character policy/u);
+    expect(card).not.toMatch(/\bunbounded\b/iu);
+    const author = source(".agents/agents/workflow-author.md");
+    expect(author).toContain("Each implementer receives exactly one complete task block");
+    expect(author).toContain("matching `history/S<n>.md`");
+    expect(author).toMatch(/reviewer receives.*separately/isu);
+    expect(author).toContain("never add a\nworkflow under `extensions/workflows/examples/`");
+  });
+
+  it("links canonical agent, authority, event, and human-unit budget semantics", () => {
+    const skill = source("skills/locus-pi-workflows/SKILL.md");
+    const author = source(".agents/agents/workflow-author.md");
+    const manual = source("docs/extensions/active/workflows.md");
+    const agentsAudit = source("docs/source-audit/agents.md");
+    const workflowsAudit = source("docs/source-audit/workflows.md");
+
+    expect(manual).toContain('agent(prompt, { agent: "default" })');
+    expect(manual).toContain("project `.agents/agents/`");
+    expect(manual).toContain("`~/.agents/agents/`");
+    expect(manual).toContain("package's bundled `.agents/agents/`");
+    expect(manual).toContain("full host-exposed tool surface");
+    expect(manual).toContain("is not authorization");
+    expect(manual).toContain("presentation metadata");
+    expect(manual).toContain("`phase()` is the\ncall that journals actual execution");
+    expect(manual).toContain("one readable script event");
+    for (const text of [skill, author, manual]) {
+      expect(text).toMatch(/1,000 (?:tool )?calls/u);
+      expect(text).toMatch(/24-hour/u);
+      expect(text).toMatch(/20 turns/u);
+      expect(text).toMatch(/500,000\s+(?:answer\s+)?characters/u);
+      expect(text).toMatch(/10,000\s+physical attempts/u);
+      expect(text).toMatch(/four attempts concurrently|concurrency four|4 attempts at once/u);
+      expect(text).toMatch(
+        /Review.*retry attempts consume|reviewer.*retry.*consume|review.*transport-retry.*consume/isu,
+      );
+      expect(text).toMatch(/SDK timeout.*later transport backstop/isu);
+    }
+    expect(agentsAudit).toContain("project -> user -> package precedence");
+    expect(workflowsAudit).toContain("no Locus items count or character policy");
   });
 
   it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {
@@ -444,6 +547,7 @@ ${skill[1] ?? ""}
       "dynamic-orchestrator-workers.md",
       "fixed-fan-out.md",
       "human-gate.md",
+      "plan-to-sequential-workflow.md",
       "sequential-text.md",
     ]);
     for (const name of cards) {
