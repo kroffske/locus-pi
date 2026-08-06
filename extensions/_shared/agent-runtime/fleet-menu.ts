@@ -8,6 +8,7 @@ import {
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
+import { RenderScheduler } from "../host/render-scheduler.js";
 import type { CustomUiComponent, CustomUiTui } from "../host/pi-api.js";
 
 export const FLEET_MENU_MAX_ROWS = 8;
@@ -290,6 +291,7 @@ export class FleetFocusComponent implements CustomUiComponent {
   #disposed = false;
   #closed = false;
   readonly #requestRender: () => void;
+  readonly #scheduler: RenderScheduler;
 
   constructor(
     private readonly rows: () => AgentLiveRow[],
@@ -298,7 +300,10 @@ export class FleetFocusComponent implements CustomUiComponent {
     private readonly done: (action: FleetMenuAction) => void,
     private readonly theme: AgentLiveThemeLike = {},
   ) {
-    this.#requestRender = () => this.tui.requestRender();
+    // Store churn is coalesced; keystrokes below stay on the direct path so the
+    // cursor never lags behind the operator.
+    this.#scheduler = new RenderScheduler(() => this.tui.requestRender());
+    this.#requestRender = () => this.#scheduler.request();
     agentLiveStore.emitter.on("change", this.#requestRender);
   }
 
@@ -374,6 +379,9 @@ export class FleetFocusComponent implements CustomUiComponent {
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#requestRender);
+    // A trailing render must not outlive the component and paint over whatever
+    // the host put in the editor slot next.
+    this.#scheduler.cancel();
   }
 }
 

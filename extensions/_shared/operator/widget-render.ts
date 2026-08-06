@@ -64,7 +64,12 @@ class OperatorBlockWidget implements CustomUiComponent {
     private readonly block: OperatorBlock,
     private readonly theme?: OperatorThemeLike,
   ) {
-    this.tui.requestRender(true);
+    // Presentation asks for a normal differential paint. A forced full redraw
+    // here clears and repaints the whole frame for every operator block, which
+    // reads as a blink on slow consoles (WSL). When this widget REPLACES an
+    // older one, the outgoing widget's dispose() still forces the clearing
+    // redraw, so nothing is left stale by keeping presentation differential.
+    this.tui.requestRender();
   }
 
   render(width: number): string[] {

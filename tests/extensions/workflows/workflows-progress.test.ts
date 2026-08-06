@@ -13,6 +13,7 @@ import {
   renderAgentLiveRowsText,
 } from "../../../extensions/workflows/progress-widget.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
 import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
@@ -712,6 +713,9 @@ describe("workflow progress widget", () => {
         component,
         line({ kind: "agent_end", agent: "slow", status: "completed", durationMs: 3000, ts: 4, runId: "r1" }),
       );
+      // Let any coalesced trailing render drain before sampling, so the count
+      // below measures timer retirement rather than the throttle window.
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
       const afterEnd = tui.requestRender.mock.calls.length;
       vi.advanceTimersByTime(5000);
       expect(tui.requestRender.mock.calls.length).toBe(afterEnd);
@@ -744,16 +748,84 @@ describe("workflow progress widget", () => {
     }
   });
 
-  it("drops old journal lines and requests a render for every pushed event", () => {
-    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 80 } };
-    const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r");
+  it("drops old journal lines and coalesces a push storm into a bounded number of renders", () => {
+    // Regression guard for the WSL/Windows flicker: the store emits per SDK
+    // event, and turning each one into a frame is what tore the panel. A burst
+    // must collapse to one leading render plus one trailing flush — while the
+    // last pushed state still survives into the projection.
+    vi.useFakeTimers();
+    try {
+      const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 80 } };
+      const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r");
 
-    for (let i = 0; i < 200; i += 1) {
-      pushProgress(component, line({ kind: "log", message: "x", ts: Date.now(), runId: "r" }));
+      for (let i = 0; i < 199; i += 1) {
+        pushProgress(component, line({ kind: "log", message: "x", ts: 1, runId: "r" }));
+      }
+      pushProgress(component, line({ kind: "log", message: "final-line", ts: 1, runId: "r" }));
+
+      expect(tui.requestRender.mock.calls.length).toBeLessThanOrEqual(2);
+
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
+      expect(tui.requestRender.mock.calls.length).toBeLessThanOrEqual(3);
+
+      // Coalescing must never cost the newest state.
+      const rendered = component.render(80);
+      expect(rendered.length).toBeLessThanOrEqual(24);
+      expect(rendered.join("\n")).toContain("final-line");
+
+      component.dispose();
+    } finally {
+      vi.useRealTimers();
     }
+  });
 
-    expect(component.render(80).length).toBeLessThanOrEqual(24);
-    expect(tui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(200);
+  it("flushes the final frame on finish and stops rendering after dispose", () => {
+    vi.useFakeTimers();
+    try {
+      const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
+      const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "finish-r1");
+
+      pushProgress(component, line({ kind: "agent_start", agent: "slow", ts: 1, runId: "finish-r1" }));
+      for (let i = 0; i < 20; i += 1) {
+        pushProgress(component, line({ kind: "log", message: `x${i}`, ts: 1, runId: "finish-r1" }));
+      }
+      tui.requestRender.mockClear();
+
+      component.finish({ ok: true, result: "done" });
+
+      // The verdict frame is synchronous — never deferred behind the window.
+      expect(tui.requestRender).toHaveBeenCalled();
+
+      tui.requestRender.mockClear();
+      vi.advanceTimersByTime(5000);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips repaints when the projection is unchanged", () => {
+    vi.useFakeTimers();
+    try {
+      const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
+      const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "quiet-r1", {
+        scope: "workflow",
+      });
+      pushProgress(component, line({ kind: "agent_start", agent: "slow", ts: 1, runId: "quiet-r1" }));
+      component.render(100);
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
+      tui.requestRender.mockClear();
+
+      // A row belonging to a different run is outside this widget's projection,
+      // so its churn must not reach the terminal at all.
+      agentLiveStore.begin({ id: "unrelated-row", label: "unrelated", workflowRunId: "other-run" });
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS * 2);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+
+      component.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders failed completion state in place", () => {

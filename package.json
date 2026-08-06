@@ -106,6 +106,7 @@
     "extensions/_shared/host/pi-api.ts",
     "extensions/_shared/project/prompt-command-store.ts",
     "extensions/_shared/host/redaction.ts",
+    "extensions/_shared/host/render-scheduler.ts",
     "extensions/_shared/runtime/runtime-capabilities.ts",
     "extensions/_shared/host/safe-output.ts",
     "extensions/_shared/runtime/session-core.ts",

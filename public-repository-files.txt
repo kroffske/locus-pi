@@ -94,6 +94,7 @@ extensions/_shared/host/error-text.ts
 extensions/_shared/host/files.ts
 extensions/_shared/host/pi-api.ts
 extensions/_shared/host/redaction.ts
+extensions/_shared/host/render-scheduler.ts
 extensions/_shared/host/safe-output.ts
 extensions/_shared/host/validation.ts
 extensions/_shared/model/live-model-display.ts
@@ -398,6 +399,7 @@ tests/shared/operator-ui/operator-question.test.ts
 tests/shared/operator-ui/operator-ui.test.ts
 tests/shared/operator-ui/prompt-shelf-ui.test.ts
 tests/shared/operator-ui/viewer-geometry.test.ts
+tests/shared/render-scheduler.test.ts
 tests/shared/security/security.test.ts
 tests/shared/session/session-core-jsonl.test.ts
 tests/shared/session/session-core.test.ts

@@ -1,4 +1,5 @@
 import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/host/pi-api.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS, RenderScheduler } from "../_shared/host/render-scheduler.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 import {
@@ -72,6 +73,8 @@ export interface WorkflowProgressOptions {
   scope?: "fleet" | "workflow";
   /** Statically declared stages (`meta.phases`): titles plus their planned detail. */
   declaredStages?: readonly WorkflowDeclaredStage[];
+  /** Render coalescing window; `0` renders on every change. Defaults to the shared 4 fps ceiling. */
+  renderMinIntervalMs?: number;
 }
 
 /** One stage a workflow declared before the run started. */
@@ -94,9 +97,17 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   #spinnerIndex = 0;
   #disposed = false;
   readonly #knownRowIds = new Set<string>();
+  readonly #scheduler: RenderScheduler;
+  /**
+   * The last frame handed to the host, keyed by the width it was built for.
+   * Compared against a fresh projection to suppress repaints that would change
+   * nothing on screen. Cleared by `invalidate()` so a theme or layout change
+   * can never be masked by a stale identity proof.
+   */
+  #lastFrame: { width: number; lines: string[] } | undefined;
   readonly #onStoreChange = () => {
     this.#syncLiveTimer();
-    this.tui.requestRender();
+    this.#scheduler.request();
   };
 
   constructor(
@@ -106,8 +117,26 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     readonly runId: string,
     readonly options: WorkflowProgressOptions = {},
   ) {
+    this.#scheduler = new RenderScheduler(() => this.#paintIfChanged(), {
+      minIntervalMs: options.renderMinIntervalMs ?? DEFAULT_RENDER_MIN_INTERVAL_MS,
+    });
     agentLiveStore.emitter.on("change", this.#onStoreChange);
     this.#syncLiveTimer();
+  }
+
+  /**
+   * Project the next frame and ask for a paint only when it differs from the
+   * one already on screen. The store emits on every row mutation, and most of
+   * those — `lastActivityAt` bumps, undisplayed event lines, sub-second elapsed
+   * drift — produce a byte-identical panel.
+   */
+  #paintIfChanged(): void {
+    if (this.#disposed && this.done === undefined) return;
+    const previous = this.#lastFrame;
+    const width = previous?.width ?? this.tui.terminal?.columns ?? 80;
+    const next = this.render(width);
+    if (previous !== undefined && previous.width === width && sameLines(previous.lines, next)) return;
+    this.tui.requestRender();
   }
 
   attachTui(tui: WidgetFactoryTui): void {
@@ -117,6 +146,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   invalidate(): void {
     // Pi invalidates render/theme cache without disposing live progress state.
+    // The cached frame is part of that cache: a re-themed panel renders the
+    // same source to different bytes, so the identity gate must not hold it.
+    this.#lastFrame = undefined;
   }
 
   dispose(): void {
@@ -124,6 +156,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#onStoreChange);
+    this.#scheduler.cancel();
     this.#stopLiveTimer();
   }
 
@@ -134,7 +167,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       this.#knownRowIds.add(workflowGroupLiveRowId(line));
     }
     this.#syncLiveTimer();
-    this.tui.requestRender();
+    // A journal line usually also mutates the live store, so this and
+    // `#onStoreChange` fire back to back; the scheduler folds them into one frame.
+    this.#scheduler.request();
   }
 
   finish(res: {
@@ -166,6 +201,15 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   }
 
   render(width: number): string[] {
+    const lines = this.#project(width);
+    // Always cache what was actually produced, including host-initiated renders
+    // (typing, resize), so the identity gate compares against what is on screen.
+    this.#lastFrame = { width, lines };
+    return lines;
+  }
+
+  /** Pull-based projection. Never serves a cached frame — the cache is only a comparison baseline. */
+  #project(width: number): string[] {
     const rows = this.tui.terminal?.rows ?? 24;
     const budget = Math.max(1, Math.min(rows - 6, 24));
     const liveRows = this.visibleRows();
@@ -395,7 +439,10 @@ export class WorkflowProgressComponent implements CustomUiComponent {
         return;
       }
       this.#spinnerIndex = (this.#spinnerIndex + 1) % AGENT_LIVE_SPINNER_FRAME_COUNT;
-      this.tui.requestRender();
+      // 1 Hz is slower than the coalescing window, so this always lands on a
+      // leading edge and liveness is unchanged — but it now passes the identity
+      // gate, so a fleet with nothing moving stops repainting entirely.
+      this.#scheduler.request();
     }, LIVE_TICK_MS);
     (timer as { unref?: () => void }).unref?.();
     this.#tickTimer = timer;
@@ -499,6 +546,11 @@ function workflowProgressDonePresentation(status: WorkflowProjectedStatus): {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled workflow progress status: ${String(value)}`);
+}
+
+function sameLines(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((line, index) => line === b[index]);
 }
 
 function formatProgressTailLine(line: WorkflowJournalLine): string {

@@ -10,6 +10,7 @@ import type {
   AgentTranscriptToolBlock,
 } from "../_shared/agent-runtime/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
+import { RenderScheduler } from "../_shared/host/render-scheduler.js";
 import { agentLiveDisplayName, agentLiveTitle } from "../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
@@ -200,6 +201,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   #inputNotice: string | undefined;
   readonly #title: string;
   readonly #unsubscribe: () => void;
+  readonly #scheduler = new RenderScheduler(() => this.tui.requestRender());
   #storeAttached = true;
   #releaseMouseScroll = () => {};
   #unregisterGlobal = () => {};
@@ -216,6 +218,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
     this.#selection = rounds?.active ?? 1;
     this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
+    // Row-lifecycle handling stays synchronous and unthrottled — a vanished row
+    // must close or detach the overlay at once. Only the repaint is coalesced.
     const requestRender = () => {
       if (this.#disposed) return;
       if (agentLiveStore.rowForExecution(this.execution) === undefined) {
@@ -223,7 +227,7 @@ export class AgentSessionViewer implements CustomUiComponent {
         else this.#close();
         return;
       }
-      this.tui.requestRender();
+      this.#scheduler.request();
     };
     agentLiveStore.emitter.on("change", requestRender);
     this.#unsubscribe = () => agentLiveStore.emitter.off("change", requestRender);
@@ -350,6 +354,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     if (!this.#storeAttached) return;
     this.#storeAttached = false;
     this.#unsubscribe();
+    // Drop any coalesced repaint queued before the row went away.
+    this.#scheduler.cancel();
   }
 
   #close(): void {

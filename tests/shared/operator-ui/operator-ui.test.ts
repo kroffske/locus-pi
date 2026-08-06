@@ -141,7 +141,10 @@ describe("typed operator widget adapter", () => {
       ansiTheme("35"),
     );
     const lines = component.render(48);
-    expect(requestRender).toHaveBeenCalledWith(true);
+    // Presentation is a normal differential paint; only teardown forces a full
+    // redraw, so a block appearing never blinks the frame.
+    expect(requestRender).toHaveBeenCalled();
+    expect(requestRender).not.toHaveBeenCalledWith(true);
     expect(lines.join("\n")).toContain("[VIEW]");
     expect(lines.join("\n")).toContain(block.primary);
     expect(lines.every((line) => visibleWidth(line) <= 48)).toBe(true);

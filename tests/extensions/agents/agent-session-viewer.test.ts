@@ -8,6 +8,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
 import agents from "../../../extensions/agents/index.js";
 import {
   AgentSessionViewer,
@@ -276,6 +277,41 @@ describe("AgentSessionViewer", () => {
     const updated = viewer.render(80).join("\n");
     expect(updated).toContain("message-12");
     viewer.dispose();
+  });
+
+  it("coalesces a streaming event storm into a bounded number of repaints", () => {
+    // A streaming child mutates its row per SDK event. The drill overlay is
+    // full-screen, so an unthrottled repaint per event is the most expensive
+    // flicker source of all on a slow console.
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "storm-viewer", agentName: "reviewer", label: "Review" });
+      const tui = { terminal: { rows: 8, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+      viewer.render(80);
+      tui.requestRender.mockClear();
+
+      for (let i = 0; i < 50; i += 1) {
+        agentLiveStore.feedSessionEvent(row.id, {
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: `stream-${i}` }], stopReason: "stop" },
+        });
+      }
+
+      expect(tui.requestRender).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
+      expect(tui.requestRender).toHaveBeenCalledTimes(2);
+
+      // The newest streamed content is still what the viewer projects.
+      expect(viewer.render(80).join("\n")).toContain("stream-49");
+
+      tui.requestRender.mockClear();
+      viewer.dispose();
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS * 4);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("captures wheel history, keeps the selected child output anchored, and returns to the live tail", () => {
