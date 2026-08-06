@@ -58,6 +58,14 @@ If the user revises the graph, update the design and ask again. If Build discove
 a material algorithm change, return to Design instead of hiding the change in
 source.
 
+An owner-approved `plan.md` plus its canonical `steps.md` may be Design input for an
+optional sequential project-local workflow. Read
+[`references/plan-to-sequential-workflow.md`](./references/plan-to-sequential-workflow.md).
+Preserve every complete task block: Build renders those blocks as literal
+author-known prompts in generated source, or uses caller `items` only when a
+programmatic embedder owns the frozen list. Plan approval never implies workflow
+Build approval.
+
 ## Design contract
 
 The design is short Markdown a reader can approve without opening JavaScript:
@@ -101,6 +109,11 @@ Declare stable agent identities together near the top. Keep
 every prompt, call, branch, and exact handoff visible where it executes.
 Declare `meta.profile: "standard"` in every newly generated workflow.
 
+Omit `maxToolCalls` and `timeoutMs` from standard generated `agent()` options.
+The package already applies emergency defaults to every child attempt. Emit a
+per-attempt override only when the operator explicitly requests a narrower or
+raised fuse and the approved Design records why. Do not sweep legacy workflows.
+
 ```js
 const AGENTS = {
   reviewer: { agent: "reviewer" },
@@ -130,10 +143,13 @@ Standard agent answers have three forms:
 - `choice`. Use `agent(prompt, { choice: ["accept", "revise"] })` only when
   JavaScript must select a branch. Runtime owns format instructions, one repair,
   parsing, validation, journal evidence, replay, and fail-closed exhaustion.
-- `handoffs`. Use `agent(prompt, { handoffs: { maxItems: 64 } })` when one
-  discovery call must return a bounded runtime list of complete text work units.
-  Runtime owns the array shape, blank/duplicate rejection, bounds, repair,
-  replay, and failure; workflow code receives `string[]` and uses `parallel()`.
+- `handoffs`. Use `agent(prompt, { handoffs: { maxItems: MAX_DAGS_IN_SCOPE } })`
+  when one discovery call must return a small bounded runtime list of complete
+  text work units. The approved Design derives and names the bound from the
+  domain; it is transport safety, not a default business limit. Runtime requires
+  `maxItems` in `1..100` and owns the array shape, blank/duplicate rejection, one
+  repair, replay, and fail-closed exhaustion. Workflow code receives `string[]`
+  and uses `parallel()` or `pipeline()`.
 
 `agent()` is the only model-calling primitive. `parallel()` is the fail-closed
 barrier for independent known calls; `pipeline()` handles fixed ordered stages
@@ -155,7 +171,8 @@ collectors, permission fields, or alternate writable roots.
 Workflow `input` remains semantic text. A main agent that already knows exact
 work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow
 source reads the immutable list with `dsl.items()`. Values, order, whitespace,
-empty strings, and duplicates are preserved without count or character policy,
+empty strings, and duplicates are preserved with no Locus items count or
+character policy,
 so source enforces only its real domain rule, such as requiring at least one item.
 Standard source does not encode a hidden line/CSV/JSON protocol. It does not
 `split`, regex-match, or parse semantic input into branch units. Author-known arrays, caller-supplied
@@ -272,8 +289,12 @@ Dynamic decomposition therefore stays in the visible harness: caller-supplied
 `parallel()` or `pipeline()` calls process them under the shared workflow budget.
 The default `totalAgents` fuse is 10,000 so fine-grained finite decomposition has
 headroom; exceeding it still fails the run as a genuine runaway loop.
-Per-call and run timeouts default to 24-hour emergency fuses, while each child
-keeps a 20-turn host maximum. Use natural task evidence, not a fixed one-word
+The package defaults are 1,000 tool calls, a 24-hour timeout, 20 turns, and
+500,000 answer characters per child attempt; one run admits at most 10,000
+physical attempts, starts no new child after its 24-hour gate, and runs at most
+four attempts concurrently. Review and retry attempts consume `totalAgents`.
+The SDK timeout is a later transport backstop, not authored policy. Use natural
+task evidence, not a fixed one-word
 acknowledgement protocol. Build review rejects a mandatory acknowledgement whose
 answer has no consumer; the structural checker deliberately does not parse
 prompt English to guess that intent.

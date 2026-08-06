@@ -24,6 +24,16 @@ T-111 selection update: the resolver above is unchanged, but the caller no longe
 
 T-138 child-policy note: the SDK child-session path passes `cwd`, allowed tools, model and optional `appendSystemPrompt` to `createAgentSession`. No confirmed Pi SDK option is used here to inherit parent yolo/approval policy into nested child sessions, so the local docs describe that policy as not inherited rather than claiming hidden propagation.
 
+2026-08-06 workflow-authoring clarification: workflow `agent(prompt)` and
+`agent(prompt, { agent: "default" })` resolve the same catalog slot with
+project -> user -> package precedence; `default` is not a pinned bundled persona
+or model. Standard workflow children receive the full host-exposed tool surface
+and inherit parent permission mode. Catalog roles select prompt/model identity,
+while `workspaceMode` states isolation intent and grants no authority. This is a
+documentation/prompt clarification over existing resolver and bridge behavior;
+it changes no agent runtime or capability boundary. The cross-surface lock is
+`tests/extensions/workflows/workflow-authoring-contract.test.ts`.
+
 Historical T-209 viewer update superseded the T-116 product viewer while keeping `/agent drill` as compatibility entry. It introduced the local `AgentSessionViewer`, native assistant/tool components, original-request projection, and natural-height terminal-scrollback contract. The 2026-08-05 update below replaces only that natural-height/presentation-input behavior; the resolver, bounded timeline, evidence honesty, and decision not to use `ctx.switchSession()` remain current.
 
 2026-08-05 `/ps` live-session update: a deterministic Pi TUI harness reproduced the reported flicker as `ESC[2J ESC[H ESC[3J` after an in-place assistant update above a tall tool block. Pi's differential renderer takes that full-redraw branch when the first changed line sits above the previous viewport, so WSL only amplifies the visible effect. `AgentSessionViewer` now occupies one terminal height, follows the live tail, and pages retained history with `PgUp`/`PgDn` plus `Home`/`End`; `Ctrl+O` uses Pi's configured tool-expansion keybinding and `Esc` closes without aborting. The same surface optionally creates the public `ExtensionEditorComponent`. The SDK host registers a v5 process-shared, execution-authority-checked input callback only during an active `AgentSession.prompt()` and forwards Enter submissions through `prompt(..., { streamingBehavior: "steer" })`. Final settlement, row replacement, pruning, or reset removes the callback, so retained terminal rows never pretend to be writable. This implementation is local/write-from-scratch and follows public Pi TUI differential rendering, native component, keybinding, `AgentSession.isStreaming`, and prompt steering contracts.

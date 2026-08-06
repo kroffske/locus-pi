@@ -8,6 +8,11 @@ Worker count is runtime-selected but bounded in the discovery declaration.
 This same-run pattern is intentionally non-resumable: fresh model output must
 never be rebound to old durable checkpoint keys.
 
+The approved Design derives a small maximum from the domain (for example, the
+maximum DAGs in the selected deployment scope). `maxItems` is required in the
+runtime range `1..100`; it is transport safety for one structured response, not
+a default business limit.
+
 Cost: `1 + K×W + 1` calls for `K` discovered units, `W` visible workers per
 unit, and one composer. The run-level 10,000-call fuse and global concurrency
 gate remain authoritative.
@@ -29,8 +34,9 @@ Primitive:
 
 ```js
 const pwd = dsl.projectRoot();
+const MAX_DAGS_IN_SCOPE = 12;
 const units = await agent("Return one complete handoff per discovered unit.", {
-  handoffs: { minItems: 1, maxItems: 64, maxItemChars: 4000 },
+  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
 });
 
 const findings = await parallel(
@@ -43,8 +49,14 @@ const findings = await parallel(
 );
 ```
 
-Failure: invalid, blank, duplicate, or over-limit discovery is repaired once by
-runtime and then fails closed. Any worker failure rejects the whole barrier.
+Failure: invalid, blank, duplicate, or over-limit discovery receives one repair
+from runtime and then fails closed. Any worker failure rejects the whole barrier.
+
+For a large catalog, do not raise this one-response shape into a hidden inventory
+policy. Freeze an owner-approved catalog, then render its complete task prompts
+literally in project-local source or pass them through caller `items`, which has
+no Locus items count or character policy. Total attempts, time, context, JSON,
+and Node memory still bind execution.
 
 For resumable execution, stop after discovery and expose its human-readable
 list for approval. A separate caller then starts the durable parent with a

@@ -74,17 +74,14 @@ Hard rules:
 
 Your final text is the handoff the next stage receives, not a message to a human.`;
 
-// `maxToolCalls: 1_000` restates the runtime default so the runaway fuse is
-// visible in the source. Drop it, or lower it, when a stage should be cheaper.
-const STAGE_DEFAULTS = Object.freeze({
-  maxToolCalls: 1_000,
+// `workspaceMode` states isolation intent, not authorization or a tool limit.
+// Package per-attempt emergency fuses stay host-owned unless the operator asks
+// the approved Design for a narrower or raised override.
+const READ_OPTIONS = Object.freeze({
   workspaceMode: "project",
 });
-const READ_OPTIONS = Object.freeze({
-  ...STAGE_DEFAULTS,
-});
 const PUBLISH_OPTIONS = Object.freeze({
-  ...STAGE_DEFAULTS,
+  workspaceMode: "project",
 });
 
 phase("resolve-scope");

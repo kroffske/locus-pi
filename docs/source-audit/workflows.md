@@ -536,6 +536,23 @@ authoring saved `.pi/workflows/<name>.workflow.mjs` files. It is not added to
 surface. The active default package surface remains the `workflows` extension at
 `./extensions/workflows/index.ts`.
 
+The 2026-08-06 authoring contract changes guidance, not runtime. New standard
+source omits per-attempt `maxToolCalls` and `timeoutMs` unless the operator asks
+for a narrower or raised fuse; package defaults and legacy workflows remain
+unchanged. Model-discovered `handoffs` still requires one named domain/design
+bound in `1..100`, uses one repair, and fails closed. The bound protects one
+structured transport response and is not a default business limit.
+
+Large approved execution uses a frozen catalog. A programmatic embedder may pass
+exact caller `items`, which has no Locus items count or character policy; an
+operator-facing `workflow-author` Build preferably renders complete canonical
+`steps.md` blocks as literal author-known prompts in project-local source. The
+new `skills/locus-pi-workflows/references/plan-to-sequential-workflow.md` card
+keeps one complete task per sequential implementer and allows one visibly
+separate reviewer after each task. Plan approval does not replace workflow
+Design -> explicit owner approval -> Build, and no file was added under the
+Package workflow registry.
+
 ## Review basis
 
 - `extensions/workflows/manifest.json` records the active command/tool surfaces,
@@ -559,6 +576,7 @@ surface. The active default package surface remains the `workflows` extension at
   `tests/extensions/workflows/workflow-transcript.test.ts`,
   `tests/extensions/workflows/workflows-launch-gate.test.ts`,
   `tests/extensions/workflows/workflows-progress.test.ts`,
+  `tests/extensions/workflows/workflow-authoring-contract.test.ts`,
   `tests/shared/workflows/workflow-agent-handoffs.test.ts`,
   `tests/shared/workflows/workflow-agent-schema.test.ts`,
   `tests/shared/workflows/workflow-replay.test.ts`, and
