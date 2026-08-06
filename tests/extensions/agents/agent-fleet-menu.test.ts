@@ -9,6 +9,7 @@ import {
   selectFleetMenuRows,
 } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import { agentLiveStore, type AgentLiveStatus } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveChildRowId,
@@ -506,6 +507,71 @@ describe("agent fleet menu", () => {
     expect(fleetMenuState.selectedRowId).toBe(selectedAfterDispose);
     expect(done).not.toHaveBeenCalled();
     expect(requestRender).not.toHaveBeenCalled();
+  });
+
+  it("coalesces a live-mutation storm and drops the trailing repaint on dispose", () => {
+    // The focused /ps selector subscribes to the live store, which emits once
+    // per SDK event. Unthrottled that is the render storm that flickers on WSL.
+    vi.useFakeTimers();
+    try {
+      const target = row("storm-a", "storm row");
+      const requestRender = vi.fn();
+      const component = new FleetFocusComponent(
+        () => [...agentLiveStore.rows.values()],
+        {},
+        { requestRender },
+        vi.fn(),
+      );
+      component.render(120);
+      requestRender.mockClear();
+
+      for (let i = 0; i < 50; i += 1) agentLiveStore.patch(target.id, { title: `mutation ${i}` });
+
+      // One leading repaint; the other 49 fold into a single trailing one.
+      expect(requestRender).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS);
+      expect(requestRender).toHaveBeenCalledTimes(2);
+
+      // Newest state still reaches the screen.
+      expect(component.render(120).join("\n")).toContain("mutation 49");
+
+      // A pending trailing repaint must not outlive the component.
+      agentLiveStore.patch(target.id, { title: "after close" });
+      requestRender.mockClear();
+      component.dispose();
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS * 4);
+      expect(requestRender).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps cursor movement on the immediate render path", () => {
+    // Keystrokes are already human-rate-limited; throttling them would add
+    // latency exactly where it is most visible.
+    vi.useFakeTimers();
+    try {
+      row("cursor-a", "cursor row a");
+      row("cursor-b", "cursor row b");
+      const requestRender = vi.fn();
+      const component = new FleetFocusComponent(
+        () => [...agentLiveStore.rows.values()],
+        {},
+        { requestRender },
+        vi.fn(),
+      );
+      component.render(120);
+      requestRender.mockClear();
+
+      component.handleInput("down");
+      component.handleInput("up");
+      component.handleInput("down");
+
+      expect(requestRender).toHaveBeenCalledTimes(3);
+      component.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a stale menu result after reload even when the new session reuses the row id", async () => {

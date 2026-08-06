@@ -163,6 +163,10 @@ describe("AgentLiveTranscript", () => {
     expect(snapshot.latestMessage).toBe("line 124");
   });
 
+  // Builds ~600 MB of string data (40 messages x 150 items x 100 KB), which
+  // takes ~4s of the 5s default budget even on a fast machine — so it times out
+  // intermittently under parallel load and on slower CI runners. The bound is
+  // what this test asserts, not its speed; give it explicit headroom.
   it("bounds per-message content items and aggregate transcript bytes/nodes", () => {
     const huge = "x".repeat(100_000);
     const messages = Array.from({ length: 40 }, (_unused, index) => ({
@@ -180,5 +184,5 @@ describe("AgentLiveTranscript", () => {
       expect(last.message.content).toHaveLength(100);
       expect(last.message.content[0]?.text?.length).toBeLessThanOrEqual(4_000);
     }
-  });
+  }, 30_000);
 });

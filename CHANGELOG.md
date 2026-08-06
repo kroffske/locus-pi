@@ -4,6 +4,25 @@ This file records user-visible changes to the public package.
 
 ## Unreleased
 
+### Fixed
+
+- **Live agent surfaces no longer flicker on slow terminals (notably Windows/WSL).**
+  The agent live store emits once per child-agent SDK event, and every live
+  surface turned each emission straight into a terminal repaint. Across the WSL
+  console boundary each repaint is a real cross-process write, so `/ps`, the
+  fleet panel, and the drill viewer visibly tore while an agent streamed. Live
+  repaints are now coalesced to at most four per second — a leading render keeps
+  the surface responsive to the change that triggered it, and a trailing render
+  guarantees the last state is never dropped. The fleet panel additionally skips
+  repaints whose projection is byte-identical to what is already on screen, so
+  an idle fleet stops repainting entirely. Keystrokes keep the immediate render
+  path, so cursor movement in `/ps` is unchanged. Presenting an operator block
+  no longer forces a full-screen redraw (teardown still does, which is what
+  clears stale glyphs), and the workflow tool card now ticks at 1 Hz to match
+  its own second-granular content instead of repainting four times per visible
+  change. Liveness cadence is unchanged: spinners and elapsed counters still
+  update once a second.
+
 ### Changed
 
 - **Planning now stops for review instead of rolling into implementation.**

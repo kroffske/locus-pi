@@ -273,7 +273,9 @@ describe("workflow tool card", () => {
       theme,
       context,
     );
-    vi.advanceTimersByTime(500);
+    // The card ticks at 1 Hz: fast enough for a second-granular elapsed
+    // counter, slow enough not to repaint four times per visible change.
+    vi.advanceTimersByTime(2_000);
     expect(invalidate).toHaveBeenCalledTimes(2);
 
     const completed = tool.renderResult!(

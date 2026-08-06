@@ -14,7 +14,13 @@ import {
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
-const TICK_MS = 250;
+/**
+ * The card's only time-varying content is the spinner glyph and a
+ * second-granular elapsed counter, so anything faster than 1 Hz repaints
+ * without a visible difference. This also matches the fleet panel's tick, which
+ * stops the two live surfaces beating against each other.
+ */
+const CARD_TICK_MS = 1000;
 const COMPACT_AGENT_LIMIT = 4;
 const TECHNICAL_TONE = "syntaxKeyword";
 
@@ -205,7 +211,7 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
   #syncTimer(): void {
     const needsTicks = this.#options.isPartial && this.#model.status === "running";
     if (needsTicks && this.#timer === undefined) {
-      this.#timer = setInterval(() => this.#invalidate(), TICK_MS);
+      this.#timer = setInterval(() => this.#invalidate(), CARD_TICK_MS);
       this.#timer.unref?.();
     } else if (!needsTicks) {
       this.#stopTimer();
@@ -309,7 +315,7 @@ function fitAgentIdentityBeforeState(
 }
 
 function spinnerIndex(now = Date.now()): number {
-  return Math.floor(now / TICK_MS) % SPINNER_FRAMES.length;
+  return Math.floor(now / CARD_TICK_MS) % SPINNER_FRAMES.length;
 }
 
 function singleLine(value: string): string {
