@@ -1916,6 +1916,13 @@ source, and `runWorkflowScript` applies it to the runtime on every run:
 | `turns`       | 20 turns per child attempt    | Assistant turns per child attempt, equal to the host maximum.                                                                                                                                                                     |
 | `answerChars` | 500,000 characters per answer | Characters in one child answer.                                                                                                                                                                                                   |
 
+The SDK transport backstop is a per-host-turn timer computed as
+`ceil(timeoutMs / maxTurns) + 5_000` milliseconds. The `5_000` is a five-second
+safety **margin per turn**, not a five-second workflow timeout. With the shipped
+defaults, each host turn gets 4,325,000 ms (72 minutes 5 seconds); across 20
+turns that is 24 hours plus 100 seconds, so the workflow's own 24-hour
+per-attempt fuse remains the first named deadline.
+
 Review and retry attempts consume `totalAgents` exactly like implementation
 attempts. The budget counts physical attempts, not only authored `agent()` call
 sites.

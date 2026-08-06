@@ -66,10 +66,38 @@ describe("Package workflow: plan-implement", () => {
     expect(calls[0]?.prompt).toContain("`history/S<n>.md`");
     expect(calls[0]?.prompt).toContain("Execute exactly the one step below");
     expect(calls[0]?.prompt).toContain("one complete flat `## S<n> — ...` block");
-    expect(calls[0]?.prompt).toContain("form one coherent task contract");
-    expect(calls[0]?.prompt).toContain("Respect `Allowed ownership:`");
+    expect(calls[0]?.prompt).toContain("Older saved blocks may carry fewer labels");
+    expect(calls[0]?.prompt).toContain("present as one coherent task contract");
+    expect(calls[0]?.prompt).toContain("If the block declares `Allowed ownership:`");
     expect(calls[0]?.prompt).toMatch(/Do not\s+decompose it into nested tasks/u);
     expect(result).toBe(history);
+  });
+
+  it("keeps older saved steps without ownership labels executable", async () => {
+    const runWorkflow = await loadWorkflow();
+    const legacyStep = [
+      "## S2 — Preserve the legacy migration",
+      "Goal: Keep the existing migration behavior.",
+      "Verification: npm test -- migration",
+    ].join("\n");
+    let prompt = "";
+
+    await runWorkflow(
+      {
+        phase: () => undefined,
+        log: () => undefined,
+        agent: async (value: string) => {
+          prompt = value;
+          return "# S2\nStatus: completed";
+        },
+      },
+      legacyStep,
+    );
+
+    expect(prompt).toContain(legacyStep);
+    expect(prompt).toContain("Older saved blocks may carry fewer labels");
+    expect(prompt).toContain("If that label is absent");
+    expect(prompt).not.toContain("malformed");
   });
 
   it("does not reinterpret a blocked implementation result or start another step", async () => {
