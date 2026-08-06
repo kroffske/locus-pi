@@ -62,6 +62,10 @@ import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 /** Bounded preview for hosts without custom UI; the file path carries the rest. */
 const WORKFLOW_RESULT_WIDGET_LINES = 40;
 const WORKFLOW_MENU_OPTION_LIMIT = 20;
+/** Pi 0.83 throttles TUI renders to a 16 ms frame. Let a closed native selector restore the editor first. */
+const NATIVE_SELECTOR_TEARDOWN_MS = 20;
+/** Clearing an unused status is the host API's no-visible-change way to request the post-prefill render. */
+const WORKFLOW_EDITOR_PREFILL_RENDER_STATUS_KEY = "workflows:editor-prefill-render";
 
 const WORKFLOW_MENU_COMMANDS = ["dashboard", "list", "info", "status", "result", "run", "continue", "stop"] as const;
 
@@ -525,6 +529,7 @@ async function openWorkflowCommandMenu(
     case "run": {
       const selected = await selectWorkflowTarget(ctx, projectRoot, workingDirectory, "run");
       if (selected !== undefined) {
+        await waitForNativeSelectorTeardown();
         fillWorkflowEditor(ctx, `/workflows run ${formatWorkflowCommandToken(selected.ref)}`);
       }
       return;
@@ -584,6 +589,7 @@ async function openWorkflowCommandMenu(
       }
       const selected = await requestWorkflowMenuSelection(ctx, "[SELECT] Workflow run to stop", ["last", ...selectors]);
       if (!presentWorkflowMenuSelectionFailure(ctx, selected, "Retry /workflows stop [runId|last].")) return;
+      await waitForNativeSelectorTeardown();
       fillWorkflowEditor(ctx, `/workflows stop ${selected.value}`);
       return;
     }
@@ -718,6 +724,10 @@ function presentWorkflowMenuSelectionFailure(
   return false;
 }
 
+async function waitForNativeSelectorTeardown(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, NATIVE_SELECTOR_TEARDOWN_MS));
+}
+
 function fillWorkflowEditor(ctx: ExtensionCommandContext, command: string): void {
   if (ctx.ui.setEditorText === undefined) {
     setOperatorWidget(
@@ -732,6 +742,7 @@ function fillWorkflowEditor(ctx: ExtensionCommandContext, command: string): void
   }
   try {
     ctx.ui.setEditorText(command);
+    ctx.ui.setStatus(WORKFLOW_EDITOR_PREFILL_RENDER_STATUS_KEY, undefined);
   } catch (error) {
     setOperatorWidget(
       ctx,

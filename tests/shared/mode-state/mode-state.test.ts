@@ -449,8 +449,18 @@ describe("makeModeAwareEditorClass", () => {
   // must defeat by redefining borderColor as an own accessor after super()).
   class FakeEditor {
     borderColor: (s: string) => string;
+    historyIndex = -1;
+    state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+    scrollOffset = 0;
     constructor() {
       this.borderColor = baseColor;
+    }
+    navigateHistory(_direction: number) {
+      this.historyIndex = 0;
+      this.state = { lines: ["first", "last"], cursorLine: 0, cursorCol: 0 };
+    }
+    setCursorCol(column: number) {
+      this.state.cursorCol = column;
     }
   }
 
@@ -484,6 +494,15 @@ describe("makeModeAwareEditorClass", () => {
     expect(editor.borderColor("─")).toBe("PLAN(─)"); // plan dominates while active
     flag.active = false;
     expect(editor.borderColor("─")).toBe("THINK(─)"); // restored captured base
+  });
+
+  it("recalls command history with the cursor at the end instead of the first character", () => {
+    const ModeAware = makeModeAwareEditorClass(FakeEditor, planColor, () => false);
+    const editor = new ModeAware() as FakeEditor;
+
+    editor.navigateHistory(-1);
+
+    expect(editor.state).toMatchObject({ cursorLine: 1, cursorCol: 4 });
   });
 });
 

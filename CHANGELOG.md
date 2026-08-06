@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow selection and planning handoff now preserve operator context.**
+  Native workflow menus let Pi finish restoring the editor before inserting a
+  run or stop command, preventing the transcript from jumping out of view. The
+  shared main editor now recalls command history at the end of the command
+  instead of moving the cursor to its first character.
+  Started, finished, and result messages now have distinct readable cards; the
+  completion card separates each unique audit run directory from the reusable
+  workflow workspace and names the primary file. The Package `plan` workflow
+  now prints default and optional next actions, while `workflow-author` Build
+  returns the exact copyable `/workflows run <path>` command without running it.
+
 - **Plan now freezes a boundary-driven task catalog before execution.**
   `plan.md` defines coherent top-level work units, while `steps.md` remains the
   only executable catalog and carries complete flat exact-step blocks for fresh

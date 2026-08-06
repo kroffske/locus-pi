@@ -131,7 +131,11 @@ describe("Package workflow: plan", () => {
     expect(calls[1]?.prompt).toMatch(/Plan must not generate or build\s+workflow source/u);
     expect(calls[1]?.prompt).toMatch(/optional reviewer after a generated step belongs to that\s+Design/u);
     expect(published).toEqual(["plan.md"]);
-    expect(result).toEqual({ relativePath: "plan.md" });
+    expect(result).toContain("Plan and steps are ready");
+    expect(result).toContain("workflow-author");
+    expect(result).toContain("Design workflow:");
+    expect(result).toContain("Build approved design: <exact design path>");
+    expect(result).toContain("/workflows run <generated workflow path>");
   });
 
   it("resumes after a planner failure without executing reconnaissance again", async () => {

@@ -29,6 +29,18 @@ export interface ExtensionMessage {
   details?: Record<string, unknown>;
 }
 
+export interface MessageRenderOptions {
+  expanded: boolean;
+  /** Horizontal padding configured by the host outputPad setting. */
+  outputPad: number;
+}
+
+export type MessageRenderer = (
+  message: ExtensionMessage,
+  options: MessageRenderOptions,
+  theme: ThemeLike,
+) => CustomUiComponent | undefined;
+
 export interface SendMessageOptions {
   triggerTurn?: boolean;
   deliverAs?: "steer" | "followUp" | "nextTurn";
@@ -483,6 +495,8 @@ export interface ExtensionAPI {
   /** Current session command inventory; duplicate extension commands may be namespaced by Pi. */
   getCommands?(): Array<{ name: string; description?: string; source?: string; sourceInfo?: unknown }>;
   registerTool(tool: ToolDefinition): void;
+  /** Custom TUI rendering for model-visible extension messages. */
+  registerMessageRenderer?(customType: string, renderer: MessageRenderer): void;
   /**
    * Register a keyboard shortcut (real Pi: ExtensionAPI.registerShortcut).
    * Optional because the test harness and minimal hosts may not implement it.

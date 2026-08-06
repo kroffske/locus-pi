@@ -358,6 +358,13 @@ ${skill[1] ?? ""}
     expect(buildRoute).toContain("and stops");
   });
 
+  it("requires Build to return the exact copyable workflow launch command", () => {
+    const author = source(".agents/agents/workflow-author.md");
+
+    expect(author).toContain("/workflows run <project-relative workflow path>");
+    expect(author).toMatch(/exact copyable launch command/u);
+  });
+
   it("teaches exact text, choice, and handoffs as the standard answer forms", () => {
     for (const relativePath of [
       "skills/locus-pi-workflows/SKILL.md",

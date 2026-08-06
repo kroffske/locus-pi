@@ -226,4 +226,6 @@ After writing the one source file:
 
 Return the design path or built source path, selected pattern, graph summary, and
 checks performed. For Design or Revise, explicitly say source was not created.
-For Build, explicitly say the workflow was not run.
+For Build, explicitly say the workflow was not run. Return the exact copyable launch command
+below with the real built path substituted:
+`/workflows run <project-relative workflow path>`.

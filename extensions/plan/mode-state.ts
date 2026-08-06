@@ -368,6 +368,19 @@ export function makeModeAwareEditorClass(
         },
       });
     }
+
+    navigateHistory(direction: number): void {
+      super.navigateHistory(direction);
+      if (direction !== -1 || (this as any).historyIndex < 0) return;
+      const editorState = (this as any).state as {
+        lines: string[];
+        cursorLine: number;
+      };
+      const lastLine = Math.max(0, editorState.lines.length - 1);
+      editorState.cursorLine = lastLine;
+      (this as any).setCursorCol(editorState.lines[lastLine]?.length ?? 0);
+      (this as any).scrollOffset = 0;
+    }
   };
 }
 
