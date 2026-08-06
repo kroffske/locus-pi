@@ -19,13 +19,18 @@ queue and starts one top-level run per step.
 
 ## Input and workspace
 
-The input is one complete `## S<n> — ...` block copied from `steps.md`. The run
-must use the same workflow workspace as `plan`, normally an explicit
-`tmp/<select-name>` selected through the `workflow` tool.
+The input is one complete flat `## S<n> — ...` block copied from the frozen
+`steps.md` catalog. The block has one structural heading and no nested
+structural headings. Its labeled prose or bullets embed work-unit identity,
+decomposition boundary, exact goal, paths and evidence, dependencies, allowed
+ownership, verification, and done condition. The run must use the same workflow
+workspace as `plan`, normally an explicit `tmp/<select-name>` selected through
+the `workflow` tool.
 
 The implementation agent reads `plan.md`, `steps.md`, and existing history from
-that workspace. Project edits happen in `pwd`; workflow records stay under the
-workspace.
+that workspace. It implements the exact block directly and stops blocked rather
+than widening `Allowed ownership:` or recursively decomposing the task. Project
+edits happen in `pwd`; workflow records stay under the workspace.
 
 For a step keyed `S3`, the agent fully replaces `history/S3.md` with:
 
@@ -51,6 +56,11 @@ task ledger is involved.
 
 Use the installed `locus-task-workflow` skill for the complete orchestration and
 recovery protocol.
+
+Plan Implement has no per-step reviewer. If an operator chooses the separate
+generated-workflow path, optional reviewer behavior belongs to the approved
+`workflow-author` Design for that project-local workflow, not to this Package
+workflow.
 
 ## Boundaries
 

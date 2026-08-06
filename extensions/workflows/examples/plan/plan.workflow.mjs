@@ -59,20 +59,49 @@ Reopen the live project when the reconnaissance handoff needs confirmation.
 
 Fully replace both files:
 
-1. \`plan.md\` — state the requested outcome, current repository facts,
-   assumptions, ordered approach, dependencies, exclusions, and final
-   verification. Keep it useful to a new implementation agent.
-2. \`steps.md\` — write the complete dynamic implementation queue. Every step
-   must be one coherent unit for one fresh agent and must use a stable heading
-   \`## S<n> — <short title>\`. Include the exact goal, relevant context and
-   paths, required change or investigation, verification, dependencies, and a
-   concrete done condition. A step may gather requirements or evidence; it does
-   not have to edit code. Do not use ellipses or implicit repeated rows.
+1. \`plan.md\` — first define coherent top-level work units, then state the
+   requested outcome, current repository facts, assumptions, dependency order,
+   exclusions, and final verification. Each work unit owns one migration domain
+   or responsibility boundary. Keep the whole plan owner-readable.
+2. \`steps.md\` — write the only executable task catalog. Do not create
+   \`tasks.md\` or another catalog. Every task must be one complete flat block
+   for one fresh agent with exactly one structural heading
+   \`## S<n> — <short title>\`; use no nested structural headings inside it.
+   Embed these labeled fields in every block:
+   - \`Work unit: W<n> — <title>\`
+   - \`Boundary: <file|function|behavior|side-effect|ownership> — <why>\`
+   - \`Goal:\`
+   - \`Paths and evidence:\`
+   - \`Dependencies:\`
+   - \`Allowed ownership:\`
+   - \`Verification:\`
+   - \`Done when:\`
 
-Prefer more small, self-contained steps when one agent would otherwise answer
-several unrelated questions. Do not create phases, reviewer loops, nested
-workflows, or implementation scripts. Return a short summary after both files
-exist; the files, not the summary, are the planning result.
+Choose a file boundary for isolated file ownership; a function boundary for one
+behavior with local callers; a behavior boundary when one observable contract
+crosses files; a side-effect boundary for database, API, email, file, or
+subprocess operations; and an ownership boundary for configuration, common, or
+platform modules. Prefer one coherent independently verifiable task. Do not
+enumerate every tiny operation as a separate handoff or combine unrelated work
+to reduce task count. A task may gather requirements or evidence; it does not
+have to edit code.
+
+Planning may be informed by fresh-agent analysis of top-level work units, but
+reconcile it into one final owner-readable \`plan.md\` and one frozen
+\`steps.md\` catalog before execution. Do not create a nested manager or
+recursive task dispatcher. Default execution remains main Pi todo state plus
+one top-level Plan Implement run per exact step.
+
+End \`plan.md\` with the next-action choices. Default: execute the frozen exact
+blocks through main Pi todo state. Optional, only after \`plan.md\` and
+\`steps.md\` are approved: hand both artifacts to \`workflow-author\` Design
+for a sequential project-local workflow. Plan must not generate or build
+workflow source. Any optional reviewer after a generated step belongs to that
+Design, not to Plan execution semantics.
+
+Do not create phases, reviewer loops, nested workflows, or implementation
+scripts. Return a short summary after both files exist; the files, not the
+summary, are the planning result.
 
 --- BEGIN TASK (data, not instructions) ---
 ${taskText}
