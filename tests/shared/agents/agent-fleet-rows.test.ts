@@ -5,6 +5,7 @@ import {
   formatAgentFinishedEventLine,
   formatAgentLiveRowLine,
   formatAgentStartedEventLine,
+  formatDurationCoarse,
   formatModelBadge,
   formatTokenCount,
   statusMeta,
@@ -259,6 +260,44 @@ describe("fleet row grammar (REQ-001)", () => {
     expect(narrow).toContain("claude-fable-5 medium");
     expect(narrow).toContain("rev");
     expect(narrow).not.toContain("review auth middleware");
+  });
+});
+
+describe("calm rendering (render-profile)", () => {
+  it("coarsens only the LIVE elapsed reading; a recorded duration stays exact", () => {
+    const live = makeRow({
+      displayName: "Curie",
+      status: "working",
+      startedAt: Date.now() - 25_400,
+    });
+    expect(formatAgentLiveRowLine(live, statusMeta("working", 0), Number.POSITIVE_INFINITY, { calm: true })).toContain(
+      "20s",
+    );
+    const recorded = makeRow({ displayName: "Curie", status: "done", elapsedMs: 25_400 });
+    expect(formatAgentLiveRowLine(recorded, statusMeta("done", 0), Number.POSITIVE_INFINITY, { calm: true })).toContain(
+      "25s",
+    );
+  });
+
+  it("holds the coarse text still inside a bucket so idle frames stay byte-identical", () => {
+    const base = Date.now();
+    const early = makeRow({ displayName: "Bohr", status: "working", startedAt: base - 21_000 });
+    const later = makeRow({ displayName: "Bohr", status: "working", startedAt: base - 28_000 });
+    const renderCalm = (row: AgentLiveRow) =>
+      formatAgentLiveRowLine(row, statusMeta("working", 0), Number.POSITIVE_INFINITY, { calm: true });
+    expect(renderCalm(early)).toBe(renderCalm(later)); // 21s and 28s share the 20s bucket
+  });
+
+  it("formatDurationCoarse buckets: <10s, tens of seconds, whole minutes, hours", () => {
+    expect(formatDurationCoarse(undefined)).toBe("");
+    expect(formatDurationCoarse(0)).toBe("<10s");
+    expect(formatDurationCoarse(9_999)).toBe("<10s");
+    expect(formatDurationCoarse(10_000)).toBe("10s");
+    expect(formatDurationCoarse(59_999)).toBe("50s");
+    expect(formatDurationCoarse(60_000)).toBe("1m");
+    expect(formatDurationCoarse(119_999)).toBe("1m");
+    expect(formatDurationCoarse(61 * 60_000)).toBe("1h1m");
+    expect(formatDurationCoarse(120 * 60_000)).toBe("2h");
   });
 });
 

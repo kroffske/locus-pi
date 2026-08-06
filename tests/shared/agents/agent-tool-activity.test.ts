@@ -112,6 +112,18 @@ describe("tool-activity action content composer (REQ-004 W3)", () => {
     expect(formatToolActivity(row, 1000 + 8000)).toBe("bash · npm test · 8s"); // 8s > 5s → timer
   });
 
+  it("calm rendering drops the timer even past the 5s threshold", () => {
+    const row = toolRow({
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"npm test -- sums.spec"}',
+      currentToolStartMs: 1000,
+    });
+    // The timer is the only sub-line part whose text changes every second with
+    // no state transition behind it — calm frames must hold still without it.
+    expect(formatToolActivity(row, 1000 + 8000, { showElapsed: false })).toBe("bash · npm test");
+    expect(formatToolActivity(row, 1000 + 8000, { showElapsed: true })).toBe("bash · npm test · 8s");
+  });
+
   it("threshold is strict (> 5s): exactly 5s shows no timer, 5.001s does", () => {
     const row = toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"npm test"}', currentToolStartMs: 0 });
     expect(formatToolActivity(row, 5000)).toBe("bash · npm test");

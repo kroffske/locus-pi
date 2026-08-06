@@ -546,6 +546,38 @@ describe("agent fleet menu", () => {
     }
   });
 
+  it("never repaints for store churn that changes nothing visible", () => {
+    // On a console where every repaint blinks (WSL), the guarantee the operator
+    // needs is byte-identity: a frame equal to what is on screen must not reach
+    // the terminal at all — not even as a throttled leading render.
+    vi.useFakeTimers();
+    try {
+      const target = row("quiet-a", "quiet row");
+      const requestRender = vi.fn();
+      const component = new FleetFocusComponent(
+        () => [...agentLiveStore.rows.values()],
+        {},
+        { requestRender },
+        vi.fn(),
+      );
+      component.render(120);
+      requestRender.mockClear();
+
+      // eventLines feed the observer digest, not the fleet row — invisible here.
+      agentLiveStore.patch(target.id, { eventLines: ["tool bash started"] });
+      vi.advanceTimersByTime(DEFAULT_RENDER_MIN_INTERVAL_MS * 4);
+      expect(requestRender).not.toHaveBeenCalled();
+
+      // A visible change still paints immediately.
+      agentLiveStore.patch(target.id, { title: "now different" });
+      expect(requestRender).toHaveBeenCalledTimes(1);
+
+      component.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps cursor movement on the immediate render path", () => {
     // Keystrokes are already human-rate-limited; throttling them would add
     // latency exactly where it is most visible.
@@ -678,7 +710,9 @@ describe("agent fleet menu", () => {
     expect(agentLiveStore.emitter.listenerCount("change")).toBe(before + 1);
     expect(fleetMenuState.focused).toBe(true);
     expect(fleetMenuState.selectedRowId).toBe(oldFirst.id);
-    agentLiveStore.patch(oldFirst.id, { label: "old row mutated" });
+    // Patch the rendered title (label is shadowed by it and would be filtered
+    // by the frame-identity gate as an invisible change).
+    agentLiveStore.patch(oldFirst.id, { title: "old row mutated" });
     expect(oldRequestRender).toHaveBeenCalledTimes(1);
     expect(discardedRequestRender).not.toHaveBeenCalled();
     oldRequestRender.mockClear();

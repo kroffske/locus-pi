@@ -9,8 +9,10 @@ import {
   agentLiveDisplayName,
   agentLiveTitle,
   formatDuration,
+  formatDurationCoarse,
   orderAgentLiveRows,
 } from "../_shared/agent-runtime/agent-live-panel.js";
+import { defaultRenderProfile } from "../_shared/host/render-profile.js";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
@@ -21,6 +23,12 @@ const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
  * stops the two live surfaces beating against each other.
  */
 const CARD_TICK_MS = 1000;
+/**
+ * Calm rendering has no spinner to animate and shows elapsed in coarse buckets,
+ * so a 1 Hz tick would mostly re-render identical bytes; a bucket boundary can
+ * lag by at most one calm tick, which is the honest trade for a still screen.
+ */
+const CALM_CARD_TICK_MS = 10_000;
 const COMPACT_AGENT_LIMIT = 4;
 const TECHNICAL_TONE = "syntaxKeyword";
 
@@ -78,6 +86,7 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
   #theme: ThemeLike;
   #invalidate: () => void;
   #timer: ReturnType<typeof setInterval> | undefined;
+  readonly #calm = defaultRenderProfile().calm;
 
   constructor(
     model: WorkflowToolCardModel,
@@ -167,12 +176,14 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
   }
 
   #renderAgent(agent: WorkflowToolCardAgent, width: number): string {
-    const state = agentStatusPresentation(agent.status, spinnerIndex());
+    // Calm rendering pins the spinner to its first frame and coarsens elapsed,
+    // so the card's bytes hold still between real transitions.
+    const state = agentStatusPresentation(agent.status, this.#calm ? 0 : spinnerIndex());
     const marker = this.#fg(state.tone, state.marker);
     const stateText = this.#fg(state.tone, state.label);
     const identity = this.#fg(TECHNICAL_TONE, `[agent ${agent.name}]`);
     const work = agent.work === "" ? "" : ` · ${agent.work}`;
-    const elapsed = formatAgentElapsed(agent);
+    const elapsed = formatAgentElapsed(agent, this.#calm);
     const elapsedText = elapsed === "" ? "" : this.#fg("dim", ` · ${elapsed}`);
     const full = `${marker} ${identity} ${stateText}${work}${elapsedText}`;
     if (visibleWidth(full) <= width) return full;
@@ -211,7 +222,7 @@ export class WorkflowToolCardComponent implements CustomUiComponent {
   #syncTimer(): void {
     const needsTicks = this.#options.isPartial && this.#model.status === "running";
     if (needsTicks && this.#timer === undefined) {
-      this.#timer = setInterval(() => this.#invalidate(), CARD_TICK_MS);
+      this.#timer = setInterval(() => this.#invalidate(), this.#calm ? CALM_CARD_TICK_MS : CARD_TICK_MS);
       this.#timer.unref?.();
     } else if (!needsTicks) {
       this.#stopTimer();
@@ -287,10 +298,13 @@ function selectAgentRows(rows: readonly WorkflowToolCardAgent[], expanded: boole
   return rows.filter((row) => selected.has(row)).slice(-COMPACT_AGENT_LIMIT);
 }
 
-function formatAgentElapsed(agent: WorkflowToolCardAgent): string {
+function formatAgentElapsed(agent: WorkflowToolCardAgent, calm = false): string {
+  // A recorded duration is fixed and stays exact; only the live wall-clock
+  // reading is coarsened in calm mode, since its text changes every second.
   if (agent.elapsedMs !== undefined) return formatDuration(agent.elapsedMs);
   if (agent.startedAt === undefined) return "";
-  return formatDuration(Math.max(0, Date.now() - agent.startedAt));
+  const live = Math.max(0, Date.now() - agent.startedAt);
+  return calm ? formatDurationCoarse(live) : formatDuration(live);
 }
 
 function fitIdentityBeforeState(name: string, state: string, width: number, theme: ThemeLike, tone: string): string {

@@ -8,7 +8,8 @@ import {
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
-import { RenderScheduler } from "../host/render-scheduler.js";
+import { framesEqual, RenderScheduler } from "../host/render-scheduler.js";
+import { defaultRenderProfile } from "../host/render-profile.js";
 import type { CustomUiComponent, CustomUiTui } from "../host/pi-api.js";
 
 export const FLEET_MENU_MAX_ROWS = 8;
@@ -179,6 +180,8 @@ export interface RenderFleetMenuOptions {
   fallbackFocusAvailable?: boolean;
   /** Legacy combined capability flag; prefer the two explicit fields above. */
   focusShortcutsAvailable?: boolean;
+  /** Calm rendering (render-profile.ts): coarse elapsed text, no per-second tool timer. */
+  calm?: boolean;
 }
 
 /**
@@ -237,6 +240,7 @@ function renderProjectedFleetMenuRows(
   const panel = new AgentLivePanel({
     ...(options.spinnerIndex !== undefined ? { spinnerIndex: options.spinnerIndex } : {}),
     ...(options.theme !== undefined ? { theme: options.theme } : {}),
+    ...(options.calm === true ? { calm: true } : {}),
   });
   const focused = options.focused === true;
   const selectedRowId = options.selectedRowId;
@@ -293,6 +297,15 @@ export class FleetFocusComponent implements CustomUiComponent {
   readonly #requestRender: () => void;
   readonly #scheduler: RenderScheduler;
 
+  readonly #calm: boolean;
+  /**
+   * Last frame handed to the host, keyed by width. The scheduler callback
+   * projects the next frame first and stays silent when it is byte-identical —
+   * on a console where every repaint blinks, store churn that changes nothing
+   * visible must not reach the terminal at all.
+   */
+  #lastFrame: { width: number; lines: string[] } | undefined;
+
   constructor(
     private readonly rows: () => AgentLiveRow[],
     private readonly keybindings: unknown,
@@ -300,11 +313,26 @@ export class FleetFocusComponent implements CustomUiComponent {
     private readonly done: (action: FleetMenuAction) => void,
     private readonly theme: AgentLiveThemeLike = {},
   ) {
+    this.#calm = defaultRenderProfile().calm;
     // Store churn is coalesced; keystrokes below stay on the direct path so the
     // cursor never lags behind the operator.
-    this.#scheduler = new RenderScheduler(() => this.tui.requestRender());
+    this.#scheduler = new RenderScheduler(() => this.#paintIfChanged());
     this.#requestRender = () => this.#scheduler.request();
     agentLiveStore.emitter.on("change", this.#requestRender);
+  }
+
+  #paintIfChanged(): void {
+    if (this.#disposed) return;
+    const previous = this.#lastFrame;
+    if (previous === undefined) {
+      this.tui.requestRender();
+      return;
+    }
+    // render() is a pure projection over the shared store (setVisibleRows only
+    // normalizes the cursor and never emits), so a speculative call is safe.
+    const next = this.render(previous.width);
+    if (framesEqual(previous.lines, next)) return;
+    this.tui.requestRender();
   }
 
   render(width: number): string[] {
@@ -312,16 +340,19 @@ export class FleetFocusComponent implements CustomUiComponent {
     const sourceRows = this.rows();
     const rows = projectFleetMenuRows(sourceRows);
     fleetMenuState.setVisibleRows(rows);
-    return renderProjectedFleetMenuRows(
+    const lines = renderProjectedFleetMenuRows(
       rows,
       width,
       {
         focused: true,
         ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
         theme: this.theme,
+        ...(this.#calm ? { calm: true } : {}),
       },
       Math.max(0, sourceRows.length - rows.length),
     );
+    this.#lastFrame = { width, lines };
+    return lines;
   }
 
   handleInput(data: string): void {
@@ -356,7 +387,9 @@ export class FleetFocusComponent implements CustomUiComponent {
 
   invalidate(): void {
     if (this.#disposed) return;
-    // Projection is read lazily from the shared store; no render cache to clear.
+    // A theme or layout change renders the same store to different bytes; the
+    // identity baseline must not survive it.
+    this.#lastFrame = undefined;
   }
 
   /**

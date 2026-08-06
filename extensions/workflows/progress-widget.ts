@@ -1,5 +1,6 @@
 import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../_shared/host/pi-api.js";
-import { DEFAULT_RENDER_MIN_INTERVAL_MS, RenderScheduler } from "../_shared/host/render-scheduler.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS, framesEqual, RenderScheduler } from "../_shared/host/render-scheduler.js";
+import { defaultRenderProfile } from "../_shared/host/render-profile.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
 import {
@@ -75,6 +76,12 @@ export interface WorkflowProgressOptions {
   declaredStages?: readonly WorkflowDeclaredStage[];
   /** Render coalescing window; `0` renders on every change. Defaults to the shared 4 fps ceiling. */
   renderMinIntervalMs?: number;
+  /**
+   * Calm rendering: frozen spinner, coarse elapsed, no per-second tool timer —
+   * so an idle fleet produces byte-identical frames and the identity gate
+   * suppresses every repaint. Defaults from render-profile.ts (auto-on under WSL).
+   */
+  calm?: boolean;
 }
 
 /** One stage a workflow declared before the run started. */
@@ -98,6 +105,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   #disposed = false;
   readonly #knownRowIds = new Set<string>();
   readonly #scheduler: RenderScheduler;
+  readonly #calm: boolean;
   /**
    * The last frame handed to the host, keyed by the width it was built for.
    * Compared against a fresh projection to suppress repaints that would change
@@ -117,6 +125,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     readonly runId: string,
     readonly options: WorkflowProgressOptions = {},
   ) {
+    this.#calm = options.calm ?? defaultRenderProfile().calm;
     this.#scheduler = new RenderScheduler(() => this.#paintIfChanged(), {
       minIntervalMs: options.renderMinIntervalMs ?? DEFAULT_RENDER_MIN_INTERVAL_MS,
     });
@@ -135,7 +144,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const previous = this.#lastFrame;
     const width = previous?.width ?? this.tui.terminal?.columns ?? 80;
     const next = this.render(width);
-    if (previous !== undefined && previous.width === width && sameLines(previous.lines, next)) return;
+    if (previous !== undefined && previous.width === width && framesEqual(previous.lines, next)) return;
     this.tui.requestRender();
   }
 
@@ -221,6 +230,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
         theme: this.theme,
         emptyEditorFocusAvailable: fleetMenuState.emptyEditorFocusAvailable,
         fallbackFocusAvailable: fleetMenuState.fallbackFocusAvailable,
+        ...(this.#calm ? { calm: true } : {}),
       });
       const fleetFooter = fleetLines.at(-1);
       const fleetBody = fleetFooter === undefined ? [] : fleetLines.slice(0, -1);
@@ -350,6 +360,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       spinnerIndex: this.#spinnerIndex,
       theme: this.theme,
       statusColors: { working: "warning" },
+      ...(this.#calm ? { calm: true } : {}),
     });
     // Only the current row keeps its sub-lines (latest message / live tool action);
     // settled rows stay one line each so the roster fits a short terminal.
@@ -438,10 +449,12 @@ export class WorkflowProgressComponent implements CustomUiComponent {
         this.#stopLiveTimer();
         return;
       }
-      this.#spinnerIndex = (this.#spinnerIndex + 1) % AGENT_LIVE_SPINNER_FRAME_COUNT;
+      // Calm rendering freezes the spinner: the tick still fires so elapsed
+      // buckets can roll over, but a frame with no visible change is then
+      // byte-identical and the identity gate suppresses the repaint entirely.
+      if (!this.#calm) this.#spinnerIndex = (this.#spinnerIndex + 1) % AGENT_LIVE_SPINNER_FRAME_COUNT;
       // 1 Hz is slower than the coalescing window, so this always lands on a
-      // leading edge and liveness is unchanged — but it now passes the identity
-      // gate, so a fleet with nothing moving stops repainting entirely.
+      // leading edge and liveness is unchanged.
       this.#scheduler.request();
     }, LIVE_TICK_MS);
     (timer as { unref?: () => void }).unref?.();
@@ -546,11 +559,6 @@ function workflowProgressDonePresentation(status: WorkflowProjectedStatus): {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled workflow progress status: ${String(value)}`);
-}
-
-function sameLines(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((line, index) => line === b[index]);
 }
 
 function formatProgressTailLine(line: WorkflowJournalLine): string {
