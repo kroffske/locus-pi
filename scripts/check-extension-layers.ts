@@ -120,7 +120,16 @@ const LAYER_RANK: Record<SharedLayer, number> = {
 const PROVISIONAL_LAYERS: readonly SharedLayer[] = [];
 
 const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
-  host: ["pi-api", "error-text", "files", "validation", "redaction", "render-scheduler", "safe-output"],
+  host: [
+    "pi-api",
+    "error-text",
+    "files",
+    "validation",
+    "redaction",
+    "render-profile",
+    "render-scheduler",
+    "safe-output",
+  ],
   operator: [
     "command-ui",
     "widget-render",
