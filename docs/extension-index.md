@@ -1,6 +1,6 @@
 # Extension index
 
-This is the public `0.2.1` extension ledger and source map. The machine-owned
+This is the public `0.3.0` extension ledger and source map. The machine-owned
 default list is `package.json#pi.extensions`; each row below must have a matching
 active manifest and manual. Beta, backlog, deleted, and fixture modules are not
 part of this clean repository or the first public release.
@@ -13,7 +13,7 @@ part of this clean repository or the first public release.
   manifest is the machine-readable source for its ownership, risk, public
   surfaces, permissions, manual, and tests.
 - `extensions/_shared/<layer>/` contains the six shared ownership layers: `host`,
-  `operator`, `runtime`, `model`, `project`, and `agent-runtime`. Its 44 recursive
+  `operator`, `runtime`, `model`, `project`, and `agent-runtime`. Its 45 recursive
   regular files are counted separately as infrastructure, not as an
   independently loaded extension.
 - `docs/extensions/active/<id>.md` is the active public manual declared by each

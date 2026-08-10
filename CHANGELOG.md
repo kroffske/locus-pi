@@ -2,7 +2,7 @@
 
 This file records user-visible changes to the public package.
 
-## Unreleased
+## [0.3.0] - 2026-08-10
 
 ### Fixed
 
