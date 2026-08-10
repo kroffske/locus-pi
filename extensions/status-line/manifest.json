@@ -1,0 +1,47 @@
+{
+  "id": "status-line",
+  "name": "status-line",
+  "agent": {
+    "name": "extension-status-line",
+    "description": "Maintain the responsive Locus footer without hiding Pi session evidence."
+  },
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "behaviorStatus": "active",
+  "ownershipStatus": "locus-owned",
+  "sourceMode": "local",
+  "runtimeRequirements": [
+    "Pi 0.83.0 custom footer API",
+    "Pi footer data provider for Git branch",
+    "Pi context-usage API",
+    "session_before_compact and session_compact lifecycle events"
+  ],
+  "stateUsed": ["read-only current working directory and Git branch", "ephemeral compaction display state"],
+  "tier": "core-owned",
+  "provides": {
+    "tools": [],
+    "commands": [],
+    "hooks": ["session_start", "session_before_compact", "session_compact", "session_shutdown"]
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [],
+      "write": []
+    },
+    "subprocess": [],
+    "network": [],
+    "browser": false,
+    "models": false,
+    "ui": ["setFooter"]
+  },
+  "risk": "low",
+  "docsPath": "docs/extensions/active/status-line.md",
+  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/status-line.md",
+  "tests": ["tests/extensions/status-line/status-line.test.ts", "tests/integration/public-registration.test.ts"],
+  "review": {
+    "status": "reviewed",
+    "source": "local-implementation",
+    "reviewedBy": "locus-pi",
+    "reviewedAt": "2026-08-05"
+  }
+}

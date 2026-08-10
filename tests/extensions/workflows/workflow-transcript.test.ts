@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { createWorkflowTranscript, persistCommandWorkflowTranscript, WORKFLOW_EVENT_CUSTOM_TYPE } from "../../../extensions/workflows/workflow-transcript.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
-import { applyWorkflowJournalLineToAgentLiveStore, workflowAgentLiveRowId } from "../../../extensions/_shared/workflow-journal.js";
-import type { RunWorkflowScriptResult } from "../../../extensions/_shared/workflow-runner.js";
-import type { WorkflowJournalLine } from "../../../extensions/_shared/workflow-runtime.js";
+import {
+  announceCommandWorkflowStart,
+  createWorkflowTranscript,
+  persistCommandWorkflowTranscript,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+  WORKFLOW_RUN_CUSTOM_TYPE,
+} from "../../../extensions/workflows/workflow-transcript.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import {
+  applyWorkflowJournalLineToAgentLiveStore,
+  workflowAgentLiveRowId,
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import type { RunWorkflowScriptResult } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { compactWorkflowParentRows } from "../../../extensions/workflows/progress-widget.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -24,10 +33,14 @@ describe("workflow persistent transcript", () => {
     expect(harness.sentMessages).toEqual([]);
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
     expect(harness.sentMessages).toHaveLength(1);
-    expect(harness.sentMessages[0]?.message.content).toEqual(expect.stringContaining("● workflow demo.workflow.mjs started"));
-    expect(harness.sentMessages[0]?.message.content).toEqual(expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"));
+    expect(harness.sentMessages[0]?.message.content).toEqual(
+      expect.stringContaining("── workflow demo.workflow.mjs · run #run1 · finished"),
+    );
+    expect(harness.sentMessages[0]?.message.content).toEqual(
+      expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"),
+    );
     for (const entry of harness.sentMessages) {
-      expect(entry.message).toMatchObject({ customType: WORKFLOW_EVENT_CUSTOM_TYPE, display: true });
+      expect(entry.message).toMatchObject({ customType: WORKFLOW_RUN_CUSTOM_TYPE, display: true });
       expect(String(entry.message.content).length).toBeLessThanOrEqual(4096);
       expect(entry.options).toEqual({ triggerTurn: false });
       expect(entry.options).not.toHaveProperty("deliverAs");
@@ -35,6 +48,32 @@ describe("workflow persistent transcript", () => {
     expect(harness.waitForIdleCalls).toBe(1);
     expect(harness.customMessageDeliveries).toEqual(["append"]);
     expect(harness.notifications).toEqual([]);
+  });
+
+  it("separates the reusable workflow workspace from unique run evidence", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "plan", "tool");
+    transcript.start("20260806-020358-988a", "/repo/.pi/locus-pi/runs/20260806-020358-988a");
+    const completion = transcript.finish({
+      runId: "20260806-020358-988a",
+      runDir: "/repo/.pi/locus-pi/runs/20260806-020358-988a",
+      ok: true,
+      result: "Plan ready",
+      workspaceDir: "/repo/tmp/checkout-fix",
+      workspaceDirRelative: "tmp/checkout-fix",
+      primaryFile: {
+        relativePath: "plan.md",
+        absolutePath: "/repo/tmp/checkout-fix/plan.md",
+        sha256: "abc123",
+        bytes: 42,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/20260806-020358-988a/runtime/result.json" },
+    });
+
+    expect(completion.digest).toContain("workspace: /repo/tmp/checkout-fix");
+    expect(completion.digest).toContain("reused when outputDir remains tmp/checkout-fix");
+    expect(completion.digest).toContain("primary file: /repo/tmp/checkout-fix/plan.md");
+    expect(completion.digest).toContain("journal: /repo/.pi/locus-pi/runs/20260806-020358-988a/runtime/journal.ndjson");
   });
 
   it("persists exactly one final command failure in one workflow_end digest", async () => {
@@ -60,6 +99,81 @@ describe("workflow persistent transcript", () => {
     expect(failures).toHaveLength(1);
     expect(failures[0]?.message.details).toMatchObject({ eventKind: "workflow_end", runId: "run-2" });
     expect(String(failures[0]?.message.content)).toContain("failed");
+  });
+
+  it("prints the exact prose result in a separate unbounded message after the bounded run digest", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
+    transcript.start("20260731-215554-ea90");
+    const exactResult = `# Implementation Plan\n\n${"Full result line. ".repeat(400)}\nUNTRUNCATED_RESULT_SENTINEL`;
+    const resultTextPath = "/tmp/run-ea90/outputs/workflow-result.md";
+    const completion = transcript.finish({
+      runId: "20260731-215554-ea90",
+      runDir: "/tmp/run-ea90",
+      ok: true,
+      result: exactResult,
+      resultTextPath,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-ea90/runtime/result.json" },
+    });
+
+    expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
+    expect(harness.sentMessages).toHaveLength(2);
+    expect(harness.sentMessages[0]?.message).toMatchObject({
+      customType: WORKFLOW_RUN_CUSTOM_TYPE,
+      display: true,
+      details: { eventKind: "workflow_end", runId: "20260731-215554-ea90" },
+    });
+    expect(harness.sentMessages[0]?.message.content).not.toContain("UNTRUNCATED_RESULT_SENTINEL");
+    expect(harness.sentMessages[1]?.message).toMatchObject({
+      customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+      content: exactResult,
+      display: true,
+      details: {
+        eventKind: "workflow_result",
+        runId: "20260731-215554-ea90",
+        resultTextPath,
+      },
+    });
+    expect(String(harness.sentMessages[1]?.message.content).length).toBeGreaterThan(4096);
+    expect(harness.sentMessages.map((entry) => entry.options)).toEqual([
+      { triggerTurn: false },
+      { triggerTurn: false },
+    ]);
+    expect(harness.customMessageDeliveries).toEqual(["append", "append"]);
+    expect(harness.waitForIdleCalls).toBe(1);
+  });
+
+  it("renders waiting and operator cancellation as distinct terminal outcomes", () => {
+    const awaiting = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    awaiting.start("awaiting-run");
+    const awaitingCompletion = awaiting.finish({
+      runId: "awaiting-run",
+      runDir: "/tmp/awaiting-run",
+      ok: true,
+      disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      result: { mode: "prepared" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/awaiting-run/result.json" },
+    });
+    expect(awaitingCompletion.digest).toContain("◐ workflow review awaiting operator");
+    expect(awaitingCompletion.digest).toContain("review clarification required");
+    expect(awaitingCompletion.digest).not.toContain("finished");
+
+    const cancelled = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    cancelled.start("cancelled-run");
+    const cancelledCompletion = cancelled.finish({
+      runId: "cancelled-run",
+      runDir: "/tmp/cancelled-run",
+      ok: false,
+      disposition: { status: "cancelled", reason: "operator_stop" },
+      result: null,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/cancelled-run/result.json" },
+    });
+    expect(cancelledCompletion.digest).toContain("⊘ workflow review cancelled");
+    expect(cancelledCompletion.digest).toContain("cancelled by operator");
+    expect(cancelledCompletion.digest).not.toContain("completed");
   });
 
   it("preserves semantic failure summary and unresolved row ids without a technical error", () => {
@@ -111,28 +225,27 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("host bridge failed");
   });
 
-  it("uses a failed llm diagnostic as fallback when the script returns only ok:false", () => {
-    const transcript = createWorkflowTranscript(createHarness().ctx, "llm-smoke", "tool");
-    transcript.start("llm-auth-failure");
+  it("uses a journal error as fallback when the script returns only ok:false", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "live-smoke", "tool");
+    transcript.start("agent-auth-failure");
     transcript.event({
       ts: "t",
-      runId: "llm-auth-failure",
-      kind: "llm_end",
-      status: "failed",
-      label: "schema",
-      message: "Workflow llm bridge: request auth failed: No API key found",
+      runId: "agent-auth-failure",
+      kind: "error",
+      label: "classify",
+      message: "Workflow agent bridge: request auth failed: No API key found",
     });
 
     const completion = transcript.finish({
-      runId: "llm-auth-failure",
-      runDir: "/tmp/llm-auth-failure",
+      runId: "agent-auth-failure",
+      runDir: "/tmp/agent-auth-failure",
       ok: false,
       result: { ok: false },
       journal: [],
-      resultPersistence: { ok: true, path: "/tmp/llm-auth-failure/result.json" },
+      resultPersistence: { ok: true, path: "/tmp/agent-auth-failure/result.json" },
     });
 
-    expect(completion.digest).toContain("Workflow llm bridge: request auth failed: No API key found");
+    expect(completion.digest).toContain("Workflow agent bridge: request auth failed: No API key found");
     expect(completion.digest).not.toContain("Workflow execution failed");
   });
 
@@ -160,6 +273,59 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("✗ workflow persistence-warning failed");
     expect(completion.digest).toContain("Workflow result was not persisted: blocked");
     expect(completion.digest).not.toContain("finished");
+  });
+
+  it("says where the unabridged result text is and which command opens it", () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "review", "command");
+    transcript.start("20260726-212752-98cc");
+    const longResult = `# Code Review\n\n## Reviewed scope\n\n${"Detail line that runs well past the digest line cap. ".repeat(8)}`;
+
+    const completion = transcript.finish({
+      runId: "20260726-212752-98cc",
+      runDir: "/tmp/run-98cc",
+      ok: true,
+      result: longResult,
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-98cc/result.json" },
+      resultTextPath: "/tmp/run-98cc/result.md",
+    });
+
+    // The verdict line itself stays bounded — it enters model context.
+    for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
+    expect(completion.digest).toContain("result: /tmp/run-98cc/result.md");
+    expect(completion.digest).toContain("read the full result: /workflows result 98cc");
+    expect(completion.digest).toContain("journal: /tmp/run-98cc/runtime/journal.ndjson");
+  });
+
+  it("names the command that prints the reason when a run fails with a structured result and no text", () => {
+    // The shape a `plan` round cap produced in a live run: `{ok:false}` with the
+    // defects in `unresolvedRows` and no prose result at all. The digest caps its
+    // verdict line at 160 characters, so the operator saw a sentence fragment
+    // ending in "..." and, below it, only a journal path — no way to read why.
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
+    transcript.start("20260730-162453-000e");
+
+    const completion = transcript.finish({
+      runId: "20260730-162453-000e",
+      runDir: "/tmp/run-000e",
+      ok: false,
+      result: {
+        ok: false,
+        stoppedBy: "round-cap",
+        summary: "plan was not accepted within 4 drafting round(s)",
+        unresolvedRows: [`S1: ${"the find command pattern is not properly executed and may miss files. ".repeat(4)}`],
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-000e/result.json" },
+    });
+
+    for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
+    expect(completion.digest).toContain("read the full reason: /workflows status 000e");
+    // `/workflows result` refuses a non-prose result, so it must not be offered here.
+    expect(completion.digest).not.toContain("/workflows result");
+    expect(completion.digest).toContain("journal: /tmp/run-000e/runtime/journal.ndjson");
   });
 
   it("buffers a bounded tool digest without calling sendMessage and always retains workflow_end", () => {
@@ -190,10 +356,17 @@ describe("workflow persistent transcript", () => {
       });
 
       expect(harness.sentMessages).toEqual([]);
-      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 22 });
+      // 22 bounded body lines plus the failed run's one recovery pointer.
+      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 23 });
+      expect(completion.digest).toContain("read the full reason: /workflows status");
       expect(completion.digest.match(/final failure/g)).toHaveLength(1);
       expect(completion.digest).not.toContain("intermediate journal failure");
-      expect(completion.digest.split("\n").slice(1).every((line) => line.length <= 160)).toBe(true);
+      expect(
+        completion.digest
+          .split("\n")
+          .slice(1)
+          .every((line) => line.length <= 160),
+      ).toBe(true);
       expect(completion.digest.length).toBeLessThanOrEqual(4096);
     } finally {
       agentLiveStore.reset();
@@ -249,8 +422,8 @@ describe("workflow persistent transcript", () => {
         resultPersistence: { ok: true, path: "/tmp/run-cancelled/result.json" },
       });
 
-      expect(completion.digest).toContain("● agent reviewer started — sleep 60");
       expect(completion.digest).toContain("⊘ agent reviewer cancelled · 1m — sleep 60");
+      expect(completion.digest).not.toContain("● agent reviewer started");
       expect(completion.digest).not.toContain("✓ agent");
       expect(completion.digest).not.toContain(parentPetname);
       expect(completion.digest).not.toContain(childPetname);
@@ -288,5 +461,187 @@ describe("workflow persistent transcript", () => {
       message: "Workflow transcript was not persisted: ctx.waitForIdle is unavailable.",
       level: "warning",
     });
+  });
+
+  it("suppresses a delayed idle continuation after its session lease becomes stale", async () => {
+    const harness = createHarness(process.cwd(), { isStreaming: true });
+    const transcript = createWorkflowTranscript(harness.ctx, "reload-safe", "command");
+    transcript.start("run-reload-safe");
+    const completion = transcript.finish({
+      runId: "run-reload-safe",
+      runDir: "/tmp/run-reload-safe",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-reload-safe/result.json" },
+    });
+    let current = true;
+    const pending = persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion, () => current);
+    for (let attempt = 0; attempt < 20 && harness.waitForIdleCalls === 0; attempt += 1) await Promise.resolve();
+
+    expect(harness.waitForIdleCalls).toBe(1);
+    current = false;
+    harness.setStreaming(false);
+
+    expect(await pending).toBe(false);
+    expect(harness.sentMessages).toEqual([]);
+    expect(harness.notificationEvents).toEqual([]);
+  });
+
+  it("opens a run with one idle-checked boundary banner and keeps a busy session unsteered", () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "review", "command");
+    const announcement = transcript.start("20260726-183012-a6aa", "/repo/.pi/locus-pi/runs/20260726-183012-a6aa");
+
+    expect(announcement).toMatchObject({ eventKind: "workflow_start", runId: "20260726-183012-a6aa" });
+    expect(announcement?.text).toContain("── workflow review · run #a6aa · started");
+    expect(announcement?.text).toContain("runDir: /repo/.pi/locus-pi/runs/20260726-183012-a6aa");
+    expect(announceCommandWorkflowStart(harness.pi, harness.ctx, announcement!)).toBe(true);
+    expect(harness.sentMessages).toHaveLength(1);
+    expect(harness.sentMessages[0]?.message).toMatchObject({
+      customType: WORKFLOW_RUN_CUSTOM_TYPE,
+      display: true,
+      details: { eventKind: "workflow_start", runId: "20260726-183012-a6aa" },
+    });
+    expect(harness.customMessageDeliveries).toEqual(["append"]);
+
+    // A second start is not a second boundary.
+    expect(transcript.start("20260726-183012-a6aa")).toBeUndefined();
+
+    const busy = createHarness(process.cwd(), { isStreaming: true });
+    const busyTranscript = createWorkflowTranscript(busy.ctx, "review", "command");
+    const busyAnnouncement = busyTranscript.start("20260726-183500-b2c4");
+    expect(announceCommandWorkflowStart(busy.pi, busy.ctx, busyAnnouncement!)).toBe(false);
+    expect(busy.sentMessages).toEqual([]);
+    expect(busy.customMessageDeliveries).toEqual([]);
+  });
+
+  it("keeps one row per agent: the started row becomes the finished row", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
+    transcript.event({
+      ts: "t1",
+      runId: "r",
+      kind: "agent_start",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+    });
+    transcript.event({
+      ts: "t2",
+      runId: "r",
+      kind: "agent_end",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+      status: "completed",
+      durationMs: 45_000,
+    });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("✓ agent default finished · 45s — decide clarification");
+    expect(completion.digest).not.toContain("● agent default started");
+    expect(completion.digest.match(/agent default/g)).toHaveLength(1);
+  });
+
+  it("never folds an agent without an end event into a clean run", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t1", runId: "r", kind: "agent_start", agent: "reviewer", callId: "call-9" });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      result: { summary: "done" },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("■ agent reviewer started — no end recorded (evidence missing)");
+  });
+
+  it("renders the operator gate as its own block naming the stage, the tool, and the questions", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
+    transcript.start("20260726-183012-a6aa");
+    transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
+    const completion = transcript.finish({
+      runId: "20260726-183012-a6aa",
+      runDir: "/tmp/a6aa",
+      ok: true,
+      disposition: { status: "awaiting_operator", detail: "review clarification required" },
+      result: { mode: "prepared" },
+      journal: [],
+      operatorHandoff: {
+        version: 1,
+        handoffId: "handoff-a6aa",
+        originRunId: "20260726-183012-a6aa",
+        title: "review clarification",
+        questions: [{ kind: "text", id: "q1", prompt: "Which commit should this review cover?" }],
+        continuationArtifactRefs: [],
+        target: { kind: "name", ref: "review" },
+        scriptIdentity: { path: "review.workflow.mjs", sha256: "a".repeat(64) },
+      } as never,
+      resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
+    });
+
+    expect(completion.digest).toContain("◐ WAITING FOR OPERATOR — review clarification");
+    expect(completion.digest).toContain('   asked during stage "clarify" · via awaitOperator');
+    expect(completion.digest).toContain("   Q1: Which commit should this review cover?");
+    expect(completion.digest).toContain("   answer: pending — reply in Pi to continue (handoff #a6aa)");
+    // The terminal verdict stays exactly what downstream readers already pin.
+    expect(completion.digest).toContain("◐ workflow review awaiting operator");
+  });
+
+  it("declares the run it continues, the answer that unblocked it, and replayed evidence", () => {
+    const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool", {
+      input: "b09e8e8 — feat(workflows): schema uniqueness",
+    });
+    transcript.start("20260726-183412-b2c4");
+    transcript.event({
+      ts: "t1",
+      runId: "r",
+      kind: "agent_end",
+      agent: "default",
+      label: "decide clarification",
+      callId: "call-1",
+      status: "completed",
+      durationMs: 45_000,
+      replayed: true,
+      resumeFromRunId: "20260726-183012-a6aa",
+    });
+    const completion = transcript.finish({
+      runId: "20260726-183412-b2c4",
+      runDir: "/tmp/b2c4",
+      ok: true,
+      result: { summary: "done" },
+      journal: [
+        {
+          ts: "t1",
+          runId: "20260726-183412-b2c4",
+          kind: "agent_end",
+          agent: "default",
+          status: "completed",
+          replayed: true,
+        },
+      ],
+      resumeFromRunId: "20260726-183012-a6aa",
+      continuation: { originRunId: "20260726-183012-a6aa", artifacts: [] },
+      resultPersistence: { ok: true, path: "/tmp/b2c4/result.json" },
+    });
+
+    expect(completion.digest).toContain(
+      '↳ continues run #a6aa · operator answered: "b09e8e8 — feat(workflows): schema uniqueness"',
+    );
+    expect(completion.digest).toContain("↻ agent default replayed from run #a6aa · 45s — decide clarification");
+    expect(completion.digest).toContain("1 replayed from run #a6aa");
+    expect(completion.digest).not.toContain("✓ agent default finished");
   });
 });

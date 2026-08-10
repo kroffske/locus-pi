@@ -1,6 +1,10 @@
 {
   "id": "devext-doctor",
   "name": "devext-doctor",
+  "agent": {
+    "name": "extension-devext-doctor",
+    "description": "Inspect extension diagnostics, reload runtime, and validate task-lifecycle transitions."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

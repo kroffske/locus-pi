@@ -9,7 +9,7 @@ Use these repository-native routes:
 - Use GitHub Discussions for usage and design questions when Discussions is
   enabled. Otherwise, use a clearly labelled question issue.
 - Use a GitHub issue for a reproducible defect in a supported default extension
-  or one of the three curated Package workflows.
+  or one of the Package workflows shipped under `extensions/workflows/examples/`.
 - Use GitHub private vulnerability reporting for security concerns, as required
   by `SECURITY.md`. Never post vulnerability details in a public issue.
 
@@ -21,8 +21,8 @@ data, local absolute paths, and private repository content.
 ## Supported boundary
 
 Support covers the ten default entrypoints in `package.json#pi.extensions`, the
-three workflows in `CURATED_PACKAGE_WORKFLOW_NAMES`, and their shipped manuals,
-manifests, runtime dependencies, and source-audit notes.
+workflows shipped under `extensions/workflows/examples/` (currently six), and
+their shipped manuals, manifests, runtime dependencies, and source-audit notes.
 
 Beta modules, uncurated workflow fixtures, archives, reports, galleries,
 transcripts, benchmarks, evaluations, and local runtime or planning state are

@@ -1,21 +1,23 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type {
-  CustomUiComponent,
-  CustomUiTui,
-  ModelLike,
-  ThinkingLevel,
-} from "../_shared/pi-api.js";
+import { errorMessage } from "../_shared/host/error-text.js";
 import {
-  renderOperatorBlock,
-  type OperatorBlock,
-  type OperatorThemeLike,
-} from "../_shared/operator-ui.js";
+  isDown,
+  isEnter,
+  isEscape,
+  isLeft,
+  isPageDown,
+  isPageUp,
+  isRight,
+  isUp,
+} from "../_shared/operator/operator-keys.js";
+import type { CustomUiComponent, CustomUiTui, ModelLike, ThinkingLevel } from "../_shared/host/pi-api.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
 import {
   formatAssignment,
   type ModelRoleAssignment,
   type ModelRolesState,
   type ModelRoleSource,
-} from "../_shared/model-settings.js";
+} from "../_shared/model/model-settings.js";
 
 export type ModelRoleSupport = "active" | "fallback" | "dormant";
 
@@ -23,34 +25,34 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "default",
     tag: "DEFAULT",
-    label: "Set DEFAULT route",
-    capability: "active · session + route fallback",
-    narrowCapability: "active · session/fallback",
+    label: "Set as DEFAULT",
+    capability: "active · main/current model",
+    narrowCapability: "active · current model",
     support: "active",
     appliesCurrentModel: true,
   },
   {
     role: "agent",
     tag: "AGENT",
-    label: "Set AGENT route",
-    capability: "active · agents/workflows primary",
-    narrowCapability: "active · agents",
+    label: "Set as AGENT",
+    capability: "active · model-less agents/workflows",
+    narrowCapability: "active · model-less agents",
     support: "active",
     appliesCurrentModel: false,
   },
   {
     role: "task",
     tag: "TASK",
-    label: "Set TASK route",
-    capability: "fallback · agents/workflows",
-    narrowCapability: "fallback · agents",
-    support: "fallback",
+    label: "Set as TASK",
+    capability: "active · explicit task role",
+    narrowCapability: "active · task role",
+    support: "active",
     appliesCurrentModel: false,
   },
   {
     role: "plan",
     tag: "PLAN",
-    label: "Set PLAN route",
+    label: "Set as PLAN",
     capability: "dormant · beta prompt planning",
     narrowCapability: "dormant · beta",
     support: "dormant",
@@ -59,7 +61,7 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "summary",
     tag: "SUMMARY",
-    label: "Set SUMMARY route",
+    label: "Set as SUMMARY",
     capability: "dormant · resolver only",
     narrowCapability: "dormant · resolver",
     support: "dormant",
@@ -68,7 +70,7 @@ export const MODEL_ROLE_ACTIONS = [
   {
     role: "smol",
     tag: "SMOL",
-    label: "Set SMOL route",
+    label: "Set as SMOL",
     capability: "fallback-only · summary resolver",
     narrowCapability: "fallback-only",
     support: "fallback",
@@ -157,8 +159,8 @@ export function modelEffortCapability(model: ModelLike | undefined): ModelEffort
   }
 
   if (Array.isArray(capability.thinking)) {
-    const advertised = capability.thinking.filter(
-      (level): level is ThinkingLevel => (THINKING_LEVELS as readonly string[]).includes(level),
+    const advertised = capability.thinking.filter((level): level is ThinkingLevel =>
+      (THINKING_LEVELS as readonly string[]).includes(level),
     );
     return {
       levels: [...new Set<ThinkingLevel>(["off", ...advertised])],
@@ -196,7 +198,9 @@ export function buildModelRows(
     const existing = rowsBySelector.get(selector);
     rowsBySelector.set(selector, existing ? preferredDuplicateRow(existing, row) : row);
   }
-  return [...rowsBySelector.values()].sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
+  return [...rowsBySelector.values()].sort(
+    (left, right) => left.rank - right.rank || left.label.localeCompare(right.label),
+  );
 }
 
 export function roleSummaries(state: ModelRolesState): RoleSummary[] {
@@ -249,8 +253,9 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     this.#done = options.done;
     this.#providers = [
       ALL_PROVIDER_FILTER,
-      ...[...new Set(options.rows.map((row) => row.provider).filter(Boolean))]
-        .sort((left, right) => left.localeCompare(right)),
+      ...[...new Set(options.rows.map((row) => row.provider).filter(Boolean))].sort((left, right) =>
+        left.localeCompare(right),
+      ),
     ];
   }
 
@@ -271,14 +276,14 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       return;
     }
     if (isLeft(data)) {
-      if (this.#stage === "models") this.#moveProvider(-1);
-      else this.#back();
+      if (this.#stage !== "models") this.#back();
       return;
     }
-    if (this.#stage === "models" && (isRight(data) || data === "\t")) {
+    if (this.#stage === "models" && data === "\t") {
       this.#moveProvider(1);
       return;
     }
+    if (this.#stage === "models" && isRight(data)) return;
     if (isDown(data)) {
       this.#moveFocus(1);
       return;
@@ -304,9 +309,10 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #operatorBlock(width: number): OperatorBlock {
     const current = this.#currentSelector ?? "unset";
-    const effort = this.#currentThinking === undefined
-      ? ""
-      : ` · effort ${semanticText(this.#theme, "warning", this.#currentThinking, true)}`;
+    const effort =
+      this.#currentThinking === undefined
+        ? ""
+        : ` · effort ${semanticText(this.#theme, "warning", this.#currentThinking, true)}`;
     const body = [
       this.#defaultRouteLine(),
       ...this.#routingLines(width),
@@ -318,10 +324,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       type: "SELECT",
       subject: "Model roles",
       primary: `${semanticText(this.#theme, "warning", "Current", true)} session model: ${semanticText(this.#theme, "accent", current, true)}${effort}`,
-      badges: [
-        { text: this.#stage, tone: "accent" },
-        { text: `filter:${this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER}`, tone: "success" },
-      ],
+      badges: [{ text: this.#stage, tone: "accent" }],
       body,
       controls: [this.#controls()],
     };
@@ -340,24 +343,29 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const end = Math.min(start + limit, rows.length);
     return [
       this.#filterLine(width),
-      this.#rolesLine(width),
       `Models ${rows.length === 0 ? "0" : `${start + 1}-${end}`} of ${rows.length}`,
-      ...rows.slice(start, end).map((row, offset) => this.#modelRow(row, start + offset === this.#selectedIndex, width)),
+      ...rows
+        .slice(start, end)
+        .map((row, offset) => this.#modelRow(row, start + offset === this.#selectedIndex, width)),
     ];
   }
 
   #roleBody(width: number): string[] {
     const row = this.#selectedRow();
-    if (row === undefined) return ["Selected model: none"];
+    if (row === undefined) return ["Action for: no selected model"];
     return [
-      `Selected model: ${semanticText(this.#theme, "accent", row.selector, true)}`,
-      "Choose routing role:",
+      ...this.#modelBody(width),
+      "",
+      `Action for ${semanticText(this.#theme, "accent", row.selector, true)}:`,
       ...MODEL_ROLE_ACTIONS.map((action, index) => {
         const selected = index === this.#roleIndex;
         const marker = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
         const capability = width < 60 ? action.narrowCapability : action.capability;
-        const role = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.tag, selected);
-        return truncateToWidth(`${marker} ${role} · ${semanticText(this.#theme, "dim", capability)}`, Math.max(1, width - 4));
+        const label = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.label, selected);
+        return truncateToWidth(
+          `${marker} ${label} · ${semanticText(this.#theme, "dim", capability)}`,
+          Math.max(1, width - 4),
+        );
       }),
     ];
   }
@@ -369,8 +377,8 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const capability = modelEffortCapability(row.model);
     const capabilityLabel = capability.known ? capability.source : "unknown; off only";
     return [
-      `Selected model: ${semanticText(this.#theme, "accent", row.selector, true)}`,
-      `Route: ${semanticText(this.#theme, roleTone(action.tag), action.tag, true)} · ${width < 60 ? action.narrowCapability : action.capability}`,
+      `Action for ${semanticText(this.#theme, "accent", row.selector, true)}:`,
+      `${semanticText(this.#theme, roleTone(action.tag), action.label, true)} · ${width < 60 ? action.narrowCapability : action.capability}`,
       `Effort capability: ${capabilityLabel}`,
       ...(capability.levels.length === 0
         ? ["[ERROR] Model advertises no supported effort levels."]
@@ -396,10 +404,12 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     if (assigned.length === 0) return ["Routing roles: none"];
     return [
       "Routing roles:",
-      ...assigned.map((item) => truncateToWidth(
-        `  ${semanticText(this.#theme, "warning", item.tag, true)}=${semanticText(this.#theme, "warning", formatAssignment(item.assignment!), true)}`,
-        Math.max(1, width - 4),
-      )),
+      ...assigned.map((item) =>
+        truncateToWidth(
+          `  ${semanticText(this.#theme, "warning", item.tag, true)}=${semanticText(this.#theme, "warning", formatAssignment(item.assignment!), true)}`,
+          Math.max(1, width - 4),
+        ),
+      ),
     ];
   }
 
@@ -407,29 +417,22 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const active = this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER;
     if (width < 60) {
       const selected = semanticText(this.#theme, "success", `[${formatProvider(active)}]`, true);
-      return `Provider filter ${this.#activeProviderIndex + 1}/${this.#providers.length}: ${selected}`;
+      return `Models: ${selected} (${this.#activeProviderIndex + 1}/${this.#providers.length}, Tab)`;
     }
-    const filters = this.#providers.map((provider, index) => index === this.#activeProviderIndex
-      ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
-      : semanticText(this.#theme, "dim", formatProvider(provider)));
-    return truncateToWidth(`Provider filters: ${filters.join("  ")}`, Math.max(1, width - 4));
-  }
-
-  #rolesLine(width: number): string {
-    const actions = width < 60 ? MODEL_ROLE_ACTIONS.slice(0, 2) : MODEL_ROLE_ACTIONS;
-    const roles = actions.map((action) => semanticText(this.#theme, roleTone(action.tag), action.tag, true));
-    const hidden = MODEL_ROLE_ACTIONS.length - actions.length;
-    return truncateToWidth(
-      `Available roles: ${roles.join(" · ")}${hidden > 0 ? ` · +${hidden}` : ""}`,
-      Math.max(1, width - 4),
+    const filters = this.#providers.map((provider, index) =>
+      index === this.#activeProviderIndex
+        ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
+        : semanticText(this.#theme, "dim", formatProvider(provider)),
     );
+    return truncateToWidth(`Models: ${filters.join("  ")}  (Tab to cycle)`, Math.max(1, width - 4));
   }
 
   #modelRow(row: ModelRow, selected: boolean, width: number): string {
     const markers = [row.current ? "CURRENT" : "", ...row.roleTags].filter(Boolean);
-    const markerText = markers.length === 0
-      ? ""
-      : `${markers.map((marker) => semanticText(this.#theme, "warning", `[${marker}]`, true)).join(" ")} `;
+    const markerText =
+      markers.length === 0
+        ? ""
+        : `${markers.map((marker) => semanticText(this.#theme, "warning", `[${marker}]`, true)).join(" ")} `;
     const pointer = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
     const assigned = row.current || row.roleTags.length > 0;
     const selector = semanticText(this.#theme, assigned ? "warning" : "accent", row.selector, selected || assigned);
@@ -441,14 +444,15 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
   }
 
   #controls(): string {
-    if (this.#stage === "models") return "↑↓/jk models · Tab/←→ filters · Enter roles · q/Esc close";
-    if (this.#stage === "roles") return "↑↓/jk roles · Enter effort · Esc/← models · q close";
-    return "↑↓/jk effort · Enter apply · Esc/← roles · q close";
+    if (this.#stage === "models") return "↑↓/jk models · Tab provider · Enter actions · q/Esc close";
+    if (this.#stage === "roles") return "↑↓/jk actions · Enter effort · Esc/← models · q close";
+    return "↑↓/jk effort · Enter apply · Esc/← actions · q close";
   }
 
   async #advance(): Promise<void> {
     if (this.#stage === "models") {
       if (this.#selectedRow() === undefined) return;
+      this.#roleIndex = 0;
       this.#stage = "roles";
       this.#receipt = undefined;
       this.#requestRender();
@@ -460,7 +464,14 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       if (row === undefined || action === undefined) return;
       this.#selectedAction = action;
       const levels = effortLevelsForModel(row.model);
-      this.#effortIndex = preferredEffortIndex(levels, this.#roleSummaries, action, row, this.#currentSelector, this.#currentThinking);
+      this.#effortIndex = preferredEffortIndex(
+        levels,
+        this.#roleSummaries,
+        action,
+        row,
+        this.#currentSelector,
+        this.#currentThinking,
+      );
       this.#stage = "effort";
       this.#receipt = undefined;
       this.#requestRender();
@@ -489,7 +500,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       this.#stage = applied.receipt.kind === "error" ? "effort" : "models";
       if (this.#stage === "models") this.#selectedAction = undefined;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       this.#receipt = { kind: "error", text: `Apply failed: ${message}` };
       this.#stage = "effort";
     } finally {
@@ -499,13 +510,15 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
   }
 
   #refreshRows(): void {
-    this.#rows = this.#rows.map((row, index) => {
-      const roleTags = this.#roleSummaries
-        .filter((role) => role.assignment?.model === row.selector)
-        .map((role) => role.tag);
-      const current = row.selector === this.#currentSelector;
-      return { ...row, roleTags, current, rank: modelRowRank(roleTags, current, index) };
-    }).sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
+    this.#rows = this.#rows
+      .map((row, index) => {
+        const roleTags = this.#roleSummaries
+          .filter((role) => role.assignment?.model === row.selector)
+          .map((role) => role.tag);
+        const current = row.selector === this.#currentSelector;
+        return { ...row, roleTags, current, rank: modelRowRank(roleTags, current, index) };
+      })
+      .sort((left, right) => left.rank - right.rank || left.label.localeCompare(right.label));
   }
 
   #restoreSelectedModel(selector: string): void {
@@ -576,7 +589,12 @@ export function createModelRoleSelectorTheme(theme: unknown): OperatorThemeLike 
   const fg = typeof candidate.fg === "function" ? candidate.fg : undefined;
   const bold = typeof candidate.bold === "function" ? candidate.bold : undefined;
   return {
-    ...(fg === undefined ? {} : { fg: (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) => String(fg.call(candidate, color, text)) }),
+    ...(fg === undefined
+      ? {}
+      : {
+          fg: (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) =>
+            String(fg.call(candidate, color, text)),
+        }),
     ...(bold === undefined ? {} : { bold: (text: string) => String(bold.call(candidate, text)) }),
   };
 }
@@ -610,9 +628,9 @@ function preferredDuplicateRow(left: ModelRow, right: ModelRow): ModelRow {
 }
 
 function assignedRoleTags(selector: string, state: ModelRolesState): string[] {
-  return MODEL_ROLE_ACTIONS
-    .filter((action) => state.effective.get(action.role)?.assignment?.model === selector)
-    .map((action) => action.tag);
+  return MODEL_ROLE_ACTIONS.filter((action) => state.effective.get(action.role)?.assignment?.model === selector).map(
+    (action) => action.tag,
+  );
 }
 
 function modelRowRank(roleTags: string[], current: boolean, originalIndex: number): number {
@@ -639,11 +657,12 @@ function preferredEffortIndex(
   currentThinking: ThinkingLevel | undefined,
 ): number {
   const assigned = summaries.find((summary) => summary.role === action.role)?.assignment;
-  const preferred = assigned?.model === row.selector
-    ? assigned.thinking
-    : action.appliesCurrentModel && currentSelector === row.selector
-      ? currentThinking
-      : "off";
+  const preferred =
+    assigned?.model === row.selector
+      ? assigned.thinking
+      : action.appliesCurrentModel && currentSelector === row.selector
+        ? currentThinking
+        : "off";
   const index = preferred === undefined ? -1 : levels.indexOf(preferred);
   return Math.max(0, index);
 }
@@ -675,36 +694,4 @@ function windowStart(selected: number, total: number, limit: number): number {
 function cycleIndex(index: number, delta: number, total: number): number {
   if (total <= 0) return 0;
   return (index + delta + total) % total;
-}
-
-function isEnter(data: string): boolean {
-  return data === "\r" || data === "\n";
-}
-
-function isEscape(data: string): boolean {
-  return data === "\x1b";
-}
-
-function isUp(data: string): boolean {
-  return data === "\x1b[A" || data === "\x1bOA" || data === "k";
-}
-
-function isDown(data: string): boolean {
-  return data === "\x1b[B" || data === "\x1bOB" || data === "j";
-}
-
-function isRight(data: string): boolean {
-  return data === "\x1b[C" || data === "\x1bOC" || data === "l";
-}
-
-function isLeft(data: string): boolean {
-  return data === "\x1b[D" || data === "\x1bOD" || data === "h";
-}
-
-function isPageDown(data: string): boolean {
-  return data === "\x1b[6~";
-}
-
-function isPageUp(data: string): boolean {
-  return data === "\x1b[5~";
 }

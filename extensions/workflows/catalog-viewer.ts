@@ -1,7 +1,9 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator-ui.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
+import { clamp, viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
+import { terminalRows as sharedTerminalRows } from "../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
   workflowSourceBadge,
@@ -14,7 +16,8 @@ import {
 } from "./workflow-catalog.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
-// Pi 0.80.5 keeps two footer rows plus an optional extension-status row.
+// Keep two rows of breathing room above the one-row Locus footer so focused
+// browsers never collide with host redraws on short terminals.
 const PI_HOST_FOOTER_ROWS = 3;
 const COMPACT_FOOTER_ROWS = 2;
 const SOURCE_FRAME_ROWS = 2;
@@ -84,8 +87,12 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     this.#done = undefined;
   }
 
-  get selectedIndex(): number { return this.#selectedIndex; }
-  get screenKind(): CatalogScreen["kind"] { return this.#screen.kind; }
+  get selectedIndex(): number {
+    return this.#selectedIndex;
+  }
+  get screenKind(): CatalogScreen["kind"] {
+    return this.#screen.kind;
+  }
 
   #handleCatalogInput(data: string): void {
     if (matchesInput(this.keybindings, data, "tui.select.cancel", ["escape", "\x1b", "q", "Q"])) {
@@ -139,6 +146,16 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
       this.tui.requestRender();
       return;
     }
+    if (["right", "\x1b[C", "\x1bOC"].includes(data)) {
+      this.#actionIndex = cycleIndex(this.#actionIndex, 1, actions.length);
+      this.tui.requestRender();
+      return;
+    }
+    if (["left", "\x1b[D", "\x1bOD"].includes(data)) {
+      this.#actionIndex = cycleIndex(this.#actionIndex, -1, actions.length);
+      this.tui.requestRender();
+      return;
+    }
     if (matchesInput(this.keybindings, data, "tui.select.confirm", ["enter", "\r", "\n"])) {
       const action = actions[this.#actionIndex] ?? "back";
       if (action === "back") this.#returnToCatalog();
@@ -152,7 +169,8 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     if (screen.state.kind !== "ready") return;
     const page = Math.max(1, sourceBodyHeight(this.tui, screen, this.#lastWidth) - 1);
     if (matchesInput(this.keybindings, data, "tui.select.up", ["up", "k", "\x1b[A", "\x1bOA"])) this.#sourceScroll -= 1;
-    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"])) this.#sourceScroll += 1;
+    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"]))
+      this.#sourceScroll += 1;
     else if (["pageUp", "pageup", "\x1b[5~"].includes(data)) this.#sourceScroll -= page;
     else if (["pageDown", "pagedown", "\x1b[6~"].includes(data)) this.#sourceScroll += page;
     else if (["home", "\x1b[H", "\x1b[1~"].includes(data)) this.#sourceScroll = 0;
@@ -165,14 +183,20 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
   #handleIdentityInput(data: string): void {
     const screen = this.#screen;
     if (screen.kind !== "identity") return;
-    if (matchesInput(this.keybindings, data, "tui.select.cancel", ["escape", "\x1b", "q", "Q"]) || data === "i" || data === "I") {
+    if (
+      matchesInput(this.keybindings, data, "tui.select.cancel", ["escape", "\x1b", "q", "Q"]) ||
+      data === "i" ||
+      data === "I"
+    ) {
       this.#screen = { kind: "source", selected: screen.selected, state: screen.state };
       this.tui.requestRender();
       return;
     }
     const page = Math.max(1, identityBodyHeight(this.tui));
-    if (matchesInput(this.keybindings, data, "tui.select.up", ["up", "k", "\x1b[A", "\x1bOA"])) this.#identityScroll -= 1;
-    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"])) this.#identityScroll += 1;
+    if (matchesInput(this.keybindings, data, "tui.select.up", ["up", "k", "\x1b[A", "\x1bOA"]))
+      this.#identityScroll -= 1;
+    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"]))
+      this.#identityScroll += 1;
     else if (["pageUp", "pageup", "\x1b[5~"].includes(data)) this.#identityScroll -= page;
     else if (["pageDown", "pagedown", "\x1b[6~"].includes(data)) this.#identityScroll += page;
     else if (["home", "\x1b[H", "\x1b[1~"].includes(data)) this.#identityScroll = 0;
@@ -206,21 +230,27 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const query = this.model.query === undefined ? "" : ` · query ${JSON.stringify(this.model.query)}`;
     const header = fitLine(style(this.#theme, "accent", `[SELECT] Workflow catalog${query}`), width);
     const body = catalogBody(this.model, this.#selectedIndex, bodyHeight, width, this.#theme);
-    return [header, ...padLines(body, bodyHeight, width), ...footer.slice(0, footerHeight).map((line) => fitLine(line, width))];
+    return [
+      header,
+      ...padLines(body, bodyHeight, width),
+      ...footer.slice(0, footerHeight).map((line) => fitLine(line, width)),
+    ];
   }
 
   #renderSource(screen: Extract<CatalogScreen, { kind: "source" }>, width: number): string[] {
     const height = viewerRows(this.tui);
     if (height === 1) return [fitLine("[Back] · Enter/Esc back", width)];
     const layout = sourceLayout(this.tui, screen, width);
-    const identity = sourceIdentityLines(screen.selected, width, layout.identityLimit, this.#theme)
-      .slice(0, height - layout.footerHeight);
+    const identity = sourceIdentityLines(screen.selected, width, layout.identityLimit, this.#theme).slice(
+      0,
+      height - layout.footerHeight,
+    );
     const actions = sourceActions(screen, height);
     this.#actionIndex = clamp(this.#actionIndex, 0, actions.length - 1);
     let body: string[];
     let position = "";
     if (screen.state.kind === "ready") {
-      const highlighted = this.#highlightedSource ??= highlightCode(screen.state.source, "javascript");
+      const highlighted = (this.#highlightedSource ??= highlightCode(screen.state.source, "javascript"));
       const total = Math.max(1, highlighted.length);
       const maxScroll = Math.max(0, total - layout.bodyHeight);
       this.#sourceScroll = clamp(this.#sourceScroll, 0, maxScroll);
@@ -240,31 +270,21 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
           sourceFrameLine("bottom", position, width, this.#theme),
         ]
       : padLines(body, layout.bodyHeight, width);
-    const footer = sourceFooter(
-      screen,
-      actions,
-      this.#actionIndex,
-      layout.framed ? "" : position,
-      this.#theme,
-    );
-    return [
-      ...identity,
-      ...framedBody,
-      ...footer.slice(0, layout.footerHeight).map((line) => fitLine(line, width)),
-    ];
+    const footer = sourceFooter(screen, actions, this.#actionIndex, layout.framed ? "" : position, this.#theme);
+    return [...identity, ...framedBody, ...footer.slice(0, layout.footerHeight).map((line) => fitLine(line, width))];
   }
 
   #renderIdentity(screen: Extract<CatalogScreen, { kind: "identity" }>, width: number): string[] {
     const height = viewerRows(this.tui);
     const footerHeight = Math.min(COMPACT_FOOTER_ROWS, Math.max(0, height - 1));
     const bodyHeight = Math.max(0, height - 1 - footerHeight);
-    const wrapped = identityTextLines(screen.selected)
-      .flatMap((line) => wrapTextWithAnsi(styleIdentityLine(line, this.#theme), width));
+    const wrapped = identityTextLines(screen.selected).flatMap((line) =>
+      wrapTextWithAnsi(styleIdentityLine(line, this.#theme), width),
+    );
     const total = Math.max(1, wrapped.length);
     const maxScroll = Math.max(0, total - bodyHeight);
-    this.#identityScroll = this.#identityScroll === Number.MAX_SAFE_INTEGER
-      ? maxScroll
-      : clamp(this.#identityScroll, 0, maxScroll);
+    this.#identityScroll =
+      this.#identityScroll === Number.MAX_SAFE_INTEGER ? maxScroll : clamp(this.#identityScroll, 0, maxScroll);
     const visible = wrapped
       .slice(this.#identityScroll, this.#identityScroll + bodyHeight)
       .map((line) => fitLine(line, width));
@@ -273,7 +293,9 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     return [
       fitLine(`[IDENTITY] ${screen.selected.name}`, width),
       ...padLines(visible, bodyHeight, width),
-      ...identityFooter(first, last, total).slice(0, footerHeight).map((line) => fitLine(line, width)),
+      ...identityFooter(first, last, total)
+        .slice(0, footerHeight)
+        .map((line) => fitLine(line, width)),
     ];
   }
 }
@@ -303,9 +325,7 @@ export class WorkflowInfoViewer implements CustomUiComponent {
     const content = renderOperatorBlock(this.block, safeWidth, this.#theme);
     const total = Math.max(1, content.length);
     const maxScroll = Math.max(0, total - bodyHeight);
-    this.#scroll = this.#scroll === Number.MAX_SAFE_INTEGER
-      ? maxScroll
-      : clamp(this.#scroll, 0, maxScroll);
+    this.#scroll = this.#scroll === Number.MAX_SAFE_INTEGER ? maxScroll : clamp(this.#scroll, 0, maxScroll);
     const visible = content.slice(this.#scroll, this.#scroll + bodyHeight);
     if (footerHeight === 0) return visible.slice(0, 1).map((line) => fitLine(line, safeWidth));
     const first = Math.min(total, this.#scroll + 1);
@@ -323,7 +343,8 @@ export class WorkflowInfoViewer implements CustomUiComponent {
     }
     const page = Math.max(1, viewerRows(this.tui) - 1);
     if (matchesInput(this.keybindings, data, "tui.select.up", ["up", "k", "\x1b[A", "\x1bOA"])) this.#scroll -= 1;
-    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"])) this.#scroll += 1;
+    else if (matchesInput(this.keybindings, data, "tui.select.down", ["down", "j", "\x1b[B", "\x1bOB"]))
+      this.#scroll += 1;
     else if (["pageUp", "pageup", "\x1b[5~"].includes(data)) this.#scroll -= page;
     else if (["pageDown", "pagedown", "\x1b[6~"].includes(data)) this.#scroll += page;
     else if (["home", "\x1b[H", "\x1b[1~"].includes(data)) this.#scroll = 0;
@@ -376,32 +397,31 @@ function compactCatalogProjection(
 ): string[] {
   const rows = selectableRows(model);
   const selected = rows[selectedIndex];
-  const row = fitLine(
-    selected === undefined ? "No workflow rows." : compactSelectedRowLine(selected),
-    width,
-  );
+  const row = fitLine(selected === undefined ? "No workflow rows." : compactSelectedRowLine(selected), width);
   if (height === 1) return [row];
   const controls = fitLine(selected === undefined ? "Esc close" : "↑/↓ Enter · Esc", width);
   if (height === 2) return [row, controls];
   const query = model.query === undefined ? "" : ` · query ${JSON.stringify(model.query)}`;
   if (height === 3) {
-    return [
+    return [fitLine(style(theme, "accent", `[SELECT] Workflow catalog${query}`), width), row, controls];
+  }
+  return padLines(
+    [
       fitLine(style(theme, "accent", `[SELECT] Workflow catalog${query}`), width),
       row,
-      controls,
-    ];
-  }
-  return padLines([
-    fitLine(style(theme, "accent", `[SELECT] Workflow catalog${query}`), width),
-    row,
-    fitLine(selected === undefined ? "Esc close · no selectable rows" : "↑/↓ select · Enter inspect · Esc close", width),
-    fitLine("Help: /workflows info", width),
-  ], height, width);
+      fitLine(
+        selected === undefined ? "Esc close · no selectable rows" : "↑/↓ select · Enter inspect · Esc close",
+        width,
+      ),
+      fitLine("Help: /workflows info", width),
+    ],
+    height,
+    width,
+  );
 }
 
 function compactSelectedRowLine(row: SelectableWorkflowRow): string {
-  const identity = row.kind === "history" ? `[R:${row.runId}]` : "[C]";
-  return `${identity} ${workflowSourceBadge(row.source)} ${row.name}`;
+  return catalogRowSummary(row);
 }
 
 function sourceFooter(
@@ -411,17 +431,17 @@ function sourceFooter(
   position: string,
   theme: WorkflowCatalogTheme,
 ): string[] {
+  const controls = "Tab/←/→ action · Enter choose · i details · Esc back";
   return [
     `${actionBar(screen, actions, selected, theme)}${position === "" ? "" : ` ${position}`}`,
-    "Prefill editor; nothing runs · Tab Enter i Esc",
+    screen.selected.kind === "history"
+      ? `${controls} · Review handoff`
+      : `${controls} · Start direct; Edit/Review handoff`,
   ];
 }
 
 function identityFooter(first: number, last: number, total: number): string[] {
-  return [
-    `${first}-${last}/${total} · ↑/↓ PgUp/PgDn Home/End`,
-    "i/Esc source · Help: /workflows info",
-  ];
+  return [`${first}-${last}/${total} · ↑/↓ PgUp/PgDn Home/End`, "i/Esc source · Help: /workflows info"];
 }
 
 function sourceIdentityLines(
@@ -430,17 +450,14 @@ function sourceIdentityLines(
   limit: number,
   theme: WorkflowCatalogTheme = {},
 ): string[] {
-  const lines = identityTextLines(row)
-    .flatMap((line) => wrapTextWithAnsi(styleIdentityLine(line, theme), width));
+  const lines = identityTextLines(row).flatMap((line) => wrapTextWithAnsi(styleIdentityLine(line, theme), width));
   return lines.slice(0, limit).map((line) => fitLine(line, width));
 }
 
 function styleIdentityLine(line: string, theme: WorkflowCatalogTheme): string {
   if (line.startsWith("[VIEW]")) return `${style(theme, "success", "[VIEW]")}${line.slice("[VIEW]".length)}`;
   const separator = line.indexOf(":");
-  return separator < 0
-    ? line
-    : `${style(theme, "success", line.slice(0, separator + 1))}${line.slice(separator + 1)}`;
+  return separator < 0 ? line : `${style(theme, "success", line.slice(0, separator + 1))}${line.slice(separator + 1)}`;
 }
 
 function identityTextLines(row: SelectableWorkflowRow): string[] {
@@ -458,12 +475,12 @@ function actionBar(
   selected: number,
   theme: WorkflowCatalogTheme,
 ): string {
-  return actions.map((action, index) => {
-    const label = action === "review" && screen.state.kind !== "ready" ? "Diagnose" : title(action);
-    return index === selected
-      ? style(theme, "warning", `› [${label}]`)
-      : style(theme, "success", label);
-  }).join(" ");
+  return actions
+    .map((action, index) => {
+      const label = action === "review" && screen.state.kind !== "ready" ? "Diagnose" : title(action);
+      return index === selected ? style(theme, "warning", `› [${label}]`) : style(theme, "success", label);
+    })
+    .join(" ");
 }
 
 function title(action: SourceAction): string {
@@ -480,7 +497,9 @@ function catalogBody(
   const rows = selectableRows(model);
   if (height === 1) {
     const selected = rows[selectedIndex];
-    return [fitLine(selected === undefined ? "No workflow rows." : rowLines(selected, true, width, theme, false)[0]!, width)];
+    return [
+      fitLine(selected === undefined ? "No workflow rows." : rowLines(selected, true, width, theme, false)[0]!, width),
+    ];
   }
   const desiredCurrentHeight = sectionDesiredHeight(model.current.length);
   const desiredHistoryHeight = sectionDesiredHeight(model.history.length);
@@ -489,28 +508,32 @@ function catalogBody(
   const historyHeight = contentFits ? desiredHistoryHeight : Math.max(1, height - currentHeight);
   const lines = [style(theme, "muted", `Current (${model.current.length}/${model.totalCurrent}):`)];
   const currentBody = Math.max(0, currentHeight - 1);
-  lines.push(...catalogSection(
-    model.current,
-    Math.min(selectedIndex, model.current.length - 1),
-    0,
-    selectedIndex,
-    currentBody,
-    width,
-    theme,
-    model.query === undefined ? "  (none found)" : "  (no current matches)",
-  ));
+  lines.push(
+    ...catalogSection(
+      model.current,
+      Math.min(selectedIndex, model.current.length - 1),
+      0,
+      selectedIndex,
+      currentBody,
+      width,
+      theme,
+      model.query === undefined ? "  (none found)" : "  (no current matches)",
+    ),
+  );
   lines.push(style(theme, "muted", `History [R] review-only (${model.history.length}):`));
   const historyBody = Math.max(0, historyHeight - 1);
-  lines.push(...catalogSection(
-    model.history,
-    clamp(selectedIndex - model.current.length, 0, model.history.length - 1),
-    model.current.length,
-    selectedIndex,
-    historyBody,
-    width,
-    theme,
-    model.query === undefined ? "  (none yet)" : "  (no history matches)",
-  ));
+  lines.push(
+    ...catalogSection(
+      model.history,
+      clamp(selectedIndex - model.current.length, 0, model.history.length - 1),
+      model.current.length,
+      selectedIndex,
+      historyBody,
+      width,
+      theme,
+      model.query === undefined ? "  (none yet)" : "  (no history matches)",
+    ),
+  );
   return lines.slice(0, height).map((line) => fitLine(line, width));
 }
 
@@ -549,16 +572,37 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
-  const history = row.kind === "history" ? `[R:${row.runId}] ` : "";
-  const first = `${selected ? ">" : " "} ${history}${workflowSourceBadge(row.source)} ${row.sourceLabel} · ${row.name} · ${row.description}`;
+  const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
   if (!expanded) return [style(theme, selected ? "accent" : "text", fitLine(first, width))];
   const pathPrefix = "    └ ";
-  const pathWidth = Math.max(0, width - visibleWidth(pathPrefix));
-  const path = middleTruncate(row.originPath, pathWidth);
+  const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
+  const detail = catalogDetailLine(row, detailWidth);
   return [
     style(theme, selected ? "accent" : "text", fitLine(first, width)),
-    style(theme, selected ? "accent" : "muted", fitLine(`${pathPrefix}${path}`, width)),
+    style(theme, selected ? "accent" : "muted", fitLine(`${pathPrefix}${detail}`, width)),
   ];
+}
+
+function catalogRowIdentity(row: SelectableWorkflowRow): string {
+  const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+  return `${row.name}${run} · ${workflowSourceBadge(row.source)}`;
+}
+
+function catalogRowSummary(row: SelectableWorkflowRow): string {
+  return `${catalogRowIdentity(row)} · ${row.description}`;
+}
+
+function catalogDetailLine(row: SelectableWorkflowRow, width: number): string {
+  const separator = " · ";
+  const separatorWidth = visibleWidth(separator);
+  if (width <= separatorWidth + 2) return middleTruncate(row.originPath, width);
+  const descriptionWidth = Math.min(
+    visibleWidth(row.description),
+    Math.max(1, Math.floor((width - separatorWidth) * 0.4)),
+  );
+  const description = truncateToWidth(row.description, descriptionWidth, "…");
+  const pathWidth = Math.max(1, width - visibleWidth(description) - separatorWidth);
+  return `${description}${separator}${middleTruncate(row.originPath, pathWidth)}`;
 }
 
 function middleTruncate(value: string, width: number): string {
@@ -567,20 +611,12 @@ function middleTruncate(value: string, width: number): string {
   if (total <= width) return value;
   if (width === 1) return "…";
   const basename = value.split(/[\\/]/u).at(-1) ?? value;
-  const suffixWidth = Math.min(
-    width - 2,
-    Math.max(1, visibleWidth(basename), Math.floor(width * 0.55)),
-  );
+  const suffixWidth = Math.min(width - 2, Math.max(1, visibleWidth(basename), Math.floor(width * 0.55)));
   const prefixWidth = Math.max(1, width - suffixWidth - 1);
   return `${sliceByColumn(value, 0, prefixWidth)}…${sliceByColumn(value, total - suffixWidth, total)}`;
 }
 
-function sourceFrameLine(
-  edge: "top" | "bottom",
-  label: string,
-  width: number,
-  theme: WorkflowCatalogTheme,
-): string {
+function sourceFrameLine(edge: "top" | "bottom", label: string, width: number, theme: WorkflowCatalogTheme): string {
   const left = edge === "top" ? "╭─ " : "╰─ ";
   const right = edge === "top" ? "╮" : "╯";
   const prefix = `${left}${label} `;
@@ -602,11 +638,11 @@ function isKeybindings(value: unknown): value is WorkflowCatalogKeybindings {
 }
 
 function asTheme(value: unknown): WorkflowCatalogTheme {
-  return typeof value === "object" && value !== null ? value as WorkflowCatalogTheme : {};
+  return typeof value === "object" && value !== null ? (value as WorkflowCatalogTheme) : {};
 }
 
 function asOperatorTheme(value: unknown): OperatorThemeLike | undefined {
-  return typeof value === "object" && value !== null ? value as OperatorThemeLike : undefined;
+  return typeof value === "object" && value !== null ? (value as OperatorThemeLike) : undefined;
 }
 
 function style(theme: WorkflowCatalogTheme, color: string, text: string): string {
@@ -614,12 +650,11 @@ function style(theme: WorkflowCatalogTheme, color: string, text: string): string
 }
 
 function terminalRows(tui: CustomUiTui): number {
-  const rows = tui.terminal?.rows;
-  return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : DEFAULT_TERMINAL_ROWS;
+  return sharedTerminalRows(tui, 3, DEFAULT_TERMINAL_ROWS);
 }
 
 function viewerRows(tui: CustomUiTui): number {
-  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS);
+  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS - viewerExternalRows());
 }
 
 function identityBodyHeight(tui: CustomUiTui): number {
@@ -642,10 +677,11 @@ function sourceLayout(
 } {
   const height = viewerRows(tui);
   const footerHeight = Math.min(COMPACT_FOOTER_ROWS, Math.max(0, height - 1));
-  const identityLimit = screen.state.kind === "ready"
-    ? Math.max(1, height - footerHeight - 2)
-    : 1;
-  const identityHeight = sourceIdentityLines(screen.selected, width, identityLimit).slice(0, height - footerHeight).length;
+  const identityLimit = screen.state.kind === "ready" ? Math.max(1, height - footerHeight - 2) : 1;
+  const identityHeight = sourceIdentityLines(screen.selected, width, identityLimit).slice(
+    0,
+    height - footerHeight,
+  ).length;
   const contentHeight = Math.max(0, height - identityHeight - footerHeight);
   const framed = screen.state.kind === "ready" && contentHeight >= SOURCE_FRAME_ROWS + 1;
   return {
@@ -682,8 +718,4 @@ function windowStart(selected: number, total: number, limit: number): number {
 
 function cycleIndex(index: number, delta: number, total: number): number {
   return total <= 0 ? 0 : (index + delta + total) % total;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

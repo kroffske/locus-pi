@@ -1,5 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/pi-api.js";
+import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
+import { clamp } from "../_shared/operator/viewer-geometry.js";
 
 const CONTENT_LINE_COUNT = 18;
 const LARGE_SCROLL_STEP = 9;
@@ -59,8 +60,16 @@ function normalizeKey(data: string): "close" | "up" | "down" | "pageUp" | "pageD
   if (data === "q" || data === "escape" || data === "\u001b") return "close";
   if (data === "up" || data === "k" || data === "\u001b[A") return "up";
   if (data === "down" || data === "j" || data === "\u001b[B") return "down";
-  if (data === "pageUp" || data === "pageup" || data === "shift+up" || data === "\u001b[5~" || data === "\u001b[1;2A") return "pageUp";
-  if (data === "pageDown" || data === "pagedown" || data === "shift+down" || data === "\u001b[6~" || data === "\u001b[1;2B") return "pageDown";
+  if (data === "pageUp" || data === "pageup" || data === "shift+up" || data === "\u001b[5~" || data === "\u001b[1;2A")
+    return "pageUp";
+  if (
+    data === "pageDown" ||
+    data === "pagedown" ||
+    data === "shift+down" ||
+    data === "\u001b[6~" ||
+    data === "\u001b[1;2B"
+  )
+    return "pageDown";
   if (data === "home" || data === "\u001b[H" || data === "\u001b[1~") return "home";
   if (data === "end" || data === "\u001b[F" || data === "\u001b[4~") return "end";
   return "unknown";
@@ -86,8 +95,4 @@ function frameLines(title: string, body: string[], footer: string, width: number
 function fitLine(line: string, width: number): string {
   const fitted = truncateToWidth(line, width, "…");
   return `${fitted}${" ".repeat(Math.max(0, width - visibleWidth(fitted)))}`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

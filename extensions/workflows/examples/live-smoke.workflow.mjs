@@ -1,14 +1,14 @@
 // live-smoke.workflow.mjs
 // Minimal LIVE proof that the runtime really spawns child agent sessions.
-// Two read-only agents each perform a small tool action (so they pass the
+// Two agents each perform a small tool action (so they pass the
 // honesty gate, which rejects "completed" with zero tool activity) and return a
-// one-line note. The workflow returns both notes + per-agent status, so the
-// run is VERIFIABLE: check .locus/runtime/workflows/<runId>/result.json for
-// agent_end events with status "completed" and a real childSessionId.
-
+// one-line note. The workflow returns both exact notes; per-agent status and
+// session evidence remain runtime-owned in journal events and child artifacts.
+//
 export const meta = {
   name: "live-smoke",
-  description: "Checks that the Pi host can spawn read-only workflow agents and collect their reports.",
+  profile: "standard",
+  description: "Checks that the Pi host can spawn full-tool workflow agents and collect their reports.",
 };
 
 export default async function runWorkflow(dsl, input) {
@@ -18,28 +18,23 @@ export default async function runWorkflow(dsl, input) {
   phase("smoke");
   log(`Live smoke for: ${topic}`);
 
-  const ask = (who) =>
-    agent(
-      `Use your read/bash tools to list the files in the current working directory, ` +
-        `then reply in ONE short sentence: name yourself ("${who}") and say how many entries you found. Topic: ${topic}.`,
-      // Label describes the TASK (glossary standard), not the agent — the actor is
-      // already shown as `agentName#id` in the live row (T-188 W3).
-      { agent: who, label: "list cwd entries", permissionMode: "agent-defined" },
-    );
-
-  const explore = await ask("explore");
-  const quick = await ask("quick_task");
+  const explore = await agent(
+    `Use your find tool to list the files in the current working directory, ` +
+      `then reply in ONE short sentence: name yourself ("explore") and say how many entries you found. Topic: ${topic}.`,
+    { agent: "explore", label: "list cwd entries", workspaceMode: "project" },
+  );
+  const quick = await agent(
+    `Use your find tool to list the files in the current working directory, ` +
+      `then reply in ONE short sentence: name yourself ("quick_task") and say how many entries you found. Topic: ${topic}.`,
+    { agent: "quick_task", label: "list cwd entries", workspaceMode: "project" },
+  );
 
   return {
     topic,
-    ok: Boolean(explore?.ok && quick?.ok),
+    ok: true,
     notes: {
-      explore: explore?.summary ?? null,
-      quick_task: quick?.summary ?? null,
-    },
-    childSessions: {
-      explore: explore?.childSessionId ?? null,
-      quick_task: quick?.childSessionId ?? null,
+      explore,
+      quick_task: quick,
     },
   };
 }

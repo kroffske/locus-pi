@@ -16,7 +16,7 @@
 5. Merge release pull requests with a merge commit, then create the matching `vX.Y.Z` tag.
 6. Keep `main` as the GitHub default so visitors land on the stable release surface.
 
-GitHub branch rules are not available while this repository is private on the current account plan. Until the repository becomes public or the plan changes, tracked hooks, CI, and pull-request discipline are the enforceable local boundary.
+This repository is public, so GitHub branch protection and rulesets are available on the current plan — but neither is configured. `main` and `dev` both report `protected: false` and the repository has no rulesets, so the rules above are currently enforced only by the tracked pre-commit and pre-push hooks, CI, and review discipline. Those hooks are local and skippable (`--no-verify`, an unhooked clone), which makes the boundary a convention rather than a server-side guarantee. Enabling branch protection or a ruleset on `main` and `dev` — for example requiring pull requests and the `Node 22 package contract` CI check — is an owner decision and an explicit repository-settings change; agents must not make it.
 
 ## Local setup
 
@@ -39,6 +39,20 @@ npm run check:push
 
 CI repeats source checks, tests, source-audit checks, public-repository inventory validation, dependency auditing, Pi diagnostics, and npm tarball inspection.
 
+## Extension ownership layers
+
+`extensions/_shared/` is broken up into six named ownership layers — `host`, `operator`, `runtime`, `model`, `project`, `agent-runtime` — and holds nothing but those directories, so its modules are not interchangeable and its import direction is enforced, not conventional. `scripts/check-extension-layers.ts` (run by `npm run check:layers`, and inside `npm run check`) holds the ledger and the rules:
+
+- No module under `extensions/_shared/**` may import a feature directory under `extensions/**`. Invert the dependency, or move the module out of `_shared/`.
+- Every `_shared` module is declared exactly once — either in a shared layer or with the feature directory that owns it, when a module is still awaiting relocation. A new shared module with no declared owner fails the check.
+- The directory a module sits in must equal the layer it is declared under, so the tree on disk cannot disagree with the ledger. A module declared as belonging to a feature may not sit in a layer directory at all.
+- Shared layers have a declared order (`host` first, then `operator`, `runtime`/`model`, `project`, `agent-runtime`); the operator UI layer is a leaf — it may reach only `host`, and no other shared layer may reach it. Type-only imports count, because they still encode ownership.
+- One extension may not import another's internals when that module is declared internal behind a named facade; the facade is the only door.
+- Versioned `globalThis` registries (`Symbol.for("locus-pi.…")`) have exactly one declared owning module. Two modules naming one slot is how a relocation splits process-wide live state.
+- Mutable module-level state that is not such a registry is declared separately, because it does not survive Pi loading two entrypoints with the module cache disabled.
+
+Read that script's header before moving anything under `extensions/`; when a move is legitimate, update the ledger in the same change rather than loosening a rule.
+
 ## Changelog and release metadata
 
 - User-visible package, runtime, manual, security, or support changes must update `CHANGELOG.md` in the same pull request.
@@ -49,6 +63,6 @@ CI repeats source checks, tests, source-audit checks, public-repository inventor
 ## Public package boundary
 
 - `package.json#pi.extensions`, extension manifests, public manuals, source-audit notes, and `public-repository.json` define the public surface.
-- Do not widen the default extension list, curated Package workflow registry, runtime dependencies, or npm allowlist without an explicit ownership decision and matching tests and documentation.
+- Do not widen the default extension list, the Package workflow registry (the shipped `extensions/workflows/examples/` directory, scanned by existence — adding a `<name>.workflow.mjs` there widens it), runtime dependencies, or npm allowlist without an explicit ownership decision and matching tests and documentation.
 - Never commit or publish credentials, auth files, absolute workstation paths, private runtime state, generated research, transcripts, benchmarks, or evaluation artifacts.
 - Repository visibility changes and npm publication remain explicit owner actions.

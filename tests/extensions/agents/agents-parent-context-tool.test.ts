@@ -3,19 +3,36 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import { createAgentExecutionPromptCapsule, formatAgentKickoffPrompt } from "../../../extensions/_shared/agent-executor-host.js";
+import {
+  createAgentExecutionPromptCapsule,
+  formatAgentKickoffPrompt,
+} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const runSpy = vi.fn();
 const tempRoots: string[] = [];
 
-vi.mock("../../../extensions/_shared/agent-sdk-host.js", async () => {
-  const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-sdk-host.js")>("../../../extensions/_shared/agent-sdk-host.js");
+vi.mock("../../../extensions/_shared/agent-runtime/agent-sdk-host.js", async () => {
+  const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-sdk-host.js")>(
+    "../../../extensions/_shared/agent-runtime/agent-sdk-host.js",
+  );
   return {
     ...actual,
     createAgentSdkSessionExecutor() {
       return {
-        async run(request: { agent: { name: string; description: string; allowedTools: string[]; risk: "low" | "medium" | "high"; readOnly: boolean; filePath?: string; parentContextDefault?: boolean }; task: string; parentContext?: { inline?: string; artifactPath?: string } }) {
+        async run(request: {
+          agent: {
+            name: string;
+            description: string;
+            allowedTools: string[];
+            risk: "low" | "medium" | "high";
+            readOnly: boolean;
+            filePath?: string;
+            parentContextDefault?: boolean;
+          };
+          task: string;
+          parentContext?: { inline?: string; artifactPath?: string };
+        }) {
           const capsule = createAgentExecutionPromptCapsule({
             agent: request.agent,
             task: request.task,
@@ -49,14 +66,34 @@ function tempRoot(prefix = "locus-parent-context-"): string {
   return root;
 }
 
+/**
+ * A root that owns `reviewer` outright.
+ *
+ * Discovery is project → user → bundled, so a root with no `.agents/agents/` reads
+ * whatever catalog the developer installed under `$HOME`. That was harmless while
+ * agent frontmatter `model:` was parsed and never used; now that it selects the
+ * child's model, a stale home catalog can refuse the run and these assertions would
+ * fail for a reason that has nothing to do with parent context.
+ */
+function tempRootWithReviewer(prefix = "locus-parent-context-"): string {
+  const root = tempRoot(prefix);
+  mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+  writeFileSync(
+    path.join(root, ".agents", "agents", "reviewer.md"),
+    "---\nname: reviewer\ndescription: Project reviewer\ntools: read, search\nrisk: medium\n---\nReview.",
+    "utf8",
+  );
+  return root;
+}
+
 describe("agents task parent context", () => {
-  it("accepts the old task shape and omits parent context", async () => {
-    const h = createHarness(tempRoot());
+  it("accepts one task string and omits parent context", async () => {
+    const h = createHarness(tempRootWithReviewer());
     agents(h.pi);
 
     const result = await runTool(h, "task", {
       agent: "reviewer",
-      tasks: [{ id: "TaskA", description: "Task A", assignment: "Old shape task" }],
+      task: "One child task",
     });
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -64,11 +101,10 @@ describe("agents task parent context", () => {
     expect(result.details).toMatchObject({
       parentContextBroker: { forwarded: false, sources: [], agentDefault: false },
     });
-    expect((result.details as { results: Array<{ parentContextBroker: { forwarded: boolean } }> }).results[0]!.parentContextBroker.forwarded).toBe(false);
   });
 
   it("forwards non-empty parent context and reads artifact payload into kickoff", async () => {
-    const root = tempRoot();
+    const root = tempRootWithReviewer();
     const h = createHarness(root);
     agents(h.pi);
     const artifactPath = path.join(root, "parent-context.md");
@@ -76,7 +112,7 @@ describe("agents task parent context", () => {
 
     const result = await runTool(h, "task", {
       agent: "reviewer",
-      tasks: [{ id: "TaskB", description: "Task B", assignment: "Child assignment without sentinel" }],
+      task: "Child assignment without sentinel",
       parentContext: {
         inline: "INLINE_PARENT_SENTINEL",
         artifactPath,
@@ -84,7 +120,10 @@ describe("agents task parent context", () => {
     });
 
     expect(runSpy).toHaveBeenCalledTimes(1);
-    const { kickoff, request } = runSpy.mock.calls[0]![0] as { kickoff: string; request: { parentContext?: { inline?: string; artifactPath?: string } } };
+    const { kickoff, request } = runSpy.mock.calls[0]![0] as {
+      kickoff: string;
+      request: { parentContext?: { inline?: string; artifactPath?: string } };
+    };
     expect(request.parentContext).toMatchObject({ inline: "INLINE_PARENT_SENTINEL", artifactPath });
     expect(kickoff).toContain("INLINE_PARENT_SENTINEL");
     expect(kickoff).toContain("PARENT_ARTIFACT_SENTINEL");
@@ -93,34 +132,28 @@ describe("agents task parent context", () => {
     expect(result.details).toMatchObject({
       parentContextBroker: { forwarded: true, sources: ["inline", "artifactPath"], agentDefault: false },
     });
-    expect((result.details as { results: Array<{ parentContextBroker: { forwarded: boolean; sources: string[] } }> }).results[0]!.parentContextBroker).toMatchObject({
-      forwarded: true,
-      sources: ["inline", "artifactPath"],
-      agentDefault: false,
-    });
   });
 
   it("reports forwarded false and agentDefault true when parentContextDefault is set but payload is absent", async () => {
     const root = tempRoot("locus-parent-default-agent-");
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
-    writeFileSync(path.join(root, ".agents", "agents", "parent-default.md"), `---\nname: parent-default\ndescription: Parent default agent\ntools: read\nrisk: low\nparentContextDefault: true\n---\nAgent.`, "utf8");
+    writeFileSync(
+      path.join(root, ".agents", "agents", "parent-default.md"),
+      `---\nname: parent-default\ndescription: Parent default agent\ntools: read\nrisk: low\nparentContextDefault: true\n---\nAgent.`,
+      "utf8",
+    );
     const h = createHarness(root);
     agents(h.pi);
 
     const result = await runTool(h, "task", {
       agent: "parent-default",
-      tasks: [{ id: "TaskC", description: "Task C", assignment: "No payload" }],
+      task: "No payload",
     });
 
     expect(runSpy).toHaveBeenCalledTimes(1);
     expect(runSpy.mock.calls[0]![0].request).not.toHaveProperty("parentContext");
     expect(result.details).toMatchObject({
       parentContextBroker: { forwarded: false, sources: [], agentDefault: true },
-    });
-    expect((result.details as { results: Array<{ parentContextBroker: { forwarded: boolean; sources: string[]; agentDefault: boolean } }> }).results[0]!.parentContextBroker).toMatchObject({
-      forwarded: false,
-      sources: [],
-      agentDefault: true,
     });
   });
 });
@@ -132,7 +165,13 @@ function fakeResult() {
     reason: "done",
     diagnostics: [],
     lifecycleEntryIds: [],
-    structuredResult: { version: "locus.agent.result.v1", status: "completed", summary: "done" },
-    childOutputStats: { entryCount: 1, assistantMessageCount: 1, assistantToolCallCount: 0, toolResultCount: 0, hasWorkloadProof: false },
+    text: "done",
+    childOutputStats: {
+      entryCount: 1,
+      assistantMessageCount: 1,
+      assistantToolCallCount: 0,
+      toolResultCount: 0,
+      hasWorkloadProof: false,
+    },
   };
 }

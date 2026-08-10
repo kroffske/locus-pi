@@ -9,6 +9,9 @@ test-results/
 .cache/
 .tasks/
 .locus/
+# Retired: workflow run reports moved into .pi/locus-pi/runs/<runId>/outputs/.
+# Kept so a checkout that predates the move stays clean.
+.locus-pi/
 .locus/_archive/.hermes/
 .omp/
 .test_pi/
@@ -86,3 +89,4 @@ tmp/
 # stray demo output from .pi/workflows/test-two-files-with-agents.workflow.mjs
 /test1.md
 /test2.md
+.gstack/

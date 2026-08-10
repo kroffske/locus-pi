@@ -19,7 +19,8 @@
     "docsPath",
     "sourceAuditPath",
     "tests",
-    "review"
+    "review",
+    "agent"
   ],
   "properties": {
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
@@ -104,6 +105,14 @@
         "source": { "enum": ["write-from-scratch", "rewrite-first", "fork-after-audit", "wrapper-first", "copy-after-audit"] },
         "reviewedBy": { "type": ["string", "null"] },
         "reviewedAt": { "type": ["string", "null"] }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string", "maxLength": 96 }
       }
     }
   }

@@ -8,8 +8,12 @@ import {
   loadActiveModeState,
   modeStatePath,
   writeModeState,
-} from "../../../extensions/_shared/mode-state.js";
-import plan, { __resetModeUiStateForTests, __setEditorBaseLoaderForTests } from "../../../extensions/plan/index.js";
+} from "../../../extensions/plan/mode-state.js";
+import plan from "../../../extensions/plan/index.js";
+import {
+  __resetModeUiStateForTests,
+  __setEditorBaseLoaderForTests,
+} from "../../../extensions/plan/operator-surface.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 const fakeTheme = {
@@ -21,18 +25,21 @@ const fakeTheme = {
 let root: string;
 let locusPiHome: string;
 let previousLocusPiHome: string | undefined;
-let previousAgentDir: string | undefined;
 
 beforeEach(() => {
-  root = path.join(tmpdir(), `locus-pi-plan-behavior-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  locusPiHome = path.join(tmpdir(), `locus-pi-home-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  root = path.join(
+    tmpdir(),
+    `locus-pi-plan-behavior-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  locusPiHome = path.join(
+    tmpdir(),
+    `locus-pi-home-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(path.join(root, "src"), { recursive: true });
   mkdirSync(locusPiHome, { recursive: true });
   writeFileSync(path.join(root, "src", "foo.ts"), "export const foo = 1;\n", "utf8");
   previousLocusPiHome = process.env["LOCUS_PI_HOME"];
-  previousAgentDir = process.env["PI_CODING_AGENT_DIR"];
   process.env["LOCUS_PI_HOME"] = locusPiHome;
-  process.env["PI_CODING_AGENT_DIR"] = path.join(root, "agent-dir");
   __resetModeUiStateForTests();
 });
 
@@ -41,16 +48,8 @@ afterEach(() => {
   rmSync(locusPiHome, { recursive: true, force: true });
   if (previousLocusPiHome === undefined) delete process.env["LOCUS_PI_HOME"];
   else process.env["LOCUS_PI_HOME"] = previousLocusPiHome;
-  if (previousAgentDir === undefined) delete process.env["PI_CODING_AGENT_DIR"];
-  else process.env["PI_CODING_AGENT_DIR"] = previousAgentDir;
   __resetModeUiStateForTests();
 });
-
-function freeShiftTabForTest(): void {
-  const agentDir = process.env["PI_CODING_AGENT_DIR"]!;
-  mkdirSync(agentDir, { recursive: true });
-  writeFileSync(path.join(agentDir, "keybindings.json"), JSON.stringify({ "app.thinking.cycle": [] }), "utf8");
-}
 
 function activePlanPath(): string {
   return path.join(locusPiHome, ".pi", "locus-pi", "project", "plans", "active-plan.md");
@@ -89,10 +88,12 @@ describe("plan mode is behavioral, not a tool block (v2)", () => {
     const harness = createHarness(root);
     plan(harness.pi);
 
-    const writeResults = (await emit(harness, "tool_call", { toolName: "write", toolArgs: { path: "src/foo.ts" } }))
-      .filter((entry) => entry !== undefined);
-    const bashResults = (await emit(harness, "tool_call", { toolName: "bash", toolArgs: { command: "python -c 'print(1)'" } }))
-      .filter((entry) => entry !== undefined);
+    const writeResults = (
+      await emit(harness, "tool_call", { toolName: "write", toolArgs: { path: "src/foo.ts" } })
+    ).filter((entry) => entry !== undefined);
+    const bashResults = (
+      await emit(harness, "tool_call", { toolName: "bash", toolArgs: { command: "python -c 'print(1)'" } })
+    ).filter((entry) => entry !== undefined);
 
     expect(writeResults).toHaveLength(0);
     expect(bashResults).toHaveLength(0);
@@ -126,15 +127,15 @@ describe("plan-mode behavioral injection (before_agent_start)", () => {
   });
 });
 
-describe("/mode command + optional Shift+Tab cycle (T-A/T-C)", () => {
-  it("registers /mode without claiming Pi's reserved shift+tab by default", () => {
+describe("/mode explicit command boundary", () => {
+  it("registers /mode without any shift+tab mode shortcut", () => {
     const harness = createHarness(root);
     plan(harness.pi);
     expect(harness.commands.has("mode")).toBe(true);
     expect(harness.shortcuts.has("shift+tab")).toBe(false);
   });
 
-  it("/mode with no argument cycles default -> plan -> default with a status label", async () => {
+  it("/mode with no argument only shows state and never changes it", async () => {
     const harness = createHarness(root);
     plan(harness.pi);
     const mode = harness.commands.get("mode")!;
@@ -142,28 +143,10 @@ describe("/mode command + optional Shift+Tab cycle (T-A/T-C)", () => {
     expect(currentCycleMode(loadActiveModeState(root))).toBe("default");
 
     await mode.handler("", harness.ctx);
-    expect(currentCycleMode(loadActiveModeState(root))).toBe("plan");
-    expect(harness.statuses.get("locus")).toBe("MODE plan");
-    expect(harness.statuses.has("mode")).toBe(false);
-    expect(harness.widgets.get("plan")).toContain("[CHANGE]");
-    expect(harness.widgets.get("plan")).toContain("default -> plan");
-
-    await mode.handler("", harness.ctx);
     expect(currentCycleMode(loadActiveModeState(root))).toBe("default");
     expect(harness.statuses.has("locus")).toBe(false);
-  });
-
-  it("registers shift+tab only after explicit /mode bind-shift-tab policy is persisted", async () => {
-    freeShiftTabForTest();
-    const harness = createHarness(root);
-    plan(harness.pi);
-    const shortcut = harness.shortcuts.get("shift+tab")!;
-
-    await shortcut.handler(harness.ctx);
-    expect(isInPlanMode(loadActiveModeState(root))).toBe(true);
-
-    await shortcut.handler(harness.ctx);
-    expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
+    expect(harness.widgets.get("plan")).toContain("[VIEW]");
+    expect(harness.widgets.get("plan")).toContain("default (normal execution)");
   });
 
   it("/mode <name> sets the mode directly", async () => {
@@ -229,7 +212,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
     const mode = harness.commands.get("mode")!;
 
     await mode.handler("plan", harness.ctx);
-    expect(harness.statuses.get("locus")).toBe("MODE plan");
+    expect(harness.statuses.get("locus")).toBe("<warning>MODE plan");
     expect(harness.statuses.has("mode")).toBe(false);
 
     await mode.handler("default", harness.ctx);
@@ -255,28 +238,31 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
     await emit(harness, "session_start", {});
     expect(harness.editorFactory).toBeTypeOf("function");
 
-    const editor = harness.editorFactory!({}, { borderColor: (s: string) => s }, {}) as { borderColor: (s: string) => string };
+    const editor = harness.editorFactory!({}, { borderColor: (s: string) => s }, {}) as {
+      borderColor: (s: string) => string;
+    };
     // Default mode: border defers to the base (host/theme) color.
     expect(editor.borderColor("─")).toBe("BASE(─)");
 
     // Enter plan: the SAME editor instance recolors via the shared flag.
     const mode = harness.commands.get("mode")!;
     await mode.handler("plan", harness.ctx);
-    expect(editor.borderColor("─")).toBe("<accent>─");
+    expect(editor.borderColor("─")).toBe("<warning>─");
 
     // Exit plan: border returns to the base color.
     await mode.handler("default", harness.ctx);
     expect(editor.borderColor("─")).toBe("BASE(─)");
   });
 
-  it("session_start restores the plan badge from persisted state", async () => {
+  it("session_start clears persisted plan state instead of silently re-arming it", async () => {
     __setEditorBaseLoaderForTests(async () => undefined);
     armPlanMode();
     const harness = createHarness(root, { theme: fakeTheme });
     plan(harness.pi);
 
     await emit(harness, "session_start", {});
-    expect(harness.statuses.get("locus")).toBe("MODE plan");
+    expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
+    expect(harness.statuses.has("locus")).toBe(false);
     expect(harness.statuses.has("mode")).toBe(false);
   });
 
@@ -398,7 +384,12 @@ describe("plan -> execution handoff on exit (T-D)", () => {
     const planCmd = harness.commands.get("plan")!;
     const ctx = {
       ...uiCtx(harness),
-      ui: { ...harness.ctx.ui, async input() { return undefined as never; } },
+      ui: {
+        ...harness.ctx.ui,
+        async input() {
+          return undefined as never;
+        },
+      },
     } as typeof harness.ctx;
 
     await planCmd.handler("exit", ctx);
@@ -443,76 +434,16 @@ describe("plan -> execution handoff on exit (T-D)", () => {
     expect(harness.widgets.get("plan")).toContain("fresh context");
   });
 
-  it("leaving plan via /mode (no arg) runs the handoff decision", async () => {
+  it("leaving plan via explicit /mode default runs the handoff decision", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
     plan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
-    await mode.handler("", uiCtx(harness)); // empty queue -> Execute (this context)
+    await mode.handler("default", uiCtx(harness)); // empty queue -> Execute (this context)
 
     expect(harness.selectCalls).toHaveLength(1);
     expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
     expect(harness.sentUserMessages).toHaveLength(1);
-  });
-
-  it("Shift+Tab plan-exit renders the same outcome widget as /plan exit, once the deferred decision settles (T-181)", async () => {
-    armPlanWithArtifact();
-    freeShiftTabForTest();
-    const harness = createHarness(root);
-    plan(harness.pi);
-    const shortcut = harness.shortcuts.get("shift+tab")!;
-
-    await shortcut.handler(uiCtx(harness)); // sync return; handoff decision resolves async
-    await new Promise((resolve) => setImmediate(resolve)); // flush the deferred .then()
-
-    expect(harness.selectCalls).toHaveLength(1);
-    expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
-    expect(harness.sentUserMessages).toHaveLength(1);
-    expect(harness.widgets.get("plan")).toContain("[CHANGE]");
-    expect(harness.widgets.get("plan")).toContain("execution queued in this context");
-  });
-});
-
-describe("/mode bind-shift-tab", () => {
-  it("writes app.thinking.cycle: [] to keybindings.json under PI_CODING_AGENT_DIR", async () => {
-    const agentDir = path.join(root, "agent-dir");
-    const previousAgentDir = process.env["PI_CODING_AGENT_DIR"];
-    process.env["PI_CODING_AGENT_DIR"] = agentDir;
-    try {
-      const harness = createHarness(root);
-      plan(harness.pi);
-      const mode = harness.commands.get("mode")!;
-
-      await mode.handler("bind-shift-tab", harness.ctx); // harness confirm() returns true
-
-      const content = readFileSync(path.join(agentDir, "keybindings.json"), "utf8");
-      const parsed = JSON.parse(content) as Record<string, unknown>;
-      expect(parsed["app.thinking.cycle"]).toEqual([]);
-    } finally {
-      if (previousAgentDir === undefined) delete process.env["PI_CODING_AGENT_DIR"];
-      else process.env["PI_CODING_AGENT_DIR"] = previousAgentDir;
-    }
-  });
-
-  it("preserves other bindings and is idempotent", async () => {
-    const agentDir = path.join(root, "agent-dir2");
-    const previousAgentDir = process.env["PI_CODING_AGENT_DIR"];
-    process.env["PI_CODING_AGENT_DIR"] = agentDir;
-    try {
-      mkdirSync(agentDir, { recursive: true });
-      writeFileSync(path.join(agentDir, "keybindings.json"), JSON.stringify({ "app.model.select": "ctrl+l" }), "utf8");
-      const harness = createHarness(root);
-      plan(harness.pi);
-      const mode = harness.commands.get("mode")!;
-
-      await mode.handler("bind-shift-tab", harness.ctx);
-      const parsed = JSON.parse(readFileSync(path.join(agentDir, "keybindings.json"), "utf8")) as Record<string, unknown>;
-      expect(parsed["app.model.select"]).toBe("ctrl+l");
-      expect(parsed["app.thinking.cycle"]).toEqual([]);
-    } finally {
-      if (previousAgentDir === undefined) delete process.env["PI_CODING_AGENT_DIR"];
-      else process.env["PI_CODING_AGENT_DIR"] = previousAgentDir;
-    }
   });
 });

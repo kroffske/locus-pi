@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import plan from "../../../extensions/plan/index.js";
-import type { ExtensionCommandContext, ReplacementSessionContext, ReplacementSessionEntryLike } from "../../../extensions/_shared/pi-api.js";
-import { isInPlanMode, loadModeState, planArtifactPath } from "../../../extensions/_shared/mode-state.js";
+import type {
+  ExtensionCommandContext,
+  ReplacementSessionContext,
+  ReplacementSessionEntryLike,
+} from "../../../extensions/_shared/host/pi-api.js";
+import { isInPlanMode, loadModeState, planArtifactPath } from "../../../extensions/plan/mode-state.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const tempRoots: string[] = [];
@@ -35,19 +39,26 @@ function taskPromptPath(root: string, kind: string, taskDir = "T-1-prompt-contra
 
 function writeTaskIndex(root: string, task: { id?: string; title?: string; taskPath?: string } = {}): void {
   mkdirSync(path.join(root, ".tasks"), { recursive: true });
-  writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-    schema: "index.v1",
-    generated_at: "2026-06-10T00:00:00.000Z",
-    tasks: [
+  writeFileSync(
+    path.join(root, ".tasks", "index.json"),
+    JSON.stringify(
       {
-        id: task.id ?? "T-1",
-        title: task.title ?? "Prompt contract",
-        status: "doing",
-        type: "feature",
-        path: task.taskPath ?? "T-1-prompt-contract",
+        schema: "index.v1",
+        generated_at: "2026-06-10T00:00:00.000Z",
+        tasks: [
+          {
+            id: task.id ?? "T-1",
+            title: task.title ?? "Prompt contract",
+            status: "doing",
+            type: "feature",
+            path: task.taskPath ?? "T-1-prompt-contract",
+          },
+        ],
       },
-    ],
-  }, null, 2));
+      null,
+      2,
+    ),
+  );
 }
 
 function expectWidgetLinesToFit(widget: string, width = 80): void {
@@ -81,9 +92,15 @@ function stubPlanSession(
     const replacementCtx: ReplacementSessionContext = {
       ...h.ctx,
       session: { id: "plan-child", projectRoot: root, workingDirectory: root },
-      async sendUserMessage(message) { kickoff = String(message); },
+      async sendUserMessage(message) {
+        kickoff = String(message);
+      },
       async waitForIdle() {},
-      sessionManager: { getEntries() { return entries; } },
+      sessionManager: {
+        getEntries() {
+          return entries;
+        },
+      },
     };
     await opts?.withSession?.(replacementCtx);
     return { cancelled: false };
@@ -158,7 +175,9 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-bare-ui-home", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-bare-ui-session" });
-      const { commandCtx } = stubPlanSession(h, root, [{ type: "message", role: "assistant", content: "## Goal\nShip it." }]);
+      const { commandCtx } = stubPlanSession(h, root, [
+        { type: "message", role: "assistant", content: "## Goal\nShip it." },
+      ]);
       commandCtx.hasUI = true;
       const input = vi.fn(async () => "typed");
       commandCtx.ui.input = input as never;
@@ -171,7 +190,10 @@ describe("default prompt commands", () => {
       expect(state?.mode).toBe("plan");
       expect(state?.status).toBe("active");
       expect(state?.slug).toContain("typed");
-      expect(input).toHaveBeenCalledWith("[INPUT] Plan request — desired end state", "Describe the state the plan should make true");
+      expect(input).toHaveBeenCalledWith(
+        "[INPUT] Plan request — desired end state",
+        "Describe the state the plan should make true",
+      );
     });
   });
 
@@ -277,7 +299,9 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-enter-home", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-enter-session" });
-      const { commandCtx } = stubPlanSession(h, root, [{ type: "message", role: "assistant", content: "## Goal\nShip it." }]);
+      const { commandCtx } = stubPlanSession(h, root, [
+        { type: "message", role: "assistant", content: "## Goal\nShip it." },
+      ]);
       plan(h.pi);
 
       await h.commands.get("plan")!.handler("Add a feature", commandCtx);
@@ -297,7 +321,9 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-exit-home", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-exit-session" });
-      const { commandCtx } = stubPlanSession(h, root, [{ type: "message", role: "assistant", content: "## Goal\nShip it." }]);
+      const { commandCtx } = stubPlanSession(h, root, [
+        { type: "message", role: "assistant", content: "## Goal\nShip it." },
+      ]);
       plan(h.pi);
 
       // Enter first
@@ -317,11 +343,13 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-authored-home", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-authored-parent" });
-      const entries: ReplacementSessionEntryLike[] = [{
-        type: "message",
-        role: "assistant",
-        content: "```markdown\n## Goal\nThis is the plan.\n\n## Approach\nEdit the plan command.\n```",
-      }];
+      const entries: ReplacementSessionEntryLike[] = [
+        {
+          type: "message",
+          role: "assistant",
+          content: "```markdown\n## Goal\nThis is the plan.\n\n## Approach\nEdit the plan command.\n```",
+        },
+      ];
       const { commandCtx, kickoff } = stubPlanSession(h, root, entries);
       plan(h.pi);
 
@@ -395,7 +423,9 @@ describe("default prompt commands", () => {
     expect(first.goal.objective).toBe("ship stable local goal flow");
 
     await h.commands.get("goal")!.handler("set improve the operator loop", h.ctx);
-    const second = JSON.parse(readFileSync(goalStatePath(root), "utf8")) as { goal: { objective: string; status: string } };
+    const second = JSON.parse(readFileSync(goalStatePath(root), "utf8")) as {
+      goal: { objective: string; status: string };
+    };
     expect(second.goal.objective).toBe("improve the operator loop");
     expect(h.widgets.get("goal") ?? "").toContain("Goal created.");
     expect(h.widgets.get("goal") ?? "").toContain("objective: improve the operator loop");
@@ -408,7 +438,7 @@ describe("default prompt commands", () => {
     plan(h.pi);
 
     await h.commands.get("goal")!.handler("ship a tiny local goal", h.ctx);
-    expect((h.widgets.get("goal") ?? "")).toContain("status: active");
+    expect(h.widgets.get("goal") ?? "").toContain("status: active");
 
     await h.commands.get("goal")!.handler("show", h.ctx);
     expect(h.widgets.get("goal") ?? "").toContain("status: active");
@@ -453,13 +483,20 @@ describe("default prompt commands", () => {
       };
     };
     state.goal.tokensUsed = 100;
-    writeFileSync(statePath, JSON.stringify({
-      version: 1,
-      goal: {
-        ...state.goal,
-        status: "active",
-      },
-    }, null, 2) + "\n");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        {
+          version: 1,
+          goal: {
+            ...state.goal,
+            status: "active",
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
 
     await h.commands.get("goal")!.handler("budget 10", h.ctx);
     expect(h.widgets.get("goal") ?? "").toContain("Goal budget set to 10 tokens.");
@@ -581,34 +618,55 @@ describe("default prompt commands", () => {
   });
 
   it.each([
-    { command: "review", kind: "review", widgetKey: "review", saveArgs: "--task T-145 Review path wrapping.", showArgs: "--task T-145" },
-    { command: "todos", kind: "todos", widgetKey: "todos", saveArgs: "--task T-145 Track path wrapping.", showArgs: "--task T-145" },
-    { command: "goal", kind: "goal", widgetKey: "goal", saveArgs: "prompt --task T-145 Goal path wrapping.", showArgs: "prompt --task T-145" },
-  ] as const)("keeps task-backed /$command widgets bounded at 80 columns", async ({ command, kind, widgetKey, saveArgs, showArgs }) => {
-    const root = tempRoot();
-    const longTaskDir = "T-145-2026-06-18-tui-standard-and-tmux-proof-repair-loop-";
-    writeTaskIndex(root, { id: "T-145", title: "TUI proof repair", taskPath: longTaskDir });
-    const h = createHarness(root, { sessionId: `${command}-task-path-widget-session` });
-    plan(h.pi);
+    {
+      command: "review",
+      kind: "review",
+      widgetKey: "review",
+      saveArgs: "--task T-145 Review path wrapping.",
+      showArgs: "--task T-145",
+    },
+    {
+      command: "todos",
+      kind: "todos",
+      widgetKey: "todos",
+      saveArgs: "--task T-145 Track path wrapping.",
+      showArgs: "--task T-145",
+    },
+    {
+      command: "goal",
+      kind: "goal",
+      widgetKey: "goal",
+      saveArgs: "prompt --task T-145 Goal path wrapping.",
+      showArgs: "prompt --task T-145",
+    },
+  ] as const)(
+    "keeps task-backed /$command widgets bounded at 80 columns",
+    async ({ command, kind, widgetKey, saveArgs, showArgs }) => {
+      const root = tempRoot();
+      const longTaskDir = "T-145-2026-06-18-tui-standard-and-tmux-proof-repair-loop-";
+      writeTaskIndex(root, { id: "T-145", title: "TUI proof repair", taskPath: longTaskDir });
+      const h = createHarness(root, { sessionId: `${command}-task-path-widget-session` });
+      plan(h.pi);
 
-    await h.commands.get(command)!.handler(saveArgs, h.ctx);
+      await h.commands.get(command)!.handler(saveArgs, h.ctx);
 
-    expect(existsSync(taskPromptPath(root, kind, longTaskDir))).toBe(true);
-    const saveWidget = h.widgets.get(widgetKey) ?? "";
-    expect(saveWidget).toContain(`path: .tasks/T-145/artifacts/${kind}-prompt.md`);
-    expect(saveWidget).toContain(`${command === "goal" ? "/goal prompt" : `/${command}`} --task T-145`);
-    expect(saveWidget).not.toContain(longTaskDir);
-    expectWidgetLinesToFit(saveWidget);
+      expect(existsSync(taskPromptPath(root, kind, longTaskDir))).toBe(true);
+      const saveWidget = h.widgets.get(widgetKey) ?? "";
+      expect(saveWidget).toContain(`path: .tasks/T-145/artifacts/${kind}-prompt.md`);
+      expect(saveWidget).toContain(`${command === "goal" ? "/goal prompt" : `/${command}`} --task T-145`);
+      expect(saveWidget).not.toContain(longTaskDir);
+      expectWidgetLinesToFit(saveWidget);
 
-    await h.commands.get(command)!.handler(showArgs, h.ctx);
+      await h.commands.get(command)!.handler(showArgs, h.ctx);
 
-    const displayWidget = h.widgets.get(widgetKey) ?? "";
-    expect(displayWidget).toContain(`Saved ${kind} prompt.`);
-    expect(displayWidget).toContain(`path: .tasks/T-145/artifacts/${kind}-prompt.md`);
-    expect(displayWidget).toContain(`${command === "goal" ? "/goal prompt" : `/${command}`} --task T-145`);
-    expect(displayWidget).not.toContain(longTaskDir);
-    expectWidgetLinesToFit(displayWidget);
-  });
+      const displayWidget = h.widgets.get(widgetKey) ?? "";
+      expect(displayWidget).toContain(`Saved ${kind} prompt.`);
+      expect(displayWidget).toContain(`path: .tasks/T-145/artifacts/${kind}-prompt.md`);
+      expect(displayWidget).toContain(`${command === "goal" ? "/goal prompt" : `/${command}`} --task T-145`);
+      expect(displayWidget).not.toContain(longTaskDir);
+      expectWidgetLinesToFit(displayWidget);
+    },
+  );
 
   it("does not fall back to project-local storage when explicit task target is missing", async () => {
     const root = tempRoot();
@@ -632,20 +690,27 @@ describe("default prompt commands", () => {
     plan(h.pi);
 
     await h.commands.get("goal")!.handler("Build operator-friendly local goal mode", h.ctx);
-    writeFileSync(goalStatePath(root), `${JSON.stringify({
-      version: 1,
-      goal: {
-        id: "goal-view-proof",
-        objective: "Build operator-friendly local goal mode",
-        status: "active",
-        tokenBudget: 2400,
-        tokensUsed: 1200,
-        timeUsedSeconds: 75,
-        createdAt: "2026-07-09T10:00:00.000Z",
-        updatedAt: "2026-07-09T10:01:15.000Z",
-        activeSince: "2026-07-09T10:00:00.000Z",
-      },
-    }, null, 2)}\n`);
+    writeFileSync(
+      goalStatePath(root),
+      `${JSON.stringify(
+        {
+          version: 1,
+          goal: {
+            id: "goal-view-proof",
+            objective: "Build operator-friendly local goal mode",
+            status: "active",
+            tokenBudget: 2400,
+            tokensUsed: 1200,
+            timeUsedSeconds: 75,
+            createdAt: "2026-07-09T10:00:00.000Z",
+            updatedAt: "2026-07-09T10:01:15.000Z",
+            activeSince: "2026-07-09T10:00:00.000Z",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
     await h.commands.get("goal")!.handler("", h.ctx);
 
     const bareWidget = h.widgets.get("goal") ?? "";
@@ -677,7 +742,12 @@ describe("default prompt commands", () => {
     const h = createHarness(root, { sessionId: "goal-continue-screen-session" });
     plan(h.pi);
 
-    await h.commands.get("goal")!.handler("Build a unified command UI lifecycle that remains intentionally long enough to require screen-safe metadata", h.ctx);
+    await h.commands
+      .get("goal")!
+      .handler(
+        "Build a unified command UI lifecycle that remains intentionally long enough to require screen-safe metadata",
+        h.ctx,
+      );
     await h.commands.get("goal")!.handler("continue summarize the current state\nwrite the next bounded patch", h.ctx);
 
     const widget = h.widgets.get("goal") ?? "";
@@ -688,7 +758,9 @@ describe("default prompt commands", () => {
     expect(widget).not.toContain("Final result:");
     expectWidgetLinesToFit(widget);
 
-    const artifact = JSON.parse(readFileSync(path.join(root, ".locus", "runtime", "goal", "continue.md"), "utf8")) as Record<string, unknown>;
+    const artifact = JSON.parse(
+      readFileSync(path.join(root, ".locus", "runtime", "goal", "continue.md"), "utf8"),
+    ) as Record<string, unknown>;
     expect(String(artifact.prompt ?? "")).toContain("Task:");
     expect(String(artifact.prompt ?? "")).toContain("Final result:");
   });
@@ -731,9 +803,15 @@ describe("default prompt commands", () => {
       const replacementCtx: ReplacementSessionContext = {
         ...h.ctx,
         session: { id: "goal-ai-child", projectRoot: root, workingDirectory: root },
-        async sendUserMessage(message) { kickoff = String(message); },
+        async sendUserMessage(message) {
+          kickoff = String(message);
+        },
         async waitForIdle() {},
-        sessionManager: { getEntries() { return entries; } },
+        sessionManager: {
+          getEntries() {
+            return entries;
+          },
+        },
       };
       await opts?.withSession?.(replacementCtx);
       return { cancelled: false };
@@ -747,7 +825,9 @@ describe("default prompt commands", () => {
     expect(kickoff).toContain("User request:");
     expect(kickoff).toContain("make goal commands useful");
     expect(readFileSync(filePath, "utf8")).toContain("Draft goal:");
-    expect(readFileSync(filePath, "utf8")).toContain("The goal command surface turns rough intent into a usable prompt and stores it clearly.");
+    expect(readFileSync(filePath, "utf8")).toContain(
+      "The goal command surface turns rough intent into a usable prompt and stores it clearly.",
+    );
     expect(h.widgets.get("goal")).toContain("[RESULT]");
     expect(h.widgets.get("goal")).toContain("Draft saved as a goal prompt; it was not executed.");
     expect(h.widgets.get("goal")).toContain("target: project-local");
@@ -781,7 +861,11 @@ describe("default prompt commands", () => {
         session: { id: "goal-ai-bare-child", projectRoot: root, workingDirectory: root },
         async sendUserMessage() {},
         async waitForIdle() {},
-        sessionManager: { getEntries() { return [{ type: "message", role: "assistant", content: generated }]; } },
+        sessionManager: {
+          getEntries() {
+            return [{ type: "message", role: "assistant", content: generated }];
+          },
+        },
       });
       return { cancelled: false };
     };
@@ -856,7 +940,11 @@ describe("default prompt commands", () => {
         session: { id: "goal-ai-invalid-child", projectRoot: root, workingDirectory: root },
         async sendUserMessage() {},
         async waitForIdle() {},
-        sessionManager: { getEntries() { return [{ type: "message", role: "assistant", content: "Looks good to me." }]; } },
+        sessionManager: {
+          getEntries() {
+            return [{ type: "message", role: "assistant", content: "Looks good to me." }];
+          },
+        },
       };
       await opts?.withSession?.(replacementCtx);
       return { cancelled: false };
@@ -881,7 +969,7 @@ describe("default prompt commands", () => {
     expect(create.details?.path).toBe(`${path.join(root, ".locus", "runtime", "goal", "state.json")}`);
 
     const result = await runTool(h, "goal", { op: "get" });
-    const text = result.content?.map((item) => item.type === "text" ? item.text : "").join(" ");
+    const text = result.content?.map((item) => (item.type === "text" ? item.text : "")).join(" ");
     expect(result.isError ?? false).toBe(false);
     expect(text).toContain("Tool objective");
     expect(result.details?.path).toBe(`${path.join(root, ".locus", "runtime", "goal", "state.json")}`);

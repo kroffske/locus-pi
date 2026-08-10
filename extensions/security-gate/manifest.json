@@ -1,6 +1,10 @@
 {
   "id": "security-gate",
   "name": "security-gate",
+  "agent": {
+    "name": "extension-security-gate",
+    "description": "Observe dangerous tool calls in audit-only mode and inspect them with /security-audit."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const command = process.argv[2] ?? "help";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -17,11 +17,43 @@ function printHelp() {
   console.log("Usage:");
   console.log("  npx @kroffske/locus-pi");
   console.log("  npx @kroffske/locus-pi doctor");
+  console.log("  npx @kroffske/locus-pi check-workflow-source <path>");
   console.log("");
   console.log("Install into Pi:");
   console.log("  pi install npm:@kroffske/locus-pi");
   console.log("");
   console.log("After install, run Pi in a trusted project and use /devext doctor.");
+}
+
+async function checkWorkflowSource(args) {
+  if (args.length !== 1) {
+    console.error("Usage: npx @kroffske/locus-pi check-workflow-source <path>");
+    process.exitCode = 2;
+    return;
+  }
+
+  const requestedPath = args[0];
+  const sourcePath = resolve(process.cwd(), requestedPath);
+  let source;
+  try {
+    source = readFileSync(sourcePath, "utf8");
+  } catch (error) {
+    console.error(`${requestedPath}: unable to read source: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const checkerUrl = pathToFileURL(join(root, "dist/workflow-source-shape.mjs")).href;
+  const { standardWorkflowSourceShapeErrors } = await import(checkerUrl);
+  const errors = standardWorkflowSourceShapeErrors(source);
+  if (errors.length === 0) {
+    console.log(`${requestedPath}: standard source shape passed`);
+    return;
+  }
+
+  console.error(`${requestedPath}: standard source shape failed`);
+  for (const error of errors) console.error(`  - ${error}`);
+  process.exitCode = 1;
 }
 
 function printDoctor() {
@@ -43,6 +75,9 @@ switch (command) {
     break;
   case "doctor":
     printDoctor();
+    break;
+  case "check-workflow-source":
+    await checkWorkflowSource(process.argv.slice(3));
     break;
   default:
     console.error(`Unknown command: ${command}`);

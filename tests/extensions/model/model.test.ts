@@ -3,37 +3,36 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import model, {
-  buildEffortOperatorBlock,
-  effortLevelsForModel,
-  getModelRolesConfigPaths,
-  loadModelRolesState,
-  modelEffortCapability,
-  modelRoleStatusContribution,
-  MODEL_ROLE_ACTIONS,
-  ModelRoleSelectorComponent,
-  type EffortCommandOutcome,
-} from "../../../extensions/model/index.js";
+import model from "../../../extensions/model/index.js";
 import {
   buildModelRows,
+  effortLevelsForModel,
+  modelEffortCapability,
   roleSummaries,
+  MODEL_ROLE_ACTIONS,
+  ModelRoleSelectorComponent,
   type AppliedModelRoleState,
 } from "../../../extensions/model/model-role-selector.js";
+import { modelRoleStatusContribution } from "../../../extensions/model/operator-surface.js";
+import { buildEffortOperatorBlock, type EffortCommandOutcome } from "../../../extensions/model/operator-ui.js";
 import {
   buildModelRolesState,
+  getModelRolesConfigPaths,
+  legacyNamespacedRoleToken,
+  loadModelRolesState,
   resolveAgentModelPreference,
   resolvePromptPlanningModelRole,
   resolveSummaryModelRole,
-} from "../../../extensions/_shared/model-settings.js";
-import { sessionJsonlPath } from "../../../extensions/_shared/files.js";
-import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator-ui.js";
-import type { CustomUiComponent } from "../../../extensions/_shared/pi-api.js";
+  unassignedAgentTierNote,
+} from "../../../extensions/_shared/model/model-settings.js";
+import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
+import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
+import type { CustomUiComponent } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const ENTER = "\r";
 const ESC = "\x1b";
 const DOWN = "\x1b[B";
-const RIGHT = "\x1b[C";
 
 const REASONING_MODELS = [
   {
@@ -79,18 +78,20 @@ describe("model extension", () => {
   });
 
   it("publishes source-backed capability labels for all six roles", () => {
-    expect(MODEL_ROLE_ACTIONS.map(({ role, support, appliesCurrentModel }) => ({ role, support, appliesCurrentModel }))).toEqual([
+    expect(
+      MODEL_ROLE_ACTIONS.map(({ role, support, appliesCurrentModel }) => ({ role, support, appliesCurrentModel })),
+    ).toEqual([
       { role: "default", support: "active", appliesCurrentModel: true },
       { role: "agent", support: "active", appliesCurrentModel: false },
-      { role: "task", support: "fallback", appliesCurrentModel: false },
+      { role: "task", support: "active", appliesCurrentModel: false },
       { role: "plan", support: "dormant", appliesCurrentModel: false },
       { role: "summary", support: "dormant", appliesCurrentModel: false },
       { role: "smol", support: "fallback", appliesCurrentModel: false },
     ]);
     expect(MODEL_ROLE_ACTIONS.map((action) => action.capability)).toEqual([
-      "active · session + route fallback",
-      "active · agents/workflows primary",
-      "fallback · agents/workflows",
+      "active · main/current model",
+      "active · model-less agents/workflows",
+      "active · explicit task role",
       "dormant · beta prompt planning",
       "dormant · resolver only",
       "fallback-only · summary resolver",
@@ -120,8 +121,16 @@ describe("model extension", () => {
 
   it("assigns two routes with different efforts in one selector session", async () => {
     harness.customInputQueue.push(
-      ENTER, ENTER, ...repeat(DOWN, 4), ENTER,
-      DOWN, ENTER, DOWN, ENTER, ...repeat(DOWN, 2), ENTER,
+      ENTER,
+      ENTER,
+      ...repeat(DOWN, 4),
+      ENTER,
+      DOWN,
+      ENTER,
+      DOWN,
+      ENTER,
+      ...repeat(DOWN, 2),
+      ENTER,
       "q",
     );
 
@@ -136,8 +145,8 @@ describe("model extension", () => {
     const frames = joinFrames(harness);
     expect(frames).toContain("[OK] DEFAULT → test/fast:high saved; Current session updated.");
     expect(frames).toContain("[OK] AGENT → test/strong:low saved.");
-    expect(frames).toContain("Provider filters:");
-    expect(frames).toContain("Selected model: test/strong");
+    expect(frames).toContain("Models: [ALL]");
+    expect(frames).toContain("Action for test/strong:");
   });
 
   it.each([
@@ -185,7 +194,7 @@ describe("model extension", () => {
     });
   });
 
-  it("renders real provider filters instead of status-like tabs", async () => {
+  it("keeps provider filtering optional behind Tab after opening the model list", async () => {
     harness = createHarness(join(root, "project"), {
       models: [
         { provider: "openai", id: "gpt-5", name: "GPT 5", reasoning: true },
@@ -194,27 +203,31 @@ describe("model extension", () => {
       ],
     });
     model(harness.pi);
-    harness.customInputQueue.push(RIGHT, RIGHT, "q");
+    harness.customInputQueue.push("\t", "\t", "q");
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     const openaiFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("[OPENAI]"));
-    expect(openaiFrame?.join("\n")).toContain("Provider filters:");
+    expect(openaiFrame?.join("\n")).toContain("Models:");
     expect(openaiFrame?.join("\n")).toContain("openai/gpt-5");
     expect(openaiFrame?.join("\n")).not.toContain("deepseek/v4 —");
   });
 
-  it("shows active, fallback, and dormant capability labels in the role step", async () => {
+  it("keeps the selected model visible above OMP-style role actions", async () => {
     harness.customInputQueue.push(ENTER, "q");
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const rolesFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("Choose routing role:"));
+    const rolesFrame = harness.customRenderFrames.find((frame) => frame.join("\n").includes("Action for test/fast:"));
     const text = rolesFrame?.join("\n") ?? "";
-    expect(text).toContain("DEFAULT · active · session + route fallback");
-    expect(text).toContain("AGENT · active · agents/workflows primary");
-    expect(text).toContain("PLAN · dormant · beta prompt planning");
-    expect(text).toContain("SMOL · fallback-only · summary resolver");
+    expect(text).toContain("Models: [ALL]");
+    expect(text).toContain("test/fast");
+    expect(text).toContain("Set as DEFAULT · active · main/current model");
+    expect(text).toContain("Set as AGENT · active · model-less agents/workflows");
+    expect(text).toContain("Set as TASK · active · explicit task role");
+    expect(text).toContain("Set as PLAN · dormant · beta prompt planning");
+    expect(text).toContain("Set as SMOL · fallback-only · summary resolver");
+    expect(text).not.toContain("Available roles:");
   });
 
   it("deduplicates registry rows with the same canonical selector", async () => {
@@ -318,7 +331,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    expect(joinFrames(harness)).toContain("Selected model: test/strong");
+    expect(joinFrames(harness)).toContain("Action for test/strong:");
     expect(harness.entries).toEqual([]);
   });
 
@@ -329,7 +342,9 @@ describe("model extension", () => {
         if (!this.colors.has(color)) throw new Error(`unknown color ${color}`);
         return `<${color}>${text}</${color}>`;
       },
-      bold(text: string) { return `*${text}*`; },
+      bold(text: string) {
+        return `*${text}*`;
+      },
     };
     harness = createHarness(join(root, "project"), { models: REASONING_MODELS, customTheme: theme });
     model(harness.pi);
@@ -376,10 +391,17 @@ describe("model extension", () => {
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     const filePath = sessionJsonlPath(harness.ctx.session!.projectRoot);
-    const records = (await readFile(filePath, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
-      entry?: { payload?: { type?: string; data?: Record<string, unknown> } };
-    });
-    const event = records.find((record) => record.entry?.payload?.type === "model_role_runtime_event")?.entry?.payload?.data;
+    const records = (await readFile(filePath, "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            entry?: { payload?: { type?: string; data?: Record<string, unknown> } };
+          },
+      );
+    const event = records.find((record) => record.entry?.payload?.type === "model_role_runtime_event")?.entry?.payload
+      ?.data;
     expect(event).toMatchObject({
       role: "default",
       assignment: "test/strong:high",
@@ -416,7 +438,7 @@ describe("model extension", () => {
     });
   });
 
-  it("keeps PLAN/SUMMARY dormant resolver truth and AGENT/TASK active fallback truth", async () => {
+  it("keeps PLAN/SUMMARY dormant while AGENT and explicit TASK routes stay active", async () => {
     await harness.ctx.settings!.set("modelRoles", {
       default: "test/fast",
       smol: "test/fast:low",
@@ -427,11 +449,80 @@ describe("model extension", () => {
 
     expect(resolvePromptPlanningModelRole(state)).toMatchObject({ role: "plan", fallback: false });
     expect(resolveSummaryModelRole(state)).toMatchObject({ role: "smol", fallback: true });
-    expect(resolveAgentModelPreference(state)).toMatchObject({ role: "task", fallback: true });
+    const modelLessAgent = resolveAgentModelPreference(state);
+    expect(modelLessAgent).toMatchObject({
+      role: "agent",
+      requestedRoles: ["agent"],
+      fallback: true,
+    });
+    expect(modelLessAgent.assignment).toBeUndefined();
     expect(resolveAgentModelPreference(state, ["test/fast:xhigh"])).toMatchObject({
       source: "agent",
       assignment: { model: "test/fast", thinking: "xhigh" },
       fallback: false,
+    });
+  });
+
+  /**
+   * The pre-tier namespace this package itself shipped.
+   *
+   * `pi` was never a provider, so `pi/<role>` in a catalog copied from an older
+   * release is package history, not an operator's provider choice. Reading it as the
+   * role is a deliberate exception to "a slash means a real provider", and it is
+   * bounded twice — to a KNOWN role, and to agent frontmatter.
+   */
+  describe("pre-tier pi/<role> frontmatter tiers", () => {
+    const rolesState = (roles: Record<string, string> = {}) =>
+      buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, { roles }, {}, {});
+
+    it("reads pi/<role> as the role and keeps the text as written for the evidence", () => {
+      const resolution = resolveAgentModelPreference(rolesState(), ["pi/smol"]);
+
+      expect(resolution).toMatchObject({ role: "smol", source: "unset", fallback: false });
+      expect(resolution.assignment).toBeUndefined();
+      // The raw spelling survives so the degradation note can point at the file to
+      // edit rather than at a role name that appears nowhere in the catalog.
+      expect(resolution.requestedRoles).toEqual(["pi/smol"]);
+    });
+
+    it("executes the role's assignment, suffix included", () => {
+      expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol"])).toMatchObject({
+        role: "smol",
+        source: "settings",
+        assignment: { model: "test/fast" },
+      });
+      expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol:high"])).toMatchObject({
+        assignment: { model: "test/fast", thinking: "high" },
+      });
+    });
+
+    it("leaves pi/<not-a-role> a concrete selector, to fail by name downstream", () => {
+      // `gpt-5` names no role, so the only reading left is provider `pi`. Repairing
+      // it would invent a tier; the registry lookup refuses it instead.
+      expect(resolveAgentModelPreference(rolesState(), ["pi/gpt-5"])).toMatchObject({
+        source: "agent",
+        assignment: { model: "pi/gpt-5" },
+      });
+      // Two segments after the prefix is a real id, not a role under an old prefix.
+      expect(resolveAgentModelPreference(rolesState(), ["pi/openai/gpt-5"])).toMatchObject({
+        source: "agent",
+        assignment: { model: "pi/openai/gpt-5" },
+      });
+      expect(legacyNamespacedRoleToken(rolesState(), "pi/gpt-5")).toBeUndefined();
+      expect(legacyNamespacedRoleToken(rolesState(), "pi/smol:high")).toBe("smol:high");
+    });
+
+    it("adds the migration sentence to the degradation note, and only there", () => {
+      const state = rolesState();
+      const stale = unassignedAgentTierNote("stale", "pi/smol", resolveAgentModelPreference(state, ["pi/smol"]), state);
+      const bare = unassignedAgentTierNote("roled", "smol", resolveAgentModelPreference(state, ["smol"]), state);
+
+      expect(stale).toContain("inherited the parent session model");
+      expect(stale).toContain("`model: smol`");
+      // A bare tier has nothing to migrate; the note must not grow a sentence
+      // telling an operator to fix a spelling they already use.
+      expect(bare).toContain("inherited the parent session model");
+      expect(bare).not.toContain("pre-tier");
     });
   });
 
@@ -642,25 +733,32 @@ describe("ModelRoleSelectorComponent", () => {
       borderAccent: "36",
       borderMuted: "90",
     };
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {
-      fg(tone, text) { return `\x1b[${colors[tone]}m${text}\x1b[39m`; },
-      bold(text) { return `\x1b[1m${text}\x1b[22m`; },
-    }, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {
+        fg(tone, text) {
+          return `\x1b[${colors[tone]}m${text}\x1b[39m`;
+        },
+        bold(text) {
+          return `\x1b[1m${text}\x1b[22m`;
+        },
+      },
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        applySelection: vi.fn(),
+      },
+    );
 
     const text = component.render(146).join("\n");
     expect(text).toContain("\x1b[32m[ALL]\x1b[39m");
     expect(text).toContain("\x1b[33mDEFAULT\x1b[39m");
-    expect(text).toContain("\x1b[33mSMOL\x1b[39m");
     expect(text).toContain("\x1b[33mtest/fast:high\x1b[39m");
     expect(text).toContain("\x1b[36mtest/fast\x1b[39m");
     expect(text).toContain("\x1b[36m>\x1b[39m");
-    expect(text).toContain("Available roles:");
+    expect(text).not.toContain("Available roles:");
   });
 
   it("renders assigned routing roles and their models in warning color on separate lines", () => {
@@ -682,16 +780,24 @@ describe("ModelRoleSelectorComponent", () => {
       borderAccent: "36",
       borderMuted: "90",
     };
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {
-      fg(tone, text) { return `\x1b[${colors[tone]}m${text}\x1b[39m`; },
-      bold(text) { return `\x1b[1m${text}\x1b[22m`; },
-    }, {
-      rows: buildModelRows(REASONING_MODELS, state, undefined),
-      roleSummaries: roleSummaries(state),
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {
+        fg(tone, text) {
+          return `\x1b[${colors[tone]}m${text}\x1b[39m`;
+        },
+        bold(text) {
+          return `\x1b[1m${text}\x1b[22m`;
+        },
+      },
+      {
+        rows: buildModelRows(REASONING_MODELS, state, undefined),
+        roleSummaries: roleSummaries(state),
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection: vi.fn(),
+      },
+    );
 
     const lines = component.render(146);
     const routingIndex = lines.findIndex((line) => line.includes("Routing roles:"));
@@ -702,15 +808,19 @@ describe("ModelRoleSelectorComponent", () => {
     expect(lines.join("\n")).toContain("\x1b[33mtest/strong\x1b[39m");
   });
 
-  it("renders typed, width-safe SELECT hierarchy at 146/80/48 columns", () => {
+  it("renders typed, width-safe model and action hierarchy at 146/80/48 columns", async () => {
     const { rows, summaries } = selectorFixture();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      applySelection: vi.fn(),
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        applySelection: vi.fn(),
+      },
+    );
 
     for (const width of [146, 80, 48]) {
       const lines = component.render(width);
@@ -719,7 +829,16 @@ describe("ModelRoleSelectorComponent", () => {
       expect(text).toContain("Model roles");
       expect(text).toContain("Current session model:");
       expect(text).toContain("DEFAULT route:");
-      expect(text).toContain(width < 60 ? "Provider filter" : "Provider filters:");
+      expect(text).toContain("Models:");
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
+
+    await component.handleInput(ENTER);
+    for (const width of [146, 80, 48]) {
+      const lines = component.render(width);
+      const text = lines.join("\n");
+      expect(text).toContain("Action for test/fast:");
+      expect(text).toContain("Set as DEFAULT");
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     }
   });
@@ -728,24 +847,29 @@ describe("ModelRoleSelectorComponent", () => {
     const { rows, summaries } = selectorFixture();
     const done = vi.fn();
     const applySelection = vi.fn<() => Promise<AppliedModelRoleState>>();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection,
-      done,
-    });
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection,
+        done,
+      },
+    );
 
     await component.handleInput(ENTER);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
+    expect(component.render(80).join("\n")).toContain("Set as DEFAULT");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Provider filters:");
+    expect(component.render(80).join("\n")).toContain("Models: [ALL]");
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
     expect(component.render(80).join("\n")).toContain("Effort capability:");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
     component.invalidate();
     await component.handleInput("q");
 
@@ -760,19 +884,24 @@ describe("ModelRoleSelectorComponent", () => {
       name: `Bulk ${index + 1}`,
       reasoning: false,
     }));
-    const state = buildModelRolesState(
-      { project: "/project/config.json", user: "/user/config.json" },
-      {}, {}, {}, {},
+    const state = buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, {}, {}, {});
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows: buildModelRows(models, state, undefined),
+        roleSummaries: roleSummaries(state),
+        currentSelector: undefined,
+        currentThinking: "off",
+        applySelection: vi.fn(),
+      },
     );
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows: buildModelRows(models, state, undefined),
-      roleSummaries: roleSummaries(state),
-      currentSelector: undefined,
-      currentThinking: "off",
-      applySelection: vi.fn(),
-    });
 
-    for (const [width, expectedRows] of [[146, 8], [80, 6], [48, 4]] as const) {
+    for (const [width, expectedRows] of [
+      [146, 8],
+      [80, 6],
+      [48, 4],
+    ] as const) {
       const lines = component.render(width);
       expect(lines.filter((line) => line.includes("bulk/model-")).length).toBe(expectedRows);
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -782,21 +911,25 @@ describe("ModelRoleSelectorComponent", () => {
   it("keeps effort focus usable after an inline apply error", async () => {
     const { rows, summaries } = selectorFixture();
     const done = vi.fn();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: undefined,
-      currentThinking: "off",
-      async applySelection() {
-        return {
-          currentSelector: undefined,
-          currentThinking: "off",
-          roleSummaries: summaries,
-          receipt: { kind: "error", text: "Persistence denied" },
-        };
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: undefined,
+        currentThinking: "off",
+        async applySelection() {
+          return {
+            currentSelector: undefined,
+            currentThinking: "off",
+            roleSummaries: summaries,
+            receipt: { kind: "error", text: "Persistence denied" },
+          };
+        },
+        done,
       },
-      done,
-    });
+    );
 
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
@@ -805,35 +938,39 @@ describe("ModelRoleSelectorComponent", () => {
     expect(component.render(80).join("\n")).toContain("[ERROR] Persistence denied");
     expect(component.render(80).join("\n")).toContain("Effort capability:");
     await component.handleInput(ESC);
-    expect(component.render(80).join("\n")).toContain("Choose routing role:");
+    expect(component.render(80).join("\n")).toContain("Action for test/fast:");
     await component.handleInput("q");
     expect(done).toHaveBeenCalledTimes(1);
   });
 
   it("returns to the model list with the receipt after a successful assignment", async () => {
     const { rows, summaries } = selectorFixture();
-    const component = new ModelRoleSelectorComponent({ requestRender: vi.fn() }, {}, {
-      rows,
-      roleSummaries: summaries,
-      currentSelector: "test/fast",
-      currentThinking: "high",
-      async applySelection() {
-        return {
-          currentSelector: "test/fast",
-          currentThinking: "high",
-          roleSummaries: summaries,
-          receipt: { kind: "success", text: "SUMMARY saved" },
-        };
+    const component = new ModelRoleSelectorComponent(
+      { requestRender: vi.fn() },
+      {},
+      {
+        rows,
+        roleSummaries: summaries,
+        currentSelector: "test/fast",
+        currentThinking: "high",
+        async applySelection() {
+          return {
+            currentSelector: "test/fast",
+            currentThinking: "high",
+            roleSummaries: summaries,
+            receipt: { kind: "success", text: "SUMMARY saved" },
+          };
+        },
       },
-    });
+    );
 
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
     await component.handleInput(ENTER);
 
     const text = component.render(80).join("\n");
-    expect(text).toContain("Provider filters:");
-    expect(text).not.toContain("Choose routing role:");
+    expect(text).toContain("Models: [ALL]");
+    expect(text).not.toContain("Action for test/fast:");
     expect(text).not.toContain("Effort capability:");
     expect(text).toContain("[OK] SUMMARY saved");
   });
@@ -842,14 +979,20 @@ describe("ModelRoleSelectorComponent", () => {
 describe("model effort capability", () => {
   it("matches Pi reasoning/thinkingLevelMap capability semantics", () => {
     expect(effortLevelsForModel({ provider: "p", id: "plain", reasoning: false })).toEqual(["off"]);
-    expect(effortLevelsForModel({
-      provider: "p",
-      id: "reasoning",
-      reasoning: true,
-      thinkingLevelMap: { minimal: null, xhigh: "xhigh" },
-    })).toEqual(["off", "low", "medium", "high", "xhigh"]);
+    expect(
+      effortLevelsForModel({
+        provider: "p",
+        id: "reasoning",
+        reasoning: true,
+        thinkingLevelMap: { minimal: null, xhigh: "xhigh" },
+      }),
+    ).toEqual(["off", "low", "medium", "high", "xhigh"]);
     expect(effortLevelsForModel({ provider: "p", id: "reasoning", reasoning: true })).toEqual([
-      "off", "minimal", "low", "medium", "high",
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
     ]);
   });
 

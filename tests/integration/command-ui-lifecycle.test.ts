@@ -9,8 +9,12 @@ import loop from "../../extensions/loop/index.js";
 import model from "../../extensions/model/index.js";
 import plan from "../../extensions/plan/index.js";
 import workflows from "../../extensions/workflows/index.js";
-import type { ExtensionCommandContext, ReplacementSessionContext, ReplacementSessionEntryLike } from "../../extensions/_shared/pi-api.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/command-ui.js";
+import type {
+  ExtensionCommandContext,
+  ReplacementSessionContext,
+  ReplacementSessionEntryLike,
+} from "../../extensions/_shared/host/pi-api.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/operator/command-ui.js";
 import { createHarness, emit, type Harness } from "../test-harness.js";
 
 function stubPlanSession(
@@ -25,7 +29,11 @@ function stubPlanSession(
       session: { id: "plan-child", projectRoot: root, workingDirectory: root },
       async sendUserMessage() {},
       async waitForIdle() {},
-      sessionManager: { getEntries() { return entries; } },
+      sessionManager: {
+        getEntries() {
+          return entries;
+        },
+      },
     };
     await opts?.withSession?.(replacementCtx);
     return { cancelled: false };
@@ -36,10 +44,12 @@ function stubPlanSession(
 describe("command UI lifecycle", () => {
   it("dismisses the latest passive VIEW with Escape and leaves no raw listener behind", async () => {
     const h = createHarness();
+    delete h.ctx.ui.custom;
     workflows(h.pi);
 
-    // `/workflows list` now owns focused custom UI; status remains a passive
-    // VIEW and therefore exercises editor-level transient dismissal.
+    // A TUI with custom UI owns the persisted evidence viewer. Removing that
+    // capability exercises the bounded passive status fallback and its raw
+    // editor-level transient dismissal.
     await h.commands.get("workflows")!.handler("status", h.ctx as ExtensionCommandContext);
     expect(h.widgets.get("workflows")).toContain("[VIEW] Workflow runs");
     expect(h.terminalInputHandlers.size).toBe(1);
@@ -50,6 +60,22 @@ describe("command UI lifecycle", () => {
     expect(h.widgetPayloads.get("workflows")).toBeUndefined();
     expect(h.widgets.get("workflows")).toBe("");
     expect(h.terminalInputHandlers.size).toBe(0);
+  });
+
+  it("installs the passive lifecycle immediately when the workflow custom viewer fails", async () => {
+    const h = createHarness();
+    h.ctx.ui.custom = (async () => {
+      throw new Error("viewer setup failed");
+    }) as NonNullable<typeof h.ctx.ui.custom>;
+    workflows(h.pi);
+
+    await h.commands.get("workflows")!.handler("status", h.ctx as ExtensionCommandContext);
+
+    expect(h.widgets.get("workflows")).toContain("[VIEW] Workflow runs");
+    expect(h.widgets.get("workflows")).toContain("Interactive evidence viewer failed: viewer setup failed.");
+    expect(h.widgets.get("workflows")).toContain("evidence is shown instead.");
+    expect(h.widgets.get("workflows")).not.toContain("Recovery: /workflows status");
+    expect(h.terminalInputHandlers.size).toBe(1);
   });
 
   it("clears transient widgets and statuses when an unrelated slash command is entered", async () => {
@@ -173,11 +199,7 @@ describe("command UI lifecycle", () => {
     const emptyAgentDir = mkdtempSync(path.join(tmpdir(), "locus-pi-empty-agent-dir-"));
 
     try {
-      const loaded = await discoverAndLoadExtensions(
-        [alphaPath, betaPath],
-        process.cwd(),
-        emptyAgentDir,
-      );
+      const loaded = await discoverAndLoadExtensions([alphaPath, betaPath], process.cwd(), emptyAgentDir);
       expect(loaded.errors).toEqual([]);
       const alpha = loaded.extensions.find((extension) => extension.resolvedPath === alphaPath);
       const beta = loaded.extensions.find((extension) => extension.resolvedPath === betaPath);

@@ -2,7 +2,7 @@
 name: reviewer
 description: "Code review specialist for quality/security analysis"
 tools: read, search, find, bash, lsp, web_search, ast_grep, report_finding
-model: pi/slow
+model: slow
 thinking-level: high
 blocking: true
 output:
@@ -124,6 +124,7 @@ Each `report_finding` requires:
 - `line_start`, `line_end`: Range ≤10 lines, must overlap diff
 
 Final `yield` call (payload under `result.data`):
+
 - `result.data.overall_correctness`: "correct" (no bugs/blockers) or "incorrect"
 - `result.data.explanation`: Plain text, 1-3 sentences summarizing verdict. Don't repeat findings (captured via `report_finding`).
 - `result.data.confidence`: 0.0-1.0

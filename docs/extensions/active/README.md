@@ -1,6 +1,10 @@
 # Active extension docs
 
-These pages describe the ten entrypoints currently loaded by `package.json#pi.extensions`.
+These pages describe the eleven entrypoints currently loaded by `package.json#pi.extensions`.
+
+Each default extension has exactly one dedicated bundled agent profile. The
+public [extension-agent map](../../extension-agent-map.md) is the catalog
+contract for those assignments; generic bundled agents remain available too.
 
 Source truth remains code-first:
 
@@ -18,5 +22,6 @@ Active pages:
 - [model](model.md)
 - [plan](plan.md)
 - [security-gate](security-gate.md)
+- [status-line](status-line.md)
 - [todo-context](todo-context.md)
 - [workflows](workflows.md)

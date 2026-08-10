@@ -1,26 +1,27 @@
 # Extension docs
 
-Эта директория содержит manual extension documentation. Структура основана на
-runtime status, а не на удобстве implementation layout.
+This directory holds the manual extension documentation. The structure follows
+runtime status, not the convenience of the implementation layout.
 
 ## Read order
 
-1. Проверь `package.json#pi.extensions` как default-load list.
-2. Читай [active/](active/) для default extensions.
-3. Beta, fixture и future-design docs остаются repository-only и не входят в
-   npm v1 package.
-4. Используй [../extension-index.md](../extension-index.md) и
-   [../extension-ownership-matrix.md](../extension-ownership-matrix.md) как
-   status ledger.
+1. Check `package.json#pi.extensions` as the default-load list.
+2. Read [active/](active/README.md) for the default extensions.
+3. Beta, fixture and future-design docs stay repository-only and are not part of
+   the npm v1 package.
+4. Use [../extension-catalog.md](../extension-catalog.md) for the concise
+   operator and planning roster, then use [../extension-index.md](../extension-index.md)
+   and [../extension-ownership-matrix.md](../extension-ownership-matrix.md) as the
+   detailed status ledger.
 
 ## Current buckets
 
-- `active/` описывает default-loaded extensions. Канонический roster и счёт —
-  в [../README.md](../README.md#source-truth) (см. строку `Registered extensions`),
-  backed by `package.json#pi.extensions`.
+- `active/` describes the default-loaded extensions. The canonical roster and
+  count live in [../README.md](../README.md#source-truth) (see the
+  `Registered extensions` line), backed by `package.json#pi.extensions`.
 - Repository-only `beta/` and future-design material do not ship in the npm v1
   tarball and do not represent default registration.
 
-Не заменяй эти manual pages generated gallery prose. Generated gallery output
-лежит в `docs/extension-gallery/`; границу runtime-scratch reports см. в
-[../runtime/locus-workspace.md](../runtime/locus-workspace.md).
+Do not replace these manual pages with generated gallery prose. Generated
+gallery output lives in `docs/extension-gallery/`; for the runtime-scratch
+report boundary see [../runtime/locus-workspace.md](../runtime/locus-workspace.md).

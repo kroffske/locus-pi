@@ -1,17 +1,17 @@
 import { Type } from "@sinclair/typebox";
-import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/pi-api.js";
+import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
+import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import { idsByCurrentStatus, idsByOwnershipStatus } from "./extension-inventory.js";
 import {
-  errorResult,
-  getCommandText,
-  getProjectRoot,
-  textResult,
-} from "../_shared/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/command-ui.js";
-import { idsByCurrentStatus, idsByOwnershipStatus } from "../_shared/extension-inventory.js";
-import { planTaskLifecycleTransition, type TaskLifecyclePlan, type TaskLifecycleTargetStatus } from "../_shared/task-bridge.js";
-import type { OperatorBlock } from "../_shared/operator-ui.js";
-import { setOperatorWidget } from "../_shared/widget-render.js";
+  planTaskLifecycleTransition,
+  type TaskLifecyclePlan,
+  type TaskLifecycleTargetStatus,
+} from "../_shared/project/task-bridge.js";
+import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { errorMessage } from "../_shared/host/error-text.js";
+import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
 
 const ReloadParams = Type.Object({});
 const DEVEXT_WIDGET_KEY = "devext-doctor";
@@ -20,23 +20,27 @@ const DOCTOR_PREVIEW_LIMIT = 2;
 export default function devextDoctor(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "devext_reload",
-    description: "Hot-reload Pi extensions, skills, prompts, themes, and context files when this host exposes a direct reload method to tool contexts; otherwise fail closed with manual reload instructions.",
+    description:
+      "Hot-reload Pi extensions, skills, prompts, themes, and context files when this host exposes a direct reload method to tool contexts; otherwise fail closed with manual reload instructions.",
     parameters: ReloadParams,
     approval: "exec",
     async execute(_toolCallId, _params, _signal, _update, ctx) {
       const reload = reloadMethod(ctx);
       if (reload === undefined) {
-        return errorResult([
-          "devext_reload cannot reload this running Pi process from a tool context.",
-          "This host exposes ctx.reload() only to command handlers, and slash commands injected by tools are delivered as chat in this environment.",
-          "Run /devext reload or the built-in /reload from the interactive command input, or restart Pi.",
-        ].join("\n"), {
-          owner: "devext-doctor",
-          requestedSurface: "devext_reload",
-          status: "blocked",
-          hostCapability: "tool-context-reload-unavailable",
-          queuedCommand: false,
-        });
+        return errorResult(
+          [
+            "devext_reload cannot reload this running Pi process from a tool context.",
+            "This host exposes ctx.reload() only to command handlers, and slash commands injected by tools are delivered as chat in this environment.",
+            "Run /devext reload or the built-in /reload from the interactive command input, or restart Pi.",
+          ].join("\n"),
+          {
+            owner: "devext-doctor",
+            requestedSurface: "devext_reload",
+            status: "blocked",
+            hostCapability: "tool-context-reload-unavailable",
+            queuedCommand: false,
+          },
+        );
       }
       try {
         ctx.ui.notify("Reloading Pi runtime via tool ctx.reload().", "info");
@@ -56,56 +60,66 @@ export default function devextDoctor(pi: ExtensionAPI): void {
       });
     },
   });
-  registerCommandWithUiLifecycle(pi, {
-    command: "devext",
-    group: "devext-doctor",
-    surfaces: ["transient-widget", "no-ui"],
-    transientWidgets: [DEVEXT_WIDGET_KEY],
-    transientStatuses: [DEVEXT_WIDGET_KEY],
-  }, {
-    description: "Developer extension package doctor: /devext doctor | /devext task-lifecycle <task-id> <target-status> | /devext reload.",
-    handler: async (args, ctx) => {
-      const raw = getCommandText(args).trim();
-      if (raw === "" || raw === "doctor") {
-        setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, doctorBlock(ctx.mode !== "tui"));
-        return;
-      }
-
-      const [action, ...rest] = raw.split(/\s+/);
-      if (action === "reload" || action === "hot-reload") {
-        await reloadRuntime(ctx);
-        return;
-      }
-
-      if (action === "task-lifecycle") {
-        const [taskId, targetStatus] = rest;
-        if (taskId === undefined || targetStatus === undefined) {
-          setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
-            type: "WARN",
-            subject: "Task lifecycle dry-run",
-            primary: "Missing task id or target status.",
-            metadata: ["Read-only dry-run; no task mutation was attempted."],
-            controls: ["Retry: /devext task-lifecycle <task-id> <target-status>"],
-          });
+  registerCommandWithUiLifecycle(
+    pi,
+    {
+      command: "devext",
+      group: "devext-doctor",
+      surfaces: ["transient-widget", "no-ui"],
+      transientWidgets: [DEVEXT_WIDGET_KEY],
+      transientStatuses: [DEVEXT_WIDGET_KEY],
+    },
+    {
+      description:
+        "Developer extension package doctor: /devext doctor | /devext task-lifecycle <task-id> <target-status> | /devext reload.",
+      handler: async (args, ctx) => {
+        const raw = getCommandText(args).trim();
+        if (raw === "" || raw === "doctor") {
+          setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, doctorBlock(ctx.mode !== "tui"));
           return;
         }
 
-        const plan = planTaskLifecycleTransition(getProjectRoot(ctx), taskId, targetStatus as TaskLifecycleTargetStatus);
-        setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, taskLifecycleBlock(plan, ctx.mode !== "tui"));
-        return;
-      }
+        const [action, ...rest] = raw.split(/\s+/);
+        if (action === "reload" || action === "hot-reload") {
+          await reloadRuntime(ctx);
+          return;
+        }
 
-      setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
-        type: "WARN",
-        subject: "Developer extension command",
-        primary: ctx.mode === "tui"
-          ? `Unknown /devext action: ${action ?? raw}`
-          : compactDevextLine(`Unknown /devext action: ${action ?? raw}`),
-        metadata: ["No diagnostic, task mutation, or reload was attempted."],
-        controls: ["Usage: /devext doctor · /devext task-lifecycle <task-id> <target-status> · /devext reload"],
-      });
+        if (action === "task-lifecycle") {
+          const [taskId, targetStatus] = rest;
+          if (taskId === undefined || targetStatus === undefined) {
+            setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
+              type: "WARN",
+              subject: "Task lifecycle dry-run",
+              primary: "Missing task id or target status.",
+              metadata: ["Read-only dry-run; no task mutation was attempted."],
+              controls: ["Retry: /devext task-lifecycle <task-id> <target-status>"],
+            });
+            return;
+          }
+
+          const plan = planTaskLifecycleTransition(
+            getProjectRoot(ctx),
+            taskId,
+            targetStatus as TaskLifecycleTargetStatus,
+          );
+          setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, taskLifecycleBlock(plan, ctx.mode !== "tui"));
+          return;
+        }
+
+        setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
+          type: "WARN",
+          subject: "Developer extension command",
+          primary:
+            ctx.mode === "tui"
+              ? `Unknown /devext action: ${action ?? raw}`
+              : compactDevextLine(`Unknown /devext action: ${action ?? raw}`),
+          metadata: ["No diagnostic, task mutation, or reload was attempted."],
+          controls: ["Usage: /devext doctor · /devext task-lifecycle <task-id> <target-status> · /devext reload"],
+        });
+      },
     },
-  });
+  );
 }
 
 async function reloadRuntime(ctx: ExtensionCommandContext): Promise<void> {
@@ -167,8 +181,12 @@ function doctorBlock(compact = false): OperatorBlock {
       body: [
         `default surface: ${activeDefaults.length} active extension(s)`,
         compactDevextLine(`active defaults: ${summarizeIds(activeDefaults)}`),
-        compactDevextLine(`compat wrappers: ${activeCompatWrappers.length} active; ${summarizeDisabled(disabledCompatWrappers)}`),
-        compactDevextLine(`backlog/design: omp=${ompOwnedToImport.length} redesign=${redesignLater.length} split=${splitRequired.length} fixtures=${fixtures.length} deleted=${deleted.length}`),
+        compactDevextLine(
+          `compat wrappers: ${activeCompatWrappers.length} active; ${summarizeDisabled(disabledCompatWrappers)}`,
+        ),
+        compactDevextLine(
+          `backlog/design: omp=${ompOwnedToImport.length} redesign=${redesignLater.length} split=${splitRequired.length} fixtures=${fixtures.length} deleted=${deleted.length}`,
+        ),
       ],
       metadata: [
         "Evidence boundary: inventory/manifests snapshot only; not runtime proof.",
@@ -204,27 +222,16 @@ function doctorBlock(compact = false): OperatorBlock {
 
 function taskLifecycleBlock(plan: TaskLifecyclePlan, compact = false): OperatorBlock {
   if (compact) return compactTaskLifecycleBlock(plan);
-  const body = [
-    `ok: ${plan.ok}`,
-    `taskId: ${plan.taskId}`,
-    `targetStatus: ${plan.targetStatus}`,
-  ];
+  const body = [`ok: ${plan.ok}`, `taskId: ${plan.taskId}`, `targetStatus: ${plan.targetStatus}`];
   if (plan.ok) {
-    body.push(
-      `taskTitle: ${plan.taskTitle}`,
-      `taskPath: ${plan.taskPath}`,
-      `currentStatus: ${plan.currentStatus}`,
-    );
+    body.push(`taskTitle: ${plan.taskTitle}`, `taskPath: ${plan.taskPath}`, `currentStatus: ${plan.currentStatus}`);
   } else {
     body.push(`code: ${plan.code}`);
     if (plan.code !== "missing-task") {
-      body.push(
-        `taskTitle: ${plan.taskTitle}`,
-        `taskPath: ${plan.taskPath}`,
-        `currentStatus: ${plan.currentStatus}`,
-      );
+      body.push(`taskTitle: ${plan.taskTitle}`, `taskPath: ${plan.taskPath}`, `currentStatus: ${plan.currentStatus}`);
     }
-    if (plan.code === "unsupported-transition") body.push(`allowedTargets: ${plan.allowedTargets.join(", ") || "none"}`);
+    if (plan.code === "unsupported-transition")
+      body.push(`allowedTargets: ${plan.allowedTargets.join(", ") || "none"}`);
     if (plan.code === "done-precondition-failed") {
       body.push("missingPreconditions:", ...plan.missingPreconditions.map((item) => `- ${item}`));
     }
@@ -251,7 +258,11 @@ function compactTaskLifecycleBlock(plan: TaskLifecyclePlan): OperatorBlock {
   if (plan.ok) {
     body.push(compactDevextLine(`currentStatus: ${plan.currentStatus} · taskTitle: ${plan.taskTitle}`));
   } else {
-    body.push(compactDevextLine(`code: ${plan.code}${plan.code === "missing-task" ? "" : ` · currentStatus: ${plan.currentStatus}`}`));
+    body.push(
+      compactDevextLine(
+        `code: ${plan.code}${plan.code === "missing-task" ? "" : ` · currentStatus: ${plan.currentStatus}`}`,
+      ),
+    );
     if (plan.code === "unsupported-transition") {
       body.push(compactDevextLine(`allowedTargets: ${plan.allowedTargets.join(", ") || "none"}`));
     }
@@ -262,9 +273,11 @@ function compactTaskLifecycleBlock(plan: TaskLifecyclePlan): OperatorBlock {
   return {
     type: plan.ok ? "VIEW" : "WARN",
     subject: "Task lifecycle dry-run",
-    primary: compactDevextLine(plan.ok
-      ? `${plan.taskId}: ${plan.currentStatus} -> ${plan.targetStatus} is allowed.`
-      : `${plan.taskId}: transition to ${plan.targetStatus} is not ready.`),
+    primary: compactDevextLine(
+      plan.ok
+        ? `${plan.taskId}: ${plan.currentStatus} -> ${plan.targetStatus} is allowed.`
+        : `${plan.taskId}: transition to ${plan.targetStatus} is not ready.`,
+    ),
     badges: [{ text: "dry-run", tone: "muted" }],
     body,
     metadata: [
@@ -277,9 +290,7 @@ function compactTaskLifecycleBlock(plan: TaskLifecyclePlan): OperatorBlock {
 }
 
 function compactDevextLine(value: string): string {
-  const plain = value.replace(/\s+/gu, " ").trim();
-  if (visibleWidth(plain) <= 72) return plain;
-  return `${sliceByColumn(plain, 0, 71)}…`;
+  return compactOperatorLine(value, 72);
 }
 
 function summarizeIds(ids: string[]): string {
@@ -300,8 +311,4 @@ function summarizePreview(ids: string[]): string {
   const remaining = ids.length - preview.length;
   const more = remaining > 0 ? `, +${remaining} more` : "";
   return `${preview.join(", ")}${more}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

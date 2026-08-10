@@ -1,7 +1,7 @@
 # plan
 
-`plan` is the default-loaded surface for behavioral plan mode (`/plan`, `/mode`,
-and optional Shift+Tab), the `/review` and `/todos` prompt shelves, and the local goal runtime.
+`plan` is the default-loaded surface for explicit behavioral plan mode (`/plan`
+and `/mode plan|default`), the `/review` and `/todos` prompt shelves, and the local goal runtime.
 
 > **Current truth (v2, behavioral mode):** plan mode is **BEHAVIORAL**, not a
 > permission boundary. While the active mode is `plan`, a `before_agent_start`
@@ -9,16 +9,17 @@ and optional Shift+Tab), the `/review` and `/todos` prompt shelves, and the loca
 > commands and throwaway scripts are allowed** (no read-only block). `/plan
 <request>` additionally authors a plan and saves the **output** to a user-level
 > file. Bare `/plan` first opens an `[INPUT]` dialog and only authors after submit.
-> Modes form an ordered, cyclable list (`default ⇄ plan`, extensible);
-> **`/mode` cycles them by default; Shift+Tab is opt-in** and updates the same bounded mode contribution
-> in the shared `locus` status bar. `/review`, `/todos`, and `/goal prompt`
+> Modes remain a named list (`default`, `plan`), but mode changes are explicit:
+> bare `/mode` only shows state, `/mode plan` enters, and `/mode default` exits.
+> Session start clears a persisted active mode, so a restart/reload cannot silently
+> put the next turn into planning. `/review`, `/todos`, and `/goal prompt`
 > are **summary-first prompt shelves** (no mode): bare inspection shows target,
 > kind, path, and size; full body requires explicit `show`/`read`. The
 > machine-readable contract is [extensions/plan/manifest.json](../../../extensions/plan/manifest.json).
 
 ## Who uses it
 
-Operators use slash commands. Models use the `goal` tool. Shift+Tab is available only after explicit opt-in.
+Operators use slash commands. Models use the `goal` tool. No keyboard shortcut changes behavioral mode.
 
 ## Commands
 
@@ -26,8 +27,7 @@ Operators use slash commands. Models use the `goal` tool. Shift+Tab is available
 - `/plan <request>` arms plan mode and authors a plan from `<request>`, saved to `~/.pi/locus-pi/<project-slug>/plans/<plan-slug>.md`.
 - `/plan exit` leaves plan mode and clears the status label. With a composed plan it first opens the plan→execution handoff selector (see below).
 - `/plan list` and `/plan help` use typed `VIEW` blocks. `/plan open <slug>` shows a bounded typed `CHANGE` preview and re-arms plan mode; missing/unknown slugs use `WARN`.
-- `/mode` cycles to the next mode (`default ⇄ plan`); `/mode <name>` sets a mode directly; `/mode show` shows the current mode.
-- `/mode bind-shift-tab` frees Shift+Tab for the cycle by writing `app.thinking.cycle: []` to `~/.pi/agent/keybindings.json` (after a confirm). Use `/effort` to change thinking level afterward.
+- `/mode` and `/mode show` show the current mode without changing it; `/mode plan` and `/mode default` are the only `/mode` mutations.
 - `/review` and `/todos` show typed shelf summaries. `/review show|read` and `/todos show|read` explicitly show the bounded body.
 - `/review set <prompt>` and `/todos set <prompt>` are explicit writes; legacy free-form `<prompt>` remains compatible. `set show`/`set read` stores those literal words.
 - `/goal <objective>` creates or replaces local goal state.
@@ -45,32 +45,32 @@ Operators use slash commands. Models use the `goal` tool. Shift+Tab is available
 - `goal` supports `create|get|complete|resume|drop`.
 - The tool stores state in `.locus/runtime/goal/state.json`.
 
-## Modes & optional Shift+Tab
+## Explicit modes
 
-- Modes are an ordered, extensible cycle: `default → plan` (wraps). `default` is
-  normal execution; `plan` overlays a planning framing.
-- **Shift+Tab** is not registered at default startup because Pi reserves
-  `shift+tab` for `app.thinking.cycle`. Run `/mode bind-shift-tab` once (writes
-  `app.thinking.cycle: []` to `~/.pi/agent/keybindings.json`) and restart Pi;
-  the extension then registers the optional mode shortcut. `/mode` always works
-  without it.
+- `default` is normal execution; `plan` adds a planning framing. The values stay
+  named and extensible, but there is no implicit cycle route.
+- The extension never registers Shift+Tab for mode changes and never edits Pi's
+  `keybindings.json`. Bare `Tab`, Shift+Tab, arrows, Enter, and selector navigation
+  cannot activate plan mode.
+- `session_start` writes the cleared mode sentinel before installing visual cues.
+  Saved plan artifacts remain available through `/plan list` and can be explicitly
+  re-armed with `/plan open <slug>`.
 - Plan mode shows **two visual cues**, cleared on `default`:
   1. A bounded route contribution owned as `plan.mode` and rendered through the
      shared `status:locus` line. Wide terminals show the active plan label;
      compact and narrow terminals reduce it to `MODE plan` or `PLAN`. The
-     extension does not allocate a second permanent status row.
+     extension does not allocate a second permanent status row. In TUI mode this
+     contribution uses the warning tone (normally yellow) instead of footer white.
   2. A recolored **input-editor border** — at `session_start` the extension
      installs a `CustomEditor` subclass via `ctx.ui.setEditorComponent` whose
-     border getter returns the accent color while plan mode is active and defers
+     border getter returns the warning color while plan mode is active and defers
      to Pi's normal (thinking/bash) border color otherwise. Both cues share the
-     accent color so plan mode reads the same in the badge and at the input.
-- Effort control moves to `/effort` (model extension) once Shift+Tab is repurposed.
+     warning color so plan mode reads the same in the badge and at the input.
 
 ## Plan → execution handoff (on exit)
 
-Leaving plan mode **with a composed plan** (via `/plan exit`, `/mode`, or the
-explicitly enabled Shift+Tab shortcut) opens a `ctx.ui.select` prompt asking what
-to do with the plan:
+Leaving plan mode **with a composed plan** via `/plan exit` or explicit
+`/mode default` opens a `ctx.ui.select` prompt asking what to do with the plan:
 
 1. **Execute the plan (this context)** — exit plan mode and inject the saved plan
    into the current session as a follow-up (`pi.sendUserMessage`, `deliverAs:
@@ -87,7 +87,7 @@ saved plan remain unchanged and no execution message is queued.
 
 The handoff degrades to a **plain exit** (the prior behavior) when the UI is
 headless (`hasUI !== true`) or there is no composed plan artifact — e.g. when plan
-mode was entered by a bare `/mode`/explicitly enabled Shift+Tab toggle rather than
+mode was entered by explicit `/mode plan` rather than
 `/plan <request>`.
 The selector reuses Pi's built-in `ctx.ui.select`; tweak text goes through the
 local official-signature input adapter. No LLM-callable tool is
@@ -111,7 +111,7 @@ What you type, the good visible result, and the bad result to watch for.
 | `/plan exit`                        | Leaves plan mode; with a composed plan, opens the execution-handoff selector.                                                                                      | Selector offers execute / execute-fresh / tweak / keep; on execute the plan is injected as a follow-up and the label clears; on keep the `PLAN` label stays. | Selector appears with no composed plan, or the plan is not injected on execute.                            |
 | `/plan list` / `/plan help`         | Shows the saved-plan library or explicit usage.                                                                                                                    | Typed `VIEW` block, bounded rows, muted path/controls.                                                                                                       | Falls back to an unframed white-text stack.                                                                |
 | `/plan open <slug>`                 | Loads a saved plan and re-arms plan mode.                                                                                                                          | Typed `CHANGE` preview with `PLAN`, path, bounded body, and an explicit `+N more` affordance.                                                                | Unknown slug looks like success, or a long plan overflows/truncates silently.                              |
-| `/mode` / optional Shift+Tab        | `/mode` cycles `default ⇄ plan`; Shift+Tab works only after explicit bind + restart.                                                                               | A typed change receipt shows `from → to`; the shared `locus` status contribution flips `PLAN` ↔ cleared.                                                     | Startup reports a shortcut conflict, or Shift+Tab remains unavailable after bind/restart.                  |
+| `/mode [show                        | plan                                                                                                                                                               | default]`                                                                                                                                                    | Bare/show is read-only; named commands are the only mode mutations.                                        | A typed view or change receipt appears; explicit plan mode uses a yellow warning-tone badge and border.     | Bare `/mode`, restart, workflow launch, Tab, arrows, or Enter activates plan mode.         |
 | `/goal <objective>`                 | Creates or replaces the long-lived Goal state.                                                                                                                     | Typed `CHANGE` names the objective, status, id, usage/budget, and state path.                                                                                | Confuses runtime state with a prompt shelf.                                                                |
 | `/goal prompt [show                 | read                                                                                                                                                               | set <prompt>]`                                                                                                                                               | Inspects or writes the separate Goal prompt shelf.                                                         | Bare command is summary-only; explicit body view shows `target`, `kind`, compact path, and bounded content. | Bare inspection dumps the full prompt or silently falls back from an explicit task target. |
 | `/goal-ai [<request>]`              | With no argument, opens typed input; then converts rough intent into a Locus Prompt Draft through one replacement-session LLM run and saves it as the goal prompt. | Typed result shows the resolved `target`, `kind`, local `path`, and child session id when available.                                                         | Pretends to execute the goal, writes after Escape, or overwrites `goal.md` after invalid/empty LLM output. |
@@ -160,22 +160,20 @@ task lifecycle, or review outcome. Prompt storage is not execution proof.
 
 - `/goal prompt` and `/goal-ai` are prompt-writing surfaces, not goal execution.
 - Bare `/plan` and `/goal-ai` depend on interactive UI. In `json`/`print` or explicit no-UI hosts they take no action; callers must provide the request as a command argument.
-- Pi's official dialog result is `string | undefined`, while `_shared/pi-api.ts` still describes an older object result. These commands use the narrow `_shared/operator-input.ts` adapter; repository-wide facade repair is deferred.
+- Pi's official dialog result is `string | undefined`, while `_shared/host/pi-api.ts` still describes an older object result. These commands use the narrow `_shared/operator/operator-input.ts` adapter; repository-wide facade repair is deferred.
 - `/review`, `/todos`, `/goal prompt`, `/goal-ai`, and `/goal continue`
   are artifact-write surfaces. Bare shelf commands show metadata/path and are
   transient. Full prompt bodies remain hidden until explicit command verbs
   `show`/`read` (or direct file inspection). `/plan` is now a mode (above), not a shelf;
   its `plan.mode` status contribution and editor-border cue persist until `/plan exit`
-  or a cycle back to `default`, while each command/result widget remains transient.
+  or explicit `/mode default`, while each command/result widget remains transient.
 - `/goal show` and goal lifecycle commands render a bounded command summary.
   The durable source of truth remains `.locus/runtime/goal/state.json`.
 - Plan mode is **behavioral**: it influences the model via a system-prompt
   injection only. It does **not** restrict tools, writes, or the operator's shell —
   by design (v2). The model is _asked_ to plan, not _forced_ to.
-- Shift+Tab is not claimed by this extension while `app.thinking.cycle` owns the
-  chord (Pi reserves it). `/mode bind-shift-tab` frees it via the user
-  `keybindings.json`; restart Pi to enable the optional shortcut. Without that,
-  use `/mode`. Effort control then lives in `/effort`.
+- Behavioral mode has no keyboard shortcut. The extension does not modify Pi's
+  `keybindings.json`; use `/mode plan`, `/mode default`, or `/plan`.
 - The plan→execution handoff needs interactive UI; in headless/print mode
   (`hasUI !== true`) leaving plan mode is always a plain exit with no selector.
 - There is no OMP-native continuation/footer parity or exact token-accounting proof.

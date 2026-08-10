@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { RuntimeArtifact } from "../../../extensions/_shared/artifacts.js";
+import type { RuntimeArtifact } from "../../../extensions/_shared/runtime/artifacts.js";
 import {
   createTaskFromApprovedPrompt,
   exportTodosToProjectTask,
@@ -13,8 +13,8 @@ import {
   planTaskLifecycleTransition,
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
-} from "../../../extensions/_shared/task-bridge.js";
-import { sharedState } from "../../../extensions/_shared/state.js";
+} from "../../../extensions/_shared/project/task-bridge.js";
+import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness } from "../../test-harness.js";
 
 const tempRoots: string[] = [];
@@ -27,35 +27,42 @@ function tempProject(): string {
   const root = path.join(tmpdir(), `locus-pi-task-bridge-${Math.random().toString(16).slice(2)}`);
   mkdirSync(path.join(root, ".tasks"), { recursive: true });
   tempRoots.push(root);
-  writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-    schema: "index.v1",
-    generated_at: "2026-06-02T00:00:00.000Z",
-    tasks: [
+  writeFileSync(
+    path.join(root, ".tasks", "index.json"),
+    JSON.stringify(
       {
-        id: "T-1",
-        title: "Active task",
-        status: "doing",
-        type: "feature",
-        path: "T-1-active-task",
-        subtasks: [
+        schema: "index.v1",
+        generated_at: "2026-06-02T00:00:00.000Z",
+        tasks: [
           {
-            id: "T-1-a",
-            title: "Completed subtask",
-            status: "done",
+            id: "T-1",
+            title: "Active task",
+            status: "doing",
             type: "feature",
-            path: "T-1-active-task/subtasks/T-1-a-completed-subtask",
+            path: "T-1-active-task",
+            subtasks: [
+              {
+                id: "T-1-a",
+                title: "Completed subtask",
+                status: "done",
+                type: "feature",
+                path: "T-1-active-task/subtasks/T-1-a-completed-subtask",
+              },
+            ],
+          },
+          {
+            id: "T-2",
+            title: "Planned task",
+            status: "planned",
+            type: "feature",
+            path: "T-2-planned-task",
           },
         ],
       },
-      {
-        id: "T-2",
-        title: "Planned task",
-        status: "planned",
-        type: "feature",
-        path: "T-2-planned-task",
-      },
-    ],
-  }, null, 2));
+      null,
+      2,
+    ),
+  );
   return root;
 }
 
@@ -63,42 +70,54 @@ function lifecycleProject(): string {
   const root = path.join(tmpdir(), `locus-pi-task-lifecycle-${Math.random().toString(16).slice(2)}`);
   mkdirSync(path.join(root, ".tasks"), { recursive: true });
   tempRoots.push(root);
-  writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-    schema: "index.v1",
-    generated_at: "2026-06-17T00:00:00.000Z",
-    tasks: [
+  writeFileSync(
+    path.join(root, ".tasks", "index.json"),
+    JSON.stringify(
       {
-        id: "T-1",
-        title: "Draft task",
-        status: "draft",
-        type: "feature",
-        path: "T-1-draft-task",
+        schema: "index.v1",
+        generated_at: "2026-06-17T00:00:00.000Z",
+        tasks: [
+          {
+            id: "T-1",
+            title: "Draft task",
+            status: "draft",
+            type: "feature",
+            path: "T-1-draft-task",
+          },
+          {
+            id: "T-2",
+            title: "Doing task",
+            status: "doing",
+            type: "feature",
+            path: "T-2-doing-task",
+          },
+          {
+            id: "T-3",
+            title: "Review task",
+            status: "review",
+            type: "feature",
+            path: "T-3-review-task",
+          },
+          {
+            id: "T-4",
+            title: "Ready to close",
+            status: "review",
+            type: "feature",
+            path: "T-4-ready-to-close",
+          },
+        ],
       },
-      {
-        id: "T-2",
-        title: "Doing task",
-        status: "doing",
-        type: "feature",
-        path: "T-2-doing-task",
-      },
-      {
-        id: "T-3",
-        title: "Review task",
-        status: "review",
-        type: "feature",
-        path: "T-3-review-task",
-      },
-      {
-        id: "T-4",
-        title: "Ready to close",
-        status: "review",
-        type: "feature",
-        path: "T-4-ready-to-close",
-      },
-    ],
-  }, null, 2));
+      null,
+      2,
+    ),
+  );
   writeLifecycleTaskWorkspace(root, "T-3-review-task", "## Closure\n\nTODO\n", "Reviewed without acceptance.\n");
-  writeLifecycleTaskWorkspace(root, "T-4-ready-to-close", "## Closure\n\nShipped the lifecycle planner.\n", "ACCEPTED\n");
+  writeLifecycleTaskWorkspace(
+    root,
+    "T-4-ready-to-close",
+    "## Closure\n\nShipped the lifecycle planner.\n",
+    "ACCEPTED\n",
+  );
   return root;
 }
 
@@ -106,11 +125,18 @@ function currentTaskProject(tasks: unknown[]): string {
   const root = path.join(tmpdir(), `locus-pi-current-task-${Math.random().toString(16).slice(2)}`);
   mkdirSync(path.join(root, ".tasks"), { recursive: true });
   tempRoots.push(root);
-  writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-    schema: "index.v1",
-    generated_at: "2026-06-17T00:00:00.000Z",
-    tasks,
-  }, null, 2));
+  writeFileSync(
+    path.join(root, ".tasks", "index.json"),
+    JSON.stringify(
+      {
+        schema: "index.v1",
+        generated_at: "2026-06-17T00:00:00.000Z",
+        tasks,
+      },
+      null,
+      2,
+    ),
+  );
   return root;
 }
 
@@ -144,7 +170,11 @@ describe("task bridge", () => {
     const snapshot = loadTaskBridgeSnapshot(root);
     const todos = importTodosFromProjectTasks(snapshot.tasks);
 
-    expect(snapshot.tasks.map((task) => `${task.id}:${task.status}`)).toEqual(["T-1:doing", "T-1-a:done", "T-2:planned"]);
+    expect(snapshot.tasks.map((task) => `${task.id}:${task.status}`)).toEqual([
+      "T-1:doing",
+      "T-1-a:done",
+      "T-2:planned",
+    ]);
     expect(todos).toEqual([
       {
         name: "Project tasks",
@@ -258,20 +288,28 @@ describe("task bridge", () => {
 
   it("does not let session todos override project task truth", () => {
     const root = currentTaskProject([
-      { id: "T-1", title: "Blocked project task", status: "blocked", type: "feature", path: "T-1-blocked-project-task" },
+      {
+        id: "T-1",
+        title: "Blocked project task",
+        status: "blocked",
+        type: "feature",
+        path: "T-1-blocked-project-task",
+      },
     ]);
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
-    sharedState.todos = [{
-      name: "Execution",
-      tasks: [{ content: "Session-only active todo", status: "in_progress" }],
-    }];
-    const beforeTodos = JSON.parse(JSON.stringify(sharedState.todos));
+    todoStateCache.phases = [
+      {
+        name: "Execution",
+        tasks: [{ content: "Session-only active todo", status: "in_progress" }],
+      },
+    ];
+    const beforeTodos = JSON.parse(JSON.stringify(todoStateCache.phases));
 
     const resolution = resolveCurrentProjectTask(root);
 
     expect(resolution).toMatchObject({ ok: false, code: "no-current-task" });
     expect(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")).toBe(beforeIndex);
-    expect(sharedState.todos).toEqual(beforeTodos);
+    expect(todoStateCache.phases).toEqual(beforeTodos);
   });
 
   it("creates a project task only from an approved prompt artifact", () => {
@@ -287,13 +325,15 @@ describe("task bridge", () => {
 
     expect(readFileSync(workspace.taskPath, "utf8")).toContain("Source artifact:");
     expect(readFileSync(workspace.taskPath, "utf8")).toContain("Source session: prepare-session");
-    expect(readFileSync(workspace.eventsPath, "utf8")).toContain("\"actor\":\"task-bridge\"");
-    expect(() => createTaskFromApprovedPrompt({
-      projectRoot: root,
-      artifact: { ...approvedArtifact(root), id: "draft-2", metadata: { status: "draft" } },
-      taskId: "T-4",
-      title: "Draft artifact",
-    })).toThrow("Task bridge requires an approved prompt artifact.");
+    expect(readFileSync(workspace.eventsPath, "utf8")).toContain('"actor":"task-bridge"');
+    expect(() =>
+      createTaskFromApprovedPrompt({
+        projectRoot: root,
+        artifact: { ...approvedArtifact(root), id: "draft-2", metadata: { status: "draft" } },
+        taskId: "T-4",
+        title: "Draft artifact",
+      }),
+    ).toThrow("Task bridge requires an approved prompt artifact.");
   });
 
   it("writes completion notes while delegating write permission to Pi", async () => {
@@ -355,18 +395,20 @@ describe("task bridge", () => {
     writeFileSync(runtimeFile, "before\n");
     const beforeIndex = readFileSync(indexPath, "utf8");
     const beforeRuntime = readFileSync(runtimeFile, "utf8");
-    sharedState.todos = [{
-      name: "Execution",
-      tasks: [{ content: "Existing todo", status: "pending" }],
-    }];
-    const beforeTodos = JSON.parse(JSON.stringify(sharedState.todos));
+    todoStateCache.phases = [
+      {
+        name: "Execution",
+        tasks: [{ content: "Existing todo", status: "pending" }],
+      },
+    ];
+    const beforeTodos = JSON.parse(JSON.stringify(todoStateCache.phases));
 
     const plan = planTaskLifecycleTransition(root, "T-1", "review");
 
     expect(plan).toMatchObject({ ok: true, taskId: "T-1", targetStatus: "review" });
     expect(readFileSync(indexPath, "utf8")).toBe(beforeIndex);
     expect(readFileSync(runtimeFile, "utf8")).toBe(beforeRuntime);
-    expect(sharedState.todos).toEqual(beforeTodos);
+    expect(todoStateCache.phases).toEqual(beforeTodos);
   });
 
   it("plans allowed lifecycle transitions and keeps task files unchanged", () => {
@@ -393,7 +435,9 @@ describe("task bridge", () => {
     expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-1-draft-task");
     expect(formatTaskLifecyclePlan(plan)).toContain("currentStatus: draft");
     expect(formatTaskLifecyclePlan(plan)).toContain("targetStatus: planned");
-    expect(formatTaskLifecyclePlan(plan)).toContain("message: Dry-run only. `locus task update` remains the mutation path.");
+    expect(formatTaskLifecyclePlan(plan)).toContain(
+      "message: Dry-run only. `locus task update` remains the mutation path.",
+    );
     expect(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")).toBe(beforeIndex);
     expect(readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "task.md"), "utf8")).toBe(beforeTask);
     expect(readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "qa.md"), "utf8")).toBe(beforeQa);
@@ -487,6 +531,8 @@ describe("task bridge", () => {
     expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-4-ready-to-close");
     expect(formatTaskLifecyclePlan(plan)).toContain("currentStatus: review");
     expect(formatTaskLifecyclePlan(plan)).toContain("targetStatus: done");
-    expect(formatTaskLifecyclePlan(plan)).toContain("message: Dry-run only. `locus task update` remains the mutation path.");
+    expect(formatTaskLifecyclePlan(plan)).toContain(
+      "message: Dry-run only. `locus task update` remains the mutation path.",
+    );
   });
 });

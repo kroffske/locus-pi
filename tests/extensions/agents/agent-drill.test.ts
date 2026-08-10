@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import agents from "../../../extensions/agents/index.js";
 import { ScrollableTextOverlay } from "../../../extensions/agents/drill-overlay.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-sdk-host.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/pi-api.js";
+import * as sessionViewer from "../../../extensions/agents/session-viewer.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { SupersededInlineOperatorInteractionError } from "../../../extensions/_shared/operator/operator-interaction.js";
+import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 afterEach(() => {
@@ -15,7 +17,7 @@ function registerRow(id: string, status: "queued" | "working" | "done" | "error"
   agentLiveStore.patch(id, { status });
 }
 
-describe("agent drill command and overlay", () => {
+describe("agent drill command and inline interaction", () => {
   it("warns when Pi namespaces a /ps collision and names /agent ps fallback", async () => {
     const h = createHarness();
     h.pi.getCommands = () => [
@@ -25,7 +27,9 @@ describe("agent drill command and overlay", () => {
     agents(h.pi);
     await emit(h, "session_start");
 
-    expect(h.notifications).toContain("Multiple /ps commands are loaded (ps:1, ps:2). Use /agent ps as the stable Locus fallback.");
+    expect(h.notifications).toContain(
+      "Multiple /ps commands are loaded (ps:1, ps:2). Use /agent ps as the stable Locus fallback.",
+    );
   });
 
   it("registers /ps as primary direct viewer navigation with /agent ps compatibility", async () => {
@@ -36,10 +40,7 @@ describe("agent drill command and overlay", () => {
     agents(primary.pi);
 
     await primary.commands.get("ps")!.handler(row.id, primary.ctx as ExtensionCommandContext);
-    expect(primary.customOptions).toEqual([{
-      overlay: true,
-      overlayOptions: { width: "100%", maxHeight: "100%", row: 0, col: 0, margin: 0 },
-    }]);
+    expect(primary.customOptions).toEqual([{ overlay: false }]);
 
     const compatibility = createHarness();
     compatibility.ctx.hasUI = true;
@@ -47,6 +48,84 @@ describe("agent drill command and overlay", () => {
     agents(compatibility.pi);
     await compatibility.commands.get("agent")!.handler(`ps ${row.id}`, compatibility.ctx as ExtensionCommandContext);
     expect(compatibility.customRenderFrames[0]?.[0]).toContain(row.displayName);
+  });
+
+  it.each([
+    ["/ps", (h: ReturnType<typeof createHarness>, id: string) => h.commands.get("ps")!.handler(id, h.ctx)],
+    [
+      "/agent ps",
+      (h: ReturnType<typeof createHarness>, id: string) => h.commands.get("agent")!.handler(`ps ${id}`, h.ctx),
+    ],
+    [
+      "/agent drill",
+      (h: ReturnType<typeof createHarness>, id: string) => h.commands.get("agent")!.handler(`drill ${id}`, h.ctx),
+    ],
+  ])("drops delayed %s viewer capability after session replacement reuses the row id", async (_name, invoke) => {
+    type CapabilityResult = Awaited<ReturnType<typeof sessionViewer.loadAgentViewerCapability>>;
+    let resolveCapability!: (result: CapabilityResult) => void;
+    const capability = new Promise<CapabilityResult>((resolve) => {
+      resolveCapability = resolve;
+    });
+    const capabilitySpy = vi
+      .spyOn(sessionViewer, "loadAgentViewerCapability")
+      .mockImplementation(async () => capability);
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    registerRow("reused-direct-row", "working");
+    const beforeListeners = agentLiveStore.emitter.listenerCount("change");
+    const notificationsBefore = [...h.notifications];
+    try {
+      const opening = invoke(h, "reused-direct-row");
+      await vi.waitFor(() => expect(capabilitySpy).toHaveBeenCalledOnce());
+      await emit(h, "session_start");
+      registerRow("reused-direct-row", "working");
+      resolveCapability({ ok: true, capability: {} as never });
+      await opening;
+
+      expect(h.customComponents).toHaveLength(0);
+      expect(h.customOptions).toHaveLength(0);
+      expect(agentLiveStore.emitter.listenerCount("change")).toBe(beforeListeners);
+      expect(h.notifications).toEqual(notificationsBefore);
+    } finally {
+      capabilitySpy.mockRestore();
+    }
+  });
+
+  it("drops delayed focused Enter after reload without creating an old viewer or disturbing the replacement", async () => {
+    type CapabilityResult = Awaited<ReturnType<typeof sessionViewer.loadAgentViewerCapability>>;
+    let resolveCapability!: (result: CapabilityResult) => void;
+    const capability = new Promise<CapabilityResult>((resolve) => {
+      resolveCapability = resolve;
+    });
+    const capabilitySpy = vi
+      .spyOn(sessionViewer, "loadAgentViewerCapability")
+      .mockImplementation(async () => capability);
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    registerRow("reused-focused-row", "working");
+    const beforeListeners = agentLiveStore.emitter.listenerCount("change");
+    const notificationsBefore = [...h.notifications];
+    h.customInputQueue.push("enter");
+    try {
+      const opening = h.commands.get("ps")!.handler("", h.ctx);
+      await vi.waitFor(() => expect(capabilitySpy).toHaveBeenCalledOnce());
+      await emit(h, "session_start");
+      registerRow("reused-focused-row", "working");
+      resolveCapability({ ok: true, capability: {} as never });
+      await opening;
+
+      expect(h.customComponents).toHaveLength(1);
+      expect(h.customOptions).toEqual([{ overlay: false }]);
+      expect(agentLiveStore.emitter.listenerCount("change")).toBe(beforeListeners);
+      expect(h.notifications).toEqual(notificationsBefore);
+      expect(agentLiveStore.rows.has("reused-focused-row")).toBe(true);
+    } finally {
+      capabilitySpy.mockRestore();
+    }
   });
 
   it("does not claim fallback delivery when the host has no UI", async () => {
@@ -91,7 +170,13 @@ describe("agent drill command and overlay", () => {
   });
 
   it("resolves a completed row by short id, child-session fragment, and label, with identity in the header (T-188 W5/W3)", async () => {
-    agentLiveStore.begin({ id: "run:reviewer:1", agentName: "reviewer", label: "review the diff", isolated: false, noMcp: false });
+    agentLiveStore.begin({
+      id: "run:reviewer:1",
+      agentName: "reviewer",
+      label: "review the diff",
+      isolated: false,
+      noMcp: false,
+    });
     agentLiveStore.patch("run:reviewer:1", { status: "done", childSessionId: "550e8400-e29b-41d4-a716-446655440000" });
 
     // The 6-char short id shown in the row actor (`reviewer#440000`) is drillable.
@@ -101,7 +186,9 @@ describe("agent drill command and overlay", () => {
     agents(byShortId.pi);
     await byShortId.commands.get("agent")!.handler("drill 440000", byShortId.ctx as ExtensionCommandContext);
     const shortFrame = byShortId.customRenderFrames[0] ?? [];
-    expect(shortFrame[0]).toContain(`${agentLiveStore.rows.get("run:reviewer:1")?.displayName} — review the diff`);
+    expect(shortFrame[0]).toContain(
+      `[agent ${agentLiveStore.rows.get("run:reviewer:1")?.displayName}] started work · review the diff`,
+    );
     expect(shortFrame.join("\n")).toContain("Agent completed without assistant output.");
 
     // A child-session id fragment resolves the same completed row.
@@ -126,13 +213,19 @@ describe("agent drill command and overlay", () => {
     byPetname.customInputQueue.push("escape");
     agents(byPetname.pi);
     const petname = agentLiveStore.rows.get("run:reviewer:1")!.displayName!;
-    await byPetname.commands.get("agent")!.handler(`drill ${petname.toLocaleLowerCase()}`, byPetname.ctx as ExtensionCommandContext);
+    await byPetname.commands
+      .get("agent")!
+      .handler(`drill ${petname.toLocaleLowerCase()}`, byPetname.ctx as ExtensionCommandContext);
     expect(byPetname.customRenderFrames[0]?.[0]).toContain("review the diff");
   });
 
   it("reports ambiguous label and uuid fragments with candidates, while exact row id wins", async () => {
     const first = agentLiveStore.begin({ id: "row-collision-a", agentName: "reviewer", label: "review shared target" });
-    const second = agentLiveStore.begin({ id: "row-collision-b", agentName: "reviewer", label: "review shared target" });
+    const second = agentLiveStore.begin({
+      id: "row-collision-b",
+      agentName: "reviewer",
+      label: "review shared target",
+    });
     agentLiveStore.patch(first.id, { status: "done", childSessionId: "550e8400-aaaa-1111" });
     agentLiveStore.patch(second.id, { status: "working", childSessionId: "550e8400-bbbb-2222" });
     const h = createHarness();
@@ -197,7 +290,12 @@ describe("agent drill command and overlay", () => {
   });
 
   it("frames title, body, and footer without exceeding normal or narrow widths", () => {
-    const overlay = new ScrollableTextOverlay("Agent 🧪 catalog", () => ["wide body 世界", "second"], { requestRender: vi.fn() }, () => {});
+    const overlay = new ScrollableTextOverlay(
+      "Agent 🧪 catalog",
+      () => ["wide body 世界", "second"],
+      { requestRender: vi.fn() },
+      () => {},
+    );
 
     for (const width of [1, 2, 3, 8, 40]) {
       const frame = overlay.render(width);
@@ -208,5 +306,64 @@ describe("agent drill command and overlay", () => {
     expect(overlay.render(40).join("\n")).toContain("Agent 🧪 catalog");
     expect(overlay.render(40).join("\n")).toContain("q/esc close");
   });
+});
 
+describe("/ps never fails silently", () => {
+  it("says so when there is nothing to show", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+
+    await h.commands.get("ps")!.handler("", h.ctx as ExtensionCommandContext);
+
+    expect(h.customComponents).toHaveLength(0);
+    expect(h.notifications).toContain("/ps found no live agent rows.");
+  });
+
+  it("falls back to the bounded catalog and says why when the scroll surface loses the screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    // Pi shows one inline surface at a time: this models the newer prompt that
+    // takes the screen while /agent list is opening.
+    h.ctx.ui.custom = async () => {
+      throw new SupersededInlineOperatorInteractionError();
+    };
+    agents(h.pi);
+
+    await h.commands.get("agent")!.handler("list", h.ctx as ExtensionCommandContext);
+
+    // Neither surface may end blank: the operator gets the catalog either way.
+    expect(h.widgets.get("agents") ?? "").toContain("Agent catalog");
+    expect(h.notifications.some((message) => message.startsWith("Agent catalog closed:"))).toBe(true);
+  });
+});
+
+describe("re-run agent identity", () => {
+  it("resolves a plain agent name to its newest workflow run, not a retained earlier one", async () => {
+    const older = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183012-a6aa:default",
+      agentName: "default",
+      label: "decide clarification",
+      workflowRunId: "20260726-183012-a6aa",
+    });
+    agentLiveStore.patch(older.id, { status: "done" });
+    const newer = agentLiveStore.begin({
+      id: "workflow-agent:20260726-183412-b2c4:default",
+      agentName: "default",
+      label: "decide clarification",
+      workflowRunId: "20260726-183412-b2c4",
+    });
+    agentLiveStore.patch(newer.id, { status: "working" });
+
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    h.customInputQueue.push("escape");
+    agents(h.pi);
+    await h.commands.get("ps")!.handler("default", h.ctx as ExtensionCommandContext);
+
+    const frame = h.customRenderFrames[0]?.join("\n") ?? "";
+    expect(frame).toContain(newer.displayName!);
+    expect(frame).not.toContain(older.displayName!);
+    expect(h.widgets.get("agents") ?? "").not.toContain("ambiguous");
+  });
 });

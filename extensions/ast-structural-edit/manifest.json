@@ -1,6 +1,10 @@
 {
   "id": "ast-structural-edit",
   "name": "AST Structural Edit",
+  "agent": {
+    "name": "extension-ast-structural-edit",
+    "description": "Search, preview, approve, stale-check, apply, and resolve AST edits, including ast_apply."
+  },
   "version": "0.1.0",
   "defaultEnabled": true,
   "behaviorStatus": "active",

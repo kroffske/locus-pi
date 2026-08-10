@@ -3,15 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import todoContext from "../../../extensions/todo-context/index.js";
-import { exportTodosToProjectTask } from "../../../extensions/_shared/task-bridge.js";
-import { sharedState } from "../../../extensions/_shared/state.js";
-import { createHarness, runTool } from "../../test-harness.js";
+import { exportTodosToProjectTask } from "../../../extensions/_shared/project/task-bridge.js";
+import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
+import { createHarness, emit, runTool } from "../../test-harness.js";
 
 describe("todo-context OMP-compatible todo_write", () => {
   const tempRoots: string[] = [];
 
   beforeEach(() => {
-    sharedState.todos = [];
+    todoStateCache.phases = [];
+    todoStateCache.context = null;
+    todoStateCache.autoContinue = false;
     delete process.env.LOCUS_PI_SESSION_STORE;
   });
 
@@ -37,42 +39,58 @@ describe("todo-context OMP-compatible todo_write", () => {
   function explicitTaskProject(): string {
     const root = tempRoot();
     mkdirSync(path.join(root, ".tasks"), { recursive: true });
-    writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-      schema: "index.v1",
-      generated_at: "2026-06-17T00:00:00.000Z",
-      tasks: [
+    writeFileSync(
+      path.join(root, ".tasks", "index.json"),
+      JSON.stringify(
         {
-          id: "T-136",
-          title: "Explicit task todo bridge command surface",
-          status: "doing",
-          type: "feature",
-          path: "T-136-explicit-task-todo-bridge-command-surface",
+          schema: "index.v1",
+          generated_at: "2026-06-17T00:00:00.000Z",
+          tasks: [
+            {
+              id: "T-136",
+              title: "Explicit task todo bridge command surface",
+              status: "doing",
+              type: "feature",
+              path: "T-136-explicit-task-todo-bridge-command-surface",
+            },
+            {
+              id: "T-137",
+              title: "Follow-on task",
+              status: "planned",
+              type: "feature",
+              path: "T-137-follow-on-task",
+            },
+          ],
         },
-        {
-          id: "T-137",
-          title: "Follow-on task",
-          status: "planned",
-          type: "feature",
-          path: "T-137-follow-on-task",
-        },
-      ],
-    }, null, 2));
+        null,
+        2,
+      ),
+    );
     return root;
   }
 
   function projectWithTasks(tasks: ProjectTaskIndexEntry[]): string {
     const root = tempRoot();
     mkdirSync(path.join(root, ".tasks"), { recursive: true });
-    writeFileSync(path.join(root, ".tasks", "index.json"), JSON.stringify({
-      schema: "index.v1",
-      generated_at: "2026-06-17T00:00:00.000Z",
-      tasks,
-    }, null, 2));
+    writeFileSync(
+      path.join(root, ".tasks", "index.json"),
+      JSON.stringify(
+        {
+          schema: "index.v1",
+          generated_at: "2026-06-17T00:00:00.000Z",
+          tasks,
+        },
+        null,
+        2,
+      ),
+    );
     return root;
   }
 
   function readTaskIndex(root: string): ProjectTaskIndexEntry[] {
-    const index = JSON.parse(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")) as { tasks?: ProjectTaskIndexEntry[] };
+    const index = JSON.parse(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")) as {
+      tasks?: ProjectTaskIndexEntry[];
+    };
     return index.tasks ?? [];
   }
 
@@ -108,6 +126,158 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(text).toContain("Inspect contract [in_progress] (Execution)");
   });
 
+  it("persists queue context and dispatches exactly one hidden continuation after progress settles", async () => {
+    const h = createHarness();
+    todoContext(h.pi);
+
+    const init = await runTool(h, "todo_write", {
+      context: "Verify arithmetic one response at a time.",
+      autoContinue: true,
+      ops: [{ op: "init", list: [{ phase: "Checks", items: ["Add 2 + 2", "Add 3 + 4"] }] }],
+    });
+
+    expect(init.details).toMatchObject({
+      queueContext: "Verify arithmetic one response at a time.",
+      autoContinue: true,
+      continuationArmed: true,
+    });
+    expect(h.sentMessages).toHaveLength(0);
+
+    await emit(h, "agent_settled");
+
+    expect(h.sentMessages).toHaveLength(1);
+    expect(h.sentMessages[0]).toMatchObject({
+      message: {
+        customType: "locus-todo-continuation",
+        display: false,
+      },
+      options: {
+        triggerTurn: true,
+        deliverAs: "followUp",
+      },
+    });
+    expect(h.sentMessages[0]?.message.content).toContain("Queue context:\nVerify arithmetic one response at a time.");
+    expect(h.sentMessages[0]?.message.content).toContain("Active todo: Add 2 + 2");
+    expect(h.sentUserMessages).toHaveLength(0);
+
+    await emit(h, "agent_settled");
+    expect(h.sentMessages).toHaveLength(1);
+
+    await runTool(h, "todo_write", { ops: [{ op: "done", task: "Add 2 + 2" }] });
+    await runTool(h, "todo_write", {
+      ops: [{ op: "note", task: "Add 2 + 2", text: "Result: 4." }],
+    });
+    await emit(h, "agent_settled");
+    expect(h.sentMessages).toHaveLength(2);
+    expect(h.sentMessages[1]?.message.content).toContain("Active todo: Add 3 + 4");
+
+    const completed = await runTool(h, "todo_write", { ops: [{ op: "done", task: "Add 3 + 4" }] });
+    expect(completed.details).toMatchObject({ autoContinue: false, continuationArmed: false });
+    await emit(h, "agent_settled");
+    expect(h.sentMessages).toHaveLength(2);
+  });
+
+  it("keeps manual mode non-dispatching and lets /todo run and /todo pause control execution", async () => {
+    const h = createHarness();
+    todoContext(h.pi);
+
+    await runTool(h, "todo_write", {
+      ops: [{ op: "init", list: [{ phase: "Checks", items: ["Add 2 + 2"] }] }],
+    });
+    await emit(h, "agent_settled");
+    expect(h.sentMessages).toHaveLength(0);
+
+    await runCommand(h, "todo", "run Small arithmetic smoke");
+    expect(h.sentMessages).toHaveLength(1);
+    expect(h.sentMessages[0]?.message.content).toContain("Queue context:\nSmall arithmetic smoke");
+    expect(h.widgets.get("todo")).toContain("Autonomous todo execution started.");
+
+    await runCommand(h, "todo", "pause");
+    expect(h.widgets.get("todo")).toContain("Autonomous todo execution paused.");
+    expect(h.entries[0]?.data).toMatchObject({
+      metadata: {
+        context: "Small arithmetic smoke",
+        autoContinue: false,
+      },
+    });
+  });
+
+  it("pauses without losing the active task when continuation transport fails", async () => {
+    const h = createHarness();
+    todoContext(h.pi);
+    h.pi.sendMessage = async () => {
+      throw new Error("follow-up transport failed");
+    };
+
+    await runTool(h, "todo_write", {
+      autoContinue: true,
+      ops: [{ op: "init", list: [{ phase: "Checks", items: ["Add 2 + 2"] }] }],
+    });
+    await emit(h, "agent_settled");
+
+    expect(h.widgets.get("todo")).toContain("Autonomous execution paused");
+    expect(h.widgets.get("todo")).toContain("follow-up transport failed");
+    expect(h.entries[0]?.data).toMatchObject({
+      phases: [
+        {
+          name: "Checks",
+          tasks: [{ content: "Add 2 + 2", status: "in_progress" }],
+        },
+      ],
+      metadata: { autoContinue: false },
+    });
+  });
+
+  it("pauses after the bounded continuation limit", async () => {
+    const h = createHarness();
+    todoContext(h.pi);
+    await runTool(h, "todo_write", {
+      autoContinue: true,
+      ops: [{ op: "init", list: [{ phase: "Checks", items: ["Repeat bounded check"] }] }],
+    });
+
+    for (let index = 0; index < 20; index++) {
+      await emit(h, "agent_settled");
+      expect(h.sentMessages).toHaveLength(index + 1);
+      await runTool(h, "todo_write", {
+        ops: [{ op: "start", task: "Repeat bounded check" }],
+      });
+    }
+    await emit(h, "agent_settled");
+
+    expect(h.sentMessages).toHaveLength(20);
+    expect(h.widgets.get("todo")).toContain("paused after 20 continuations");
+    expect(h.entries[0]?.data).toMatchObject({ metadata: { autoContinue: false } });
+  });
+
+  it("loads legacy phase-only entries with autonomous mode disabled", async () => {
+    const h = createHarness();
+    h.entries.unshift({
+      type: "todo_write",
+      data: {
+        phases: [
+          {
+            name: "Legacy",
+            tasks: [{ content: "Keep old state readable", status: "in_progress" }],
+          },
+        ],
+      },
+    });
+    todoContext(h.pi);
+
+    const result = await runTool(h, "todo_write", {
+      ops: [{ op: "note", task: "Keep old state readable", text: "Restored." }],
+    });
+    await emit(h, "agent_settled");
+
+    expect(result.details).toMatchObject({
+      todoStateSource: "pi-entry",
+      autoContinue: false,
+      continuationArmed: false,
+    });
+    expect(h.sentMessages).toHaveLength(0);
+  });
+
   it("marks phase tasks completed and reports completion transitions", async () => {
     const h = createHarness();
     todoContext(h.pi);
@@ -141,7 +311,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
-    sharedState.todos = [];
+    todoStateCache.phases = [];
 
     const result = await runTool(h, "todo_write", { ops: [{ op: "done", task: "Inspect contract" }] });
 
@@ -156,9 +326,7 @@ describe("todo-context OMP-compatible todo_write", () => {
         ],
       },
     ]);
-    expect(result.details?.completedTasks).toEqual([
-      { phase: "Execution", content: "Inspect contract" },
-    ]);
+    expect(result.details?.completedTasks).toEqual([{ phase: "Execution", content: "Inspect contract" }]);
   });
 
   it("persists and replays todos through the JSONL session store", async () => {
@@ -168,15 +336,21 @@ describe("todo-context OMP-compatible todo_write", () => {
     todoContext(first.pi);
 
     const init = await runTool(first, "todo_write", {
+      context: "Persist across JSONL restore.",
+      autoContinue: true,
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
     expect(init.details).toMatchObject({
       storage: "session",
       storageBackend: "jsonl",
       todoStateSource: "memory",
+      queueContext: "Persist across JSONL restore.",
+      autoContinue: true,
     });
 
-    sharedState.todos = [];
+    todoStateCache.phases = [];
+    todoStateCache.context = null;
+    todoStateCache.autoContinue = false;
     const second = createHarness(root, { sessionId: "todo-jsonl-session" });
     todoContext(second.pi);
     const restored = await runTool(second, "todo_write", { ops: [{ op: "done", task: "Inspect contract" }] });
@@ -185,6 +359,8 @@ describe("todo-context OMP-compatible todo_write", () => {
       storage: "session",
       storageBackend: "jsonl",
       todoStateSource: "jsonl",
+      queueContext: "Persist across JSONL restore.",
+      autoContinue: true,
     });
     expect(restored.details?.phases).toEqual([
       {
@@ -209,8 +385,10 @@ describe("todo-context OMP-compatible todo_write", () => {
     });
 
     expect(result.isError).toBe(true);
-    sharedState.todos = [];
-    const restored = await runTool(h, "todo_write", { ops: [{ op: "append", phase: "Execution", items: ["Patch wrapper"] }] });
+    todoStateCache.phases = [];
+    const restored = await runTool(h, "todo_write", {
+      ops: [{ op: "append", phase: "Execution", items: ["Patch wrapper"] }],
+    });
     expect(restored.details?.phases).toEqual([
       {
         name: "Execution",
@@ -238,6 +416,33 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(h.widgets.get("todo")).toContain("[VIEW] Session todos");
     expect(h.widgets.get("todo")).toContain("- [x] Inspect contract");
     expect(h.entries[0]?.type).toBe("todo_write");
+  });
+
+  it("appends a delimiter-separated batch atomically", async () => {
+    const h = createHarness();
+    todoContext(h.pi);
+
+    await runCommand(h, "todo", "append Checks add 2 + 2 ;; add 3 + 4 ;; add 5 + 6");
+
+    expect(h.widgets.get("todo")).toContain("Appended 3 tasks to Checks.");
+    expect(h.entries[0]?.data).toMatchObject({
+      phases: [
+        {
+          name: "Checks",
+          tasks: [
+            { content: "Add 2 + 2", status: "in_progress" },
+            { content: "Add 3 + 4", status: "pending" },
+            { content: "Add 5 + 6", status: "pending" },
+          ],
+        },
+      ],
+    });
+    const entriesBefore = h.entries.length;
+
+    await runCommand(h, "todo", "append Checks add 7 + 8 ;; ;; add 9 + 10");
+
+    expect(h.widgets.get("todo")).toContain("state was not changed");
+    expect(h.entries).toHaveLength(entriesBefore);
   });
 
   it("shows the todo state backend in /todo output", async () => {
@@ -317,9 +522,7 @@ describe("todo-context OMP-compatible todo_write", () => {
       phases: [
         {
           name: "Project tasks",
-          tasks: [
-            { content: "T-136: Explicit task todo bridge command surface", status: "in_progress" },
-          ],
+          tasks: [{ content: "T-136: Explicit task todo bridge command surface", status: "in_progress" }],
         },
       ],
     });
@@ -342,15 +545,11 @@ describe("todo-context OMP-compatible todo_write", () => {
     const expectedArtifact = exportTodosToProjectTask([
       {
         name: "Project tasks",
-        tasks: [
-          { content: "T-136: Explicit task todo bridge command surface", status: "in_progress" },
-        ],
+        tasks: [{ content: "T-136: Explicit task todo bridge command surface", status: "in_progress" }],
       },
       {
         name: "Verification",
-        tasks: [
-          { content: "Capture current session markdown", status: "pending" },
-        ],
+        tasks: [{ content: "Capture current session markdown", status: "pending" }],
       },
     ]);
 
@@ -390,7 +589,8 @@ describe("todo-context OMP-compatible todo_write", () => {
   it("edits todos as Markdown through the /todo command", async () => {
     const h = createHarness();
     todoContext(h.pi);
-    h.ctx.ui.editor = (async () => "# Review\n- [ ] Inspect OMP todo command\n  > Keep source evidence\n") as unknown as typeof h.ctx.ui.editor;
+    h.ctx.ui.editor = (async () =>
+      "# Review\n- [ ] Inspect OMP todo command\n  > Keep source evidence\n") as unknown as typeof h.ctx.ui.editor;
 
     await runCommand(h, "todo", "edit");
 
@@ -555,7 +755,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     await runTool(h, "todo_write", {
       ops: [{ op: "note", task: "Inspect contract", text: "Keep source evidence.\nPreserve local limits." }],
     });
-    sharedState.todos = [];
+    todoStateCache.phases = [];
 
     await runCommand(h, "todo", "export");
 
@@ -577,7 +777,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(h.widgets.get("todo")).toContain("[CHANGE] Session todos");
     expect(h.widgets.get("todo")).toContain("Cleared all todos.");
     expect(h.entries[0]?.data).toMatchObject({ phases: [] });
-    sharedState.todos = [{ name: "Stale", tasks: [{ content: "Should not reappear", status: "pending" }] }];
+    todoStateCache.phases = [{ name: "Stale", tasks: [{ content: "Should not reappear", status: "pending" }] }];
     await runCommand(h, "todo", "show");
     expect(h.widgets.get("todo")).toContain("No todos. Use /todo append <task> to start one.");
   });
@@ -632,7 +832,12 @@ describe("todo-context OMP-compatible todo_write", () => {
     h.ctx.hasUI = true;
     todoContext(h.pi);
     await runTool(h, "todo_write", {
-      ops: [{ op: "init", list: [{ phase: "Execution", items: Array.from({ length: 12 }, (_, index) => `Task ${index + 1}`) }] }],
+      ops: [
+        {
+          op: "init",
+          list: [{ phase: "Execution", items: Array.from({ length: 12 }, (_, index) => `Task ${index + 1}`) }],
+        },
+      ],
     });
 
     await runCommand(h, "todo", "show");

@@ -6,10 +6,14 @@ import {
   assembleParentContext,
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
-} from "../../../extensions/_shared/agent-executor-host.js";
-import { createAgentRunRequest, executeAgentRunBoundary, type AgentExecutor } from "../../../extensions/_shared/agent-runner.js";
-import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/pi-api.js";
-import type { AgentDefinition } from "../../../extensions/_shared/types.js";
+} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
+import {
+  createAgentRunRequest,
+  executeAgentRunBoundary,
+  type AgentExecutor,
+} from "../../../extensions/_shared/agent-runtime/agent-runner.js";
+import type { ExtensionAPI, ExtensionContext } from "../../../extensions/_shared/host/pi-api.js";
+import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
 
 const agent: AgentDefinition = {
   name: "reviewer",
@@ -28,20 +32,32 @@ function pi(): ExtensionAPI {
     on() {},
     appendEntry: vi.fn(async () => {}),
     async sendUserMessage() {},
+    getActiveTools() {
+      return [];
+    },
     setActiveTools() {},
-    getSessionId() { return "parent-session"; },
   };
 }
 
 function ctx(projectRoot: string, getBranch: ReturnType<typeof vi.fn>): ExtensionContext {
   return {
     cwd: projectRoot,
-    isIdle() { return true; },
+    isIdle() {
+      return true;
+    },
     ui: {
-      async select() { return { value: "", cancelled: true }; },
-      async input() { return { value: "", cancelled: true }; },
-      async editor() { return { value: "", cancelled: true }; },
-      async confirm() { return true; },
+      async select() {
+        return { value: "", cancelled: true };
+      },
+      async input() {
+        return { value: "", cancelled: true };
+      },
+      async editor() {
+        return { value: "", cancelled: true };
+      },
+      async confirm() {
+        return true;
+      },
       notify() {},
       setStatus() {},
       setWidget() {},
@@ -50,10 +66,16 @@ function ctx(projectRoot: string, getBranch: ReturnType<typeof vi.fn>): Extensio
     },
     session: { id: "parent-session", projectRoot, workingDirectory: projectRoot },
     sessionManager: {
-      getEntries() { return []; },
+      getEntries() {
+        return [];
+      },
       getBranch,
-      getSessionId() { return "parent-session"; },
-      getSessionFile() { return undefined; },
+      getSessionId() {
+        return "parent-session";
+      },
+      getSessionFile() {
+        return undefined;
+      },
     },
   };
 }

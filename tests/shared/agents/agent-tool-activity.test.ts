@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { AgentLivePanel, formatToolActivity, toolActivityGist } from "../../../extensions/_shared/agent-live-panel.js";
-import type { AgentLiveRow } from "../../../extensions/_shared/agent-sdk-host.js";
+import {
+  AgentLivePanel,
+  formatToolActivity,
+  toolActivityGist,
+} from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 
 // T-196 (agent-fleet-visibility slice — REQ-004 tool-activity action sub-line).
 // Every case here maps 1:1 to the REQ-004 acceptance column in
@@ -56,7 +60,7 @@ describe("tool-activity gist heuristic (REQ-004 W1)", () => {
     expect(toolActivityGist('{"path":"a/b.ts","command":"ls -la"}')).toBe("ls");
   });
 
-  it("never echoes raw JSON / arg-soup: unknown key or brace-string → \"\"", () => {
+  it('never echoes raw JSON / arg-soup: unknown key or brace-string → ""', () => {
     expect(toolActivityGist('{"file":"README.md"}')).toBe(""); // `file` is NOT a priority key
     expect(toolActivityGist("{not valid json at all")).toBe("");
     expect(toolActivityGist(undefined)).toBe("");
@@ -65,28 +69,59 @@ describe("tool-activity gist heuristic (REQ-004 W1)", () => {
 
 describe("tool-activity action content composer (REQ-004 W3)", () => {
   it("bash · npm test — verb + command-head gist (no arg-soup, no wrapper)", () => {
-    const activity = formatToolActivity(toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"npm test -- sums.spec"}' }), 0);
+    const activity = formatToolActivity(
+      toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"npm test -- sums.spec"}' }),
+      0,
+    );
     expect(activity).toBe("bash · npm test");
     expect(activity).not.toContain("{");
     expect(activity).not.toContain("/bin/zsh -lc");
   });
 
   it('bash · python3 — python3 -c "print(1)" collapses to the binary', () => {
-    expect(formatToolActivity(toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"python3 -c \\"print(1)\\""}' }), 0)).toBe("bash · python3");
+    expect(
+      formatToolActivity(
+        toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"python3 -c \\"print(1)\\""}' }),
+        0,
+      ),
+    ).toBe("bash · python3");
   });
 
   it("read · app.ts — path basename", () => {
-    expect(formatToolActivity(toolRow({ currentTools: ["read"], currentToolArgs: '{"path":"src/app.ts"}' }), 0)).toBe("read · app.ts");
+    expect(formatToolActivity(toolRow({ currentTools: ["read"], currentToolArgs: '{"path":"src/app.ts"}' }), 0)).toBe(
+      "read · app.ts",
+    );
   });
 
   it("fetch · <host> — url host", () => {
-    expect(formatToolActivity(toolRow({ currentTools: ["fetch"], currentToolArgs: '{"url":"https://api.example.com/v1/x"}' }), 0)).toBe("fetch · api.example.com");
+    expect(
+      formatToolActivity(
+        toolRow({ currentTools: ["fetch"], currentToolArgs: '{"url":"https://api.example.com/v1/x"}' }),
+        0,
+      ),
+    ).toBe("fetch · api.example.com");
   });
 
   it("adds the · <t-elapsed> timer only past 5s: 3s → none, 8s → · 8s", () => {
-    const row = toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"npm test -- sums.spec"}', currentToolStartMs: 1000 });
+    const row = toolRow({
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"npm test -- sums.spec"}',
+      currentToolStartMs: 1000,
+    });
     expect(formatToolActivity(row, 1000 + 3000)).toBe("bash · npm test"); // 3s ≤ 5s → no timer
     expect(formatToolActivity(row, 1000 + 8000)).toBe("bash · npm test · 8s"); // 8s > 5s → timer
+  });
+
+  it("calm rendering drops the timer even past the 5s threshold", () => {
+    const row = toolRow({
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"npm test -- sums.spec"}',
+      currentToolStartMs: 1000,
+    });
+    // The timer is the only sub-line part whose text changes every second with
+    // no state transition behind it — calm frames must hold still without it.
+    expect(formatToolActivity(row, 1000 + 8000, { showElapsed: false })).toBe("bash · npm test");
+    expect(formatToolActivity(row, 1000 + 8000, { showElapsed: true })).toBe("bash · npm test · 8s");
   });
 
   it("threshold is strict (> 5s): exactly 5s shows no timer, 5.001s does", () => {
@@ -100,7 +135,9 @@ describe("tool-activity action content composer (REQ-004 W3)", () => {
   });
 
   it("degrades to verb-only when the gist is not extractable (unknown key)", () => {
-    expect(formatToolActivity(toolRow({ currentTools: ["read"], currentToolArgs: '{"file":"README.md"}' }), 0)).toBe("read");
+    expect(formatToolActivity(toolRow({ currentTools: ["read"], currentToolArgs: '{"file":"README.md"}' }), 0)).toBe(
+      "read",
+    );
   });
 });
 
@@ -110,7 +147,12 @@ describe("tool-activity sub-line rendering (REQ-004 W3 wiring)", () => {
   it("renders `   └ <verb> · <gist>` beneath the row while a tool is active", () => {
     // No `currentToolStartMs` → no timer (the >5s timer is covered by the composer
     // tests with an explicit `now`); this keeps the render assertion deterministic.
-    const row = toolRow({ displayName: "Anscombe", title: "sum batch", currentTools: ["bash"], currentToolArgs: '{"command":"npm test -- sums.spec"}' });
+    const row = toolRow({
+      displayName: "Anscombe",
+      title: "sum batch",
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"npm test -- sums.spec"}',
+    });
     const lines = panel.renderRows([row], Number.POSITIVE_INFINITY);
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("Anscombe");
@@ -118,13 +160,19 @@ describe("tool-activity sub-line rendering (REQ-004 W3 wiring)", () => {
   });
 
   it("emits no sub-line for a working row with no active tool", () => {
-    const lines = panel.renderRows([toolRow({ displayName: "Bessel", title: "thinking", currentTools: [] })], Number.POSITIVE_INFINITY);
+    const lines = panel.renderRows(
+      [toolRow({ displayName: "Bessel", title: "thinking", currentTools: [] })],
+      Number.POSITIVE_INFINITY,
+    );
     expect(lines).toHaveLength(1);
     expect(lines[0]).not.toContain("└");
   });
 
   it("the sub-line never contains `{`, `/bin/zsh -lc`, or `[current task]`", () => {
-    const row = toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"/bin/zsh -lc \\"npm test -- sums.spec\\""}' });
+    const row = toolRow({
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"/bin/zsh -lc \\"npm test -- sums.spec\\""}',
+    });
     const text = panel.renderRows([row], Number.POSITIVE_INFINITY).join("\n");
     expect(text).not.toContain("{");
     expect(text).not.toContain("/bin/zsh -lc");
@@ -133,7 +181,10 @@ describe("tool-activity sub-line rendering (REQ-004 W3 wiring)", () => {
   });
 
   it("width-clamps the sub-line so it never overflows a narrow terminal", () => {
-    const row = toolRow({ currentTools: ["bash"], currentToolArgs: '{"command":"npm run some-really-long-script-name"}' });
+    const row = toolRow({
+      currentTools: ["bash"],
+      currentToolArgs: '{"command":"npm run some-really-long-script-name"}',
+    });
     for (const rendered of panel.renderRows([row], 18)) expect(rendered.length).toBeLessThanOrEqual(18);
   });
 });

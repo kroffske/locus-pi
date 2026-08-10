@@ -1,28 +1,62 @@
 import { describe, expect, it } from "vitest";
-import { AgentLiveTranscript, latestVisibleAssistantText } from "../../../extensions/_shared/agent-live-transcript.js";
+import {
+  AgentLiveTranscript,
+  latestVisibleAssistantText,
+} from "../../../extensions/_shared/agent-runtime/agent-live-transcript.js";
 
 describe("AgentLiveTranscript", () => {
   it("keeps interleaved tools in stable start order and updates structured lifecycle state", () => {
     const transcript = new AgentLiveTranscript("/repo");
     transcript.ingest({ type: "tool_execution_start", toolCallId: "call-a", toolName: "read", args: { path: "a.ts" } });
-    transcript.ingest({ type: "tool_execution_start", toolCallId: "call-b", toolName: "bash", args: { command: "npm test" } });
-    transcript.ingest({ type: "tool_execution_update", toolCallId: "call-a", partialResult: { content: [{ type: "text", text: "A partial" }] } });
-    let snapshot = transcript.ingest({ type: "tool_execution_update", toolCallId: "call-b", partialResult: "B partial" });
+    transcript.ingest({
+      type: "tool_execution_start",
+      toolCallId: "call-b",
+      toolName: "bash",
+      args: { command: "npm test" },
+    });
+    transcript.ingest({
+      type: "tool_execution_update",
+      toolCallId: "call-a",
+      partialResult: { content: [{ type: "text", text: "A partial" }] },
+    });
+    let snapshot = transcript.ingest({
+      type: "tool_execution_update",
+      toolCallId: "call-b",
+      partialResult: "B partial",
+    });
 
     expect(snapshot.blocks.map((block) => block.id)).toEqual(["tool:call-a", "tool:call-b"]);
     expect(snapshot.blocks[0]).toMatchObject({ kind: "tool", cwd: "/repo", executionStarted: true, isPartial: true });
-    expect(snapshot.blocks[1]).toMatchObject({ kind: "tool", result: { content: [{ type: "text", text: "B partial" }] } });
+    expect(snapshot.blocks[1]).toMatchObject({
+      kind: "tool",
+      result: { content: [{ type: "text", text: "B partial" }] },
+    });
 
-    snapshot = transcript.ingest({ type: "tool_execution_end", toolCallId: "call-a", toolName: "read", result: "A done", isError: false });
+    snapshot = transcript.ingest({
+      type: "tool_execution_end",
+      toolCallId: "call-a",
+      toolName: "read",
+      result: "A done",
+      isError: false,
+    });
     expect(snapshot.blocks[0]).toMatchObject({ id: "tool:call-a", isPartial: false, result: { isError: false } });
     expect(snapshot.blocks[1]).toMatchObject({ id: "tool:call-b", isPartial: true });
   });
 
   it("replaces a streaming assistant snapshot in place and derives latest visible text", () => {
     const transcript = new AgentLiveTranscript();
-    const partial = { role: "assistant", content: [{ type: "thinking", thinking: "Inspecting" }, { type: "text", text: "First draft" }] };
+    const partial = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Inspecting" },
+        { type: "text", text: "First draft" },
+      ],
+    };
     const streaming = transcript.ingest({ type: "message_update", message: partial });
-    const completed = transcript.ingest({ type: "message_end", message: { ...partial, content: [{ type: "text", text: "Final answer" }], stopReason: "stop" } });
+    const completed = transcript.ingest({
+      type: "message_end",
+      message: { ...partial, content: [{ type: "text", text: "Final answer" }], stopReason: "stop" },
+    });
 
     expect(streaming.blocks).toHaveLength(1);
     expect(streaming.blocks[0]).toMatchObject({ id: "assistant:1", kind: "assistant", complete: false });
@@ -42,7 +76,13 @@ describe("AgentLiveTranscript", () => {
         ],
         stopReason: "toolUse",
       },
-      { role: "toolResult", toolCallId: "call-read", toolName: "read", content: [{ type: "text", text: "file body" }], isError: false },
+      {
+        role: "toolResult",
+        toolCallId: "call-read",
+        toolName: "read",
+        content: [{ type: "text", text: "file body" }],
+        isError: false,
+      },
       { role: "assistant", content: [{ type: "text", text: "Done" }], stopReason: "stop" },
     ]);
 
@@ -56,11 +96,27 @@ describe("AgentLiveTranscript", () => {
     expect(snapshot.latestMessage).toBe("Done");
   });
 
+  it("keeps the viewer transcript limited to child assistant and tool output", () => {
+    const snapshot = new AgentLiveTranscript().replaceMessages([
+      { role: "system", content: "PARENT_SYSTEM_SENTINEL" },
+      { role: "user", content: [{ type: "text", text: "PARENT_CHAT_SENTINEL" }] },
+      { role: "assistant", content: [{ type: "text", text: "Child output" }], stopReason: "stop" },
+    ]);
+
+    expect(snapshot.blocks).toHaveLength(1);
+    expect(snapshot.latestMessage).toBe("Child output");
+    expect(JSON.stringify(snapshot)).not.toContain("PARENT_SYSTEM_SENTINEL");
+    expect(JSON.stringify(snapshot)).not.toContain("PARENT_CHAT_SENTINEL");
+  });
+
   it("ignores repeated tool observations without a stable toolCallId", () => {
     const transcript = new AgentLiveTranscript("/repo");
     const incompleteAssistant = {
       role: "assistant",
-      content: [{ type: "text", text: "Working" }, { type: "toolCall", name: "read", arguments: { path: "README.md" } }],
+      content: [
+        { type: "text", text: "Working" },
+        { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+      ],
     };
 
     transcript.ingest({ type: "message_start", message: incompleteAssistant });
@@ -75,7 +131,12 @@ describe("AgentLiveTranscript", () => {
 
   it("redacts sensitive tool values and does not expose image payloads", () => {
     const transcript = new AgentLiveTranscript();
-    transcript.ingest({ type: "tool_execution_start", toolCallId: "secret", toolName: "http", args: { token: "abc", nested: { apiKey: "xyz", ok: 1 } } });
+    transcript.ingest({
+      type: "tool_execution_start",
+      toolCallId: "secret",
+      toolName: "http",
+      args: { token: "abc", nested: { apiKey: "xyz", ok: 1 } },
+    });
     const snapshot = transcript.ingest({
       type: "tool_execution_end",
       toolCallId: "secret",
@@ -102,6 +163,10 @@ describe("AgentLiveTranscript", () => {
     expect(snapshot.latestMessage).toBe("line 124");
   });
 
+  // Builds ~600 MB of string data (40 messages x 150 items x 100 KB), which
+  // takes ~4s of the 5s default budget even on a fast machine — so it times out
+  // intermittently under parallel load and on slower CI runners. The bound is
+  // what this test asserts, not its speed; give it explicit headroom.
   it("bounds per-message content items and aggregate transcript bytes/nodes", () => {
     const huge = "x".repeat(100_000);
     const messages = Array.from({ length: 40 }, (_unused, index) => ({
@@ -119,5 +184,5 @@ describe("AgentLiveTranscript", () => {
       expect(last.message.content).toHaveLength(100);
       expect(last.message.content[0]?.text?.length).toBeLessThanOrEqual(4_000);
     }
-  });
+  }, 30_000);
 });

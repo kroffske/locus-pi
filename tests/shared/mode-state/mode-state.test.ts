@@ -16,7 +16,6 @@ import {
   modeStatePath,
   modeStateForCycle,
   modeStatusLabel,
-  nextCycleMode,
   normalizeRemote,
   planArtifactPath,
   planModeInjectionText,
@@ -27,8 +26,8 @@ import {
   styleModeStatusLabel,
   userPlansDir,
   writeModeState,
-} from "../../../extensions/_shared/mode-state.js";
-import type { ModeState } from "../../../extensions/_shared/mode-state.js";
+} from "../../../extensions/plan/mode-state.js";
+import type { ModeState } from "../../../extensions/plan/mode-state.js";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -396,15 +395,6 @@ describe("mode cycle", () => {
     expect(currentCycleMode(sampleState({ mode: "plan" }))).toBe("plan");
   });
 
-  it("nextCycleMode advances and wraps around", () => {
-    expect(nextCycleMode("default")).toBe("plan");
-    expect(nextCycleMode("plan")).toBe("default");
-  });
-
-  it("nextCycleMode falls back to the first mode for an unknown position", () => {
-    expect(nextCycleMode("workflow" as never)).toBe("default");
-  });
-
   it("modeStateForCycle('plan') arms plan mode with an empty slug and active status", () => {
     const state = modeStateForCycle("plan", new Date(Date.UTC(2026, 5, 30)));
     expect(state.mode).toBe("plan");
@@ -459,8 +449,18 @@ describe("makeModeAwareEditorClass", () => {
   // must defeat by redefining borderColor as an own accessor after super()).
   class FakeEditor {
     borderColor: (s: string) => string;
+    historyIndex = -1;
+    state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+    scrollOffset = 0;
     constructor() {
       this.borderColor = baseColor;
+    }
+    navigateHistory(_direction: number) {
+      this.historyIndex = 0;
+      this.state = { lines: ["first", "last"], cursorLine: 0, cursorCol: 0 };
+    }
+    setCursorCol(column: number) {
+      this.state.cursorCol = column;
     }
   }
 
@@ -494,6 +494,15 @@ describe("makeModeAwareEditorClass", () => {
     expect(editor.borderColor("─")).toBe("PLAN(─)"); // plan dominates while active
     flag.active = false;
     expect(editor.borderColor("─")).toBe("THINK(─)"); // restored captured base
+  });
+
+  it("recalls command history with the cursor at the end instead of the first character", () => {
+    const ModeAware = makeModeAwareEditorClass(FakeEditor, planColor, () => false);
+    const editor = new ModeAware() as FakeEditor;
+
+    editor.navigateHistory(-1);
+
+    expect(editor.state).toMatchObject({ cursorLine: 1, cursorCol: 4 });
   });
 });
 

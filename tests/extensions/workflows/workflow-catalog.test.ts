@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { renderOperatorBlock } from "../../../extensions/_shared/operator-ui.js";
+import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
+import { renderOperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
 import {
   buildWorkflowActionPrompt,
   buildWorkflowCatalogBlock,
@@ -13,17 +14,31 @@ import {
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
+import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
-  CURATED_PACKAGE_WORKFLOW_NAMES,
-  packagedExamplesDir,
-} from "../../../extensions/_shared/workflow-runner.js";
+  workflowJournalFile,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 
 describe("workflow operator catalog", () => {
   it("keeps every curated Package workflow description concise and purpose-first", () => {
-    const descriptions = CURATED_PACKAGE_WORKFLOW_NAMES
-      .map((name) => ({ name, description: readWorkflowMetaDescription(path.join(packagedExamplesDir(), `${name}.workflow.mjs`)) }));
+    const descriptions = packagedWorkflowNames().map((name) => ({
+      name,
+      description: readWorkflowMetaDescription(packagedWorkflowPath(name)),
+    }));
 
-    expect(descriptions.map(({ name }) => name)).toEqual(["live-smoke", "llm-smoke", "requirements-grill"]);
+    // Scan order is entry filename, so "plan-implement.workflow.mjs" precedes
+    // "plan.workflow.mjs" exactly as review-fix precedes review.
+    expect(descriptions.map(({ name }) => name)).toEqual([
+      "live-smoke",
+      "plan-implement",
+      "plan",
+      "requirements-grill",
+      "review-fix",
+      "review",
+    ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
       expect(description.length, name).toBeLessThanOrEqual(96);
@@ -35,11 +50,20 @@ describe("workflow operator catalog", () => {
   it("exposes exactly the curated Package registry through the catalog model", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-curated-"));
     try {
-      const packageNames = buildWorkflowCatalogModel(root, root).current
-        .filter((row) => row.source === "package")
+      const packageNames = buildWorkflowCatalogModel(root, root)
+        .current.filter((row) => row.source === "package")
         .map((row) => row.name);
 
-      expect(packageNames).toEqual(["live-smoke", "llm-smoke", "requirements-grill"]);
+      // Package rows are ordered by entry filename, so "plan-implement.workflow.mjs"
+      // sorts before "plan.workflow.mjs" exactly as review-fix sorts before review.
+      expect(packageNames).toEqual([
+        "live-smoke",
+        "plan-implement",
+        "plan",
+        "requirements-grill",
+        "review-fix",
+        "review",
+      ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -96,12 +120,18 @@ describe("workflow operator catalog", () => {
 
   it("projects persisted path targets without absolute-path disclosure", () => {
     const projectRoot = "/workspace/project";
-    expect(safeRecentWorkflowLabel({ kind: "scriptPath", ref: "/workspace/project/.pi/workflows/safe.workflow.mjs" }, projectRoot))
-      .toBe(".pi/workflows/safe.workflow.mjs");
-    expect(safeRecentWorkflowLabel({ kind: "scriptPath", ref: "/var/folders/private/secret.workflow.mjs" }, projectRoot))
-      .toBe("secret.workflow.mjs");
-    expect(safeRecentWorkflowLabel({ kind: "scriptPath", ref: "C:\\Users\\name\\secret.workflow.mjs" }, projectRoot))
-      .toBe("secret.workflow.mjs");
+    expect(
+      safeRecentWorkflowLabel(
+        { kind: "scriptPath", ref: "/workspace/project/.pi/workflows/safe.workflow.mjs" },
+        projectRoot,
+      ),
+    ).toBe(".pi/workflows/safe.workflow.mjs");
+    expect(
+      safeRecentWorkflowLabel({ kind: "scriptPath", ref: "/var/folders/private/secret.workflow.mjs" }, projectRoot),
+    ).toBe("secret.workflow.mjs");
+    expect(
+      safeRecentWorkflowLabel({ kind: "scriptPath", ref: "C:\\Users\\name\\secret.workflow.mjs" }, projectRoot),
+    ).toBe("secret.workflow.mjs");
   });
 
   it("filters by description and returns a typed no-match state", () => {
@@ -125,8 +155,8 @@ describe("workflow operator catalog", () => {
       const filtered = buildWorkflowCatalogBlock(root, root, "invoices");
       const filteredText = filtered.body?.join("\n") ?? "";
       expect(filtered.primary).toBe('Matches for "invoices".');
-      expect(filteredText).toContain("[P] alpha · Handles invoices");
-      expect(filteredText).not.toContain("[P] beta");
+      expect(filteredText).toContain("alpha · [P] · Handles invoices");
+      expect(filteredText).not.toContain("beta · [P]");
       expect(filteredText).toContain("[R] Run history:\n  (no recent matches)");
       expect(filteredText).toContain("[U] User:\n  (no matches)");
 
@@ -176,11 +206,22 @@ describe("workflow operator catalog", () => {
         subject: "Workflow catalog",
         metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history"],
       });
-      expect(recent).toContain("[R] [U] same · historical run snapshot");
-      expect(recent).toContain("[R] [P] secret.workflow.mjs · historical run snapshot");
-      expect(recent).not.toContain("[R] [P] same");
+      expect(recent).toContain("same · run 20260101-000002-personal · [U] · historical run snapshot");
+      expect(recent).toContain("secret.workflow.mjs · run 20260101-000001-path · [P] · historical run snapshot");
+      expect(recent).not.toContain("same · run 20260101-000002-personal · [P]");
       expect(text).not.toContain("/var/folders/private");
-      expect(text).toContain("[P] same · current project");
+      expect(text).toContain("same · [P] · current project");
+      const catalogRows = block.body?.filter((line) => line.startsWith("  ") && !line.startsWith("  (")) ?? [];
+      expect(catalogRows.every((line) => !/\b(?:Project|User|Package)\b/u.test(line))).toBe(true);
+
+      const compactRows = buildWorkflowCatalogBlock(root, root, undefined, { compact: true }).body ?? [];
+      expect(compactRows).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("same · run 20260101-000002-personal · [U] · historical run snapshot"),
+          expect.stringContaining("same · [P] · current project"),
+        ]),
+      );
+      expect(compactRows.every((line) => !/\b(?:Project|User|Package)\b/u.test(line))).toBe(true);
       expect(text.indexOf("[R] Run history:")).toBeLessThan(text.indexOf("[P] Project:"));
       expect(text.indexOf("[P] Project:")).toBeLessThan(text.indexOf("[U] User:"));
       expect(text.indexOf("[U] User:")).toBeLessThan(text.indexOf("[PKG] Package:"));
@@ -200,10 +241,7 @@ describe("workflow operator catalog", () => {
       writeRun(root, "20260101-000001-alpha", { kind: "name", ref: "alpha", source: "project" });
 
       const model = buildWorkflowCatalogModel(root, root);
-      expect(model.history.map((row) => row.runId)).toEqual([
-        "20260101-000002-alpha",
-        "20260101-000001-alpha",
-      ]);
+      expect(model.history.map((row) => row.runId)).toEqual(["20260101-000002-alpha", "20260101-000001-alpha"]);
       expect(model.history.every((row) => row.snapshot.kind === "ready")).toBe(true);
       expect(model.history.every((row) => row.originPath.includes(row.runId))).toBe(true);
     } finally {
@@ -257,39 +295,72 @@ describe("workflow operator catalog", () => {
 
       const currentState = { kind: "ready" as const, row: current, path: current.target.path, source: "source" };
       const historyState = { kind: "ready" as const, row: history, path: history.originPath, source: "source" };
-      expect(buildWorkflowActionPrompt({ action: "start", row: current, sourceState: currentState })).toBe([
-        `Request: Start the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-        "Skill: $pi-workflow-authoring",
-        "",
-        "Additional instructions:",
-        "",
-      ].join("\n"));
-      expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe([
-        `Request: Edit the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-        "Skill: $pi-workflow-authoring",
-        "",
-        "Additional instructions:",
-        "",
-      ].join("\n"));
-      expect(buildWorkflowActionPrompt({ action: "review", row: current, sourceState: currentState })).toBe([
-        `Request: Review the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-        "Skill: $pi-workflow-authoring",
-        "",
-        "Additional instructions:",
-        "",
-      ].join("\n"));
-      expect(buildWorkflowActionPrompt({ action: "review", row: history, sourceState: historyState })).toBe([
-        `Request: Review the immutable workflow snapshot for run ${JSON.stringify(history.runId)}, target "name:alpha", at ${JSON.stringify(history.originPath)}, SHA-256 ${JSON.stringify(history.snapshot.sha256)}.`,
-        "Skill: $pi-workflow-authoring",
-        "",
-        "Additional instructions:",
-        "",
-      ].join("\n"));
-      expect(() => buildWorkflowActionPrompt({
-        action: "start",
-        row: history,
-        sourceState: historyState,
-      } as unknown as WorkflowBrowserIntent)).toThrow("Historical workflow actions are review-only");
+      expect(buildWorkflowActionPrompt({ action: "start", row: current, sourceState: currentState })).toBe(
+        "/workflows run alpha",
+      );
+      expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe(
+        [
+          `Request: Edit the exact current workflow at ${JSON.stringify(current.target.path)}.`,
+          "Agent: workflow-author",
+          "",
+          "Additional instructions:",
+          "",
+        ].join("\n"),
+      );
+      expect(buildWorkflowActionPrompt({ action: "review", row: current, sourceState: currentState })).toBe(
+        [
+          `Request: Review the exact current workflow at ${JSON.stringify(current.target.path)}.`,
+          "Agent: workflow-author",
+          "",
+          "Additional instructions:",
+          "",
+        ].join("\n"),
+      );
+      expect(buildWorkflowActionPrompt({ action: "review", row: history, sourceState: historyState })).toBe(
+        [
+          `Request: Review the immutable workflow snapshot for run ${JSON.stringify(history.runId)}, target "name:alpha", at ${JSON.stringify(history.originPath)}, SHA-256 ${JSON.stringify(history.snapshot.sha256)}.`,
+          "Agent: workflow-author",
+          "",
+          "Additional instructions:",
+          "",
+        ].join("\n"),
+      );
+      expect(() =>
+        buildWorkflowActionPrompt({
+          action: "start",
+          row: history,
+          sourceState: historyState,
+        } as unknown as WorkflowBrowserIntent),
+      ).toThrow("Historical workflow actions are review-only");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hands off to an authoring agent that ships with the installed package", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-handoff-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = path.join(root, "home");
+      const workflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(workflowDir, { recursive: true });
+      writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), 'export const meta = { description: "Alpha" };\n');
+      const model = buildWorkflowCatalogModel(root, root);
+      const current = model.current.find((row) => row.name === "alpha")!;
+
+      const prompt = buildWorkflowActionPrompt({
+        action: "edit",
+        row: current,
+        sourceState: { kind: "ready", row: current, path: current.target.path, source: "source" },
+      });
+      const handoff = prompt.split("\n").find((line) => line.startsWith("Agent: "));
+      expect(handoff).toBeDefined();
+
+      // The handoff must name a real bundled catalog agent, not a phantom surface.
+      const bundled = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
+      expect(bundled.definitions.map((definition) => definition.name)).toContain(handoff!.slice("Agent: ".length));
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -304,22 +375,40 @@ describe("workflow operator catalog", () => {
       process.env.HOME = path.join(root, "home");
       const workflowDir = path.join(root, ".pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
-      writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), [
-        "globalThis.__workflowInfoImported = true;",
-        'export const meta = { description: "Explains alpha" };',
-      ].join("\n"));
+      writeFileSync(
+        path.join(workflowDir, "alpha.workflow.mjs"),
+        ["globalThis.__workflowInfoImported = true;", 'export const meta = { description: "Explains alpha" };'].join(
+          "\n",
+        ),
+      );
 
       const named = buildWorkflowInfoBlock(root, root, "alpha");
       const namedText = named.body?.join("\n") ?? "";
       expect(namedText).toContain(`resolved path: ${path.join(workflowDir, "alpha.workflow.mjs")}`);
-      expect(namedText).toContain("static top-level export const meta.description only");
-      expect(namedText).toContain("DSL: agent(), llm(), parallel(), pipeline(), phase(), log(), workflow()");
+      expect(namedText).toContain("static top-level export const meta.description, meta.profile, and meta.phases only");
+      expect(namedText).toContain("profile: unclassified");
+      // A workflow that declares no phases produces no phase lines at all.
+      expect(namedText).not.toContain("phases:");
+      expect(namedText).toContain("DSL: agent(), parallel(), pipeline(), phase(), log(), workflow()");
       expect(namedText).toContain('omitted agent uses role "default"');
-      expect(namedText).toContain("opts.model selects the child-session model");
-      expect(namedText).toContain("otherwise the active Pi session model is passed to the child executor");
-      expect(namedText).toContain("llm() is a direct one-shot model call with no child session or tools");
-      expect(namedText).toContain("curated Package names live-smoke, llm-smoke, requirements-grill");
-      expect(namedText).toContain("Package files are not registered by existence");
+      // The reader-facing routing claim, kept honest by assertion: `/workflows info`
+      // must state the executor precedence and the two asymmetric failure modes, not
+      // the pre-T-129 "metadata beside the session model" story.
+      // The reader-facing routing claim, kept honest by assertion: `/workflows info`
+      // must state the executor precedence and the two asymmetric failure modes, not
+      // the pre-T-129 "metadata beside the session model" story. It also has to stay
+      // short enough to survive the bounded 48-column view asserted below.
+      expect(namedText).toContain(
+        "the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, " +
+          "else the session model",
+      );
+      expect(namedText).toContain("an unresolvable provider/id fails the call");
+      expect(namedText).toContain("an unassigned role degrades and is recorded");
+      expect(namedText).toContain("agent_end reports the read-back executedModel");
+      expect(namedText).toContain(
+        "the packaged examples directory, currently live-smoke, plan-implement, plan, requirements-grill, review-fix, review",
+      );
+      expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 
       expect(buildWorkflowInfoBlock(root, root, "unknown")).toMatchObject({
@@ -350,30 +439,33 @@ function writeRun(
   target: { kind: "name" | "scriptPath"; ref: string; source: "project" | "personal" | "package" },
   executedSource = `export default () => ${JSON.stringify(runId)};\n`,
 ): void {
-  const runDir = path.join(root, ".locus", "runtime", "workflows", runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(path.join(runDir, "journal.ndjson"), "", "utf8");
+  const runDir = ensureWorkflowRunDir(root, runId);
+  writeFileSync(workflowJournalFile(runDir), "", "utf8");
   const sha256 = createHash("sha256").update(executedSource).digest("hex");
-  const snapshotPath = path.join(runDir, `script-${sha256}.workflow.mjs`);
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${sha256}.workflow.mjs`);
   writeFileSync(snapshotPath, executedSource, "utf8");
-  writeFileSync(path.join(runDir, "result.json"), JSON.stringify({
-    runId,
-    ok: true,
-    result: null,
-    target,
-    scriptIdentity: {
-      schemaVersion: 2,
-      identityPolicy: "static-node-only-v1",
-      sourcePath: path.join(root, ".pi", "workflows", `${target.ref}.workflow.mjs`),
-      snapshotPath,
-      scriptSha256: sha256,
-      identityCoverage: "self-contained-static",
-      executionSource: "snapshot",
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      builtinImports: [],
-      unboundDependencies: [],
-    },
-  }), "utf8");
+  writeFileSync(
+    workflowResultFile(runDir),
+    JSON.stringify({
+      runId,
+      ok: true,
+      result: null,
+      target,
+      scriptIdentity: {
+        schemaVersion: 2,
+        identityPolicy: "static-node-only-v1",
+        sourcePath: path.join(root, ".pi", "workflows", `${target.ref}.workflow.mjs`),
+        snapshotPath,
+        scriptSha256: sha256,
+        identityCoverage: "self-contained-static",
+        executionSource: "snapshot",
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        builtinImports: [],
+        unboundDependencies: [],
+      },
+    }),
+    "utf8",
+  );
 }

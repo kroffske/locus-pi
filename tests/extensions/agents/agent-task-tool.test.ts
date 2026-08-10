@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENT_RESULT_MARKER } from "../../../extensions/_shared/agent-executor-host.js";
-import { agentLiveStore, type SdkAgentSessionEventLike } from "../../../extensions/_shared/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type SdkAgentSessionEventLike,
+} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const tempRoots: string[] = [];
@@ -12,6 +14,7 @@ afterEach(() => {
   agentLiveStore.reset();
   vi.resetModules();
   vi.doUnmock("@earendil-works/pi-coding-agent");
+  vi.doUnmock("../../../extensions/_shared/agent-runtime/agent-runner.js");
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -21,144 +24,168 @@ function tempRoot(): string {
   return root;
 }
 
-describe("agent task tool execution UX", () => {
-  it("renders the current runtime model and /effort in the live task row", async () => {
-    vi.doMock("@earendil-works/pi-coding-agent", () => ({
-      DefaultResourceLoader: class {
-        constructor(_options: Record<string, unknown>) {}
-        reload() {}
-      },
-      getAgentDir() {
-        return tempRoot();
-      },
-      async createAgentSession() {
-        let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
-        return {
-          session: {
-            sessionId: "sdk-child-model",
-            subscribe(fn: (event: SdkAgentSessionEventLike) => void) {
-              listener = fn;
-              return () => {
-                listener = undefined;
-              };
-            },
-            async prompt() {
-              listener?.({ type: "turn_start" });
-              listener?.({ type: "agent_end", willRetry: false });
-            },
-            getSessionStats() {
-              return { sessionId: "sdk-child-model", toolCalls: 0, toolResults: 0 };
-            },
-            getLastAssistantText() {
-              return `${AGENT_RESULT_MARKER} {"version":"locus.agent.result.v1","status":"completed","summary":"done"}`;
-            },
-            exportToJsonl(outputPath: string) {
-              return outputPath;
-            },
-            dispose() {},
-          },
-        };
-      },
-    }));
+/**
+ * A project root that owns the `task` agent outright.
+ *
+ * Agent discovery is project → user → bundled (`agents.ts` `agentDiscoveryDirs`), so
+ * a root with no `.agents/agents/` silently borrows whatever catalog the developer
+ * happens to have installed under `$HOME`. That was invisible while agent frontmatter
+ * `model:` was parsed and never used; now that it selects the child's model, a stale
+ * home catalog decides what these assertions see. So the project declares its own.
+ */
+function tempRootWithTaskAgent(): string {
+  const root = tempRoot();
+  const dir = path.join(root, ".agents", "agents");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, "task.md"),
+    "---\nname: task\ndescription: General task agent\nmodel: task\n---\nDo the task.\n",
+    "utf8",
+  );
+  return root;
+}
 
+function mockSdkResult(text: string): void {
+  vi.doMock("@earendil-works/pi-coding-agent", () => ({
+    DefaultResourceLoader: class {
+      constructor(_options: Record<string, unknown>) {}
+      reload() {}
+    },
+    getAgentDir() {
+      return tempRoot();
+    },
+    async createAgentSession() {
+      let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+      return {
+        session: {
+          sessionId: "sdk-child",
+          subscribe(fn: (event: SdkAgentSessionEventLike) => void) {
+            listener = fn;
+            return () => {
+              listener = undefined;
+            };
+          },
+          async prompt() {
+            listener?.({ type: "turn_start" });
+            listener?.({ type: "agent_end", willRetry: false });
+          },
+          getSessionStats() {
+            return { sessionId: "sdk-child", toolCalls: 0, toolResults: 0 };
+          },
+          getLastAssistantText() {
+            return text;
+          },
+          exportToJsonl(outputPath: string) {
+            return outputPath;
+          },
+          dispose() {},
+        },
+      };
+    },
+  }));
+}
+
+describe("agent task tool execution", () => {
+  it("streams the generated live agent name as soon as the child starts", async () => {
+    mockSdkResult("done");
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
+    agents(h.pi);
+    const update = vi.fn();
+
+    await h.tools
+      .get("spawn_agent")!
+      .execute(
+        "test-spawn_agent",
+        { task: "Return done", title: "Compute expression" },
+        new AbortController().signal,
+        update,
+        h.ctx,
+      );
+
+    const row = [...agentLiveStore.rows.values()].at(-1);
+    expect(row?.displayName).toBeTypeOf("string");
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]?.[0]).toEqual({
+      content: [
+        {
+          type: "text",
+          text: expect.stringContaining(`agent ${row!.displayName} started — Compute expression`),
+        },
+      ],
+      // Partial identity for the transcript card: it resolves the live row by id.
+      details: {
+        rowId: row!.id,
+        agent: "task",
+        title: "Compute expression",
+        status: "running",
+      },
+    });
+  });
+
+  it("returns one child's exact text and keeps metadata in details", async () => {
+    mockSdkResult("  done\nwith details\n");
+    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "openai", id: "gpt-5.5", name: "GPT 5.5" };
     h.pi.setThinkingLevel?.("high");
     agents(h.pi);
 
-    await runTool(h, "task", { tasks: [{ id: "ShowModel", description: "Show model", assignment: "Return done" }] });
+    const result = await runTool(h, "task", {
+      task: "Return done",
+      title: "Show model",
+    });
 
-    const row = agentLiveStore.rows.get("task:task:ShowModel");
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "  done\nwith details\n" }]);
+    expect(result.details).toMatchObject({
+      requestedSurface: "task",
+      requestedAgent: "task",
+      agent: "task",
+      taskCount: 1,
+      status: "completed",
+      childSessionId: "sdk-child",
+    });
+    const row = [...agentLiveStore.rows.values()].at(-1);
     expect(row).toMatchObject({
       model: "openai/gpt-5.5",
       thinking: "high",
       status: "done",
-      finalAnswer: "done",
+      finalAnswer: "  done\nwith details\n",
     });
   });
 
-  it("returns isError when the child session returns a failed structured result", async () => {
-    vi.doMock("@earendil-works/pi-coding-agent", () => ({
-      DefaultResourceLoader: class {
-        constructor(_options: Record<string, unknown>) {}
-        reload() {}
-      },
-      getAgentDir() {
-        return tempRoot();
-      },
-      async createAgentSession() {
-        let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
-        return {
-          session: {
-            sessionId: "sdk-child-failed",
-            subscribe(fn: (event: SdkAgentSessionEventLike) => void) {
-              listener = fn;
-              return () => {
-                listener = undefined;
-              };
-            },
-            async prompt() {
-              listener?.({ type: "agent_end", willRetry: false });
-            },
-            getSessionStats() {
-              return { sessionId: "sdk-child-failed", toolCalls: 0, toolResults: 0 };
-            },
-            getLastAssistantText() {
-              return [
-                AGENT_RESULT_MARKER,
-                JSON.stringify({
-                  version: "locus.agent.result.v1",
-                  status: "failed",
-                  summary: "Child failed.",
-                  diagnostics: { reason: "tool denied" },
-                }),
-              ].join("\n");
-            },
-            exportToJsonl(outputPath: string) {
-              return outputPath;
-            },
-            dispose() {},
-          },
-        };
-      },
-    }));
-
+  it("treats JSON-looking child output as ordinary text", async () => {
+    const text = '{"status":"failed","summary":"model words only"}';
+    mockSdkResult(text);
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    const result = await runTool(h, "task", { tasks: [{ id: "Fail", description: "Fail", assignment: "Return failed" }] });
+    const result = await runTool(h, "spawn_agent", { task: "Return JSON-looking prose" });
 
-    const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-    expect(result.isError).toBe(true);
-    expect(text).toContain("task task: 0/1 completed");
-    expect(text).toContain("Fail: failed");
-    expect(text).toContain("Child failed.");
-    expect(result.details).toMatchObject({
-      owner: "agents-catalog",
-      requestedSurface: "task",
-      requestedAgent: "task",
-      agent: "task",
-      status: "failed",
-    });
-    expect(result.details?.results).toEqual([
-      expect.objectContaining({
-        id: "Fail",
-        status: "failed",
-        reason: "Child failed.",
-        diagnostics: expect.arrayContaining(["reason: tool denied"]),
-      }),
-    ]);
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: "text", text }]);
+    expect(result.details).toMatchObject({ status: "completed", taskCount: 1 });
   });
 
-  it("stops the progress spinner and surfaces a visible error when the run boundary throws", async () => {
-    // A crash that escapes the per-task loop (e.g. host machinery throwing outside
-    // the SDK executor's own try/catch) must finish the panel with ok:false so the
-    // animation stops AND an "error:" line is shown — not silently spin forever.
-    vi.doMock("../../../extensions/_shared/agent-runner.js", async () => {
-      const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runner.js")>(
-        "../../../extensions/_shared/agent-runner.js",
+  it("returns isError when the child has no non-empty final text", async () => {
+    mockSdkResult(" \n ");
+    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
+    agents(h.pi);
+
+    const result = await runTool(h, "task", { task: "Return nothing" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "Agent result text is empty." }]);
+    expect(result.details).toMatchObject({ status: "failed", taskCount: 1 });
+  });
+
+  it("stops progress and surfaces an error when the run boundary throws", async () => {
+    vi.doMock("../../../extensions/_shared/agent-runtime/agent-runner.js", async () => {
+      const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-runner.js")>(
+        "../../../extensions/_shared/agent-runtime/agent-runner.js",
       );
       return {
         ...actual,
@@ -167,25 +194,20 @@ describe("agent task tool execution UX", () => {
         },
       };
     });
-
     const { default: agents } = await import("../../../extensions/agents/index.js");
-    const h = createHarness(tempRoot(), { sessionId: "parent-session" });
+    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.hasUI = true;
     agents(h.pi);
 
-    await expect(
-      runTool(h, "spawn_agent", { tasks: [{ id: "Boom", description: "Boom", assignment: "explode" }] }),
-    ).rejects.toThrow("simulated host crash mid-run");
+    await expect(runTool(h, "spawn_agent", { task: "explode" })).rejects.toThrow("simulated host crash mid-run");
 
-    // Re-render the installed live widget: finish({ ok:false, error }) must have
-    // disposed the timer and produced a visible error line.
     const factory = h.widgetPayloads.get("agents");
     expect(typeof factory).toBe("function");
     const stubTui = { requestRender: () => {}, terminal: { rows: 30, columns: 100 } };
-    const component = (factory as (tui: typeof stubTui, theme: unknown) => { render(width: number): string[] })(stubTui, {});
-    const rendered = component.render(100);
-    expect(rendered.some((line) => line.includes("error") || line.includes("FAILED"))).toBe(true);
-
-    vi.doUnmock("../../../extensions/_shared/agent-runner.js");
+    const component = (factory as (tui: typeof stubTui, theme: unknown) => { render(width: number): string[] })(
+      stubTui,
+      {},
+    );
+    expect(component.render(100).some((line) => line.includes("error") || line.includes("FAILED"))).toBe(true);
   });
 });
