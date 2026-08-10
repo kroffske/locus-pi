@@ -2,6 +2,17 @@
 
 This file records user-visible changes to the public package.
 
+## [Unreleased]
+
+### Fixed
+
+- **Workflow choice routers can opt into a safe degraded route.**
+  `agent({ choice, choiceFallback })` keeps the normal two schema-validated
+  attempts, then returns the explicitly declared fallback and records the
+  validation failure in the runtime journal. The fallback must be one of the
+  declared choices and does not mask child execution or transport failures;
+  choice calls without it retain fail-closed behavior.
+
 ## [0.3.0] - 2026-08-10
 
 ### Fixed

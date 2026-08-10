@@ -730,7 +730,10 @@ ${skill[1] ?? ""}
     [
       "runtime-owned choice controls a branch",
       standardSource(`export default async function run({ agent }) {
-  const route = await agent("Choose a route.", { choice: ["accept", "revise"] });
+  const route = await agent("Choose a route.", {
+    choice: ["accept", "revise"],
+    choiceFallback: "revise",
+  });
   if (route === "accept") return agent("Handle the accepted route.");
   return agent("Handle the revision route.");
 }`),

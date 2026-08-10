@@ -67,12 +67,16 @@ When JavaScript must route, use the runtime-owned exact choice:
 ```js
 const route = await agent("Choose the next step.", {
   choice: ["accept", "revise", "blocked"],
+  choiceFallback: "blocked",
 });
 ```
 
 The runtime desugars `choice` to its existing string-enum shape path. It owns
 format instructions, parsing, validation, corrective re-ask, journal evidence,
-replay, budgets, and fail-closed exhaustion. Workflow code does none of those.
+replay, and budgets. By default exhaustion fails closed. A design may declare
+`choiceFallback` as one of the listed choices when a deterministic degraded route
+is safer; the runtime uses it only after both invalid answers and records the
+fallback in the journal. Workflow code does none of that recovery itself.
 
 When discovery determines the work units at runtime, use bounded text handoffs:
 

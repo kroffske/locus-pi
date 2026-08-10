@@ -307,9 +307,11 @@ public package support promises.
 Standard scripts pass narrative results as exact text, use
 `agent({ choice: [...] })` when JavaScript must select a branch, and use
 `agent({ handoffs: {...} })` when discovery must produce bounded complete text
-units for visible downstream workers. Raw `schema`, `validate`, parsers,
-renderers, and custom recovery remain outside the standard profile. Only files
-in the curated `examples/` registry are Package workflows.
+units for visible downstream workers. A choice may explicitly name a
+`choiceFallback` from the same list for a design-approved degraded route after
+both invalid answers. Raw `schema`, `validate`, parsers, renderers, and custom
+recovery remain outside the standard profile. Only files in the curated
+`examples/` registry are Package workflows.
 
 Saved workflow names such as `live-smoke` use one first-wins resolver for
 execution, `/workflows list`, and `/workflows info <name>`. Starting at the command's
@@ -1679,16 +1681,20 @@ Use `choice` when workflow JavaScript must select one small branch:
 ```js
 const route = await agent("Choose the next step.", {
   choice: ["accept", "revise", "blocked"],
+  choiceFallback: "blocked",
 });
 ```
 
 The declaration contains 2–32 unique, non-empty strings, each at most 200
 characters. It cannot be combined with `schema` or `validate`. The runtime
 desugars it to `{ type: "string", enum: [...] }` before canonicalizing the
-request. The equivalent hand-written schema therefore produces the same prompt,
-replay key, journal evidence, repair bound, and fail-closed error. Standard
-generated workflows use this form for machine routing and exact text for every
-narrative result.
+request. Without `choiceFallback`, the equivalent hand-written schema therefore
+produces the same prompt, replay key, journal evidence, repair bound, and
+fail-closed error. An optional `choiceFallback` must exactly equal one declared
+choice. The runtime returns it only after both schema attempts fail, records a
+runtime-owned journal line with the validation errors, and never masks child
+execution or transport failures. Standard generated workflows use this form for
+machine routing and exact text for every narrative result.
 
 ### Standard dynamic decomposition — `agent({ handoffs })`
 

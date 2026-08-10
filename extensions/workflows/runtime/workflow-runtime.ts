@@ -499,6 +499,8 @@ export interface WorkflowAgentOptions {
   workspaceHandle?: string;
   /** A choice selects WorkflowAgentChoiceOptions instead of the exact-text overload. */
   choice?: never;
+  /** A choice fallback is valid only with WorkflowAgentChoiceOptions. */
+  choiceFallback?: never;
   /** Handoffs select WorkflowAgentHandoffOptions instead of the exact-text overload. */
   handoffs?: never;
   /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
@@ -523,9 +525,11 @@ export type WorkflowAgentValidate = (value: unknown) => readonly string[];
  *  semantics. Narrative output remains exact text. */
 export interface WorkflowAgentChoiceOptions<Choices extends readonly string[] = readonly string[]> extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice: Choices;
+  /** Exact declared route used only after the normal schema-repair budget is exhausted. */
+  choiceFallback?: Choices[number];
   handoffs?: never;
   schema?: never;
   validate?: never;
@@ -545,9 +549,10 @@ export interface WorkflowAgentHandoffBounds {
  * array-of-strings schema path, including repair, replay and journal semantics. */
 export interface WorkflowAgentHandoffOptions extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice?: never;
+  choiceFallback?: never;
   handoffs: WorkflowAgentHandoffBounds;
   schema?: never;
   validate?: never;
@@ -557,9 +562,10 @@ export interface WorkflowAgentHandoffOptions extends Omit<
  *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
 export interface WorkflowAgentSchemaOptions extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice?: never;
+  choiceFallback?: never;
   handoffs?: never;
   schema: Record<string, unknown>;
   /** Cross-field rules the schema subset cannot declare. Runs only after schema
@@ -1243,6 +1249,13 @@ function normalizeAgentChoices(value: unknown): readonly string[] {
     seen.add(member);
   }
   return value as readonly string[];
+}
+
+function normalizeAgentChoiceFallback(value: unknown, choices: readonly string[]): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error("agent choiceFallback must be a string");
+  if (!choices.includes(value)) throw new Error("agent choiceFallback must be one of the declared choices");
+  return value;
 }
 
 function normalizeAgentHandoffs(value: unknown): Required<WorkflowAgentHandoffBounds> {
@@ -2990,9 +3003,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * fed back, and resolves to the validated value. Every attempt is a real child run and is
    * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
    *
-   * `choice` is only syntax over `{ type: "string", enum: [...] }`; it reaches this
-   * same path before any request is canonicalized. A hand-written equivalent schema
-   * therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * `choice` is syntax over `{ type: "string", enum: [...] }`; it reaches this same path
+   * before any request is canonicalized. Without `choiceFallback`, a hand-written equivalent
+   * schema therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * An explicit fallback changes only exhaustion: the runtime journals the degraded route and
+   * returns that declared choice after both schema attempts fail.
    *
    * `validate` extends that loop to the rules a declared schema cannot say — referential
    * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
@@ -3010,18 +3025,36 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
     const declaredChoice = opts?.choice;
+    const declaredChoiceFallback = opts?.choiceFallback;
     const declaredHandoffs = opts?.handoffs;
     const declaredValidate = opts?.validate;
+    if (declaredChoice === undefined && declaredChoiceFallback !== undefined) {
+      throw new Error("agent choiceFallback requires choice");
+    }
     if (declaredChoice !== undefined) {
       if (schema !== undefined) throw new Error("agent choice cannot be combined with schema");
       if (declaredHandoffs !== undefined) throw new Error("agent choice cannot be combined with handoffs");
       if (declaredValidate !== undefined) throw new Error("agent choice cannot be combined with validate");
       const choices = normalizeAgentChoices(declaredChoice);
-      const { choice: _choice, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
-      return await agentDsl(prompt, {
-        ...baseOptions,
-        schema: { type: "string", enum: [...choices] },
-      });
+      const choiceFallback = normalizeAgentChoiceFallback(declaredChoiceFallback, choices);
+      const { choice: _choice, choiceFallback: _choiceFallback, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
+      try {
+        return await agentDsl(prompt, {
+          ...baseOptions,
+          schema: { type: "string", enum: [...choices] },
+        });
+      } catch (error) {
+        if (choiceFallback === undefined || !(error instanceof SchemaValidationError)) throw error;
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: `choice fallback ${JSON.stringify(choiceFallback)} selected after ${error.attempts} schema mismatch attempts: ${error.errors.join("; ")}`,
+          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        });
+        return choiceFallback;
+      }
     }
     if (declaredHandoffs !== undefined) {
       if (schema !== undefined) throw new Error("agent handoffs cannot be combined with schema");

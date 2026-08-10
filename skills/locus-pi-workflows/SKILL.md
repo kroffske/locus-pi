@@ -149,7 +149,9 @@ Standard agent answers have three forms:
   returns the complete replacement document; publish that exact text.
 - `choice`. Use `agent(prompt, { choice: ["accept", "revise"] })` only when
   JavaScript must select a branch. Runtime owns format instructions, one repair,
-  parsing, validation, journal evidence, replay, and fail-closed exhaustion.
+  parsing, validation, journal evidence, and replay. Exhaustion fails closed unless
+  the approved Design names `choiceFallback` as one of those choices; runtime uses
+  that degraded route only after both invalid answers and journals why.
 - `handoffs`. Use `agent(prompt, { handoffs: { maxItems: MAX_DAGS_IN_SCOPE } })`
   when one discovery call must return a small bounded runtime list of complete
   text work units. The approved Design derives and names the bound from the
