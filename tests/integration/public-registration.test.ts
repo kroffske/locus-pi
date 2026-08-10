@@ -14,6 +14,12 @@ interface PackageJson {
 
 interface ExtensionManifest {
   docsPath: string;
+  provides: {
+    tools: string[];
+    commands: string[];
+    hooks: string[];
+    shortcuts?: string[];
+  };
   sourceAuditPath: string | null;
   tests: string[];
 }
@@ -21,11 +27,19 @@ interface ExtensionManifest {
 interface ExtensionMapRow {
   dependencies: string[];
   entrypoint: string;
+  files: number;
   manifest: string;
   manual: string;
 }
 
-type ExtensionCatalogRow = ExtensionMapRow;
+interface ManifestSurfaceRow {
+  tools: string[];
+  commands: string[];
+  hooks: string[];
+  shortcuts: string[];
+}
+
+type ExtensionCatalogRow = Omit<ExtensionMapRow, "files">;
 
 const sourceAuditUrlPrefix = "https://github.com/kroffske/locus-pi/blob/main/";
 const sourceExtensions = new Set([".cjs", ".js", ".mjs", ".mts", ".ts", ".tsx"]);
@@ -52,6 +66,23 @@ function inlineCode(value: string): string {
   return match[1];
 }
 
+function inlineCodeList(value: string): string[] {
+  if (value === "—") return [];
+  const items = [...value.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+  if (items.length === 0) {
+    throw new Error(`expected inline-code list or em dash, received: ${value}`);
+  }
+  return items;
+}
+
+function countRegularFiles(directory: string): number {
+  return readdirSync(directory, { withFileTypes: true }).reduce((count, entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return count + countRegularFiles(entryPath);
+    return count + (entry.isFile() ? 1 : 0);
+  }, 0);
+}
+
 function parseExtensionMap(markdown: string): Map<string, ExtensionMapRow> {
   const defaultSection = markdown.split("## Default extensions\n")[1]?.split("\n## ")[0];
   if (!defaultSection) {
@@ -65,7 +96,7 @@ function parseExtensionMap(markdown: string): Map<string, ExtensionMapRow> {
       .split("|")
       .slice(1, -1)
       .map((column) => column.trim());
-    if (columns.length !== 10) {
+    if (columns.length !== 11) {
       throw new Error(`invalid extension map row: ${line}`);
     }
 
@@ -73,13 +104,37 @@ function parseExtensionMap(markdown: string): Map<string, ExtensionMapRow> {
     if (rows.has(id)) {
       throw new Error(`duplicate extension map row: ${id}`);
     }
-    const dependencyCell = columns[7] ?? "";
+    const dependencyCell = columns[8] ?? "";
     rows.set(id, {
-      entrypoint: inlineCode(columns[4] ?? ""),
-      manifest: inlineCode(columns[5] ?? ""),
-      manual: inlineCode(columns[6] ?? ""),
+      files: Number.parseInt(columns[1] ?? "", 10),
+      entrypoint: inlineCode(columns[5] ?? ""),
+      manifest: inlineCode(columns[6] ?? ""),
+      manual: inlineCode(columns[7] ?? ""),
       dependencies:
         dependencyCell === "none" ? [] : [...dependencyCell.matchAll(/`([^`]+)`/g)].map((match) => match[1]!),
+    });
+  }
+  return rows;
+}
+
+function parseManifestSurfaces(markdown: string): Map<string, ManifestSurfaceRow> {
+  const section = markdown.split("## Manifest-declared public surfaces\n")[1]?.split("\n## ")[0];
+  if (!section) throw new Error("missing Manifest-declared public surfaces section");
+
+  const rows = new Map<string, ManifestSurfaceRow>();
+  for (const line of section.split("\n")) {
+    if (!line.startsWith("| `")) continue;
+    const columns = line
+      .split("|")
+      .slice(1, -1)
+      .map((column) => column.trim());
+    if (columns.length !== 5) throw new Error(`invalid manifest surface row: ${line}`);
+    const id = inlineCode(columns[0] ?? "");
+    rows.set(id, {
+      tools: inlineCodeList(columns[1] ?? ""),
+      commands: inlineCodeList(columns[2] ?? ""),
+      hooks: inlineCodeList(columns[3] ?? ""),
+      shortcuts: inlineCodeList(columns[4] ?? ""),
     });
   }
   return rows;
@@ -295,21 +350,35 @@ describe("public registration contract", () => {
   it("keeps the public extension map aligned with package, manifests, manuals, and source imports", () => {
     const extensionIds = pkg.pi.extensions.map(extensionIdFromEntrypoint);
     const mapRows = parseExtensionMap(extensionIndex);
+    const surfaceRows = parseManifestSurfaces(extensionIndex);
     expect([...mapRows.keys()].sort()).toEqual([...extensionIds].sort());
+    expect([...surfaceRows.keys()].sort()).toEqual([...extensionIds].sort());
+
+    const sharedCount = Number.parseInt(/Its (\d+) recursive\s+regular files/u.exec(extensionIndex)?.[1] ?? "", 10);
+    expect(sharedCount).toBe(countRegularFiles(path.join(root, "extensions/_shared")));
 
     for (const [index, entrypoint] of pkg.pi.extensions.entries()) {
       const id = extensionIds[index]!;
       const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
       const mapRow = mapRows.get(id);
+      const surfaceRow = surfaceRows.get(id);
 
       expect(mapRow, `missing extension map row: ${id}`).toBeDefined();
+      expect(surfaceRow, `missing manifest surface row: ${id}`).toBeDefined();
+      expect(mapRow?.files).toBe(countRegularFiles(path.dirname(path.join(root, entrypoint))));
       expect(mapRow?.entrypoint).toBe(entrypoint.slice(2));
       expect(mapRow?.manifest).toBe(path.relative(root, manifestPath));
       expect(mapRow?.manual).toBe(manifest.docsPath);
       expect(existsSync(path.join(root, entrypoint)), `missing entrypoint: ${entrypoint}`).toBe(true);
       expect(existsSync(manifestPath), `missing manifest: ${manifestPath}`).toBe(true);
       expect(existsSync(path.join(root, manifest.docsPath)), `missing docsPath from ${manifestPath}`).toBe(true);
+      expect(surfaceRow).toEqual({
+        tools: manifest.provides.tools,
+        commands: manifest.provides.commands,
+        hooks: manifest.provides.hooks,
+        shortcuts: manifest.provides.shortcuts ?? [],
+      });
       for (const testPath of manifest.tests) {
         expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);
       }

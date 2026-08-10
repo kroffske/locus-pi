@@ -1,13 +1,53 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-It provides eleven default extensions, a bundled agent catalog, six curated
-Package workflows, and one skill that teaches an agent how to use them, through
-a deliberately narrow npm artifact.
+Installing it gives a Pi session eleven extensions, a bundled agent catalog, six
+curated Package workflows, and two skills that teach an agent how to find, run,
+and author them — through a deliberately narrow npm artifact.
 
-> `locus-pi` is MIT-licensed. Published releases use GitHub private
-> vulnerability reporting so security reports do not need to enter public
-> issues or workflow transcripts.
+The package is built on deterministic decomposition, bounded capabilities, and
+inspectable run evidence: the structure of a workflow carries the work, so a run
+stays readable and reviewable instead of depending on model strength alone.
+
+## Requirements
+
+- Node.js `>=22.19.0`.
+- Pi `0.83.x`; the package peer floor is `0.83.0`.
+- A trusted project, and reviewed sources for every workflow you run.
+
+## Install
+
+Install the published package into Pi:
+
+```bash
+pi install npm:@kroffske/locus-pi
+```
+
+Confirm the registration and the shipped inventory:
+
+```bash
+pi list                        # what Pi actually loads, per scope
+npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
+```
+
+Then start Pi in a trusted project and run `/workflows list`: the six curated
+workflows resolve out of the installed package, so nothing has to be copied
+anywhere. Inside a session, `/devext doctor` gives the same kind of compact
+inventory view.
+
+Inventory output only reports what is registered. The smallest real check that
+child agents work on this host is `/workflows run live-smoke`, which starts two
+small child-agent jobs that list the current project directory.
+
+Remove the package with the same source identity:
+
+```bash
+pi remove npm:@kroffske/locus-pi
+```
+
+npm is the supported operator path. Use
+[a Git clone](#install-from-a-git-clone) only when you want Pi to load the
+repository source itself.
 
 ## What the package includes
 
@@ -28,47 +68,119 @@ contains exactly these eleven entrypoints:
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
 | `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, flat `/workflow-*` compatibility aliases, and the `workflow` tool for trusted JavaScript orchestration.                                                              |
 
-Each retained extension also has a manifest and a manual under
+Each extension ships its `manifest.json` and a manual under
 [`docs/extensions/active/`](docs/extensions/active/README.md). Every default
-extension has one dedicated bundled agent profile, published in the
+extension also has one dedicated bundled agent profile, listed in the
 [extension-agent map](docs/extension-agent-map.md); the generic bundled agents
 remain available as well. The public [extension source and dependency
 map](docs/extension-index.md) links every entrypoint, manifest, and manual and
 separates direct feature imports from shared-layer and external-package
-dependencies. Maintainer source-audit evidence remains in the public GitHub
-repository rather than the npm artifact.
+dependencies. Maintainer source-audit evidence stays in the public GitHub
+repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-Only these names are registered as Package workflows:
+The installed package registers exactly these six Package workflows:
 
-| Workflow             | Intended use                                                                                                   |
-| -------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two small read-only child-agent jobs to prove that the installed Pi host can create real child sessions.  |
-| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.    |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.             |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.          |
-| `plan`               | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`. |
-| `plan-implement`     | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.         |
+| Workflow             | Intended use                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
+| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
+| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
+| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
+| `plan`               | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
+| `plan-implement`     | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
 
-Use the canonical `/workflows` command menu to inspect and run them:
+The Package registry is the shipped `extensions/workflows/examples/` directory
+itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
+file there, and the npm allowlist ships exactly the six files above.
+
+Inspect and run them from the canonical command menu:
 
 ```text
 /workflows
 /workflows list
 /workflows info live-smoke
 /workflows run live-smoke
+/workflows status
+/workflows result last
 /workflows stop last
 /ps
 ```
 
 Bare `/workflows` opens the interactive command menu when TUI selection is
-available. Its exact verbs are `dashboard`, `list`, `info`, `status`, `result`,
-`run`, `continue`, and `stop`, each shown with a short description; direct typed
-forms such as `/workflows run live-smoke` remain available. Other hosts receive
-the typed help fallback. Flat `/workflow-*` commands remain compatibility
-aliases while their behavior reaches parity with the unified command; they are
-not removed yet.
+available; other hosts receive the typed help fallback. Its exact verbs are
+`dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop`,
+each shown with a short description, and direct typed forms such as
+`/workflows run live-smoke` always work. Flat `/workflow-*` commands remain
+compatibility aliases while their behavior reaches parity with the unified
+command; they are not removed yet. In the catalog, each row leads with the
+workflow name and a compact `[P]`, `[U]`, or `[PKG]` badge for its Project,
+User, or Package source; history rows insert the run id after the name.
+
+### Watching a run
+
+`/workflows run` starts one interactive run in the background and returns the
+editor immediately. The compact widget below the editor shows the current
+workflow stage and one active child; `/ps` expands the same shared agent fleet
+for leaf selection and readable drill-down. A second interactive run in the same
+session and project is rejected until the first run settles.
+`/workflows stop [runId|last]` requests cancellation and remains honest about the
+run being `stopping` until its terminal result is persisted. The programmatic
+`workflow` tool remains awaited and headless.
+
+`/ps` drill-down renders the retained agent transcript with Pi's native
+assistant and tool components in a terminal-height viewport that follows live
+output without clearing terminal scrollback. Use `PgUp`/`PgDn` or `Home`/`End`
+to inspect older output and `Ctrl+O` to toggle tool detail. While the child is
+actively processing, the view mounts Pi's native editor and Enter sends it a
+steering message; after settlement the view becomes read-only. `Esc` closes the
+view without aborting the child. Transcript retention applies its documented
+content, byte, and node bounds.
+
+When a workflow declares an actionable operator handoff, a run launched by the
+current Pi session (or one of its continuations) opens its oldest pending
+question directly in the primary editor after Pi is idle. Escape submits an
+explicit declined answer; it does not snooze or cancel. Otherwise open the
+`/workflows` menu and choose `continue` to select an eligible handoff
+oldest-first, or type `/workflows continue <runId>` to name one directly.
+
+### Where a name resolves from
+
+Every directory is scanned on each call, and the first match wins: project
+`.pi/workflows/`, `.claude/workflows/`, and `.agents/workflows/`, ascending from
+the working directory to the project root, then user `~/.pi/workflows/`, then
+the packaged examples. A pi-native `<name>.workflow.mjs` in one of those
+directories therefore shadows a Package workflow of the same name without
+changing the package. That exact filename is the only one these directories
+accept, and a workflow written for another host's DSL is not portable here.
+
+## Skills and workflow authoring
+
+The package declares its skills through `package.json#pi.skills`, and Pi loads
+package skills automatically and enabled: their descriptions are in the system
+prompt from the first session, and the full text loads on demand.
+
+[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) is
+the operation and authoring skill, also reachable through
+`/skill:locus-pi-workflows`. It covers finding a workflow, running one, reading
+the result envelope, the name resolution order, and approval-first authoring: a
+raw request produces a readable `.design.md` agent graph, while only the exact
+request `Build approved design: <exact path>` creates the matching source. Its
+compact Markdown pattern cards load only after the author selects a topology.
+
+[`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
+the thin execution protocol for the shipped planning pair. The main Pi agent
+uses one shared `tmp/<select-name>` workspace, appends single-line step
+references to session todos, and starts one top-level `plan-implement` run with
+the exact matching block from `steps.md`. A failed step stops the queue; a later
+session reconstructs it by reading `steps.md` and `history/*.md`.
+
+The full authoring contract — the Design/Build boundary, what a design must
+expose, and the standard primitive profile — is
+[`extensions/workflows/AUTHORING.md`](extensions/workflows/AUTHORING.md), and
+the complete runtime, trust, replay, and artifact reference is
+[`docs/extensions/active/workflows.md`](docs/extensions/active/workflows.md).
 
 Check a newly authored standard workflow from its project directory with the
 installed package command; no project-local script or `tsx` is required:
@@ -77,82 +189,13 @@ installed package command; no project-local script or `tsx` is required:
 npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
 ```
 
-In the interactive catalog, each row leads with the workflow name and uses a
-compact `[P]`, `[U]`, or `[PKG]` badge for its Project, User, or Package source.
-History rows lead with the workflow name, then run id, then source badge. On a
-source screen, press `Tab` or Left/Right to change the focused action, then
-press Enter to activate it.
-
-`/workflows run` starts one interactive run in the background and returns the
-editor immediately. The compact widget below the editor shows the current
-workflow stage and one active child; `/ps` expands the same shared agent fleet
-for leaf selection and readable drill-down. A second interactive run in the
-same session/project is rejected until the first run settles. `/workflows stop
-[runId|last]` requests cancellation and remains honest about the run being
-`stopping` until its terminal result is persisted. The programmatic `workflow`
-tool remains awaited and headless. `/ps` drill-down renders the retained agent
-transcript with Pi's native assistant and tool components in a terminal-height
-viewport that follows live output without clearing terminal scrollback. Use
-`PgUp`/`PgDn` or `Home`/`End` to inspect older output and `Ctrl+O` to toggle tool
-detail. While the SDK child is actively processing, the same view mounts Pi's
-native editor and Enter sends a steering message to that child; after settlement
-the view becomes read-only. `Esc` closes the view without aborting the child.
-Transcript retention still applies its documented content, byte, and node bounds.
-
-When a workflow declares an actionable operator handoff, a run launched by the
-current Pi session (or one of its continuations) opens its oldest pending
-question directly in the primary editor after Pi is idle. Escape submits an
-explicit declined answer; it does not snooze or cancel. Open the `/workflows`
-menu and choose `continue` to select an eligible handoff oldest-first, or type
-`/workflows continue <runId>` to name one directly. Flat `/workflow-continue`
-remains a compatibility alias for the same verified-artifact continuation.
-
-Project and user workflow directories remain scan-based. A pi-native
-`<name>.workflow.mjs` in `.pi/workflows/`, `.claude/workflows/`,
-`.agents/workflows/`, or `~/.pi/workflows/` can change the next resolution result
-without changing the Package registry. That exact filename is the only one these
-directories accept, and a workflow written for another host's DSL is not portable
-here. Files that merely exist under the repository's workflow examples are not
-Package workflows and cannot be launched by bare name unless they are in the
-curated registry.
-
-## The shipped skills
-
-Nothing has to be copied anywhere for the six workflows above to be runnable:
-they resolve out of the installed package, so `/workflows list` shows them the
-first time Pi starts after `pi install`, whether the package came from npm or
-from a local checkout.
-
-What an agent could not previously find is the _concept_. A model asked to "run
-the review workflow" had no document telling it what a workflow is here, which
-names exist, or how to read a finished run, so it went looking for a repository
-that is not on the machine. The package therefore ships two skills. The
-authoring and operation skill is
-[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md), declared
-through `package.json#pi.skills`. Pi loads package skills automatically and
-enabled, so its description is in the system prompt from the first session and
-the full text loads on demand — including through `/skill:locus-pi-workflows`. It
-covers finding a workflow, running one, reading the result envelope, the name
-resolution order, and approval-first authoring: a raw request produces a readable
-`.design.md` agent graph, while only `Build approved design: <exact path>` creates
-the matching source. Its compact Markdown pattern cards are loaded only after the
-author selects a topology.
-
-The file is a plain [Agent Skills](https://agentskills.io/specification)
-directory, so other hosts can read it too. Claude Code and Codex discover skills
-only under their own roots, so link the installed directory into the root that
-host uses instead of copying it — a copy stops matching the package on the next
-update. Pi writes user installs under `~/.pi/agent/npm/` and project installs
-under `.pi/npm/`; `pi list` prints the source of every registration, and the
-skill is at `skills/locus-pi-workflows/` inside whichever one applies.
-
-[`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
-the thin execution protocol for the shipped planning pair. The main Pi agent
-uses one shared `tmp/<select-name>` workspace, appends single-line step
-references to session todos, and starts one top-level `plan-implement` run with
-the exact matching block from `steps.md`. A failed
-step stops the queue; a later session reconstructs it by reading `steps.md` and
-`history/*.md`.
+Both skills are plain [Agent Skills](https://agentskills.io/specification)
+directories, so other hosts can read them too. Claude Code and Codex discover
+skills only under their own roots, so link the installed directory into the root
+that host uses instead of copying it — a copy stops matching the package on the
+next update. Pi writes user installs under `~/.pi/agent/npm/` and project
+installs under `.pi/npm/`; `pi list` prints the source of every registration,
+and the skills are under `skills/` inside whichever one applies.
 
 ## Trust and safety boundary
 
@@ -162,46 +205,21 @@ or other capabilities. Path checks, identity hashes, and Pi's `exec` approval
 are evidence and consent boundaries; they are not a sandbox. Review every
 project or user workflow before running it.
 
+`security-gate` is audit-only telemetry: it classifies dangerous tool calls and
+records them for `/security-audit` review. It never blocks a call and never
+replaces Pi's own approval prompts.
+
 The npm package excludes beta modules, uncurated workflow fixtures, archives,
 reports, galleries, transcripts, benchmarks, evaluations, and local runtime or
 planning state. Their presence in a source checkout does not make them supported
 package behavior.
 
-## Requirements
-
-- Node.js `>=22.19.0`.
-- Pi `0.83.x`; the package peer floor is `0.83.0`.
-- A trusted project and reviewed local workflow sources.
-
-## Install
-
-Install it with Pi:
-
-```bash
-pi install npm:@kroffske/locus-pi
-```
-
-Confirm the package registration and CLI inventory:
-
-```bash
-pi list
-npx @kroffske/locus-pi doctor
-```
-
-Inside an interactive Pi session, `/devext doctor` provides a compact inventory
-view. It does not replace the test suite or a live workflow smoke.
-
-Remove the npm package with the same source identity:
-
-```bash
-pi remove npm:@kroffske/locus-pi
-```
-
 ## Install from a Git clone
 
-Use a source checkout when you want Pi to load the repository directly instead
-of the published npm package. A normal clone checks out the stable `main`
-branch:
+Most operators do not need this. Use a source checkout only when you want Pi to
+load the repository directly instead of the published npm package — to develop
+the package itself, or to test accepted work before it is released. A normal
+clone checks out the stable `main` branch:
 
 ```bash
 git clone https://github.com/kroffske/locus-pi.git
@@ -218,8 +236,8 @@ cd locus-pi
 npm ci --ignore-scripts
 ```
 
-Review the checkout before registering it. Pi loads extension source directly
-from the cloned directory; this package does not sandbox that code.
+Review the checkout before registering it: Pi loads extension source directly
+from the cloned directory, under the same trust boundary described above.
 
 ### 1. Remove any earlier registration
 
@@ -318,7 +336,7 @@ pi install npm:@kroffske/locus-pi
 pi list
 ```
 
-The release-quality package checks are:
+Maintainers validate a checkout with the release-quality package checks:
 
 ```bash
 npm run check
@@ -334,6 +352,9 @@ npm pack --dry-run --json --ignore-scripts
 - Repository-only `SECURITY.md` defines the vulnerability-reporting gate.
 - Repository-only `CODE_OF_CONDUCT.md` defines expected project conduct.
 - Repository-only `CHANGELOG.md` records the release history.
+
+Security reports go through GitHub private vulnerability reporting, so they do
+not need to enter public issues or workflow transcripts.
 
 The repository policy files and `.github/**` are intentionally not included in
 the npm artifact. The shipped README carries the essential install, trust,

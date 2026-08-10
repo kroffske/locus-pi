@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05, 2026-08-10
 
 ## Decision
 
@@ -17,7 +17,7 @@ The accepted Package portfolio is:
 
 | Workflow             | Product role                | Why it belongs                                                                                                                                                                    |
 | -------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions with a minimal read-only run.                                                                                         |
+| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions through two full-tool agents performing a minimal file-listing action.                                                |
 | `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
 | `review`             | Evidence-backed code review | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
 | `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
@@ -192,9 +192,10 @@ subset validator, retries within `SCHEMA_MAX_ATTEMPTS`, and throws
 proven at source level by `tests/shared/workflows/workflow-agent-schema.test.ts`.
 
 Extending `live-smoke` with a shaped stage was considered and rejected here.
-`live-smoke`'s curated contract is exactly "two read-only child agents, each doing
-one small tool action" — the minimum that proves child-session creation on a live
-host. Adding a schema stage would change its public result shape and its cost
+`live-smoke`'s current curated contract is exactly "two full-tool child agents,
+each doing one small file-listing action" — the minimum that proves child-session
+creation on a live host through the same unrestricted child route used by normal
+workflows. Adding a schema stage would change its public result shape and its cost
 inside a removal task, for a check that is about validation logic rather than host
 capability. The portfolio criterion is a stable bounded contract, not maximal
 coverage per workflow.
