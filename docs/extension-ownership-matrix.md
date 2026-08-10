@@ -1,6 +1,6 @@
 # Extension ownership matrix
 
-This matrix records ownership of the eleven `0.2.1` default extensions. `Locus`
+This matrix records ownership of the eleven `0.3.0` default extensions. `Locus`
 means locally owned behavior. `compat-wrapper` means a bounded Pi-facing surface
 whose source audit records the upstream contract and license context.
 

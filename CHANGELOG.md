@@ -2,7 +2,7 @@
 
 This file records user-visible changes to the public package.
 
-## Unreleased
+## [0.3.0] - 2026-08-10
 
 ### Fixed
 
@@ -44,6 +44,16 @@ This file records user-visible changes to the public package.
   either way with `LOCUS_PS_CALM=1` / `LOCUS_PS_CALM=0`.
 
 ### Changed
+
+- **The README now starts with the operator path instead of the repository
+  inventory.** Installation, verification, and the live host smoke appear
+  before implementation detail; workflow authoring and the trusted-code
+  boundary are separated into explicit sections, while the full Git checkout
+  lifecycle remains available for maintainers.
+
+- **The public extension index is now a complete operator inventory.** It
+  records recursive file counts for every default-loaded extension and lists
+  all manifest-declared tools, commands, hooks, and shortcuts in one place.
 
 - **The workflow tool card names the task it is working on.** A `task:` line
   under the `LOCUS · workflow <name>` header shows the first line of the
@@ -663,13 +673,6 @@ this workflow's questions.` — through the same continuation a typed reply
   registration that works from every directory, explains update and uninstall
   commands, and identifies duplicate user/project registrations as the reason
   Pi can fail only inside the `locus-pi` checkout.
-
-- **The packaged `live-smoke` workflow now enforces the read-only contract its
-  public description already promised.** Both child calls are confined to the
-  project workspace with `readOnly: true` and only the `find` tool, so the
-  write-capable `quick_task` profile cannot edit files or run shell commands.
-  The prompt no longer asks the read-only `explore` profile to use a `bash` tool
-  it does not have.
 
 - **The two catch-all files are gone, and `extensions/_shared/` is now nothing but its six
   named layers.** `types.ts` and `state.ts` held unrelated contracts and one shared mutable
