@@ -708,14 +708,42 @@ here because the workflow's product is agent orchestration; reintroducing a
 parser or ledger would create a second task manager and make dynamic recovery
 depend on script logic the owner explicitly rejected.
 
+## Amendment 2026-08-13 — modular post-code review becomes an installable bundle
+
+The owner promoted the reviewed project-local post-code-review pilot into one
+tracked Package folder. The public portfolio gains six names, but they expose
+one product: `post-code-review` is the intended external entry; `scope`,
+`boundaries`, `simplicity`, `contracts`, and `synthesis` are its separately
+inspectable saved-child components.
+
+The parent owns no model call. It runs scope first, opens one three-child
+parallel barrier, runs synthesis after the barrier, and publishes the resulting
+`post-code-review.md`. Complete Markdown files are the only lane handoffs. One
+self-contained `post-code-review-pipeline.svg` beside the sources shows every
+workflow boundary, agent role, artifact, and fail-closed exit.
+
+Normal saved-child `name` lookup intentionally keeps Project → User → Package
+precedence. This bundle must not mix an installed parent with a same-named local
+child, so its five edges use the exact `packageName` target. The parent resolves
+each Package child before launch; the expected-child canonical path and source
+hash proof then makes a project or personal shadow fail closed.
+
+Installation is package installation, not artifact copying:
+`pi install npm:@kroffske/locus-pi` ships the folder through
+`package.json#files`, and `/workflows run post-code-review --output-dir ...`
+launches it from any trusted project. Task-local bundle and Git-scope verifier
+scripts remain development evidence and are not workflow entries.
+
 ## Consequences
 
 The Package surface grew from three to five names, back to four when `llm-smoke`
 retired with the primitive it proved (2026-07-21 amendment), and to six with the
-planning pair (2026-07-27 amendment). It is
-not a general automation catalog. The four non-diagnostic names expose two
-deliberate sequences — question-led evidence then a human-directed fix, and a
-plan workspace then main-agent-driven one-step runs — while
+planning pair (2026-07-27 amendment), then to twelve with the six-entry modular
+post-code-review bundle (2026-08-13 amendment). It is not a general automation
+catalog. The non-diagnostic names expose three deliberate products —
+question-led evidence then a human-directed fix, a plan workspace then
+main-agent-driven one-step runs, and an independently synthesized multi-lane
+code review — while
 keeping source mutation uncommitted and deployment outside the workflow boundary.
 
 The remediation binding now covers the review artifact, not an editable path or a

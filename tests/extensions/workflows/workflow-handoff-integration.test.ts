@@ -36,13 +36,13 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
   );
   const target = resolveWorkflowTarget({ script: "alpha" }, root, root);
   const currentIdentity = readCurrentWorkflowScriptIdentity(target.path);
+  const runDir = ensureWorkflowRunDir(root, runId);
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${currentIdentity.scriptSha256}.workflow.mjs`);
+  writeFileSync(snapshotPath, readFileSync(target.path));
   const scriptIdentity = {
     ...currentIdentity,
     sourcePath: target.path,
-    snapshotPath: path.join(
-      workflowRunRuntimeDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
-      "script.workflow.mjs",
-    ),
+    snapshotPath,
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
@@ -75,7 +75,8 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
     scriptIdentity,
     terminalArtifactRefs: [artifactRef],
   });
-  const runDir = ensureWorkflowRunDir(root, runId);
+  const workspaceDir = path.join(root, "handoff-workspace");
+  mkdirSync(workspaceDir, { recursive: true });
   writeFileSync(
     workflowResultFile(runDir),
     `${JSON.stringify({
@@ -85,6 +86,9 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
       disposition: { status: "awaiting_operator", detail: "review clarification required" },
       journal: [],
       resultPersistence: { ok: true, path: workflowResultFile(runDir) },
+      workspaceDir,
+      workspaceDirRelative: "handoff-workspace",
+      workspaceDirExplicit: true,
       target,
       scriptIdentity,
       artifactRefs: [artifactRef],

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
 import { renderOperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
+import { parseRunCommand, workflowRunUsage } from "../../../extensions/workflows/command-parser.js";
+import { workflowArgumentCompletions } from "../../../extensions/workflows/command-completions.js";
 import {
   buildWorkflowActionPrompt,
   buildWorkflowCatalogBlock,
@@ -14,15 +16,242 @@ import {
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../extensions/workflows/workflow-catalog.js";
-import { packagedWorkflowNames, packagedWorkflowPath } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  packagedWorkflowNames,
+  packagedWorkflowPath,
+  listWorkflowCatalogTargets,
+  resolveWorkflowTarget,
+  runWorkflowScript,
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { isPostCodeReviewTargetIdentity } from "../../../extensions/workflows/runtime/workflow-saved-name.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   workflowJournalFile,
   workflowRunRuntimeDir,
 } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import { createHarness } from "../../test-harness.js";
 
 describe("workflow operator catalog", () => {
+  it.each([
+    ["an external file symlink", "file"],
+    ["an external ancestor symlink", "ancestor"],
+  ])("does not advertise or fall through a project entry behind %s", (_label, shape) => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-confinement-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "wf-catalog-confinement-outside-"));
+    const home = path.join(root, "home");
+    const name = "collision";
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = home;
+      const personalDir = path.join(home, ".pi", "workflows");
+      mkdirSync(personalDir, { recursive: true });
+      writeFileSync(path.join(personalDir, `${name}.workflow.mjs`), 'export default () => "personal";\n', "utf8");
+
+      const externalWorkflowDir = path.join(outside, ".pi", "workflows");
+      mkdirSync(externalWorkflowDir, { recursive: true });
+      const externalFile = path.join(externalWorkflowDir, `${name}.workflow.mjs`);
+      writeFileSync(externalFile, 'export const meta = { description: "outside" };\n', "utf8");
+      const projectWorkflowDir = path.join(root, ".pi", "workflows");
+      if (shape === "file") {
+        mkdirSync(path.dirname(projectWorkflowDir), { recursive: true });
+        mkdirSync(projectWorkflowDir, { recursive: true });
+        symlinkSync(externalFile, path.join(projectWorkflowDir, `${name}.workflow.mjs`));
+      } else {
+        symlinkSync(path.join(outside, ".pi"), path.join(root, ".pi"), "dir");
+      }
+
+      if (shape === "ancestor") {
+        expect(() => buildWorkflowCatalogModel(root, root)).toThrow(/escapes project root through a symlink/u);
+        expect(workflowArgumentCompletions("run c", root, root)).toEqual([]);
+      } else {
+        const model = buildWorkflowCatalogModel(root, root);
+        expect(model.current.some((row) => row.name === name)).toBe(false);
+        expect(workflowArgumentCompletions("run c", root, root)?.map((completion) => completion.value)).not.toContain(
+          "run collision",
+        );
+      }
+      expect(() => resolveWorkflowTarget({ name }, root, root)).toThrow(/escapes project root through a symlink/u);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an external project symlink fall through to the packaged workflow", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-package-confinement-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "wf-catalog-package-outside-"));
+    try {
+      const projectWorkflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(projectWorkflowDir, { recursive: true });
+      const externalFile = path.join(outside, "plan.workflow.mjs");
+      writeFileSync(externalFile, 'export const meta = { description: "outside" };\n', "utf8");
+      symlinkSync(externalFile, path.join(projectWorkflowDir, "plan.workflow.mjs"));
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.current.some((row) => row.name === "plan")).toBe(false);
+      expect(workflowArgumentCompletions("run p", root, root)?.map((completion) => completion.value)).not.toContain(
+        "run plan",
+      );
+      expect(() => resolveWorkflowTarget({ name: "plan" }, root, root)).toThrow(
+        /escapes project root through a symlink/u,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks a directory-shaped project entry across resolver, catalog, info, completion, and launch", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-directory-collision-"));
+    try {
+      mkdirSync(path.join(root, ".pi", "workflows", "plan.workflow.mjs"), { recursive: true });
+
+      expect(buildWorkflowCatalogModel(root, root).current.some((row) => row.name === "plan")).toBe(false);
+      expect(workflowArgumentCompletions("run p", root, root)?.map((completion) => completion.value)).not.toContain(
+        "run plan",
+      );
+      expect(buildWorkflowInfoBlock(root, root, "plan")).toMatchObject({
+        primary: 'Unknown current workflow: "plan".',
+      });
+      expect(() => resolveWorkflowTarget({ name: "plan" }, root, root)).toThrow(/not a regular file/u);
+
+      const harness = createHarness(root);
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "plan",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/not a regular file/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks an invalid higher-precedence search directory consistently", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-invalid-search-dir-"));
+    try {
+      mkdirSync(path.join(root, ".pi"), { recursive: true });
+      writeFileSync(path.join(root, ".pi", "workflows"), "not a directory\n", "utf8");
+      const fallback = path.join(root, ".claude", "workflows", "collision.workflow.mjs");
+      mkdirSync(path.dirname(fallback), { recursive: true });
+      writeFileSync(fallback, 'export default () => "fallback";\n', "utf8");
+
+      expect(() => buildWorkflowCatalogModel(root, root)).toThrow(/not a directory/u);
+      expect(workflowArgumentCompletions("run c", root, root)).toEqual([]);
+      expect(() => buildWorkflowInfoBlock(root, root, "collision")).toThrow(/not a directory/u);
+      expect(() => resolveWorkflowTarget({ name: "collision" }, root, root)).toThrow(/not a directory/u);
+
+      const harness = createHarness(root);
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "collision",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/not a directory/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("supports an internally confined project search-directory symlink consistently", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-internal-search-dir-"));
+    try {
+      const actual = path.join(root, "workflow-sources");
+      mkdirSync(actual, { recursive: true });
+      writeFileSync(path.join(actual, "inside.workflow.mjs"), 'export default () => "inside";\n', "utf8");
+      mkdirSync(path.join(root, ".pi"), { recursive: true });
+      symlinkSync(actual, path.join(root, ".pi", "workflows"), "dir");
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.current.find((row) => row.name === "inside")).toMatchObject({
+        source: "project",
+        target: { path: path.join(root, ".pi", "workflows", "inside.workflow.mjs") },
+      });
+      expect(resolveWorkflowTarget({ name: "inside" }, root, root)).toMatchObject({
+        source: "project",
+        path: path.join(root, ".pi", "workflows", "inside.workflow.mjs"),
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks the same invalid lower-precedence directory for an existing higher source", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-lower-invalid-dir-"));
+    try {
+      const higher = path.join(root, ".pi", "workflows", "inside.workflow.mjs");
+      mkdirSync(path.dirname(higher), { recursive: true });
+      writeFileSync(higher, 'export default () => "higher";\n', "utf8");
+      mkdirSync(path.join(root, ".claude"), { recursive: true });
+      writeFileSync(path.join(root, ".claude", "workflows"), "not a directory\n", "utf8");
+
+      expect(() => resolveWorkflowTarget({ name: "inside" }, root, root)).toThrow(/not a directory/u);
+      expect(() => listWorkflowCatalogTargets(root, root)).toThrow(/not a directory/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a personal post-code-review name outside the project owner policy", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-owner-source-"));
+    const home = mkdtempSync(path.join(tmpdir(), "wf-catalog-owner-home-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = home;
+      const personalDir = path.join(home, ".pi", "workflows");
+      mkdirSync(personalDir, { recursive: true });
+      writeFileSync(
+        path.join(personalDir, "post-code-review.workflow.mjs"),
+        'export default () => "personal";\n',
+        "utf8",
+      );
+
+      const target = resolveWorkflowTarget({ name: "post-code-review" }, root, root);
+      expect(target.source).toBe("personal");
+      expect(isPostCodeReviewTargetIdentity(target)).toBe(false);
+      expect(isPostCodeReviewTargetIdentity({ kind: "name", ref: "post-code-review", source: "package" })).toBe(true);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an external personal leaf symlink fall through to Package", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-personal-confinement-"));
+    const home = mkdtempSync(path.join(tmpdir(), "wf-catalog-personal-home-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "wf-catalog-personal-outside-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = home;
+      const personalDir = path.join(home, ".pi", "workflows");
+      mkdirSync(personalDir, { recursive: true });
+      const external = path.join(outside, "live-smoke.workflow.mjs");
+      writeFileSync(external, "export default () => 'outside';\n", "utf8");
+      symlinkSync(external, path.join(personalDir, "live-smoke.workflow.mjs"));
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.current.some((row) => row.name === "live-smoke")).toBe(false);
+      expect(() => resolveWorkflowTarget({ name: "live-smoke" }, root, root)).toThrow(
+        /personal workflow root|symlink/u,
+      );
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("keeps every curated Package workflow description concise and purpose-first", () => {
     const descriptions = packagedWorkflowNames().map((name) => ({
       name,
@@ -35,6 +264,12 @@ describe("workflow operator catalog", () => {
       "live-smoke",
       "plan-implement",
       "plan",
+      "post-code-review-boundaries",
+      "post-code-review-contracts",
+      "post-code-review-scope",
+      "post-code-review-simplicity",
+      "post-code-review-synthesis",
+      "post-code-review",
       "requirements-grill",
       "review-fix",
       "review",
@@ -60,6 +295,12 @@ describe("workflow operator catalog", () => {
         "live-smoke",
         "plan-implement",
         "plan",
+        "post-code-review-boundaries",
+        "post-code-review-contracts",
+        "post-code-review-scope",
+        "post-code-review-simplicity",
+        "post-code-review-synthesis",
+        "post-code-review",
         "requirements-grill",
         "review-fix",
         "review",
@@ -206,6 +447,7 @@ describe("workflow operator catalog", () => {
         subject: "Workflow catalog",
         metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history"],
       });
+      expect(block.controls).toContain(`Run: ${workflowRunUsage()}`);
       expect(recent).toContain("same · run 20260101-000002-personal · [U] · historical run snapshot");
       expect(recent).toContain("secret.workflow.mjs · run 20260101-000001-path · [P] · historical run snapshot");
       expect(recent).not.toContain("same · run 20260101-000002-personal · [P]");
@@ -214,7 +456,9 @@ describe("workflow operator catalog", () => {
       const catalogRows = block.body?.filter((line) => line.startsWith("  ") && !line.startsWith("  (")) ?? [];
       expect(catalogRows.every((line) => !/\b(?:Project|User|Package)\b/u.test(line))).toBe(true);
 
-      const compactRows = buildWorkflowCatalogBlock(root, root, undefined, { compact: true }).body ?? [];
+      const compactBlock = buildWorkflowCatalogBlock(root, root, undefined, { compact: true });
+      expect(compactBlock.controls).toEqual([`Run: ${workflowRunUsage()} · Filter: /workflows list <query>`]);
+      const compactRows = compactBlock.body ?? [];
       expect(compactRows).toEqual(
         expect.arrayContaining([
           expect.stringContaining("same · run 20260101-000002-personal · [U] · historical run snapshot"),
@@ -273,6 +517,63 @@ describe("workflow operator catalog", () => {
 
       expect(model.current.find((row) => row.name === "alpha")?.description).toBe("Changed current description");
       expect(model.history[0]?.description).toBe("Executed description");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips an interior-whitespace catalog Start command without an input tail", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-start-name-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = path.join(root, "home");
+      const workflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(workflowDir, { recursive: true });
+      writeFileSync(
+        path.join(workflowDir, "alpha workflow.workflow.mjs"),
+        'export const meta = { description: "Quoted alpha" };\n',
+      );
+      const spaced = buildWorkflowCatalogModel(root, root).current.find((row) => row.name === "alpha workflow")!;
+
+      const start = buildWorkflowActionPrompt({
+        action: "start",
+        row: spaced,
+        sourceState: { kind: "ready", row: spaced, path: spaced.target.path, source: "source" },
+      });
+
+      expect(start).toBe('/workflows run "alpha workflow"');
+      expect(parseRunCommand(start.slice("/workflows ".length))).toEqual({ scriptRef: "alpha workflow" });
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prefills post-code-review Start with an explicit editable review namespace", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-post-review-start-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = path.join(root, "home");
+      const workflowDir = path.join(root, ".pi", "workflows");
+      mkdirSync(workflowDir, { recursive: true });
+      writeFileSync(path.join(workflowDir, "post-code-review.workflow.mjs"), "export default () => null;\n");
+      const row = buildWorkflowCatalogModel(root, root).current.find(
+        (candidate) => candidate.name === "post-code-review",
+      )!;
+      const start = buildWorkflowActionPrompt({
+        action: "start",
+        row,
+        sourceState: { kind: "ready", row, path: row.target.path, source: "source" },
+      });
+
+      expect(start).toBe("/workflows run post-code-review --output-dir tmp/post-code-review/<review-id>");
+      expect(parseRunCommand(start.slice("/workflows ".length))).toEqual({
+        scriptRef: "post-code-review",
+        outputDir: "tmp/post-code-review/<review-id>",
+      });
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -381,9 +682,21 @@ describe("workflow operator catalog", () => {
           "\n",
         ),
       );
+      writeFileSync(
+        path.join(workflowDir, "alpha workflow.workflow.mjs"),
+        'export const meta = { description: "Explains quoted alpha" };',
+      );
 
       const named = buildWorkflowInfoBlock(root, root, "alpha");
       const namedText = named.body?.join("\n") ?? "";
+      expect(named.controls).toContain(`Run deliberately: ${workflowRunUsage("alpha")}`);
+      expect(buildWorkflowInfoBlock(root, root, "alpha workflow").controls).toContain(
+        `Run deliberately: ${workflowRunUsage('"alpha workflow"')}`,
+      );
+      expect(buildWorkflowInfoBlock(root, root, " alpha")).toMatchObject({
+        type: "WARN",
+        primary: 'Invalid saved workflow name: " alpha".',
+      });
       expect(namedText).toContain(`resolved path: ${path.join(workflowDir, "alpha.workflow.mjs")}`);
       expect(namedText).toContain("static top-level export const meta.description, meta.profile, and meta.phases only");
       expect(namedText).toContain("profile: unclassified");
@@ -406,10 +719,12 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unassigned role degrades and is recorded");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain(
-        "the packaged examples directory, currently live-smoke, plan-implement, plan, requirements-grill, review-fix, review",
+        "the packaged examples directory, currently live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-scope, post-code-review-simplicity, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
       );
       expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
+
+      expect(buildWorkflowInfoBlock(root, root).controls).toContain(`Run: ${workflowRunUsage()}`);
 
       expect(buildWorkflowInfoBlock(root, root, "unknown")).toMatchObject({
         type: "WARN",

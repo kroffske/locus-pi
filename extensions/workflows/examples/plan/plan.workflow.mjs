@@ -102,11 +102,14 @@ executed until the owner reviews \`plan.md\` and \`steps.md\` and starts executi
 themselves. The choices are: run the generated \`execute.workflow.mjs\` this run
 renders from a fixed template; or execute the frozen exact blocks through main Pi
 todo state, one Plan Implement run per step; or hand both artifacts to
-\`workflow-author\` Design for a bespoke sequential project-local workflow. Plan
-renders only the fixed template into the workflow workspace; it never writes a
-registered project workflow, and plan approval never implies \`workflow-author\`
-Build approval. Any optional reviewer after a generated step belongs to that
-Design, not to Plan execution semantics.
+\`workflow-author\` as a normal authoring request for a bespoke sequential
+project-local workflow. The ordinary continuous request writes Design, reviews
+it, and Builds matching source in the same turn. Do not inject \`Design only\` or a later
+Build-only request; only the user may separately request a pause after design.
+Plan renders only the fixed template into the workflow workspace; it never writes
+a registered project workflow, and plan approval starts neither implementation
+nor workflow authoring. Any optional reviewer after a generated step belongs to
+the bespoke design, not to Plan execution semantics.
 
 Do not create phases, reviewer loops, nested workflows, or implementation
 scripts, and do not implement any step yourself. Return a short summary after
@@ -147,7 +150,7 @@ Do not start implementation, do not create implementation todos, and do not run 
 After the owner approves, the owner picks one route:
 A. Run the generated script by explicit path: /workflows run <workflow workspace>/execute.workflow.mjs
 B. Execute steps.md through main Pi todo state with the locus-task-workflow skill: one plan-implement run per exact step.
-C. For a bespoke graph, send workflow-author: Design workflow: create a sequential project-local workflow from the approved plan.md and steps.md in this workflow workspace. Then, after reviewing the design, send: Build approved design: <exact design path>
+C. For a bespoke graph, send workflow-author: Author a sequential project-local workflow from the approved plan.md and steps.md in this workflow workspace. workflow-author performs the ordinary continuous sequence in that same turn: write Design, review it, and Build matching source. Do not add Design only or a later Build request unless the user separately asks to pause after design.
 
 Route A runs trusted JavaScript with full filesystem, subprocess, and network authority. Read execute.workflow.mjs before running it.`;
 }

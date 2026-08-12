@@ -218,8 +218,15 @@ describe("curated workflow declarations", () => {
       (name) => readWorkflowMeta(packagedWorkflowPath(name)).phases.length === 0,
     );
 
-    // live-smoke has a single stage; declaring it would be ceremony, and it must
-    // stay valid without a declaration.
-    expect(undeclared).toEqual(["live-smoke"]);
+    // These entries each have one implicit stage; declaring it would be ceremony.
+    // The post-code-review parent owns and declares their orchestration phases.
+    expect(undeclared).toEqual([
+      "live-smoke",
+      "post-code-review-boundaries",
+      "post-code-review-contracts",
+      "post-code-review-scope",
+      "post-code-review-simplicity",
+      "post-code-review-synthesis",
+    ]);
   });
 });

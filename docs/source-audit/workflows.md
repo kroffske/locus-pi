@@ -550,8 +550,11 @@ operator-facing `workflow-author` Build preferably renders complete canonical
 new `skills/locus-pi-workflows/references/plan-to-sequential-workflow.md` card
 keeps one complete task per sequential implementer and allows one visibly
 separate reviewer after each task. Plan approval does not replace workflow
-Design -> explicit owner approval -> Build, and no file was added under the
-Package workflow registry.
+authoring's continuous Design -> review -> Build sequence: a raw request first
+writes and reviews `.pi/workflows/<name>.design.md`, then builds the matching
+source in the same turn. Only explicit `Design only` wording pauses after
+design; `Build design:` and `Build approved design:` remain Build-only
+compatibility forms. No file was added under the Package workflow registry.
 
 Package `plan` gained a third `scripting` agent that renders
 `execute.workflow.mjs` into the run's workflow workspace from the fixed template

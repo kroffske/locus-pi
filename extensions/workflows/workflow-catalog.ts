@@ -14,7 +14,9 @@ import {
   listWorkflowCatalogTargets,
   type ResolvedWorkflowTarget,
 } from "./runtime/workflow-runner.js";
+import { isWorkflowSavedName } from "./runtime/workflow-saved-name.js";
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
+import { buildWorkflowRunCommand, formatWorkflowCommandToken, workflowRunUsage } from "./command-parser.js";
 
 const RECENT_WORKFLOW_LIMIT = 5;
 const WORKFLOW_METADATA_SCAN_BYTES = 64 * 1024;
@@ -161,7 +163,7 @@ export function buildWorkflowCatalogBlockFromModel(
       primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
       body: compactBody.lines,
       metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] History"],
-      controls: ["Run: /workflows run <name|path> · Filter: /workflows list <query>"],
+      controls: [`Run: ${workflowRunUsage()} · Filter: /workflows list <query>`],
     };
   }
 
@@ -197,11 +199,7 @@ export function buildWorkflowCatalogBlockFromModel(
     primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
     body,
     metadata: [WORKFLOW_SOURCE_LEGEND],
-    controls: [
-      "Run: /workflows run <name|path> [input]",
-      "Filter: /workflows list <query>",
-      "Status: /workflows status",
-    ],
+    controls: [`Run: ${workflowRunUsage()}`, "Filter: /workflows list <query>", "Status: /workflows status"],
   };
 }
 
@@ -258,7 +256,7 @@ export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string
         `Current workflow start requires a ready source; received ${JSON.stringify(intent.sourceState.kind)}.`,
       );
     }
-    return `/workflows run ${row.target.ref}`;
+    return buildWorkflowRunCommand(row.target);
   }
   let request: string;
   if (row.kind === "current") {
@@ -285,9 +283,20 @@ export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string
 
 /** Passive source-backed explanation. It reads static metadata but never imports workflow code. */
 export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: string, name?: string): OperatorBlock {
+  const requested = name;
+  if (requested !== undefined && !isWorkflowSavedName(requested)) {
+    return {
+      type: "WARN",
+      subject: "Workflow info",
+      primary: `Invalid saved workflow name: ${JSON.stringify(requested)}.`,
+      body: [
+        "Saved workflow names are exact; whitespace and other invalid characters are never trimmed or reinterpreted.",
+      ],
+      controls: ["Use /workflows list to inspect current names."],
+    };
+  }
   const model = buildWorkflowCatalogModel(projectRoot, workingDirectory);
-  const requested = name?.trim();
-  if (requested !== undefined && requested !== "") {
+  if (requested !== undefined) {
     const row = model.current.find((candidate) => candidate.name === requested);
     if (row === undefined) {
       return {
@@ -312,7 +321,10 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
         `resolved path: ${row.target.path}`,
       ],
       metadata: [WORKFLOW_SOURCE_LEGEND],
-      controls: ["Inspect: /workflows list", `Run deliberately: /workflows run ${row.name}`],
+      controls: [
+        "Inspect: /workflows list",
+        `Run deliberately: ${workflowRunUsage(formatWorkflowCommandToken(row.name))}`,
+      ],
     };
   }
   return {
@@ -324,7 +336,7 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
     controls: [
       "Browse: /workflows list [query]",
       "Inspect one: /workflows info <exact-name>",
-      "Run: /workflows run <name|path> [input]",
+      `Run: ${workflowRunUsage()}`,
       "History: /workflows status [runId]",
     ],
   };
@@ -347,7 +359,6 @@ function declaredPhaseLines(phases: readonly WorkflowMetaPhase[]): string[] {
 
 function workflowContractLines(projectRoot: string, workingDirectory: string): string[] {
   return [
-    "commands: list [query] browses; info [name] explains; run <name|path> executes only after explicit command use; status [runId] reads persisted progress",
     "trust: executed workflow files are reviewed JavaScript with full Pi host Node.js/module access; inspection and info are inert text/static-metadata reads",
     "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
     "agent models: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role degrades and is recorded, and agent_end reports the read-back executedModel",

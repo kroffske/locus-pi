@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowArtifactStore } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   createWorkflowReplayController,
   workflowReplayFile,
@@ -27,6 +28,10 @@ function temporaryRoot(prefix = "workflow-fusion-"): string {
   const root = mkdtempSync(path.join(tmpdir(), prefix));
   roots.push(root);
   return root;
+}
+
+function temporaryRunDir(prefix: string, runId: string): string {
+  return ensureWorkflowRunDir(temporaryRoot(prefix), runId);
 }
 
 function success(request: WorkflowAgentRequest, text: string): WorkflowAgentResult {
@@ -361,7 +366,7 @@ describe("dsl.fusion", () => {
   });
 
   it("replays the complete fan-out and judge without spawning fresh children", async () => {
-    const sourceDir = temporaryRoot("workflow-fusion-replay-source-");
+    const sourceDir = temporaryRunDir("workflow-fusion-replay-source-", "fusion-replay-source");
     const sourceController = createWorkflowReplayController({ runDir: sourceDir });
     let sourceCalls = 0;
     const source = createWorkflowRuntime({
@@ -383,7 +388,7 @@ describe("dsl.fusion", () => {
     let resumedCalls = 0;
     let resumedPreflights = 0;
     const resumedController = createWorkflowReplayController({
-      runDir: temporaryRoot("workflow-fusion-replay-resumed-"),
+      runDir: temporaryRunDir("workflow-fusion-replay-resumed-", "fusion-replay-resumed"),
       recorded: sourceEntries,
     });
     const resumed = createWorkflowRuntime({

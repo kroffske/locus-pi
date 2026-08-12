@@ -7,30 +7,32 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import {
-  closeSync,
-  constants as fsConstants,
-  existsSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { WorkflowArtifactRef, WorkflowContinuation } from "./workflow-artifacts.js";
-import { workflowRunDir } from "./workflow-journal.js";
-import { readWorkflowRunSummary } from "./workflow-journal.js";
+import {
+  readWorkflowRunResult,
+  readWorkflowRunSummary,
+  workflowPersistedResultInvalidity,
+  workflowRunDir,
+} from "./workflow-journal.js";
 import { projectWorkflowDisposition, workflowResultFile } from "./workflow-result.js";
-import { readWorkflowRunTextFile, workflowRunRuntimeDir } from "./workflow-run-layout.js";
+import {
+  readWorkflowRunTextFile,
+  removeWorkflowRunFile,
+  renameWorkflowRunFile,
+  workflowRunFileExists,
+  workflowRunFileMtimeMs,
+  workflowRunRuntimeFile,
+  writeWorkflowRunFile,
+} from "./workflow-run-layout.js";
 import {
   assessWorkflowSourceIdentity,
   sha256WorkflowBytes,
   type WorkflowScriptIdentity,
 } from "./workflow-script-identity.js";
+import { parseWorkflowTargetIdentity, workflowTargetIdentityKey } from "./workflow-saved-name.js";
+import { isWorkflowPathWithinRoot } from "./workflow-output.js";
 
 export const WORKFLOW_OPERATOR_HANDOFF_VERSION = "locus.workflow.operator-handoff.v1" as const;
 export const WORKFLOW_HANDOFF_CLAIM_VERSION = "locus.workflow.operator-handoff-claim.v1" as const;
@@ -256,11 +258,15 @@ export function normalizeWorkflowOperatorHandoffEnvelope(value: unknown): Workfl
  * Parse the handoff from an already parsed result envelope. Absence is the only
  * legacy state; a present malformed/future field is always invalid.
  */
-export function readWorkflowOperatorHandoff(value: unknown): WorkflowOperatorHandoffRead {
+export function readWorkflowOperatorHandoff(value: unknown, projectRoot?: string): WorkflowOperatorHandoffRead {
   if (!isRecord(value)) return { status: "invalid", message: "Workflow result envelope must be an object." };
   if (!Object.prototype.hasOwnProperty.call(value, "operatorHandoff")) return { status: "absent" };
   try {
-    const handoff = normalizeWorkflowOperatorHandoffEnvelope(value.operatorHandoff);
+    const parsedHandoff = normalizeWorkflowOperatorHandoffEnvelope(value.operatorHandoff);
+    const handoff: WorkflowOperatorHandoffEnvelope = {
+      ...parsedHandoff,
+      target: normalizeTarget(parsedHandoff.target, false, projectRoot),
+    };
     if (value.runId !== handoff.originRunId) {
       throw new Error("operatorHandoff originRunId does not match the result runId");
     }
@@ -273,7 +279,9 @@ export function readWorkflowOperatorHandoff(value: unknown): WorkflowOperatorHan
     if (disposition.status !== "awaiting_operator") {
       throw new Error("operatorHandoff requires an exact awaiting_operator disposition with bounded detail");
     }
-    if (!sameTarget(normalizeTarget(value.target, true), handoff.target)) {
+    if (
+      !sameTarget(normalizeTarget(value.target, true, projectRoot), normalizeTarget(handoff.target, false, projectRoot))
+    ) {
       throw new Error("operatorHandoff target identity does not match the result target");
     }
     if (!sameScriptIdentity(normalizeScriptIdentity(value.scriptIdentity, true), handoff.scriptIdentity)) {
@@ -294,20 +302,22 @@ export function readWorkflowOperatorHandoff(value: unknown): WorkflowOperatorHan
 export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId: string): WorkflowOperatorHandoffRead {
   try {
     assertSafeComponent(runId, "workflow runId");
-    const runDir = assertCanonicalRunDirectory(projectRoot, runId);
+    const runDir = workflowRunDir(projectRoot, runId);
     const resultPath = workflowResultFile(runDir);
     // A run directory with no result.json has not published a terminal result
     // yet — it is still executing, or it was interrupted. Such a run cannot
     // carry an operator handoff, so absence is the honest answer; calling it
     // invalid would surface every live or abandoned run as a corrupt-evidence
     // warning on the operator surfaces that scan run history.
-    // lstat, not existsSync: a dangling symlink must stay an invalid file
-    // rather than masquerade as an absent one.
-    if (lstatSync(resultPath, { throwIfNoEntry: false }) === undefined) return { status: "absent" };
-    assertRegularConfinedFile(runDir, resultPath, "Workflow result");
-    return readWorkflowOperatorHandoff(JSON.parse(readWorkflowRunTextFile(runDir, resultPath)) as unknown);
+    if (!workflowRunFileExists(runDir, resultPath)) return { status: "absent" };
+    const persisted = readWorkflowRunResult(projectRoot, runId);
+    const invalidity = workflowPersistedResultInvalidity(persisted);
+    if (invalidity !== undefined) {
+      return { status: "invalid", message: `Workflow result has malformed persisted metadata (${invalidity}).` };
+    }
+    return readWorkflowOperatorHandoff(JSON.parse(readWorkflowRunTextFile(runDir, resultPath)) as unknown, projectRoot);
   } catch (error) {
-    return { status: "invalid", message: errorMessage(error) };
+    return { status: "invalid", message: handoffFileErrorMessage(error, "Workflow result") };
   }
 }
 
@@ -325,6 +335,7 @@ export function assertWorkflowHandoffContinuationEligibility(
     target: WorkflowOperatorTargetIdentity;
     scriptIdentity: WorkflowScriptIdentity | WorkflowOperatorScriptIdentity;
   },
+  projectRoot?: string,
 ): void {
   const normalized = normalizeWorkflowOperatorHandoffEnvelope(handoff);
   if (normalized.scriptIdentity.identityCoverage !== "self-contained-static") {
@@ -332,8 +343,9 @@ export function assertWorkflowHandoffContinuationEligibility(
       "Workflow handoff is not actionable because its script identity coverage is not self-contained-static",
     );
   }
-  const target = normalizeTarget(current.target, true);
-  if (!sameTarget(normalized.target, target)) {
+  const handoffTarget = normalizeTarget(normalized.target, false, projectRoot);
+  const target = normalizeTarget(current.target, true, projectRoot);
+  if (!sameTarget(handoffTarget, target)) {
     throw new Error("Workflow handoff target has changed; start the workflow again");
   }
   const identity = normalizeScriptIdentity(current.scriptIdentity, true);
@@ -403,7 +415,7 @@ export function assertWorkflowHandoffClaimEligibility(
   if (persisted.handoff.handoffId !== claim.handoffId) {
     throw new Error("Workflow handoff claim does not match the persisted source handoff");
   }
-  assertWorkflowHandoffContinuationEligibility(persisted.handoff, current);
+  assertWorkflowHandoffContinuationEligibility(persisted.handoff, current, claim.projectRoot);
 }
 
 export function claimWorkflowOperatorHandoff(
@@ -417,13 +429,13 @@ export function claimWorkflowOperatorHandoff(
     normalized = requirePersistedHandoff(projectRoot, handoff);
     paths = claimPaths(projectRoot, normalized.originRunId);
   } catch (error) {
-    return { status: "invalid", message: errorMessage(error) };
+    return { status: "invalid", message: handoffFileErrorMessage(error, "Workflow handoff claim sidecar") };
   }
   const now = options.now?.() ?? new Date();
   const lock = acquireClaimLock(paths, now, options.lockStaleMs);
   if (lock === undefined) return { status: "active", message: "Workflow handoff claim transition is active." };
   try {
-    const existing = readClaimState(paths.claimPath);
+    const existing = readClaimState(paths.runDir, paths.claimPath);
     if (existing.status === "invalid") return existing;
     if (existing.status === "ready") {
       if (!claimMatchesHandoff(existing.state, normalized)) {
@@ -437,7 +449,7 @@ export function claimWorkflowOperatorHandoff(
         childIsRetryable ||
         (existing.state.childRunId === undefined && now.getTime() - Date.parse(existing.state.claimedAt) >= staleMs)
       ) {
-        unlinkClaimState(paths.claimPath, lock);
+        unlinkClaimState(paths.runDir, paths.claimPath, lock);
       } else {
         return { status: "active", state: existing.state, message: "Workflow handoff already has an active claim." };
       }
@@ -449,7 +461,7 @@ export function claimWorkflowOperatorHandoff(
       claimId: randomUUID(),
       claimedAt: now.toISOString(),
     };
-    writeClaimStateAtomic(paths.claimPath, state, lock);
+    writeClaimStateAtomic(paths, state, lock);
     return {
       status: "claimed",
       claim: {
@@ -472,7 +484,8 @@ export function readWorkflowHandoffClaim(
 ): WorkflowHandoffClaimRead {
   try {
     const normalized = requirePersistedHandoff(projectRoot, handoff);
-    const read = readClaimState(claimPaths(projectRoot, normalized.originRunId).claimPath);
+    const paths = claimPaths(projectRoot, normalized.originRunId);
+    const read = readClaimState(paths.runDir, paths.claimPath);
     if (read.status === "ready" && !claimMatchesHandoff(read.state, normalized)) {
       return { status: "invalid", message: "Workflow handoff claim does not match the persisted handoff." };
     }
@@ -492,7 +505,7 @@ export function bindWorkflowHandoffClaim(
   const lock = acquireClaimLock(paths, new Date());
   if (lock === undefined) throw new Error("Workflow handoff claim transition is active.");
   try {
-    const read = readClaimState(paths.claimPath);
+    const read = readClaimState(paths.runDir, paths.claimPath);
     if (read.status !== "ready") {
       throw new Error(read.status === "invalid" ? read.message : "Workflow handoff claim is missing.");
     }
@@ -502,7 +515,7 @@ export function bindWorkflowHandoffClaim(
     }
     if (read.state.childRunId === childRunId) return read.state;
     const state = { ...read.state, childRunId };
-    writeClaimStateAtomic(paths.claimPath, state, lock);
+    writeClaimStateAtomic(paths, state, lock);
     return state;
   } finally {
     releaseClaimLock(lock);
@@ -515,11 +528,11 @@ export function releaseWorkflowHandoffClaim(claim: WorkflowHandoffClaimLease): b
   const lock = acquireClaimLock(paths, new Date());
   if (lock === undefined) throw new Error("Workflow handoff claim transition is active.");
   try {
-    const read = readClaimState(paths.claimPath);
+    const read = readClaimState(paths.runDir, paths.claimPath);
     if (read.status === "absent") return false;
     if (read.status === "invalid") throw new Error(read.message);
     assertClaimOwnedByLease(read.state, claim);
-    unlinkClaimState(paths.claimPath, lock);
+    unlinkClaimState(paths.runDir, paths.claimPath, lock);
     return true;
   } finally {
     releaseClaimLock(lock);
@@ -617,19 +630,51 @@ function normalizeQuestionId(value: unknown): string {
   return value;
 }
 
-function normalizeTarget(value: unknown, allowRunnerPath = false): WorkflowOperatorTargetIdentity {
+function normalizeTarget(
+  value: unknown,
+  allowRunnerPath = false,
+  projectRoot?: string,
+): WorkflowOperatorTargetIdentity {
   const record = requireExactRecord(
     value,
     ["kind", "ref", "source"],
     "workflow target",
     allowRunnerPath ? ["path"] : [],
   );
-  if (record.kind !== "name" && record.kind !== "scriptPath") throw new Error("Workflow target kind is invalid");
-  if (typeof record.ref !== "string" || record.ref.trim() === "") throw new Error("Workflow target ref is invalid");
-  if (record.source !== "project" && record.source !== "personal" && record.source !== "package") {
-    throw new Error("Workflow target source is invalid");
+  // The exact-record check above owns runner-only `path` presence. Generic
+  // readers without project context retain raw refs; persisted readers pass
+  // the selected project root so physical identity is proven before use.
+  const parsed = parseWorkflowTargetIdentity(record);
+  if (projectRoot !== undefined && parsed.kind === "scriptPath" && parsed.source === "project") {
+    const candidate = path.resolve(projectRoot, parsed.ref);
+    const root = path.resolve(projectRoot);
+    try {
+      const physicalRoot = realpathSync(root);
+      // `realpathSync()` may expose macOS `/private` aliases. A persisted
+      // physical ref must therefore be checked against both lexical spellings
+      // before its own realpath is resolved; this keeps repeated normalization
+      // stable without allowing an external absolute path.
+      if (!isWorkflowPathWithinRoot(root, candidate) && !isWorkflowPathWithinRoot(physicalRoot, candidate)) {
+        throw new Error("Workflow target path escapes the project root.");
+      }
+      const physicalPath = realpathSync(candidate);
+      if (!isWorkflowPathWithinRoot(physicalRoot, physicalPath)) {
+        throw new Error("Workflow target path escapes the project root through a symlink.");
+      }
+      return { ...parsed, ref: physicalPath };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("escapes the project root")) throw error;
+      // Removed historical paths remain represented by their raw ref and are
+      // rejected by the source resolver before continuation launch.
+    }
   }
-  return { kind: record.kind, ref: record.ref, source: record.source };
+  if (allowRunnerPath && parsed.kind === "scriptPath" && typeof record.path === "string") {
+    if (!path.isAbsolute(record.path)) throw new Error("Workflow target path must be absolute.");
+    if (path.basename(record.path) !== path.basename(parsed.ref)) {
+      throw new Error("Workflow target path basename does not match scriptPath ref.");
+    }
+  }
+  return parsed;
 }
 
 function normalizeScriptIdentity(value: unknown, allowRunnerFields = false): WorkflowOperatorScriptIdentity {
@@ -720,36 +765,58 @@ function requirePersistedHandoff(
       persisted.status === "invalid" ? persisted.message : "Workflow run has no actionable operator handoff.",
     );
   }
-  if (JSON.stringify(persisted.handoff) !== JSON.stringify(normalized)) {
+  if (!sameHandoffEnvelope(persisted.handoff, normalized, projectRoot)) {
     throw new Error("Workflow handoff does not match immutable source result evidence.");
   }
   return normalized;
 }
 
+/**
+ * Compare the immutable handoff envelope while treating target refs as an
+ * identity projection. Persisted reads may replace a project scriptPath ref
+ * with its confined physical path; direct callers intentionally retain the
+ * raw ref for display and must still be able to claim that handoff.
+ */
+function sameHandoffEnvelope(
+  persisted: WorkflowOperatorHandoffEnvelope,
+  candidate: WorkflowOperatorHandoffEnvelope,
+  projectRoot: string,
+): boolean {
+  if (
+    !sameTarget(
+      normalizeTarget(persisted.target, false, projectRoot),
+      normalizeTarget(candidate.target, false, projectRoot),
+    )
+  ) {
+    return false;
+  }
+  const { target: _persistedTarget, ...persistedWithoutTarget } = persisted;
+  const { target: _candidateTarget, ...candidateWithoutTarget } = candidate;
+  return JSON.stringify(persistedWithoutTarget) === JSON.stringify(candidateWithoutTarget);
+}
+
 interface WorkflowHandoffClaimPaths {
+  runDir: string;
   claimPath: string;
   lockPath: string;
 }
 
 function claimPaths(projectRoot: string, runId: string): WorkflowHandoffClaimPaths {
-  const runDir = assertCanonicalRunDirectory(projectRoot, runId);
+  const runDir = workflowRunDir(projectRoot, runId);
   return {
-    claimPath: path.join(workflowRunRuntimeDir(runDir), HANDOFF_CLAIM_FILE),
-    lockPath: path.join(workflowRunRuntimeDir(runDir), HANDOFF_CLAIM_LOCK_FILE),
+    runDir,
+    claimPath: workflowRunRuntimeFile(runDir, HANDOFF_CLAIM_FILE),
+    lockPath: workflowRunRuntimeFile(runDir, HANDOFF_CLAIM_LOCK_FILE),
   };
 }
 
-function readClaimState(claimPath: string): WorkflowHandoffClaimRead {
-  if (!existsSync(claimPath)) return { status: "absent" };
+function readClaimState(runDir: string, claimPath: string): WorkflowHandoffClaimRead {
   try {
-    const stat = lstatSync(claimPath);
-    if (stat.isSymbolicLink() || !stat.isFile()) {
-      throw new Error("Workflow handoff claim sidecar is not a regular non-symlink file.");
-    }
-    const parsed: unknown = JSON.parse(readFileSync(claimPath, "utf8"));
+    if (!workflowRunFileExists(runDir, claimPath)) return { status: "absent" };
+    const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, claimPath));
     return { status: "ready", state: normalizeClaimState(parsed) };
   } catch (error) {
-    return { status: "invalid", message: errorMessage(error) };
+    return { status: "invalid", message: handoffFileErrorMessage(error, "Workflow handoff claim sidecar") };
   }
 }
 
@@ -778,22 +845,26 @@ function normalizeClaimState(value: unknown): WorkflowHandoffClaimState {
   };
 }
 
-function writeClaimStateAtomic(claimPath: string, state: WorkflowHandoffClaimState, lock: ClaimLock): void {
+function writeClaimStateAtomic(
+  paths: WorkflowHandoffClaimPaths,
+  state: WorkflowHandoffClaimState,
+  lock: ClaimLock,
+): void {
   const normalized = normalizeClaimState(state);
-  const tempPath = `${claimPath}.${normalized.claimId}.${randomUUID()}.tmp`;
-  let fd: number | undefined;
+  const tempPath = workflowRunRuntimeFile(
+    paths.runDir,
+    `${HANDOFF_CLAIM_FILE}.${normalized.claimId}.${randomUUID()}.tmp`,
+  );
   try {
-    fd = openSync(tempPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | noFollowFlag(), 0o600);
-    writeFileSync(fd, `${JSON.stringify(normalized)}\n`, "utf8");
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
+    writeWorkflowRunFile(paths.runDir, tempPath, `${JSON.stringify(normalized)}\n`, {
+      durable: true,
+      exclusive: true,
+    });
     assertClaimLockOwned(lock);
-    renameSync(tempPath, claimPath);
+    renameWorkflowRunFile(paths.runDir, tempPath, paths.claimPath);
   } finally {
-    if (fd !== undefined) closeSync(fd);
     try {
-      if (existsSync(tempPath)) unlinkSync(tempPath);
+      if (workflowRunFileExists(paths.runDir, tempPath)) removeWorkflowRunFile(paths.runDir, tempPath);
     } catch {
       // The canonical state either won the rename or the caller receives the
       // original write error. Temp cleanup must not hide it.
@@ -802,6 +873,7 @@ function writeClaimStateAtomic(claimPath: string, state: WorkflowHandoffClaimSta
 }
 
 interface ClaimLock {
+  runDir: string;
   path: string;
   ownerToken: string;
 }
@@ -824,31 +896,18 @@ function acquireClaimLock(
       ownerToken: randomUUID(),
       acquiredAt: now.toISOString(),
     };
-    let fd: number | undefined;
     try {
-      fd = openSync(
-        paths.lockPath,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | noFollowFlag(),
-        0o600,
-      );
-      writeFileSync(fd, `${JSON.stringify(state)}\n`, "utf8");
-      fsyncSync(fd);
-      closeSync(fd);
-      return { path: paths.lockPath, ownerToken: state.ownerToken };
+      writeWorkflowRunFile(paths.runDir, paths.lockPath, `${JSON.stringify(state)}\n`, {
+        durable: true,
+        exclusive: true,
+      });
+      return { runDir: paths.runDir, path: paths.lockPath, ownerToken: state.ownerToken };
     } catch (error) {
-      if (fd !== undefined) closeSync(fd);
       if (!isCode(error, "EEXIST")) throw error;
-      let stat;
-      try {
-        stat = lstatSync(paths.lockPath);
-      } catch (statError) {
-        if (isCode(statError, "ENOENT")) continue;
-        throw statError;
-      }
-      if (stat.isSymbolicLink() || !stat.isFile())
-        throw new Error("Workflow handoff claim lock is not a regular file.");
-      if (now.getTime() - stat.mtimeMs < staleMs) return undefined;
-      unlinkSync(paths.lockPath);
+      const lockMtime = workflowRunFileMtimeMs(paths.runDir, paths.lockPath);
+      if (lockMtime === undefined) continue;
+      if (now.getTime() - lockMtime < staleMs) return undefined;
+      removeWorkflowRunFile(paths.runDir, paths.lockPath);
     }
   }
   return undefined;
@@ -856,9 +915,9 @@ function acquireClaimLock(
 
 function releaseClaimLock(lock: ClaimLock): void {
   try {
-    const state = readClaimLockState(lock.path);
+    const state = readClaimLockState(lock.runDir, lock.path);
     if (state === undefined || state.ownerToken !== lock.ownerToken) return;
-    unlinkSync(lock.path);
+    removeWorkflowRunFile(lock.runDir, lock.path);
   } catch (error) {
     if (!isCode(error, "ENOENT")) {
       // A malformed or replaced lock is not ours to remove. Claim mutation has
@@ -867,25 +926,21 @@ function releaseClaimLock(lock: ClaimLock): void {
   }
 }
 
-function unlinkClaimState(claimPath: string, lock: ClaimLock): void {
+function unlinkClaimState(runDir: string, claimPath: string, lock: ClaimLock): void {
   assertClaimLockOwned(lock);
-  unlinkSync(claimPath);
+  removeWorkflowRunFile(runDir, claimPath);
 }
 
 function assertClaimLockOwned(lock: ClaimLock): void {
-  const state = readClaimLockState(lock.path);
+  const state = readClaimLockState(lock.runDir, lock.path);
   if (state === undefined || state.ownerToken !== lock.ownerToken) {
     throw new Error("Workflow handoff claim lock ownership was lost before mutation.");
   }
 }
 
-function readClaimLockState(lockPath: string): ClaimLockState | undefined {
-  if (!existsSync(lockPath)) return undefined;
-  const stat = lstatSync(lockPath);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error("Workflow handoff claim lock is not a regular file.");
-  }
-  const value: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+function readClaimLockState(runDir: string, lockPath: string): ClaimLockState | undefined {
+  if (!workflowRunFileExists(runDir, lockPath)) return undefined;
+  const value: unknown = JSON.parse(readWorkflowRunTextFile(runDir, lockPath));
   const record = requireExactRecord(value, ["acquiredAt", "ownerToken", "version"], "workflow handoff claim lock");
   if (record.version !== WORKFLOW_HANDOFF_CLAIM_LOCK_VERSION) {
     throw new Error("Workflow handoff claim lock version is invalid.");
@@ -899,45 +954,6 @@ function readClaimLockState(lockPath: string): ClaimLockState | undefined {
     ownerToken: record.ownerToken,
     acquiredAt: record.acquiredAt,
   };
-}
-
-function assertCanonicalRunDirectory(projectRoot: string, runId: string): string {
-  const lexicalProjectRoot = path.resolve(projectRoot);
-  const runDir = path.resolve(workflowRunDir(lexicalProjectRoot, runId));
-  const relative = path.relative(lexicalProjectRoot, runDir);
-  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error("Workflow run directory escapes the project root.");
-  }
-  let current = lexicalProjectRoot;
-  for (const component of relative.split(path.sep)) {
-    current = path.join(current, component);
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new Error("Workflow run directory chain must contain only regular directories.");
-    }
-  }
-  const physicalProjectRoot = realpathSync(lexicalProjectRoot);
-  const physicalRunDir = realpathSync(runDir);
-  const physicalRelative = path.relative(physicalProjectRoot, physicalRunDir);
-  if (physicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(physicalRelative)) {
-    throw new Error("Workflow run directory escapes the physical project root.");
-  }
-  return runDir;
-}
-
-function assertRegularConfinedFile(root: string, file: string, label: string): void {
-  const relative = path.relative(path.resolve(root), path.resolve(file));
-  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`${label} escapes its run directory.`);
-  }
-  const stat = lstatSync(file);
-  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} is not a regular non-symlink file.`);
-  const physicalRoot = realpathSync(root);
-  const physicalFile = realpathSync(file);
-  const physicalRelative = path.relative(physicalRoot, physicalFile);
-  if (physicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(physicalRelative)) {
-    throw new Error(`${label} escapes its physical run directory.`);
-  }
 }
 
 function stableWorkflowHandoffId(runId: string): string {
@@ -972,7 +988,7 @@ function claimMatchesHandoff(state: WorkflowHandoffClaimState, handoff: Workflow
 }
 
 function sameTarget(left: WorkflowOperatorTargetIdentity, right: WorkflowOperatorTargetIdentity): boolean {
-  return left.kind === right.kind && left.ref === right.ref && left.source === right.source;
+  return workflowTargetIdentityKey(left) === workflowTargetIdentityKey(right);
 }
 
 function sameScriptIdentity(left: WorkflowOperatorScriptIdentity, right: WorkflowOperatorScriptIdentity): boolean {
@@ -1048,14 +1064,15 @@ function boundedDuration(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
-function noFollowFlag(): number {
-  return typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
-}
-
 function isCode(error: unknown, code: string): boolean {
   return isRecord(error) && error.code === code;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim() !== "" ? error.message : String(error);
+}
+
+function handoffFileErrorMessage(error: unknown, label: string): string {
+  const message = errorMessage(error);
+  return message.startsWith("Workflow run path is unsafe:") ? `${label} is not a regular non-symlink file.` : message;
 }

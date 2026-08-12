@@ -16,7 +16,7 @@ This skill has two jobs: operate existing workflows and author new ones.
 ```text
 /workflows list
 /workflows info <name>
-/workflows run <name|path> [semantic text input]
+/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]
 /workflows status <runId>
 /workflows result <runId|last>
 /workflows continue <runId>
@@ -35,36 +35,41 @@ then use `/workflows continue <runId>` to answer the named handoff. Use
 `/workflows stop [runId|last]` for cancellation; stopping is not a continuation
 answer and terminal cancellation follows runtime settlement.
 
-## Authoring is two explicit turns
+## Authoring is continuous by default
 
-Never turn a raw request directly into `.workflow.mjs`.
+A plain request to create, design, write, or author a workflow runs one visible
+sequence in the same turn:
 
-1. Send the requirement to the bundled `workflow-author` agent as a Design
-   request. It writes only `.pi/workflows/<name>.design.md`.
-2. Show that Markdown design to the user. Stop for explicit approval or revision.
-3. Only the exact request `Build approved design: <exact design path>` authorizes
-   the agent to create the matching `.workflow.mjs`. Build validates identity and
-   module load, but does not run the workflow.
+1. Send the requirement to the bundled `workflow-author` agent.
+2. Write `.pi/workflows/<name>.design.md` before any source.
+3. Review the design against the request, selected pattern, graph contract, and
+   standard source profile. Revise the design until the review finds no material
+   mismatch.
+4. Build the matching `.pi/workflows/<name>.workflow.mjs` from those reviewed
+   design bytes.
+5. Validate source identity, module load, graph correspondence, and standard
+   source shape. Do not run the workflow unless the user separately asks to run it.
 
-That command approves the design bytes present at the exact path when Build
-reads it. This protocol has no separate approval token or stored digest; review
-the current file immediately before issuing Build.
+The design remains the readable source of truth and must exist before JavaScript;
+continuous authoring removes only the mandatory human pause between them. Stop
+after the design only when the user explicitly asks for `design only`, `pause
+after design`, `do not build`, or equivalent wording. A user may also request the
+build-only compatibility route with `Build approved design: <exact design path>`
+or `Build design: <exact design path>`.
 
-Use `/agent run workflow-author` or the `task` tool. A plain authoring request is
-always interpreted as Design, never Build. Approval cannot be inferred from
-“create a workflow”, previous conversation, or the existence of a design file.
+Use `/agent run workflow-author` or the `task` tool. If design review or Build
+discovers a material algorithm mismatch, update and re-review the design before
+building; never hide the change in source. Ask the user only when resolving the
+mismatch would change the requested result, not for routine authoring choices.
 
-If the user revises the graph, update the design and ask again. If Build discovers
-a material algorithm change, return to Design instead of hiding the change in
-source.
-
-An owner-approved `plan.md` plus its canonical `steps.md` may be Design input for an
+An owner-approved `plan.md` plus its canonical `steps.md` may be authoring input for an
 optional sequential project-local workflow. Read
 [`references/plan-to-sequential-workflow.md`](./references/plan-to-sequential-workflow.md).
 Preserve every complete task block: Build renders those blocks as literal
 author-known prompts in generated source, or uses caller `items` only when a
-programmatic embedder owns the frozen list. Plan approval never implies workflow
-Build approval.
+programmatic embedder owns the frozen list. Plan approval alone does not start
+workflow authoring; once the user requests that workflow, the ordinary continuous
+design -> review -> build sequence applies unless they explicitly request design only.
 
 The Package `plan` workflow already renders `execute.workflow.mjs` into its own
 workflow workspace from a fixed template — one literal implementation node per
@@ -100,7 +105,7 @@ Project source: <live-read drift policy>
 Worst-case calls: <exact formula including saved children>
 Failure exits: <fail-closed exits>
 Mechanisms: <parallel barriers, choices, loops, human gates; no agent-count penalty>
-Status: DRAFT — waiting for operator approval.
+Status: REVIEWED — ready for build.
 ```
 
 Count orchestration machinery, not agents. More agents are fine when the task
@@ -227,6 +232,12 @@ the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
 work on retry; parent or child source changes invalidate them. Saved children
 cannot nest, and source cycles fail before model work.
 
+Choose the child target deliberately: `name` uses normal Project → User →
+Package precedence, `scriptPath` binds one project-relative source, and
+`packageName` binds one exact installed Package entry. Use `packageName` for a
+tracked multi-workflow Package bundle whose child must not be replaced by a
+higher-precedence project or personal shadow.
+
 Run evidence remains under `.pi/locus-pi/runs/<runId>/` and contains only
 `outputs/` plus `runtime/`. Durable user files belong under the project-local
 workspace returned by `dsl.outputDir()`, defaulting to
@@ -312,18 +323,24 @@ a large structured plan.
 
 ## Build checks
 
-Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the approved
+Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the reviewed
 design, then checks:
 
 - `meta.name` matches both design and filename;
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
 - the module loads and exports `meta` plus a default function;
-- source exposes the approved nodes, edges, handoffs, bounds, and failure exits;
-- no unapproved node or standard-profile bad smell appeared.
-- `npx @kroffske/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs` reports no standard source-shape violations
-  from the project containing the built file.
+- source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
+- no design-absent node or standard-profile bad smell appeared.
+- the exact built file passes the source checker: in a locus-pi source checkout
+  prefer `./bin/locus-pi check-workflow-source
+.pi/workflows/<name>.workflow.mjs`; otherwise use
+  `npx @kroffske/locus-pi check-workflow-source
+.pi/workflows/<name>.workflow.mjs` from the project containing the built file.
+
+A missing checker command, non-zero checker exit, failed module import, or
+design/source mismatch means Build failed. Repair and rerun; never return a
+successful Build claim after a skipped or failed check.
 
 Build does not run. The caller runs it separately and evaluates the primary
 artifact against live repository evidence.

@@ -10,6 +10,7 @@ import type {
   WorkflowConsumedTextArtifact,
 } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   createWorkflowRuntime,
   SchemaValidationError,
@@ -100,7 +101,8 @@ function runtimeWith(
   options: { runId?: string; consumed?: Map<string, WorkflowConsumedTextArtifact> } = {},
 ) {
   const runId = options.runId ?? "review-test";
-  const runDir = mkdtempSync(path.join(tmpdir(), "locus-review-workflow-"));
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "locus-review-workflow-"));
+  const runDir = ensureWorkflowRunDir(projectRoot, runId);
   const resourceLoader = createWorkflowResourceLoader({
     workflowSourcePath: workflowPath,
     runDir,
@@ -149,7 +151,7 @@ function runtimeWith(
         awaiting.push(declaration);
       },
       ...(continuation === undefined ? {} : { continuation }),
-      projectRoot: process.cwd(),
+      projectRoot,
     }),
     resourceLoader,
     published,

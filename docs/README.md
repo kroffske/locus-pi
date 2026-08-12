@@ -20,7 +20,7 @@ drafts and one-off artifacts are not part of this map.
   catalog of the eleven public extensions, their paths, roles, and dependency
   boundaries.
 - [extension-index.md](extension-index.md) — detailed public source map for the
-  eleven retained active extensions and six curated workflows, including
+  eleven retained active extensions and twelve curated workflows, including
   entrypoint, manifest, manual, and dependency paths plus the direct feature
   dependency graph.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
@@ -77,9 +77,9 @@ promotion decision says otherwise:
 ## Package Boundary
 
 The npm package intentionally ships only the eleven default entrypoints and their
-explicit local import closure, the six curated Package workflows
-(`live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
-`review-fix`), active manifests, the
+explicit local import closure, the twelve curated Package workflows (the six
+existing entries plus the external `post-code-review` parent and its five saved
+child lanes), active manifests, the
 bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.

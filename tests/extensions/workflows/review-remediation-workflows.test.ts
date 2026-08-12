@@ -105,6 +105,7 @@ function createReviewFixture(findings?: string[], targetRef = "review", stage = 
   writeFileSync(
     workflowResultFile(sourceRunDir),
     `${JSON.stringify({
+      runId: sourceRunId,
       ok: true,
       result: text,
       artifactRefs: [reviewRef],
@@ -318,6 +319,7 @@ describe("curated review remediation workflow", () => {
     writeFileSync(
       workflowResultFile(sourceRunDir),
       `${JSON.stringify({
+        runId: fixture.reviewRef.runId,
         ok: true,
         result: fixture.reviewText,
         artifactRefs: [],
@@ -426,6 +428,7 @@ describe("curated review remediation workflow", () => {
     writeFileSync(
       workflowResultFile(sourceRunDir),
       `${JSON.stringify({
+        runId: fixture.reviewRef.runId,
         ok: true,
         result: "an unrelated terminal answer",
         artifactRefs: [],

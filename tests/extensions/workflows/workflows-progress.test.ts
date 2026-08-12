@@ -1415,6 +1415,68 @@ describe("workflow progress widget", () => {
     }
   });
 
+  it("keeps terminal metadata identical between success and error tool results", async () => {
+    const success = {
+      runId: "terminal-parity-success",
+      runDir: "/tmp/terminal-parity-success",
+      ok: true,
+      result: { summary: "done" },
+      disposition: { status: "completed" as const },
+      journal: [],
+      resultPersistence: { ok: true as const, path: "/tmp/terminal-parity-success/result.json" },
+    };
+    const failure = {
+      runId: "terminal-parity-failure",
+      runDir: "/tmp/terminal-parity-failure",
+      ok: false,
+      result: { summary: "failed" },
+      error: "failed",
+      disposition: { status: "failed" as const },
+      journal: [],
+      resultPersistence: { ok: true as const, path: "/tmp/terminal-parity-failure/result.json" },
+    };
+    const harness = createHarness();
+    workflowsExt(harness.pi);
+    const runSpy = vi.spyOn(runner, "runWorkflowScript");
+    runSpy.mockResolvedValueOnce(success).mockResolvedValueOnce(failure);
+    try {
+      const successResult = await runTool(harness, "workflow", { name: "terminal-parity" });
+      const failureResult = await runTool(harness, "workflow", { name: "terminal-parity" });
+      const successDetails = successResult.details as Record<string, unknown>;
+      const failureDetails = failureResult.details as Record<string, unknown>;
+      const intentionalDifferences = new Set([
+        "status",
+        "summary",
+        "disposition",
+        "transcript",
+        "runId",
+        "runDir",
+        "outputDir",
+        "resultPath",
+        "resultPersistence",
+        "result",
+        "error",
+      ]);
+      const successSharedKeys = Object.keys(successDetails)
+        .filter((key) => !intentionalDifferences.has(key))
+        .sort();
+      const failureSharedKeys = Object.keys(failureDetails)
+        .filter((key) => !intentionalDifferences.has(key))
+        .sort();
+      expect(failureSharedKeys).toEqual(successSharedKeys);
+      for (const key of successSharedKeys) {
+        expect(failureDetails[key], `shared terminal metadata: ${key}`).toEqual(successDetails[key]);
+      }
+      expect(successDetails.status).toBe("completed");
+      expect(failureDetails.status).toBe("failed");
+      expect(failureDetails.transcript).toMatchObject({ surface: "tool", eventKind: "workflow_end" });
+      expect(successDetails).not.toHaveProperty("result");
+      expect(failureDetails).toMatchObject({ result: failure.result, error: failure.error });
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
   it("pins an active run, then retires its widget while retaining terminal rows on next input", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-live-input-"));
     try {
@@ -1636,7 +1698,7 @@ describe("workflow progress widget", () => {
           journal,
           target: { kind: "name", ref: "detail", source: "project" },
           scriptIdentity: {
-            sourcePath: "/private/source/detail.workflow.mjs",
+            sourcePath: path.join(root, ".pi", "workflows", "detail.workflow.mjs"),
             snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
             scriptSha256: "a".repeat(64),
           },

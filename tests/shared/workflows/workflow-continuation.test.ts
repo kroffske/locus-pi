@@ -75,6 +75,7 @@ function sourceContinuation(
   writeFileSync(
     workflowResultFile(runDir(root, runId)),
     `${JSON.stringify({
+      runId,
       ok: true,
       result: { mode: "prepared", artifactRefs: refs },
       artifactRefs: refs,

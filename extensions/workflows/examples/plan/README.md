@@ -70,8 +70,8 @@ Two boundaries hold the trust line:
   read the file before running it. Approving a plan is not approving a run.
 
 The template deliberately omits loops, reviewers, retries, parsers, schemas,
-`try`/`catch`, and nested workflows. A graph that needs any of those is a
-`workflow-author` Design the owner approves separately.
+`try`/`catch`, and nested workflows. A graph that needs any of those uses the
+bespoke continuous-authoring route described below.
 
 ## Decomposition contract
 
@@ -117,11 +117,15 @@ and runs `/workflows run <workspace>/execute.workflow.mjs`. It runs the same
 frozen blocks as one sequential graph in a single run instead of one run per
 step, which is fewer moving parts but a coarser recovery unit.
 
-For a graph the fixed template does not express, hand `plan.md` and `steps.md` to
-`workflow-author` Design. Plan renders only its fixed template into the workflow
-workspace; it never writes a registered project workflow, and Design approval
-remains separate from Build approval. Any optional reviewer after a generated
-step belongs to that Design, not to Plan or Plan Implement execution semantics.
+For a graph the fixed template does not express, send `workflow-author` a normal
+authoring request: `Author a sequential project-local workflow from the approved
+plan.md and steps.md in this workflow workspace.` The author writes Design,
+reviews it, and Builds matching source in the same turn. Do not inject `Design
+only` or a second Build request; only the user may separately request a pause
+after design. Plan renders only its fixed template into the workflow workspace
+and never writes a registered project workflow. Any optional reviewer after a
+generated step belongs to the bespoke design, not to Plan or Plan Implement
+execution semantics.
 
 ## Run and resume
 

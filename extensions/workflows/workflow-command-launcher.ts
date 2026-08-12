@@ -8,6 +8,7 @@ import {
   type ResolvedWorkflowTarget,
   type RunWorkflowScriptOptions,
   type RunWorkflowScriptResult,
+  type WorkflowHandoffWorkspaceReuseBinding,
 } from "./runtime/workflow-runner.js";
 import {
   workflowBackgroundRunRegistry,
@@ -25,9 +26,11 @@ export interface WorkflowCommandLaunchRequest {
   scriptRef: string;
   target?: ResolvedWorkflowTarget;
   input?: string;
+  outputDir?: string;
   resumeFromRunId?: string;
   continuation?: WorkflowContinuation;
   operatorHandoffClaim?: WorkflowHandoffClaimLease;
+  operatorHandoffWorkspaceReuse?: WorkflowHandoffWorkspaceReuseBinding;
   waitForIdle?: () => Promise<void>;
 }
 
@@ -122,17 +125,24 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
       const launched = backgroundRuns.launch<RunWorkflowScriptResult>(lease, async (background) => {
         const isCurrent = (): boolean => background.isCurrent();
         try {
+          const scriptInput =
+            request.target?.kind === "scriptPath" ? { scriptPath: request.scriptRef } : { script: request.scriptRef };
           const result = await (options.runScript ?? runWorkflowScript)({
             pi: options.pi,
             ctx: request.ctx,
             signal: background.signal,
-            script: request.scriptRef,
+            ...scriptInput,
             ...(request.input === undefined ? {} : { input: request.input }),
+            ...(request.outputDir === undefined ? {} : { outputDir: request.outputDir }),
             ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
             ...(request.continuation === undefined ? {} : { continuation: request.continuation }),
             ...(request.operatorHandoffClaim === undefined
               ? {}
               : { operatorHandoffClaim: request.operatorHandoffClaim }),
+            ...(request.operatorHandoffWorkspaceReuse === undefined
+              ? {}
+              : { operatorHandoffWorkspaceReuse: request.operatorHandoffWorkspaceReuse }),
+            ...(request.target === undefined ? {} : { targetBinding: request.target }),
             onRunStart: ({ runId, runDir }) => {
               background.setRunId(runId);
               if (isCurrent()) observer.onRunStart({ runId, runDir });

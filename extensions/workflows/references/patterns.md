@@ -486,10 +486,14 @@ nothing downstream depends on it being right.
 
 ## Semantic text input
 
-Both `/workflows run <name> [input]` and the `workflow` tool pass one optional
-bounded string. It is the operator's semantic request, not a command language or
-serialized parameter object. Let an agent interpret meaning; keep only explicit
-deterministic invariants in JavaScript:
+Both `/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]`
+and the `workflow` tool pass one optional bounded semantic string.
+Command options precede that input. When semantic input begins with an
+option-looking token such as `--resume`, `--output-dir`, or `--`, place the
+conventional `--` end-of-options delimiter before it; every character after the
+delimiter is forwarded unchanged. Input is the operator's semantic request,
+not a command language or serialized parameter object. Let an agent interpret
+meaning; keep only explicit deterministic invariants in JavaScript:
 
 ```js
 export default async function run({ agent, phase }, input) {

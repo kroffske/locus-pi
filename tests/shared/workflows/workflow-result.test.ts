@@ -16,6 +16,10 @@ import {
   workflowResultFile,
   writeWorkflowResultJson,
 } from "../../../extensions/workflows/runtime/workflow-result.js";
+import {
+  ensureWorkflowRunDir,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 
 describe("workflow result JSON boundary", () => {
   it("projects new dispositions strictly while preserving only absent legacy envelopes", () => {
@@ -155,18 +159,19 @@ describe("workflow result JSON boundary", () => {
   it("reports both envelope serialization and filesystem write failures instead of swallowing them", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-result-boundary-"));
     try {
-      const safeDir = path.join(root, "safe");
+      const safeDir = ensureWorkflowRunDir(root, "safe");
       const safe = writeWorkflowResultJson(safeDir, { runId: "safe", ok: true, result: null });
       expect(safe).toEqual({ ok: true, path: workflowResultFile(safeDir) });
       expect(JSON.parse(readFileSync(safe.path, "utf8"))).toMatchObject({ runId: "safe", result: null });
 
-      const unsafeDir = path.join(root, "unsafe");
+      const unsafeDir = ensureWorkflowRunDir(root, "unsafe");
       const unsafe = writeWorkflowResultJson(unsafeDir, { runId: "unsafe", ok: true, result: 42n });
       expect(unsafe).toMatchObject({ ok: false, code: WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE });
       expect(existsSync(workflowResultFile(unsafeDir))).toBe(false);
 
-      const blockedDir = path.join(root, "blocked");
-      writeFileSync(blockedDir, "not a directory", "utf8");
+      const blockedDir = ensureWorkflowRunDir(root, "blocked");
+      rmSync(workflowRunRuntimeDir(blockedDir), { recursive: true });
+      writeFileSync(workflowRunRuntimeDir(blockedDir), "not a directory", "utf8");
       const blocked = writeWorkflowResultJson(blockedDir, { runId: "blocked", ok: true, result: null });
       expect(blocked).toMatchObject({ ok: false, code: WORKFLOW_RESULT_WRITE_FAILED });
       if (blocked.ok) throw new Error("expected blocked persistence to fail");

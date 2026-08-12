@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import type {
   RunWorkflowScriptOptions,
   RunWorkflowScriptResult,
@@ -63,17 +64,33 @@ describe("workflow command launcher", () => {
         ctx: harness.ctx,
         scriptRef: "continued",
         input: "answer",
+        outputDir: "tmp/reviews/review-1",
         continuation: { originRunId: "source-run", artifactRefs: [] },
       }),
     ).toEqual({ status: "started" });
     await vi.waitFor(() => expect(terminals).toEqual(["ordinary", "continued"]));
 
-    expect(runScript).toHaveBeenCalledTimes(2);
+    const scriptPathRef = "extensions/workflows/examples/plan/plan.workflow.mjs";
+    expect(
+      launcher.launch({
+        ctx: harness.ctx,
+        scriptRef: scriptPathRef,
+        target: { kind: "scriptPath", ref: scriptPathRef, source: "project", path: path.resolve(scriptPathRef) },
+      }),
+    ).toEqual({ status: "started" });
+    await vi.waitFor(() => expect(terminals).toEqual(["ordinary", "continued", scriptPathRef]));
+
+    expect(runScript).toHaveBeenCalledTimes(3);
     expect(runScript.mock.calls[0]?.[0]).toMatchObject({ script: "ordinary" });
     expect(runScript.mock.calls[1]?.[0]).toMatchObject({
       script: "continued",
       input: "answer",
+      outputDir: "tmp/reviews/review-1",
       continuation: { originRunId: "source-run", artifactRefs: [] },
+    });
+    expect(runScript.mock.calls[2]?.[0]).toMatchObject({ scriptPath: scriptPathRef });
+    expect(runScript.mock.calls[2]?.[0]).toMatchObject({
+      targetBinding: { kind: "scriptPath", ref: scriptPathRef, source: "project", path: path.resolve(scriptPathRef) },
     });
     expect(observed).toEqual([
       "start:ordinary:launcher-run-1:/tmp/launcher-run-1",
@@ -82,6 +99,9 @@ describe("workflow command launcher", () => {
       "start:continued:launcher-run-2:/tmp/launcher-run-2",
       "result:continued:launcher-run-2",
       "finally:continued",
+      `start:${scriptPathRef}:launcher-run-3:/tmp/launcher-run-3`,
+      `result:${scriptPathRef}:launcher-run-3`,
+      `finally:${scriptPathRef}`,
     ]);
   });
 });

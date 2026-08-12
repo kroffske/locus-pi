@@ -51,6 +51,12 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "live-smoke",
   "plan",
   "plan-implement",
+  "post-code-review",
+  "post-code-review-boundaries",
+  "post-code-review-contracts",
+  "post-code-review-scope",
+  "post-code-review-simplicity",
+  "post-code-review-synthesis",
   "requirements-grill",
   "review",
   "review-fix",
@@ -65,6 +71,16 @@ const PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
   plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
   "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
+  "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
+  "post-code-review-boundaries":
+    "extensions/workflows/examples/post-code-review/post-code-review-boundaries.workflow.mjs",
+  "post-code-review-contracts":
+    "extensions/workflows/examples/post-code-review/post-code-review-contracts.workflow.mjs",
+  "post-code-review-scope": "extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs",
+  "post-code-review-simplicity":
+    "extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs",
+  "post-code-review-synthesis":
+    "extensions/workflows/examples/post-code-review/post-code-review-synthesis.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
@@ -477,10 +493,15 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
     expect(source).toContain("the exact step catalog is frozen");
     expect(source).toMatch(
-      /hand the approved `plan\.md`\s+and\s+`steps\.md`\s+to\s+`workflow-author`\s+for\s+Design only/u,
+      /hand the approved `plan\.md`\s+and\s+`steps\.md`\s+to\s+`workflow-author`\s+as a\s+normal authoring request/u,
     );
-    expect(source).toContain("`Build approved design: <exact path>`");
-    expect(source).toMatch(/optional\s+reviewer\s+after\s+a\s+generated\s+step\s+belongs\s+to\s+that\s+Design/u);
+    expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
+    expect(source).toContain("Do not author `.workflow.mjs` source yourself, inject\n  `Design only`");
+    expect(source).not.toContain("`Design only:`");
+    expect(source).not.toContain("`Build approved design: <exact path>`");
+    expect(source).toMatch(
+      /optional\s+reviewer\s+after\s+a\s+generated\s+step\s+belongs\s+to\s+the\s+bespoke\s+design/u,
+    );
 
     // Planning must not roll into execution. Without these, one confident
     // paraphrase turns "here is the plan" back into an unattended run.

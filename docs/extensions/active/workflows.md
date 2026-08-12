@@ -85,17 +85,23 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ## Curated Package workflows
 
-| Workflow             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `requirements-grill` | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
-| `review`             | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                            |
-| `review-fix`         | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
-| `plan`               | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator.                                                                                                                                                                                                  |
-| `plan-implement`     | **One exact step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                       |
+| Workflow                      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`                  | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `requirements-grill`          | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
+| `review`                      | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                            |
+| `review-fix`                  | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
+| `plan`                        | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator.                                                                                                                                                                                                  |
+| `plan-implement`              | **One exact step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                       |
+| `post-code-review`            | **External modular code review**: the parent makes no model call. It resolves scope first, runs boundaries, simplicity, and contracts lanes behind one parallel barrier, starts synthesis only after all three succeed, and publishes the resulting `post-code-review.md`. Five exact `packageName` edges bind the installed children to the Package source.                                                                                                                                                                                                                                                                                                                                                              |
+| `post-code-review-scope`      | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `post-code-review-boundaries` | **Architecture lane**: one Luna/high agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `post-code-review-simplicity` | **Delete-first lane**: one Luna/high agent reopens `review-scope.md` and writes evidence-backed duplication, empty-wrapper, redundant-guard, dead-path, and unnecessary-depth findings to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `post-code-review-contracts`  | **Contract lane**: one Luna/xhigh agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `post-code-review-synthesis`  | **Independent final verifier**: one Luna/xhigh agent reads the scope and all three lane reports, rechecks live source and consumers, rejects stale/duplicate/unsupported claims, grades retained findings, and writes the final `post-code-review.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Catalog metadata exposes an authoring profile without changing execution:
-`live-smoke`, `plan`, and `plan-implement` are `standard`;
+`live-smoke`, `plan`, `plan-implement`, and all six `post-code-review` entries are `standard`;
 `requirements-grill`, `review`, and `review-fix` are `legacy`. A workflow with no
 literal profile is shown as `unclassified`. New generated source declares
 `meta.profile: "standard"`; the other labels document compatibility or portfolio
@@ -224,7 +230,7 @@ remains the machine-readable run envelope, while
 `.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
-These six names are what `extensions/workflows/examples/` currently holds, and
+These twelve names are what `extensions/workflows/examples/` currently holds, and
 that directory **is** the Package registry — a workflow is registered by the
 existence of its entry file, exactly like a project one. The set stays small
 because it is a public surface: `package.json#files` still decides what an
@@ -346,7 +352,18 @@ Package workflow. The scan descends one directory level, which is how a workflow
 keeps prompt resources or its diagram beside its entry, and it accepts only
 regular files, so a symlink never resolves out of the package. An already-open
 catalog selection is revalidated, so a precedence change fails explicitly instead of
-switching paths silently.
+switching paths silently. If a higher-precedence search directory is missing,
+resolver and catalog skip it together. An existing non-directory, unreadable,
+dangling, or externally symlinked directory blocks resolution instead of falling
+through to a lower source. A directory symlink whose physical target remains
+inside the owning project is accepted; resolver and catalog apply this same
+physical proof.
+
+The owner-specific `post-code-review` launch policy follows the resolved project
+or curated Package target. Named and explicit-path launches under
+`.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`, plus the installed
+Package parent, therefore require the same fresh `outputDir`; a personal workflow
+with the same saved name is not the owner.
 
 To run your own script, pass an explicit project-relative `scriptPath` ending in `.mjs`.
 At resolution time, existing explicit targets and project saved-name candidates are checked
@@ -380,10 +397,29 @@ with the unified command is proven, and are not removed as part of this menu.
 /workflows status [runId]         interactive persisted viewer and stage evidence
 /workflows result [runId|last]    whole text the run finished with, scrollable and untruncated
 /workflows run live-smoke         start one background workflow (returns editor)
+/workflows run live-smoke --output-dir tmp/reviews/review-1 <input>  select a fresh project-relative workspace
+/workflows run live-smoke -- --resume literal request  pass option-looking input unchanged
 /workflows continue <runId>       answer and continue an actionable handoff
 /workflows stop [runId|last]      request cancellation; terminal state follows settlement
 /workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
 ```
+
+`post-code-review` is owner-scoped: every fresh launch must name an explicit,
+new project-relative namespace, for example
+`/workflows run post-code-review --output-dir tmp/post-code-review/review-20260812-a`.
+The catalog Start action inserts `tmp/post-code-review/<review-id>` as an
+editable template; replace it before submitting. The programmatic `workflow`
+tool, canonical/flat commands, headless command mode, and direct runner all
+reject a fresh post-code-review launch without `outputDir`. Resume is the only
+supported namespace reuse and must bind to the original run's exact workspace.
+Other workflows retain their existing default `tmp/<workflow-name>` behavior.
+
+`--output-dir` and `--resume` may appear in either order before semantic input.
+If either option is repeated, the last supplied value wins. Use the conventional
+`--` end-of-options delimiter when semantic input begins with `--resume`,
+`--output-dir`, `--`, or another option-looking token; the entire remainder
+after the delimiter is forwarded byte-for-byte as semantic input. The delimiter
+works the same way for `/workflow-run`.
 
 ### Direct Fusion from the main session
 
@@ -446,7 +482,7 @@ reported as missing when runs were found.
 The same owners are also available as flat commands:
 
 ```
-/workflow-run <name|path> [input]
+/workflow-run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]
 /workflow-stop [runId|last]
 /workflow-list [query]
 /workflow-info [name]
@@ -916,7 +952,9 @@ duplicates, and adds no count or character limit. The tool's strict
 arrays, `null`, and unknown top-level fields before Pi's schema conversion can
 coerce them; direct `execute` and runner/runtime callers are revalidated as well.
 An absent list becomes an empty frozen list; a workflow that requires units owns
-a named pre-pipeline guard. The human `/workflows run` grammar is unchanged.
+a named pre-pipeline guard. The human `/workflows run` grammar exposes the same
+workspace choice through `--output-dir <safe-project-relative-path>` before the
+optional semantic input.
 Cross-run state is a
 separate closed `continuation` control with one origin and 1–8 complete artifact
 refs. `continuation` and replay-only `resumeFromRunId` are mutually exclusive.
@@ -977,18 +1015,21 @@ Fresh evidence:
 
 ## Authoring a new workflow
 
-Authoring is approval-first. A raw request creates only
+Authoring is design-first and continuous by default. A raw request first creates
 `.pi/workflows/<name>.design.md`: selected pattern, numbered algorithm, graph
 table, node responsibilities, inputs, complete outputs, roles, consumers,
-edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. Show it
-to the operator and stop.
+edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. The
+author reviews and revises that design, then creates the matching
+`.workflow.mjs` in the same turn. Build checks identity and module load but does
+not run the workflow.
 
-Only `Build approved design: <exact design path>` authorizes creation of the
-matching `.workflow.mjs`. Build checks identity and module load but does not run.
-If the algorithm changes materially, revise the design and ask for approval
-again. The command approves the design bytes present at the path when Build
-reads them; there is no separate approval token or persisted design digest, so
-the operator reviews the current file immediately before issuing Build. The bundled `workflow-author` agent and
+The author stops after design only when the user explicitly asks for `design
+only`, `pause after design`, `do not build`, or equivalent wording. Build-only
+requests may use `Build design: <exact design path>` or the compatibility form
+`Build approved design: <exact design path>`. Both forms read the current design
+bytes; there is no separate token or persisted design digest. If the algorithm
+changes materially, revise and re-review the design before source is created or
+replaced. The bundled `workflow-author` agent and
 `skills/locus-pi-workflows/SKILL.md` own the exact protocol.
 
 An owner-approved `plan.md` plus its canonical `steps.md` may be the Design
@@ -997,9 +1038,9 @@ preserves every complete `## S<n>` block as one task: Build preferably renders
 those blocks as literal author-known prompts in generated source, while a
 programmatic embedder may pass the same frozen blocks through caller `items`.
 One implementer receives one complete block per iteration; an optional reviewer
-is a visibly separate child after that implementer. The approved Design states
+is a visibly separate child after that implementer. The reviewed Design states
 whether review is advisory or blocking and whether any finite retry exists.
-Plan approval does not imply workflow Build approval, no runtime parser reads
+Plan approval alone does not start workflow authoring, no runtime parser reads
 `steps.md`, and this path adds no Package workflow. See the
 [Plan-to-sequential pattern card](../../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
 
@@ -1138,7 +1179,13 @@ export default async function runWorkflow(dsl, input) {
 This example passes the machine-enforced `standard` grammar. The complete rule
 list is in
 [`extensions/workflows/AUTHORING.md`](../../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape).
-Build checks an authored file with:
+In a locus-pi source checkout, Build checks an authored file with:
+
+```bash
+./bin/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+```
+
+In an installed/consumer project, use:
 
 ```bash
 npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
@@ -1147,6 +1194,8 @@ npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
 The command comes from the installed package, resolves the workflow path from
 the current project, and requires no project-local npm script or `tsx`. Its
 checker is prebuilt ESM, including when the package lives under `node_modules`.
+Build is not successful until the checker exits zero, the module imports, and
+the source still matches its reviewed design.
 Standard source treats semantic input, plain model text, and items as opaque whole values:
 only exact prompt/publication/return forwarding and unchanged item scheduling
 are allowed. Runtime-owned choices, list identity, status, and counters remain
@@ -1339,10 +1388,12 @@ replay-only `resumeFromRunId`.
 
 Delegate a plain requirement to `workflow-author` with `/agent run
 workflow-author` or `task { agent: "workflow-author", task: "<requirement>" }`.
-That first turn writes only the design. After the user approves it, send `Build
-approved design: .pi/workflows/<name>.design.md`; only that turn writes source,
-confirms identity and module load, and returns the path. Neither turn runs the
-workflow. The helper is a catalog agent only; the package surface remains
+The agent writes the design first, reviews it, then writes source in the same
+turn unless the user explicitly asks to pause after design. `Build design:
+.pi/workflows/<name>.design.md` and `Build approved design:
+.pi/workflows/<name>.design.md` remain build-only compatibility requests. The
+agent confirms identity and module load and never runs the workflow. The helper
+is a catalog agent only; the package surface remains
 `./extensions/workflows/index.ts`.
 
 ---
@@ -1411,12 +1462,19 @@ and `/workflows continue <runId>` takes a named run.
 
 `outputDir()` returns the project-relative workflow workspace. It defaults to
 `tmp/<workflow-name>` beneath Pi's verified session working directory, or to the
-programmatic tool's explicit safe project-relative `outputDir`. The runtime
+explicit safe project-relative workspace selected by the programmatic tool's
+`outputDir` or `/workflows run <name|path> --output-dir <path>`. The runtime
 creates its absolute path before the first child and names it exactly once in
 every child task. Agent files keep their exact names; the runtime does not
 rename, move, or clean them. Absolute overrides, traversal, whitespace tricks,
 backslashes, out-of-project working directories, and symlink escapes fail before
 a child starts.
+
+For `post-code-review`, the explicit namespace is also a freshness boundary:
+fresh semantic input cannot reuse a prior durable namespace. Choose a new
+`tmp/post-code-review/<review-id>` path, or resume with the original `runId` and
+workspace. This owner policy lives at launch/runtime boundaries, not in the
+workflow JavaScript.
 
 `runWorkspaceDir()` is removed and throws
 `WorkflowRunWorkspaceRemovedError`. New run evidence has no `workspace/`
@@ -1426,13 +1484,21 @@ and transcripts go to `runtime/artifacts/`. See
 
 `publishPrimaryFile(relativePath)` validates a regular, non-symlink, non-empty
 file beneath the workflow workspace and exposes absolute/relative path, byte count, and
-SHA-256 digest. It neither copies nor parses content. Workspace files survive failed
-runs; run-local evidence remains immutable under the run id.
+SHA-256 digest. It neither copies nor parses content. The reference is a
+point-in-time, non-atomic observation: portable Node cannot make ancestor
+replacement and path-based open/rename/unlink one indivisible operation against
+a hostile local process. Workspace files survive failed runs; run-local evidence
+remains immutable under the run id.
 
-`invokeWorkflow()` accepts exactly one saved `name` or `scriptPath`, optional
+`invokeWorkflow()` accepts exactly one saved `name`, project-relative
+`scriptPath`, or exact `packageName`, optional
 semantic `input` and exact `items`, one safe item `key`, the complete unique
 `keys` list, and the same `outputDir()`. It starts a real depth-one child with an
 independent run directory, source snapshot, journal, result, and parent lineage.
+`name` keeps normal Project → User → Package precedence. `packageName` resolves
+the Package entry first and then requires the child launch to match that exact
+canonical path and source hash, so a higher-precedence shadow fails closed rather
+than replacing the installed child.
 The root and children share cancellation, global concurrency, one physical-call
 counter, one 24-hour emergency deadline, and one fenced workflow-workspace lease.
 Saved children cannot invoke saved grandchildren; direct or source-identity
@@ -1446,8 +1512,13 @@ positional keys from fresh model output. Terminal-success checkpoints are commit
 and keyed by parent source hash, child source hash, workflow workspace, and
 item key. A retry skips a matching child and reruns missing or source-invalidated
 items. Execution is at least once, so assigned files must be replaced
-idempotently rather than appended. The runtime provides no workflow-side ledger,
-domain parser, renderer, or recovery engine.
+idempotently rather than appended. Checkpoint reads and quarantine first prove
+the lexical and physical `workflow-state/<namespace>/checkpoints` ancestor chain;
+symlinked or dangling ancestors and leaves fail closed rather than becoming
+ordinary absence or mutating an external path. The runtime provides no workflow-side ledger,
+domain parser, renderer, or recovery engine. As with other portable Node path
+operations, a hostile concurrent replacement can still race the proof; this is
+a local evidence-integrity limitation, not process isolation.
 
 Project source is read live throughout execution. Each run journals
 `policy=live`, the project root, and its run-boundary timestamp. This makes the
@@ -2097,7 +2168,13 @@ When the Pi SDK host cannot spawn a child agent session:
 ## Resume and replay
 
 `/workflows run <name> --resume <runId>` reruns the workflow against a recorded
-run. Every `agent()` call whose **position** and **exact request** match the
+run. The source result must persist its workspace identity; resume rejects a
+missing or unsafe identity and requires the current resolved workspace to match
+both the recorded project-relative path and its canonical physical target. When
+the source run used an explicit workspace, repeat its exact `--output-dir <path>`;
+omitting it or naming another workspace fails before child execution. A fresh
+semantic target must use a different path. Every
+`agent()` call whose **position** and **exact request** match the
 record returns the recorded child text without spawning a child, so iterating on
 the last stage of a long pipeline no longer pays for the earlier stages.
 
@@ -2123,6 +2200,7 @@ Refusal is never silent — the reason is written to the journal and to
 | Reason                       | Meaning                                                                                              |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `source-run-unusable`        | the named run has no readable persisted script identity                                              |
+| `target-changed`             | the persisted source target does not match the target selected for this resume                       |
 | `script-changed`             | `scriptSha256` differs from the recorded run's                                                       |
 | `identity-coverage-unproven` | the script declares `entry-only`, so imported bytes could move calls without changing the entry hash |
 | `replay-unsafe-script`       | the AST found direct clock/randomness syntax (below)                                                 |

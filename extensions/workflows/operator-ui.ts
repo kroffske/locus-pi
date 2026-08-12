@@ -20,6 +20,7 @@ import {
 import { packagedWorkflowNames } from "./runtime/workflow-runner.js";
 import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowBackgroundStopResult } from "./background-run-registry.js";
+import { workflowRunUsage } from "./command-parser.js";
 import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "./workflow-catalog.js";
 import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
 
@@ -39,7 +40,7 @@ export function workflowHelpBlock(): OperatorBlock {
       "Info: /workflows info [exact-name]",
       "History: /workflows status [runId]",
       "Result: /workflows result [runId|last]",
-      "Run: /workflows run <name|path> [--resume <runId>] [input]",
+      `Run: ${workflowRunUsage()}`,
       "Continue: /workflows continue <runId> [--answer <text>]",
       "Stop: /workflows stop [runId|last]",
     ],
@@ -57,7 +58,7 @@ export function workflowUnknownCommandBlock(text: string, available: string[]): 
     primary: `Unknown workflow command: ${text}`,
     body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
     controls: [
-      "Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | run <name|path> [--resume <runId>] [input] | continue <runId> [--answer <text>] | stop [runId|last]",
+      `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last]`,
     ],
   };
 }
