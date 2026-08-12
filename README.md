@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, six
+Installing it gives a Pi session eleven extensions, a bundled agent catalog, twelve
 curated Package workflows, and two skills that teach an agent how to find, run,
 and author them — through a deliberately narrow npm artifact.
 
@@ -30,7 +30,7 @@ pi list                        # what Pi actually loads, per scope
 npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the six curated
+Then start Pi in a trusted project and run `/workflows list`: the twelve curated
 workflows resolve out of the installed package, so nothing has to be copied
 anywhere. Inside a session, `/devext doctor` gives the same kind of compact
 inventory view.
@@ -80,20 +80,29 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers exactly these six Package workflows:
+The installed package registers exactly these twelve Package workflows. Six of
+them form one modular post-code-review bundle: `post-code-review` is the external
+entry and the five prefixed lanes are its source-bound child components.
 
-| Workflow             | Intended use                                                                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
-| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
-| `plan`               | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
-| `plan-implement`     | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
+| Workflow                      | Intended use                                                                                                                     |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`                  | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
+| `requirements-grill`          | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
+| `review`                      | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
+| `review-fix`                  | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
+| `plan`                        | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
+| `plan-implement`              | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
+| `post-code-review`            | Runs one scoped, three-lane parallel code review and publishes an independently verified `post-code-review.md`.                  |
+| `post-code-review-scope`      | Resolves a function, file, commit, range, diff, or local PR into an exact review boundary.                                       |
+| `post-code-review-boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
+| `post-code-review-simplicity` | Audits duplication, empty wrappers, redundant guards, dead paths, and delete-first alternatives.                                 |
+| `post-code-review-contracts`  | Audits APIs, consumers, validation parity, defaults, errors, documentation, tests, and intent.                                   |
+| `post-code-review-synthesis`  | Re-verifies the scope and three lane reports, removes unsupported claims, and authors the final report.                          |
 
 The Package registry is the shipped `extensions/workflows/examples/` directory
 itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
-file there, and the npm allowlist ships exactly the six files above.
+file there, and the npm allowlist ships exactly the twelve files above plus the
+post-code-review bundle's README and SVG diagram.
 
 Inspect and run them from the canonical command menu:
 
@@ -102,6 +111,7 @@ Inspect and run them from the canonical command menu:
 /workflows list
 /workflows info live-smoke
 /workflows run live-smoke
+/workflows run post-code-review --output-dir tmp/post-code-review/review-20260813-a review the current diff
 /workflows status
 /workflows result last
 /workflows stop last
@@ -164,9 +174,11 @@ prompt from the first session, and the full text loads on demand.
 [`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) is
 the operation and authoring skill, also reachable through
 `/skill:locus-pi-workflows`. It covers finding a workflow, running one, reading
-the result envelope, the name resolution order, and approval-first authoring: a
-raw request produces a readable `.design.md` agent graph, while only the exact
-request `Build approved design: <exact path>` creates the matching source. Its
+the result envelope, the name resolution order, and design-first authoring: a
+raw request writes and reviews a readable `.design.md` agent graph before
+creating the matching source in the same turn. An explicit design-only request
+pauses before source; `Build design: <exact path>` and `Build approved design:
+<exact path>` remain build-only compatibility forms. Its
 compact Markdown pattern cards load only after the author selects a topology.
 
 [`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is

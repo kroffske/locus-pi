@@ -11,9 +11,11 @@ any step, and do not execute the file you write.
 
 Write only inside the workflow workspace named in the filesystem note above.
 Never write to `.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`.
-The generated file is a reviewable draft that resolves only by explicit path; a
-registered project workflow still requires the `workflow-author` Design ->
-approval -> Build protocol.
+The generated file is a reviewable draft that resolves only by explicit path.
+For a registered bespoke project workflow, send `workflow-author` a normal
+authoring request. It writes Design, reviews it, and Builds matching source in
+the same turn. Do not inject `Design only` or a later Build-only request; only
+the user may separately request a pause after design.
 
 ## What to read
 
@@ -163,5 +165,4 @@ prompt checks its own `history/<step id>.md` first, so rerunning the script skip
 credible completed work instead of redoing it.
 
 Do not add a loop, a reviewer, a retry, a parser, a schema, a `try`/`catch`, or a
-nested workflow. Those belong in a `workflow-author` Design that the owner
-approves separately.
+nested workflow. Those belong in the bespoke continuous-authoring route above.

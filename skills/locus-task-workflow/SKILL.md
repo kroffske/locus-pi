@@ -80,12 +80,13 @@ Once the user has approved, run the route they chose:
   behalf only when they ask you to. It resolves by explicit path only and is
   not a registered project workflow.
 - **Bespoke workflow route.** When the user wants a graph the template does not
-  express, hand the approved `plan.md` and `steps.md` to `workflow-author` for
-  Design only. Do not author `.workflow.mjs` source yourself, do not ask for
-  Build, and do not treat plan approval as Build approval. Build remains gated
-  by the operator phrase `Build approved design: <exact path>`. Any optional
-  reviewer after a generated step belongs to that Design, not to Plan or Plan
-  Implement execution semantics.
+  express, hand the approved `plan.md` and `steps.md` to `workflow-author` as a
+  normal authoring request. It writes Design, reviews it, and Builds matching
+  source in the same turn. Do not author `.workflow.mjs` source yourself, inject
+  `Design only`, or add a later Build-only request. Only the user may separately
+  request a pause after design. Plan approval starts neither implementation nor
+  workflow authoring. Any optional reviewer after a generated step belongs to
+  the bespoke design, not to Plan or Plan Implement execution semantics.
 
 ## Create the execution queue
 

@@ -10,8 +10,16 @@ import {
   workflowContinuationForHandoff,
   type WorkflowOperatorHandoffEnvelope,
 } from "./runtime/workflow-handoff.js";
-import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
-import { resolveWorkflowTarget } from "./runtime/workflow-runner.js";
+import {
+  listWorkflowRunIds,
+  readWorkflowRunResult,
+  workflowPersistedResultInvalidity,
+} from "./runtime/workflow-journal.js";
+import {
+  readWorkflowResumeWorkspaceIdentity,
+  resolveWorkflowTarget,
+  type WorkflowHandoffWorkspaceReuseBinding,
+} from "./runtime/workflow-runner.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import type {
   ActionableWorkflowHandoff,
@@ -37,6 +45,21 @@ export function createWorkflowOperatorHandoffService(
         if (read.status === "absent") continue;
         if (read.status === "invalid") {
           items.push({ status: "invalid", runId, message: read.message });
+          continue;
+        }
+        const invalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId));
+        if (invalidity !== undefined) {
+          items.push({
+            status: "invalid",
+            runId,
+            message: `Workflow run ${runId} has malformed persisted metadata (${invalidity}).`,
+          });
+          continue;
+        }
+        try {
+          readWorkflowResumeWorkspaceIdentity(projectRoot, runId);
+        } catch (error) {
+          items.push({ status: "invalid", runId, message: errorMessage(error) });
           continue;
         }
         try {
@@ -84,6 +107,15 @@ export function createWorkflowOperatorHandoffService(
       const read = readPersistedWorkflowOperatorHandoff(projectRoot, runId);
       if (read.status === "absent") return undefined;
       if (read.status === "invalid") return { message: read.message };
+      const invalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId));
+      if (invalidity !== undefined) {
+        return { message: `Workflow run ${runId} has malformed persisted metadata (${invalidity}).` };
+      }
+      try {
+        readWorkflowResumeWorkspaceIdentity(projectRoot, runId);
+      } catch (error) {
+        return { message: errorMessage(error) };
+      }
       try {
         const state = projectWorkflowHandoffState(projectRoot, read.handoff);
         if (state.status === "running") {
@@ -105,12 +137,31 @@ export function createWorkflowOperatorHandoffService(
     async launch(item, answer, ctx) {
       const handoff = item.value;
       let target;
+      let workspace: WorkflowHandoffWorkspaceReuseBinding;
       try {
-        target = resolveWorkflowTarget({ script: handoff.target.ref }, getProjectRoot(ctx), getWorkingDirectory(ctx));
-        assertWorkflowHandoffContinuationEligibility(handoff, {
-          target,
-          scriptIdentity: readCurrentWorkflowScriptIdentity(target.path),
-        });
+        const targetInput =
+          handoff.target.kind === "scriptPath" ? { scriptPath: handoff.target.ref } : { script: handoff.target.ref };
+        target = resolveWorkflowTarget(targetInput, getProjectRoot(ctx), getWorkingDirectory(ctx));
+        assertWorkflowHandoffContinuationEligibility(
+          handoff,
+          {
+            target,
+            scriptIdentity: readCurrentWorkflowScriptIdentity(target.path),
+          },
+          getProjectRoot(ctx),
+        );
+        const invalidity = workflowPersistedResultInvalidity(
+          readWorkflowRunResult(getProjectRoot(ctx), handoff.originRunId),
+        );
+        if (invalidity !== undefined) {
+          throw new Error(
+            `Workflow handoff source run ${handoff.originRunId} has malformed persisted metadata (${invalidity}).`,
+          );
+        }
+        workspace = {
+          sourceRunId: handoff.originRunId,
+          ...readWorkflowResumeWorkspaceIdentity(getProjectRoot(ctx), handoff.originRunId),
+        };
       } catch (error) {
         return { status: "invalid", message: errorMessage(error) };
       }
@@ -131,6 +182,7 @@ export function createWorkflowOperatorHandoffService(
           input: answer,
           continuation: workflowContinuationForHandoff(handoff),
           operatorHandoffClaim: claimed.claim,
+          operatorHandoffWorkspaceReuse: workspace,
           ...(waitForIdle === undefined ? {} : { waitForIdle }),
         });
       } catch (error) {

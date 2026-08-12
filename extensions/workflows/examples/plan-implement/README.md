@@ -58,9 +58,12 @@ Use the installed `locus-task-workflow` skill for the complete orchestration and
 recovery protocol.
 
 Plan Implement has no per-step reviewer. If an operator chooses the separate
-generated-workflow path, optional reviewer behavior belongs to the approved
-`workflow-author` Design for that project-local workflow, not to this Package
-workflow.
+generated-workflow path, a normal authoring request writes Design, reviews it,
+and Builds the matching workflow continuously. The agent pauses after Design
+only when the user explicitly asks for `Design only` or a pause; there is
+no agent-injected `Design only` or approval turn, and it must not create a
+separate Build request. This behavior belongs to the project-local
+`workflow-author` Design, not to this Package workflow.
 
 ## Boundaries
 

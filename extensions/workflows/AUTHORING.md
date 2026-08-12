@@ -5,26 +5,33 @@ The bundled entry point is
 The complete runtime, trust, replay, and artifact reference is
 [`docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md).
 
-## Contract: Design, approve, Build
+## Contract: Design, review, Build
 
-A plain request to create a workflow produces only
-`.pi/workflows/<name>.design.md`. The author shows that file to the operator and
-stops. Only this exact request kind authorizes source creation:
+A plain request to create, design, write, or author a workflow runs one ordered
+authoring sequence: write `.pi/workflows/<name>.design.md`, review and revise that
+design against the request and standard source profile, then write the matching
+`<name>.workflow.mjs`. Build checks source identity and module load and does not
+run the workflow.
+
+The design always precedes source. The author stops after design only when the
+user explicitly asks for `design only`, `pause after design`, `do not build`, or
+equivalent wording. Build-only compatibility requests remain available:
 
 ```text
+Build design: .pi/workflows/<name>.design.md
 Build approved design: .pi/workflows/<name>.design.md
 ```
 
-The Build turn writes the matching `<name>.workflow.mjs`, checks source identity
-and module load, and does not run it. A changed algorithm returns to Design for
-approval. Approval is never inferred from “create a workflow”, previous chat, or
-the existence of a draft. The exact Build command approves the design bytes
-present at its path when Build reads them; the protocol has no separate approval
-token or stored digest, so review the current file immediately before Build.
+Both Build-only forms use the current design bytes at the exact path; there is no
+separate token or stored digest. A material algorithm mismatch returns to design
+revision and review before source is created or replaced. Routine corrections do
+not introduce another human stop; ask only when the correction changes the
+requested result.
 
 Use `/agent run workflow-author` or delegate to the bundled `workflow-author`
-catalog agent. A raw request is always Design. The agent’s exact design template
-and standard source profile live in its prompt and the skill above.
+catalog agent. A raw request is Author: Design first, review, then Build. The
+agent’s exact design template and standard source profile live in its prompt and
+the skill above.
 
 An owner-approved `plan.md` plus its canonical `steps.md` may be supplied as
 Design input for an optional sequential project-local workflow. Each complete
@@ -32,8 +39,8 @@ Design input for an optional sequential project-local workflow. Each complete
 Build renders those blocks as literal author-known prompts in generated source; a programmatic
 embedder may instead transport the same frozen list through caller `items`.
 Neither path parses Plan prose at runtime, adds a Package example, or skips the
-ordinary Design -> explicit owner approval -> Build boundary. Plan approval does
-not imply workflow Build approval. The selected card
+ordinary Design -> review -> Build sequence. Plan approval alone does not start
+workflow authoring. The selected card
 is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
 
 ## What the design must expose
@@ -97,20 +104,20 @@ repair, then fails closed.
 
 The remaining standard orchestration primitives are:
 
-| Primitive                            | Responsibility                                               |
-| ------------------------------------ | ------------------------------------------------------------ |
-| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls. |
-| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.             |
-| `phase(name)` / `log(text)`          | Reader-visible run progress.                                 |
-| `publishArtifact(name, text)`        | Supporting exact text artifact.                              |
-| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                              |
-| `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.        |
-| `items()`                            | Immutable exact caller-supplied text units.                  |
-| `outputDir()`                        | Project-relative workflow workspace selected by the host.    |
-| `invokeWorkflow(declaration)`        | One real saved child run with durable item checkpointing.    |
-| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.    |
-| `promptFile(path, variables)`        | Long/shared role charter; never routing.                     |
-| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.    |
+| Primitive                            | Responsibility                                                             |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls.               |
+| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.                           |
+| `phase(name)` / `log(text)`          | Reader-visible run progress.                                               |
+| `publishArtifact(name, text)`        | Supporting exact text artifact.                                            |
+| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                                            |
+| `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.                      |
+| `items()`                            | Immutable exact caller-supplied text units.                                |
+| `outputDir()`                        | Project-relative workflow workspace selected by the host.                  |
+| `invokeWorkflow(declaration)`        | One real saved or exact-Package child run with durable item checkpointing. |
+| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.                  |
+| `promptFile(path, variables)`        | Long/shared role charter; never routing.                                   |
+| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.                  |
 
 `runWorkspaceDir()` is removed. Existing source that calls it fails with
 `WorkflowRunWorkspaceRemovedError`; migrate to `outputDir()` and the single
@@ -227,6 +234,11 @@ global concurrency, the 10,000 physical-agent-call fuse, and the workflow
 workspace. A saved child cannot invoke another saved child, and source-identity
 cycles fail before agent work. `dsl.workflow()` remains only an inline
 readability/journal boundary; it starts no child run or checkpoint.
+Use `name` when normal Project → User → Package precedence is intentional. Use
+project-relative `scriptPath` for an exact project child. A tracked Package
+parent that must keep its reviewed bundle intact uses `packageName`: the runtime
+resolves the exact Package entry and rejects a project or personal shadow before
+the child executes.
 Keys are compact stable identities, not opaque item payloads. Prefer stable
 caller-owned semantic keys. Position keys such as `item-1` are safe only when
 the exact approved caller list and ordering are intentionally unchanged for the
@@ -289,7 +301,14 @@ that surviving results remain useful.
 ## Machine-enforced standard source shape
 
 The build gate is deliberately a small source grammar, not a second workflow
-engine. For a project workflow, run it against the exact file Build produced:
+engine. In this source checkout, run the repository-local binary against the
+exact file Build produced:
+
+```bash
+./bin/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+```
+
+From an installed/consumer project, use the package binary:
 
 ```bash
 npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
@@ -299,10 +318,14 @@ This installed-package command resolves the path from the project where it is
 run; it needs neither a consumer npm script nor `tsx`. The package ships a
 prebuilt ESM checker so Node never has to strip TypeScript under `node_modules`.
 Repository maintainers use `npm run check:workflow-source` with no path to check every `standard` entry
-already present in the six-workflow Package registry. Neither command discovers
+already present in the twelve-workflow Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
 assessment or importing the module.
+
+Build remains failed until the exact source passes this checker, module import,
+identity checks, and design/source comparison. A missing checker command or a
+non-zero exit cannot be reported as a successful Build.
 
 These are all rules enforced for `meta.profile: "standard"`:
 
@@ -450,8 +473,12 @@ validation is not evidence that the workflow ran.
 `input` is optional bounded semantic text, not a command language or serialized
 object. Programmatic callers may separately supply exact `items: string[]`;
 `dsl.items()` exposes a frozen snapshot and returns an empty frozen list when
-absent. The human `/workflows run` grammar is unchanged. Cross-run data arrives
-through host-verified continuation artifacts.
+absent. Human launch uses `/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]`;
+both options precede semantic input. Use the conventional `--` end-of-options
+delimiter when semantic input begins with `--resume`, `--output-dir`, `--`, or
+another option-looking token; every character after that delimiter is passed as
+input unchanged. Cross-run data arrives through host-verified continuation
+artifacts.
 `agent({ artifact })` names the runtime-captured exact answer;
 `publishPrimaryArtifact()` declares the one successful terminal document.
 

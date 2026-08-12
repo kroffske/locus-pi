@@ -10,6 +10,8 @@
 
 import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
 import {
+  isPostCodeReviewTarget,
+  postCodeReviewFreshLaunchError,
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
   type ResolvedWorkflowTarget,
@@ -59,4 +61,15 @@ export function preflightWorkflowCommandTarget(
     if (error instanceof WorkflowNameNotFoundError) return { status: "not-found" };
     return { status: "runner-durable-failure" };
   }
+}
+
+/** Reject the owner-specific fresh-review omission before a background launch. */
+export function workflowFreshLaunchPolicyError(input: {
+  target: ResolvedWorkflowTarget;
+  projectRoot?: string;
+  outputDir?: string;
+  resumeFromRunId?: string;
+}): string | undefined {
+  if (!isPostCodeReviewTarget(input.target, input.projectRoot) || input.resumeFromRunId !== undefined) return undefined;
+  return input.outputDir === undefined ? postCodeReviewFreshLaunchError() : undefined;
 }

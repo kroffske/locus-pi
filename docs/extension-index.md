@@ -47,7 +47,7 @@ which is infrastructure rather than a public extension.
 | `security-gate`       |     3 | active | locus-specific / critical | `/security-audit` and an audit-only `tool_call` observer                                                            | `extensions/security-gate/index.ts`       | `extensions/security-gate/manifest.json`       | `docs/extensions/active/security-gate.md`       | none                        | `host`, `operator`                                      | `@earendil-works/pi-tui`                                                                           |
 | `status-line`         |     3 | active | locus-specific / low      | Responsive violet TUI footer for working location, context, compaction, model, and effort                           | `extensions/status-line/index.ts`         | `extensions/status-line/manifest.json`         | `docs/extensions/active/status-line.md`         | none                        | `agent-runtime`, `host`, `operator`                     | `@earendil-works/pi-tui`                                                                           |
 | `todo-context`        |    14 | active | compat-wrapper / high     | Session todos, `todo_write`, bounded opt-in settled continuation, and operator `/todo`                              | `extensions/todo-context/index.ts`        | `extensions/todo-context/manifest.json`        | `docs/extensions/active/todo-context.md`        | none                        | `host`, `operator`, `project`, `runtime`                | `@sinclair/typebox`                                                                                |
-| `workflows`           |    66 | active | locus-specific / critical | Workflow runtime, `/workflows`, `workflow`, opt-in `/fusion` + `fusion`, and six Package workflows                  | `extensions/workflows/index.ts`           | `extensions/workflows/manifest.json`           | `docs/extensions/active/workflows.md`           | none                        | `agent-runtime`, `host`, `model`, `operator`            | `@ast-grep/napi`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@sinclair/typebox` |
+| `workflows`           |    78 | active | locus-specific / critical | Workflow runtime, `/workflows`, `workflow`, opt-in `/fusion` + `fusion`, and twelve Package workflows               | `extensions/workflows/index.ts`           | `extensions/workflows/manifest.json`           | `docs/extensions/active/workflows.md`           | none                        | `agent-runtime`, `host`, `model`, `operator`            | `@ast-grep/napi`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@sinclair/typebox` |
 
 ## Manifest-declared public surfaces
 
@@ -89,14 +89,20 @@ an extension edge.
 `extensions/workflows/examples/` is the registry: every `<name>.workflow.mjs`
 there resolves by name. It currently holds:
 
-| Workflow             | Purpose                                                                                               |
-| -------------------- | ----------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Proves two full-tool child sessions on a live Pi host through a small file-listing action.            |
-| `requirements-grill` | Produces a bounded requirements challenge and handoff.                                                |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.    |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports. |
-| `plan`               | Maps one task with a reconnaissance agent, then writes `plan.md` and dynamic `steps.md`.              |
-| `plan-implement`     | Gives one exact step to one implementation agent and records its changes, checks, and status.         |
+| Workflow                      | Purpose                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `live-smoke`                  | Proves two full-tool child sessions on a live Pi host through a small file-listing action.            |
+| `requirements-grill`          | Produces a bounded requirements challenge and handoff.                                                |
+| `review`                      | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.    |
+| `review-fix`                  | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports. |
+| `plan`                        | Maps one task with a reconnaissance agent, then writes `plan.md` and dynamic `steps.md`.              |
+| `plan-implement`              | Gives one exact step to one implementation agent and records its changes, checks, and status.         |
+| `post-code-review`            | External parent: scope, three parallel review lanes, synthesis, and final Markdown publication.       |
+| `post-code-review-scope`      | Resolves the requested target and immutable Git semantics into `review-scope.md`.                     |
+| `post-code-review-boundaries` | Reviews ownership, placement, dependency direction, coupling, facades, and seams.                     |
+| `post-code-review-simplicity` | Reviews duplication, redundant machinery, dead paths, and delete-first alternatives.                  |
+| `post-code-review-contracts`  | Reviews APIs, consumers, validation parity, errors, defaults, documentation, and tests.               |
+| `post-code-review-synthesis`  | Independently verifies all lane claims and writes the final `post-code-review.md`.                    |
 
 Every workflow directory is scan-based, including this one. What separates a
 Package workflow from a project file is not the mechanism but the promise: the

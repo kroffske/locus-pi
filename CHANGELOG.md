@@ -4,7 +4,60 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- **Modular post-code review now ships as an installable Package workflow.**
+  `post-code-review` coordinates one scope child, three parallel audit children,
+  and one synthesis child from one shipped folder, publishes the final Markdown
+  report, and includes a self-contained SVG interaction diagram. Exact
+  `invokeWorkflow({ packageName })` edges keep installed child sources bound to
+  the Package registry and fail before execution when a project or personal
+  workflow shadows a child name.
+
+- **Workflow authoring now continues from design review into source by default.**
+  `workflow-author` still writes and reviews `.design.md` before JavaScript, but
+  pauses there only when the user explicitly requests design-only work. Build
+  now prefers the repository-local source checker in a source checkout and
+  cannot report success after a skipped or failed check.
+
+- **Interactive workflow launches can select a fresh durable workspace.**
+  `/workflows run <name> --output-dir <project-relative-path> [input]` passes the
+  same safe `outputDir` contract already available to the programmatic workflow
+  tool, so repeated semantic targets do not need to share stale checkpoints.
+
+- **Fresh `post-code-review` launches now require an explicit new namespace.**
+  Catalog Start, canonical/flat commands, the workflow tool, headless launches,
+  and direct runner calls reject omitted or previously used `outputDir` values;
+  resume remains bound to the original run and workspace. Other workflows keep
+  their existing default workspace behavior.
+
 ### Fixed
+
+- **Durable workflow evidence now stays bound to its recorded run and
+  workspace.** Resume rejects a missing or different output workspace before
+  any child executes; persisted workflow targets, run identifiers, artifact
+  indexes, handoff claim/lock sidecars, and published primary files now pass
+  the same physical-containment and descriptor-identity checks. Unsafe or
+  dangling symlinks fail closed, and claim/lock writes retain their prior
+  `fsync` durability.
+
+- **Exact post-code-review resume now proves the source workspace identity.**
+  Result envelopes persist a versioned canonical project-relative physical
+  identity; malformed, missing, or changed identities fail before lease and
+  checkpoint access, without adding another workstation-absolute public field.
+
+- **Post-code-review resume and handoff admission no longer trust mutable result projections.**
+  A write-once host-owned launch binding records the validated source target,
+  script identity, workspace identity, explicit selection, and semantic input
+  digest. Owner resume and handoff paths fail closed when that binding is
+  missing or disagrees with `runtime/result.json`; generic and legacy workflows
+  remain readable.
+
+- **Workflow discovery, parsing, and completion now share one executable
+  command contract.** Invalid directory-shaped project workflows block
+  lower-precedence fallbacks, quoted `--output-dir` values complete correctly,
+  repeatable options remain discoverable, and the standalone `--` delimiter
+  preserves opaque input for both canonical and compatibility commands.
 
 - **Workflow choice routers can opt into a safe degraded route.**
   `agent({ choice, choiceFallback })` keeps the normal two schema-validated

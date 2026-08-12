@@ -13,7 +13,8 @@ import { packagedExamplesDir, packagedWorkflowPath } from "../../../extensions/w
 const RETIRED_DIAGRAM_SUFFIXES = [".diagram.mjs", ".excalidraw", ".png"];
 
 /** Every example that still has a hand-authored diagram. */
-const DRAWN = ["requirements-grill"] as const;
+const DRAWN = ["requirements-grill", "post-code-review"] as const;
+const ROSTER_DRAWN = ["requirements-grill"] as const;
 
 function diagramPath(name: string): string {
   const workflowPath = packagedWorkflowPath(name);
@@ -53,8 +54,8 @@ describe("curated workflow diagrams", () => {
     expect(svg.trimStart().startsWith("<svg"), svgPath).toBe(true);
     expect(svg, svgPath).toContain("viewBox=");
     // A diagram a screen reader cannot describe is a picture, not documentation.
-    expect(svg, svgPath).toMatch(/<title>/u);
-    expect(svg, svgPath).toMatch(/<desc>/u);
+    expect(svg, svgPath).toMatch(/<title(?:\s[^>]*)?>/u);
+    expect(svg, svgPath).toMatch(/<desc(?:\s[^>]*)?>/u);
 
     // Self-contained: an SVG that pulls a font, an image, or a script is not a
     // file a reviewer can read, and in a published package it is a request the
@@ -73,7 +74,7 @@ describe("curated workflow diagrams", () => {
     expect(svg, svgPath).not.toMatch(/llm\(/iu);
   });
 
-  it.each(DRAWN)("names every phase, artifact and agent the %s workflow actually declares", (name) => {
+  it.each(ROSTER_DRAWN)("names every phase, artifact and agent the %s workflow actually declares", (name) => {
     const source = readFileSync(packagedWorkflowPath(name), "utf8");
     const svg = readFileSync(diagramPath(name), "utf8");
 
@@ -106,5 +107,36 @@ describe("curated workflow diagrams", () => {
 
     expect(svg).toMatch(/Empty request/u);
     expect(svg).toMatch(/before the first agent is spawned|before any agent runs/u);
+  });
+
+  it("shows every post-code-review workflow boundary, phase, model role, and Markdown handoff", () => {
+    const parentPath = packagedWorkflowPath("post-code-review");
+    const parent = readFileSync(parentPath, "utf8");
+    const svg = readFileSync(diagramPath("post-code-review"), "utf8");
+    const packageChildren = declaredNames(parent, /\bpackageName:\s*"([^"]+)"/gu);
+
+    expect(packageChildren).toEqual([
+      "post-code-review-scope",
+      "post-code-review-boundaries",
+      "post-code-review-simplicity",
+      "post-code-review-contracts",
+      "post-code-review-synthesis",
+    ]);
+    for (const phase of declaredNames(parent, /\bphase\("([^"]+)"\)/gu)) {
+      expect(svg, `post-code-review diagram omits phase ${phase}`).toContain(phase);
+    }
+    for (const child of packageChildren) {
+      expect(svg, `post-code-review diagram omits child ${child}`).toContain(child.replace("post-code-review-", ""));
+      const childSource = readFileSync(packagedWorkflowPath(child), "utf8");
+      for (const artifact of declaredNames(childSource, /\bpublishPrimaryFile\("([^"]+)"\)/gu)) {
+        expect(svg, `post-code-review diagram omits artifact ${artifact}`).toContain(artifact);
+      }
+    }
+    expect(svg).toContain('modelRole "smol:high"');
+    expect(svg).toContain('modelRole "smol:xhigh"');
+    expect(svg).toContain("Operator:");
+    expect(svg).toContain("Workflow:");
+    expect(svg).toContain("Agent:");
+    expect(svg).toContain("Artifact:");
   });
 });

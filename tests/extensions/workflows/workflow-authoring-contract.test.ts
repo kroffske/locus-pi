@@ -71,19 +71,73 @@ function dslReturnSource(call: string, body: string): string {
 }`);
 }
 
-describe("approval-first readable workflow authoring", () => {
-  const approvalSurfaces = [
+describe("design-first readable workflow authoring", () => {
+  const authoringSurfaces = [
     "skills/locus-pi-workflows/SKILL.md",
     ".agents/agents/workflow-author.md",
     "extensions/workflows/AUTHORING.md",
     "docs/extensions/active/workflows.md",
     "extensions/workflows/workflow-tool.ts",
+    "extensions/workflows/manifest.json",
+    "extensions/workflows/examples/README.md",
+    "docs/source-audit/workflows.md",
   ];
 
-  it.each(approvalSurfaces)("keeps Design -> explicit approval -> Build on %s", (relativePath) => {
+  it.each(authoringSurfaces)("keeps Design -> review -> Build continuous by default on %s", (relativePath) => {
     const text = source(relativePath);
     expect(text).toContain(".design.md");
+    expect(text).toContain("Build design:");
     expect(text).toContain("Build approved design:");
+    expect(text).toMatch(/design[- ]only|pause after design/iu);
+  });
+
+  const planAuthoringSurfaces = [
+    "extensions/workflows/examples/plan/plan.workflow.mjs",
+    "extensions/workflows/examples/plan/README.md",
+    "extensions/workflows/examples/plan-implement/README.md",
+    "extensions/workflows/examples/plan/resources/execute-template.prompt.md",
+    "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
+    "skills/locus-task-workflow/SKILL.md",
+  ];
+
+  it.each(planAuthoringSurfaces)("keeps the bespoke Plan handoff continuous on %s", (relativePath) => {
+    const text = source(relativePath);
+    expect(text).toMatch(
+      /normal authoring request|ordinary continuous (?:authoring|request)|continuous-authoring route/iu,
+    );
+    expect(text).toMatch(/writes Design[\s\S]{0,80}reviews\s+it[\s\S]{0,80}Builds/iu);
+    expect(text).toMatch(/(?:Do not[\s\S]{0,80}inject|no agent-injected)[\s\S]{0,40}`?Design\s+only/iu);
+    expect(text).not.toContain("Design workflow:");
+    expect(text).not.toContain("Build approved design: <exact design path>");
+  });
+
+  it("documents continuous workflow-author design review and build in Plan Implement", () => {
+    const text = source("extensions/workflows/examples/plan-implement/README.md");
+    expect(text).toContain("a normal authoring request writes Design, reviews it,");
+    expect(text).toContain("Builds the matching workflow continuously");
+    expect(text).toContain("only when the user explicitly asks for `Design only` or a pause");
+    expect(text).toContain("agent-injected `Design only` or approval turn");
+    expect(text).toMatch(/must not create a\s+separate/u);
+    expect(text).toContain("Build request");
+  });
+
+  it("keeps CLI syntax target-first on every active manual speaker", () => {
+    const canonical = "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]";
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/references/patterns.md",
+    ]) {
+      expect(source(relativePath)).toContain(canonical);
+    }
+    expect(source("docs/extensions/active/workflows.md")).toContain(
+      "/workflow-run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]",
+    );
+    for (const relativePath of ["docs/extensions/active/workflows.md", "docs/runtime/workflow-run-storage.md"]) {
+      const text = source(relativePath);
+      expect(text).toContain("/workflows run <name|path> --output-dir <path>");
+      expect(text).not.toContain("/workflows run --output-dir <path>");
+    }
   });
 
   it.each([
@@ -93,6 +147,15 @@ describe("approval-first readable workflow authoring", () => {
     "docs/extensions/active/workflows.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
     expect(source(relativePath)).toContain("npx @kroffske/locus-pi check-workflow-source");
+  });
+
+  it("makes workflow-author source-checking fail closed in a source checkout", () => {
+    for (const relativePath of [".agents/agents/workflow-author.md", "skills/locus-pi-workflows/SKILL.md"]) {
+      const text = source(relativePath);
+      expect(text).toContain("./bin/locus-pi check-workflow-source");
+      expect(text).toMatch(/non-zero checker exit/iu);
+      expect(text).toMatch(/never (?:report|return).*successful Build/isu);
+    }
   });
 
   it("keeps the manual hello-world inside the enforced input-normalization grammar", () => {
@@ -341,21 +404,23 @@ ${skill[1] ?? ""}
     ).toEqual([]);
   });
 
-  it("makes a raw request design-only and keeps Build from running", () => {
+  it("makes a raw request design-review-build and reserves design-only for explicit pauses", () => {
     const author = source(".agents/agents/workflow-author.md");
     expect(author).toContain("tools: read, search, find, write, edit, bash");
-    expect(author).toContain("Any plain request to create, write, or author a workflow is Design");
-    expect(author).toContain("Design writes only `.pi/workflows/<name>.design.md`");
+    expect(author).toContain("Any plain request to create, design, write, or author a workflow is Author");
+    expect(author).toContain("Author performs one continuous sequence");
+    expect(author).toContain("Never create source before the\ndesign");
+    expect(author).toContain("Only explicit wording such as `Design only`");
     expect(author).toContain("You never run a workflow");
-    expect(author).toContain("material\nchange");
+    expect(author).toMatch(/material\s+(?:algorithm\s+)?(?:mismatch|change)/u);
 
-    const designRoute = author.split("### Design\n")[1]?.split("### Revise\n")[0] ?? "";
+    const authorRoute = author.split("### Author\n")[1]?.split("### Design-only\n")[0] ?? "";
+    const designOnlyRoute = author.split("### Design-only\n")[1]?.split("### Revise\n")[0] ?? "";
     const buildRoute = author.split("### Build\n")[1]?.split("## Design method\n")[0] ?? "";
-    expect(designRoute).toContain("writes only `.pi/workflows/<name>.design.md`");
-    expect(designRoute).toContain("must not create or edit a\n`.workflow.mjs`");
-    expect(designRoute).not.toContain("Build creates one matching");
-    expect(buildRoute).toContain("Build creates one matching `.pi/workflows/<name>.workflow.mjs`");
-    expect(buildRoute).toContain("and stops");
+    expect(authorRoute).toContain("then create the\nmatching `.workflow.mjs`");
+    expect(designOnlyRoute).toContain("must not create or edit a\n`.workflow.mjs`");
+    expect(buildRoute).toContain("creates one matching\n`.pi/workflows/<name>.workflow.mjs`");
+    expect(buildRoute).toContain("stops without running");
   });
 
   it("requires Build to return the exact copyable workflow launch command", () => {
@@ -470,7 +535,7 @@ ${skill[1] ?? ""}
     }
   });
 
-  it("offers an approval-first Plan catalog to sequential project workflow path", () => {
+  it("keeps Plan approval separate from continuous workflow authoring", () => {
     const card = source("skills/locus-pi-workflows/references/plan-to-sequential-workflow.md");
     for (const relativePath of [
       "skills/locus-pi-workflows/SKILL.md",
@@ -483,7 +548,7 @@ ${skill[1] ?? ""}
       expect(text).toContain("steps.md");
       expect(text).toMatch(/literal\s+author-known/u);
       expect(text).toMatch(/caller\s+`items`|caller\s+items/u);
-      expect(text).toMatch(/Plan approval.*(?:not|never).*Build approval/isu);
+      expect(text).toMatch(/Plan approval.*(?:does not start|starts neither)/isu);
     }
     expect(card).toMatch(/one\s+complete task block/u);
     expect(card).toMatch(/visibly\s+separate child/u);
@@ -609,7 +674,7 @@ ${skill[1] ?? ""}
     }
   });
 
-  it("classifies every existing Package registry entry without changing the registry", () => {
+  it("classifies every existing Package registry entry", () => {
     const profiles = Object.fromEntries(
       packagedWorkflowNames().map((name) => {
         const text = readFileSync(packagedWorkflowPath(name), "utf8");
@@ -621,12 +686,28 @@ ${skill[1] ?? ""}
       "live-smoke": "standard",
       "plan-implement": "standard",
       plan: "standard",
+      "post-code-review": "standard",
+      "post-code-review-boundaries": "standard",
+      "post-code-review-contracts": "standard",
+      "post-code-review-scope": "standard",
+      "post-code-review-simplicity": "standard",
+      "post-code-review-synthesis": "standard",
       "requirements-grill": "legacy",
       "review-fix": "legacy",
       review: "legacy",
     });
-    expect(packagedWorkflowNames()).toHaveLength(6);
-    for (const name of ["live-smoke", "plan", "plan-implement"]) {
+    expect(packagedWorkflowNames()).toHaveLength(12);
+    for (const name of [
+      "live-smoke",
+      "plan",
+      "plan-implement",
+      "post-code-review",
+      "post-code-review-boundaries",
+      "post-code-review-contracts",
+      "post-code-review-scope",
+      "post-code-review-simplicity",
+      "post-code-review-synthesis",
+    ]) {
       expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);
     }
   });

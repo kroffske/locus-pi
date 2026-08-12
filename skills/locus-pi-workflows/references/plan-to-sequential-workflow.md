@@ -14,9 +14,11 @@ a reviewer between steps, a bounded revision loop, concurrency, or a different
 publication.
 
 Design input: the approved Plan plus every complete canonical `## S<n>` block
-from `steps.md`. Design proposes the graph only. Ordinary Design -> explicit
-owner approval -> Build remains mandatory; approving the Plan does not approve
-workflow source.
+from `steps.md`. Request ordinary continuous authoring: the author writes Design,
+reviews it, and Builds matching source in the same turn. Do not inject `Design
+only` or a later Build-only request; only the user may separately request a pause
+after design. Approving the Plan itself does not approve or start workflow
+authoring.
 
 Graph: `task-1 implement -> optional task-1 review -> task-2 implement ->
 optional task-2 review -> ... -> publish`. Each implementer receives exactly one

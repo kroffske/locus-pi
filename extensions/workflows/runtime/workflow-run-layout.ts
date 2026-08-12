@@ -17,15 +17,23 @@
 
 import {
   appendFileSync,
-  chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  ftruncateSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  type Dirent,
 } from "node:fs";
 import path from "node:path";
 
@@ -50,23 +58,42 @@ export function workflowRunsRootDir(projectRoot: string): string {
   return path.join(workflowExtensionRootDir(projectRoot), WORKFLOW_RUNS_DIRNAME);
 }
 
+/** Validate one run id before it can select any run-owned filesystem evidence. */
+export function assertWorkflowRunId(runId: unknown): string {
+  if (typeof runId !== "string" || !WORKFLOW_RUN_COMPONENT_REGEX.test(runId)) {
+    throw new Error(`Invalid workflow run id: ${workflowRunIdDescription(runId)}`);
+  }
+  return runId;
+}
+
 export function workflowRunDir(projectRoot: string, runId: string): string {
-  return path.join(workflowRunsRootDir(projectRoot), runId);
+  return workflowRunDirectoryWithin(workflowRunsRootDir(projectRoot), runId);
 }
 
 export function workflowLegacyRunDir(projectRoot: string, runId: string): string {
-  return path.join(workflowExtensionRootDir(projectRoot), WORKFLOW_LEGACY_RUNS_DIRNAME, runId);
+  const legacyRoot = path.join(workflowExtensionRootDir(projectRoot), WORKFLOW_LEGACY_RUNS_DIRNAME);
+  return workflowRunDirectoryWithin(legacyRoot, runId);
 }
 
 /** Return a migration message without reading or mutating retired run evidence. */
 export function workflowLegacyRunMigrationMessage(projectRoot: string, runId: string): string | undefined {
-  if (!WORKFLOW_RUN_COMPONENT_REGEX.test(runId)) return undefined;
-  const legacyRunDir = workflowLegacyRunDir(projectRoot, runId);
-  if (!existsSync(legacyRunDir)) return undefined;
-  return (
-    `Workflow run ${runId} uses the retired storage location ${legacyRunDir}. ` +
-    `This version reads only ${workflowRunDir(projectRoot, runId)}; inspect or remove the old local evidence manually.`
-  );
+  try {
+    assertWorkflowRunId(runId);
+    const lexicalProjectRoot = path.resolve(projectRoot);
+    const physicalProjectRoot = realpathSync(lexicalProjectRoot);
+    const legacyRunDir = workflowLegacyRunDir(lexicalProjectRoot, runId);
+    const expectedPhysicalLegacyRunDir = workflowLegacyRunDir(physicalProjectRoot, runId);
+    assertExistingChainIsRegular(physicalProjectRoot, expectedPhysicalLegacyRunDir);
+    const legacyStat = lstatSync(legacyRunDir, { throwIfNoEntry: false });
+    if (legacyStat === undefined || legacyStat.isSymbolicLink() || !legacyStat.isDirectory()) return undefined;
+    if (realpathSync(legacyRunDir) !== expectedPhysicalLegacyRunDir) return undefined;
+    return (
+      `Workflow run ${runId} uses the retired storage location ${legacyRunDir}. ` +
+      `This version reads only ${workflowRunDir(projectRoot, runId)}; inspect or remove the old local evidence manually.`
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 export function workflowRunOutputsDir(runDir: string): string {
@@ -85,10 +112,25 @@ export function workflowJournalFile(runDir: string): string {
   return path.join(workflowRunRuntimeDir(runDir), WORKFLOW_RUN_JOURNAL_FILENAME);
 }
 
+/** Return one validated file directly below a run's runtime evidence directory. */
+export function workflowRunRuntimeFile(runDir: string, fileName: string): string {
+  if (!WORKFLOW_RUN_COMPONENT_REGEX.test(fileName)) {
+    throw new Error(`Invalid workflow runtime file name: ${JSON.stringify(fileName)}`);
+  }
+  const filePath = path.join(workflowRunRuntimeDir(runDir), fileName);
+  assertWorkflowRunFilePath(runDir, filePath, false);
+  return filePath;
+}
+
 /** Read one regular file without following a replaced run directory or file symlink. */
 export function readWorkflowRunFile(runDir: string, filePath: string): Buffer {
   assertWorkflowRunFilePath(runDir, filePath, true);
-  return readFileSync(filePath);
+  const descriptor = openWorkflowRunFile(runDir, filePath, constants.O_RDONLY);
+  try {
+    return readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function readWorkflowRunTextFile(runDir: string, filePath: string): string {
@@ -100,20 +142,45 @@ export function writeWorkflowRunFile(
   runDir: string,
   filePath: string,
   bytes: string | NodeJS.ArrayBufferView,
-  options: { exclusive?: boolean } = {},
+  options: { durable?: boolean; exclusive?: boolean } = {},
 ): void {
   assertWorkflowRunFilePath(runDir, filePath, false);
-  writeFileSync(filePath, bytes, { flag: options.exclusive === true ? "wx" : "w" });
+  const flags =
+    constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | (options.exclusive === true ? constants.O_EXCL : 0);
+  const descriptor = openSync(filePath, flags, 0o666);
+  try {
+    verifyOpenedWorkflowRunFile(runDir, filePath, descriptor);
+    if (options.exclusive !== true) ftruncateSync(descriptor, 0);
+    writeFileSync(descriptor, bytes);
+    if (options.durable === true) fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function appendWorkflowRunTextFile(runDir: string, filePath: string, text: string): void {
   assertWorkflowRunFilePath(runDir, filePath, false);
-  appendFileSync(filePath, text, "utf8");
+  const descriptor = openSync(
+    filePath,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+    0o666,
+  );
+  try {
+    verifyOpenedWorkflowRunFile(runDir, filePath, descriptor);
+    appendFileSync(descriptor, text, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function chmodWorkflowRunFile(runDir: string, filePath: string, mode: number): void {
   assertWorkflowRunFilePath(runDir, filePath, true);
-  chmodSync(filePath, mode);
+  const descriptor = openWorkflowRunFile(runDir, filePath, constants.O_RDONLY);
+  try {
+    fchmodSync(descriptor, mode);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function renameWorkflowRunFile(runDir: string, sourcePath: string, destinationPath: string): void {
@@ -125,6 +192,29 @@ export function renameWorkflowRunFile(runDir: string, sourcePath: string, destin
 export function removeWorkflowRunFile(runDir: string, filePath: string): void {
   assertWorkflowRunFilePath(runDir, filePath, true);
   unlinkSync(filePath);
+}
+
+/** Check one run-owned path without letting an unsafe ancestor read as "missing". */
+export function workflowRunFileExists(runDir: string, filePath: string): boolean {
+  try {
+    return assertWorkflowRunFilePath(runDir, filePath, false);
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+/** Return one run-owned file's modification time after central path validation. */
+export function workflowRunFileMtimeMs(runDir: string, filePath: string): number | undefined {
+  if (!assertWorkflowRunFilePath(runDir, filePath, false)) return undefined;
+  const stat = lstatSync(filePath, { throwIfNoEntry: false });
+  return stat?.mtimeMs;
+}
+
+/** List only the canonical physical runs root; unsafe evidence roots are rejected. */
+export function readWorkflowRunsDirectory(projectRoot: string): Dirent[] {
+  const runsRoot = assertCanonicalWorkflowRunsRoot(projectRoot);
+  return readdirSync(runsRoot, { withFileTypes: true });
 }
 
 /** Create the canonical run root. Throws before creation through an unsafe chain. */
@@ -166,14 +256,44 @@ export function ensureWorkflowDirectoryNoSymlink(root: string, directory: string
   if (existsSync(lexicalRoot) && lstatSync(lexicalRoot).isSymbolicLink()) {
     throw new Error("Workflow run root must not be a symlink.");
   }
+  const layout = workflowRunLayoutFromBoundaryRoot(lexicalRoot);
+  if (layout !== undefined) assertCanonicalWorkflowRunDirectory(layout);
   mkdirSync(lexicalDirectory, { recursive: true });
   assertExistingChainIsRegular(lexicalRoot, lexicalDirectory);
 }
 
-function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string {
-  if (!WORKFLOW_RUN_COMPONENT_REGEX.test(runId)) {
-    throw new Error(`Invalid workflow run id for run directory: ${JSON.stringify(runId)}`);
+/** Validate one run-owned directory before an external tool receives its path. */
+export function assertWorkflowRunDirectoryPath(runDir: string, directory: string, mustExist: boolean): boolean {
+  const lexicalRunDir = path.resolve(runDir);
+  const lexicalDirectory = path.resolve(directory);
+  const relative = path.relative(lexicalRunDir, lexicalDirectory);
+  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Workflow run directory escapes its run root.");
   }
+  const layout = workflowRunLayoutFromBoundaryRoot(lexicalRunDir);
+  if (layout === undefined) throw new Error("Workflow run directory is not canonical workflow evidence.");
+  const physicalRunDir = assertCanonicalWorkflowRunDirectory(layout);
+  let current = lexicalRunDir;
+  for (const part of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat === undefined) {
+      if (mustExist) throw new Error(`Workflow run directory is missing: ${current}`);
+      return false;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`Workflow run directory is unsafe: ${current}`);
+    }
+    const physicalCurrent = realpathSync(current);
+    if (!isContainedPath(physicalRunDir, physicalCurrent)) {
+      throw new Error(`Workflow run directory escapes its physical run root: ${current}`);
+    }
+  }
+  return true;
+}
+
+function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string {
+  assertWorkflowRunId(runId);
   const physicalProjectRoot = realpathSync(path.resolve(projectRoot));
   const rootStat = lstatSync(physicalProjectRoot);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
@@ -185,14 +305,31 @@ function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string
   return workflowRunDir(path.resolve(projectRoot), runId);
 }
 
+/** Defense in depth: safe-component validation and root containment remain separate proofs. */
+function workflowRunDirectoryWithin(root: string, runId: string): string {
+  const safeRunId = assertWorkflowRunId(runId);
+  const runDir = path.join(root, safeRunId);
+  const relative = path.relative(path.resolve(root), path.resolve(runDir));
+  if (relative !== safeRunId || path.isAbsolute(relative) || relative.startsWith(`..${path.sep}`)) {
+    throw new Error("Workflow run directory escapes its storage root.");
+  }
+  return runDir;
+}
+
 /** Recheck every existing component. Missing intermediate directories are never created here. */
-function assertWorkflowRunFilePath(runDir: string, filePath: string, mustExist: boolean): void {
+function assertWorkflowRunFilePath(runDir: string, filePath: string, mustExist: boolean): boolean {
   const lexicalRunDir = path.resolve(runDir);
   const lexicalFile = path.resolve(filePath);
   const relative = path.relative(lexicalRunDir, lexicalFile);
   if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("Workflow file escapes its run root.");
   }
+  const layout = workflowRunLayoutFromBoundaryRoot(lexicalRunDir);
+  if (layout === undefined) {
+    throw new Error("Workflow run root is not inside the canonical workflow evidence layout.");
+  }
+  const physicalRunDir = assertCanonicalWorkflowRunDirectory(layout);
+  assertExistingChainIsRegular(layout.lexicalRunDir, lexicalRunDir);
   const rootStat = lstatSync(lexicalRunDir);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error("Workflow run root is not a regular non-symlink directory.");
@@ -204,13 +341,125 @@ function assertWorkflowRunFilePath(runDir: string, filePath: string, mustExist: 
     const isLeaf = index === parts.length - 1;
     const stat = lstatSync(current, { throwIfNoEntry: false });
     if (stat === undefined) {
-      if (!isLeaf || mustExist) throw new Error(`Workflow run path is missing: ${current}`);
-      return;
+      // Read-side existence probes are deliberately best-effort when a run is
+      // only partially persisted. A missing intermediate directory (for
+      // example `runtime/` after an interrupted setup) is still a normal
+      // "not present" answer; callers that require the file pass `mustExist`
+      // and retain the hard failure. Every ancestor above this point has
+      // already passed the non-symlink and physical-containment checks, so a
+      // symlink or escape cannot be downgraded to false.
+      if (mustExist) throw new Error(`Workflow run path is missing: ${current}`);
+      const physicalParent = realpathSync(path.dirname(current));
+      if (!isContainedPath(physicalRunDir, physicalParent)) {
+        throw new Error(`Workflow run path escapes its physical run root: ${current}`);
+      }
+      return false;
     }
     if (stat.isSymbolicLink() || (isLeaf ? !stat.isFile() : !stat.isDirectory())) {
       throw new Error(`Workflow run path is unsafe: ${current}`);
     }
   }
+  const physicalFile = realpathSync(lexicalFile);
+  if (!isContainedPath(physicalRunDir, physicalFile)) {
+    throw new Error(`Workflow run path escapes its physical run root: ${lexicalFile}`);
+  }
+  return true;
+}
+
+function openWorkflowRunFile(runDir: string, filePath: string, flags: number): number {
+  const descriptor = openSync(filePath, flags | constants.O_NOFOLLOW);
+  try {
+    verifyOpenedWorkflowRunFile(runDir, filePath, descriptor);
+    return descriptor;
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function verifyOpenedWorkflowRunFile(runDir: string, filePath: string, descriptor: number): void {
+  assertWorkflowRunFilePath(runDir, filePath, true);
+  const opened = fstatSync(descriptor);
+  const selected = lstatSync(filePath);
+  if (!opened.isFile() || opened.dev !== selected.dev || opened.ino !== selected.ino) {
+    throw new Error(`Workflow run file changed while it was being opened: ${filePath}`);
+  }
+}
+
+interface WorkflowRunLayout {
+  lexicalProjectRoot: string;
+  lexicalRunDir: string;
+  runId: string;
+}
+
+function workflowRunLayoutFromBoundaryRoot(boundaryRoot: string): WorkflowRunLayout | undefined {
+  const lexicalBoundaryRoot = path.resolve(boundaryRoot);
+  let candidate = lexicalBoundaryRoot;
+  for (;;) {
+    const runsRoot = path.dirname(candidate);
+    const extensionRoot = path.dirname(runsRoot);
+    const runtimeRoot = path.dirname(extensionRoot);
+    if (
+      path.basename(runsRoot) === WORKFLOW_RUNS_DIRNAME &&
+      path.basename(extensionRoot) === WORKFLOW_EXTENSION_DIRNAME &&
+      path.basename(runtimeRoot) === WORKFLOW_RUNTIME_DIRNAME
+    ) {
+      const runId = path.basename(candidate);
+      assertWorkflowRunId(runId);
+      const lexicalProjectRoot = path.dirname(runtimeRoot);
+      if (workflowRunDir(lexicalProjectRoot, runId) !== candidate) {
+        throw new Error("Workflow run directory does not match the canonical evidence layout.");
+      }
+      return { lexicalProjectRoot, lexicalRunDir: candidate, runId };
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return undefined;
+    candidate = parent;
+  }
+}
+
+function assertCanonicalWorkflowRunsRoot(projectRoot: string): string {
+  const lexicalProjectRoot = path.resolve(projectRoot);
+  const physicalProjectRoot = realpathSync(lexicalProjectRoot);
+  const projectStat = lstatSync(physicalProjectRoot);
+  if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) {
+    throw new Error("Workflow run project root is not a regular directory.");
+  }
+  const lexicalRunsRoot = workflowRunsRootDir(lexicalProjectRoot);
+  const expectedPhysicalRunsRoot = workflowRunsRootDir(physicalProjectRoot);
+  assertExistingChainIsRegular(physicalProjectRoot, expectedPhysicalRunsRoot);
+  const physicalRunsRoot = realpathSync(lexicalRunsRoot);
+  if (physicalRunsRoot !== expectedPhysicalRunsRoot) {
+    throw new Error("Workflow runs root escapes the canonical physical project root.");
+  }
+  return lexicalRunsRoot;
+}
+
+function assertCanonicalWorkflowRunDirectory(layout: WorkflowRunLayout): string {
+  const lexicalRunsRoot = assertCanonicalWorkflowRunsRoot(layout.lexicalProjectRoot);
+  const physicalRunsRoot = realpathSync(lexicalRunsRoot);
+  const expectedPhysicalRunDir = workflowRunDirectoryWithin(physicalRunsRoot, layout.runId);
+  assertExistingChainIsRegular(physicalRunsRoot, expectedPhysicalRunDir);
+  const physicalRunDir = realpathSync(layout.lexicalRunDir);
+  if (physicalRunDir !== expectedPhysicalRunDir) {
+    throw new Error("Workflow run root escapes the canonical physical runs root.");
+  }
+  return physicalRunDir;
+}
+
+function isContainedPath(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function workflowRunIdDescription(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null) return "null";
+  return `<${typeof value}>`;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 /** Refuse an unsafe component that already exists, before any mkdir can create through it. */

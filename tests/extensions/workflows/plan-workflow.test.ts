@@ -156,10 +156,12 @@ describe("Package workflow: plan", () => {
     }
     expect(calls[1]?.prompt).toMatch(/one frozen\s+`steps\.md` catalog before execution/u);
     expect(calls[1]?.prompt).toContain("one Plan Implement run per step");
-    expect(calls[1]?.prompt).toContain("`workflow-author` Design");
+    expect(calls[1]?.prompt).toContain("`workflow-author` as a normal authoring request");
     expect(calls[1]?.prompt).toMatch(/nothing is\s+executed until the owner reviews/u);
-    expect(calls[1]?.prompt).toMatch(/plan approval never implies `workflow-author`\s+Build approval/u);
-    expect(calls[1]?.prompt).toMatch(/optional reviewer after a generated step belongs to that\s+Design/u);
+    expect(calls[1]?.prompt).toMatch(/plan approval starts neither implementation\s+nor workflow authoring/u);
+    expect(calls[1]?.prompt).toMatch(/writes Design, reviews\s+it, and\s+Builds matching source in the same turn/u);
+    expect(calls[1]?.prompt).toContain("Do not inject `Design only`");
+    expect(calls[1]?.prompt).toMatch(/optional reviewer after a generated step belongs to\s+the\s+bespoke design/u);
     expect(published).toEqual(["plan.md"]);
     expect(result).toContain("Planning is complete and nothing has been implemented");
     expect(result).toContain("This run stops here");
@@ -167,8 +169,11 @@ describe("Package workflow: plan", () => {
     expect(result).toMatch(/Do not start implementation, do not create implementation todos/u);
     expect(result).toContain("execute.workflow.mjs");
     expect(result).toContain("workflow-author");
-    expect(result).toContain("Design workflow:");
-    expect(result).toContain("Build approved design: <exact design path>");
+    expect(result).toContain("Author a sequential project-local workflow");
+    expect(result).toContain("ordinary continuous sequence in that same turn");
+    expect(result).not.toContain("Design only:");
+    expect(result).not.toContain("Build design:");
+    expect(result).not.toContain("Build approved design:");
   });
 
   it("renders standard-profile execute source from the shipped template", () => {

@@ -2,9 +2,12 @@
 
 > These are complete supported jobs, not standard authoring templates. Some
 > predate the exact-text/`choice` profile and deliberately retain advanced raw
-> schemas or validators for compatibility. New workflow source starts from the
-> approval-first skill and its compact pattern cards, then keeps only the nodes
-> and mechanisms its approved graph needs.
+> schemas or validators for compatibility. New workflow source uses one
+> continuous Design -> review -> Build sequence: a raw request first writes and
+> reviews `.pi/workflows/<name>.design.md`, then creates the matching source in
+> the same turn. Only explicit `Design only` wording pauses after design;
+> `Build design:` and `Build approved design:` remain Build-only compatibility
+> forms. The source keeps only the nodes and mechanisms its reviewed graph needs.
 
 This directory shows the complete jobs the package supports, including advanced
 compatibility shapes that standard authoring no longer generates. This file says
@@ -31,14 +34,20 @@ and source-bound item checkpoints—see [`AUTHORING.md`](../AUTHORING.md).
 Counts are of real occurrences — `promptFile()` calls, `agent({ schema })` calls,
 and `throw` statements — not of the words where a comment happens to mention one.
 
-| Example                                                                                      | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
-| -------------------------------------------------------------------------------------------- | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
-| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                       | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
-| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                       | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                 | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                 | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                         | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs) | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
+| Example                                                                                                                    | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
+| -------------------------------------------------------------------------------------------------------------------------- | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                                                     | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
+| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                                     | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                               | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                               | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                                       | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                               | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review.workflow.mjs`](./post-code-review/post-code-review.workflow.mjs)                       | `standard` |    65 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-scope.workflow.mjs`](./post-code-review/post-code-review-scope.workflow.mjs)           | `standard` |    44 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-boundaries.workflow.mjs`](./post-code-review/post-code-review-boundaries.workflow.mjs) | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-simplicity.workflow.mjs`](./post-code-review/post-code-review-simplicity.workflow.mjs) | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-contracts.workflow.mjs`](./post-code-review/post-code-review-contracts.workflow.mjs)   | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-synthesis.workflow.mjs`](./post-code-review/post-code-review-synthesis.workflow.mjs)   | `standard` |    18 |              0 |            0 |       0 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflows run <name>`, discovered by existence on each call
@@ -86,6 +95,8 @@ so a copy placed there works on one machine and exists in no clone.
 | `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                |
 | `plan`                | Task → repository map, plan, dynamic steps, and the execute script   | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`; one scripting agent renders `execute.workflow.mjs`.   |
 | `plan-implement`      | One exact step → changes, checks, and history                        | One implementation agent receives one complete step, changes only that scope, verifies it, and writes `history/S<n>.md`.                                                             |
+| `post-code-review`    | Modular evidence-backed code review                                  | One external parent, one scope child, three independent parallel audit children, and one synthesis child exchange complete Markdown files and publish `post-code-review.md`.         |
+| `post-code-review-*`  | Source-bound components of `post-code-review`                        | Inspect the exact scope, boundaries, simplicity, contracts, and synthesis prompts separately; normally launch the parent rather than one lane.                                       |
 | `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                          |
 
 `plan` and `plan-implement` are a pair, but no workflow calls the other, and a
@@ -119,6 +130,7 @@ lines and up — or a prompt shared by more than one workflow.
 | `review-fix`          | Inline `COMMON` plus every stage task. No `resources/` directory.                                                                                                                                                                   |
 | `plan`                | Two inline stage prompts; `resources/execute-template.prompt.md` (167 lines) holds the scripting charter and the fixed execute-script template it fills.                                                                            |
 | `plan-implement`      | One inline implementation prompt. No `resources/` directory.                                                                                                                                                                        |
+| `post-code-review`    | Parent has no model prompt; all five child prompts are inline in their own source files.                                                                                                                                            |
 | `excalidraw-pipeline` | Three external prompt files, unmigrated.                                                                                                                                                                                            |
 
 A prompt rendered inside a loop is still one prompt file: `promptFile()` snapshots
@@ -200,9 +212,10 @@ as such at its definition.
 A diagram here is **one hand-authored SVG** named `<name>-pipeline.svg`, checked
 in beside the entry it describes — inside the workflow's directory when it has
 one, next to the entry file when it does not.
-[`requirements-grill-pipeline.svg`](./requirements-grill-pipeline.svg) is the
-remaining diagram. The other examples are undrawn; the obsolete `plan` critic
-loop diagram was removed with that loop.
+[`requirements-grill-pipeline.svg`](./requirements-grill-pipeline.svg) and
+[`post-code-review/post-code-review-pipeline.svg`](./post-code-review/post-code-review-pipeline.svg)
+are the current diagrams. The other examples are undrawn; the obsolete `plan`
+critic-loop diagram was removed with that loop.
 
 This replaces the generated triple that used to sit beside every example — a
 generator, an Excalidraw document, and an exported PNG. Three files had to agree,

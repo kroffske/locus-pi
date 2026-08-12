@@ -22,7 +22,10 @@ import {
   type WorkflowRunReportInput,
 } from "../../../extensions/workflows/runtime/workflow-run-report.js";
 import { readWorkflowRunJournalState, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
-import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowJournalFile,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile, writeWorkflowResultText } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
@@ -93,6 +96,7 @@ function evidenceFrom(
 describe("workflow run report", () => {
   it("projects each artifact name as ONE document holding its newest revision, with the chain in the README", () => {
     const root = project();
+    ensureWorkflowRunDir(root, RUN_ID);
     const records = [
       record({ artifactId: "published-0001", name: "task.md", kind: "published" }),
       record({

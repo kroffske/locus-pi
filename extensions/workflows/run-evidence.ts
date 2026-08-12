@@ -15,6 +15,7 @@ import {
   readWorkflowRunResult,
   readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
+  workflowPersistedResultInvalidity,
   workflowRunDir,
 } from "./runtime/workflow-journal.js";
 import type { WorkflowRunResultEnvelope } from "./runtime/workflow-journal.js";
@@ -23,8 +24,14 @@ import {
   projectWorkflowDisposition,
   type WorkflowDispositionProjection,
 } from "./runtime/workflow-result.js";
+import { assertWorkflowRunId } from "./runtime/workflow-run-layout.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
-import { compactWorkflowLine, formatOperatorScriptIdentity, workflowStatusTone } from "./operator-ui.js";
+import {
+  compactWorkflowLine,
+  formatOperatorScriptIdentity,
+  workflowStatusTone,
+  workflowWarningBlock,
+} from "./operator-ui.js";
 import {
   matchWorkflowPhaseGroups,
   staticWorkflowMetaPhases,
@@ -93,17 +100,18 @@ function formatRunRow(projectRoot: string, runId: string, compact = false): stri
 }
 
 export function buildRunDetailBlock(projectRoot: string, runId: string, compact = false): OperatorBlock {
+  try {
+    assertWorkflowRunId(runId);
+  } catch {
+    return workflowWarningBlock(`Workflow run not found: ${runId}`, "Recovery: /workflows status");
+  }
   const journalState = readWorkflowRunJournalState(projectRoot, runId);
   const journal = journalState.lines;
   const summary = readWorkflowRunSummary(projectRoot, runId);
   const persisted = readWorkflowRunResult(projectRoot, runId);
+  const persistedInvalidity = workflowPersistedResultInvalidity(persisted);
   if (journal.length === 0 && !summary.hasResult) {
-    return {
-      type: "ERROR",
-      subject: "Workflow run",
-      primary: `Workflow run not found: ${runId}`,
-      controls: ["Recovery: /workflows status"],
-    };
+    return workflowWarningBlock(`Workflow run not found: ${runId}`, "Recovery: /workflows status");
   }
   const budgetLine =
     summary.usage !== null
@@ -126,9 +134,11 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
       ? summary.hasResult
         ? "result detail: unavailable (result.json is unreadable)"
         : "result: unavailable (run is in flight or was interrupted)"
-      : persisted.error !== undefined
-        ? `error: ${persisted.error}`
-        : `result: ${formatWorkflowResultDetail(persisted.result)}`;
+      : persistedInvalidity !== undefined
+        ? `result detail: unavailable (${persistedInvalidity})`
+        : persisted.error !== undefined
+          ? `error: ${persisted.error}`
+          : `result: ${formatWorkflowResultDetail(persisted.result)}`;
   const source = persisted?.target?.source;
   const scriptIdentity = persisted?.scriptIdentity;
   // Same actionable failure evidence a live run showed, recovered from the
@@ -140,9 +150,11 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
   const compactResult =
     persisted === null
       ? resultDetail
-      : persisted.error !== undefined
-        ? `error: ${persisted.error}`
-        : `result: ${persistedWorkflowDisposition(persisted).summary}`;
+      : persistedInvalidity !== undefined
+        ? resultDetail
+        : persisted.error !== undefined
+          ? `error: ${persisted.error}`
+          : `result: ${persistedWorkflowDisposition(persisted).summary}`;
   return {
     type: "VIEW",
     subject: "Workflow run",

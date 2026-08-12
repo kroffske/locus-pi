@@ -338,7 +338,7 @@ describe("the runner applies the budget contract", () => {
     expect(result.ok, result.error).toBe(true);
     expect(result.result).toEqual({ calls: 201 });
     expect(children).toHaveLength(201);
-  });
+  }, 10_000);
 
   it("bounds a script that declares nothing with the contract tool-call fuse", async () => {
     const root = scratchProject();

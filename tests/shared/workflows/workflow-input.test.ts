@@ -181,14 +181,61 @@ describe("string-only workflow input", () => {
     expect(Value.Check(schema, { name: "demo", unexpected: true })).toBe(false);
   });
 
-  it("accepts only confined project-relative workflow workspaces in the tool schema", () => {
+  it("uses the exact saved-name policy in the programmatic tool schema", () => {
     const { tool } = registerTool();
     const schema = tool.parameters;
 
+    expect(Value.Check(schema, { name: "alpha workflow" })).toBe(true);
+    expect(Value.Check(schema, { name: "a".repeat(200) })).toBe(true);
+    for (const name of [
+      "",
+      " alpha",
+      "alpha ",
+      "alpha\u0001control",
+      "alpha/beta",
+      String.raw`alpha\beta`,
+      "alpha.mjs",
+      "alpha.MJS",
+      "a".repeat(201),
+    ]) {
+      expect(Value.Check(schema, { name }), name).toBe(false);
+    }
+  });
+
+  it("accepts only confined project-relative workflow workspaces in the tool schema", () => {
+    const { tool } = registerTool();
+    const schema = tool.parameters;
+    const outputDirDescription = (schema as { properties?: Record<string, { description?: string }> }).properties
+      ?.outputDir?.description;
+    expect(outputDirDescription).toContain("Ordinary workflows default");
+    expect(outputDirDescription).toContain("fresh post-code-review launches require an explicit new outputDir");
+    expect(outputDirDescription).toContain("resume repeats the source workspace");
+    expect(outputDirDescription).not.toMatch(/defaults to tmp\/<workflow-name> beneath the Pi working directory\.$/u);
+
     expect(Value.Check(schema, { name: "demo", outputDir: "outputs/demo" })).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: "results.v2/task_1" })).toBe(true);
+    expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(199)}/${"b".repeat(200)}` })).toBe(true);
+    expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(200)}/${"b".repeat(200)}` })).toBe(false);
     for (const outputDir of ["/tmp/demo", "../demo", "outputs/../demo", " outputs/demo", "outputs/demo/"]) {
       expect(Value.Check(schema, { name: "demo", outputDir })).toBe(false);
+    }
+  });
+
+  it("accepts only safe workflow run ids for tool resume metadata", () => {
+    const { tool } = registerTool();
+    const schema = tool.parameters;
+
+    expect(Value.Check(schema, { name: "demo", resumeFromRunId: "20260812-123456-abcd" })).toBe(true);
+    expect(Value.Check(schema, { name: "demo", resumeFromRunId: "a".repeat(128) })).toBe(true);
+    for (const resumeFromRunId of [
+      "../outside",
+      "runs/outside",
+      String.raw`runs\\outside`,
+      "/tmp/outside",
+      "C:/outside",
+      "a".repeat(129),
+    ]) {
+      expect(Value.Check(schema, { name: "demo", resumeFromRunId })).toBe(false);
     }
   });
 

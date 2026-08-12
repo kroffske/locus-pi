@@ -16,7 +16,9 @@ must never resolve to the same directory.
 
 `pwd` is Pi's session working directory. The runtime verifies both its lexical
 and physical location inside the project root before creating the default
-workspace. An explicit `outputDir` remains a safe project-relative override.
+workspace. An explicit `outputDir` remains a safe project-relative override,
+selected programmatically or with
+`/workflows run <name|path> --output-dir <path>`.
 
 `extensions/workflows/runtime/workflow-run-layout.ts` owns `.pi/locus-pi/`, the
 `runs/` and `workflow-state/` names, and every run-evidence path. Other runtime
@@ -42,6 +44,10 @@ SHA-256 digest without copying or interpreting content.
 One fenced lease owns each physical workspace. Concurrent runs targeting the
 same default or explicit workspace fail closed. Parallel callers choose distinct
 explicit directories. Saved children inherit the root workspace and lease.
+Lease acquisition, stale-owner replacement, and release prove the complete
+`workflow-state/<namespace>/lease/owner.json` ancestor chain before reading or
+mutating it. A symlinked or dangling lease directory is unsafe evidence, never
+an absent owner, and cannot redirect cleanup to an external sentinel.
 
 `runWorkspaceDir()` is removed and throws
 `WorkflowRunWorkspaceRemovedError`. A run-local `workspace/` directory is not
@@ -67,28 +73,56 @@ back to `runtime/result.json` when the readable copy is missing.
 
 ## `runtime/`: machine evidence
 
-| Path                                   | Purpose                                                                                    |
-| -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `runtime/journal.ndjson`               | phases, logs, agent starts/ends, usage, and errors                                         |
-| `runtime/replay.ndjson`                | replay-safe answers plus recorded `dsl.now()`/`dsl.random()` values                        |
-| `runtime/result.json`                  | terminal envelope, workspace/run paths, disposition, journal, identity, and projected refs |
-| `runtime/script-<sha256>.workflow.mjs` | retained executed script snapshot                                                          |
-| `runtime/resources/`                   | retained prompt resources                                                                  |
-| `runtime/operator-handoff-claim.json`  | mutable continuation claim metadata; never answer content                                  |
-| `runtime/worktrees/`                   | retained Git worktrees created by explicit isolation APIs                                  |
-| `runtime/artifacts/index.json`         | canonical digest-bound artifact inventory                                                  |
-| `runtime/artifacts/answers/`           | exact final answer from each agent attempt                                                 |
-| `runtime/artifacts/published/`         | deterministic text explicitly published by workflow code                                   |
-| `runtime/artifacts/inputs/`            | verified copies consumed from prior runs                                                   |
-| `runtime/artifacts/transcripts/`       | fresh child Pi transcripts                                                                 |
-| `runtime/artifacts/results/`           | fresh child result envelopes                                                               |
+| Path                                   | Purpose                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `runtime/journal.ndjson`               | phases, logs, agent starts/ends, usage, and errors                                                                       |
+| `runtime/replay.ndjson`                | replay-safe answers plus recorded `dsl.now()`/`dsl.random()` values                                                      |
+| `runtime/result.json`                  | terminal envelope, workspace/run paths, disposition, journal, identity, and projected refs                               |
+| `runtime/launch-binding.json`          | write-once host-owned source/target/workspace/input binding used for exact post-code-review resume and handoff admission |
+| `runtime/script-<sha256>.workflow.mjs` | retained executed script snapshot                                                                                        |
+| `runtime/resources/`                   | retained prompt resources                                                                                                |
+| `runtime/operator-handoff-claim.json`  | mutable continuation claim metadata; never answer content                                                                |
+| `runtime/worktrees/`                   | retained Git worktrees created by explicit isolation APIs                                                                |
+| `runtime/artifacts/index.json`         | canonical digest-bound artifact inventory                                                                                |
+| `runtime/artifacts/answers/`           | exact final answer from each agent attempt                                                                               |
+| `runtime/artifacts/published/`         | deterministic text explicitly published by workflow code                                                                 |
+| `runtime/artifacts/inputs/`            | verified copies consumed from prior runs                                                                                 |
+| `runtime/artifacts/transcripts/`       | fresh child Pi transcripts                                                                                               |
+| `runtime/artifacts/results/`           | fresh child result envelopes                                                                                             |
 
 The artifact index, not `outputs/`, is continuation authority.
+
+`runtime/result.json` is a readable, mutable projection. For the owner-specific
+`post-code-review` resume and operator handoff paths, the runtime also writes
+`launch-binding.json` once after validated launch state is established. Those
+paths require the binding and reject any result projection whose run, target,
+script, workspace, explicit-selection bit, or semantic-input digest differs.
+Generic workflows and legacy runs without this sidecar retain their existing
+readability and resume rules.
+
+Run-evidence access rejects symlinked ancestors and leaf files. Regular file
+reads and writes also use `O_NOFOLLOW` plus descriptor identity checks. Node's
+portable filesystem API does not expose dirfd-relative `readdir`, `rename`, or
+`unlink`, so a hostile local process that replaces an ancestor concurrently can
+still race those path-based operations. Operator handoff claim and lock sidecars
+use the same confined runtime-file owner for reads, exclusive creation, atomic
+replacement, and removal; the replacement/removal operations retain that exact
+portable Node path-based TOCTOU limit. Workflow JavaScript is already trusted
+host code; this is a residual local evidence-integrity limit, not process
+isolation.
 
 ## Lookup and retention
 
 - `/workflows status <runId>` shows both `workspaceDir` and `runDir` when the
   persisted envelope is available.
+- Result envelopes also persist `workspacePhysicalIdentity` with schema version
+  `1`, a canonical project-relative identity with no workstation absolute path. Exact
+  `post-code-review` resume requires this field to be valid and equal to the
+  newly resolved physical workspace before lease or checkpoint access. This
+  generated identity is separate from the caller-facing `outputDir` grammar:
+  default workspaces may contain spaces or exceed its 400-character bound, while
+  runtime resolution proves lexical and physical project containment before
+  persisting the identity.
 - New readers inspect only `.pi/locus-pi/runs/<runId>/`.
 - Old `.pi/locus-pi/workflows/<runId>/` directories are left untouched. An exact
   lookup returns a named migration message; there is no fallback read or

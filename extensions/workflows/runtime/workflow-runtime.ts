@@ -408,6 +408,8 @@ export interface WorkflowDsl {
 export interface WorkflowSavedChildInvocation {
   name?: string;
   scriptPath?: string;
+  /** Exact Package-registry child name. Unlike `name`, project and personal shadows fail closed. */
+  packageName?: string;
   input?: string;
   items?: readonly string[];
   /** Stable semantic identity for this item. Opaque payload does not redefine it. */
