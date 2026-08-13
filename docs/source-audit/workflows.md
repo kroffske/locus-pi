@@ -94,13 +94,21 @@ or borrowed runtime implementation was identified for this source-audit slice.
   workflow name, then run id, then source badge. The same model partitions current
   rows into Project, User, and Package display sections in resolver-precedence
   order and leaves History separate. A literal, package-owned declaration marks
-  `post-code-review` as one parent plus six exact children only when all seven
+  `post-code-review` as one parent plus seven exact children only when all eight
   names simultaneously resolve to Package targets. Any higher-precedence shadow
   suppresses the relation for every member, so presentation cannot describe a
   mixed or incomplete Package bundle. This is catalog metadata only: it does not
   participate in target resolution, execution, or history persistence. Compact
   projections retain an exact bundle continuation, budget-independent current
   and history row totals, and explicit notice that detail lines may be omitted.
+- `extensions/workflows/examples/implement/implement.workflow.mjs` is the
+  standalone prepared-work remediation owner. It keeps plan normalization,
+  `execute`/`no-work`/`needs-operator` routing, one human decision, independent
+  verification, and the single corrective pass visible in standard-profile
+  source. Agents exchange complete Markdown files; JavaScript does not parse a
+  plan or review. REQUIRED work is the default, RECOMMENDED work needs explicit
+  operator opt-in, and NO_ACTION or illustrative snippet content is never an
+  executable unit. Git publication and deployment remain outside the workflow.
 - `extensions/workflows/catalog-viewer.ts` owns the focused `/workflows list`
   cursor, current/history selection, catalog/source/identity screen transition,
   independent source and identity scroll, action focus, and width-bounded
@@ -249,7 +257,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   project-local workflow workspace. It derives the default
   `<pwd>/tmp/<workflow-name>/` from Pi's lexically and physically confined
   working directory, validates explicit project-relative overrides, and owns
-  physical-root leases, checkpoints, and primary-file references.
+  physical-root leases, checkpoints, and primary-file references. A fresh root
+  `post-code-review` launch also asks this owner to preserve an existing regular
+  request-local `style.md` or create it empty; symlinks and non-regular leaves
+  fail before child work.
 - `extensions/workflows/runtime/workflow-journal.ts` owns run discovery/order and
   immutable executed-snapshot reads as well as journal-to-live status mapping.
   Status/catalog consumers see only evidenced directories with a canonical UTC

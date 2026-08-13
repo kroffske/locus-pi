@@ -6,9 +6,27 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Post-code review now states whether work is mandatory and hands it to a
+  separate verified implementation workflow.** Final reports use `READY`,
+  `READY_WITH_RECOMMENDATIONS`, `CHANGES_REQUIRED`, or `BLOCKED`; each item has
+  an independent `REQUIRED`, `RECOMMENDED`, or `NO_ACTION` level plus impact.
+  Actionable items may include small illustrative snippets, never literal
+  patches. The new Package `implement` workflow defaults to REQUIRED work,
+  intentionally no-ops when nothing is selected, pauses for unresolved owner or
+  product decisions, independently verifies live changes, and permits at most
+  one corrective pass. It never commits, pushes, opens a pull request, merges,
+  or deploys.
+
+- **Post-code review now audits comments and project-specific style from one
+  request-local file.** Every fresh review preserves an existing
+  `tmp/post-code-review/<review-id>/style.md` or safely creates it empty before
+  child work starts. A fourth parallel lane checks misleading, stale, redundant,
+  or missing comments and evidence-backed project style; its proposals still
+  pass through the sequential necessity challenge before synthesis.
+
 - **The workflow catalog now separates Project, User, Package, and immutable run
   history while presenting `post-code-review` as one explicit Package bundle.**
-  The external parent and all six exact child names remain independently
+  The external parent and all seven exact child names remain independently
   addressable through `/workflows info`; compact and no-UI projections disclose
   exact current/history totals, possible detail omission, and the bundle details
   affordance. This is a presentation-only read model and does not change
@@ -22,7 +40,7 @@ This file records user-visible changes to the public package.
   still verifies origin-run membership and artifact integrity.
 
 - **Modular post-code review now ships as an installable Package workflow.**
-  `post-code-review` coordinates one scope child, three parallel audit children,
+  `post-code-review` coordinates one scope child, four parallel audit children,
   one sequential necessity challenge, and one synthesis child from one shipped
   folder, publishes the final Markdown report, and includes a self-contained
   SVG interaction diagram. The necessity challenge requires a proven failure,

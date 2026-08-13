@@ -15,7 +15,7 @@ what ships, what each example is for, which shape it demonstrates, and how far
 it travels. The standard source profile lives in [`AUTHORING.md`](../AUTHORING.md)
 and the skill-loaded compact pattern cards.
 
-Measured 2026-08-06 against the files in this directory. `Profile` is literal
+Measured 2026-08-13 against the files in this directory. `Profile` is literal
 catalog metadata: `standard` is the current generated-source contract,
 `legacy` preserves reviewed compatibility shapes, and `integration` names a
 portfolio-level end-to-end flow.
@@ -36,19 +36,21 @@ and `throw` statements — not of the words where a comment happens to mention o
 
 | Example                                                                                                                    | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
 | -------------------------------------------------------------------------------------------------------------------------- | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`implement/implement.workflow.mjs`](./implement/implement.workflow.mjs)                                                   | `standard` |   240 |              0 |            0 |       0 | npm package · public repository |
 | [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                                                     | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
 | [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                                     | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
 | [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                               | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
 | [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                               | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
 | [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                                       | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
 | [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                               | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review.workflow.mjs`](./post-code-review/post-code-review.workflow.mjs)                       | `standard` |    75 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review.workflow.mjs`](./post-code-review/post-code-review.workflow.mjs)                       | `standard` |    83 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/post-code-review-scope.workflow.mjs`](./post-code-review/post-code-review-scope.workflow.mjs)           | `standard` |    44 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/post-code-review-boundaries.workflow.mjs`](./post-code-review/post-code-review-boundaries.workflow.mjs) | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/post-code-review-simplicity.workflow.mjs`](./post-code-review/post-code-review-simplicity.workflow.mjs) | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-style.workflow.mjs`](./post-code-review/post-code-review-style.workflow.mjs)           | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/post-code-review-contracts.workflow.mjs`](./post-code-review/post-code-review-contracts.workflow.mjs)   | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/post-code-review-necessity.workflow.mjs`](./post-code-review/post-code-review-necessity.workflow.mjs)   | `standard` |    32 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-synthesis.workflow.mjs`](./post-code-review/post-code-review-synthesis.workflow.mjs)   | `standard` |    24 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review-synthesis.workflow.mjs`](./post-code-review/post-code-review-synthesis.workflow.mjs)   | `standard` |    28 |              0 |            0 |       0 | npm package · public repository |
 
 **This directory is the Package registry.** Every `<name>.workflow.mjs` in it
 resolves through `/workflows run <name>`, discovered by existence on each call
@@ -88,17 +90,18 @@ so a copy placed there works on one machine and exists in no clone.
 
 ## What each example is for
 
-| Example               | Product role                                                         | Read it for                                                                                                                                                                                                      |
-| --------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential full-tool `agent()` calls perform one file-listing action each, with one input check and no schemas.                                                              |
-| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                     |
-| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                             |
-| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                            |
-| `plan`                | Task → repository map, plan, dynamic steps, and the execute script   | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`; one scripting agent renders `execute.workflow.mjs`.                               |
-| `plan-implement`      | One exact step → changes, checks, and history                        | One implementation agent receives one complete step, changes only that scope, verifies it, and writes `history/S<n>.md`.                                                                                         |
-| `post-code-review`    | Modular evidence-backed code review                                  | One external parent, one scope child, three independent parallel audit children, one sequential necessity challenge, and one synthesis child exchange complete Markdown files and publish `post-code-review.md`. |
-| `post-code-review-*`  | Source-bound components of `post-code-review`                        | Inspect the exact scope, boundaries, simplicity, contracts, necessity, and synthesis prompts separately; normally launch the parent rather than one lane.                                                        |
-| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                      |
+| Example               | Product role                                                         | Read it for                                                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `implement`           | Prepared plan/review remediation                                     | Exact-text plan normalization, REQUIRED-by-default selection, no-op and human-decision routes, independent verification, and one bounded corrective pass.                                                       |
+| `live-smoke`          | Child-session diagnostic                                             | The smallest complete workflow: two sequential full-tool `agent()` calls perform one file-listing action each, with one input check and no schemas.                                                             |
+| `requirements-grill`  | Requirements refinement                                              | The shortest declared roster — `scout`, `challenger`, `synthesizer` — in a straight line: three agents, no loop, no branch, and therefore no declared answer shape anywhere.                                    |
+| `review`              | Evidence-backed code review                                          | The staged text pipeline, two shaped `agent({ schema })` gates, a split-run operator handoff, a bounded assessed loop, **and** both halves of the prompt-placement rule in one file.                            |
+| `review-fix`          | Human-directed fixes                                                 | A model-planned dependency graph that deterministic code validates and orders before any writer starts, one writer per finding, an independent read-only check stage.                                           |
+| `plan`                | Task → repository map, plan, dynamic steps, and the execute script   | One reconnaissance agent writes `context.md`; one planning agent writes `plan.md` and complete `## S<n>` blocks in `steps.md`; one scripting agent renders `execute.workflow.mjs`.                              |
+| `plan-implement`      | One exact step → changes, checks, and history                        | One implementation agent receives one complete step, changes only that scope, verifies it, and writes `history/S<n>.md`.                                                                                        |
+| `post-code-review`    | Modular evidence-backed code review                                  | One external parent, one scope child, four independent parallel audit children, one sequential necessity challenge, and one synthesis child exchange complete Markdown files and publish `post-code-review.md`. |
+| `post-code-review-*`  | Source-bound components of `post-code-review`                        | Inspect the exact scope, boundaries, simplicity, contracts, style, necessity, and synthesis prompts separately; normally launch the parent rather than one lane.                                                |
+| `excalidraw-pipeline` | Reference only, under `extensions/workflows/references/`, not packed | Fan-out over many sections with per-section repair, and an explicit per-stage `model:` pin.                                                                                                                     |
 
 `plan` and `plan-implement` are a pair, but no workflow calls the other, and a
 finished `plan` run starts nothing. The installed `locus-task-workflow` skill
@@ -125,13 +128,14 @@ lines and up — or a prompt shared by more than one workflow.
 
 | Example               | Prompt placement                                                                                                                                                                                                                    |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `implement`           | Inline; every prompt and finite route remains visible in the source.                                                                                                                                                                |
 | `live-smoke`          | Inline; the prompts are one line each.                                                                                                                                                                                              |
 | `requirements-grill`  | Inline.                                                                                                                                                                                                                             |
 | `review`              | Inline `COMMON` contract plus five stage tasks; `resources/interrogator.prompt.md` (136 lines) and `resources/verifier.prompt.md` (139 lines) stay external. This is the example to read when you need to see _both_ rules at once. |
 | `review-fix`          | Inline `COMMON` plus every stage task. No `resources/` directory.                                                                                                                                                                   |
 | `plan`                | Two inline stage prompts; `resources/execute-template.prompt.md` (167 lines) holds the scripting charter and the fixed execute-script template it fills.                                                                            |
 | `plan-implement`      | One inline implementation prompt. No `resources/` directory.                                                                                                                                                                        |
-| `post-code-review`    | Parent has no model prompt; all six child prompts are inline in their own source files.                                                                                                                                             |
+| `post-code-review`    | Parent has no model prompt; all seven child prompts are inline in their own source files.                                                                                                                                           |
 | `excalidraw-pipeline` | Three external prompt files, unmigrated.                                                                                                                                                                                            |
 
 A prompt rendered inside a loop is still one prompt file: `promptFile()` snapshots

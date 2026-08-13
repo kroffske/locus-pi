@@ -216,6 +216,55 @@ export function resolveWorkflowOutputDirectoryForReuse(
   return { relativePath, absolutePath, physicalPath, identity };
 }
 
+/** Preserve an existing regular workspace file or create it empty without following symlinks. */
+export function ensureWorkflowWorkspaceFile(output: WorkflowOutputDirectory, relativeFile: string): string {
+  const normalized = assertRelativeOutputPath(relativeFile, "workspace file");
+  const absolutePath = path.resolve(output.absolutePath, ...normalized.split("/"));
+  if (!isWorkflowPathWithinRoot(output.absolutePath, absolutePath)) {
+    throw new Error("workflow workspace file escapes outputDir");
+  }
+
+  let fd: number;
+  try {
+    fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (!isNodeError(error, "ENOENT")) throw error;
+    try {
+      fd = openSync(
+        absolutePath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o666,
+      );
+    } catch (createError) {
+      if (!isNodeError(createError, "EEXIST")) throw createError;
+      fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    }
+  }
+
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile()) throw new Error(`workflow workspace file is not a regular file: ${normalized}`);
+    const physicalWorkspace = realpathSync(output.absolutePath);
+    if (physicalWorkspace !== output.physicalPath) {
+      throw new Error("workflow workspace changed while its input file was being opened");
+    }
+    const selected = lstatSync(absolutePath);
+    const physicalFile = realpathSync(absolutePath);
+    if (
+      selected.isSymbolicLink() ||
+      !selected.isFile() ||
+      opened.dev !== selected.dev ||
+      opened.ino !== selected.ino ||
+      !isWorkflowPathWithinRoot(output.physicalPath, physicalFile)
+    ) {
+      throw new Error(`workflow workspace file changed while it was being opened: ${normalized}`);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return absolutePath;
+}
+
 export function assertWorkflowItemKey(key: string): string {
   if (typeof key !== "string" || !ITEM_KEY.test(key)) {
     throw new Error(

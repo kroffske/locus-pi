@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, thirteen
+Installing it gives a Pi session eleven extensions, a bundled agent catalog, fifteen
 curated Package workflows, and two skills that teach an agent how to find, run,
 and author them — through a deliberately narrow npm artifact.
 
@@ -30,7 +30,7 @@ pi list                        # what Pi actually loads, per scope
 npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the thirteen curated
+Then start Pi in a trusted project and run `/workflows list`: the fifteen curated
 workflows resolve out of the installed package, so nothing has to be copied
 anywhere. Inside a session, `/devext doctor` gives the same kind of compact
 inventory view.
@@ -80,30 +80,32 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers exactly these thirteen Package workflows. Seven
+The installed package registers exactly these fifteen Package workflows. Eight
 of them form one modular post-code-review bundle: `post-code-review` is the
-external entry and the six prefixed workflows are its source-bound child
+external entry and the seven prefixed workflows are its source-bound child
 components.
 
 | Workflow                      | Intended use                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `implement`                   | Applies authorized REQUIRED work from a plan or review, independently verifies it, and allows one corrective pass.               |
 | `live-smoke`                  | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
 | `requirements-grill`          | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
 | `review`                      | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
 | `review-fix`                  | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
 | `plan`                        | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
 | `plan-implement`              | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
-| `post-code-review`            | Runs one scoped, three-lane parallel code review and publishes an independently verified `post-code-review.md`.                  |
+| `post-code-review`            | Runs one scoped, four-lane parallel code review and publishes an independently verified `post-code-review.md`.                   |
 | `post-code-review-scope`      | Resolves a function, file, commit, range, diff, or local PR into an exact review boundary.                                       |
 | `post-code-review-boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
 | `post-code-review-simplicity` | Audits duplication, empty wrappers, redundant guards, dead paths, and delete-first alternatives.                                 |
 | `post-code-review-contracts`  | Audits APIs, consumers, validation parity, defaults, errors, documentation, tests, and intent.                                   |
+| `post-code-review-style`      | Audits comments and evidence-backed project style, with optional request-local criteria from `style.md`.                         |
 | `post-code-review-necessity`  | Challenges every proposed fix to prove a real failure, a guarantee owner, and the simplest net improvement.                      |
-| `post-code-review-synthesis`  | Re-verifies the scope and three lane reports, removes unsupported claims, and authors the final report.                          |
+| `post-code-review-synthesis`  | Re-verifies the scope and four lane reports, removes unsupported claims, and authors the final report.                           |
 
 The Package registry is the shipped `extensions/workflows/examples/` directory
 itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
-file there, and the npm allowlist ships exactly the thirteen files above plus the
+file there, and the npm allowlist ships exactly the fifteen files above plus the
 post-code-review bundle's README and SVG diagram.
 
 Inspect and run them from the canonical command menu:
@@ -114,11 +116,24 @@ Inspect and run them from the canonical command menu:
 /workflows info live-smoke
 /workflows run live-smoke
 /workflows run post-code-review --output-dir tmp/post-code-review/review-20260813-a review the current diff
+/workflows run implement --output-dir tmp/post-code-review/review-20260813-a apply REQUIRED fixes from post-code-review.md
 /workflows status
 /workflows result last
 /workflows stop last
 /ps
 ```
+
+Before launching `post-code-review`, an operator may write additional comment
+and style criteria to `tmp/post-code-review/<review-id>/style.md`. The runtime
+preserves that regular file byte-for-byte; when it is absent, the runtime creates
+it empty before review work starts.
+
+The final review uses `READY`, `READY_WITH_RECOMMENDATIONS`, `CHANGES_REQUIRED`,
+or `BLOCKED`. Every item separately declares `Action: REQUIRED`, `RECOMMENDED`,
+or `NO_ACTION` and `Impact: high`, `medium`, or `low`. Small fix snippets are
+illustrative guidance for actionable items, never literal patches. `implement`
+defaults to REQUIRED work, includes RECOMMENDED work only when explicitly asked,
+and intentionally returns `NO_WORK` when nothing selected needs a change.
 
 Bare `/workflows` opens the interactive command menu when TUI selection is
 available; other hosts receive the typed help fallback. Its exact verbs are

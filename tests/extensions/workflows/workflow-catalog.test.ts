@@ -261,6 +261,7 @@ describe("workflow operator catalog", () => {
     // Scan order is entry filename, so "plan-implement.workflow.mjs" precedes
     // "plan.workflow.mjs" exactly as review-fix precedes review.
     expect(descriptions.map(({ name }) => name)).toEqual([
+      "implement",
       "live-smoke",
       "plan-implement",
       "plan",
@@ -269,6 +270,7 @@ describe("workflow operator catalog", () => {
       "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
+      "post-code-review-style",
       "post-code-review-synthesis",
       "post-code-review",
       "requirements-grill",
@@ -293,6 +295,7 @@ describe("workflow operator catalog", () => {
       // Package rows are ordered by entry filename, so "plan-implement.workflow.mjs"
       // sorts before "plan.workflow.mjs" exactly as review-fix sorts before review.
       expect(packageNames).toEqual([
+        "implement",
         "live-smoke",
         "plan-implement",
         "plan",
@@ -301,6 +304,7 @@ describe("workflow operator catalog", () => {
         "post-code-review-necessity",
         "post-code-review-scope",
         "post-code-review-simplicity",
+        "post-code-review-style",
         "post-code-review-synthesis",
         "post-code-review",
         "requirements-grill",
@@ -324,6 +328,7 @@ describe("workflow operator catalog", () => {
         "post-code-review-boundaries",
         "post-code-review-simplicity",
         "post-code-review-contracts",
+        "post-code-review-style",
         "post-code-review-necessity",
         "post-code-review-synthesis",
       ];
@@ -339,7 +344,7 @@ describe("workflow operator catalog", () => {
         maxLines: 10,
       }).join("\n");
       expect(parentRpc).toContain("Bundle: post-code-review parent");
-      expect(parentRpc).toContain("6 exact children");
+      expect(parentRpc).toContain("7 exact children");
       for (const name of bundleNames.slice(1)) {
         expect(model.current.find((row) => row.name === name)?.bundle).toMatchObject({
           version: 1,
@@ -536,11 +541,11 @@ describe("workflow operator catalog", () => {
         "Display order: Project → User → Package (does not change first-wins resolution)",
       );
       const compactRows = compactBlock.body ?? [];
-      expect(compactRows).toContain("Bundle: post-code-review · 6 children · /workflows info post-code-review");
+      expect(compactRows).toContain("Bundle: post-code-review · 7 children · /workflows info post-code-review");
       expect(compactRows).toContainEqual(expect.stringMatching(/^\+\d+ hidden workflow row\(s\);/u));
       const rpcCatalog = renderOperatorBlockPlain(compactBlock, 80, { maxLines: 10 }).join("\n");
       expect(rpcCatalog).toContain("Bundle: post-code-review");
-      expect(rpcCatalog).toContain("6 exact children");
+      expect(rpcCatalog).toContain("7 exact children");
       const compactModel = buildWorkflowCatalogModel(root, root);
       expect(rpcCatalog).toContain(
         `${compactModel.current.length} current workflow(s) · ${compactModel.history.length} history row(s)`,
@@ -807,7 +812,7 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unassigned role degrades and is recorded");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain(
-        "the packaged examples directory, currently live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-necessity, post-code-review-scope, post-code-review-simplicity, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
+        "the packaged examples directory, currently implement, live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-necessity, post-code-review-scope, post-code-review-simplicity, post-code-review-style, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
       );
       expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();

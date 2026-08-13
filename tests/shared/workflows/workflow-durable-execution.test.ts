@@ -245,6 +245,83 @@ describe("stable workflow output paths", () => {
     expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
   });
 
+  it("creates an empty style.md before post-code-review executes", async () => {
+    const root = project();
+    const styleFile = path.join(root, "tmp", "post-code-review", "empty-style", "style.md");
+    writeWorkflow(
+      root,
+      "post-code-review",
+      `import { readFileSync } from "node:fs";
+export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
+`,
+    );
+    const harness = createHarness(root);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      outputDir: "tmp/post-code-review/empty-style",
+    });
+
+    expect(result.ok, result.error).toBe(true);
+    expect(result.result).toBe("");
+    expect(readFileSync(styleFile, "utf8")).toBe("");
+  });
+
+  it("preserves an existing post-code-review style.md", async () => {
+    const root = project();
+    const outputDir = "tmp/post-code-review/custom-style";
+    const styleFile = path.join(root, outputDir, "style.md");
+    mkdirSync(path.dirname(styleFile), { recursive: true });
+    writeFileSync(styleFile, "Prefer domain names over abbreviations.\n", "utf8");
+    writeWorkflow(
+      root,
+      "post-code-review",
+      `import { readFileSync } from "node:fs";
+export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
+`,
+    );
+    const harness = createHarness(root);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      outputDir,
+    });
+
+    expect(result.ok, result.error).toBe(true);
+    expect(result.result).toBe("Prefer domain names over abbreviations.\n");
+    expect(readFileSync(styleFile, "utf8")).toBe("Prefer domain names over abbreviations.\n");
+  });
+
+  it("rejects a symlinked post-code-review style.md without touching its target", async () => {
+    const root = project();
+    const outputDir = "tmp/post-code-review/symlinked-style";
+    const workspace = path.join(root, outputDir);
+    const outside = path.join(root, "outside-style.md");
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(outside, "outside\n", "utf8");
+    symlinkSync(outside, path.join(workspace, "style.md"));
+    writeWorkflow(root, "post-code-review", `export default () => "must not run";\n`);
+    const harness = createHarness(root);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      outputDir,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/style\.md|symbolic link|symlink|regular file/u);
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
+  });
+
   it("rejects fresh post-code-review reuse while allowing exact resume", async () => {
     const root = project();
     writeWorkflow(root, "post-code-review", `export default (dsl) => dsl.outputDir();\n`);

@@ -740,16 +740,52 @@ Installation is package installation, not artifact copying:
 launches it from any trusted project. Task-local bundle and Git-scope verifier
 scripts remain development evidence and are not workflow entries.
 
+## Amendment 2026-08-13 — request-local style guidance
+
+The bundle gains one fourth parallel audit child, `post-code-review-style`. It
+checks comment accuracy and evidence-backed project style, then writes
+`review-style.md`; the existing necessity challenge remains the only admission
+path into synthesis. Optional operator criteria live beside the review request
+at `tmp/post-code-review/<review-id>/style.md`, not in Package source or semantic
+input. The runtime preserves an existing regular file or creates it empty before
+the first child starts, and rejects a symlink or non-regular leaf. Empty means no
+additional criteria, while live project conventions still apply.
+
+The parent therefore has seven exact Package-child edges and the public bundle
+has eight names. The extra lane is independent analysis, not a new synthesis or
+consensus vote; its recommendations remain subject to the same proven-risk,
+ownership, non-duplication, and net-simplicity test as every other lane.
+
+## Amendment 2026-08-13 — explicit review actions and separate implementation
+
+The final post-code-review report now separates acceptance from optional work.
+Its top-level decision is `READY`, `READY_WITH_RECOMMENDATIONS`,
+`CHANGES_REQUIRED`, or `BLOCKED`; each item independently declares `REQUIRED`,
+`RECOMMENDED`, or `NO_ACTION` plus impact. Small fix snippets are illustrative
+guidance only and appear only when an actionable item has enough evidence for a
+truthful localized example.
+
+The portfolio gains one standalone `implement` workflow instead of making code
+review mutate source. It normalizes a named ready or nearly ready plan/review,
+defaults to REQUIRED work, routes an empty selection to an intentional no-op,
+and pauses when a real owner/product decision remains. One implementation agent
+edits the live checkout, a separate agent verifies the result, and at most one
+verifier-backed corrective pass is allowed. A remaining defect is blocked rather
+than looped. The workflow never treats a review snippet as a patch and never
+commits, pushes, opens a pull request, merges, or deploys.
+
 ## Consequences
 
 The Package surface grew from three to five names, back to four when `llm-smoke`
 retired with the primitive it proved (2026-07-21 amendment), and to six with the
 planning pair (2026-07-27 amendment), then to thirteen with the seven-entry
-modular post-code-review bundle (2026-08-13 amendment). It is not a general automation
+modular post-code-review bundle and fourteen with its eight-entry style extension
+(2026-08-13 amendments), then to fifteen with the standalone verified
+implementation workflow. It is not a general automation
 catalog. The non-diagnostic names expose three deliberate products —
 question-led evidence then a human-directed fix, a plan workspace then
-main-agent-driven one-step runs, and an independently synthesized multi-lane
-code review — while
+main-agent-driven one-step runs, an independently synthesized multi-lane code
+review, and explicit prepared-work remediation — while
 keeping source mutation uncommitted and deployment outside the workflow boundary.
 
 The remediation binding now covers the review artifact, not an editable path or a

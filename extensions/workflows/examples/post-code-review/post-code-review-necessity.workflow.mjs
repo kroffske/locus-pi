@@ -11,7 +11,7 @@ export default async function runWorkflow(dsl, input) {
 Semantic review target and intent:
 ${input}
 
-Read review-scope.md, review-boundaries.md, review-simplicity.md, and review-contracts.md from the runtime-injected shared workflow output directory. Then inspect the live source, supported consumers, project contracts, specifications, decisions, tests, and dependency documentation needed to evaluate the recommendations. Audit the proposed findings and required changes, not the codebase in general. Do not invent an additional review lane or reward agreement among lane reports as evidence.
+Read review-scope.md, review-boundaries.md, review-simplicity.md, review-contracts.md, and review-style.md from the runtime-injected shared workflow output directory. Then inspect the live source, supported consumers, project contracts, specifications, decisions, tests, style conventions, and dependency documentation needed to evaluate the recommendations. Audit the proposed findings and required changes, not the codebase in general. Do not invent an additional review lane or reward agreement among lane reports as evidence.
 
 For every proposed finding and required action, answer all four questions with concrete path:line, symbol, contract, or supported-consumer evidence:
 1. What real failure or violated contract is proven?

@@ -332,6 +332,7 @@ describe("consilium reference workflow", () => {
     // `references/` is a sibling of the scanned `examples/` directory and is never
     // visited, so this file is unreachable by name.
     expect([...packagedWorkflowNames()].sort()).toEqual([
+      "implement",
       "live-smoke",
       "plan",
       "plan-implement",
@@ -341,6 +342,7 @@ describe("consilium reference workflow", () => {
       "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
+      "post-code-review-style",
       "post-code-review-synthesis",
       "requirements-grill",
       "review",

@@ -36,6 +36,7 @@ export const PACKAGE_WORKFLOW_BUNDLES = [
       "post-code-review-boundaries",
       "post-code-review-simplicity",
       "post-code-review-contracts",
+      "post-code-review-style",
       "post-code-review-necessity",
       "post-code-review-synthesis",
     ] as const,
