@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The `/ps` agent viewer now gives the transcript more room and clearer
+  boundaries.** While one agent's transcript is open, the lower fleet panel
+  shows only that agent instead of the full roster. The viewer frame uses the
+  theme accent color, and the interactive input keeps one concise
+  `Message to Agent` heading instead of repeating it above the editor.
+
 - **Post-code review now states whether work is mandatory and hands it to a
   separate verified implementation workflow.** Final reports use `READY`,
   `READY_WITH_RECOMMENDATIONS`, `CHANGES_REQUIRED`, or `BLOCKED`; each item has

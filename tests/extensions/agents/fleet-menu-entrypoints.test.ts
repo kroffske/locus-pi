@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
  * The proof T-135 W4 owes for moving `fleet-menu.ts` into `extensions/_shared/agent-runtime/`.
  *
  * `check:layers` rule 7 asserts STATICALLY that exactly one module names
- * `Symbol.for("locus-pi.fleet-menu-state.v2")`. That is a source-level count, and it stays green
+ * `Symbol.for("locus-pi.fleet-menu-state.v2")` and the active-viewer companion
+ * `Symbol.for("locus-pi.fleet-viewed-row.v1")`. That is a source-level count, and it stays green
  * for a relocation that breaks the runtime: Pi loads each registered entrypoint with the module
  * cache disabled, so `extensions/agents/index.ts` and `extensions/workflows/index.ts` each hold
  * their OWN instance of `fleet-menu.ts`. A same-process test that pokes `globalThis` proves
@@ -42,6 +43,7 @@ describe("fleet menu state across Pi entrypoints", () => {
     const script = `
 const runtimeGlobal = globalThis;
 const registryKey = Symbol.for("locus-pi.fleet-menu-state.v2");
+const viewedRowRegistryKey = Symbol.for("locus-pi.fleet-viewed-row.v1");
 const { mkdtempSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const path = (await import("node:path")).default;
@@ -68,12 +70,16 @@ const command = (loaded, extensionPath, name) => {
 
 // No slot exists until a fleet-menu module is loaded — the registry is created on import.
 check(runtimeGlobal[registryKey] === undefined, "registry slot existed before any entrypoint ran");
+check(runtimeGlobal[viewedRowRegistryKey] === undefined, "viewed-row registry slot existed before any entrypoint ran");
 
 const firstLoad = await loadEntrypoints();
 const firstSlot = runtimeGlobal[registryKey];
+const firstViewedRowSlot = runtimeGlobal[viewedRowRegistryKey];
 check(firstSlot?.version === 2 && firstSlot.state !== undefined, "first fleet-menu slot missing");
+check(firstViewedRowSlot?.version === 1, "first fleet-viewed-row slot missing");
 const firstState = firstSlot.state;
 const descriptor = Object.getOwnPropertyDescriptor(runtimeGlobal, registryKey);
+const viewedRowDescriptor = Object.getOwnPropertyDescriptor(runtimeGlobal, viewedRowRegistryKey);
 
 // Both sides subscribe BEFORE either mutates, so each listener is in place for the peer's change.
 await command(firstLoad, producerPath, "test-fleet-producer-listen")("", harness.ctx);
@@ -92,11 +98,20 @@ await command(firstLoad, consumerPath, "test-fleet-consumer-release")("", harnes
 await command(firstLoad, producerPath, "test-fleet-producer-observe")("", harness.ctx);
 const producerObserved = harness.widgets.get("fleet-producer-observe");
 
+// The producer opens a transcript row; the independently loaded consumer must see the same
+// row so its lower roster can collapse to the one agent being inspected.
+await command(firstLoad, producerPath, "test-fleet-producer-view-row")("", harness.ctx);
+await command(firstLoad, consumerPath, "test-fleet-consumer-viewed-row")("", harness.ctx);
+const consumerViewedRow = harness.widgets.get("fleet-consumer-viewed-row");
+
 // A second discovery pass must adopt the same slot and the same state object.
 const secondLoad = await loadEntrypoints();
 const secondSlot = runtimeGlobal[registryKey];
+const secondViewedRowSlot = runtimeGlobal[viewedRowRegistryKey];
 await command(secondLoad, consumerPath, "test-fleet-consumer-observe")("", harness.ctx);
 const reloadedConsumerObserved = harness.widgets.get("fleet-consumer-observe");
+await command(secondLoad, consumerPath, "test-fleet-consumer-viewed-row")("", harness.ctx);
+const reloadedConsumerViewedRow = harness.widgets.get("fleet-consumer-viewed-row");
 
 process.stdout.write(JSON.stringify({
   ok: true,
@@ -112,12 +127,17 @@ process.stdout.write(JSON.stringify({
   consumerReleased: harness.widgets.get("fleet-consumer-release"),
   // The emitter proof: the producer's listener received the peer's emit too.
   producerObserved,
+  consumerViewedRow,
   // A freshly loaded module instance adopts the existing state rather than a blank one.
   reloadedConsumerObserved,
+  reloadedConsumerViewedRow,
   sameSlot: secondSlot === firstSlot,
   sameState: secondSlot?.state === firstState,
+  sameViewedRowSlot: secondViewedRowSlot === firstViewedRowSlot,
   slotConfigurable: descriptor?.configurable,
   slotWritable: descriptor?.writable,
+  viewedRowSlotConfigurable: viewedRowDescriptor?.configurable,
+  viewedRowSlotWritable: viewedRowDescriptor?.writable,
 }) + "\\n");
 `;
     const output = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
@@ -139,17 +159,22 @@ process.stdout.write(JSON.stringify({
       consumerReleased: "focused=false\nvisible=0",
       // changes=3 — its own two emits AND the consumer's release emit reached this listener.
       producerObserved: "focused=false\nselected=undefined\nvisible=0\nfallbackFocus=true\nchanges=3",
+      consumerViewedRow: "viewed=fleet-producer-row",
       // The reloaded consumer instance reads the released state and the still-true fallback
       // flag out of the shared slot. Its own `changes` counter is 0 because a module-level
       // `let` does NOT survive cache-disabled reloading and its listener was never
       // reattached — which is precisely why this state lives in a registry and not a module.
       reloadedConsumerObserved: "focused=false\nselected=undefined\nvisible=0\nfallbackFocus=true\nchanges=0",
+      reloadedConsumerViewedRow: "viewed=fleet-producer-row",
       sameSlot: true,
       sameState: true,
+      sameViewedRowSlot: true,
       // The module installs the slot non-configurable and non-writable, so nothing can swap the
       // fleet state out from under a focused menu.
       slotConfigurable: false,
       slotWritable: false,
+      viewedRowSlotConfigurable: false,
+      viewedRowSlotWritable: false,
     });
   }, 30_000);
 });

@@ -80,13 +80,13 @@ class FakeEditorComponent {
   constructor(
     _tui: unknown,
     _keybindings: unknown,
-    _title: string,
+    private readonly title: string,
     _prefill: string | undefined,
     private readonly onSubmit: (value: string) => void,
     private readonly onCancel: () => void,
   ) {}
   render(): string[] {
-    return ["input", `> ${this.#value}`, "Enter submit · Esc cancel"];
+    return [this.title, `> ${this.#value}`, "Enter submit · Esc cancel"];
   }
   handleInput(data: string): void {
     if (data === "enter" || data === "\n") this.onSubmit(this.#value);
@@ -212,6 +212,28 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
+  it("renders the transcript frame in the theme accent color", () => {
+    const row = agentLiveStore.begin({ id: "accent-frame", agentName: "reviewer", label: "Review" });
+    const fg = vi.fn((color: string, text: string) => `<${color}>${text}</${color}>`);
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 8, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+      undefined,
+      undefined,
+      { fg },
+    );
+
+    const rendered = viewer.render(80).join("\n");
+    expect(rendered).toContain("<accent>┌─ [agent");
+    expect(rendered).toContain("<accent>├─ REQUEST");
+    expect(rendered).toContain("<accent>├─ RUNTIME");
+    expect(rendered).toContain("<accent>╘═ STATUS:");
+    expect(fg.mock.calls.every(([color]) => color === "accent")).toBe(true);
+    viewer.dispose();
+  });
+
   it("reserves both the permanent footer and an active workflow widget", () => {
     const row = agentLiveStore.begin({ id: "reserved-viewer", agentName: "reviewer", label: "Review" });
     const tui = { terminal: { rows: 12, columns: 80 }, requestRender: vi.fn() };
@@ -333,7 +355,7 @@ describe("AgentSessionViewer", () => {
     expect(write).toHaveBeenCalledWith("\u001b[?1000h\u001b[?1006h");
     const initial = viewer.render(80).join("\n");
     expect(initial).toContain("wheel-11");
-    expect(initial).toContain("MESSAGE TO AGENT");
+    expect(initial.match(/Message to Agent/gu)).toHaveLength(1);
 
     viewer.handleInput("\u001b[<64;10;5M");
     const scrolled = viewer.render(80).join("\n");
@@ -539,7 +561,8 @@ describe("AgentSessionViewer", () => {
 
     const initial = viewer.render(80);
     expect(initial).toHaveLength(tui.terminal.rows - 1);
-    expect(initial.join("\n")).toContain("╞═ MESSAGE TO AGENT");
+    expect(initial.join("\n").match(/Message to Agent/gu)).toHaveLength(1);
+    expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
     expect(initial.at(-1)).toMatch(/^╘═ STATUS: queued/u);
     viewer.handleInput("h");
     viewer.handleInput("i");
@@ -621,7 +644,7 @@ describe("AgentSessionViewer", () => {
 
     const rendered = viewer.render(80);
     expect(rendered).toHaveLength(terminal.rows - 1);
-    expect(rendered.join("\n")).toContain("Message this agent");
+    expect(rendered.join("\n").match(/Message to Agent/gu)).toHaveLength(1);
     viewer.handleInput("o");
     viewer.handleInput("k");
     viewer.handleInput("\r");

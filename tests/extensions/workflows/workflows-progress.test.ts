@@ -14,7 +14,7 @@ import {
 } from "../../../extensions/workflows/progress-widget.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
-import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { acquireFleetViewedRow, fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
@@ -142,6 +142,28 @@ describe("workflow progress widget", () => {
     fleetMenuState.setFocused(false);
     component.dispose();
     expect(viewerExternalRows()).toBe(0);
+  });
+
+  it("shows only the agent whose transcript viewer is open, then restores the roster", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
+    const component = new WorkflowProgressComponent(tui, {}, "task reviewer", "ordinary-r1");
+    agentLiveStore.begin({ id: "viewer-filter-first", agentName: "reviewer", label: "first task" });
+    const second = agentLiveStore.begin({ id: "viewer-filter-second", agentName: "scout", label: "selected task" });
+
+    const release = acquireFleetViewedRow(second.id);
+    const focused = component.render(100).join("\n");
+    expect(focused).toContain("selected task");
+    expect(focused).not.toContain("first task");
+
+    release();
+    const restored = component.render(100).join("\n");
+    expect(restored).toContain("selected task");
+    expect(restored).toContain("first task");
+    expect(tui.requestRender).toHaveBeenCalled();
+
+    component.dispose();
+    agentLiveStore.reset();
   });
 
   it("rosters finished, running, and still-planned work, and keeps one row per re-entered slot", () => {

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { acquireFleetViewedRow, fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 
 /**
  * One of the two separately registered entrypoints behind
@@ -51,6 +51,13 @@ export default function fleetMenuProducer(pi: ExtensionAPI): void {
         `fallbackFocus=${fleetMenuState.fallbackFocusAvailable}`,
         `changes=${observedChanges}`,
       ]);
+    },
+  });
+
+  pi.registerCommand("test-fleet-producer-view-row", {
+    handler: (_args, ctx) => {
+      acquireFleetViewedRow(PRODUCER_ROW_ID);
+      ctx.ui.setWidget("fleet-producer-view-row", ["viewed=fleet-producer-row"]);
     },
   });
 }
