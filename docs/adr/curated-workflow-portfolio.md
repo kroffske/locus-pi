@@ -728,11 +728,10 @@ the only lane handoffs. One
 self-contained `post-code-review-pipeline.svg` beside the sources shows every
 workflow boundary, agent role, artifact, and fail-closed exit.
 
-Normal saved-child `name` lookup intentionally keeps Project → User → Package
-precedence. This bundle must not mix an installed parent with a same-named local
-child, so its six edges use the exact `packageName` target. The parent resolves
-each Package child before launch; the expected-child canonical path and source
-hash proof then makes a project or personal shadow fail closed.
+The folder is one namespace. Its root invokes short sibling names through
+`child`, which binds every edge to the exact selected source and directory.
+Project → User → Package precedence selects the whole namespace, so an installed
+root can never mix with a same-named local child.
 
 Installation is package installation, not artifact copying:
 `pi install npm:@kroffske/locus-pi` ships the folder through
@@ -742,7 +741,7 @@ scripts remain development evidence and are not workflow entries.
 
 ## Amendment 2026-08-13 — request-local style guidance
 
-The bundle gains one fourth parallel audit child, `post-code-review-style`. It
+The bundle gains one fourth parallel audit child, `post-code-review/style`. It
 checks comment accuracy and evidence-backed project style, then writes
 `review-style.md`; the existing necessity challenge remains the only admission
 path into synthesis. Optional operator criteria live beside the review request
@@ -751,7 +750,7 @@ input. The runtime preserves an existing regular file or creates it empty before
 the first child starts, and rejects a symlink or non-regular leaf. Empty means no
 additional criteria, while live project conventions still apply.
 
-The parent therefore has seven exact Package-child edges and the public bundle
+The parent therefore has seven source-bound child edges and the public tree
 has eight names. The extra lane is independent analysis, not a new synthesis or
 consensus vote; its recommendations remain subject to the same proven-risk,
 ownership, non-duplication, and net-simplicity test as every other lane.

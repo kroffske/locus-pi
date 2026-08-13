@@ -30,13 +30,12 @@ This file records user-visible changes to the public package.
   or missing comments and evidence-backed project style; its proposals still
   pass through the sequential necessity challenge before synthesis.
 
-- **The workflow catalog now separates Project, User, Package, and immutable run
-  history while presenting `post-code-review` as one explicit Package bundle.**
-  The external parent and all seven exact child names remain independently
-  addressable through `/workflows info`; compact and no-UI projections disclose
-  exact current/history totals, possible detail omission, and the bundle details
-  affordance. This is a presentation-only read model and does not change
-  first-wins resolution or execution semantics.
+- **Saved workflows now form folder-owned trees.** A canonical
+  `<name>/<name>.workflow.mjs` root owns its direct child files, which resolve as
+  `<name>/<child>`. Namespace precedence is atomic, `/workflows list` renders
+  roots before indented short-name children without absolute paths, and every
+  entry remains directly runnable. Existing flat Project/User workflows remain
+  compatible; Package workflows now require folders.
 
 - **Standard workflows can attach their own published evidence to an operator
   continuation.** Unchanged references returned by the three publication APIs
@@ -53,16 +52,15 @@ This file records user-visible changes to the public package.
   a guarantee owner, a non-duplicated responsibility, and the simplest net
   improvement before synthesis may retain a finding. Explicitly trusted external
   provider guarantees are accepted boundaries rather than automatic demands for
-  duplicate local validation. Exact
-  `invokeWorkflow({ packageName })` edges keep installed child sources bound to
-  the Package registry and fail before execution when a project or personal
-  workflow shadows a child name.
+  duplicate local validation. `invokeWorkflow({ child })` binds every short
+  sibling name to the exact folder namespace and source selected for the root.
 
-- **Workflow authoring now continues from design review into source by default.**
-  `workflow-author` still writes and reviews `.design.md` before JavaScript, but
-  pauses there only when the user explicitly requests design-only work. Build
-  now prefers the repository-local source checker in a source checkout and
-  cannot report success after a skipped or failed check.
+- **Workflow authoring now defines the complete tree before source.**
+  `workflow-author` writes `.pi/workflows/<name>/<name>.design.md` with an exact
+  root/child `Entries` table, reviews it, then builds the same-named root and only
+  the declared direct children. It pauses only for explicit design-only work and
+  cannot report success until every source passes identity, import, graph, and
+  source-shape checks.
 
 - **Interactive workflow launches can select a fresh durable workspace.**
   `/workflows run <name> --output-dir <project-relative-path> [input]` passes the

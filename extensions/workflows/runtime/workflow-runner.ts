@@ -15,10 +15,8 @@
  */
 
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import type { Dirent } from "node:fs";
-import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
@@ -72,14 +70,38 @@ import {
   type WorkflowLaunchBinding,
 } from "./workflow-launch-binding.js";
 import {
-  assertWorkflowSavedName,
   isPostCodeReviewTargetProjection,
   isWorkflowSavedName,
   workflowTargetIdentityKey,
   type WorkflowTargetIdentity,
-  WORKFLOW_SAVED_NAME_MAX_CHARS,
-  WORKFLOW_SAVED_NAME_PATTERN,
 } from "./workflow-saved-name.js";
+import {
+  assertResolvedWorkflowTargetBinding,
+  listPackagedWorkflowEntries,
+  listWorkflowCatalogTargets,
+  packagedExamplesDir,
+  packagedWorkflowNames,
+  packagedWorkflowPath,
+  resolveOwnedWorkflowChild,
+  resolveWorkflowTarget,
+  workflowTargetComposition,
+  WORKFLOW_ENTRY_SUFFIX,
+  WorkflowNameNotFoundError,
+  type PackagedWorkflowEntry,
+  type ResolvedWorkflowTarget,
+  type WorkflowTargetKind,
+} from "./workflow-discovery.js";
+
+export {
+  listPackagedWorkflowEntries,
+  listWorkflowCatalogTargets,
+  packagedExamplesDir,
+  packagedWorkflowNames,
+  packagedWorkflowPath,
+  resolveWorkflowTarget,
+  WorkflowNameNotFoundError,
+};
+export type { PackagedWorkflowEntry, ResolvedWorkflowTarget, WorkflowTargetKind };
 import {
   createWorkflowReplayController,
   readWorkflowReplayLog,
@@ -221,15 +243,6 @@ interface WorkflowRunnerCoordination {
 
 const RUN_COORDINATION = Symbol("workflow-run-coordination");
 
-export type WorkflowTargetKind = "name" | "scriptPath";
-
-export interface ResolvedWorkflowTarget {
-  kind: WorkflowTargetKind;
-  ref: string;
-  path: string;
-  source: "project" | "personal" | "package";
-}
-
 /** Validate a host-owned target binding before any snapshot or import. */
 export function assertWorkflowTargetBinding(
   binding: unknown,
@@ -237,76 +250,7 @@ export function assertWorkflowTargetBinding(
   projectRoot: string,
   workingDirectory = projectRoot,
 ): ResolvedWorkflowTarget {
-  if (typeof binding !== "object" || binding === null || Array.isArray(binding)) {
-    throw new Error("Workflow target binding must be an object");
-  }
-  const record = binding as Record<string, unknown>;
-  const keys = Object.keys(record).sort().join(",");
-  if (keys !== "kind,path,ref,source") throw new Error("Workflow target binding has unexpected fields");
-  if (record.kind !== "name" && record.kind !== "scriptPath")
-    throw new Error("Workflow target binding kind is invalid");
-  if (typeof record.ref !== "string" || record.ref === "") throw new Error("Workflow target binding ref is invalid");
-  if (record.source !== "project" && record.source !== "personal" && record.source !== "package") {
-    throw new Error("Workflow target binding source is invalid");
-  }
-  if (typeof record.path !== "string" || record.path === "") throw new Error("Workflow target binding path is invalid");
-  const publicFields = [request.name, request.scriptPath, request.script].filter((value) => value !== undefined);
-  if (publicFields.length !== 1) throw new Error("Workflow target binding requires exactly one public target field");
-  const publicRef = publicFields[0]!;
-  const expectedKind =
-    request.name !== undefined ||
-    (request.script !== undefined && !hasPathSeparators(request.script) && !hasWorkflowModuleSuffix(request.script))
-      ? "name"
-      : "scriptPath";
-  if (record.kind !== expectedKind || record.ref !== publicRef) {
-    throw new Error("Workflow target binding does not match the public target request");
-  }
-  if (record.kind === "name") assertWorkflowSavedName(record.ref);
-
-  const sourceRoots: Record<ResolvedWorkflowTarget["source"], string> = {
-    project: path.resolve(projectRoot),
-    personal: path.join(homedir(), ".pi", "workflows"),
-    package: PACKAGED_EXAMPLES_DIR,
-  };
-  const lexicalRoot = path.resolve(sourceRoots[record.source]);
-  const lexicalPath = path.resolve(record.path);
-  if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalPath)) {
-    throw new Error("Workflow target binding escapes the project root");
-  }
-  if (record.source === "project" || record.source === "personal") {
-    confinedWorkflowSourcePath(lexicalPath, record.source, projectRoot, record.ref);
-  }
-  let current = lexicalRoot;
-  for (const part of path.relative(lexicalRoot, lexicalPath).split(path.sep).filter(Boolean)) {
-    current = path.join(current, part);
-    const stat = lstatSync(current);
-    if (!stat.isSymbolicLink() && current !== lexicalPath && !stat.isDirectory())
-      throw new Error("Workflow target binding ancestor is not a directory");
-  }
-  const physicalRoot = realpathSync(lexicalRoot);
-  const physicalPath = realpathSync(lexicalPath);
-  if (!isWorkflowPathWithinRoot(physicalRoot, physicalPath)) {
-    throw new Error("Workflow target binding escapes the physical project root");
-  }
-  if (!statSync(physicalPath).isFile()) throw new Error("Workflow target binding is not a regular file");
-  const resolved = resolveWorkflowTarget(
-    request.name !== undefined
-      ? { name: request.name }
-      : request.scriptPath !== undefined
-        ? { scriptPath: request.scriptPath }
-        : { script: request.script! },
-    projectRoot,
-    workingDirectory,
-  );
-  if (
-    resolved.kind !== record.kind ||
-    resolved.ref !== record.ref ||
-    resolved.source !== record.source ||
-    path.resolve(resolved.path) !== lexicalPath
-  ) {
-    throw new Error("Workflow target binding no longer matches the resolved target");
-  }
-  return { kind: record.kind, ref: record.ref, source: record.source, path: lexicalPath };
+  return assertResolvedWorkflowTargetBinding(binding, request, projectRoot, workingDirectory);
 }
 
 /** T-154 owner policy: only this workflow has a fresh-namespace requirement. */
@@ -333,16 +277,6 @@ export function postCodeReviewFreshLaunchError(): string {
     "post-code-review fresh launch requires an explicit project-relative outputDir, e.g. " +
     '"tmp/post-code-review/<review-id>"; resume the original run with its exact workspace instead'
   );
-}
-
-export class WorkflowNameNotFoundError extends Error {
-  readonly workflowName: string;
-
-  constructor(workflowName: string) {
-    super(`Workflow name is not saved or registered by the package: ${workflowName}`);
-    this.name = "WorkflowNameNotFoundError";
-    this.workflowName = workflowName;
-  }
 }
 
 export interface RunWorkflowScriptOptions {
@@ -553,6 +487,7 @@ interface SavedChildExecutionOwnerOptions {
   projectRoot: string;
   workingDirectory: string;
   parentRunId: string;
+  parentTarget: ResolvedWorkflowTarget;
   parentScriptSha256: string;
   coordination: WorkflowRunnerCoordination;
   childRuns: WorkflowChildRunEvidence[];
@@ -841,21 +776,28 @@ class SavedChildExecutionOwner {
 
   private resolveSource(input: import("./workflow-runtime.js").WorkflowSavedChildInvocation): ResolvedSavedChildSource {
     const target: ResolvedWorkflowTarget =
-      input.packageName === undefined
-        ? resolveWorkflowTarget(
-            {
-              ...(input.name === undefined ? {} : { name: input.name }),
-              ...(input.scriptPath === undefined ? {} : { scriptPath: input.scriptPath }),
-            },
+      input.child !== undefined
+        ? resolveOwnedWorkflowChild(
+            this.options.parentTarget,
+            input.child,
             this.options.projectRoot,
             this.options.workingDirectory,
           )
-        : {
-            kind: "name",
-            ref: input.packageName,
-            path: packagedWorkflowPath(input.packageName),
-            source: "package",
-          };
+        : input.packageName === undefined
+          ? resolveWorkflowTarget(
+              {
+                ...(input.name === undefined ? {} : { name: input.name }),
+                ...(input.scriptPath === undefined ? {} : { scriptPath: input.scriptPath }),
+              },
+              this.options.projectRoot,
+              this.options.workingDirectory,
+            )
+          : {
+              kind: "name",
+              ref: input.packageName,
+              path: packagedWorkflowPath(input.packageName),
+              source: "package",
+            };
     const sourcePath = realpathSync(target.path);
     const scriptSha256 = sha256WorkflowBytes(readFileSync(sourcePath));
     if (
@@ -918,10 +860,11 @@ class SavedChildExecutionOwner {
         pi: this.options.pi,
         ctx: this.options.ctx,
         signal: this.options.signal,
-        ...(input.name === undefined && input.packageName === undefined
-          ? {}
-          : { name: input.name ?? input.packageName }),
-        ...(input.scriptPath === undefined ? {} : { scriptPath: input.scriptPath }),
+        ...(source.target.kind === "name" ? { name: source.target.ref } : { scriptPath: source.target.ref }),
+        // packageName is the legacy exact-Package selector. Let the child
+        // source snapshot reject a newly introduced project shadow with the
+        // established source-change error instead of rebinding it.
+        ...(input.packageName === undefined ? { targetBinding: source.target } : {}),
         ...(input.input === undefined ? {} : { input: input.input }),
         items: validated.items,
         outputDir: this.options.coordination.output.relativePath,
@@ -958,12 +901,24 @@ class SavedChildExecutionOwner {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new Error("invokeWorkflow requires one closed invocation object");
     }
-    const allowed = new Set(["name", "scriptPath", "packageName", "input", "items", "key", "keys", "outputDir"]);
+    const allowed = new Set([
+      "child",
+      "name",
+      "scriptPath",
+      "packageName",
+      "input",
+      "items",
+      "key",
+      "keys",
+      "outputDir",
+    ]);
     const unknown = Object.keys(input).find((key) => !allowed.has(key));
     if (unknown !== undefined) throw new Error(`invokeWorkflow has no field ${JSON.stringify(unknown)}`);
-    const targetCount = [input.name, input.scriptPath, input.packageName].filter((value) => value !== undefined).length;
+    const targetCount = [input.child, input.name, input.scriptPath, input.packageName].filter(
+      (value) => value !== undefined,
+    ).length;
     if (targetCount !== 1) {
-      throw new Error("invokeWorkflow requires exactly one of name, scriptPath, or packageName");
+      throw new Error("invokeWorkflow requires exactly one of child, name, scriptPath, or packageName");
     }
     assertWorkflowInput(input.input, "saved child input");
     const items = snapshotWorkflowItems(input.items);
@@ -994,367 +949,18 @@ const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
-
-/** The one filename shape every saved and packaged workflow entry must have. */
-const WORKFLOW_ENTRY_SUFFIX = ".workflow.mjs";
-
-export interface PackagedWorkflowEntry {
-  name: string;
-  path: string;
-}
-
-/**
- * The Package registry is the shipped examples directory itself: every
- * `<name>.workflow.mjs` under it is a Package workflow, discovered by existence
- * on each call exactly like a project directory. There is no second allowlist to
- * keep in sync, so adding a workflow is adding a file — and removing one is
- * removing a file.
- *
- * Two bounds make that safe to say. Depth is one nested directory, which is how a
- * workflow that owns prompt resources or a diagram triple keeps them beside its
- * entry; anything deeper is support material, not another entry point. Only
- * `entry.isFile()` is accepted, so a symlink is never followed out of the
- * package. Both are properties of this scan, not of the filesystem it reads.
- *
- * What the *npm artifact* contains is still `package.json#files`, and a test
- * pins the two together: a workflow that lives here and is not packed would
- * resolve in a checkout and be missing after install, which is the one way this
- * simplification could lie to an operator.
- */
-export function listPackagedWorkflowEntries(): PackagedWorkflowEntry[] {
-  const found = new Map<string, string>();
-  const visit = (directory: string, remainingDepth: number): void => {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (remainingDepth > 0) visit(full, remainingDepth - 1);
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith(WORKFLOW_ENTRY_SUFFIX)) continue;
-      const name = entry.name.slice(0, -WORKFLOW_ENTRY_SUFFIX.length);
-      if (!isWorkflowSavedName(name) || found.has(name)) continue;
-      found.set(name, full);
-    }
-  };
-  visit(PACKAGED_EXAMPLES_DIR, 1);
-  // Ordered by entry filename so the catalog, the resolver, and every test see
-  // one stable sequence regardless of directory iteration order.
-  return [...found.entries()]
-    .map(([name, entryPath]) => ({ name, path: entryPath }))
-    .sort((left, right) => {
-      const leftEntry = `${left.name}${WORKFLOW_ENTRY_SUFFIX}`;
-      const rightEntry = `${right.name}${WORKFLOW_ENTRY_SUFFIX}`;
-      return leftEntry < rightEntry ? -1 : leftEntry > rightEntry ? 1 : 0;
-    });
-}
-
-/** Package workflow names currently present in the shipped examples directory. */
-export function packagedWorkflowNames(): string[] {
-  return listPackagedWorkflowEntries().map((entry) => entry.name);
-}
-
-/** Absolute path to this package's shipped workflow examples directory. */
-export function packagedExamplesDir(): string {
-  return PACKAGED_EXAMPLES_DIR;
-}
-
-/** Absolute path to one Package workflow entry module. */
-export function packagedWorkflowPath(name: string): string {
-  assertWorkflowSavedName(name);
-  const entry = listPackagedWorkflowEntries().find((candidate) => candidate.name === name);
-  if (entry === undefined) throw new WorkflowNameNotFoundError(name);
-  return entry.path;
-}
-
-function hasPathSeparators(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
-}
-
-function hasWorkflowModuleSuffix(value: string): boolean {
-  return /\.mjs$/iu.test(value);
-}
-
-function resolveConfinedScriptPath(scriptPath: string, projectRoot: string, displayRef = scriptPath): string {
-  const root = path.resolve(projectRoot);
-  return resolveConfinedSourcePath(path.resolve(root, scriptPath), root, displayRef, "project root");
-}
-
-/** Keep a source inside its owning root while preserving its lexical spelling. */
-function resolveConfinedSourcePath(
-  sourcePath: string,
-  sourceRoot: string,
-  displayRef: string,
-  rootLabel: string,
-): string {
-  const lexicalRoot = path.resolve(sourceRoot);
-  const resolved = path.resolve(sourcePath);
-  const subject = rootLabel === "project root" ? "Script path" : "Workflow source";
-  if (!isWorkflowPathWithinRoot(lexicalRoot, resolved)) {
-    throw new Error(`${subject} escapes ${rootLabel}: ${displayRef}`);
-  }
-  if (!existsSync(resolved)) return resolved;
-
-  const physicalRoot = realpathSync(lexicalRoot);
-  const physicalTarget = realpathSync(resolved);
-  if (!isWorkflowPathWithinRoot(physicalRoot, physicalTarget)) {
-    throw new Error(`${subject} escapes ${rootLabel} through a symlink: ${displayRef}`);
-  }
-  // Keep the public/execution path stable after proving its physical target is
-  // confined. Returning the canonical path would silently rewrite sourcePath,
-  // script identity, and macOS /var -> /private/var compatibility contracts.
-  return resolved;
-}
-
-function personalWorkflowRoot(): string {
-  return path.join(homedir(), ".pi", "workflows");
-}
-
-function confinedWorkflowSourcePath(
-  sourcePath: string,
-  source: ResolvedWorkflowTarget["source"],
-  projectRoot: string,
-  displayRef: string,
-): string {
-  if (source === "project") return resolveConfinedScriptPath(sourcePath, projectRoot, displayRef);
-  if (source !== "personal") return sourcePath;
-  const homeRoot = path.resolve(homedir());
-  const root = personalWorkflowRoot();
-  const physicalRoot = realpathSync(root);
-  if (!isWorkflowPathWithinRoot(realpathSync(homeRoot), physicalRoot)) {
-    throw new Error(`Personal workflow root escapes the home directory: ${root}`);
-  }
-  return resolveConfinedSourcePath(sourcePath, root, displayRef, "personal workflow root");
-}
-
-/**
- * Project-relative directories a saved workflow may live in, in first-wins order.
- *
- * `.pi/workflows/` is the canonical pi-native save target (where `workflow-author`
- * writes). The other two exist for repositories that already keep agent assets under
- * `.claude/` or `.agents/`; they are NOT foreign-format interop sources. Every entry
- * here accepts exactly `<name>.workflow.mjs` (see `resolveSavedWorkflowPath`), so a
- * host that writes `<name>.js` is never resolved, and a script authored against a
- * different workflow DSL would fail at execution regardless of its filename. All
- * three carry `source: "project"`.
- */
-const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
-  [".pi", "workflows"],
-  [".claude", "workflows"],
-  [".agents", "workflows"],
-];
-
-function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDirectory: string): ResolvedWorkflowTarget {
-  assertWorkflowSavedName(name);
-  const searches = workflowSearchDirectories(projectRoot, workingDirectory);
-  for (const search of searches) {
-    if (search.source !== "package") {
-      const listing = readWorkflowSearchDirectory(search.directory, search.source, projectRoot);
-      if (listing.state === "blocked") throw new Error(listing.error);
-    }
-  }
-  for (const search of searches) {
-    const candidate =
-      search.source === "package"
-        ? listPackagedWorkflowEntries().find((entry) => entry.name === name)?.path
-        : path.join(search.directory, `${name}${WORKFLOW_ENTRY_SUFFIX}`);
-    if (candidate !== undefined) {
-      const state = workflowEntryState(candidate);
-      if (state === "missing") continue;
-      if (state === "invalid") {
-        throw new Error(`Workflow entry is not a regular file: ${candidate}`);
-      }
-      const targetPath =
-        search.source === "package"
-          ? candidate
-          : confinedWorkflowSourcePath(candidate, search.source, projectRoot, `${name}${WORKFLOW_ENTRY_SUFFIX}`);
-      return { kind: "name", ref: name, path: targetPath, source: search.source };
-    }
-  }
-  throw new WorkflowNameNotFoundError(name);
-}
-
-interface WorkflowSearchDirectory {
-  directory: string;
-  source: ResolvedWorkflowTarget["source"];
-}
-
-type WorkflowSearchDirectoryState =
-  { state: "missing" } | { state: "blocked"; error: string } | { state: "ready"; entries: Dirent[] };
-
-/** Read one project/personal search directory once so resolver and catalog agree. */
-function readWorkflowSearchDirectory(
-  directory: string,
-  source: Exclude<ResolvedWorkflowTarget["source"], "package">,
-  projectRoot: string,
-): WorkflowSearchDirectoryState {
-  let stat;
-  try {
-    stat = lstatSync(directory, { throwIfNoEntry: false });
-  } catch {
-    return { state: "blocked", error: `Workflow search directory is unreadable: ${directory}` };
-  }
-  if (stat === undefined) return { state: "missing" };
-  if (!stat.isDirectory() && !stat.isSymbolicLink()) {
-    return { state: "blocked", error: `Workflow search directory is not a directory: ${directory}` };
-  }
-  try {
-    confinedWorkflowSourcePath(directory, source, projectRoot, directory);
-    if (!statSync(realpathSync(directory)).isDirectory()) {
-      return { state: "blocked", error: `Workflow search directory is not a directory: ${directory}` };
-    }
-    return { state: "ready", entries: readdirSync(directory, { withFileTypes: true }) };
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      /escapes (?:project root|personal workflow root|the home directory)/u.test(error.message)
-    ) {
-      return { state: "blocked", error: error.message };
-    }
-    return { state: "blocked", error: `Workflow search directory is unsafe or unreadable: ${directory}` };
-  }
-}
-
-/** One source-precedence owner shared by execution resolution and catalog listing. */
-function workflowSearchDirectories(projectRoot: string, workingDirectory: string): WorkflowSearchDirectory[] {
-  const directories: WorkflowSearchDirectory[] = [];
-  const currentRoot = path.resolve(projectRoot);
-  const requestedWorkingDirectory = path.resolve(workingDirectory);
-  const workingRelative = path.relative(currentRoot, requestedWorkingDirectory);
-  let current =
-    workingRelative === "" || (!workingRelative.startsWith("..") && !path.isAbsolute(workingRelative))
-      ? requestedWorkingDirectory
-      : currentRoot;
-
-  while (true) {
-    for (const [first, second] of PROJECT_WORKFLOW_DIRS) {
-      directories.push({ directory: path.join(current, first, second), source: "project" });
-    }
-    if (current === currentRoot) break;
-    const parent = path.dirname(current);
-    const parentRelative = path.relative(currentRoot, parent);
-    if (parentRelative.startsWith("..") || path.isAbsolute(parentRelative)) break;
-    current = parent;
-  }
-  directories.push({ directory: personalWorkflowRoot(), source: "personal" });
-  directories.push({ directory: PACKAGED_EXAMPLES_DIR, source: "package" });
-  return directories;
-}
-
-export function resolveWorkflowTarget(
-  target: { name?: string; scriptPath?: string; script?: string },
-  projectRoot: string,
-  workingDirectory?: string,
-): ResolvedWorkflowTarget {
-  const supplied = [target.name, target.scriptPath, target.script].filter((v) => v !== undefined);
-  if (supplied.length !== 1) {
-    throw new Error("Exactly one workflow target field is required: name, scriptPath, or script");
-  }
-
-  if (target.name !== undefined) {
-    return resolveSavedWorkflowPath(target.name, projectRoot, workingDirectory ?? projectRoot);
-  }
-
-  const raw = target.scriptPath ?? target.script;
-  if (raw === undefined) throw new Error("Missing workflow target");
-  if (target.script !== undefined && !hasPathSeparators(raw) && !hasWorkflowModuleSuffix(raw)) {
-    return resolveSavedWorkflowPath(raw, projectRoot, workingDirectory ?? projectRoot);
-  }
-
-  const resolved = resolveConfinedScriptPath(raw, projectRoot);
-  return { kind: "scriptPath", ref: raw, path: resolved, source: "project" };
-}
-
-/**
- * Enumerate the saved names that the existing resolver can launch, preserving
- * the same first-wins source precedence. Project and personal names are scanned;
- * Package names are filtered by the curated registry above.
- */
-export function listWorkflowCatalogTargets(
-  projectRoot: string,
-  workingDirectory = projectRoot,
-): ResolvedWorkflowTarget[] {
-  const targets = new Map<string, ResolvedWorkflowTarget>();
-  const blockedNames = new Set<string>();
-  for (const search of workflowSearchDirectories(projectRoot, workingDirectory)) {
-    if (search.source === "package") addPackagedCatalogTargets(targets, blockedNames);
-    else addCatalogDirectory(targets, blockedNames, search.directory, search.source, projectRoot);
-  }
-  return [...targets.values()];
-}
-
-function addPackagedCatalogTargets(targets: Map<string, ResolvedWorkflowTarget>, blockedNames: Set<string>): void {
-  for (const entry of listPackagedWorkflowEntries()) {
-    if (targets.has(entry.name) || blockedNames.has(entry.name)) continue;
-    targets.set(entry.name, { kind: "name", ref: entry.name, path: entry.path, source: "package" });
-  }
-}
-
-function addCatalogDirectory(
-  targets: Map<string, ResolvedWorkflowTarget>,
-  blockedNames: Set<string>,
-  directory: string,
-  source: Exclude<ResolvedWorkflowTarget["source"], "package">,
-  projectRoot: string,
-): void {
-  const listing = readWorkflowSearchDirectory(directory, source, projectRoot);
-  if (listing.state === "missing") return;
-  if (listing.state === "blocked") throw new Error(listing.error);
-  const entries = listing.entries
-    // Include invalid directory/symlink entries so a bad first-wins target
-    // blocks the same name from lower-precedence sources.
-    .filter((entry) => entry.name.endsWith(WORKFLOW_ENTRY_SUFFIX))
-    .map((entry) => entry.name)
-    .sort();
-  for (const entry of entries) {
-    const name = entry.slice(0, -WORKFLOW_ENTRY_SUFFIX.length);
-    if (!isWorkflowSavedName(name) || targets.has(name) || blockedNames.has(name)) continue;
-    const candidate = path.join(directory, entry);
-    const state = workflowEntryState(candidate);
-    if (state !== "regular-file") {
-      if (state === "invalid") blockedNames.add(name);
-      continue;
-    }
-    if (source === "project" || source === "personal") {
-      try {
-        confinedWorkflowSourcePath(candidate, source, projectRoot, entry);
-      } catch {
-        blockedNames.add(name);
-        continue;
-      }
-    }
-    targets.set(name, { kind: "name", ref: name, path: candidate, source });
-  }
-}
-
-type WorkflowEntryState = "missing" | "regular-file" | "invalid";
-
-/** Classify one first-wins candidate identically for execution and discovery. */
-function workflowEntryState(filePath: string): WorkflowEntryState {
-  let leaf;
-  try {
-    leaf = lstatSync(filePath, { throwIfNoEntry: false });
-  } catch {
-    return "invalid";
-  }
-  if (leaf === undefined) return "missing";
-  if (leaf.isFile()) return "regular-file";
-  if (!leaf.isSymbolicLink()) return "invalid";
-  try {
-    return lstatSync(realpathSync(filePath)).isFile() ? "regular-file" : "invalid";
-  } catch {
-    return "invalid";
-  }
-}
-
 export function resolveExampleScriptPath(scriptRef: string, projectRoot: string): string {
-  return resolveWorkflowTarget({ script: scriptRef }, projectRoot, projectRoot).path;
+  return resolveWorkflowTarget(
+    isWorkflowSavedName(scriptRef) ? { name: scriptRef } : { scriptPath: scriptRef },
+    projectRoot,
+    projectRoot,
+  ).path;
+}
+
+function workflowDefaultOutputName(target: ResolvedWorkflowTarget): string {
+  return target.kind === "name"
+    ? workflowTargetComposition(target).rootRef
+    : path.basename(target.path, WORKFLOW_ENTRY_SUFFIX);
 }
 
 // ---------------------------------------------------------------------------
@@ -2170,7 +1776,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       resolveWorkflowOutputDirectoryPath(
         projectRoot,
         opts.outputDir,
-        path.basename(target.path, WORKFLOW_ENTRY_SUFFIX),
+        workflowDefaultOutputName(target),
         workingDirectory,
       );
     if (
@@ -2193,13 +1799,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     const resolvedOutput =
       handoffReuseOutput ??
-      resolveWorkflowOutputDirectory(
-        projectRoot,
-        opts.outputDir,
-        path.basename(target.path, WORKFLOW_ENTRY_SUFFIX),
-        workingDirectory,
-        { create: !hasResume },
-      );
+      resolveWorkflowOutputDirectory(projectRoot, opts.outputDir, workflowDefaultOutputName(target), workingDirectory, {
+        create: !hasResume,
+      });
     if (freshOwnerLaunch) {
       assertFreshWorkflowOutputNamespace({ projectRoot, output: resolvedOutput });
     }
@@ -2483,6 +2085,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     projectRoot,
     workingDirectory,
     parentRunId: runId,
+    parentTarget: target,
     parentScriptSha256: scriptIdentity.scriptSha256,
     coordination: executionCoordination,
     childRuns,

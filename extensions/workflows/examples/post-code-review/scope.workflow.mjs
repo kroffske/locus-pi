@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-scope",
+  name: "post-code-review/scope",
   description: "Resolve a review target into an exact evidence boundary and write review-scope.md.",
   profile: "standard",
 };

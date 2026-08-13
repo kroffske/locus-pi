@@ -336,7 +336,7 @@ describe("/workflows run launch gate", () => {
       await h.commands.get("workflows")!.handler("run live-smoke hello", h.ctx);
       expect(approval).not.toHaveBeenCalled();
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "live-smoke", input: "hello" });
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", input: "hello" });
       expect(h.statuses.get("locus")).toContain("WF launch · operator cmd");
       expect(h.statuses.has("workflows")).toBe(false);
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
@@ -585,7 +585,7 @@ describe("/workflows run launch gate", () => {
       expect(approval).not.toHaveBeenCalled();
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
-          script: "live-smoke",
+          name: "live-smoke",
           outputDir: "tmp/reviews/review-1",
           resumeFromRunId: "run-old",
           input: "review commit HEAD",
@@ -620,13 +620,13 @@ describe("/workflows run launch gate", () => {
 
         expect(spy).toHaveBeenCalledTimes(2);
         expect(spy.mock.calls[0]?.[0]).toMatchObject({
-          script: "live-smoke",
+          name: "live-smoke",
           outputDir: "tmp/reviews/review-1",
           resumeFromRunId: "run-old",
           input: "request",
         });
         expect(spy.mock.calls[1]?.[0]).toMatchObject({
-          script: "live-smoke",
+          name: "live-smoke",
           outputDir: "tmp/reviews/review-1",
           resumeFromRunId: "run-old",
           input: "request",
@@ -657,8 +657,8 @@ describe("/workflows run launch gate", () => {
       await flat.commands.get("workflow-run")!.handler("live-smoke -- exact  input  ", flat.ctx);
 
       expect(spy).toHaveBeenCalledTimes(2);
-      expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "live-smoke", input: "exact  input  " });
-      expect(spy.mock.calls[1]?.[0]).toMatchObject({ script: "live-smoke", input: "exact  input  " });
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", input: "exact  input  " });
+      expect(spy.mock.calls[1]?.[0]).toMatchObject({ name: "live-smoke", input: "exact  input  " });
     } finally {
       spy.mockRestore();
       rmSync(canonicalRoot, { recursive: true, force: true });
@@ -914,7 +914,7 @@ describe("/workflows run launch gate", () => {
         await h.commands.get("workflows")!.handler("run same", h.ctx);
         expect(approval).not.toHaveBeenCalled();
         expect(spy).toHaveBeenCalledTimes(1);
-        expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "same" });
+        expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "same" });
         expect(h.statuses.get("locus")).toContain("WF launch");
         expect(h.statuses.has("workflows")).toBe(false);
         expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);

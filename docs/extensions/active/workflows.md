@@ -94,14 +94,14 @@ with real session ids. See "Run a real workflow (live)" below.
 | `review-fix`                  | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
 | `plan`                        | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator.                                                                                                                                                                                                  |
 | `plan-implement`              | **One exact step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                       |
-| `post-code-review`            | **External modular code review**: the parent makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven exact `packageName` edges bind the installed children to the Package source.                                                                                                                                                                                                                                                                                                                                       |
-| `post-code-review-scope`      | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `post-code-review-boundaries` | **Architecture lane**: one Luna/high agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review-simplicity` | **Delete-first lane**: one Luna/high agent reopens `review-scope.md` and writes evidence-backed duplication, empty-wrapper, redundant-guard, dead-path, and unnecessary-depth findings to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review-contracts`  | **Contract lane**: one Luna/xhigh agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `post-code-review-style`      | **Comments and style lane**: one Luna/high agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review-necessity`  | **Fix-necessity challenge**: one Luna/xhigh agent reads the scope and all four lane reports, then requires each proposed fix to prove a real failure, name the guarantee owner, avoid duplicated responsibility, and be the simplest net improvement. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven.                                                                                                                                                                                                                                                                    |
-| `post-code-review-synthesis`  | **Independent final verifier**: one Luna/xhigh agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, rejects stale/duplicate/unsupported claims, grades admitted findings, and writes the final `post-code-review.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `post-code-review`            | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                                                                                                                                                                                                                                                                                     |
+| `post-code-review/scope`      | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `post-code-review/boundaries` | **Architecture lane**: one Luna/high agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `post-code-review/simplicity` | **Delete-first lane**: one Luna/high agent reopens `review-scope.md` and writes evidence-backed duplication, empty-wrapper, redundant-guard, dead-path, and unnecessary-depth findings to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `post-code-review/contracts`  | **Contract lane**: one Luna/xhigh agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `post-code-review/style`      | **Comments and style lane**: one Luna/high agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `post-code-review/necessity`  | **Fix-necessity challenge**: one Luna/xhigh agent reads the scope and all four lane reports, then requires each proposed fix to prove a real failure, name the guarantee owner, avoid duplicated responsibility, and be the simplest net improvement. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven.                                                                                                                                                                                                                                                                    |
+| `post-code-review/synthesis`  | **Independent final verifier**: one Luna/xhigh agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, rejects stale/duplicate/unsupported claims, grades admitted findings, and writes the final `post-code-review.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Catalog metadata exposes an authoring profile without changing execution:
 `implement`, `live-smoke`, `plan`, `plan-implement`, and all eight `post-code-review` entries are `standard`;
@@ -233,9 +233,10 @@ remains the machine-readable run envelope, while
 `.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
-These fifteen names are what `extensions/workflows/examples/` currently holds, and
-that directory **is** the Package registry — a workflow is registered by the
-existence of its entry file, exactly like a project one. The set stays small
+These eight roots and seven child refs are what
+`extensions/workflows/examples/` currently holds, and that directory **is** the
+Package registry — a folder is registered by its same-named root entry, with
+direct child entries discovered beneath it. The set stays small
 because it is a public surface: `package.json#files` still decides what an
 install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
@@ -322,36 +323,28 @@ both invalid answers. Raw `schema`, `validate`, parsers, renderers, and custom
 recovery remain outside the standard profile. Only files in the curated
 `examples/` registry are Package workflows.
 
-Saved workflow names such as `live-smoke` use one first-wins resolver for
-execution, `/workflows list`, and `/workflows info <name>`. Starting at the command's
-working directory and walking upward to the project root, each level is checked in this
-order:
+Saved workflow refs such as `live-smoke` or `post-code-review/necessity` use one
+first-wins resolver for execution, `/workflows list`, and `/workflows info`.
+Starting at the command's working directory and walking upward to the project
+root, each level checks `.pi/workflows/`, `.claude/workflows/`, then
+`.agents/workflows/`; User `~/.pi/workflows/` and Package follow.
 
-1. `./.pi/workflows/<name>.workflow.mjs` — human source `Project`; the canonical
-   Pi-native authoring target.
-2. `./.claude/workflows/<name>.workflow.mjs`, then
-   `./.agents/workflows/<name>.workflow.mjs` — human source `Project`; additional
-   project directories for repositories that already keep agent assets there. The
-   accepted file is the same pi-native `<name>.workflow.mjs`: the resolver and the
-   catalog scan build that exact filename and nothing else, so a `<name>.js` in
-   these directories is not found. A script authored against another host's
-   workflow DSL is **not portable as is** even when its filename matches — it
-   would expect globals and primitives this runtime does not provide (for example
-   an `args` global or a `budget` object), and here `agent()` returns the child's
-   exact text unless the call declares a `schema`. Port such a script to the DSL
-   contract below rather than dropping it in.
-3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
-4. The packaged examples directory — human source `Package`. Every
-   `<name>.workflow.mjs` under `extensions/workflows/examples/` is a Package
-   workflow. The current Package catalog has 15 entries: seven standalone workflows
-   (`implement`, `live-smoke`, `plan`, `plan-implement`, `requirements-grill`,
-   `review`, and `review-fix`) plus the eight-entry `post-code-review` bundle. The bundle has one
-   parent entrypoint and seven exact, directly addressable children:
-   `post-code-review-scope`, `post-code-review-boundaries`,
-   `post-code-review-simplicity`, `post-code-review-contracts`, `post-code-review-style`,
-   `post-code-review-necessity`, and `post-code-review-synthesis`.
+A canonical namespace is `<root>/<root>.workflow.mjs` plus direct sibling
+`<child>.workflow.mjs` entries. The root runs as `<root>` and a child runs as
+`<root>/<child>`. Once a source owns `<root>`, that whole namespace wins: a
+missing child does not fall through to User or Package. Existing flat
+`<root>.workflow.mjs` Project/User entries remain compatible standalone roots,
+but new authoring always uses a folder. A foreign `<name>.js` is never accepted;
+scripts for another host's DSL still require a real port.
 
-The first eligible source for a name wins and its exact resolved path is retained.
+Package requires the canonical folder layout. The current catalog has eight root
+workflows and seven children. `post-code-review` is one root with these exact,
+directly addressable children:
+`post-code-review/scope`, `post-code-review/boundaries`,
+`post-code-review/simplicity`, `post-code-review/contracts`, `post-code-review/style`,
+`post-code-review/necessity`, and `post-code-review/synthesis`.
+
+The first eligible source for a root namespace wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
 removing a valid file changes the next result and removing a shadow reveals the next
 source. The packaged examples directory is scanned the same way, so adding or
@@ -805,35 +798,31 @@ sections, in the same precedence order used for execution. `History` remains a
 separate review-only section. Every current row is one selectable two-line block
 whose row identity leads with the workflow name and a compact source badge
 (`[P]`, `[U]`, or `[PKG]`); its detail line carries the one-line description and
-exact origin path. A path that still exceeds the terminal width is
-middle-truncated so its beginning and basename remain visible. Current sections
+profile. Root rows precede their indented short-name child rows. The catalog
+does not expose absolute origin paths; inspection uses a source-relative locator. Current sections
 and History stay adjacent when the terminal has spare rows; unused height remains
 below the lists instead of splitting them. Very low terminals use a compact
 one-line fallback.
 
-The Package `post-code-review` entries form one display bundle without becoming
-one resolver target. The parent row is marked as the bundle entrypoint and shows
-its seven exact children. Child rows retain their full saved names and are marked
-as components of `post-code-review`, so all eight entries remain directly
-addressable. Bundle metadata is attached only when the parent and all seven
-children simultaneously resolve to Package rows. If a Project or User workflow
-shadows any exact member, the catalog suppresses the relationship instead of
-showing a mixed-source or incomplete bundle. `/workflows info <exact-name>` keeps
-the exact source and path available for both parent and children.
+Every canonical folder is one catalog tree and one resolver namespace. The root
+row is the standard entry point and shows its child count; direct children follow
+with indentation and short labels. Each remains directly runnable through its
+qualified `<root>/<child>` ref. Namespace precedence is atomic, so the catalog
+cannot show a Project root with User or Package children. `/workflows info
+<exact-ref>` shows composition and a safe source locator for both roles.
 
 RPC, print, and TUI hosts without the focused viewer receive the same model as a
-bounded passive projection. It includes a deterministic bundle summary,
-`/workflows info post-code-review` as the exact continuation, exact current and
-history row totals that remain true under any host line budget, and an explicit
+bounded passive projection. It includes exact root, child, and history row totals
+that remain true under any host line budget, and an explicit
 warning that details may be omitted. The compact form does not imply that omitted
 rows are unavailable, and it never derives an omitted-workflow count from dropped
 presentation lines.
 
 History rows are separate evidenced runs, not a deduplicated list of names or a
-bundle projection: each row leads with the workflow name, then its `runId`, then
+tree projection: each row leads with the workflow ref, then its `runId`, then
 the compact source badge, and carries the persisted target, source label, and
 retained snapshot availability. `[R]` means run history; `[P]`, `[U]`, and
-`[PKG]` are compact source badges, not alternative registries. Bundle grouping
+`[PKG]` are compact source badges, not alternative registries. Tree grouping
 never rewrites persisted run identity.
 
 In an interactive Pi TUI with custom UI support, Up/Down moves across every
@@ -1056,12 +1045,14 @@ Fresh evidence:
 ## Authoring a new workflow
 
 Authoring is design-first and continuous by default. A raw request first creates
-`.pi/workflows/<name>.design.md`: selected pattern, numbered algorithm, graph
+`.pi/workflows/<name>/<name>.design.md`: selected pattern, exact `Entries` table,
+numbered algorithm, graph
 table, node responsibilities, inputs, complete outputs, roles, consumers,
 edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. The
-author reviews and revises that design, then creates the matching
-`.workflow.mjs` in the same turn. Build checks identity and module load but does
-not run the workflow.
+author reviews and revises that design, then creates the same-named root and
+exactly its declared direct child `.workflow.mjs` files in the same turn. Build
+checks every logical ref, filename, module load, and source shape but does not
+run the workflow.
 
 The author stops after design only when the user explicitly asks for `design
 only`, `pause after design`, `do not build`, or equivalent wording. Build-only
@@ -1156,7 +1147,7 @@ A workflow with several stages, agents, branches, parallel groups, or persisted
 handoffs keeps a visual map beside its source: exactly one hand-authored
 `<name>-pipeline.svg`. It is edited directly. There is no generator, no
 rendering dependency, and no exported preview to keep in sync;
-[`extensions/workflows/examples/requirements-grill-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill-pipeline.svg)
+[`extensions/workflows/examples/requirements-grill/requirements-grill-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill/requirements-grill-pipeline.svg)
 is the remaining reference shape.
 
 This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,
@@ -1222,16 +1213,16 @@ list is in
 In a locus-pi source checkout, Build checks an authored file with:
 
 ```bash
-./bin/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+./bin/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
 
 In an installed/consumer project, use:
 
 ```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
 
-The command comes from the installed package, resolves the workflow path from
+Run the same check for every declared direct child. The command comes from the installed package, resolves the workflow path from
 the current project, and requires no project-local npm script or `tsx`. Its
 checker is prebuilt ESM, including when the package lives under `node_modules`.
 Build is not successful until the checker exits zero, the module imports, and
@@ -1430,8 +1421,8 @@ Delegate a plain requirement to `workflow-author` with `/agent run
 workflow-author` or `task { agent: "workflow-author", task: "<requirement>" }`.
 The agent writes the design first, reviews it, then writes source in the same
 turn unless the user explicitly asks to pause after design. `Build design:
-.pi/workflows/<name>.design.md` and `Build approved design:
-.pi/workflows/<name>.design.md` remain build-only compatibility requests. The
+.pi/workflows/<name>/<name>.design.md` and `Build approved design:
+.pi/workflows/<name>/<name>.design.md` remain build-only compatibility requests. The
 agent confirms identity and module load and never runs the workflow. The helper
 is a catalog agent only; the package surface remains
 `./extensions/workflows/index.ts`.
@@ -1535,12 +1526,15 @@ replacement and path-based open/rename/unlink one indivisible operation against
 a hostile local process. Workspace files survive failed runs; run-local evidence
 remains immutable under the run id.
 
-`invokeWorkflow()` accepts exactly one saved `name`, project-relative
-`scriptPath`, or exact `packageName`, optional
+`invokeWorkflow()` accepts exactly one source-bound sibling `child`, saved
+`name`, project-relative `scriptPath`, or exact legacy `packageName`, optional
 semantic `input` and exact `items`, one safe item `key`, the complete unique
 `keys` list, and the same `outputDir()`. It starts a real depth-one child with an
 independent run directory, source snapshot, journal, result, and parent lineage.
-`name` keeps normal Project → User → Package precedence. `packageName` resolves
+`child` resolves `<running-root>/<child>` inside the exact source and folder of
+the running root; it cannot fall through to another namespace owner. `name`
+accepts a root or qualified child ref and keeps normal Project → User → Package
+precedence. `packageName` resolves
 the Package entry first and then requires the child launch to match that exact
 canonical path and source hash, so a higher-precedence shadow fails closed rather
 than replacing the installed child.

@@ -54,13 +54,13 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "plan",
   "plan-implement",
   "post-code-review",
-  "post-code-review-boundaries",
-  "post-code-review-contracts",
-  "post-code-review-necessity",
-  "post-code-review-scope",
-  "post-code-review-simplicity",
-  "post-code-review-style",
-  "post-code-review-synthesis",
+  "post-code-review/boundaries",
+  "post-code-review/contracts",
+  "post-code-review/necessity",
+  "post-code-review/scope",
+  "post-code-review/simplicity",
+  "post-code-review/style",
+  "post-code-review/synthesis",
   "requirements-grill",
   "review",
   "review-fix",
@@ -79,23 +79,18 @@ const PI_PACKAGES = [
 ] as const;
 const PACKAGE_WORKFLOW_PATHS = {
   implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
-  "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
+  "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
   plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
   "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
-  "post-code-review-boundaries":
-    "extensions/workflows/examples/post-code-review/post-code-review-boundaries.workflow.mjs",
-  "post-code-review-contracts":
-    "extensions/workflows/examples/post-code-review/post-code-review-contracts.workflow.mjs",
-  "post-code-review-necessity":
-    "extensions/workflows/examples/post-code-review/post-code-review-necessity.workflow.mjs",
-  "post-code-review-scope": "extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs",
-  "post-code-review-simplicity":
-    "extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs",
-  "post-code-review-style": "extensions/workflows/examples/post-code-review/post-code-review-style.workflow.mjs",
-  "post-code-review-synthesis":
-    "extensions/workflows/examples/post-code-review/post-code-review-synthesis.workflow.mjs",
-  "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
+  "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
+  "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
+  "post-code-review/necessity": "extensions/workflows/examples/post-code-review/necessity.workflow.mjs",
+  "post-code-review/scope": "extensions/workflows/examples/post-code-review/scope.workflow.mjs",
+  "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
+  "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
+  "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
+  "requirements-grill": "extensions/workflows/examples/requirements-grill/requirements-grill.workflow.mjs",
   review: "extensions/workflows/examples/review/review.workflow.mjs",
   "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
 } as const;
@@ -321,9 +316,9 @@ describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("fifteen curated Package workflows");
-    expect(prose).toContain("the fifteen curated workflows");
-    expect(prose).toContain("exactly the fifteen files above");
+    expect(prose).toContain("eight curated Package workflow trees with seven runnable children");
+    expect(prose).toContain("the eight curated workflow roots and their seven children");
+    expect(prose).toContain("each `<name>/` owns `<name>.workflow.mjs` plus any direct child entries");
   });
 
   it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
@@ -415,7 +410,11 @@ describe("npm public package boundary", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))
-      .map((file) => path.basename(file, ".workflow.mjs"))
+      .map((file) => {
+        const stem = path.basename(file, ".workflow.mjs");
+        const rootName = path.basename(path.dirname(file));
+        return stem === rootName ? rootName : `${rootName}/${stem}`;
+      })
       .sort();
 
     // The load-bearing assertion of the scanned registry: what a checkout

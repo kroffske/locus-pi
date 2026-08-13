@@ -23,9 +23,12 @@ This skill has two jobs: operate existing workflows and author new ones.
 /workflows stop [runId|last]
 ```
 
-Project workflows resolve first from `.pi/workflows/<name>.workflow.mjs`, then
-`.claude/workflows/`, `.agents/workflows/`, `~/.pi/workflows/`, and finally the
-Package examples. Run evidence lives under
+New Project workflows use one folder namespace:
+`.pi/workflows/<name>/<name>.workflow.mjs`. Direct sibling files named
+`<child>.workflow.mjs` are runnable as `<name>/<child>`. Resolution chooses the
+whole namespace from the nearest Project source, then User, then Package; it
+never mixes children from different sources. Existing flat Project/User
+`<name>.workflow.mjs` files remain compatible standalone workflows. Run evidence lives under
 `.pi/locus-pi/runs/<runId>/`; `outputs/` contains the human projection and
 `runtime/result.json` contains the terminal envelope. Agent-authored files are
 separate, under the workflow workspace described below.
@@ -41,12 +44,13 @@ A plain request to create, design, write, or author a workflow runs one visible
 sequence in the same turn:
 
 1. Send the requirement to the bundled `workflow-author` agent.
-2. Write `.pi/workflows/<name>.design.md` before any source.
+2. Create `.pi/workflows/<name>/` and write
+   `.pi/workflows/<name>/<name>.design.md` before any source.
 3. Review the design against the request, selected pattern, graph contract, and
    standard source profile. Revise the design until the review finds no material
    mismatch.
-4. Build the matching `.pi/workflows/<name>.workflow.mjs` from those reviewed
-   design bytes.
+4. Build `.pi/workflows/<name>/<name>.workflow.mjs` plus exactly the direct child
+   entries declared by the reviewed design.
 5. Validate source identity, module load, graph correspondence, and standard
    source shape. Do not run the workflow unless the user separately asks to run it.
 
@@ -90,6 +94,13 @@ Input: <semantic text or none>
 Primary output: `<name>.md`
 Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
+
+## Entries
+
+| Ref              | Role  | Responsibility         | Invoked by |
+| ---------------- | ----- | ---------------------- | ---------- |
+| `<name>`         | root  | <standard entry point> | operator   |
+| `<name>/<child>` | child | <one bounded subtask>  | `<node>`   |
 
 1. <numbered algorithm>
 
@@ -194,9 +205,9 @@ Standard source does not encode a hidden line/CSV/JSON protocol. It does not
 the same visible `pipeline(items, ...)`; model handoffs alone retain runtime
 repair, blank/duplicate rejection, and declared bounds.
 
-For durable work, use a real saved mini workflow for each caller-frozen item.
-Pass the complete key list so the runtime validates every key before the first
-child starts:
+For durable work inside one composed workflow, declare a short child entry in
+the same folder and invoke it with `child`. Pass the complete key list so the
+runtime validates every key before the first child starts:
 
 ```js
 const items = dsl.items();
@@ -204,7 +215,7 @@ const keys = items.map((_, keyIndex) => `item-${keyIndex + 1}`);
 for (let index = 0; index < items.length; index += 1) {
   const item = items[index];
   await dsl.invokeWorkflow({
-    name: "saved-worker",
+    child: "worker",
     key: keys[index],
     keys,
     input: item,
@@ -232,11 +243,11 @@ the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
 work on retry; parent or child source changes invalidate them. Saved children
 cannot nest, and source cycles fail before model work.
 
-Choose the child target deliberately: `name` uses normal Project → User →
-Package precedence, `scriptPath` binds one project-relative source, and
-`packageName` binds one exact installed Package entry. Use `packageName` for a
-tracked multi-workflow Package bundle whose child must not be replaced by a
-higher-precedence project or personal shadow.
+Use `child` for a declared sibling: the runtime binds it to the exact source and
+folder namespace of the running root. `name` remains the explicit cross-tree
+selector and accepts `<root>` or `<root>/<child>` with normal Project → User →
+Package precedence. `scriptPath` remains an exact project-relative selector;
+`packageName` remains legacy compatibility for an exact Package entry.
 
 Run evidence remains under `.pi/locus-pi/runs/<runId>/` and contains only
 `outputs/` plus `runtime/`. Durable user files belong under the project-local
@@ -323,20 +334,23 @@ a large structured plan.
 
 ## Build checks
 
-Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the reviewed
-design, then checks:
+Build writes one canonical folder matching the reviewed design:
+`.pi/workflows/<name>/<name>.workflow.mjs` plus only its declared direct child
+entries. It then checks:
 
-- `meta.name` matches both design and filename;
+- the design `Entries` table and source set match exactly;
+- root `meta.name` equals `<name>`; each child `meta.name` equals
+  `<name>/<child>` and its filename is `<child>.workflow.mjs`;
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
 - the module loads and exports `meta` plus a default function;
 - source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the source checker: in a locus-pi source checkout
-  prefer `./bin/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs`; otherwise use
-  `npx @kroffske/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs` from the project containing the built file.
+  prefer `./bin/locus-pi check-workflow-source` on every built
+  `.pi/workflows/<name>/*.workflow.mjs`; otherwise use
+  `npx @kroffske/locus-pi check-workflow-source` on those same files from the
+  project containing the built folder.
 
 A missing checker command, non-zero checker exit, failed module import, or
 design/source mismatch means Build failed. Repair and rerun; never return a

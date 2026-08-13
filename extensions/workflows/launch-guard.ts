@@ -16,6 +16,7 @@ import {
   WorkflowNameNotFoundError,
   type ResolvedWorkflowTarget,
 } from "./runtime/workflow-runner.js";
+import { isWorkflowSavedName } from "./runtime/workflow-saved-name.js";
 
 const WORKFLOW_BUSY_MESSAGE =
   "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";
@@ -45,7 +46,7 @@ export function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefi
 export type WorkflowCommandTargetPreflight =
   | { status: "resolved"; target: ResolvedWorkflowTarget }
   | { status: "not-found" }
-  | { status: "runner-durable-failure" };
+  | { status: "runner-durable-failure"; targetKind: "name" | "scriptPath" };
 
 export function preflightWorkflowCommandTarget(
   scriptRef: string,
@@ -55,11 +56,18 @@ export function preflightWorkflowCommandTarget(
   try {
     return {
       status: "resolved",
-      target: resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory),
+      target: resolveWorkflowTarget(
+        isWorkflowSavedName(scriptRef) ? { name: scriptRef } : { scriptPath: scriptRef },
+        projectRoot,
+        workingDirectory,
+      ),
     };
   } catch (error) {
     if (error instanceof WorkflowNameNotFoundError) return { status: "not-found" };
-    return { status: "runner-durable-failure" };
+    return {
+      status: "runner-durable-failure",
+      targetKind: isWorkflowSavedName(scriptRef) ? "name" : "scriptPath",
+    };
   }
 }
 

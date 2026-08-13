@@ -30,6 +30,7 @@ import {
 import {
   readWorkflowRunResult,
   readWorkflowRunResultText,
+  readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
 } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import * as workflowJournal from "../../../extensions/workflows/runtime/workflow-journal.js";
@@ -50,6 +51,14 @@ function project(): string {
 
 function writeWorkflow(root: string, name: string, source: string): void {
   writeFileSync(path.join(root, ".pi", "workflows", `${name}.workflow.mjs`), source, "utf8");
+}
+
+function writeWorkflowTree(root: string, name: string, entries: Record<string, string>): void {
+  const directory = path.join(root, ".pi", "workflows", name);
+  mkdirSync(directory, { recursive: true });
+  for (const [entry, source] of Object.entries(entries)) {
+    writeFileSync(path.join(directory, `${entry}.workflow.mjs`), source, "utf8");
+  }
 }
 
 function authoredPrompt(request: AgentRunRequest): string {
@@ -1017,6 +1026,70 @@ export default (dsl) => dsl.invokeWorkflow({
     expect(shadowed.ok).toBe(false);
     expect(shadowed.error).toContain("saved child workflow source changed before execution");
     expect(shadowCalls).toEqual([]);
+  });
+
+  it("binds child to the running root folder and records its qualified identity", async () => {
+    const root = project();
+    writeWorkflowTree(root, "composed", {
+      composed: `export const meta = { name: "composed", profile: "standard" };
+export default (dsl) => dsl.invokeWorkflow({
+  child: "worker",
+  key: "worker",
+  keys: ["worker"],
+  input: "owned child",
+  outputDir: dsl.outputDir(),
+});
+`,
+      worker: `export const meta = { name: "composed/worker", profile: "standard" };
+export default (dsl, input) => dsl.agent(input);
+`,
+    });
+    const harness = createHarness(root);
+    const calls: string[] = [];
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "composed",
+      outputDir: "outputs/composed",
+      createExecutor: executor((prompt) => {
+        calls.push(prompt);
+        return "done";
+      }),
+    });
+
+    expect(result.ok, result.error).toBe(true);
+    expect(calls).toEqual(["owned child"]);
+    expect(readWorkflowRunSummary(root, result.runId!).status).toBe("completed");
+    expect(readWorkflowRunScriptSnapshot(root, result.runId!)).toMatchObject({
+      kind: "ready",
+      target: { kind: "name", ref: "composed", source: "project" },
+    });
+    const childRunId = result.childRuns![0]!.runId!;
+    const child = readWorkflowRunResult(root, childRunId);
+    if (child === null) throw new Error("composed child result was not persisted");
+    expect(child.target).toMatchObject({ kind: "name", ref: "composed/worker", source: "project" });
+    expect(readWorkflowRunSummary(root, childRunId).status).toBe("completed");
+    expect(readWorkflowRunScriptSnapshot(root, childRunId)).toMatchObject({
+      kind: "ready",
+      target: { kind: "name", ref: "composed/worker", source: "project" },
+    });
+
+    const direct = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "composed/worker",
+      input: "direct child",
+      outputDir: "outputs/composed-direct",
+      createExecutor: executor(() => "direct done"),
+    });
+    expect(direct.ok, direct.error).toBe(true);
+    expect(readWorkflowRunSummary(root, direct.runId!).status).toBe("completed");
+    expect(readWorkflowRunScriptSnapshot(root, direct.runId!)).toMatchObject({
+      kind: "ready",
+      target: { kind: "name", ref: "composed/worker", source: "project" },
+    });
   });
 
   it("skips changed opaque payload in one namespace but runs it in a fresh namespace", async () => {

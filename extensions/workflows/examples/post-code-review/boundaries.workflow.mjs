@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-boundaries",
+  name: "post-code-review/boundaries",
   description: "Audit ownership and architecture boundaries, then publish review-boundaries.md.",
   profile: "standard",
 };

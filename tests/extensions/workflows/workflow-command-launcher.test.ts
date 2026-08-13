@@ -81,9 +81,9 @@ describe("workflow command launcher", () => {
     await vi.waitFor(() => expect(terminals).toEqual(["ordinary", "continued", scriptPathRef]));
 
     expect(runScript).toHaveBeenCalledTimes(3);
-    expect(runScript.mock.calls[0]?.[0]).toMatchObject({ script: "ordinary" });
+    expect(runScript.mock.calls[0]?.[0]).toMatchObject({ name: "ordinary" });
     expect(runScript.mock.calls[1]?.[0]).toMatchObject({
-      script: "continued",
+      name: "continued",
       input: "answer",
       outputDir: "tmp/reviews/review-1",
       continuation: { originRunId: "source-run", artifactRefs: [] },

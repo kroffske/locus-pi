@@ -113,23 +113,23 @@ describe("curated workflow diagrams", () => {
     const parentPath = packagedWorkflowPath("post-code-review");
     const parent = readFileSync(parentPath, "utf8");
     const svg = readFileSync(diagramPath("post-code-review"), "utf8");
-    const packageChildren = declaredNames(parent, /\bpackageName:\s*"([^"]+)"/gu);
+    const packageChildren = declaredNames(parent, /\bchild:\s*"([^"]+)"/gu);
 
     expect(packageChildren).toEqual([
-      "post-code-review-scope",
-      "post-code-review-boundaries",
-      "post-code-review-simplicity",
-      "post-code-review-contracts",
-      "post-code-review-style",
-      "post-code-review-necessity",
-      "post-code-review-synthesis",
+      "scope",
+      "boundaries",
+      "simplicity",
+      "contracts",
+      "style",
+      "necessity",
+      "synthesis",
     ]);
     for (const phase of declaredNames(parent, /\bphase\("([^"]+)"\)/gu)) {
       expect(svg, `post-code-review diagram omits phase ${phase}`).toContain(phase);
     }
     for (const child of packageChildren) {
-      expect(svg, `post-code-review diagram omits child ${child}`).toContain(child.replace("post-code-review-", ""));
-      const childSource = readFileSync(packagedWorkflowPath(child), "utf8");
+      expect(svg, `post-code-review diagram omits child ${child}`).toContain(child);
+      const childSource = readFileSync(packagedWorkflowPath(`post-code-review/${child}`), "utf8");
       for (const artifact of declaredNames(childSource, /\bpublishPrimaryFile\("([^"]+)"\)/gu)) {
         expect(svg, `post-code-review diagram omits artifact ${artifact}`).toContain(artifact);
       }
@@ -143,10 +143,10 @@ describe("curated workflow diagrams", () => {
   });
 
   it("challenges proposed fixes before synthesis and respects trusted external ownership", () => {
-    const contracts = readFileSync(packagedWorkflowPath("post-code-review-contracts"), "utf8");
-    const style = readFileSync(packagedWorkflowPath("post-code-review-style"), "utf8");
-    const necessity = readFileSync(packagedWorkflowPath("post-code-review-necessity"), "utf8");
-    const synthesis = readFileSync(packagedWorkflowPath("post-code-review-synthesis"), "utf8");
+    const contracts = readFileSync(packagedWorkflowPath("post-code-review/contracts"), "utf8");
+    const style = readFileSync(packagedWorkflowPath("post-code-review/style"), "utf8");
+    const necessity = readFileSync(packagedWorkflowPath("post-code-review/necessity"), "utf8");
+    const synthesis = readFileSync(packagedWorkflowPath("post-code-review/synthesis"), "utf8");
 
     expect(contracts).toContain("Do not require duplicate local leaf validation merely because data is external");
     expect(contracts).toContain("accepted responsibility boundary rather than a defect");

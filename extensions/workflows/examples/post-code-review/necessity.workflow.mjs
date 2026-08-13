@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-necessity",
+  name: "post-code-review/necessity",
   description: "Challenge proposed review fixes for necessity, ownership, and complexity.",
   profile: "standard",
 };

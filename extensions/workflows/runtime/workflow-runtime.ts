@@ -405,11 +405,7 @@ export interface WorkflowDsl {
   invokeWorkflow(input: WorkflowSavedChildInvocation): Promise<WorkflowSavedChildResult>;
 }
 
-export interface WorkflowSavedChildInvocation {
-  name?: string;
-  scriptPath?: string;
-  /** Exact Package-registry child name. Unlike `name`, project and personal shadows fail closed. */
-  packageName?: string;
+interface WorkflowSavedChildInvocationFields {
   input?: string;
   items?: readonly string[];
   /** Stable semantic identity for this item. Opaque payload does not redefine it. */
@@ -419,6 +415,15 @@ export interface WorkflowSavedChildInvocation {
   /** Must equal this execution tree's project-relative workflow workspace. */
   outputDir: string;
 }
+
+type WorkflowSavedChildSelector =
+  | { child: string; name?: never; scriptPath?: never; packageName?: never }
+  | { child?: never; name: string; scriptPath?: never; packageName?: never }
+  | { child?: never; name?: never; scriptPath: string; packageName?: never }
+  | { child?: never; name?: never; scriptPath?: never; packageName: string };
+
+/** One target selector plus the shared child-run contract. */
+export type WorkflowSavedChildInvocation = WorkflowSavedChildInvocationFields & WorkflowSavedChildSelector;
 
 export interface WorkflowSavedChildResult {
   status: "completed" | "skipped";

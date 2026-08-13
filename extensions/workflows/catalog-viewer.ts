@@ -464,7 +464,9 @@ function identityTextLines(row: SelectableWorkflowRow): string[] {
   return [
     `[VIEW] ${row.kind === "history" ? "[R] " : ""}${workflowSourceBadge(row.source)} ${row.name}`,
     `Source: ${row.sourceLabel}`,
-    ...(row.kind === "history" ? [`Run: ${row.runId}`, `Snapshot: ${row.originPath}`] : [`Path: ${row.target.path}`]),
+    ...(row.kind === "history"
+      ? [`Run: ${row.runId}`, `Snapshot: ${row.sourceLocator}`]
+      : [`Locator: ${row.sourceLocator}`]),
     ...(row.kind === "history" && row.snapshot.sha256 !== undefined ? [`SHA-256: ${row.snapshot.sha256}`] : []),
   ];
 }
@@ -506,7 +508,15 @@ function catalogBody(
   const contentFits = desiredCurrentHeight + desiredHistoryHeight <= height;
   const currentHeight = contentFits ? desiredCurrentHeight : Math.max(1, Math.ceil(height * 0.6));
   const historyHeight = contentFits ? desiredHistoryHeight : Math.max(1, height - currentHeight);
-  const lines = [style(theme, "muted", `Current workflows (${model.current.length}/${model.totalCurrent}):`)];
+  const visibleRoots = model.current.filter((row) => row.role === "root").length;
+  const visibleChildren = model.current.filter((row) => row.role === "child").length;
+  const lines = [
+    style(
+      theme,
+      "muted",
+      `Current workflows (${visibleRoots}/${model.totalRoots} roots · ${visibleChildren}/${model.totalChildren} children):`,
+    ),
+  ];
   const currentBody = Math.max(0, currentHeight - 1);
   lines.push(...groupedCurrentCatalog(model, selectedIndex, currentBody, width, theme));
   lines.push(style(theme, "muted", `History [R] review-only (${model.history.length}):`));
@@ -542,7 +552,12 @@ function groupedCurrentCatalog(
   const entries: Array<{ text: string; rowIndex?: number; groupStart?: number }> = [];
   for (const group of currentSourceGroups(model)) {
     const groupStart = entries.length;
-    entries.push({ text: style(theme, "muted", `${group.label} (${group.rows.length}):`), groupStart });
+    const roots = group.rows.filter((row) => row.role === "root").length;
+    const children = group.rows.filter((row) => row.role === "child").length;
+    entries.push({
+      text: style(theme, "muted", `${group.label} (${roots} roots · ${children} children):`),
+      groupStart,
+    });
     if (group.rows.length === 0) {
       entries.push({ text: model.query === undefined ? "  (none found)" : "  (no matches)", groupStart });
       continue;
@@ -616,16 +631,12 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
-  if (expanded && width < 60 && row.bundle !== undefined) {
-    const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-    const identity = `${selected ? ">" : " "} ${row.name}${run} · ${workflowSourceBadge(row.source)}`;
-    const relationship =
-      row.bundle.role === "parent"
-        ? `    └ bundle parent · ${row.bundle.children?.length ?? 0} children`
-        : `    └ child of ${row.bundle.parent}`;
+  if (expanded && width < 60 && row.kind === "current") {
+    const treeName = row.role === "child" ? `  └ ${row.label}` : row.name;
+    const identity = `${selected ? ">" : " "} ${treeName} · ${workflowSourceBadge(row.source)}`;
     return [
       style(theme, selected ? "accent" : "text", fitLine(identity, width)),
-      style(theme, selected ? "accent" : "muted", fitLine(relationship, width)),
+      style(theme, selected ? "accent" : "muted", fitLine(`    └ ${catalogDetailLine(row, width - 6)}`, width)),
     ];
   }
   const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
@@ -641,13 +652,12 @@ function rowLines(
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const bundle =
-    row.bundle === undefined
+  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const composition =
+    row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""
-      : row.bundle.role === "parent"
-        ? ` · BUNDLE PARENT (${row.bundle.children?.length ?? 0} children)`
-        : ` · child of ${row.bundle.parent}`;
-  return `${row.name}${run} · ${workflowSourceBadge(row.source)}${bundle}`;
+      : ` · ${row.children.length} children`;
+  return `${treeName}${run} · ${workflowSourceBadge(row.source)}${composition}`;
 }
 
 function catalogRowSummary(row: SelectableWorkflowRow): string {
@@ -655,16 +665,7 @@ function catalogRowSummary(row: SelectableWorkflowRow): string {
 }
 
 function catalogDetailLine(row: SelectableWorkflowRow, width: number): string {
-  const separator = " · ";
-  const separatorWidth = visibleWidth(separator);
-  if (width <= separatorWidth + 2) return middleTruncate(row.originPath, width);
-  const descriptionWidth = Math.min(
-    visibleWidth(row.description),
-    Math.max(1, Math.floor((width - separatorWidth) * 0.4)),
-  );
-  const description = truncateToWidth(row.description, descriptionWidth, "…");
-  const pathWidth = Math.max(1, width - visibleWidth(description) - separatorWidth);
-  return `${description}${separator}${middleTruncate(row.originPath, pathWidth)}`;
+  return truncateToWidth(`${row.description} · profile=${row.profile}`, width, "…");
 }
 
 function middleTruncate(value: string, width: number): string {

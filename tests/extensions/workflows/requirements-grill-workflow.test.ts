@@ -20,7 +20,10 @@ import {
  * agents, so what is pinned here is the cast, the handoffs between them, and the
  * absence of the script-owned repository search this file used to carry.
  */
-const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/requirements-grill.workflow.mjs");
+const workflowPath = path.join(
+  process.cwd(),
+  "extensions/workflows/examples/requirements-grill/requirements-grill.workflow.mjs",
+);
 
 interface PublishedArtifact {
   ref: WorkflowArtifactRef;

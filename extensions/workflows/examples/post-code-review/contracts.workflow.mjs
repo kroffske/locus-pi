@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-contracts",
+  name: "post-code-review/contracts",
   description: "Audit API and internal contracts for one post-code review scope.",
   profile: "standard",
 };

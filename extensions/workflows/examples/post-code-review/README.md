@@ -1,4 +1,4 @@
-# Post-code review workflow bundle
+# Post-code review workflow tree
 
 `post-code-review` is one installable code-review workflow composed from seven
 saved child workflows. The parent makes no model call itself: it owns order,
@@ -12,19 +12,19 @@ parallelism, the shared output directory, child identity, and final publication.
 The review uses several complementary perspectives rather than one repeated
 style:
 
-1. `post-code-review-scope` resolves the requested function, file, commit,
+1. `post-code-review/scope` resolves the requested function, file, commit,
    commit range, diff, or locally available PR range into an exact evidence
    boundary.
-2. `post-code-review-boundaries`, `post-code-review-simplicity`,
-   `post-code-review-contracts`, and `post-code-review-style` run behind one
+2. `post-code-review/boundaries`, `post-code-review/simplicity`,
+   `post-code-review/contracts`, and `post-code-review/style` run behind one
    parallel barrier. Each reopens `review-scope.md`, inspects live evidence
    independently, and writes only its own report. The style lane also reads the
    request-local `style.md` criteria.
-3. `post-code-review-necessity` runs sequentially after the barrier, reopens the
+3. `post-code-review/necessity` runs sequentially after the barrier, reopens the
    scope and all four lane reports, and challenges every proposed fix for a
    proven failure, a clear guarantee owner, duplicated responsibility, and net
    simplicity. It writes `review-necessity.md`.
-4. `post-code-review-synthesis` reopens all six reports, independently verifies
+4. `post-code-review/synthesis` reopens all six reports, independently verifies
    admitted claims against live source and consumers, removes unsupported or
    duplicate findings, assigns the final action levels, and writes
    `post-code-review.md`.
@@ -37,7 +37,7 @@ model roles, Markdown handoffs, and the failure boundary on one canvas.
 
 ## Install
 
-The bundle is part of the `@kroffske/locus-pi` package boundary. From this
+The tree is part of the `@kroffske/locus-pi` package boundary. From this
 checkout, register the local package once; do not copy files out of task
 artifacts or into every project:
 
@@ -46,7 +46,7 @@ cd /path/to/locus-pi
 pi install .
 ```
 
-After the release containing this bundle is published, install it from npm:
+After the release containing this tree is published, install it from npm:
 
 ```bash
 pi install npm:@kroffske/locus-pi
@@ -111,7 +111,7 @@ report or an unselected recommendation produces an intentional `NO_WORK` result.
 
 All eight files are Package workflow entries because the Package registry scans
 one directory level below `extensions/workflows/examples/`. The parent is the
-intended external entry. Its seven `invokeWorkflow({ packageName })` edges bind
+intended external entry. Its seven `invokeWorkflow({ child })` edges bind
 children to these installed Package files. A project or personal workflow with
 the same name therefore cannot silently replace one child; a shadow causes the
 run to fail before the child executes.
@@ -124,16 +124,16 @@ handoff.
 ## Files in this directory
 
 - `post-code-review.workflow.mjs` — external parent and final publisher.
-- `post-code-review-scope.workflow.mjs` — exact scope and Git-semantics mapper.
-- `post-code-review-boundaries.workflow.mjs` — ownership and architecture lane.
-- `post-code-review-simplicity.workflow.mjs` — delete-first complexity lane.
-- `post-code-review-contracts.workflow.mjs` — API, consumer, documentation, and
+- `scope.workflow.mjs` — exact scope and Git-semantics mapper.
+- `boundaries.workflow.mjs` — ownership and architecture lane.
+- `simplicity.workflow.mjs` — delete-first complexity lane.
+- `contracts.workflow.mjs` — API, consumer, documentation, and
   validation-contract lane.
-- `post-code-review-style.workflow.mjs` — comment quality and evidence-backed
+- `style.workflow.mjs` — comment quality and evidence-backed
   project-style lane with optional request-local criteria.
-- `post-code-review-necessity.workflow.mjs` — sequential challenge to proposed
+- `necessity.workflow.mjs` — sequential challenge to proposed
   fixes, their ownership, duplicated responsibility, and net complexity.
-- `post-code-review-synthesis.workflow.mjs` — independent verifier and final
+- `synthesis.workflow.mjs` — independent verifier and final
   report author.
 - `post-code-review-pipeline.svg` — self-contained reader-facing interaction
   diagram.

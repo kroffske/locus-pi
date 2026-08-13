@@ -6,7 +6,11 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
-import { parseWorkflowTargetIdentity, type WorkflowTargetIdentity } from "./workflow-saved-name.js";
+import {
+  parseWorkflowTargetIdentity,
+  workflowSavedNameParts,
+  type WorkflowTargetIdentity,
+} from "./workflow-saved-name.js";
 import { isWorkflowPathWithinRoot } from "./workflow-output.js";
 import { projectWorkflowDisposition } from "./workflow-result.js";
 import {
@@ -318,16 +322,15 @@ function validatePersistedWorkflowPath(
   } catch (error) {
     if (!isMissingFileError(error)) throw error;
   }
+  let stat;
+  try {
+    stat = lstatSync(lexicalPath, { throwIfNoEntry: false });
+  } catch (error) {
+    throw new Error(`${label} is unavailable: ${errorMessage(error)}.`);
+  }
   const basename = path.basename(lexicalPath);
   if (target.kind === "name") {
-    if (basename !== `${target.ref}.workflow.mjs`)
-      throw new Error(`${label} basename does not match persisted workflow name.`);
-    if (target.source === "project") {
-      const relative = path.relative(path.resolve(projectRoot), lexicalPath).split(path.sep).join("/");
-      if (!/^(?:.+\/)?\.(?:pi|claude|agents)\/workflows\/[^/]+\.workflow\.mjs$/u.test(relative)) {
-        throw new Error(`${label} is not under the persisted workflow source root.`);
-      }
-    }
+    validatePersistedNamedWorkflowLayout(lexicalPath, lexicalRoot, target, projectRoot, label, stat !== undefined);
   } else {
     if (target.source !== "project") throw new Error("Workflow scriptPath target must use project source.");
     if (basename !== path.basename(target.ref))
@@ -342,13 +345,7 @@ function validatePersistedWorkflowPath(
       throw new Error(`${label} does not match persisted scriptPath ref.`);
     }
   }
-  let stat;
-  try {
-    stat = lstatSync(lexicalPath);
-  } catch (error) {
-    if (isMissingFileError(error)) return lexicalPath;
-    throw new Error(`${label} is unavailable: ${errorMessage(error)}.`);
-  }
+  if (stat === undefined) return lexicalPath;
   if (!stat.isFile() && !stat.isSymbolicLink()) throw new Error(`${label} must identify a regular file.`);
   const physicalRoot = realpathSync(lexicalRoot);
   const physicalPath = realpathSync(lexicalPath);
@@ -359,8 +356,61 @@ function validatePersistedWorkflowPath(
   if (target.source === "personal" && !isWorkflowPathWithinRoot(realpathSync(os.homedir()), physicalRoot)) {
     throw new Error("Personal workflow root escapes the physical home directory.");
   }
-  validateWorkflowSourceInventory(lexicalPath, target, label);
+  if (target.source === "package") validatePackageInventoryPath(lexicalRoot, lexicalPath, label);
   return lexicalPath;
+}
+
+function validatePersistedNamedWorkflowLayout(
+  lexicalPath: string,
+  lexicalRoot: string,
+  target: WorkflowTargetIdentity,
+  projectRoot: string,
+  label: string,
+  sourceExists: boolean,
+): void {
+  const { root, child } = workflowSavedNameParts(target.ref);
+  const filename = `${child ?? root}.workflow.mjs`;
+  if (path.basename(lexicalPath) !== filename) {
+    throw new Error(`${label} basename does not match persisted workflow name.`);
+  }
+  const folderTail = [root, filename];
+  const legacyTail = child === undefined ? [filename] : undefined;
+  if (target.source === "project") {
+    const relative = path.relative(path.resolve(projectRoot), lexicalPath);
+    const parts = relative.split(path.sep).filter(Boolean);
+    const matches = parts.some(
+      (part, index) =>
+        [".pi", ".claude", ".agents"].includes(part) &&
+        parts[index + 1] === "workflows" &&
+        (samePathParts(parts.slice(index + 2), folderTail) ||
+          (legacyTail !== undefined && samePathParts(parts.slice(index + 2), legacyTail))),
+    );
+    if (!matches) throw new Error(`${label} is not under the persisted workflow source root.`);
+    return;
+  }
+  if (!sourceExists) return;
+  const relativeParts = path.relative(lexicalRoot, lexicalPath).split(path.sep).filter(Boolean);
+  const acceptsLegacy = target.source === "personal" && legacyTail !== undefined;
+  if (!samePathParts(relativeParts, folderTail) && !(acceptsLegacy && samePathParts(relativeParts, legacyTail))) {
+    throw new Error(`${label} is outside the ${target.source} workflow inventory.`);
+  }
+}
+
+function samePathParts(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((part, index) => part === expected[index]);
+}
+
+function validatePackageInventoryPath(root: string, filePath: string, label: string): void {
+  let current = path.resolve(root);
+  const parts = path.relative(current, filePath).split(path.sep).filter(Boolean);
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`${label} uses a symlinked Package inventory entry.`);
+    if (index < parts.length - 1 && !stat.isDirectory()) {
+      throw new Error(`${label} uses a non-inventory Package directory.`);
+    }
+  }
 }
 
 /**
@@ -369,33 +419,6 @@ function validatePersistedWorkflowPath(
  * removed historical runs remain readable; current consumers must resolve a
  * present source through the live target binding before execution.
  */
-function validateWorkflowSourceInventory(lexicalPath: string, target: WorkflowTargetIdentity, label: string): void {
-  if (target.source === "project") return;
-  const root = target.source === "package" ? WORKFLOW_PACKAGE_ROOT : path.join(os.homedir(), ".pi", "workflows");
-  const relative = path.relative(path.resolve(root), lexicalPath);
-  const parts = relative.split(path.sep).filter(Boolean);
-  if (target.source === "personal") {
-    if (parts.length !== 1) {
-      throw new Error(`${label} is outside the personal workflow inventory.`);
-    }
-    return;
-  }
-  if (parts.length < 1 || parts.length > 2) {
-    throw new Error(`${label} is outside the Package workflow inventory depth.`);
-  }
-  let current = path.resolve(root);
-  for (const [index, part] of parts.entries()) {
-    current = path.join(current, part);
-    const stat = lstatSync(current);
-    if (index < parts.length - 1 && (!stat.isDirectory() || stat.isSymbolicLink())) {
-      throw new Error(`${label} uses a non-inventory Package directory.`);
-    }
-    if (index === parts.length - 1 && stat.isSymbolicLink()) {
-      throw new Error(`${label} is not a regular Package inventory entry.`);
-    }
-  }
-}
-
 function samePhysicalPath(left: string, right: string): boolean {
   const leftPhysical = tryRealpath(left);
   const rightPhysical = tryRealpath(right);

@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-style",
+  name: "post-code-review/style",
   description: "Audit comments and project-specific code style for one post-code review scope.",
   profile: "standard",
 };

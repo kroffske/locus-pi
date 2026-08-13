@@ -187,6 +187,7 @@ const WORKFLOW_RUNTIME_MODULES: readonly string[] = [
   "workflow-agent-bridge",
   "workflow-artifacts",
   "workflow-budget",
+  "workflow-discovery",
   "workflow-failure",
   "workflow-handoff",
   "workflow-journal",

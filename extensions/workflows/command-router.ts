@@ -462,6 +462,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       const launched = commandLauncher.launch({
         ctx,
         scriptRef,
+        ...(targetPreflight.status === "runner-durable-failure" ? { targetKind: targetPreflight.targetKind } : {}),
         ...(target === undefined ? {} : { target }),
         ...(parsedRun.input === undefined ? {} : { input: parsedRun.input }),
         ...(parsedRun.outputDir === undefined ? {} : { outputDir: parsedRun.outputDir }),

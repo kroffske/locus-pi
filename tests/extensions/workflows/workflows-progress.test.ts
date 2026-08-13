@@ -1904,7 +1904,7 @@ describe("workflow progress widget", () => {
       await handler("list definitely-no-match", harness.ctx);
       const noMatch = renderHarnessWidget(harness);
       expect(noMatch).toContain('No workflows match "definitely-no-match".');
-      expect(noMatch).toMatch(/Catalog contains \d+ runnable workflow\(s\)/u);
+      expect(noMatch).toMatch(/Catalog contains \d+ top-level workflow\(s\) · \d+ child workflow\(s\)/u);
       expect(noMatch).not.toContain("Workflow catalog:\n  (none)");
     } finally {
       if (previousHome === undefined) delete process.env.HOME;

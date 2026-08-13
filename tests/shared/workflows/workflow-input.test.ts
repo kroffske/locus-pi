@@ -186,13 +186,14 @@ describe("string-only workflow input", () => {
     const schema = tool.parameters;
 
     expect(Value.Check(schema, { name: "alpha workflow" })).toBe(true);
+    expect(Value.Check(schema, { name: "alpha/beta" })).toBe(true);
     expect(Value.Check(schema, { name: "a".repeat(200) })).toBe(true);
     for (const name of [
       "",
       " alpha",
       "alpha ",
       "alpha\u0001control",
-      "alpha/beta",
+      "alpha/beta/gamma",
       String.raw`alpha\beta`,
       "alpha.mjs",
       "alpha.MJS",

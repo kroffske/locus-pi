@@ -216,7 +216,7 @@ describe("workflow target physical confinement", () => {
 
       expect(resolveWorkflowTarget({ name: "live-smoke" }, root, root)).toMatchObject({
         source: "package",
-        path: path.join(packagedExamplesDir(), "live-smoke.workflow.mjs"),
+        path: path.join(packagedExamplesDir(), "live-smoke", "live-smoke.workflow.mjs"),
       });
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
@@ -381,7 +381,7 @@ describe("saved workflow name identity", () => {
       for (const name of [" alpha", "alpha ", "alpha\u0001control", "a".repeat(201)]) {
         expect(() => resolveWorkflowTarget({ script: name }, root, root), name).toThrow(/Invalid saved workflow name/u);
       }
-      for (const name of ["alpha/beta", String.raw`alpha\beta`, "alpha.mjs", "alpha.MJS"]) {
+      for (const name of ["alpha/beta/gamma", String.raw`alpha\beta`, "alpha.mjs", "alpha.MJS"]) {
         expect(() => resolveWorkflowTarget({ name }, root, root), name).toThrow(/Invalid saved workflow name/u);
       }
     });

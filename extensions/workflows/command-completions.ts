@@ -92,7 +92,7 @@ export function workflowArgumentCompletions(
   if (parsedTarget === undefined) {
     return runTail === "" || runTail.startsWith('"') ? workflowNameCompletions("run", runTail, workflowNames()) : null;
   }
-  if (parsedTarget.value.includes("/")) return null;
+  if (parsedTarget.value.includes("/") && !workflowNames().includes(parsedTarget.value)) return null;
   const targetToken = formatWorkflowCommandToken(parsedTarget.value);
   const targetIsComplete = parsedTarget.rest !== "" || /\s$/u.test(runTail);
   if (!targetIsComplete) {
