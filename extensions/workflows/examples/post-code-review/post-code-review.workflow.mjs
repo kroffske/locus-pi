@@ -2,11 +2,17 @@ export const meta = {
   name: "post-code-review",
   description: "Run modular post-code review lanes and publish the synthesis report.",
   profile: "standard",
-  phases: [{ title: "Scope" }, { title: "Parallel audits" }, { title: "Synthesis" }, { title: "Publish" }],
+  phases: [
+    { title: "Scope" },
+    { title: "Parallel audits" },
+    { title: "Necessity challenge" },
+    { title: "Synthesis" },
+    { title: "Publish" },
+  ],
 };
 
 export default async function runWorkflow(dsl, input) {
-  const keys = ["scope", "boundaries", "simplicity", "contracts", "synthesis"];
+  const keys = ["scope", "boundaries", "simplicity", "contracts", "necessity", "synthesis"];
   const outputDir = dsl.outputDir();
 
   dsl.phase("scope");
@@ -45,6 +51,15 @@ export default async function runWorkflow(dsl, input) {
         outputDir,
       }),
   ]);
+
+  dsl.phase("necessity");
+  await dsl.invokeWorkflow({
+    packageName: "post-code-review-necessity",
+    input,
+    keys,
+    key: "necessity",
+    outputDir,
+  });
 
   dsl.phase("synthesis");
   await dsl.invokeWorkflow({

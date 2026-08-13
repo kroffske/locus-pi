@@ -8,8 +8,13 @@ This file records user-visible changes to the public package.
 
 - **Modular post-code review now ships as an installable Package workflow.**
   `post-code-review` coordinates one scope child, three parallel audit children,
-  and one synthesis child from one shipped folder, publishes the final Markdown
-  report, and includes a self-contained SVG interaction diagram. Exact
+  one sequential necessity challenge, and one synthesis child from one shipped
+  folder, publishes the final Markdown report, and includes a self-contained
+  SVG interaction diagram. The necessity challenge requires a proven failure,
+  a guarantee owner, a non-duplicated responsibility, and the simplest net
+  improvement before synthesis may retain a finding. Explicitly trusted external
+  provider guarantees are accepted boundaries rather than automatic demands for
+  duplicate local validation. Exact
   `invokeWorkflow({ packageName })` edges keep installed child sources bound to
   the Package registry and fail before execution when a project or personal
   workflow shadows a child name.

@@ -1,6 +1,6 @@
 # Post-code review workflow bundle
 
-`post-code-review` is one installable code-review workflow composed from five
+`post-code-review` is one installable code-review workflow composed from six
 saved child workflows. The parent makes no model call itself: it owns order,
 parallelism, the shared output directory, child identity, and final publication.
 
@@ -19,10 +19,14 @@ style:
    `post-code-review-contracts` run behind one parallel barrier. Each reopens
    `review-scope.md`, inspects live evidence independently, and writes only its
    own report.
-3. `post-code-review-synthesis` reopens all four reports, independently verifies
-   their claims against live source and consumers, removes unsupported or
+3. `post-code-review-necessity` runs sequentially after the barrier, reopens the
+   scope and all three lane reports, and challenges every proposed fix for a
+   proven failure, a clear guarantee owner, duplicated responsibility, and net
+   simplicity. It writes `review-necessity.md`.
+4. `post-code-review-synthesis` reopens all five reports, independently verifies
+   admitted claims against live source and consumers, removes unsupported or
    duplicate findings, and writes `post-code-review.md`.
-4. The parent publishes that final Markdown file as the run result.
+5. The parent publishes that final Markdown file as the run result.
 
 The diagram below shows these workflow boundaries, exact source filenames,
 model roles, Markdown handoffs, and the failure boundary on one canvas.
@@ -65,7 +69,7 @@ resume reuses the exact source run and workspace.
 
 ## Source binding
 
-All six files are Package workflow entries because the Package registry scans
+All seven files are Package workflow entries because the Package registry scans
 one directory level below `extensions/workflows/examples/`. The parent is the
 intended external entry. Its five `invokeWorkflow({ packageName })` edges bind
 children to these installed Package files. A project or personal workflow with
@@ -85,6 +89,8 @@ handoff.
 - `post-code-review-simplicity.workflow.mjs` — delete-first complexity lane.
 - `post-code-review-contracts.workflow.mjs` — API, consumer, documentation, and
   validation-contract lane.
+- `post-code-review-necessity.workflow.mjs` — sequential challenge to proposed
+  fixes, their ownership, duplicated responsibility, and net complexity.
 - `post-code-review-synthesis.workflow.mjs` — independent verifier and final
   report author.
 - `post-code-review-pipeline.svg` — self-contained reader-facing interaction

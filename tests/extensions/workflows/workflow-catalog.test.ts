@@ -266,6 +266,7 @@ describe("workflow operator catalog", () => {
       "plan",
       "post-code-review-boundaries",
       "post-code-review-contracts",
+      "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
       "post-code-review-synthesis",
@@ -297,6 +298,7 @@ describe("workflow operator catalog", () => {
         "plan",
         "post-code-review-boundaries",
         "post-code-review-contracts",
+        "post-code-review-necessity",
         "post-code-review-scope",
         "post-code-review-simplicity",
         "post-code-review-synthesis",
@@ -719,7 +721,7 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unassigned role degrades and is recorded");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain(
-        "the packaged examples directory, currently live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-scope, post-code-review-simplicity, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
+        "the packaged examples directory, currently live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-necessity, post-code-review-scope, post-code-review-simplicity, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
       );
       expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();

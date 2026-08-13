@@ -230,6 +230,7 @@
     "extensions/workflows/examples/post-code-review/README.md",
     "extensions/workflows/examples/post-code-review/post-code-review-boundaries.workflow.mjs",
     "extensions/workflows/examples/post-code-review/post-code-review-contracts.workflow.mjs",
+    "extensions/workflows/examples/post-code-review/post-code-review-necessity.workflow.mjs",
     "extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg",
     "extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs",
     "extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs",
