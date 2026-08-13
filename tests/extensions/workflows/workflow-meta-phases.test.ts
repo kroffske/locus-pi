@@ -222,13 +222,13 @@ describe("curated workflow declarations", () => {
     // The post-code-review parent owns and declares their orchestration phases.
     expect(undeclared).toEqual([
       "live-smoke",
-      "post-code-review-boundaries",
-      "post-code-review-contracts",
-      "post-code-review-necessity",
-      "post-code-review-scope",
-      "post-code-review-simplicity",
-      "post-code-review-style",
-      "post-code-review-synthesis",
+      "post-code-review/boundaries",
+      "post-code-review/contracts",
+      "post-code-review/necessity",
+      "post-code-review/scope",
+      "post-code-review/simplicity",
+      "post-code-review/style",
+      "post-code-review/synthesis",
     ]);
   });
 });

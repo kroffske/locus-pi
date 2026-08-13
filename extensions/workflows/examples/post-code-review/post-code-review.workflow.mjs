@@ -17,7 +17,7 @@ export default async function runWorkflow(dsl, input) {
 
   dsl.phase("scope");
   await dsl.invokeWorkflow({
-    packageName: "post-code-review-scope",
+    child: "scope",
     input,
     keys,
     key: "scope",
@@ -28,7 +28,7 @@ export default async function runWorkflow(dsl, input) {
   await dsl.parallel([
     () =>
       dsl.invokeWorkflow({
-        packageName: "post-code-review-boundaries",
+        child: "boundaries",
         input,
         keys,
         key: "boundaries",
@@ -36,7 +36,7 @@ export default async function runWorkflow(dsl, input) {
       }),
     () =>
       dsl.invokeWorkflow({
-        packageName: "post-code-review-simplicity",
+        child: "simplicity",
         input,
         keys,
         key: "simplicity",
@@ -44,7 +44,7 @@ export default async function runWorkflow(dsl, input) {
       }),
     () =>
       dsl.invokeWorkflow({
-        packageName: "post-code-review-contracts",
+        child: "contracts",
         input,
         keys,
         key: "contracts",
@@ -52,7 +52,7 @@ export default async function runWorkflow(dsl, input) {
       }),
     () =>
       dsl.invokeWorkflow({
-        packageName: "post-code-review-style",
+        child: "style",
         input,
         keys,
         key: "style",
@@ -62,7 +62,7 @@ export default async function runWorkflow(dsl, input) {
 
   dsl.phase("necessity");
   await dsl.invokeWorkflow({
-    packageName: "post-code-review-necessity",
+    child: "necessity",
     input,
     keys,
     key: "necessity",
@@ -71,7 +71,7 @@ export default async function runWorkflow(dsl, input) {
 
   dsl.phase("synthesis");
   await dsl.invokeWorkflow({
-    packageName: "post-code-review-synthesis",
+    child: "synthesis",
     input,
     keys,
     key: "synthesis",

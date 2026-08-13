@@ -8,18 +8,25 @@ The complete runtime, trust, replay, and artifact reference is
 ## Contract: Design, review, Build
 
 A plain request to create, design, write, or author a workflow runs one ordered
-authoring sequence: write `.pi/workflows/<name>.design.md`, review and revise that
-design against the request and standard source profile, then write the matching
-`<name>.workflow.mjs`. Build checks source identity and module load and does not
-run the workflow.
+authoring sequence: create `.pi/workflows/<name>/`, write
+`<name>/<name>.design.md`, review and revise that design against the request and
+standard source profile, then write `<name>/<name>.workflow.mjs` plus exactly the
+direct children declared by the design. Build checks every source identity and
+module load and does not run the workflow.
+
+The folder is the workflow namespace and public name. Its same-named file is the
+standard operator entry point. A direct `<child>.workflow.mjs` is a runnable
+child with logical ref `<name>/<child>`; do not repeat the root prefix in the
+child filename. New authoring always uses this layout. Existing flat Project or
+User files remain runtime-compatible standalone workflows.
 
 The design always precedes source. The author stops after design only when the
 user explicitly asks for `design only`, `pause after design`, `do not build`, or
 equivalent wording. Build-only compatibility requests remain available:
 
 ```text
-Build design: .pi/workflows/<name>.design.md
-Build approved design: .pi/workflows/<name>.design.md
+Build design: .pi/workflows/<name>/<name>.design.md
+Build approved design: .pi/workflows/<name>/<name>.design.md
 ```
 
 Both Build-only forms use the current design bytes at the exact path; there is no
@@ -57,6 +64,11 @@ The Markdown draft names:
   rule, and project-source drift policy;
 - worst-case physical call count, including saved child runs;
 - orchestration mechanisms.
+
+It also contains one `## Entries` table with the exact source set. Each row
+declares a logical ref, `root` or `child` role, one responsibility, and its
+invoker. The root ref is `<name>`. Child refs are `<name>/<child>`. Build must
+neither omit a declared entry nor add an undeclared one.
 
 Agent count is not a complexity penalty. Hidden machinery is. Count raw schema,
 validator, parser, custom retry/recovery, execution wrapper, renderer, hidden
@@ -196,10 +208,10 @@ policy; a workflow
 checks only domain rules it truly needs. Model handoffs retain their separate
 declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
 
-For durable item work, start from a caller-frozen approved list. The parent then
-invokes one reviewed saved child per key and passes that same full list on every
-call, allowing the host to reject duplicate or unsafe keys before the first
-child starts:
+For durable item work, start from a caller-frozen approved list. The root then
+invokes one reviewed sibling child per key and passes that same full list on
+every call, allowing the host to reject duplicate or unsafe keys before the
+first child starts:
 
 ```js
 export const meta = {
@@ -216,7 +228,7 @@ export default async function runWorkflow(dsl) {
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     await dsl.invokeWorkflow({
-      name: "durable-worker",
+      child: "worker",
       key: keys[index],
       keys,
       input: item,
@@ -234,11 +246,12 @@ global concurrency, the 10,000 physical-agent-call fuse, and the workflow
 workspace. A saved child cannot invoke another saved child, and source-identity
 cycles fail before agent work. `dsl.workflow()` remains only an inline
 readability/journal boundary; it starts no child run or checkpoint.
-Use `name` when normal Project → User → Package precedence is intentional. Use
-project-relative `scriptPath` for an exact project child. A tracked Package
-parent that must keep its reviewed bundle intact uses `packageName`: the runtime
-resolves the exact Package entry and rejects a project or personal shadow before
-the child executes.
+Use `child` for an entry in the running root's folder. The runtime binds that
+child to the root's exact selected source, so lower-source children cannot leak
+into the tree. Use `name` only for an explicit cross-tree call; it accepts a root
+or qualified `<root>/<child>` and follows normal Project → User → Package
+precedence. `scriptPath` remains exact project-source selection and
+`packageName` remains legacy exact-Package compatibility.
 Keys are compact stable identities, not opaque item payloads. Prefer stable
 caller-owned semantic keys. Position keys such as `item-1` are safe only when
 the exact approved caller list and ordering are intentionally unchanged for the
@@ -305,20 +318,24 @@ engine. In this source checkout, run the repository-local binary against the
 exact file Build produced:
 
 ```bash
-./bin/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+./bin/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
 
 From an installed/consumer project, use the package binary:
 
 ```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
+
+Run the same check for every declared direct child file. Build succeeds only
+when the design `Entries` set, files, `meta.name` values, module imports, and
+source checks all agree.
 
 This installed-package command resolves the path from the project where it is
 run; it needs neither a consumer npm script nor `tsx`. The package ships a
 prebuilt ESM checker so Node never has to strip TypeScript under `node_modules`.
 Repository maintainers use `npm run check:workflow-source` with no path to check every `standard` entry
-already present in the thirteen-workflow Package registry. Neither command discovers
+already present in the Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
 assessment or importing the module.

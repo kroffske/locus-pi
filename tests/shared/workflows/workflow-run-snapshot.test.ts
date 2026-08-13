@@ -15,6 +15,7 @@ import {
 } from "../../../extensions/workflows/workflow-catalog.js";
 import { workflowRunRuntimeDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import { packagedWorkflowPath } from "../../../extensions/workflows/runtime/workflow-discovery.js";
 
 const roots: string[] = [];
 
@@ -237,7 +238,7 @@ describe("persisted workflow run source snapshot", () => {
         ok: true,
         result: "ok",
         disposition: { status: "completed" },
-        target: { kind: "name", ref: "nested/run", source: "project" },
+        target: { kind: "name", ref: "nested/run/extra", source: "project" },
         scriptIdentity: {
           schemaVersion: 2,
           identityPolicy: "static-node-only-v1",
@@ -524,7 +525,7 @@ describe("persisted workflow run source snapshot", () => {
   it.each([
     { kind: "name", ref: " alpha", source: "project" },
     { kind: "name", ref: "alpha ", source: "personal" },
-    { kind: "name", ref: "nested/run", source: "project" },
+    { kind: "name", ref: "nested/run/extra", source: "project" },
     { kind: "name", ref: "alpha\u0001control", source: "project" },
     { kind: "name", ref: "alpha.workflow.mjs", source: "package" },
     { kind: "scriptPath", ref: "alpha.workflow.mjs", source: "personal" },
@@ -557,6 +558,25 @@ describe("persisted workflow run source snapshot", () => {
   });
 
   it.each([
+    { ref: "post-code-review", path: packagedWorkflowPath("post-code-review") },
+    { ref: "post-code-review/scope", path: packagedWorkflowPath("post-code-review/scope") },
+  ])("reads canonical Package folder identity $ref", ({ ref, path: sourcePath }) => {
+    const fixture = writeSnapshotRun(`20260713-010102-package-${ref.includes("/") ? "child" : "root"}`, "package\n");
+    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, {
+      kind: "name",
+      ref,
+      source: "package",
+      path: sourcePath,
+    });
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).not.toHaveProperty("targetInvalid");
+    expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({
+      kind: "ready",
+      target: { kind: "name", ref, source: "package" },
+    });
+  });
+
+  it.each([
     { kind: "scriptPath", ref: "alpha.workflow.mjs", sourcePath: "other.workflow.mjs" },
     { kind: "name", ref: "alpha", sourcePath: "other.workflow.mjs" },
   ])("rejects target/source parity drift without runner path: %j", ({ kind, ref, sourcePath }) => {
@@ -582,6 +602,30 @@ describe("persisted workflow run source snapshot", () => {
     (result.scriptIdentity as Record<string, unknown>).sourcePath = path.join(fixture.root, "alpha.workflow.mjs");
     writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
     expect(readWorkflowRunResult(fixture.root, fixture.runId)).not.toHaveProperty("scriptIdentityInvalid");
+  });
+
+  it("keeps removed canonical Project workflow history readable", () => {
+    const fixture = writeSnapshotRun("20260713-010102-removed-project-name", "removed project name\n");
+    rmSync(fixture.sourcePath);
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).not.toHaveProperty("scriptIdentityInvalid");
+    expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "ready" });
+  });
+
+  it("rejects a missing named Project source outside workflow inventory", () => {
+    const fixture = writeSnapshotRun("20260713-010102-missing-project-name", "missing project name\n");
+    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
+    (result.scriptIdentity as Record<string, unknown>).sourcePath = path.join(
+      fixture.root,
+      "not-workflows",
+      "alpha.workflow.mjs",
+    );
+    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      scriptIdentityInvalid: expect.stringContaining("persisted workflow source root"),
+    });
+    expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
   });
 
   it.each([
@@ -735,9 +779,10 @@ function writeResult(
 ): void {
   const projectRoot = path.dirname(path.dirname(path.dirname(path.dirname(runDir))));
   const sourcePath =
-    target.kind === "scriptPath"
+    target.path ??
+    (target.kind === "scriptPath"
       ? path.resolve(projectRoot, target.ref)
-      : path.join(projectRoot, ".pi", "workflows", `${target.ref}.workflow.mjs`);
+      : path.join(projectRoot, ".pi", "workflows", `${target.ref}.workflow.mjs`));
   writeFileSync(
     workflowResultFile(runDir),
     JSON.stringify({

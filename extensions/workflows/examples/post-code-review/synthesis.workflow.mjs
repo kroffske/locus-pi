@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-synthesis",
+  name: "post-code-review/synthesis",
   description: "Verify review evidence and publish the final post-code review.",
   profile: "standard",
 };

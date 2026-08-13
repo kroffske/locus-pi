@@ -258,24 +258,23 @@ describe("workflow operator catalog", () => {
       description: readWorkflowMetaDescription(packagedWorkflowPath(name)),
     }));
 
-    // Scan order is entry filename, so "plan-implement.workflow.mjs" precedes
-    // "plan.workflow.mjs" exactly as review-fix precedes review.
+    // Folder names sort top-level workflows; each root precedes its children.
     expect(descriptions.map(({ name }) => name)).toEqual([
       "implement",
       "live-smoke",
-      "plan-implement",
       "plan",
-      "post-code-review-boundaries",
-      "post-code-review-contracts",
-      "post-code-review-necessity",
-      "post-code-review-scope",
-      "post-code-review-simplicity",
-      "post-code-review-style",
-      "post-code-review-synthesis",
+      "plan-implement",
       "post-code-review",
+      "post-code-review/boundaries",
+      "post-code-review/contracts",
+      "post-code-review/necessity",
+      "post-code-review/scope",
+      "post-code-review/simplicity",
+      "post-code-review/style",
+      "post-code-review/synthesis",
       "requirements-grill",
-      "review-fix",
       "review",
+      "review-fix",
     ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
@@ -292,24 +291,23 @@ describe("workflow operator catalog", () => {
         .current.filter((row) => row.source === "package")
         .map((row) => row.name);
 
-      // Package rows are ordered by entry filename, so "plan-implement.workflow.mjs"
-      // sorts before "plan.workflow.mjs" exactly as review-fix sorts before review.
+      // Package rows are ordered as top-level folders with root before children.
       expect(packageNames).toEqual([
         "implement",
         "live-smoke",
-        "plan-implement",
         "plan",
-        "post-code-review-boundaries",
-        "post-code-review-contracts",
-        "post-code-review-necessity",
-        "post-code-review-scope",
-        "post-code-review-simplicity",
-        "post-code-review-style",
-        "post-code-review-synthesis",
+        "plan-implement",
         "post-code-review",
+        "post-code-review/boundaries",
+        "post-code-review/contracts",
+        "post-code-review/necessity",
+        "post-code-review/scope",
+        "post-code-review/simplicity",
+        "post-code-review/style",
+        "post-code-review/synthesis",
         "requirements-grill",
-        "review-fix",
         "review",
+        "review-fix",
       ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
@@ -317,44 +315,42 @@ describe("workflow operator catalog", () => {
     }
   });
 
-  it("exposes the complete post-code-review bundle in every catalog identity surface", () => {
+  it("exposes the complete post-code-review composition in every catalog identity surface", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-bundle-"));
     try {
       const model = buildWorkflowCatalogModel(root, root);
       const packageRows = model.current.filter((row) => row.source === "package");
       const bundleNames = [
         "post-code-review",
-        "post-code-review-scope",
-        "post-code-review-boundaries",
-        "post-code-review-simplicity",
-        "post-code-review-contracts",
-        "post-code-review-style",
-        "post-code-review-necessity",
-        "post-code-review-synthesis",
+        "post-code-review/boundaries",
+        "post-code-review/contracts",
+        "post-code-review/necessity",
+        "post-code-review/scope",
+        "post-code-review/simplicity",
+        "post-code-review/style",
+        "post-code-review/synthesis",
       ];
       expect(packageRows.filter((row) => bundleNames.includes(row.name)).map((row) => row.name)).toEqual(
         expect.arrayContaining(bundleNames),
       );
-      expect(model.current.find((row) => row.name === "post-code-review")?.bundle).toMatchObject({
-        version: 1,
-        role: "parent",
+      expect(model.current.find((row) => row.name === "post-code-review")).toMatchObject({
+        role: "root",
         children: bundleNames.slice(1),
       });
       const parentRpc = renderOperatorBlockPlain(buildWorkflowInfoBlock(root, root, "post-code-review"), 80, {
         maxLines: 10,
       }).join("\n");
-      expect(parentRpc).toContain("Bundle: post-code-review parent");
-      expect(parentRpc).toContain("7 exact children");
+      expect(parentRpc).toContain("Composition: root");
+      expect(parentRpc).toContain("7 child workflow");
       for (const name of bundleNames.slice(1)) {
-        expect(model.current.find((row) => row.name === name)?.bundle).toMatchObject({
-          version: 1,
+        expect(model.current.find((row) => row.name === name)).toMatchObject({
           role: "child",
-          parent: "post-code-review",
+          rootName: "post-code-review",
         });
         const info = buildWorkflowInfoBlock(root, root, name);
         expect(info.body?.join("\\n")).toContain(`target: name:${name}`);
         expect(renderOperatorBlockPlain(info, 80, { maxLines: 10 }).join("\n")).toContain(
-          "Bundle: exact child of post-code-review",
+          "Composition: child of post-code-review",
         );
       }
     } finally {
@@ -362,7 +358,7 @@ describe("workflow operator catalog", () => {
     }
   });
 
-  it("suppresses the whole bundle relation when project or personal precedence shadows an exact member", () => {
+  it("selects one whole namespace without mixing lower-source children", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-incomplete-bundle-"));
     const previousHome = process.env.HOME;
     try {
@@ -370,19 +366,19 @@ describe("workflow operator catalog", () => {
       const home = path.join(root, "home");
       const personalDir = path.join(home, ".pi", "workflows");
       process.env.HOME = home;
-      mkdirSync(projectDir, { recursive: true });
+      const projectNamespace = path.join(projectDir, "post-code-review");
+      mkdirSync(projectNamespace, { recursive: true });
       mkdirSync(personalDir, { recursive: true });
-      writeFileSync(path.join(projectDir, "post-code-review-scope.workflow.mjs"), 'export default () => "project";\n');
-      writeFileSync(
-        path.join(personalDir, "post-code-review-contracts.workflow.mjs"),
-        'export default () => "personal";\n',
-      );
+      writeFileSync(path.join(projectNamespace, "post-code-review.workflow.mjs"), 'export default () => "root";\n');
+      writeFileSync(path.join(projectNamespace, "scope.workflow.mjs"), 'export default () => "project";\n');
 
       const model = buildWorkflowCatalogModel(root, root);
-      expect(model.current.find((row) => row.name === "post-code-review-scope")?.source).toBe("project");
-      expect(model.current.find((row) => row.name === "post-code-review-contracts")?.source).toBe("personal");
-      expect(model.current.every((row) => row.bundle === undefined)).toBe(true);
-      expect(buildWorkflowInfoBlock(root, root, "post-code-review").body?.join("\n")).not.toContain("bundle:");
+      expect(model.current.find((row) => row.name === "post-code-review")?.source).toBe("project");
+      expect(model.current.find((row) => row.name === "post-code-review/scope")?.source).toBe("project");
+      expect(model.current.find((row) => row.name === "post-code-review/contracts")).toBeUndefined();
+      expect(() => resolveWorkflowTarget({ name: "post-code-review/contracts" }, root, root)).toThrow(
+        /does not exist/u,
+      );
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -487,7 +483,7 @@ describe("workflow operator catalog", () => {
         metadata: ["Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history"],
         controls: ["Try: /workflows list <query>"],
       });
-      expect(noMatch.body?.[0]).toMatch(/^Catalog contains \d+ runnable workflow\(s\);/u);
+      expect(noMatch.body?.[0]).toMatch(/^Catalog contains \d+ top-level workflow\(s\) · \d+ child workflow\(s\);/u);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -541,16 +537,13 @@ describe("workflow operator catalog", () => {
         "Display order: Project → User → Package (does not change first-wins resolution)",
       );
       const compactRows = compactBlock.body ?? [];
-      expect(compactRows).toContain("Bundle: post-code-review · 7 children · /workflows info post-code-review");
       expect(compactRows).toContainEqual(expect.stringMatching(/^\+\d+ hidden workflow row\(s\);/u));
       const rpcCatalog = renderOperatorBlockPlain(compactBlock, 80, { maxLines: 10 }).join("\n");
-      expect(rpcCatalog).toContain("Bundle: post-code-review");
-      expect(rpcCatalog).toContain("7 exact children");
       const compactModel = buildWorkflowCatalogModel(root, root);
       expect(rpcCatalog).toContain(
-        `${compactModel.current.length} current workflow(s) · ${compactModel.history.length} history row(s)`,
+        `${compactModel.totalRoots} top-level workflow(s) · ${compactModel.totalChildren} child workflow(s)`,
       );
-      expect(rpcCatalog).toMatch(/details may be omitted by host line\s+budget/u);
+      expect(rpcCatalog).toMatch(/details may be\s+omitted by host line\s+budget/u);
       expect(rpcCatalog).not.toContain("other workflow row(s)");
       expect(compactRows).toEqual(
         expect.arrayContaining([
@@ -790,7 +783,8 @@ describe("workflow operator catalog", () => {
         type: "WARN",
         primary: 'Invalid saved workflow name: " alpha".',
       });
-      expect(namedText).toContain(`resolved path: ${path.join(workflowDir, "alpha.workflow.mjs")}`);
+      expect(namedText).toContain("source locator: .pi/workflows/alpha.workflow.mjs");
+      expect(namedText).not.toContain(path.resolve(root));
       expect(namedText).toContain("static top-level export const meta.description, meta.profile, and meta.phases only");
       expect(namedText).toContain("profile: unclassified");
       // A workflow that declares no phases produces no phase lines at all.
@@ -811,10 +805,8 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unresolvable provider/id fails the call");
       expect(namedText).toContain("an unassigned role degrades and is recorded");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
-      expect(namedText).toContain(
-        "the packaged examples directory, currently implement, live-smoke, plan-implement, plan, post-code-review-boundaries, post-code-review-contracts, post-code-review-necessity, post-code-review-scope, post-code-review-simplicity, post-code-review-style, post-code-review-synthesis, post-code-review, requirements-grill, review-fix, review",
-      );
-      expect(namedText).toContain("registered by the existence of its <name>.workflow.mjs file");
+      expect(namedText).toContain("the nearest Project namespace wins");
+      expect(namedText).toContain("a canonical folder owns <workflow>.workflow.mjs plus direct child entries");
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 
       expect(buildWorkflowInfoBlock(root, root).controls).toContain(`Run: ${workflowRunUsage()}`);

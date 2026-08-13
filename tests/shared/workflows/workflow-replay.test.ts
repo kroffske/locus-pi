@@ -461,7 +461,7 @@ describe("workflow --resume replays recorded agent calls", () => {
       if (mode !== "mismatch") {
         const result = JSON.parse(readFileSync(workflowResultFile(first.runDir), "utf8")) as Record<string, unknown>;
         if (mode === "absent") delete result.target;
-        else result.target = { kind: "name", ref: "nested/run", source: "project" };
+        else result.target = { kind: "name", ref: "nested/run/extra", source: "project" };
         writeFileSync(workflowResultFile(first.runDir), `${JSON.stringify(result)}\n`, "utf8");
       }
 

@@ -313,19 +313,19 @@ describe("public registration contract", () => {
     expect(packagedWorkflowNames()).toEqual([
       "implement",
       "live-smoke",
-      "plan-implement",
       "plan",
-      "post-code-review-boundaries",
-      "post-code-review-contracts",
-      "post-code-review-necessity",
-      "post-code-review-scope",
-      "post-code-review-simplicity",
-      "post-code-review-style",
-      "post-code-review-synthesis",
+      "plan-implement",
       "post-code-review",
+      "post-code-review/boundaries",
+      "post-code-review/contracts",
+      "post-code-review/necessity",
+      "post-code-review/scope",
+      "post-code-review/simplicity",
+      "post-code-review/style",
+      "post-code-review/synthesis",
       "requirements-grill",
-      "review-fix",
       "review",
+      "review-fix",
     ]);
   });
 

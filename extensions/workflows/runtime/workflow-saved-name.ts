@@ -12,7 +12,7 @@ import { realpathSync } from "node:fs";
 
 export const WORKFLOW_SAVED_NAME_MAX_CHARS = 200;
 export const WORKFLOW_SAVED_NAME_PATTERN =
-  "^(?!\\s)(?![\\s\\S]*\\s$)(?![\\s\\S]*[\\\\/])(?![\\s\\S]*\\.[mM][jJ][sS]$)(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F])[\\s\\S]{1,200}$";
+  "^(?=[\\s\\S]{1,200}$)(?!\\s)(?![^/]*\\s/)(?![^/]*/\\s)(?![\\s\\S]*\\s$)(?![\\s\\S]*\\\\)(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F])(?!\\.{1,2}(?:/|$))(?![^/]+/\\.{1,2}$)(?![^/]*\\.[mM][jJ][sS](?:/|$))(?![^/]+/[^/]*\\.[mM][jJ][sS]$)[^/]+(?:/[^/]+)?$";
 const WORKFLOW_SAVED_NAME_REGEX = new RegExp(WORKFLOW_SAVED_NAME_PATTERN);
 
 export function isWorkflowSavedName(value: unknown): value is string {
@@ -25,6 +25,18 @@ export function assertWorkflowSavedName(value: unknown): asserts value is string
   if (!isWorkflowSavedName(value)) {
     throw new Error(`Invalid saved workflow name: ${JSON.stringify(value)}`);
   }
+}
+
+export interface WorkflowSavedNameParts {
+  root: string;
+  child?: string;
+}
+
+/** Parse one already-valid logical ref without inferring filesystem layout. */
+export function workflowSavedNameParts(value: string): WorkflowSavedNameParts {
+  assertWorkflowSavedName(value);
+  const [root, child] = value.split("/");
+  return child === undefined ? { root: root! } : { root: root!, child };
 }
 
 export type WorkflowTargetKind = "name" | "scriptPath";
@@ -48,6 +60,11 @@ const POST_CODE_REVIEW_PROJECT_REFS = new Set([
   ".claude/workflows/post-code-review.workflow.mjs",
   ".agents/workflows/post-code-review.workflow.mjs",
 ]);
+const POST_CODE_REVIEW_PROJECT_DIRS = [
+  ".pi/workflows/post-code-review/",
+  ".claude/workflows/post-code-review/",
+  ".agents/workflows/post-code-review/",
+] as const;
 
 /** Owner identity for the post-code-review namespace policy. */
 export function isPostCodeReviewTargetIdentity(target: WorkflowTargetIdentity, projectRoot?: string): boolean {
@@ -79,10 +96,17 @@ export function isPostCodeReviewTargetProjection(
   options: WorkflowTargetIdentityProjectionOptions = {},
 ): boolean {
   if (target.kind === "name") {
-    return (target.source === "project" || target.source === "package") && target.ref === "post-code-review";
+    return (
+      (target.source === "project" || target.source === "package") &&
+      (target.ref === "post-code-review" || target.ref.startsWith("post-code-review/"))
+    );
   }
   if (target.source !== "project") return false;
-  return POST_CODE_REVIEW_PROJECT_REFS.has(canonicalWorkflowTargetRef(target, options));
+  const ref = canonicalWorkflowTargetRef(target, options);
+  return (
+    POST_CODE_REVIEW_PROJECT_REFS.has(ref) ||
+    POST_CODE_REVIEW_PROJECT_DIRS.some((directory) => ref.startsWith(directory))
+  );
 }
 
 export function canonicalWorkflowTargetRef(

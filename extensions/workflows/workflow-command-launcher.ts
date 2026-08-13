@@ -25,6 +25,8 @@ export interface WorkflowCommandLaunchRequest {
   ctx: ExtensionContext;
   scriptRef: string;
   target?: ResolvedWorkflowTarget;
+  /** Preserves name/path intent when preflight failed and the runner must persist the canonical failure. */
+  targetKind?: ResolvedWorkflowTarget["kind"];
   input?: string;
   outputDir?: string;
   resumeFromRunId?: string;
@@ -125,8 +127,9 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
       const launched = backgroundRuns.launch<RunWorkflowScriptResult>(lease, async (background) => {
         const isCurrent = (): boolean => background.isCurrent();
         try {
+          const targetKind = request.target?.kind ?? request.targetKind ?? "name";
           const scriptInput =
-            request.target?.kind === "scriptPath" ? { scriptPath: request.scriptRef } : { script: request.scriptRef };
+            targetKind === "scriptPath" ? { scriptPath: request.scriptRef } : { name: request.scriptRef };
           const result = await (options.runScript ?? runWorkflowScript)({
             pi: options.pi,
             ctx: request.ctx,

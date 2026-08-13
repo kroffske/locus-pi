@@ -20,17 +20,17 @@ Read `skills/locus-pi-workflows/SKILL.md` first. For pattern selection, read
 Any plain request to create, design, write, or author a workflow is Author. A
 request may also say `Design workflow: <requirement>`.
 
-Author performs one continuous sequence: write
-`.pi/workflows/<name>.design.md` first, review it against the request and source
-profile, revise the design until no material mismatch remains, then create the
-matching `.workflow.mjs` and run all Build checks. Never create source before the
-design. Never run the workflow.
+Author performs one continuous sequence: create `.pi/workflows/<name>/`, write
+`.pi/workflows/<name>/<name>.design.md` first, review it against the request and
+source profile, revise until no material mismatch remains, then create the root
+and exactly the declared direct child `.workflow.mjs` entries. Never create
+source before the design. Never run the workflow.
 
 ### Design-only
 
 Only explicit wording such as `Design only`, `pause after design`, `do not
 build`, or equivalent user intent stops after
-`.pi/workflows/<name>.design.md`. Design-only must not create or edit a
+`.pi/workflows/<name>/<name>.design.md`. Design-only must not create or edit a
 `.workflow.mjs`, prompt resource, helper module, or runtime code. Mark its status
 `DRAFT — paused at operator request` and return the design path.
 
@@ -49,9 +49,9 @@ project-relative path is required. Missing, outside-project, non-design, or
 name-mismatched paths fail loudly. Build uses the design bytes present at that
 path when it reads them; there is no separate approval token or stored digest.
 
-Build reviews the design, creates one matching
-`.pi/workflows/<name>.workflow.mjs`, validates source identity and module load,
-and stops without running. If the reviewed graph needs a material change, update
+Build reviews the design, creates one matching folder-owned root plus exactly
+the direct child entries declared by `Entries`, validates every source identity
+and module load, and stops without running. If the reviewed graph needs a material change, update
 and re-review the design before building; do not hide the change in source. Ask
 the user only when the change would alter the requested result.
 
@@ -116,6 +116,13 @@ Primary output: `<name>.md`
 Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
+## Entries
+
+| Ref              | Role  | Responsibility         | Invoked by |
+| ---------------- | ----- | ---------------------- | ---------- |
+| `<name>`         | root  | <standard entry point> | operator   |
+| `<name>/<child>` | child | <one bounded subtask>  | `<node>`   |
+
 ## Algorithm
 
 1. <visible step>
@@ -178,8 +185,9 @@ Standard generated source is a readable harness:
   and require idempotent replacement. Use `projectRoot()` only for source
   context. Do not invent another writable root or add permission/tool fields.
 - For durable item work, start from a caller-frozen approved list, then call one
-  saved child with `invokeWorkflow()` per exact key. Pass the complete key list,
-  unchanged item, and `outputDir()`. Return `publishPrimaryFile()` for the final
+  declared sibling with `invokeWorkflow({ child: "<child>" })` per exact key.
+  Pass the complete key list, unchanged item, and `outputDir()`. Return
+  `publishPrimaryFile()` for the final
   regular, non-empty durable file. Prefer caller-owned semantic keys. Position
   keys are safe only when the caller intentionally reuses the exact same list
   and ordering for the output namespace. Fresh `agent({ handoffs })` discovery
@@ -231,19 +239,20 @@ The SDK timeout is a later transport backstop, not authored workflow policy.
 
 ## Build checks
 
-After writing the one source file:
+After writing the canonical root and declared child source files:
 
-1. Confirm `meta.name`, design name, and filename match.
+1. Confirm the design `Entries` table and built source set match exactly. Root
+   identity is `<name>`; child identity is `<name>/<child>` while its filename is
+   only `<child>.workflow.mjs`.
 2. Confirm `meta.profile` is `"standard"`.
 3. Run the repository source-identity assessment against the exact bytes.
 4. Import the module and require `meta` plus a default function.
 5. Reconstruct nodes, edges, handoffs, concurrency, loop caps, and failure exits
    from source; compare them to the design.
-6. Run the source checker against the exact built file. In a locus-pi source
-   checkout, prefer `./bin/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs`; otherwise use
-   `npx @kroffske/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs`. Then search for every forbidden smell,
+6. Run the source checker against every exact built file. In a locus-pi source
+   checkout, prefer `./bin/locus-pi check-workflow-source` for each
+   `.pi/workflows/<name>/*.workflow.mjs`; otherwise use
+   `npx @kroffske/locus-pi check-workflow-source` for those same files. Then search for every forbidden smell,
    including new wrappers or helpers not named above.
 
 Build is not complete until source identity, module load, design/source review,
@@ -251,9 +260,9 @@ and the source checker all pass. A missing command or non-zero checker exit is a
 Build failure: repair the design/source and rerun the checks. Never report a
 workflow as a successful Build after a failed or skipped check.
 
-Return the design path and, when built, the source path, selected pattern, graph
+Return the design path and, when built, the root and child refs, selected pattern, graph
 summary, design-review result, and checks performed. For Design-only or
 Revise-design-only, explicitly say source was not created. For Author, Revise,
 or Build, explicitly say the workflow was built but not run. Return the exact copyable launch command
-below with the real built path substituted:
-`/workflows run <project-relative workflow path>`.
+below with the real root name substituted:
+`/workflows run <name>`.

@@ -1,8 +1,8 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, fifteen
-curated Package workflows, and two skills that teach an agent how to find, run,
+Installing it gives a Pi session eleven extensions, a bundled agent catalog, eight
+curated Package workflow trees with seven runnable children, and two skills that teach an agent how to find, run,
 and author them — through a deliberately narrow npm artifact.
 
 The package is built on deterministic decomposition, bounded capabilities, and
@@ -30,8 +30,8 @@ pi list                        # what Pi actually loads, per scope
 npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the fifteen curated
-workflows resolve out of the installed package, so nothing has to be copied
+Then start Pi in a trusted project and run `/workflows list`: the eight curated
+workflow roots and their seven children resolve out of the installed package, so nothing has to be copied
 anywhere. Inside a session, `/devext doctor` gives the same kind of compact
 inventory view.
 
@@ -80,10 +80,9 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers exactly these fifteen Package workflows. Eight
-of them form one modular post-code-review bundle: `post-code-review` is the
-external entry and the seven prefixed workflows are its source-bound child
-components.
+The installed package registers eight Package workflow roots and seven runnable
+children. `post-code-review` is the standard root entry and the seven qualified
+refs are source-bound children in the same folder namespace.
 
 | Workflow                      | Intended use                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -95,18 +94,18 @@ components.
 | `plan`                        | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
 | `plan-implement`              | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
 | `post-code-review`            | Runs one scoped, four-lane parallel code review and publishes an independently verified `post-code-review.md`.                   |
-| `post-code-review-scope`      | Resolves a function, file, commit, range, diff, or local PR into an exact review boundary.                                       |
-| `post-code-review-boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
-| `post-code-review-simplicity` | Audits duplication, empty wrappers, redundant guards, dead paths, and delete-first alternatives.                                 |
-| `post-code-review-contracts`  | Audits APIs, consumers, validation parity, defaults, errors, documentation, tests, and intent.                                   |
-| `post-code-review-style`      | Audits comments and evidence-backed project style, with optional request-local criteria from `style.md`.                         |
-| `post-code-review-necessity`  | Challenges every proposed fix to prove a real failure, a guarantee owner, and the simplest net improvement.                      |
-| `post-code-review-synthesis`  | Re-verifies the scope and four lane reports, removes unsupported claims, and authors the final report.                           |
+| `post-code-review/scope`      | Resolves a function, file, commit, range, diff, or local PR into an exact review boundary.                                       |
+| `post-code-review/boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
+| `post-code-review/simplicity` | Audits duplication, empty wrappers, redundant guards, dead paths, and delete-first alternatives.                                 |
+| `post-code-review/contracts`  | Audits APIs, consumers, validation parity, defaults, errors, documentation, tests, and intent.                                   |
+| `post-code-review/style`      | Audits comments and evidence-backed project style, with optional request-local criteria from `style.md`.                         |
+| `post-code-review/necessity`  | Challenges every proposed fix to prove a real failure, a guarantee owner, and the simplest net improvement.                      |
+| `post-code-review/synthesis`  | Re-verifies the scope and four lane reports, removes unsupported claims, and authors the final report.                           |
 
 The Package registry is the shipped `extensions/workflows/examples/` directory
-itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
-file there, and the npm allowlist ships exactly the fifteen files above plus the
-post-code-review bundle's README and SVG diagram.
+itself: each `<name>/` owns `<name>.workflow.mjs` plus any direct child entries.
+The npm allowlist ships every registered source explicitly, plus the
+post-code-review README and SVG diagram.
 
 Inspect and run them from the canonical command menu:
 
@@ -174,13 +173,12 @@ oldest-first, or type `/workflows continue <runId>` to name one directly.
 
 ### Where a name resolves from
 
-Every directory is scanned on each call, and the first match wins: project
-`.pi/workflows/`, `.claude/workflows/`, and `.agents/workflows/`, ascending from
-the working directory to the project root, then user `~/.pi/workflows/`, then
-the packaged examples. A pi-native `<name>.workflow.mjs` in one of those
-directories therefore shadows a Package workflow of the same name without
-changing the package. That exact filename is the only one these directories
-accept, and a workflow written for another host's DSL is not portable here.
+Every directory is scanned on each call. A canonical `<name>/` folder owns its
+same-named root and direct children; the nearest Project namespace wins as a
+whole, then User, then Package. Root and child refs are `<name>` and
+`<name>/<child>`. Existing flat Project/User `<name>.workflow.mjs` files remain
+compatible standalone roots. A workflow written for another host's DSL is not
+portable here.
 
 ## Skills and workflow authoring
 
@@ -215,7 +213,7 @@ Check a newly authored standard workflow from its project directory with the
 installed package command; no project-local script or `tsx` is required:
 
 ```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
+npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
 
 Both skills are plain [Agent Skills](https://agentskills.io/specification)

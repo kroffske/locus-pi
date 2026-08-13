@@ -90,17 +90,13 @@ or borrowed runtime implementation was identified for this source-audit slice.
   path, SHA, or identity coverage changed. It never consults current source.
   `[R]` is a run-history lens;
   `[P]`/`[U]`/`[PKG]` are compact labels for project, user, and package sources;
-  catalog rows lead with the workflow name, while history rows lead with the
-  workflow name, then run id, then source badge. The same model partitions current
+  catalog rows lead with the workflow ref, while history rows lead with the
+  workflow ref, then run id, then source badge. The same model partitions current
   rows into Project, User, and Package display sections in resolver-precedence
-  order and leaves History separate. A literal, package-owned declaration marks
-  `post-code-review` as one parent plus seven exact children only when all eight
-  names simultaneously resolve to Package targets. Any higher-precedence shadow
-  suppresses the relation for every member, so presentation cannot describe a
-  mixed or incomplete Package bundle. This is catalog metadata only: it does not
-  participate in target resolution, execution, or history persistence. Compact
-  projections retain an exact bundle continuation, budget-independent current
-  and history row totals, and explicit notice that detail lines may be omitted.
+  order and leaves History separate. Generic folder composition comes from the
+  resolver itself: one root precedes its indented short-name children, and one
+  winning source owns the complete namespace. Compact projections retain exact
+  root, child, and history totals plus explicit notice that detail lines may be omitted.
 - `extensions/workflows/examples/implement/implement.workflow.mjs` is the
   standalone prepared-work remediation owner. It keeps plan normalization,
   `execute`/`no-work`/`needs-operator` routing, one human decision, independent
@@ -112,16 +108,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
 - `extensions/workflows/catalog-viewer.ts` owns the focused `/workflows list`
   cursor, current/history selection, catalog/source/identity screen transition,
   independent source and identity scroll, action focus, and width-bounded
-  rendering. Catalog entries are two-line logical rows with a middle-truncated
-  path that preserves its beginning and basename; compact terminals retain a
+  rendering. Catalog entries are two-line logical rows with no absolute path;
+  inspection uses a source-relative locator, and compact terminals retain a
   one-line fallback, and content-aware section sizing keeps Current and History
   adjacent before padding unused height. The viewer uses terminal height minus Pi's three footer rows,
-  with no 24-row cap. `i` exposes the exact current path or history run ID,
-  snapshot path, and SHA; Up/Down, PageUp/PageDown, Home, and End keep that
+  with no 24-row cap. `i` exposes the current locator or history run ID,
+  snapshot locator, and SHA; Up/Down, PageUp/PageDown, Home, and End keep that
   identity reachable even at widths 8 and 1. Current list screens retain the
   Project, User, and Package section labels plus the separate History section;
-  the `post-code-review` parent and child rows use text labels as well as color,
-  so bundle hierarchy survives narrow and monochrome terminals. Current ready source exposes
+  every root and child row uses indentation as well as color, so tree hierarchy
+  survives narrow and monochrome terminals. Current ready source exposes
   `Back`/`Start`/`Edit`/`Review`; history exposes only `Back`/`Review`. Tab or
   Left/Right changes action focus, a caret plus semantic warning tone marks the selected action, and
   success tone distinguishes other actions and metadata labels. Enter resolves a
@@ -554,7 +550,7 @@ footer key. The live widget remains domain-owned and below the editor; static
 results use the shared typed presentation kit.
 
 `.agents/agents/workflow-author.md` is a bundled catalog-agent helper for
-authoring saved `.pi/workflows/<name>.workflow.mjs` files. It is not added to
+authoring saved `.pi/workflows/<name>/` trees. It is not added to
 `package.json#pi.extensions`, and it does not create a separate workflow runtime
 surface. The active default package surface remains the `workflows` extension at
 `./extensions/workflows/index.ts`.
@@ -574,8 +570,8 @@ new `skills/locus-pi-workflows/references/plan-to-sequential-workflow.md` card
 keeps one complete task per sequential implementer and allows one visibly
 separate reviewer after each task. Plan approval does not replace workflow
 authoring's continuous Design -> review -> Build sequence: a raw request first
-writes and reviews `.pi/workflows/<name>.design.md`, then builds the matching
-source in the same turn. Only explicit `Design only` wording pauses after
+writes and reviews `.pi/workflows/<name>/<name>.design.md`, then builds the
+matching root and declared direct children in the same turn. Only explicit `Design only` wording pauses after
 design; `Build design:` and `Build approved design:` remain Build-only
 compatibility forms. No file was added under the Package workflow registry.
 

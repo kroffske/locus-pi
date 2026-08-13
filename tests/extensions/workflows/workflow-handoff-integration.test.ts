@@ -191,7 +191,7 @@ describe("workflow actionable handoff integration", () => {
     await waitFor(() => continuations(requests).length === 1);
 
     expect(continuations(requests)[0]).toMatchObject({
-      script: "alpha",
+      name: "alpha",
       input: "Current changes",
       continuation: {
         originRunId: sourceRunId,

@@ -1,5 +1,4 @@
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import type { SgNode } from "@ast-grep/napi";
@@ -9,11 +8,12 @@ import {
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
 } from "./runtime/workflow-journal.js";
+import { listWorkflowCatalogTargets, type ResolvedWorkflowTarget } from "./runtime/workflow-runner.js";
 import {
-  packagedWorkflowNames,
-  listWorkflowCatalogTargets,
-  type ResolvedWorkflowTarget,
-} from "./runtime/workflow-runner.js";
+  listWorkflowDefinitions,
+  safeWorkflowSourceLocator,
+  workflowTargetComposition,
+} from "./runtime/workflow-discovery.js";
 import { isWorkflowSavedName } from "./runtime/workflow-saved-name.js";
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import { buildWorkflowRunCommand, formatWorkflowCommandToken, workflowRunUsage } from "./command-parser.js";
@@ -25,24 +25,6 @@ const HISTORICAL_WORKFLOW_DESCRIPTION = "historical run snapshot";
 export const WORKFLOW_SOURCE_LEGEND = "Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history";
 export const WORKFLOW_DISPLAY_ORDER_LEGEND =
   "Display order: Project → User → Package (does not change first-wins resolution)";
-
-/** Explicit, inert Package grouping metadata. Never inferred from names or files. */
-export const PACKAGE_WORKFLOW_BUNDLES = [
-  {
-    version: 1 as const,
-    parent: "post-code-review",
-    children: [
-      "post-code-review-scope",
-      "post-code-review-boundaries",
-      "post-code-review-simplicity",
-      "post-code-review-contracts",
-      "post-code-review-style",
-      "post-code-review-necessity",
-      "post-code-review-synthesis",
-    ] as const,
-  },
-] as const;
-export type WorkflowBundle = (typeof PACKAGE_WORKFLOW_BUNDLES)[number];
 
 /** One statically declared stage from a workflow's exported `meta.phases`. */
 export interface WorkflowMetaPhase {
@@ -62,11 +44,15 @@ export type WorkflowAuthoringProfile = "standard" | "legacy" | "integration" | "
 
 export interface WorkflowCatalogRow {
   name: string;
-  /** Explicit Package bundle membership; absent means independent. */
-  bundle?: { version: number; parent: string; role: "parent" | "child"; children?: readonly string[] } | undefined;
+  label: string;
+  rootName: string;
+  role: "root" | "child";
+  /** Qualified refs owned by this root. Present only on root rows. */
+  children: readonly string[];
   source: ResolvedWorkflowTarget["source"];
   sourceLabel: "Project" | "User" | "Package";
   originPath: string;
+  sourceLocator: string;
   description: string;
   profile: WorkflowAuthoringProfile;
   phases: WorkflowMetaPhase[];
@@ -87,6 +73,8 @@ export interface WorkflowCatalogHistoryRow extends WorkflowCatalogRow {
 export interface WorkflowCatalogModel {
   query: string | undefined;
   totalCurrent: number;
+  totalRoots: number;
+  totalChildren: number;
   current: WorkflowCatalogCurrentRow[];
   history: WorkflowCatalogHistoryRow[];
 }
@@ -133,29 +121,40 @@ export function buildWorkflowCatalogModel(
   workingDirectory: string,
   query?: string,
 ): WorkflowCatalogModel {
-  const targets = listWorkflowCatalogTargets(projectRoot, workingDirectory);
-  const completeBundleParents = completePackageBundleParents(targets);
-  const catalogRows: WorkflowCatalogCurrentRow[] = targets.map((target) => {
-    const meta = readWorkflowMeta(target.path);
-    return {
-      kind: "current",
-      target,
-      name: target.ref,
-      bundle: workflowBundleFor(target.ref, target.source, completeBundleParents),
-      source: target.source,
-      sourceLabel: workflowSourceLabel(target.source),
-      originPath: target.path,
-      description: meta.description,
-      profile: meta.profile,
-      phases: meta.phases,
-    };
+  const definitions = listWorkflowDefinitions(projectRoot, workingDirectory);
+  const catalogRows: WorkflowCatalogCurrentRow[] = definitions.flatMap((definition) => {
+    const rootChildren = definition.children.map((child) => child.ref);
+    return [definition.root, ...definition.children].map((target) => {
+      const meta = readWorkflowMeta(target.path);
+      const isRoot = target === definition.root;
+      const label = isRoot ? definition.root.ref : target.ref.slice(definition.root.ref.length + 1);
+      return {
+        kind: "current",
+        target,
+        name: target.ref,
+        label,
+        rootName: definition.root.ref,
+        role: isRoot ? "root" : "child",
+        children: isRoot ? rootChildren : [],
+        source: target.source,
+        sourceLabel: workflowSourceLabel(target.source),
+        originPath: target.path,
+        sourceLocator: safeWorkflowSourceLocator(target, projectRoot),
+        description: meta.description,
+        profile: meta.profile,
+        phases: meta.phases,
+      };
+    });
   });
   const recentRows = recentWorkflowRows(projectRoot);
+  const filteredCurrent = filterCurrentWorkflowRows(catalogRows, query);
   const matches = (row: WorkflowCatalogRow): boolean => workflowCatalogRowMatches(row, query);
   return {
     query,
     totalCurrent: catalogRows.length,
-    current: catalogRows.filter(matches),
+    totalRoots: catalogRows.filter((row) => row.role === "root").length,
+    totalChildren: catalogRows.filter((row) => row.role === "child").length,
+    current: filteredCurrent,
     history: recentRows.filter(matches),
   };
 }
@@ -165,14 +164,15 @@ export function buildWorkflowCatalogBlockFromModel(
   model: WorkflowCatalogModel,
   options: WorkflowCatalogOptions = {},
 ): OperatorBlock {
-  const { query, totalCurrent, current: filteredCatalog, history: filteredRecent } = model;
+  const { query, totalRoots, totalChildren, current: filteredCatalog, history: filteredRecent } = model;
+  const totalSummary = `${totalRoots} top-level workflow(s) · ${totalChildren} child workflow(s)`;
 
   if (query !== undefined && filteredCatalog.length === 0 && filteredRecent.length === 0) {
     return {
       type: "VIEW",
       subject: "Workflow catalog",
       primary: `No workflows match ${JSON.stringify(query)}.`,
-      body: [`Catalog contains ${totalCurrent} runnable workflow(s); search checks name and description.`],
+      body: [`Catalog contains ${totalSummary}; search checks name and description.`],
       metadata: [WORKFLOW_SOURCE_LEGEND],
       controls: ["Try: /workflows list <query>"],
     };
@@ -180,18 +180,13 @@ export function buildWorkflowCatalogBlockFromModel(
 
   if (options.compact === true) {
     const compactBody = compactWorkflowCatalogBody(filteredRecent, filteredCatalog, query);
-    const compactBundle = compactBundleSummary(filteredCatalog);
-    const compactTotals = `${filteredCatalog.length} current workflow(s) · ${filteredRecent.length} history row(s); details may be omitted by host line budget`;
+    const compactTotals = `${totalSummary} · ${filteredRecent.length} history row(s); details may be omitted by host line budget`;
     return {
       type: "VIEW",
       subject: "Workflow catalog",
-      primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
+      primary: query === undefined ? `${totalSummary}.` : `Matches for ${JSON.stringify(query)}.`,
       body: compactBody.lines,
-      metadata: [
-        ...(compactBundle === undefined ? [] : [`${compactBundle} · ${compactTotals}`]),
-        WORKFLOW_DISPLAY_ORDER_LEGEND,
-        WORKFLOW_SOURCE_LEGEND,
-      ],
+      metadata: [compactTotals, WORKFLOW_DISPLAY_ORDER_LEGEND, WORKFLOW_SOURCE_LEGEND],
       controls: [`Run: ${workflowRunUsage()} · Filter: /workflows list <query>`],
     };
   }
@@ -225,7 +220,7 @@ export function buildWorkflowCatalogBlockFromModel(
   return {
     type: "VIEW",
     subject: "Workflow catalog",
-    primary: query === undefined ? `${totalCurrent} runnable workflow(s).` : `Matches for ${JSON.stringify(query)}.`,
+    primary: query === undefined ? `${totalSummary}.` : `Matches for ${JSON.stringify(query)}.`,
     body: [WORKFLOW_DISPLAY_ORDER_LEGEND, ...body],
     metadata: [WORKFLOW_SOURCE_LEGEND],
     controls: [`Run: ${workflowRunUsage()}`, "Filter: /workflows list <query>", "Status: /workflows status"],
@@ -252,7 +247,7 @@ export function readSelectedWorkflowSource(
     return {
       kind: "shadowed",
       row: selected,
-      message: `Selected workflow changed precedence from ${selected.target.path} to ${current.path}. Nothing was opened; return and refresh /workflows list.`,
+      message: `Selected workflow changed precedence from ${selected.sourceLocator} to ${safeWorkflowSourceLocator(current, projectRoot)}. Nothing was opened; return and refresh /workflows list.`,
     };
   }
   try {
@@ -345,12 +340,12 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
         `target: ${row.target.kind}:${row.target.ref}`,
         `profile: ${row.profile}`,
         "metadata: static top-level export const meta.description, meta.profile, and meta.phases only; the module was not imported or evaluated",
-        ...workflowBundleDetailLines(row.bundle),
+        ...workflowCompositionDetailLines(row),
         ...declaredPhaseLines(row.phases),
-        ...workflowContractLines(projectRoot, workingDirectory),
-        `resolved path: ${row.target.path}`,
+        ...workflowContractLines(),
+        `source locator: ${row.sourceLocator}`,
       ],
-      metadata: [...workflowBundleCompactLines(row.bundle), WORKFLOW_SOURCE_LEGEND],
+      metadata: [workflowCompositionCompactLine(row), WORKFLOW_SOURCE_LEGEND],
       controls: [
         "Inspect: /workflows list",
         `Run deliberately: ${workflowRunUsage(formatWorkflowCommandToken(row.name))}`,
@@ -361,7 +356,7 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
     type: "VIEW",
     subject: "Workflow info",
     primary: "Passive workflow resolver, DSL, agent, and model contract.",
-    body: workflowContractLines(projectRoot, workingDirectory),
+    body: workflowContractLines(),
     metadata: [WORKFLOW_SOURCE_LEGEND, "No workflow JavaScript was imported or evaluated."],
     controls: [
       "Browse: /workflows list [query]",
@@ -387,7 +382,7 @@ function declaredPhaseLines(phases: readonly WorkflowMetaPhase[]): string[] {
   ];
 }
 
-function workflowContractLines(projectRoot: string, workingDirectory: string): string[] {
+function workflowContractLines(): string[] {
   return [
     "trust: executed workflow files are reviewed JavaScript with full Pi host Node.js/module access; inspection and info are inert text/static-metadata reads",
     "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
@@ -397,8 +392,8 @@ function workflowContractLines(projectRoot: string, workingDirectory: string): s
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
     "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), outputDir(), invokeWorkflow(), publishPrimaryFile(), promptFile(), workspace()",
     "durability: outputDir() selects a confined stable project namespace distinct from run evidence; invokeWorkflow() runs one saved child level with source-bound item checkpoints and shared cancellation/concurrency/physical-call budget; publishPrimaryFile() exposes a verified non-empty file reference",
-    `resolver: first name wins; project .pi/workflows, .claude/workflows, and .agents/workflows ascend ${path.resolve(workingDirectory)} to ${path.resolve(projectRoot)}; then user ${path.join(homedir(), ".pi", "workflows")}; then the packaged examples directory, currently ${packagedWorkflowNames().join(", ")}`,
-    "registration: every directory including the packaged examples directory is scanned on every call, so a workflow is registered by the existence of its <name>.workflow.mjs file",
+    "resolver: the nearest Project namespace wins, checking .pi/workflows, .claude/workflows, and .agents/workflows at each level; then User; then Package",
+    "registration: a canonical folder owns <workflow>.workflow.mjs plus direct child entries; existing flat Project/User entries remain standalone workflows",
   ];
 }
 
@@ -458,24 +453,9 @@ function compactWorkflowCatalogBody(
     if (row === undefined) return `${group.label} (${group.empty})`;
     return compactWorkflowCatalogLine(passiveCatalogRowLine(row));
   });
-  const bundleParent = catalogRows.find((row) => row.source === "package" && row.bundle?.role === "parent");
-  if (bundleParent !== undefined) {
-    lines.push(
-      compactWorkflowCatalogLine(
-        `Bundle: ${bundleParent.name} · ${bundleParent.bundle?.children?.length ?? 0} children · /workflows info ${bundleParent.name}`,
-      ),
-    );
-  }
   if (hidden > 0)
     lines.push(`+${hidden} hidden workflow row(s); use /workflows list <query> or /workflows info <exact-name>`);
   return { lines };
-}
-
-function compactBundleSummary(rows: readonly WorkflowCatalogCurrentRow[]): string | undefined {
-  const parent = rows.find((row) => row.source === "package" && row.bundle?.role === "parent");
-  return parent === undefined
-    ? undefined
-    : `Bundle: ${parent.name} · ${parent.bundle?.children?.length ?? 0} exact children · /workflows info ${parent.name}`;
 }
 
 /**
@@ -531,6 +511,10 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
     const target = snapshot.target;
     if (target === undefined) continue;
     const safeName = safeRecentWorkflowLabel(target, projectRoot);
+    const composition =
+      target.kind === "name" && isWorkflowSavedName(target.ref)
+        ? workflowTargetComposition({ ref: target.ref })
+        : { rootRef: safeName, role: "root" as const, label: safeName };
     const meta = snapshot.kind === "ready" ? staticWorkflowMeta(snapshot.source) : undefined;
     recent.push({
       kind: "history",
@@ -538,9 +522,14 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
       target,
       snapshot,
       name: safeName,
+      label: composition.label,
+      rootName: composition.rootRef,
+      role: composition.role,
+      children: [],
       source: target.source,
       sourceLabel: workflowSourceLabel(target.source),
       originPath: snapshot.path ?? `(snapshot unavailable for run ${runId})`,
+      sourceLocator: safeSnapshotLocator(snapshot.path, projectRoot, runId),
       description: meta?.description ?? HISTORICAL_WORKFLOW_DESCRIPTION,
       profile: meta?.profile ?? "unclassified",
       phases: meta?.phases ?? [],
@@ -548,6 +537,14 @@ function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
     if (recent.length >= RECENT_WORKFLOW_LIMIT) break;
   }
   return recent;
+}
+
+function safeSnapshotLocator(snapshotPath: string | undefined, projectRoot: string, runId: string): string {
+  if (snapshotPath === undefined) return `run:${runId}`;
+  const relative = path.relative(path.resolve(projectRoot), path.resolve(snapshotPath)).split(path.sep).join("/");
+  return relative !== "" && relative !== ".." && !relative.startsWith("../") && !path.isAbsolute(relative)
+    ? relative
+    : `run:${runId}`;
 }
 
 /**
@@ -748,33 +745,6 @@ function decodeEscapeSequence(value: string): string {
   return body;
 }
 
-function completePackageBundleParents(targets: readonly ResolvedWorkflowTarget[]): ReadonlySet<string> {
-  const visiblePackageNames = new Set(
-    targets.filter((target) => target.source === "package").map((target) => target.ref),
-  );
-  return new Set(
-    PACKAGE_WORKFLOW_BUNDLES.filter(
-      (bundle) =>
-        visiblePackageNames.has(bundle.parent) && bundle.children.every((child) => visiblePackageNames.has(child)),
-    ).map((bundle) => bundle.parent),
-  );
-}
-
-function workflowBundleFor(
-  name: string,
-  source: WorkflowCatalogRow["source"],
-  completeBundleParents: ReadonlySet<string>,
-): WorkflowCatalogRow["bundle"] {
-  if (source !== "package") return undefined;
-  for (const bundle of PACKAGE_WORKFLOW_BUNDLES) {
-    if (!completeBundleParents.has(bundle.parent)) continue;
-    if (name === bundle.parent) return { ...bundle, role: "parent" };
-    if ((bundle.children as readonly string[]).includes(name))
-      return { version: bundle.version, parent: bundle.parent, role: "child" };
-  }
-  return undefined;
-}
-
 function rowsForSource<Row extends WorkflowCatalogRow>(rows: Row[], source: WorkflowCatalogRow["source"]): Row[] {
   return rows.filter((row) => row.source === source).sort(compareCatalogRows);
 }
@@ -783,6 +753,24 @@ function workflowCatalogRowMatches(row: WorkflowCatalogRow, query: string | unde
   if (query === undefined) return true;
   const needle = query.toLocaleLowerCase();
   return row.name.toLocaleLowerCase().includes(needle) || row.description.toLocaleLowerCase().includes(needle);
+}
+
+function filterCurrentWorkflowRows(
+  rows: readonly WorkflowCatalogCurrentRow[],
+  query: string | undefined,
+): WorkflowCatalogCurrentRow[] {
+  if (query === undefined) return [...rows];
+  const filtered: WorkflowCatalogCurrentRow[] = [];
+  for (const root of rows.filter((row) => row.role === "root")) {
+    const children = rows.filter((row) => row.role === "child" && row.rootName === root.name);
+    if (workflowCatalogRowMatches(root, query)) {
+      filtered.push(root, ...children);
+      continue;
+    }
+    const matchingChildren = children.filter((row) => workflowCatalogRowMatches(row, query));
+    if (matchingChildren.length > 0) filtered.push(root, ...matchingChildren);
+  }
+  return filtered;
 }
 
 function appendWorkflowCatalogGroup(
@@ -797,38 +785,36 @@ function appendWorkflowCatalogGroup(
     return;
   }
   for (const row of rows) {
-    out.push(`  ${passiveCatalogRowLine(row)}`);
+    const prefix = row.kind === "current" && row.role === "child" ? "    ├ " : "  ";
+    out.push(`${prefix}${passiveCatalogRowLine(row)}`);
   }
 }
 
-function workflowBundleDetailLines(bundle: WorkflowCatalogRow["bundle"]): string[] {
-  if (bundle === undefined) return [];
-  if (bundle.role === "child") return [`bundle: child of ${bundle.parent} (version ${bundle.version})`];
+function workflowCompositionDetailLines(row: WorkflowCatalogRow): string[] {
+  if (row.role === "child") return [`composition: child of ${row.rootName}`];
   return [
-    `bundle: parent (version ${bundle.version}; ${bundle.children?.length ?? 0} children)`,
-    ...(bundle.children ?? []).map((child, index) => `  child ${index + 1}: ${child}`),
+    `composition: root (${row.children.length} child workflow(s))`,
+    ...row.children.map((child, index) => `  child ${index + 1}: ${child}`),
   ];
 }
 
-function workflowBundleCompactLines(bundle: WorkflowCatalogRow["bundle"]): string[] {
-  if (bundle === undefined) return [];
-  return bundle.role === "parent"
-    ? [`Bundle: ${bundle.parent} parent · ${bundle.children?.length ?? 0} exact children · version ${bundle.version}`]
-    : [`Bundle: exact child of ${bundle.parent} · version ${bundle.version}`];
+function workflowCompositionCompactLine(row: WorkflowCatalogRow): string {
+  return row.role === "root"
+    ? `Composition: root · ${row.children.length} child workflow(s)`
+    : `Composition: child of ${row.rootName}`;
 }
 
 function passiveCatalogRowLine(row: WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const bundle =
-    row.bundle === undefined
+  const name = row.kind === "current" && row.role === "child" ? row.label : row.name;
+  const composition =
+    row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""
-      : row.bundle.role === "parent"
-        ? ` · bundle parent (${row.bundle.children?.length ?? 0} children)`
-        : ` · bundle child of ${row.bundle.parent}`;
+      : ` · ${row.children.length} children`;
   // Stage count only: the full declaration belongs to /workflows info, and a
   // catalog row that grows with the pipeline stops being scannable.
   const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
-  return `${row.name}${run} · ${workflowSourceBadge(row.source)}${bundle} · ${row.description}${phases} · profile=${row.profile} · ${row.originPath} · /workflows info ${row.name}`;
+  return `${name}${run} · ${workflowSourceBadge(row.source)}${composition} · ${row.description}${phases} · profile=${row.profile} · /workflows info ${row.name}`;
 }
 
 export function workflowSourceBadge(source: WorkflowCatalogRow["source"]): "[P]" | "[U]" | "[PKG]" {
@@ -844,7 +830,10 @@ export function workflowSourceLabel(source: WorkflowCatalogRow["source"]): "Proj
 }
 
 function compareCatalogRows(a: WorkflowCatalogRow, b: WorkflowCatalogRow): number {
-  return a.name.localeCompare(b.name);
+  const root = a.rootName.localeCompare(b.rootName);
+  if (root !== 0) return root;
+  if (a.role !== b.role) return a.role === "root" ? -1 : 1;
+  return a.label.localeCompare(b.label);
 }
 
 function compactCatalogText(value: string): string {

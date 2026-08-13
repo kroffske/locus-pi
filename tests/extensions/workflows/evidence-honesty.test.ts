@@ -13,7 +13,13 @@ const EXAMPLES_DIR = path.resolve(process.cwd(), "extensions/workflows/examples"
 const PLACEHOLDER_LABEL = "SDK child session";
 
 describe("evidence honesty: workflow example fixtures (T-194 / REQ-010)", () => {
-  const files = readdirSync(EXAMPLES_DIR).filter((f) => f.endsWith(".mjs"));
+  const files = readdirSync(EXAMPLES_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) =>
+      readdirSync(path.join(EXAMPLES_DIR, entry.name), { withFileTypes: true })
+        .filter((child) => child.isFile() && child.name.endsWith(".workflow.mjs"))
+        .map((child) => path.join(entry.name, child.name)),
+    );
 
   it("ships at least one example workflow to guard", () => {
     expect(files.length).toBeGreaterThan(0);

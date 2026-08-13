@@ -40,7 +40,7 @@ const STANDARD_DSL_RETURN_CASES = [
   { method: "continuationArtifacts", call: "dsl.continuationArtifacts()", category: "list" },
   {
     method: "invokeWorkflow",
-    call: 'dsl.invokeWorkflow({ name: "child", key: "one", keys: ["one"], outputDir: dsl.outputDir() })',
+    call: 'dsl.invokeWorkflow({ child: "worker", key: "one", keys: ["one"], outputDir: dsl.outputDir() })',
     category: "status",
   },
   { method: "items", call: "dsl.items()", category: "list" },
@@ -494,7 +494,7 @@ ${skill[1] ?? ""}
     expect(author).toContain("tools: read, search, find, write, edit, bash");
     expect(author).toContain("Any plain request to create, design, write, or author a workflow is Author");
     expect(author).toContain("Author performs one continuous sequence");
-    expect(author).toContain("Never create source before the\ndesign");
+    expect(author).toMatch(/Never create\s+source before the design/u);
     expect(author).toContain("Only explicit wording such as `Design only`");
     expect(author).toContain("You never run a workflow");
     expect(author).toMatch(/material\s+(?:algorithm\s+)?(?:mismatch|change)/u);
@@ -502,17 +502,34 @@ ${skill[1] ?? ""}
     const authorRoute = author.split("### Author\n")[1]?.split("### Design-only\n")[0] ?? "";
     const designOnlyRoute = author.split("### Design-only\n")[1]?.split("### Revise\n")[0] ?? "";
     const buildRoute = author.split("### Build\n")[1]?.split("## Design method\n")[0] ?? "";
-    expect(authorRoute).toContain("then create the\nmatching `.workflow.mjs`");
+    expect(authorRoute).toContain(
+      "then create the root\nand exactly the declared direct child `.workflow.mjs` entries",
+    );
     expect(designOnlyRoute).toContain("must not create or edit a\n`.workflow.mjs`");
-    expect(buildRoute).toContain("creates one matching\n`.pi/workflows/<name>.workflow.mjs`");
+    expect(buildRoute).toContain("creates one matching folder-owned root plus exactly\nthe direct child entries");
     expect(buildRoute).toContain("stops without running");
   });
 
   it("requires Build to return the exact copyable workflow launch command", () => {
     const author = source(".agents/agents/workflow-author.md");
 
-    expect(author).toContain("/workflows run <project-relative workflow path>");
+    expect(author).toContain("/workflows run <name>");
     expect(author).toMatch(/exact copyable launch command/u);
+  });
+
+  it("defines one folder-owned root and explicit direct child entry contract", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflows/SKILL.md",
+      ".agents/agents/workflow-author.md",
+      "extensions/workflows/AUTHORING.md",
+      "docs/extensions/active/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toContain(".pi/workflows/<name>/<name>.design.md");
+      expect(text).toMatch(/<(?:name|root)>\/<child>/u);
+      expect(text).toMatch(/## Entries|`Entries` table/u);
+      expect(text).toMatch(/direct child|direct sibling/iu);
+    }
   });
 
   it("teaches exact text, choice, and handoffs as the standard answer forms", () => {
@@ -773,13 +790,13 @@ ${skill[1] ?? ""}
       "plan-implement": "standard",
       plan: "standard",
       "post-code-review": "standard",
-      "post-code-review-boundaries": "standard",
-      "post-code-review-contracts": "standard",
-      "post-code-review-necessity": "standard",
-      "post-code-review-scope": "standard",
-      "post-code-review-simplicity": "standard",
-      "post-code-review-style": "standard",
-      "post-code-review-synthesis": "standard",
+      "post-code-review/boundaries": "standard",
+      "post-code-review/contracts": "standard",
+      "post-code-review/necessity": "standard",
+      "post-code-review/scope": "standard",
+      "post-code-review/simplicity": "standard",
+      "post-code-review/style": "standard",
+      "post-code-review/synthesis": "standard",
       "requirements-grill": "legacy",
       "review-fix": "legacy",
       review: "legacy",
@@ -791,13 +808,13 @@ ${skill[1] ?? ""}
       "plan",
       "plan-implement",
       "post-code-review",
-      "post-code-review-boundaries",
-      "post-code-review-contracts",
-      "post-code-review-necessity",
-      "post-code-review-scope",
-      "post-code-review-simplicity",
-      "post-code-review-style",
-      "post-code-review-synthesis",
+      "post-code-review/boundaries",
+      "post-code-review/contracts",
+      "post-code-review/necessity",
+      "post-code-review/scope",
+      "post-code-review/simplicity",
+      "post-code-review/style",
+      "post-code-review/synthesis",
     ]) {
       expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);
     }

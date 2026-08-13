@@ -1,5 +1,5 @@
 export const meta = {
-  name: "post-code-review-simplicity",
+  name: "post-code-review/simplicity",
   description: "Audit a frozen review scope for avoidable complexity and publish simplicity findings.",
   profile: "standard",
 };

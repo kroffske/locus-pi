@@ -4,8 +4,8 @@
 > predate the exact-text/`choice` profile and deliberately retain advanced raw
 > schemas or validators for compatibility. New workflow source uses one
 > continuous Design -> review -> Build sequence: a raw request first writes and
-> reviews `.pi/workflows/<name>.design.md`, then creates the matching source in
-> the same turn. Only explicit `Design only` wording pauses after design;
+> reviews `.pi/workflows/<name>/<name>.design.md`, then creates the matching root
+> and declared direct child sources in the same folder. Only explicit `Design only` wording pauses after design;
 > `Build design:` and `Build approved design:` remain Build-only compatibility
 > forms. The source keeps only the nodes and mechanisms its reviewed graph needs.
 
@@ -34,30 +34,28 @@ and source-bound item checkpoints—see [`AUTHORING.md`](../AUTHORING.md).
 Counts are of real occurrences — `promptFile()` calls, `agent({ schema })` calls,
 and `throw` statements — not of the words where a comment happens to mention one.
 
-| Example                                                                                                                    | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
-| -------------------------------------------------------------------------------------------------------------------------- | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
-| [`implement/implement.workflow.mjs`](./implement/implement.workflow.mjs)                                                   | `standard` |   240 |              0 |            0 |       0 | npm package · public repository |
-| [`live-smoke.workflow.mjs`](./live-smoke.workflow.mjs)                                                                     | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
-| [`requirements-grill.workflow.mjs`](./requirements-grill.workflow.mjs)                                                     | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
-| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                               | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
-| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                               | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
-| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                                       | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
-| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                               | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review.workflow.mjs`](./post-code-review/post-code-review.workflow.mjs)                       | `standard` |    83 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-scope.workflow.mjs`](./post-code-review/post-code-review-scope.workflow.mjs)           | `standard` |    44 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-boundaries.workflow.mjs`](./post-code-review/post-code-review-boundaries.workflow.mjs) | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-simplicity.workflow.mjs`](./post-code-review/post-code-review-simplicity.workflow.mjs) | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-style.workflow.mjs`](./post-code-review/post-code-review-style.workflow.mjs)           | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-contracts.workflow.mjs`](./post-code-review/post-code-review-contracts.workflow.mjs)   | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-necessity.workflow.mjs`](./post-code-review/post-code-review-necessity.workflow.mjs)   | `standard` |    32 |              0 |            0 |       0 | npm package · public repository |
-| [`post-code-review/post-code-review-synthesis.workflow.mjs`](./post-code-review/post-code-review-synthesis.workflow.mjs)   | `standard` |    28 |              0 |            0 |       0 | npm package · public repository |
+| Example                                                                                                      | Profile    | Lines | `promptFile()` | Shaped calls | `throw` | Distribution                    |
+| ------------------------------------------------------------------------------------------------------------ | ---------- | ----: | -------------: | -----------: | ------: | ------------------------------- |
+| [`implement/implement.workflow.mjs`](./implement/implement.workflow.mjs)                                     | `standard` |   240 |              0 |            0 |       0 | npm package · public repository |
+| [`live-smoke/live-smoke.workflow.mjs`](./live-smoke/live-smoke.workflow.mjs)                                 | `standard` |    40 |              0 |            0 |       0 | npm package · public repository |
+| [`requirements-grill/requirements-grill.workflow.mjs`](./requirements-grill/requirements-grill.workflow.mjs) | `legacy`   |   342 |              0 |            0 |       1 | npm package · public repository |
+| [`review/review.workflow.mjs`](./review/review.workflow.mjs)                                                 | `legacy`   |   869 |              2 |            2 |       4 | npm package · public repository |
+| [`review-fix/review-fix.workflow.mjs`](./review-fix/review-fix.workflow.mjs)                                 | `legacy`   |   590 |              0 |            1 |      10 | npm package · public repository |
+| [`plan/plan.workflow.mjs`](./plan/plan.workflow.mjs)                                                         | `standard` |   153 |              1 |            0 |       0 | npm package · public repository |
+| [`plan-implement/plan-implement.workflow.mjs`](./plan-implement/plan-implement.workflow.mjs)                 | `standard` |    54 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/post-code-review.workflow.mjs`](./post-code-review/post-code-review.workflow.mjs)         | `standard` |    83 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/scope.workflow.mjs`](./post-code-review/scope.workflow.mjs)                               | `standard` |    44 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/boundaries.workflow.mjs`](./post-code-review/boundaries.workflow.mjs)                     | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/simplicity.workflow.mjs`](./post-code-review/simplicity.workflow.mjs)                     | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/style.workflow.mjs`](./post-code-review/style.workflow.mjs)                               | `standard` |    26 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/contracts.workflow.mjs`](./post-code-review/contracts.workflow.mjs)                       | `standard` |    27 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/necessity.workflow.mjs`](./post-code-review/necessity.workflow.mjs)                       | `standard` |    32 |              0 |            0 |       0 | npm package · public repository |
+| [`post-code-review/synthesis.workflow.mjs`](./post-code-review/synthesis.workflow.mjs)                       | `standard` |    28 |              0 |            0 |       0 | npm package · public repository |
 
-**This directory is the Package registry.** Every `<name>.workflow.mjs` in it
-resolves through `/workflows run <name>`, discovered by existence on each call
-exactly like a project directory — there is no separate allowlist to keep in
-sync. The scan descends one directory level, which is how a workflow keeps its
-prompt resources and its diagram beside its entry, and it accepts only regular
-files, so a symlink never resolves out of the package.
+**This directory is the Package registry.** Every `<workflow>/` folder owns a
+matching `<workflow>.workflow.mjs` root and any direct child workflow files.
+Roots run as `<workflow>`; children run as `<workflow>/<child>`. Discovery reads
+the folders on each call, so there is no separate registry to keep in sync.
 
 Flat `/workflow-run <name>` remains a compatibility alias for the canonical
 `/workflows run <name>` form.
@@ -217,7 +215,7 @@ as such at its definition.
 A diagram here is **one hand-authored SVG** named `<name>-pipeline.svg`, checked
 in beside the entry it describes — inside the workflow's directory when it has
 one, next to the entry file when it does not.
-[`requirements-grill-pipeline.svg`](./requirements-grill-pipeline.svg) and
+[`requirements-grill-pipeline.svg`](./requirements-grill/requirements-grill-pipeline.svg) and
 [`post-code-review/post-code-review-pipeline.svg`](./post-code-review/post-code-review-pipeline.svg)
 are the current diagrams. The other examples are undrawn; the obsolete `plan`
 critic-loop diagram was removed with that loop.
