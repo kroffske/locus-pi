@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
-import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { fleetMenuState, fleetViewedRowId } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 
 /**
  * The peer entrypoint of `fleet-menu-producer.ts`. It never creates a live row of its own: its
@@ -45,6 +45,12 @@ export default function fleetMenuConsumer(pi: ExtensionAPI): void {
         `focused=${fleetMenuState.focused}`,
         `visible=${fleetMenuState.visibleRows().length}`,
       ]);
+    },
+  });
+
+  pi.registerCommand("test-fleet-consumer-viewed-row", {
+    handler: (_args, ctx) => {
+      ctx.ui.setWidget("fleet-consumer-viewed-row", [`viewed=${fleetViewedRowId()}`]);
     },
   });
 }

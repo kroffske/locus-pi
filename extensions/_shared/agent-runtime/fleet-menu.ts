@@ -112,9 +112,15 @@ class FleetMenuState {
 }
 
 const FLEET_MENU_STATE_GLOBAL_KEY = Symbol.for("locus-pi.fleet-menu-state.v2");
+const FLEET_VIEWED_ROW_GLOBAL_KEY = Symbol.for("locus-pi.fleet-viewed-row.v1");
 interface SharedFleetMenuStateSlot {
   version: 2;
   state: FleetMenuState;
+}
+
+interface SharedFleetViewedRowSlot {
+  version: 1;
+  readonly rowsByViewer: Map<symbol, string>;
 }
 
 function sharedFleetMenuState(): FleetMenuState {
@@ -144,6 +150,49 @@ function isSharedFleetMenuStateSlot(value: unknown): value is SharedFleetMenuSta
 }
 
 export const fleetMenuState = sharedFleetMenuState();
+
+function sharedFleetViewedRowSlot(): SharedFleetViewedRowSlot {
+  const runtimeGlobal = globalThis as unknown as Record<symbol, unknown>;
+  const existing = runtimeGlobal[FLEET_VIEWED_ROW_GLOBAL_KEY];
+  if (existing !== undefined) {
+    if (!isRecord(existing) || existing.version !== 1 || !(existing.rowsByViewer instanceof Map)) {
+      throw new Error("locus-pi: incompatible global fleet-viewed-row slot");
+    }
+    return existing as unknown as SharedFleetViewedRowSlot;
+  }
+  const slot: SharedFleetViewedRowSlot = { version: 1, rowsByViewer: new Map() };
+  Object.defineProperty(runtimeGlobal, FLEET_VIEWED_ROW_GLOBAL_KEY, {
+    value: slot,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return slot;
+}
+
+const fleetViewedRows = sharedFleetViewedRowSlot();
+
+/**
+ * Lease the row whose transcript currently owns Pi's inline viewer. The newest
+ * viewer wins; releasing it restores an older overlapping viewer, if one exists.
+ */
+export function acquireFleetViewedRow(rowId: string): () => void {
+  const owner = Symbol("fleet-viewer-row-owner");
+  fleetViewedRows.rowsByViewer.set(owner, rowId);
+  fleetMenuState.emitter.emit("change");
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    fleetViewedRows.rowsByViewer.delete(owner);
+    fleetMenuState.emitter.emit("change");
+  };
+}
+
+/** The row shown by the currently foregrounded agent transcript viewer. */
+export function fleetViewedRowId(): string | undefined {
+  return [...fleetViewedRows.rowsByViewer.values()].at(-1);
+}
 
 /** Stable active-first projection, capped to the eight rows the menu can own. */
 export function selectFleetMenuRows(rows: AgentLiveRow[], limit = FLEET_MENU_MAX_ROWS): AgentLiveRow[] {

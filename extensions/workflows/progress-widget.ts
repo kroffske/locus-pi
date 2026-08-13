@@ -13,7 +13,12 @@ import {
   selectAgentLiveRowsForParents,
   truncate,
 } from "../_shared/agent-runtime/agent-live-panel.js";
-import { fleetMenuState, renderFleetMenuRows, selectFleetMenuLeafRows } from "../_shared/agent-runtime/fleet-menu.js";
+import {
+  fleetMenuState,
+  fleetViewedRowId,
+  renderFleetMenuRows,
+  selectFleetMenuLeafRows,
+} from "../_shared/agent-runtime/fleet-menu.js";
 import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "./runtime/workflow-failure.js";
 import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "./runtime/workflow-journal.js";
 import {
@@ -130,6 +135,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       minIntervalMs: options.renderMinIntervalMs ?? DEFAULT_RENDER_MIN_INTERVAL_MS,
     });
     agentLiveStore.emitter.on("change", this.#onStoreChange);
+    fleetMenuState.emitter.on("change", this.#onStoreChange);
     this.#syncLiveTimer();
   }
 
@@ -165,6 +171,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#onStoreChange);
+    fleetMenuState.emitter.off("change", this.#onStoreChange);
     this.#scheduler.cancel();
     this.#stopLiveTimer();
   }
@@ -273,16 +280,21 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   private visibleRows(): AgentLiveRow[] {
     const all = [...agentLiveStore.rows.values()];
+    let visible: AgentLiveRow[];
     if (this.#knownRowIds.size > 0) {
-      return compactWorkflowParentRows(selectAgentLiveRowsForParents(all, this.#knownRowIds));
+      visible = compactWorkflowParentRows(selectAgentLiveRowsForParents(all, this.#knownRowIds));
+    } else if (this.options.scope !== "workflow") {
+      visible = compactWorkflowParentRows(all);
+    } else {
+      const prefix = `workflow:${this.runId}:`;
+      const scopedParentIds = new Set(all.filter((row) => row.id.startsWith(prefix)).map((row) => row.id));
+      const scoped = all.filter(
+        (row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
+      );
+      visible = compactWorkflowParentRows(scoped);
     }
-    if (this.options.scope !== "workflow") return compactWorkflowParentRows(all);
-    const prefix = `workflow:${this.runId}:`;
-    const scopedParentIds = new Set(all.filter((row) => row.id.startsWith(prefix)).map((row) => row.id));
-    const scoped = all.filter(
-      (row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
-    );
-    return compactWorkflowParentRows(scoped);
+    const viewedRowId = fleetViewedRowId();
+    return viewedRowId === undefined ? visible : visible.filter((row) => row.id === viewedRowId);
   }
 
   private renderHeader(width: number, rows: AgentLiveRow[]): string {
@@ -370,7 +382,10 @@ export class WorkflowProgressComponent implements CustomUiComponent {
         (line) => `  ${line}`,
       ),
     }));
-    const pendingLines = this.pendingStageLines(width).map((line) => ({ settled: false, lines: [line] }));
+    const pendingLines = (fleetViewedRowId() === undefined ? this.pendingStageLines(width) : []).map((line) => ({
+      settled: false,
+      lines: [line],
+    }));
     const roster = [...agentLines, ...pendingLines];
     if (roster.length === 0) return [this.#fg("dim", truncate("  waiting for workflow agents…", width))];
     return clampRosterLines(roster, budget, width);
