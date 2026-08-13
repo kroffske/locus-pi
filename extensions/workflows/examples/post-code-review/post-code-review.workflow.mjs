@@ -12,7 +12,7 @@ export const meta = {
 };
 
 export default async function runWorkflow(dsl, input) {
-  const keys = ["scope", "boundaries", "simplicity", "contracts", "necessity", "synthesis"];
+  const keys = ["scope", "boundaries", "simplicity", "contracts", "style", "necessity", "synthesis"];
   const outputDir = dsl.outputDir();
 
   dsl.phase("scope");
@@ -48,6 +48,14 @@ export default async function runWorkflow(dsl, input) {
         input,
         keys,
         key: "contracts",
+        outputDir,
+      }),
+    () =>
+      dsl.invokeWorkflow({
+        packageName: "post-code-review-style",
+        input,
+        keys,
+        key: "style",
         outputDir,
       }),
   ]);

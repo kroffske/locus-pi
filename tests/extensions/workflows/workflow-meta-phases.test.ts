@@ -227,6 +227,7 @@ describe("curated workflow declarations", () => {
       "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
+      "post-code-review-style",
       "post-code-review-synthesis",
     ]);
   });

@@ -115,10 +115,10 @@ describe("focused workflow catalog", () => {
       expect(narrow).toContain("[PKG] Package");
       expect(narrow).toContain("post-code-review-necessity");
       expect(narrow).toContain("child of post-code-review");
-      expect(narrow.toLowerCase()).toMatch(/bundle parent (?:· 6|\(6) children/u);
+      expect(narrow.toLowerCase()).toMatch(/bundle parent (?:· 7|\(7) children/u);
     }
     const rendered = viewer.render(80).join("\n");
-    expect(rendered).toContain("BUNDLE PARENT (6 children)");
+    expect(rendered).toContain("BUNDLE PARENT (7 children)");
     expect(rendered).toContain("child of post-code-review");
   });
 

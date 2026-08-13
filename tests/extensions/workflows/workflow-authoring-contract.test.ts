@@ -768,6 +768,7 @@ ${skill[1] ?? ""}
     );
 
     expect(profiles).toEqual({
+      implement: "standard",
       "live-smoke": "standard",
       "plan-implement": "standard",
       plan: "standard",
@@ -777,13 +778,15 @@ ${skill[1] ?? ""}
       "post-code-review-necessity": "standard",
       "post-code-review-scope": "standard",
       "post-code-review-simplicity": "standard",
+      "post-code-review-style": "standard",
       "post-code-review-synthesis": "standard",
       "requirements-grill": "legacy",
       "review-fix": "legacy",
       review: "legacy",
     });
-    expect(packagedWorkflowNames()).toHaveLength(13);
+    expect(packagedWorkflowNames()).toHaveLength(15);
     for (const name of [
+      "implement",
       "live-smoke",
       "plan",
       "plan-implement",
@@ -793,6 +796,7 @@ ${skill[1] ?? ""}
       "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
+      "post-code-review-style",
       "post-code-review-synthesis",
     ]) {
       expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);

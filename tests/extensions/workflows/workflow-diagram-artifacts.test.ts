@@ -120,6 +120,7 @@ describe("curated workflow diagrams", () => {
       "post-code-review-boundaries",
       "post-code-review-simplicity",
       "post-code-review-contracts",
+      "post-code-review-style",
       "post-code-review-necessity",
       "post-code-review-synthesis",
     ]);
@@ -143,11 +144,17 @@ describe("curated workflow diagrams", () => {
 
   it("challenges proposed fixes before synthesis and respects trusted external ownership", () => {
     const contracts = readFileSync(packagedWorkflowPath("post-code-review-contracts"), "utf8");
+    const style = readFileSync(packagedWorkflowPath("post-code-review-style"), "utf8");
     const necessity = readFileSync(packagedWorkflowPath("post-code-review-necessity"), "utf8");
     const synthesis = readFileSync(packagedWorkflowPath("post-code-review-synthesis"), "utf8");
 
     expect(contracts).toContain("Do not require duplicate local leaf validation merely because data is external");
     expect(contracts).toContain("accepted responsibility boundary rather than a defect");
+
+    expect(style).toContain("Read review-scope.md there first, then read style.md");
+    expect(style).toContain("an empty file means that the operator supplied no additional style criteria");
+    expect(style).toContain("misleading, stale, redundant, or missing comments");
+    expect(style).toContain("turn personal taste into a defect");
 
     expect(necessity).toContain("What real failure or violated contract is proven?");
     expect(necessity).toContain("Which component owns that guarantee?");
@@ -164,5 +171,12 @@ describe("curated workflow diagrams", () => {
     expect(synthesis).toContain("must not restore a proposal that the necessity challenge rejected");
     expect(synthesis).toContain("absence of repeat local validation is an accepted responsibility boundary");
     expect(synthesis).toContain("Do not treat current documentation or tests as proof");
+    expect(synthesis).toContain("READY_WITH_RECOMMENDATIONS");
+    expect(synthesis).toContain("CHANGES_REQUIRED");
+    expect(synthesis).toContain("Action: REQUIRED, RECOMMENDED, or NO_ACTION");
+    expect(synthesis).toContain("Impact: high, medium, or low");
+    expect(synthesis).toContain("illustrative fix snippet");
+    expect(synthesis).toContain("Do not include a snippet");
+    expect(synthesis).toContain("/workflows run implement");
   });
 });

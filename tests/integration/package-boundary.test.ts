@@ -49,6 +49,7 @@ function recursiveTypeScriptFiles(directory: string): string[] {
  * is cheap, but it is still a public-surface change somebody has to look at.
  */
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
+  "implement",
   "live-smoke",
   "plan",
   "plan-implement",
@@ -58,6 +59,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review-necessity",
   "post-code-review-scope",
   "post-code-review-simplicity",
+  "post-code-review-style",
   "post-code-review-synthesis",
   "requirements-grill",
   "review",
@@ -76,6 +78,7 @@ const PI_PACKAGES = [
   "@earendil-works/pi-tui",
 ] as const;
 const PACKAGE_WORKFLOW_PATHS = {
+  implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
   "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
   plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
   "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
@@ -89,6 +92,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review-scope": "extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs",
   "post-code-review-simplicity":
     "extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs",
+  "post-code-review-style": "extensions/workflows/examples/post-code-review/post-code-review-style.workflow.mjs",
   "post-code-review-synthesis":
     "extensions/workflows/examples/post-code-review/post-code-review-synthesis.workflow.mjs",
   "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
@@ -317,9 +321,9 @@ describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("thirteen curated Package workflows");
-    expect(prose).toContain("the thirteen curated workflows");
-    expect(prose).toContain("exactly the thirteen files above");
+    expect(prose).toContain("fifteen curated Package workflows");
+    expect(prose).toContain("the fifteen curated workflows");
+    expect(prose).toContain("exactly the fifteen files above");
   });
 
   it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {

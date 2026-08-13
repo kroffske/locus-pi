@@ -223,6 +223,8 @@ extensions/workflows/command-completions.ts
 extensions/workflows/command-parser.ts
 extensions/workflows/command-router.ts
 extensions/workflows/examples/README.md
+extensions/workflows/examples/implement/README.md
+extensions/workflows/examples/implement/implement.workflow.mjs
 extensions/workflows/examples/live-smoke.workflow.mjs
 extensions/workflows/examples/plan-implement/README.md
 extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs
@@ -236,6 +238,7 @@ extensions/workflows/examples/post-code-review/post-code-review-necessity.workfl
 extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg
 extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs
 extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs
+extensions/workflows/examples/post-code-review/post-code-review-style.workflow.mjs
 extensions/workflows/examples/post-code-review/post-code-review-synthesis.workflow.mjs
 extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs
 extensions/workflows/examples/requirements-grill-pipeline.svg
@@ -347,6 +350,7 @@ tests/extensions/todo-context/todo-context.test.ts
 tests/extensions/workflows/consilium-reference-workflow.test.ts
 tests/extensions/workflows/evidence-honesty.test.ts
 tests/extensions/workflows/fusion-tool.test.ts
+tests/extensions/workflows/implement-workflow.test.ts
 tests/extensions/workflows/live-smoke-workflow.test.ts
 tests/extensions/workflows/plan-implement-workflow.test.ts
 tests/extensions/workflows/plan-workflow.test.ts

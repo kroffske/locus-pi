@@ -118,6 +118,7 @@ import {
   assertWorkflowItemKey,
   assertWorkflowRootLease,
   commitWorkflowCompletedCheckpoint,
+  ensureWorkflowWorkspaceFile,
   isWorkflowPathWithinRoot,
   readWorkflowCompletedCheckpoint,
   referenceWorkflowPrimaryFile,
@@ -2240,6 +2241,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       );
     }
     stableOutput = inheritedCoordination?.output ?? resolvedOutput;
+    if (inheritedCoordination === undefined && isPostCodeReviewTarget(target, projectRoot)) {
+      ensureWorkflowWorkspaceFile(stableOutput, "style.md");
+    }
     // Persist the independent owner binding before acquiring the lease or
     // starting any child work. The result envelope written at terminal time is
     // only a projection and cannot be the source of resume/handoff authority.
