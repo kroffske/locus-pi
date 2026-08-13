@@ -1,7 +1,7 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, twelve
+Installing it gives a Pi session eleven extensions, a bundled agent catalog, thirteen
 curated Package workflows, and two skills that teach an agent how to find, run,
 and author them — through a deliberately narrow npm artifact.
 
@@ -30,7 +30,7 @@ pi list                        # what Pi actually loads, per scope
 npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the twelve curated
+Then start Pi in a trusted project and run `/workflows list`: the thirteen curated
 workflows resolve out of the installed package, so nothing has to be copied
 anywhere. Inside a session, `/devext doctor` gives the same kind of compact
 inventory view.
@@ -80,9 +80,10 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers exactly these twelve Package workflows. Six of
-them form one modular post-code-review bundle: `post-code-review` is the external
-entry and the five prefixed lanes are its source-bound child components.
+The installed package registers exactly these thirteen Package workflows. Seven
+of them form one modular post-code-review bundle: `post-code-review` is the
+external entry and the six prefixed workflows are its source-bound child
+components.
 
 | Workflow                      | Intended use                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -97,11 +98,12 @@ entry and the five prefixed lanes are its source-bound child components.
 | `post-code-review-boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
 | `post-code-review-simplicity` | Audits duplication, empty wrappers, redundant guards, dead paths, and delete-first alternatives.                                 |
 | `post-code-review-contracts`  | Audits APIs, consumers, validation parity, defaults, errors, documentation, tests, and intent.                                   |
+| `post-code-review-necessity`  | Challenges every proposed fix to prove a real failure, a guarantee owner, and the simplest net improvement.                      |
 | `post-code-review-synthesis`  | Re-verifies the scope and three lane reports, removes unsupported claims, and authors the final report.                          |
 
 The Package registry is the shipped `extensions/workflows/examples/` directory
 itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
-file there, and the npm allowlist ships exactly the twelve files above plus the
+file there, and the npm allowlist ships exactly the thirteen files above plus the
 post-code-review bundle's README and SVG diagram.
 
 Inspect and run them from the canonical command menu:

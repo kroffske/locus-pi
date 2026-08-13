@@ -91,7 +91,16 @@ or borrowed runtime implementation was identified for this source-audit slice.
   `[R]` is a run-history lens;
   `[P]`/`[U]`/`[PKG]` are compact labels for project, user, and package sources;
   catalog rows lead with the workflow name, while history rows lead with the
-  workflow name, then run id, then source badge.
+  workflow name, then run id, then source badge. The same model partitions current
+  rows into Project, User, and Package display sections in resolver-precedence
+  order and leaves History separate. A literal, package-owned declaration marks
+  `post-code-review` as one parent plus six exact children only when all seven
+  names simultaneously resolve to Package targets. Any higher-precedence shadow
+  suppresses the relation for every member, so presentation cannot describe a
+  mixed or incomplete Package bundle. This is catalog metadata only: it does not
+  participate in target resolution, execution, or history persistence. Compact
+  projections retain an exact bundle continuation, budget-independent current
+  and history row totals, and explicit notice that detail lines may be omitted.
 - `extensions/workflows/catalog-viewer.ts` owns the focused `/workflows list`
   cursor, current/history selection, catalog/source/identity screen transition,
   independent source and identity scroll, action focus, and width-bounded
@@ -101,7 +110,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   adjacent before padding unused height. The viewer uses terminal height minus Pi's three footer rows,
   with no 24-row cap. `i` exposes the exact current path or history run ID,
   snapshot path, and SHA; Up/Down, PageUp/PageDown, Home, and End keep that
-  identity reachable even at widths 8 and 1. Current ready source exposes
+  identity reachable even at widths 8 and 1. Current list screens retain the
+  Project, User, and Package section labels plus the separate History section;
+  the `post-code-review` parent and child rows use text labels as well as color,
+  so bundle hierarchy survives narrow and monochrome terminals. Current ready source exposes
   `Back`/`Start`/`Edit`/`Review`; history exposes only `Back`/`Review`. Tab or
   Left/Right changes action focus, a caret plus semantic warning tone marks the selected action, and
   success tone distinguishes other actions and metadata labels. Enter resolves a
