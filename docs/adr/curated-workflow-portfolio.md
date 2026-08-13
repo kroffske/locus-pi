@@ -711,20 +711,26 @@ depend on script logic the owner explicitly rejected.
 ## Amendment 2026-08-13 — modular post-code review becomes an installable bundle
 
 The owner promoted the reviewed project-local post-code-review pilot into one
-tracked Package folder. The public portfolio gains six names, but they expose
+tracked Package folder. The public portfolio gains seven names, but they expose
 one product: `post-code-review` is the intended external entry; `scope`,
-`boundaries`, `simplicity`, `contracts`, and `synthesis` are its separately
-inspectable saved-child components.
+`boundaries`, `simplicity`, `contracts`, `necessity`, and `synthesis` are its
+separately inspectable saved-child components.
 
 The parent owns no model call. It runs scope first, opens one three-child
-parallel barrier, runs synthesis after the barrier, and publishes the resulting
-`post-code-review.md`. Complete Markdown files are the only lane handoffs. One
+parallel barrier, runs one sequential necessity challenge after the barrier,
+then runs synthesis and publishes the resulting `post-code-review.md`. The
+challenge requires every proposed fix to prove a real failure, name the owner of
+the guarantee, avoid duplicated responsibility, and be the simplest net
+improvement. An explicitly trusted external provider remains the owner of its
+declared field guarantees unless the local component claims a stricter contract
+or a supported consumer failure proves otherwise. Complete Markdown files are
+the only lane handoffs. One
 self-contained `post-code-review-pipeline.svg` beside the sources shows every
 workflow boundary, agent role, artifact, and fail-closed exit.
 
 Normal saved-child `name` lookup intentionally keeps Project → User → Package
 precedence. This bundle must not mix an installed parent with a same-named local
-child, so its five edges use the exact `packageName` target. The parent resolves
+child, so its six edges use the exact `packageName` target. The parent resolves
 each Package child before launch; the expected-child canonical path and source
 hash proof then makes a project or personal shadow fail closed.
 
@@ -738,8 +744,8 @@ scripts remain development evidence and are not workflow entries.
 
 The Package surface grew from three to five names, back to four when `llm-smoke`
 retired with the primitive it proved (2026-07-21 amendment), and to six with the
-planning pair (2026-07-27 amendment), then to twelve with the six-entry modular
-post-code-review bundle (2026-08-13 amendment). It is not a general automation
+planning pair (2026-07-27 amendment), then to thirteen with the seven-entry
+modular post-code-review bundle (2026-08-13 amendment). It is not a general automation
 catalog. The non-diagnostic names expose three deliberate products —
 question-led evidence then a human-directed fix, a plan workspace then
 main-agent-driven one-step runs, and an independently synthesized multi-lane

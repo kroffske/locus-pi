@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="diagram-title diagram-desc" preserveAspectRatio="xMidYMid meet">
-  <title id="diagram-title">post-code-review: one external workflow, five child workflows, one published report</title>
-  <desc id="diagram-desc">An operator runs post-code-review.workflow.mjs, the only external entry point. The parent calls no model. First, post-code-review-scope.workflow.mjs writes review-scope.md. Next, post-code-review-boundaries.workflow.mjs, post-code-review-simplicity.workflow.mjs, and post-code-review-contracts.workflow.mjs run in parallel and write three independent reports. Then post-code-review-synthesis.workflow.mjs reads all four reports and writes post-code-review.md. Finally, the parent publishes that report. The internal runtime phase identifiers are scope, audit-barrier, synthesis, and publish. A missing or shadowed child, a failed child or agent, or a failed write or publication stops successful publication.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1390" viewBox="0 0 1600 1390" role="img" aria-labelledby="diagram-title diagram-desc" preserveAspectRatio="xMidYMid meet">
+  <title id="diagram-title">post-code-review: one external workflow, six child workflows, one published report</title>
+  <desc id="diagram-desc">An operator runs post-code-review.workflow.mjs, the only external entry point. The parent calls no model. First, post-code-review-scope.workflow.mjs writes review-scope.md. Next, post-code-review-boundaries.workflow.mjs, post-code-review-simplicity.workflow.mjs, and post-code-review-contracts.workflow.mjs run in parallel and write three independent reports. Then post-code-review-necessity.workflow.mjs challenges every proposed fix and writes review-necessity.md. Finally, post-code-review-synthesis.workflow.mjs reads all five reports and writes post-code-review.md, which the parent publishes. The internal runtime phase identifiers are scope, audit-barrier, necessity, synthesis, and publish. A missing or shadowed child, a failed child or agent, or a failed write or publication stops successful publication.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
@@ -33,9 +33,9 @@
     </style>
   </defs>
 
-  <rect width="1600" height="1180" fill="#ffffff" />
+  <rect width="1600" height="1390" fill="#ffffff" />
 
-  <text x="56" y="46" class="sans h1">Post-code review — one entry point, five child workflows</text>
+  <text x="56" y="46" class="sans h1">Post-code review — one entry point, six child workflows</text>
   <text x="56" y="73" class="sans subtitle">Every workflow box names the exact source file. The parent controls the graph and makes zero model calls.</text>
 
   <rect x="56" y="88" width="500" height="76" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2" />
@@ -45,7 +45,7 @@
   <path d="M 306 164 L 306 184" class="edge" />
   <text x="320" y="178" class="sans edge-label">request + outputDir</text>
 
-  <rect x="40" y="184" width="1520" height="866" rx="22" fill="#eff6ff" stroke="#1d4ed8" stroke-width="3" />
+  <rect x="40" y="184" width="1520" height="1060" rx="22" fill="#eff6ff" stroke="#1d4ed8" stroke-width="3" />
   <path d="M 62 184 H 1538 Q 1560 184 1560 206 V 266 H 40 V 206 Q 40 184 62 184 Z" fill="#1d4ed8" />
   <text x="70" y="210" class="sans tag-light">WORKFLOW · ONLY EXTERNAL ENTRY POINT</text>
   <text x="70" y="238" class="mono parent-title">post-code-review.workflow.mjs</text>
@@ -53,7 +53,7 @@
   <rect x="1320" y="207" width="204" height="33" rx="16" fill="#dbeafe" stroke="#93c5fd" />
   <text x="1422" y="228" class="sans badge" text-anchor="middle">0 MODEL CALLS</text>
 
-  <path d="M 112 316 L 112 1018" fill="none" stroke="#bfdbfe" stroke-width="3" />
+  <path d="M 112 316 L 112 1210" fill="none" stroke="#bfdbfe" stroke-width="3" />
 
   <circle cx="112" cy="352" r="21" fill="#1d4ed8" />
   <text x="112" y="352" class="sans step-number">1</text>
@@ -132,7 +132,7 @@
   <path d="M 856 770 L 856 794" class="edge" />
   <path d="M 1296 770 L 1296 794" class="edge" />
   <rect x="216" y="794" width="1304" height="34" rx="17" fill="#e2e8f0" stroke="#475569" stroke-width="1.5" />
-  <text x="868" y="816" class="sans bar-text">Workflow: await all three reports — synthesis starts only after every parallel child finishes successfully</text>
+  <text x="868" y="816" class="sans bar-text">Workflow: await all three reports — necessity starts only after every parallel child finishes successfully</text>
 
   <circle cx="112" cy="902" r="21" fill="#1d4ed8" />
   <text x="112" y="902" class="sans step-number">3</text>
@@ -141,41 +141,58 @@
 
   <rect x="216" y="842" width="1304" height="120" rx="16" fill="#ffffff" stroke="#94a3b8" stroke-width="2" />
   <text x="240" y="870" class="sans tag">WORKFLOW</text>
-  <text x="240" y="894" class="mono node-file">post-code-review-synthesis.workflow.mjs</text>
-  <text x="240" y="915" class="sans body">Reads all four reports, re-verifies claims against live source, removes unsupported and duplicate findings.</text>
+  <text x="240" y="894" class="mono node-file">post-code-review-necessity.workflow.mjs</text>
+  <text x="240" y="915" class="sans body">Challenges proposed fixes: proven failure · guarantee owner · no duplicated responsibility · simplest net improvement.</text>
   <rect x="240" y="927" width="470" height="28" rx="14" fill="#ede9fe" stroke="#6d28d9" stroke-width="1.5" />
   <text x="257" y="946" class="sans body"><tspan font-weight="700">Agent:</tspan> one Pi session · <tspan class="mono">modelRole "smol:xhigh"</tspan></text>
   <path d="M 738 927 H 1030 L 1044 941 L 1030 955 H 738 Z" fill="#dcfce7" stroke="#15803d" stroke-width="1.5" />
   <path d="M 1030 927 V 941 H 1044" fill="none" stroke="#15803d" stroke-width="1.5" />
-  <text x="756" y="946" class="mono body"><tspan font-family="system-ui" font-weight="700">Artifact:</tspan> post-code-review.md</text>
+  <text x="756" y="946" class="mono body"><tspan font-family="system-ui" font-weight="700">Artifact:</tspan> review-necessity.md</text>
   <path d="M 710 941 L 738 941" class="edge" />
   <text x="713" y="931" class="sans edge-label">writes</text>
 
-  <circle cx="112" cy="1014" r="21" fill="#1d4ed8" />
-  <text x="112" y="1014" class="sans step-number">4</text>
-  <path d="M 133 1028 L 216 1028" class="edge" />
-  <path d="M 868 962 L 868 984" class="edge" />
-  <text x="880" y="977" class="sans edge-label">post-code-review.md</text>
+  <circle cx="112" cy="1052" r="21" fill="#1d4ed8" />
+  <text x="112" y="1052" class="sans step-number">4</text>
+  <path d="M 133 1078 L 216 1078" class="edge" />
+  <path d="M 868 962 L 868 992" class="edge" />
+  <text x="880" y="981" class="sans edge-label">review-necessity.md</text>
 
-  <rect x="216" y="984" width="1304" height="52" rx="12" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2" />
-  <text x="242" y="1007" class="sans tag">WORKFLOW</text>
-  <text x="242" y="1027" class="mono node-title">dsl.publishPrimaryFile("post-code-review.md")</text>
-  <text x="720" y="1027" class="sans body">The parent returns that exact file as the run result.</text>
+  <rect x="216" y="992" width="1304" height="120" rx="16" fill="#ffffff" stroke="#94a3b8" stroke-width="2" />
+  <text x="240" y="1020" class="sans tag">WORKFLOW</text>
+  <text x="240" y="1044" class="mono node-file">post-code-review-synthesis.workflow.mjs</text>
+  <text x="240" y="1065" class="sans body">Reads all five reports, re-verifies admitted claims, removes unsupported, duplicate, or unnecessary findings.</text>
+  <rect x="240" y="1077" width="470" height="28" rx="14" fill="#ede9fe" stroke="#6d28d9" stroke-width="1.5" />
+  <text x="257" y="1096" class="sans body"><tspan font-weight="700">Agent:</tspan> one Pi session · <tspan class="mono">modelRole "smol:xhigh"</tspan></text>
+  <path d="M 738 1077 H 1030 L 1044 1091 L 1030 1105 H 738 Z" fill="#dcfce7" stroke="#15803d" stroke-width="1.5" />
+  <path d="M 1030 1077 V 1091 H 1044" fill="none" stroke="#15803d" stroke-width="1.5" />
+  <text x="756" y="1096" class="mono body"><tspan font-family="system-ui" font-weight="700">Artifact:</tspan> post-code-review.md</text>
+  <path d="M 710 1091 L 738 1091" class="edge" />
 
-  <rect x="56" y="1064" width="1488" height="56" rx="12" fill="#fef2f2" stroke="#b91c1c" stroke-width="2" />
-  <text x="78" y="1088" class="sans node-title" fill="#7f1d1d">Workflow: fail closed — no successful publication</text>
-  <text x="78" y="1107" class="sans body" fill="#7f1d1d">missing or shadowed Package child · child workflow or agent fails · report write or publication fails</text>
-  <text x="1518" y="1098" class="mono body" fill="#7f1d1d" text-anchor="end" font-weight="700">⊗ no published post-code-review.md</text>
-  <path d="M 1450 1064 L 1450 1037" class="edge-red" />
+  <circle cx="112" cy="1190" r="21" fill="#1d4ed8" />
+  <text x="112" y="1190" class="sans step-number">5</text>
+  <path d="M 133 1204 L 216 1204" class="edge" />
+  <path d="M 868 1112 L 868 1140" class="edge" />
+  <text x="880" y="1131" class="sans edge-label">post-code-review.md</text>
 
-  <rect x="56" y="1138" width="1488" height="30" rx="10" fill="#f8fafc" stroke="#cbd5e1" />
-  <text x="78" y="1158" class="sans tag">LEGEND</text>
-  <text x="160" y="1158" class="sans body"><tspan font-weight="700">Operator:</tspan> launch/input</text>
-  <text x="330" y="1158" class="sans body"><tspan font-weight="700">Workflow:</tspan> deterministic orchestration</text>
-  <text x="600" y="1158" class="sans body"><tspan font-weight="700">Agent:</tspan> one Pi child session</text>
-  <text x="800" y="1158" class="sans body"><tspan font-weight="700">Artifact:</tspan> persisted Markdown</text>
-  <line x1="1045" y1="1153" x2="1080" y2="1153" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
-  <text x="1090" y="1158" class="sans body">execution / file handoff</text>
-  <line x1="1285" y1="1153" x2="1320" y2="1153" stroke="#b91c1c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow-red)" />
-  <text x="1330" y="1158" class="sans body">blocked publication</text>
+  <rect x="216" y="1140" width="1304" height="60" rx="12" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2" />
+  <text x="242" y="1164" class="sans tag">WORKFLOW</text>
+  <text x="242" y="1186" class="mono node-title">dsl.publishPrimaryFile("post-code-review.md")</text>
+  <text x="720" y="1186" class="sans body">The parent returns that exact file as the run result.</text>
+
+  <rect x="56" y="1260" width="1488" height="56" rx="12" fill="#fef2f2" stroke="#b91c1c" stroke-width="2" />
+  <text x="78" y="1284" class="sans node-title" fill="#7f1d1d">Workflow: fail closed — no successful publication</text>
+  <text x="78" y="1303" class="sans body" fill="#7f1d1d">missing or shadowed Package child · child workflow or agent fails · report write or publication fails</text>
+  <text x="1518" y="1294" class="mono body" fill="#7f1d1d" text-anchor="end" font-weight="700">⊗ no published post-code-review.md</text>
+  <path d="M 1450 1260 L 1450 1201" class="edge-red" />
+
+  <rect x="56" y="1334" width="1488" height="30" rx="10" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="78" y="1354" class="sans tag">LEGEND</text>
+  <text x="160" y="1354" class="sans body"><tspan font-weight="700">Operator:</tspan> launch/input</text>
+  <text x="330" y="1354" class="sans body"><tspan font-weight="700">Workflow:</tspan> deterministic orchestration</text>
+  <text x="600" y="1354" class="sans body"><tspan font-weight="700">Agent:</tspan> one Pi child session</text>
+  <text x="800" y="1354" class="sans body"><tspan font-weight="700">Artifact:</tspan> persisted Markdown</text>
+  <line x1="1045" y1="1349" x2="1080" y2="1349" stroke="#334155" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="1090" y="1354" class="sans body">execution / file handoff</text>
+  <line x1="1285" y1="1349" x2="1320" y2="1349" stroke="#b91c1c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow-red)" />
+  <text x="1330" y="1354" class="sans body">blocked publication</text>
 </svg>

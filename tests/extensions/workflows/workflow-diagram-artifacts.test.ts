@@ -120,6 +120,7 @@ describe("curated workflow diagrams", () => {
       "post-code-review-boundaries",
       "post-code-review-simplicity",
       "post-code-review-contracts",
+      "post-code-review-necessity",
       "post-code-review-synthesis",
     ]);
     for (const phase of declaredNames(parent, /\bphase\("([^"]+)"\)/gu)) {
@@ -138,5 +139,30 @@ describe("curated workflow diagrams", () => {
     expect(svg).toContain("Workflow:");
     expect(svg).toContain("Agent:");
     expect(svg).toContain("Artifact:");
+  });
+
+  it("challenges proposed fixes before synthesis and respects trusted external ownership", () => {
+    const contracts = readFileSync(packagedWorkflowPath("post-code-review-contracts"), "utf8");
+    const necessity = readFileSync(packagedWorkflowPath("post-code-review-necessity"), "utf8");
+    const synthesis = readFileSync(packagedWorkflowPath("post-code-review-synthesis"), "utf8");
+
+    expect(contracts).toContain("Do not require duplicate local leaf validation merely because data is external");
+    expect(contracts).toContain("accepted responsibility boundary rather than a defect");
+
+    expect(necessity).toContain("What real failure or violated contract is proven?");
+    expect(necessity).toContain("Which component owns that guarantee?");
+    expect(necessity).toContain("duplicate validation or responsibility");
+    expect(necessity).toContain("the simplest way to close the proven risk");
+    expect(necessity).toContain("documentation and tests prove that a dependency exists and is exercised");
+    expect(necessity).toContain("is not duplicate validation when the old check is removed");
+    expect(necessity).toContain("RETAIN");
+    expect(necessity).toContain("REFRAME");
+    expect(necessity).toContain("REJECT");
+    expect(necessity).toContain("BLOCKED");
+
+    expect(synthesis).toContain("The necessity challenge is an admission gate, not another vote");
+    expect(synthesis).toContain("must not restore a proposal that the necessity challenge rejected");
+    expect(synthesis).toContain("absence of repeat local validation is an accepted responsibility boundary");
+    expect(synthesis).toContain("Do not treat current documentation or tests as proof");
   });
 });

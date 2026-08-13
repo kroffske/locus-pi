@@ -54,6 +54,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review",
   "post-code-review-boundaries",
   "post-code-review-contracts",
+  "post-code-review-necessity",
   "post-code-review-scope",
   "post-code-review-simplicity",
   "post-code-review-synthesis",
@@ -76,6 +77,8 @@ const PACKAGE_WORKFLOW_PATHS = {
     "extensions/workflows/examples/post-code-review/post-code-review-boundaries.workflow.mjs",
   "post-code-review-contracts":
     "extensions/workflows/examples/post-code-review/post-code-review-contracts.workflow.mjs",
+  "post-code-review-necessity":
+    "extensions/workflows/examples/post-code-review/post-code-review-necessity.workflow.mjs",
   "post-code-review-scope": "extensions/workflows/examples/post-code-review/post-code-review-scope.workflow.mjs",
   "post-code-review-simplicity":
     "extensions/workflows/examples/post-code-review/post-code-review-simplicity.workflow.mjs",

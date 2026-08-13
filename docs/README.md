@@ -77,9 +77,9 @@ promotion decision says otherwise:
 ## Package Boundary
 
 The npm package intentionally ships only the eleven default entrypoints and their
-explicit local import closure, the twelve curated Package workflows (the six
-existing entries plus the external `post-code-review` parent and its five saved
-child lanes), active manifests, the
+explicit local import closure, the thirteen curated Package workflows (the six
+existing entries plus the external `post-code-review` parent and its six saved
+children), active manifests, the
 bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.

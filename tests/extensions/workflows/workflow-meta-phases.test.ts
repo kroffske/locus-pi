@@ -224,6 +224,7 @@ describe("curated workflow declarations", () => {
       "live-smoke",
       "post-code-review-boundaries",
       "post-code-review-contracts",
+      "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
       "post-code-review-synthesis",

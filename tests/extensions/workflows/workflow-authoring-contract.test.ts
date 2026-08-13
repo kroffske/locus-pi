@@ -689,6 +689,7 @@ ${skill[1] ?? ""}
       "post-code-review": "standard",
       "post-code-review-boundaries": "standard",
       "post-code-review-contracts": "standard",
+      "post-code-review-necessity": "standard",
       "post-code-review-scope": "standard",
       "post-code-review-simplicity": "standard",
       "post-code-review-synthesis": "standard",
@@ -696,7 +697,7 @@ ${skill[1] ?? ""}
       "review-fix": "legacy",
       review: "legacy",
     });
-    expect(packagedWorkflowNames()).toHaveLength(12);
+    expect(packagedWorkflowNames()).toHaveLength(13);
     for (const name of [
       "live-smoke",
       "plan",
@@ -704,6 +705,7 @@ ${skill[1] ?? ""}
       "post-code-review",
       "post-code-review-boundaries",
       "post-code-review-contracts",
+      "post-code-review-necessity",
       "post-code-review-scope",
       "post-code-review-simplicity",
       "post-code-review-synthesis",
