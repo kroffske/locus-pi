@@ -20,7 +20,7 @@ drafts and one-off artifacts are not part of this map.
   catalog of the eleven public extensions, their paths, roles, and dependency
   boundaries.
 - [extension-index.md](extension-index.md) — detailed public source map for the
-  eleven retained active extensions and twelve curated workflows, including
+  eleven retained active extensions and thirteen curated workflows, including
   entrypoint, manifest, manual, and dependency paths plus the direct feature
   dependency graph.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and

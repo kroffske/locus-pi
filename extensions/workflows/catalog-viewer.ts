@@ -501,25 +501,14 @@ function catalogBody(
       fitLine(selected === undefined ? "No workflow rows." : rowLines(selected, true, width, theme, false)[0]!, width),
     ];
   }
-  const desiredCurrentHeight = sectionDesiredHeight(model.current.length);
+  const desiredCurrentHeight = groupedCurrentDesiredHeight(model);
   const desiredHistoryHeight = sectionDesiredHeight(model.history.length);
   const contentFits = desiredCurrentHeight + desiredHistoryHeight <= height;
   const currentHeight = contentFits ? desiredCurrentHeight : Math.max(1, Math.ceil(height * 0.6));
   const historyHeight = contentFits ? desiredHistoryHeight : Math.max(1, height - currentHeight);
-  const lines = [style(theme, "muted", `Current (${model.current.length}/${model.totalCurrent}):`)];
+  const lines = [style(theme, "muted", `Current workflows (${model.current.length}/${model.totalCurrent}):`)];
   const currentBody = Math.max(0, currentHeight - 1);
-  lines.push(
-    ...catalogSection(
-      model.current,
-      Math.min(selectedIndex, model.current.length - 1),
-      0,
-      selectedIndex,
-      currentBody,
-      width,
-      theme,
-      model.query === undefined ? "  (none found)" : "  (no current matches)",
-    ),
-  );
+  lines.push(...groupedCurrentCatalog(model, selectedIndex, currentBody, width, theme));
   lines.push(style(theme, "muted", `History [R] review-only (${model.history.length}):`));
   const historyBody = Math.max(0, historyHeight - 1);
   lines.push(
@@ -535,6 +524,61 @@ function catalogBody(
     ),
   );
   return lines.slice(0, height).map((line) => fitLine(line, width));
+}
+
+function groupedCurrentDesiredHeight(model: WorkflowCatalogModel): number {
+  const groups = currentSourceGroups(model);
+  return 1 + groups.reduce((total, group) => total + 1 + Math.max(1, group.rows.length * 2), 0);
+}
+
+function groupedCurrentCatalog(
+  model: WorkflowCatalogModel,
+  selectedIndex: number,
+  height: number,
+  width: number,
+  theme: WorkflowCatalogTheme,
+): string[] {
+  if (height <= 0) return [];
+  const entries: Array<{ text: string; rowIndex?: number; groupStart?: number }> = [];
+  for (const group of currentSourceGroups(model)) {
+    const groupStart = entries.length;
+    entries.push({ text: style(theme, "muted", `${group.label} (${group.rows.length}):`), groupStart });
+    if (group.rows.length === 0) {
+      entries.push({ text: model.query === undefined ? "  (none found)" : "  (no matches)", groupStart });
+      continue;
+    }
+    for (const row of group.rows) {
+      const rowIndex = model.current.indexOf(row);
+      for (const text of rowLines(row, rowIndex === selectedIndex, width, theme, true)) {
+        entries.push({ text, rowIndex, groupStart });
+      }
+    }
+  }
+  const selectedLine = Math.max(
+    0,
+    entries.findIndex((entry) => entry.rowIndex === selectedIndex),
+  );
+  const selectedGroupStart = entries[selectedLine]?.groupStart ?? 0;
+  const maxStart = Math.max(0, entries.length - height);
+  let start = clamp(selectedLine - Math.floor(height / 2), 0, maxStart);
+  if (selectedGroupStart >= start && selectedGroupStart < start + height) start = selectedGroupStart;
+  else if (selectedLine - selectedGroupStart < height) start = selectedGroupStart;
+  return padLines(
+    entries.slice(start, start + height).map((entry) => entry.text),
+    height,
+    width,
+  );
+}
+
+function currentSourceGroups(model: WorkflowCatalogModel): Array<{
+  label: string;
+  rows: WorkflowCatalogModel["current"];
+}> {
+  return [
+    { label: "[P] Project", rows: model.current.filter((row) => row.source === "project") },
+    { label: "[U] User", rows: model.current.filter((row) => row.source === "personal") },
+    { label: "[PKG] Package", rows: model.current.filter((row) => row.source === "package") },
+  ];
 }
 
 function sectionDesiredHeight(rowCount: number): number {
@@ -572,6 +616,18 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
+  if (expanded && width < 60 && row.bundle !== undefined) {
+    const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+    const identity = `${selected ? ">" : " "} ${row.name}${run} · ${workflowSourceBadge(row.source)}`;
+    const relationship =
+      row.bundle.role === "parent"
+        ? `    └ bundle parent · ${row.bundle.children?.length ?? 0} children`
+        : `    └ child of ${row.bundle.parent}`;
+    return [
+      style(theme, selected ? "accent" : "text", fitLine(identity, width)),
+      style(theme, selected ? "accent" : "muted", fitLine(relationship, width)),
+    ];
+  }
   const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
   if (!expanded) return [style(theme, selected ? "accent" : "text", fitLine(first, width))];
   const pathPrefix = "    └ ";
@@ -585,7 +641,13 @@ function rowLines(
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  return `${row.name}${run} · ${workflowSourceBadge(row.source)}`;
+  const bundle =
+    row.bundle === undefined
+      ? ""
+      : row.bundle.role === "parent"
+        ? ` · BUNDLE PARENT (${row.bundle.children?.length ?? 0} children)`
+        : ` · child of ${row.bundle.parent}`;
+  return `${row.name}${run} · ${workflowSourceBadge(row.source)}${bundle}`;
 }
 
 function catalogRowSummary(row: SelectableWorkflowRow): string {

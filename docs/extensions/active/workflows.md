@@ -231,7 +231,7 @@ remains the machine-readable run envelope, while
 `.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
-These twelve names are what `extensions/workflows/examples/` currently holds, and
+These thirteen names are what `extensions/workflows/examples/` currently holds, and
 that directory **is** the Package registry — a workflow is registered by the
 existence of its entry file, exactly like a project one. The set stays small
 because it is a public surface: `package.json#files` still decides what an
@@ -341,8 +341,13 @@ order:
 3. `~/.pi/workflows/<name>.workflow.mjs` — human source `User`.
 4. The packaged examples directory — human source `Package`. Every
    `<name>.workflow.mjs` under `extensions/workflows/examples/` is a Package
-   workflow; currently `live-smoke`, `plan`, `plan-implement`,
-   `requirements-grill`, `review`, and `review-fix`.
+   workflow. The current Package catalog has 13 entries: six standalone workflows
+   (`live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`, and
+   `review-fix`) plus the seven-entry `post-code-review` bundle. The bundle has one
+   parent entrypoint and six exact, directly addressable children:
+   `post-code-review-scope`, `post-code-review-boundaries`,
+   `post-code-review-simplicity`, `post-code-review-contracts`,
+   `post-code-review-necessity`, and `post-code-review-synthesis`.
 
 The first eligible source for a name wins and its exact resolved path is retained.
 Project and user directories are scanned on each resolve/list/info call, so adding or
@@ -783,19 +788,42 @@ would split workflow progress from `/agent drill` and fleet control.
 
 `/workflows list [query]` is a read model over the same first-wins resolver used
 by `/workflows run`: scan-based discovery for Project, User, and Package alike.
-It does not add a separate UI-only registry. Every current row is one selectable
-two-line block whose row identity leads with the workflow name and a compact
-source badge (`[P]`, `[U]`, or `[PKG]`); its detail line carries the one-line
-description and exact origin path. A path that still exceeds the terminal width
-is middle-truncated so its beginning and basename remain visible. Current and
-History stay adjacent when the terminal has spare rows; unused height remains
+It does not add a separate UI-only registry or change resolution semantics. The
+catalog displays current workflows in explicit `Project`, `User`, and `Package`
+sections, in the same precedence order used for execution. `History` remains a
+separate review-only section. Every current row is one selectable two-line block
+whose row identity leads with the workflow name and a compact source badge
+(`[P]`, `[U]`, or `[PKG]`); its detail line carries the one-line description and
+exact origin path. A path that still exceeds the terminal width is
+middle-truncated so its beginning and basename remain visible. Current sections
+and History stay adjacent when the terminal has spare rows; unused height remains
 below the lists instead of splitting them. Very low terminals use a compact
 one-line fallback.
-History rows are separate evidenced runs, not a deduplicated list of names: each
-row leads with the workflow name, then its `runId`, then the compact source
-badge, and carries the persisted target, source label, and retained snapshot
-availability. `[R]` means run history; `[P]`, `[U]`, and `[PKG]` are compact source
-badges, not alternative registries.
+
+The Package `post-code-review` entries form one display bundle without becoming
+one resolver target. The parent row is marked as the bundle entrypoint and shows
+its six exact children. Child rows retain their full saved names and are marked
+as components of `post-code-review`, so all seven entries remain directly
+addressable. Bundle metadata is attached only when the parent and all six
+children simultaneously resolve to Package rows. If a Project or User workflow
+shadows any exact member, the catalog suppresses the relationship instead of
+showing a mixed-source or incomplete bundle. `/workflows info <exact-name>` keeps
+the exact source and path available for both parent and children.
+
+RPC, print, and TUI hosts without the focused viewer receive the same model as a
+bounded passive projection. It includes a deterministic bundle summary,
+`/workflows info post-code-review` as the exact continuation, exact current and
+history row totals that remain true under any host line budget, and an explicit
+warning that details may be omitted. The compact form does not imply that omitted
+rows are unavailable, and it never derives an omitted-workflow count from dropped
+presentation lines.
+
+History rows are separate evidenced runs, not a deduplicated list of names or a
+bundle projection: each row leads with the workflow name, then its `runId`, then
+the compact source badge, and carries the persisted target, source label, and
+retained snapshot availability. `[R]` means run history; `[P]`, `[U]`, and
+`[PKG]` are compact source badges, not alternative registries. Bundle grouping
+never rewrites persisted run identity.
 
 In an interactive Pi TUI with custom UI support, Up/Down moves across every
 selectable current or history row and Enter opens the exact selected source in an

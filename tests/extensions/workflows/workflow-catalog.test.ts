@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
-import { renderOperatorBlock } from "../../../extensions/_shared/operator/operator-ui.js";
+import { renderOperatorBlock, renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
 import { parseRunCommand, workflowRunUsage } from "../../../extensions/workflows/command-parser.js";
 import { workflowArgumentCompletions } from "../../../extensions/workflows/command-completions.js";
 import {
@@ -313,6 +313,78 @@ describe("workflow operator catalog", () => {
     }
   });
 
+  it("exposes the complete post-code-review bundle in every catalog identity surface", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-bundle-"));
+    try {
+      const model = buildWorkflowCatalogModel(root, root);
+      const packageRows = model.current.filter((row) => row.source === "package");
+      const bundleNames = [
+        "post-code-review",
+        "post-code-review-scope",
+        "post-code-review-boundaries",
+        "post-code-review-simplicity",
+        "post-code-review-contracts",
+        "post-code-review-necessity",
+        "post-code-review-synthesis",
+      ];
+      expect(packageRows.filter((row) => bundleNames.includes(row.name)).map((row) => row.name)).toEqual(
+        expect.arrayContaining(bundleNames),
+      );
+      expect(model.current.find((row) => row.name === "post-code-review")?.bundle).toMatchObject({
+        version: 1,
+        role: "parent",
+        children: bundleNames.slice(1),
+      });
+      const parentRpc = renderOperatorBlockPlain(buildWorkflowInfoBlock(root, root, "post-code-review"), 80, {
+        maxLines: 10,
+      }).join("\n");
+      expect(parentRpc).toContain("Bundle: post-code-review parent");
+      expect(parentRpc).toContain("6 exact children");
+      for (const name of bundleNames.slice(1)) {
+        expect(model.current.find((row) => row.name === name)?.bundle).toMatchObject({
+          version: 1,
+          role: "child",
+          parent: "post-code-review",
+        });
+        const info = buildWorkflowInfoBlock(root, root, name);
+        expect(info.body?.join("\\n")).toContain(`target: name:${name}`);
+        expect(renderOperatorBlockPlain(info, 80, { maxLines: 10 }).join("\n")).toContain(
+          "Bundle: exact child of post-code-review",
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("suppresses the whole bundle relation when project or personal precedence shadows an exact member", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-incomplete-bundle-"));
+    const previousHome = process.env.HOME;
+    try {
+      const projectDir = path.join(root, ".pi", "workflows");
+      const home = path.join(root, "home");
+      const personalDir = path.join(home, ".pi", "workflows");
+      process.env.HOME = home;
+      mkdirSync(projectDir, { recursive: true });
+      mkdirSync(personalDir, { recursive: true });
+      writeFileSync(path.join(projectDir, "post-code-review-scope.workflow.mjs"), 'export default () => "project";\n');
+      writeFileSync(
+        path.join(personalDir, "post-code-review-contracts.workflow.mjs"),
+        'export default () => "personal";\n',
+      );
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.current.find((row) => row.name === "post-code-review-scope")?.source).toBe("project");
+      expect(model.current.find((row) => row.name === "post-code-review-contracts")?.source).toBe("personal");
+      expect(model.current.every((row) => row.bundle === undefined)).toBe(true);
+      expect(buildWorkflowInfoBlock(root, root, "post-code-review").body?.join("\n")).not.toContain("bundle:");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reads only a static description on the exported top-level meta literal", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-meta-"));
     const file = path.join(root, "safe.workflow.mjs");
@@ -460,7 +532,21 @@ describe("workflow operator catalog", () => {
 
       const compactBlock = buildWorkflowCatalogBlock(root, root, undefined, { compact: true });
       expect(compactBlock.controls).toEqual([`Run: ${workflowRunUsage()} · Filter: /workflows list <query>`]);
+      expect(compactBlock.metadata).toContain(
+        "Display order: Project → User → Package (does not change first-wins resolution)",
+      );
       const compactRows = compactBlock.body ?? [];
+      expect(compactRows).toContain("Bundle: post-code-review · 6 children · /workflows info post-code-review");
+      expect(compactRows).toContainEqual(expect.stringMatching(/^\+\d+ hidden workflow row\(s\);/u));
+      const rpcCatalog = renderOperatorBlockPlain(compactBlock, 80, { maxLines: 10 }).join("\n");
+      expect(rpcCatalog).toContain("Bundle: post-code-review");
+      expect(rpcCatalog).toContain("6 exact children");
+      const compactModel = buildWorkflowCatalogModel(root, root);
+      expect(rpcCatalog).toContain(
+        `${compactModel.current.length} current workflow(s) · ${compactModel.history.length} history row(s)`,
+      );
+      expect(rpcCatalog).toMatch(/details may be omitted by host line\s+budget/u);
+      expect(rpcCatalog).not.toContain("other workflow row(s)");
       expect(compactRows).toEqual(
         expect.arrayContaining([
           expect.stringContaining("same · run 20260101-000002-personal · [U] · historical run snapshot"),

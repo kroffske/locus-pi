@@ -404,6 +404,91 @@ ${skill[1] ?? ""}
     ).toEqual([]);
   });
 
+  it.each([
+    ["publishArtifact", 'dsl.publishArtifact("intent.md", "intent")'],
+    ["publishPrimaryArtifact", 'dsl.publishPrimaryArtifact("intent.md", "intent")'],
+    ["publishPrimaryFile", 'dsl.publishPrimaryFile("intent.md")'],
+  ])("allows an unchanged %s ref in the exact operator handoff continuation array", (_method, call) => {
+    expect(
+      standardWorkflowSourceShapeErrors(
+        standardSource(`export default async function run(dsl) {
+  const artifactRef = ${call};
+  await dsl.awaitOperator({
+    reason: "review required",
+    operatorHandoff: {
+      title: "Review",
+      questions: [{ kind: "text", id: "review", prompt: "What should change?" }],
+      continuationArtifactRefs: [artifactRef],
+    },
+  });
+  return true;
+}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [
+      "unrelated runtime value",
+      `const artifactRef = dsl.outputDir();
+  await dsl.awaitOperator({
+    reason: "review required",
+    operatorHandoff: {
+      title: "Review",
+      questions: [{ kind: "text", id: "review", prompt: "What should change?" }],
+      continuationArtifactRefs: [artifactRef],
+    },
+  });`,
+    ],
+    [
+      "unrelated operator handoff field",
+      `const artifactRef = dsl.publishArtifact("intent.md", "intent");
+  await dsl.awaitOperator({
+    reason: "review required",
+    operatorHandoff: {
+      title: artifactRef,
+      questions: [{ kind: "text", id: "review", prompt: "What should change?" }],
+      continuationArtifactRefs: [],
+    },
+  });`,
+    ],
+    [
+      "nested continuation element",
+      `const artifactRef = dsl.publishArtifact("intent.md", "intent");
+  await dsl.awaitOperator({
+    reason: "review required",
+    operatorHandoff: {
+      title: "Review",
+      questions: [{ kind: "text", id: "review", prompt: "What should change?" }],
+      continuationArtifactRefs: [[artifactRef]],
+    },
+  });`,
+    ],
+    [
+      "derived continuation element",
+      `const artifactRef = dsl.publishArtifact("intent.md", "intent");
+  await dsl.awaitOperator({
+    reason: "review required",
+    operatorHandoff: {
+      title: "Review",
+      questions: [{ kind: "text", id: "review", prompt: "What should change?" }],
+      continuationArtifactRefs: [\`\${artifactRef}\`],
+    },
+  });`,
+    ],
+  ])("rejects an invalid operator handoff artifact use: %s", (_label, body) => {
+    expect(
+      standardWorkflowSourceShapeErrors(
+        standardSource(`export default async function run(dsl) {
+  ${body}
+  return true;
+}`),
+      ),
+    ).toContain(
+      "standard profile forwards opaque semantic, model, file, host, and runtime values only as whole values",
+    );
+  });
+
   it("makes a raw request design-review-build and reserves design-only for explicit pauses", () => {
     const author = source(".agents/agents/workflow-author.md");
     expect(author).toContain("tools: read, search, find, write, edit, bash");

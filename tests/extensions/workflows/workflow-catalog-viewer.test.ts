@@ -101,6 +101,27 @@ describe("focused workflow catalog", () => {
     expect(lines[row + 1]).toContain(".workflow.mjs");
   });
 
+  it("keeps source sections and exact bundle hierarchy readable at narrow widths", () => {
+    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer } = createViewer(model, root, 48);
+
+    for (const width of [40, 48, 80]) {
+      const lines = viewer.render(width);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      const narrow = lines.join("\n");
+      expect(narrow).toContain("[P] Project");
+      expect(narrow).toContain("[U] User");
+      expect(narrow).toContain("[PKG] Package");
+      expect(narrow).toContain("post-code-review-necessity");
+      expect(narrow).toContain("child of post-code-review");
+      expect(narrow.toLowerCase()).toMatch(/bundle parent (?:· 6|\(6) children/u);
+    }
+    const rendered = viewer.render(80).join("\n");
+    expect(rendered).toContain("BUNDLE PARENT (6 children)");
+    expect(rendered).toContain("child of post-code-review");
+  });
+
   it("middle-truncates a catalog path while preserving its root and basename", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);

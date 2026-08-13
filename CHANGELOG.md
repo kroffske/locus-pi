@@ -6,6 +6,21 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The workflow catalog now separates Project, User, Package, and immutable run
+  history while presenting `post-code-review` as one explicit Package bundle.**
+  The external parent and all six exact child names remain independently
+  addressable through `/workflows info`; compact and no-UI projections disclose
+  exact current/history totals, possible detail omission, and the bundle details
+  affordance. This is a presentation-only read model and does not change
+  first-wins resolution or execution semantics.
+
+- **Standard workflows can attach their own published evidence to an operator
+  continuation.** Unchanged references returned by the three publication APIs
+  may now flow only as direct elements of
+  `awaitOperator.operatorHandoff.continuationArtifactRefs`; derived, nested,
+  foreign, or differently routed runtime values remain rejected, and the host
+  still verifies origin-run membership and artifact integrity.
+
 - **Modular post-code review now ships as an installable Package workflow.**
   `post-code-review` coordinates one scope child, three parallel audit children,
   one sequential necessity challenge, and one synthesis child from one shipped

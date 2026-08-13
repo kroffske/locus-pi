@@ -33,6 +33,7 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
+const publicReadme = readFileSync(path.join(root, "README.md"), "utf8");
 
 function recursiveTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -62,6 +63,12 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "review",
   "review-fix",
 ] as const;
+
+function publicReadmeWorkflowNames(): string[] {
+  const section = publicReadme.split("## Curated Package workflows\n")[1]?.split("\n## ")[0];
+  if (section === undefined) throw new Error("README is missing the Curated Package workflows section");
+  return [...section.matchAll(/^\| `([^`]+)`/gmu)].map((match) => match[1]!).sort();
+}
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -307,6 +314,14 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
+  it("keeps the public README workflow roster equal to the Package registry", () => {
+    expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
+    const prose = publicReadme.replace(/\s+/gu, " ");
+    expect(prose).toContain("thirteen curated Package workflows");
+    expect(prose).toContain("the thirteen curated workflows");
+    expect(prose).toContain("exactly the thirteen files above");
+  });
+
   it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
     const violations: string[] = [];

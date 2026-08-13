@@ -318,7 +318,7 @@ This installed-package command resolves the path from the project where it is
 run; it needs neither a consumer npm script nor `tsx`. The package ships a
 prebuilt ESM checker so Node never has to strip TypeScript under `node_modules`.
 Repository maintainers use `npm run check:workflow-source` with no path to check every `standard` entry
-already present in the twelve-workflow Package registry. Neither command discovers
+already present in the thirteen-workflow Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
 assessment or importing the module.
@@ -367,8 +367,15 @@ These are all rules enforced for `meta.profile: "standard"`:
   prompt, log, publication, scheduling, and return sinks, but may not be
   inspected, branched on, indexed, transformed, or embedded in `Error`.
   `outputDir()` may flow unchanged into `invokeWorkflow.outputDir`. Publication
-  references and host paths may flow whole into an agent/log/return. Void calls
-  are standalone effects and cannot be bound, nested, or returned as values.
+  references and host paths may flow whole into an agent/log/return. A reference
+  returned by `publishArtifact`, `publishPrimaryArtifact`, or
+  `publishPrimaryFile` may also appear unchanged as a direct array element only
+  at `awaitOperator({ operatorHandoff: { continuationArtifactRefs: [...] } })`.
+  Another runtime value, property, nesting layer, or derived form remains
+  rejected. This source-shape rule checks only the static producer and sink; the
+  host runtime verifies that every reference belongs to the terminal source run
+  and appears in its terminal artifact projection. Void calls are standalone
+  effects and cannot be bound, nested, or returned as values.
 
 - Only the first run parameter supplies DSL bindings. The second parameter is
   semantic input, never another DSL object.

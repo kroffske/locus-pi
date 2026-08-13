@@ -6,7 +6,7 @@ parallelism, the shared output directory, child identity, and final publication.
 
 > **External entry point:**
 > [`post-code-review.workflow.mjs`](./post-code-review.workflow.mjs). The other
-> five workflow files are source-bound child components coordinated by this
+> six workflow files are source-bound child components coordinated by this
 > parent.
 
 The review uses several complementary perspectives rather than one repeated
@@ -71,7 +71,7 @@ resume reuses the exact source run and workspace.
 
 All seven files are Package workflow entries because the Package registry scans
 one directory level below `extensions/workflows/examples/`. The parent is the
-intended external entry. Its five `invokeWorkflow({ packageName })` edges bind
+intended external entry. Its six `invokeWorkflow({ packageName })` edges bind
 children to these installed Package files. A project or personal workflow with
 the same name therefore cannot silently replace one child; a shadow causes the
 run to fail before the child executes.
