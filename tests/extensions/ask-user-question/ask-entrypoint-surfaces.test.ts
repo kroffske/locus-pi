@@ -171,7 +171,7 @@ describe("ask-user-question uncovered surfaces", () => {
     h.selectQueue.push("beta");
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "Which release?",
       kind: "select",
       options: ["alpha", "beta"],
@@ -191,7 +191,7 @@ describe("ask-user-question uncovered surfaces", () => {
     h.selectQueue.push("[ ] red", "Done selecting");
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "Which colors?",
       kind: "multi-select",
       options: ["red", "blue"],
@@ -209,7 +209,7 @@ describe("ask-user-question uncovered surfaces", () => {
     h.ctx.ui.editor = editor as never;
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "Edit the note",
       kind: "editor",
       default: ["one", "two"],
@@ -228,10 +228,11 @@ describe("ask-user-question uncovered surfaces", () => {
     h.ctx.hasUI = false;
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", { question: "Answer?", kind: "text" });
+    const result = await runTool(h, "ask", { question: "Answer?", kind: "text" });
 
     expect(result.isError).toBe(true);
-    expect(result.details).toMatchObject({ status: "unavailable", reason: "no-ui", source: "askUserQuestion" });
+    expect(result.details).toMatchObject({ status: "unavailable", reason: "no-ui", source: "ask" });
+    expect(h.tools.has("askUserQuestion")).toBe(false);
     expect(h.entries).toEqual([]);
   });
 });

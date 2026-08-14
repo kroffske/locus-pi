@@ -474,7 +474,7 @@ describe("ask-user-question decision journal", () => {
     h.ctx.ui.input = input as never;
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "Answer?",
       kind: "text",
       sensitivity: "public",
@@ -491,22 +491,22 @@ describe("ask-user-question decision journal", () => {
     h.ctx.ui.input = async () => ({ label: "not-a-dialog-result" }) as never;
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "What should happen?",
       kind: "text",
     });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("Ask UI failed");
-    expect(result.details).toMatchObject({ status: "error", source: "askUserQuestion" });
+    expect(result.details).toMatchObject({ status: "error", source: "ask" });
     expect(h.entries).toEqual([]);
   });
 
-  it("records legacy askUserQuestion answers without exposing secret values", async () => {
+  it("records rich ask answers without exposing secret values", async () => {
     const h = createHarness();
     askUserQuestion(h.pi);
 
-    const result = await runTool(h, "askUserQuestion", {
+    const result = await runTool(h, "ask", {
       question: "Secret?",
       kind: "text",
       default: "token-value",
@@ -518,11 +518,11 @@ describe("ask-user-question decision journal", () => {
     expect(h.entries[0]).toMatchObject({
       type: "decision",
       data: {
-        decisionId: "askuserquestion-q-b4826f0a",
+        decisionId: "ask-q-b4826f0a",
         question: "Secret?",
         answer: "[REDACTED:secret-answer]",
         status: "answered",
-        metadata: { source: "askUserQuestion", kind: "text", sensitivity: "secret" },
+        metadata: { source: "ask", kind: "text", sensitivity: "secret" },
       },
     });
   });

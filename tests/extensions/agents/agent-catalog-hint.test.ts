@@ -143,8 +143,7 @@ describe("agent catalog hint injection", () => {
     expect(description).toContain("Agent catalog name.");
     expect(description).toContain("Available agents (name — description):");
     expect(description).toContain("shipper — Project release runner");
-    // The back-compat alias shares one schema object, so it cannot drift apart.
-    expect(injectedAgentDescription(h.tools.get("task")!.parameters)).toBe(description);
+    expect(h.tools.has("task")).toBe(false);
 
     const lines = catalogLines(description);
     const entries = lines.filter((line) => !line.startsWith("+"));

@@ -87,7 +87,6 @@ extensions/_shared/agent-runtime/agent-read-only-policy.ts
 extensions/_shared/agent-runtime/agent-runner.ts
 extensions/_shared/agent-runtime/agent-sdk-host.ts
 extensions/_shared/agent-runtime/agent-system-prompt.ts
-extensions/_shared/agent-runtime/agent-workload-proof.ts
 extensions/_shared/agent-runtime/agents.ts
 extensions/_shared/agent-runtime/fleet-menu.ts
 extensions/_shared/host/error-text.ts
@@ -137,7 +136,6 @@ extensions/agents/run-launcher.ts
 extensions/agents/session-viewer.ts
 extensions/agents/task-tool.ts
 extensions/agents/unknown-agent-report.ts
-extensions/agents/workload-proof-tool.ts
 extensions/ask-user-question/ask-tool.ts
 extensions/ask-user-question/human-control.ts
 extensions/ask-user-question/index.ts
@@ -164,6 +162,7 @@ extensions/loop/command-router.ts
 extensions/loop/continuation-launcher.ts
 extensions/loop/index.ts
 extensions/loop/loop-continuation.ts
+extensions/loop/loop-controller.ts
 extensions/loop/loop-control-tool.ts
 extensions/loop/manifest.json
 extensions/loop/operator-surface.ts

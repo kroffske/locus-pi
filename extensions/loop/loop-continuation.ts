@@ -1,5 +1,5 @@
 /**
- * extensions/loop/loop-continuation.ts — What `/loop` and `loopControl` know about
+ * extensions/loop/loop-continuation.ts — What `/loop` and the `loop` tool know about
  * their two continuation sources.
  *
  * Reports which source (goal, workflow, review) can produce a bounded next prompt

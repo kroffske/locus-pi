@@ -70,7 +70,7 @@ export async function askOmpCompatible(
         { ...question, question: title },
         labels,
         Boolean(question.multi),
-        timeoutMs,
+        question.timeoutMs ?? timeoutMs,
         signal,
         askOptions,
       );

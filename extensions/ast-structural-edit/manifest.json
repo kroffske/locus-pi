@@ -3,7 +3,7 @@
   "name": "AST Structural Edit",
   "agent": {
     "name": "extension-ast-structural-edit",
-    "description": "Search, preview, approve, stale-check, apply, and resolve AST edits, including ast_apply."
+    "description": "Search, preview, approve, stale-check, apply, and resolve AST edits."
   },
   "version": "0.1.0",
   "defaultEnabled": true,
@@ -18,7 +18,7 @@
   "stateUsed": ["in-memory pending AST previews"],
   "tier": "core-owned",
   "provides": {
-    "tools": ["ast_grep", "ast_edit", "resolve", "ast_apply"],
+    "tools": ["ast_grep", "ast_edit", "resolve"],
     "commands": [],
     "hooks": []
   },
@@ -32,11 +32,6 @@
       },
       {
         "name": "resolve",
-        "taxonomy": ["artifact-write"],
-        "persistent": ["filesystem writes after Pi approval and stale-check"]
-      },
-      {
-        "name": "ast_apply",
         "taxonomy": ["artifact-write"],
         "persistent": ["filesystem writes after Pi approval and stale-check"]
       }

@@ -131,7 +131,7 @@ describe("agent task tool execution", () => {
     h.pi.setThinkingLevel?.("high");
     agents(h.pi);
 
-    const result = await runTool(h, "task", {
+    const result = await runTool(h, "spawn_agent", {
       task: "Return done",
       title: "Show model",
     });
@@ -139,7 +139,7 @@ describe("agent task tool execution", () => {
     expect(result.isError).not.toBe(true);
     expect(result.content).toEqual([{ type: "text", text: "  done\nwith details\n" }]);
     expect(result.details).toMatchObject({
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       requestedAgent: "task",
       agent: "task",
       taskCount: 1,
@@ -175,7 +175,7 @@ describe("agent task tool execution", () => {
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    const result = await runTool(h, "task", { task: "Return nothing" });
+    const result = await runTool(h, "spawn_agent", { task: "Return nothing" });
 
     expect(result.isError).toBe(true);
     expect(result.content).toEqual([{ type: "text", text: "Agent result text is empty." }]);

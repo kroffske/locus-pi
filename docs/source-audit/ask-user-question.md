@@ -1,6 +1,6 @@
 # Source audit: ask-user-question
 
-Decision: copy-after-audit. The current extension ports the OMP `ask` tool contract into `locus-pi` and uses Pi custom UI when available; `askUserQuestion` remains a compatibility alias.
+Decision: copy-after-audit. The current extension exposes one `ask` tool. It accepts the OMP `questions[]` shape and the former rich single-question shape under the same canonical name.
 
 OMP source evidence:
 
@@ -24,7 +24,7 @@ Ported contract:
 - Single-question results expose `selectedOptions` and optional `customInput`.
 - Multi-question results expose `details.results[]`.
 - Cancellation returns an error result locally and records a cancelled Locus `decision` entry.
-- Legacy `askUserQuestion` preserves old `sensitivity` / redaction behavior for compatibility.
+- Rich single-question `ask` preserves `sensitivity` / redaction behavior without a second public tool name.
 - Local Locus runtime records answers and cancellations as durable `decision` entries through `extensions/ask-user-question/human-control.ts`.
 - When `ctx.ui.custom` is unavailable, the extension falls back to `select` / `editor` and loses the bounded checklist/navigation UI.
 - Single-question TUI calls and workflow handoffs share one narrow select/text

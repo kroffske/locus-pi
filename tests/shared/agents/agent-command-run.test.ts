@@ -202,7 +202,7 @@ describe("agent command run (unified live surface)", () => {
     agents(h.pi);
 
     // LLM tool trigger (the primary user scenario).
-    await runTool(h, "task", { agent: "reviewer", task: "Review this" });
+    await runTool(h, "spawn_agent", { agent: "reviewer", task: "Review this" });
     const toolRow = reviewerRow(agentLiveStore)!;
     const toolLine = renderRow(toolRow);
     agentLiveStore.reset();
@@ -237,7 +237,7 @@ describe("agent command run (unified live surface)", () => {
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    const toolResult = await runTool(h, "task", { agent: "reviewer", task: "Return JSON-looking text" });
+    const toolResult = await runTool(h, "spawn_agent", { agent: "reviewer", task: "Return JSON-looking text" });
     const toolRow = reviewerRow(agentLiveStore)!;
     expect(toolResult.isError).not.toBe(true);
     expect(toolRow).toMatchObject({ status: "done", finalAnswer: text });
@@ -340,13 +340,13 @@ describe("agent command run (unified live surface)", () => {
     const h: Harness = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    const taskResult = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
+    const taskResult = await runTool(h, "spawn_agent", { agent: "reviewer", task: "Review this" });
 
     // Legacy alias remains gone.
     expect(h.tools.has("runAgent")).toBe(false);
     expect(taskResult.isError).toBe(true);
     expect(taskResult.details).toMatchObject({
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       hostCapability: "agent-sdk-session-unavailable",
       toolExecutorAvailable: false,
     });
@@ -361,7 +361,7 @@ describe("agent command run (unified live surface)", () => {
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     agents(h.pi);
 
-    await runTool(h, "task", {
+    await runTool(h, "spawn_agent", {
       agent: "reviewer",
       task: "Review this",
       title: "review auth middleware",
@@ -497,7 +497,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     await h.ctx.settings?.set("modelRoles", { task: "test/fast", default: "test/fast" });
     agents(h.pi);
 
-    const result = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
+    const result = await runTool(h, "spawn_agent", { agent: "reviewer", task: "Review this" });
 
     expect(result.isError).not.toBe(true);
     expect(captured).toHaveLength(1);

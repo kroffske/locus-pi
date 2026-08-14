@@ -1334,14 +1334,14 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.status).toBe("completed");
     expect(capturedOptions).toMatchObject({
       cwd: "/repo",
-      excludeTools: ["spawn_agent", "task"],
+      excludeTools: ["spawn_agent"],
       appendSystemPrompt: expect.stringContaining("Review for correctness first."),
     });
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
       '<active_agent name="reviewer"/>',
     );
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
-      "Do not call `spawn_agent` or `task` directly",
+      "Do not call `spawn_agent` directly",
     );
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain("`workflow`");
     expect((capturedOptions as SdkCreateSessionOptionsLike | undefined)?.noTools).toBeUndefined();
@@ -1564,7 +1564,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
 
     expect(result.status).toBe("completed");
     expect(capturedOptions?.tools).toBeUndefined();
-    expect(capturedOptions?.excludeTools).toEqual(["spawn_agent", "task"]);
+    expect(capturedOptions?.excludeTools).toEqual(["spawn_agent"]);
     expect(capturedOptions?.excludeTools).not.toContain("workflow");
   });
 
@@ -1596,7 +1596,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.status).toBe("completed");
     expect(capturedOptions?.tools).toEqual(["read", "git_read", "grep", "find"]);
     expect(capturedOptions?.excludeTools).toEqual(
-      expect.arrayContaining(["spawn_agent", "task", "workflow", "bash", "edit", "write", "unknown"]),
+      expect.arrayContaining(["spawn_agent", "workflow", "bash", "edit", "write", "unknown"]),
     );
     expect(capturedOptions?.tools).not.toEqual(expect.arrayContaining(["bash", "write", "edit", "workflow"]));
 

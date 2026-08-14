@@ -35,12 +35,6 @@ const GoalToolParams = Type.Object({
   token_budget: Type.Optional(Type.Integer({ description: "Token budget for op=create", minimum: 1 })),
 });
 
-const GoalContinueParams = Type.Object({
-  summary: Type.Optional(Type.String({ description: "Short completion summary", maxLength: 2000 })),
-  nextStep: Type.Optional(Type.String({ description: "Bounded next step", maxLength: 2000 })),
-  remainingRisks: Type.Optional(Type.Array(Type.String({ maxLength: 500 }), { maxItems: 10 })),
-});
-
 function goalToolApproval(args: unknown) {
   const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   return record.op === "get" ? "read" : "write";

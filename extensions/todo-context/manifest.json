@@ -3,7 +3,7 @@
   "name": "todo-context",
   "agent": {
     "name": "extension-todo-context",
-    "description": "Manage session todos, todo_write, bounded continuation, and /todo."
+    "description": "Read and manage session todos with todo_read, todo_write, bounded continuation, and /todo."
   },
   "version": "0.1.0",
   "defaultEnabled": true,
@@ -35,7 +35,7 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": ["todo_write"],
+    "tools": ["todo_read", "todo_write"],
     "commands": ["todo"],
     "hooks": ["agent_settled"]
   },

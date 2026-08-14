@@ -1045,7 +1045,7 @@ async function runChildSession(
     : undefined;
   const effectiveTools =
     readOnlyCapabilities?.tools ?? (request.allowedTools.includes("*") ? undefined : [...request.allowedTools]);
-  const excludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent", "task"];
+  const excludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent"];
   const sessionOptions: SdkCreateSessionOptionsLike = {
     cwd,
     // Write-capable children may run `workflow`, but no child can recursively
@@ -1875,7 +1875,7 @@ function finiteNonNegativeNumber(value: unknown): number | undefined {
 function appendDirectSpawnBoundary(systemPrompt: string | undefined): string {
   const boundary = [
     "# Delegation boundary",
-    "Do not call `spawn_agent` or `task` directly; direct sub-agent nesting is disabled by the host.",
+    "Do not call `spawn_agent` directly; direct sub-agent nesting is disabled by the host.",
     "If multi-agent orchestration is necessary, you may author and run a workflow through `workflow` when that tool is available.",
   ].join("\n");
   return systemPrompt === undefined || systemPrompt.trim() === "" ? boundary : `${systemPrompt}\n\n${boundary}`;

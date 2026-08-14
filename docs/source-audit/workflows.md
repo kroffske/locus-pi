@@ -392,7 +392,7 @@ or borrowed runtime implementation was identified for this source-audit slice.
   boundary code, not borrowed behavior.
 - `extensions/workflows/runtime/workflow-agent-bridge.ts` routes workflow `agent()` calls
   through the same agent boundary and host SDK child-session path used by the
-  `task` tool. Catalog definitions resolve project → user → bundled, first-wins
+  `spawn_agent` tool. Catalog definitions resolve project → user → bundled, first-wins
   by agent name; a missing role is an explicit failed result. The executor model
   is `per-call opts.model` → `per-call opts.modelRole` → the agent's frontmatter
   tier → `ctx.model`, resolved through `ctx.modelRegistry.find`

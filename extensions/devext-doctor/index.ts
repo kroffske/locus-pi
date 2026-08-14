@@ -1,6 +1,5 @@
-import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
-import { errorResult, getCommandText, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
 import { idsByCurrentStatus, idsByOwnershipStatus } from "./extension-inventory.js";
 import {
@@ -10,56 +9,12 @@ import {
 } from "../_shared/project/task-bridge.js";
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { errorMessage } from "../_shared/host/error-text.js";
 import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
 
-const ReloadParams = Type.Object({});
 const DEVEXT_WIDGET_KEY = "devext-doctor";
 const DOCTOR_PREVIEW_LIMIT = 2;
 
 export default function devextDoctor(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "devext_reload",
-    description:
-      "Hot-reload Pi extensions, skills, prompts, themes, and context files when this host exposes a direct reload method to tool contexts; otherwise fail closed with manual reload instructions.",
-    parameters: ReloadParams,
-    approval: "exec",
-    async execute(_toolCallId, _params, _signal, _update, ctx) {
-      const reload = reloadMethod(ctx);
-      if (reload === undefined) {
-        return errorResult(
-          [
-            "devext_reload cannot reload this running Pi process from a tool context.",
-            "This host exposes ctx.reload() only to command handlers, and slash commands injected by tools are delivered as chat in this environment.",
-            "Run /devext reload or the built-in /reload from the interactive command input, or restart Pi.",
-          ].join("\n"),
-          {
-            owner: "devext-doctor",
-            requestedSurface: "devext_reload",
-            status: "blocked",
-            hostCapability: "tool-context-reload-unavailable",
-            queuedCommand: false,
-          },
-        );
-      }
-      try {
-        ctx.ui.notify("Reloading Pi runtime via tool ctx.reload().", "info");
-        await reload();
-      } catch (error) {
-        return errorResult(`Could not reload Pi runtime: ${errorMessage(error)}`, {
-          owner: "devext-doctor",
-          requestedSurface: "devext_reload",
-          status: "failed",
-        });
-      }
-      return textResult("Reloaded Pi runtime via tool ctx.reload().", {
-        owner: "devext-doctor",
-        requestedSurface: "devext_reload",
-        status: "completed",
-        queuedCommand: false,
-      });
-    },
-  });
   registerCommandWithUiLifecycle(
     pi,
     {
@@ -71,7 +26,7 @@ export default function devextDoctor(pi: ExtensionAPI): void {
     },
     {
       description:
-        "Developer extension package doctor: /devext doctor | /devext task-lifecycle <task-id> <target-status> | /devext reload.",
+        "Developer extension package doctor: /devext doctor | /devext task-lifecycle <task-id> <target-status>.",
       handler: async (args, ctx) => {
         const raw = getCommandText(args).trim();
         if (raw === "" || raw === "doctor") {
@@ -80,11 +35,6 @@ export default function devextDoctor(pi: ExtensionAPI): void {
         }
 
         const [action, ...rest] = raw.split(/\s+/);
-        if (action === "reload" || action === "hot-reload") {
-          await reloadRuntime(ctx);
-          return;
-        }
-
         if (action === "task-lifecycle") {
           const [taskId, targetStatus] = rest;
           if (taskId === undefined || targetStatus === undefined) {
@@ -114,49 +64,12 @@ export default function devextDoctor(pi: ExtensionAPI): void {
             ctx.mode === "tui"
               ? `Unknown /devext action: ${action ?? raw}`
               : compactDevextLine(`Unknown /devext action: ${action ?? raw}`),
-          metadata: ["No diagnostic, task mutation, or reload was attempted."],
-          controls: ["Usage: /devext doctor · /devext task-lifecycle <task-id> <target-status> · /devext reload"],
+          metadata: ["No diagnostic or task mutation was attempted."],
+          controls: ["Usage: /devext doctor · /devext task-lifecycle <task-id> <target-status>"],
         });
       },
     },
   );
-}
-
-async function reloadRuntime(ctx: ExtensionCommandContext): Promise<void> {
-  const compact = ctx.mode !== "tui";
-  if (typeof ctx.reload !== "function") {
-    setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
-      type: "WARN",
-      subject: "Pi runtime reload",
-      primary: "Reload is unavailable on this host.",
-      metadata: ["Host capability: ctx.reload() is not exposed."],
-      controls: ["Recovery: run /reload manually or restart Pi."],
-    });
-    return;
-  }
-  setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
-    type: "RUN",
-    subject: "Pi runtime reload",
-    primary: "Reload requested through host ctx.reload().",
-    metadata: ["Pi owns reload completion; this old command frame is not completion proof."],
-  });
-  try {
-    await ctx.reload();
-  } catch (error) {
-    setOperatorWidget(ctx, DEVEXT_WIDGET_KEY, {
-      type: "ERROR",
-      subject: "Pi runtime reload",
-      primary: "Reload failed.",
-      body: [compact ? compactDevextLine(`Reason: ${errorMessage(error)}`) : `Reason: ${errorMessage(error)}`],
-      controls: ["Recovery: run /reload manually or restart Pi."],
-    });
-  }
-}
-
-function reloadMethod(ctx: unknown): (() => Promise<void> | void) | undefined {
-  if (typeof ctx !== "object" || ctx === null) return undefined;
-  const candidate = (ctx as { reload?: unknown }).reload;
-  return typeof candidate === "function" ? () => candidate.call(ctx) as Promise<void> | void : undefined;
 }
 
 function doctorBlock(compact = false): OperatorBlock {
@@ -192,7 +105,7 @@ function doctorBlock(compact = false): OperatorBlock {
         "Evidence boundary: inventory/manifests snapshot only; not runtime proof.",
         "Details: docs/extension-index.md; manifests under extensions/**",
       ],
-      controls: ["Actions: /devext task-lifecycle <id> <status> · /devext reload"],
+      controls: ["Action: /devext task-lifecycle <id> <status>"],
     };
   }
   return {
@@ -216,7 +129,7 @@ function doctorBlock(compact = false): OperatorBlock {
       "Cleanup: clears on next unrelated input.",
       "Details: docs/extension-index.md; manifests under extensions/**",
     ],
-    controls: ["Actions: /devext task-lifecycle <task-id> <target-status> · /devext reload"],
+    controls: ["Action: /devext task-lifecycle <task-id> <target-status>"],
   };
 }
 

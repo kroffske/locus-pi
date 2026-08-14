@@ -16,7 +16,7 @@ License note: OMP checkout is MIT-licensed. Local `todo_write` ports core mutati
 
 Ported contract:
 
-- Primary tool name is `todo_write`.
+- `todo_write` is the mutation tool; `todo_read` exposes the same restored state without appending or mutating entries.
 - Slash command `/todo` supports show, `copy` as Markdown print, `export` as deterministic Markdown output, `append`, `start`, `done`, `drop`, `rm`, `edit`, explicit task seeding via `/todo from-task <task-id>`, and explicit completion-note writeback via `/todo completion-note [--yes] <task-id>` through the Pi editor API.
 - `/todo edit` round-trips OMP-style Markdown checklist markers and blockquote notes.
 - Supported ops are `init`, `start`, `done`, `drop`, `rm`, `append`, and `note`.

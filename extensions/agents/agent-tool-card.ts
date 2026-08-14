@@ -1,6 +1,6 @@
 /**
  * extensions/agents/agent-tool-card.ts — transcript card for ONE spawned agent
- * (`spawn_agent` / `task` tool call). Each launched agent owns its own block in
+ * (`spawn_agent` tool call). Each launched agent owns its own block in
  * the main window: a LOCUS rail with the agent's petname, live status, the task
  * title it is working on, and elapsed time — and, when the child returns text,
  * that answer rendered under the row marked with a left bar so it reads as the

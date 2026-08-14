@@ -157,7 +157,7 @@ describe("agents discovery", () => {
     await h.commands.get("agent")!.handler("inspect reviewer", h.ctx);
     const inspect = h.widgets.get("agents") ?? "";
     const inspectOptions = h.widgetOptions.get("agents");
-    const runResult = await runTool(h, "task", { agent: "reviewer", task: "Review this" });
+    const runResult = await runTool(h, "spawn_agent", { agent: "reviewer", task: "Review this" });
 
     expect(list).toContain("[VIEW]");
     expect(list).toContain("Agent catalog");
@@ -175,7 +175,7 @@ describe("agents discovery", () => {
     expect(runResult.isError).toBe(true);
     expect(runResult.details).toMatchObject({
       owner: "agents-catalog",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       hostCapability: "agent-sdk-session-unavailable",
       toolExecutorAvailable: false,
     });
@@ -193,9 +193,9 @@ describe("agents discovery", () => {
     const h = createHarness(project);
     agents(h.pi);
 
-    const omitted = await runTool(h, "task", { task: "Run default" });
-    const defaultAlias = await runTool(h, "task", { agent: "default", task: "Run default" });
-    const generalAlias = await runTool(h, "task", { agent: "general", task: "Run general" });
+    const omitted = await runTool(h, "spawn_agent", { task: "Run default" });
+    const defaultAlias = await runTool(h, "spawn_agent", { agent: "default", task: "Run default" });
+    const generalAlias = await runTool(h, "spawn_agent", { agent: "general", task: "Run general" });
 
     expect(omitted.details).toMatchObject({ requestedAgent: "task", agent: "task" });
     expect(defaultAlias.details).toMatchObject({ requestedAgent: "default", agent: "task", aliasApplied: "default" });
@@ -213,7 +213,7 @@ describe("agents discovery", () => {
     const h = createHarness(project);
     agents(h.pi);
 
-    const result = await runTool(h, "task", { agent: "general", task: "Run general" });
+    const result = await runTool(h, "spawn_agent", { agent: "general", task: "Run general" });
 
     expect(result.details).toMatchObject({ requestedAgent: "general", agent: "general" });
     expect(result.details).not.toMatchObject({ aliasApplied: "general" });
@@ -230,7 +230,7 @@ describe("agents discovery", () => {
     const h = createHarness(project);
     agents(h.pi);
 
-    const result = await runTool(h, "task", { agent: "missing", task: "Run missing" });
+    const result = await runTool(h, "spawn_agent", { agent: "missing", task: "Run missing" });
 
     const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
     expect(result.isError).toBe(true);
@@ -243,7 +243,7 @@ describe("agents discovery", () => {
     expect(text).toContain("Run /agent list");
     expect(result.details).toMatchObject({
       owner: "agents-catalog",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       status: "blocked",
       errorCode: "unknown-agent",
       requestedAgent: "missing",
@@ -259,14 +259,14 @@ describe("agents discovery", () => {
     const content = JSON.parse(artifact.content) as Record<string, unknown>;
     expect(artifact.metadata).toMatchObject({
       source: "agents-catalog",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       errorCode: "unknown-agent",
       requestedAgent: "missing",
     });
     expect(content).toMatchObject({
       version: "locus.agent.unknown-agent.v1",
       status: "blocked",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       requestedAgent: "missing",
     });
   });
@@ -282,25 +282,20 @@ describe("agents discovery", () => {
     const h = createHarness(project);
     agents(h.pi);
 
-    // Both tools are registered and share the same parameter spec.
+    // One canonical tool is registered; the duplicate alias is absent.
     expect(h.tools.has("spawn_agent")).toBe(true);
-    expect(h.tools.has("task")).toBe(true);
-    expect(h.tools.get("spawn_agent")?.parameters).toBe(h.tools.get("task")?.parameters);
+    expect(h.tools.has("task")).toBe(false);
 
-    // spawn_agent reports the same requestedSurface/requestedAgent shape as task, so
-    // existing detail-shape consumers keep working regardless of which name was called.
     const viaSpawn = await runTool(h, "spawn_agent", { agent: "missing", task: "Run missing" });
-    const viaTask = await runTool(h, "task", { agent: "missing", task: "Run missing" });
 
     expect(viaSpawn.isError).toBe(true);
     expect(viaSpawn.details).toMatchObject({
       owner: "agents-catalog",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       status: "blocked",
       errorCode: "unknown-agent",
       requestedAgent: "missing",
     });
-    expect(viaSpawn.details?.requestedSurface).toBe(viaTask.details?.requestedSurface);
   });
 });
 

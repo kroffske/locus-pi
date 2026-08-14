@@ -174,7 +174,6 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "agent-runner",
     "agent-sdk-host",
     "agent-system-prompt",
-    "agent-workload-proof",
     "fleet-menu",
   ],
 };

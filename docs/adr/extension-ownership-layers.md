@@ -49,13 +49,13 @@ than from a table in a script.
 - **`agent-runtime`** — the shared child-agent execution stack: catalog discovery,
   the run boundary and SDK session host, live rows, panel and transcript, the
   read-only tool policy, petnames, the system prompt and its context extras,
-  evidence evaluation, the closed failure vocabulary, workload proof, and the
+  evidence evaluation, the closed failure vocabulary, and the
   fleet menu.
   `agents`, `agent-context-extras`, `agent-evidence-evaluator`,
   `agent-execution-prompt`, `agent-executor-host`, `agent-failure-cause`,
   `agent-live-panel`, `agent-live-transcript`, `agent-names`,
   `agent-read-only-policy`, `agent-runner`, `agent-sdk-host`,
-  `agent-system-prompt`, `agent-workload-proof`, `fleet-menu`.
+  `agent-system-prompt`, `fleet-menu`.
 
 `agent-runtime` is the layer most likely to be mistaken for feature code. It stays
 shared, rather than moving under `extensions/agents/`, because `extensions/workflows/`

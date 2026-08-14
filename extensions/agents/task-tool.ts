@@ -1,8 +1,6 @@
 /**
- * extensions/agents/task-tool.ts — the spawn-a-subagent tool, registered under two
- * names: the model-friendly primary `spawn_agent` and the back-compat alias `task`.
- * Both route through the same createAgentSession host + honesty-gate and report
- * requestedSurface:"task" internally, so only the registered tool name differs.
+ * extensions/agents/task-tool.ts — the canonical spawn-a-subagent tool.
+ * It routes through the createAgentSession host + honesty gate.
  */
 import { agentLiveStore, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
@@ -66,18 +64,6 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
     renderResult: renderAgentToolResultCard,
     execute: spawnAgentExecute,
   });
-  pi.registerTool({
-    name: "task",
-    description:
-      "Run one local .agents catalog agent on one task in a headless child agent session. Successful content is the child's exact final text.",
-    parameters: TaskParams,
-    approval: "exec",
-    formatApprovalDetails: taskApprovalDetails,
-    renderShell: "self",
-    renderCall: () => new EmptyAgentToolCallComponent(),
-    renderResult: renderAgentToolResultCard,
-    execute: spawnAgentExecute,
-  });
 }
 
 function taskApprovalDetails(args: unknown): string[] {
@@ -87,7 +73,7 @@ function taskApprovalDetails(args: unknown): string[] {
 }
 
 /**
- * Real single-task execution path for the `task` tool. One invocation spawns one
+ * Real single-task execution path for the `spawn_agent` tool. One invocation spawns one
  * genuine headless child agent session through the SDK host (the tool-context executor),
  * routed through the same `executeAgentRunBoundary` as the /agent command. Falls
  * back to the honest fail-closed `sdkUnavailableResult` surface only when the SDK
@@ -105,7 +91,7 @@ async function runTaskTool(
 ) {
   const resolution = resolveAgentSelection(agentName);
   if (resolution === undefined) {
-    const report = createUnknownAgentReport(ctx, "task", agentName);
+    const report = createUnknownAgentReport(ctx, "spawn_agent", agentName);
     return errorResult(report.text, report.details);
   }
   const { agent, requestedAgent, resolvedAgent, aliasApplied } = resolution;
@@ -114,8 +100,10 @@ async function runTaskTool(
   const modelRoleResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
   const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution.assignment });
   const hasUI = ctx.hasUI === true;
-  const panel = hasUI ? installWorkflowProgress(ctx, "agents", `task ${resolvedAgent}`, "task") : undefined;
-  const rowId = `task:${resolvedAgent}:${nextAgentRunSequence()}`;
+  const panel = hasUI
+    ? installWorkflowProgress(ctx, "agents", `spawn_agent ${resolvedAgent}`, "spawn_agent")
+    : undefined;
+  const rowId = `spawn_agent:${resolvedAgent}:${nextAgentRunSequence()}`;
   const resolvedTitle = resolveAgentTitle(title, "", task);
   let boundary: Awaited<ReturnType<typeof runAgentLiveTask>>;
   // Pin the "agents" progress key for the duration of the live run so a chat
@@ -175,7 +163,7 @@ async function runTaskTool(
   const finishedRow = agentLiveStore.rows.get(rowId);
   const details = {
     owner: "agents-catalog",
-    requestedSurface: "task",
+    requestedSurface: "spawn_agent",
     requestedAgent,
     agent: resolvedAgent,
     ...(aliasApplied === undefined ? {} : { aliasApplied }),
@@ -216,7 +204,7 @@ function diagnosticsInclude(diagnostics: unknown, token: string): boolean {
 }
 
 /**
- * Honest fail-closed surface for the `task` tool when the installed Pi host
+ * Honest fail-closed surface for the `spawn_agent` tool when the installed Pi host
  * genuinely cannot spawn a child agent session (e.g. an older host that does not
  * export `createAgentSession`, or a stripped SDK namespace). The reason reflects
  * the real substrate gap and reuses the per-task diagnostics already gathered —
@@ -234,7 +222,7 @@ function sdkUnavailableResult(
     ].join("\n"),
     {
       owner: "agents-catalog",
-      requestedSurface: "task",
+      requestedSurface: "spawn_agent",
       requestedAgent: resolution.requestedAgent,
       agent: resolution.resolvedAgent,
       ...(resolution.aliasApplied === undefined ? {} : { aliasApplied: resolution.aliasApplied }),
