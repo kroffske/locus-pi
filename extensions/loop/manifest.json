@@ -3,7 +3,7 @@
   "name": "loop",
   "agent": {
     "name": "extension-loop",
-    "description": "Continue bounded goals and workflows through /loop and loopControl with explicit state."
+    "description": "Continue bounded goals and workflows through the canonical loop tool and /loop command."
   },
   "version": "0.1.0",
   "defaultEnabled": true,
@@ -18,21 +18,24 @@
     "/loop once goal coordinates with the existing /goal continue bounded-artifact contract",
     "/loop once workflow <runId> uses persisted workflow run metadata when present; otherwise fails closed with a clear reason",
     "Command-visible continuation output shows metadata/path and omits full prompt bodies from the widget",
-    "Unsupported actions and sources fail closed with a clear reason",
-    "No background auto-run or hidden agent_end follow-up is registered"
+    "start and until schedule hidden follow-up turns through Pi sendMessage and agent_settled",
+    "each session has one persisted loop state with default hard stops of 20 iterations and 30 minutes",
+    "until uses a model-evaluated condition and instructs the model to call loop stop when satisfied",
+    "transport, missing-source, duration, and iteration failures stop the loop explicitly"
   ],
   "stateUsed": [
     ".locus/runtime/goal/state.json",
     ".locus/runtime/goal/continue.md",
     ".pi/locus-pi/runs/<runId>/runtime/journal.ndjson",
     ".pi/locus-pi/runs/<runId>/runtime/result.json",
-    ".locus/runtime/loop/workflow/*.json"
+    ".locus/runtime/loop/workflow/*.json",
+    ".locus/runtime/loop/sessions/*.json"
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": ["loopControl"],
+    "tools": ["loop"],
     "commands": ["loop"],
-    "hooks": []
+    "hooks": ["agent_settled"]
   },
   "uiLifecycle": {
     "commands": [

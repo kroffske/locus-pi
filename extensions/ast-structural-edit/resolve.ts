@@ -5,12 +5,6 @@ import { validateParams } from "../_shared/host/validation.js";
 import { applyPreview, discardPreview, getLatestPendingPreview, getPreview } from "./ast-engine.js";
 import { emitDevEvent } from "../_shared/runtime/event-bus.js";
 
-const AstApplyParams = Type.Object({
-  action: Type.Union([Type.Literal("apply"), Type.Literal("discard")], { description: "Preview lifecycle action" }),
-  previewId: Type.String({ description: "Preview id returned by ast_edit" }),
-  reason: Type.Optional(Type.String({ description: "Why applying or discarding the preview", maxLength: 500 })),
-});
-
 const ResolveParams = Type.Object({
   action: Type.Union([Type.Literal("apply"), Type.Literal("discard")], {
     description: "Whether to apply or discard the pending preview",
@@ -31,20 +25,7 @@ const ResolveParams = Type.Object({
   ),
 });
 
-export default function astApplyTool(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "ast_apply",
-    description: "Legacy alias for resolve over ast_edit previews. Prefer resolve for new AST preview finalization.",
-    parameters: AstApplyParams,
-    approval: previewFinalizerApproval,
-    formatApprovalDetails: previewFinalizerApprovalDetails,
-    async execute(_toolCallId, params, _signal, _update, ctx) {
-      const valid = validateParams(AstApplyParams, params);
-      if (!valid.ok) return valid.result;
-      return finalizePreview(valid.value.previewId, valid.value.action, valid.value.reason ?? "", ctx, "ast_apply");
-    },
-  });
-
+export default function resolveTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "resolve",
     description: "Resolve a pending ast_edit preview by applying or discarding it.",
@@ -60,51 +41,40 @@ export default function astApplyTool(pi: ExtensionAPI): void {
           isError: true,
           content: [{ type: "text", text: "No pending action to resolve. Nothing to apply or discard." }],
         };
-      return finalizePreview(previewId, valid.value.action, valid.value.reason, ctx, "resolve");
+      return finalizePreview(previewId, valid.value.action, valid.value.reason, ctx);
     },
   });
 }
 
-async function finalizePreview(
-  previewId: string,
-  action: "apply" | "discard",
-  reason: string,
-  ctx: ExtensionContext,
-  sourceToolName: "resolve" | "ast_apply",
-) {
+async function finalizePreview(previewId: string, action: "apply" | "discard", reason: string, ctx: ExtensionContext) {
   const preview = getPreview(previewId);
   if (!preview) return { isError: true, content: [{ type: "text" as const, text: `Unknown preview: ${previewId}` }] };
   if (action === "discard") {
     discardPreview(previewId);
-    emitDevEvent(`${sourceToolName}:discard`, { previewId, reason });
-    return textResult(`Discarded ${previewId}`, resolveDetails(action, reason, previewId, sourceToolName));
+    emitDevEvent("resolve:discard", { previewId, reason });
+    return textResult(`Discarded ${previewId}`, resolveDetails(action, reason, previewId));
   }
   const result = await applyPreview(previewId, getProjectRoot(ctx));
   if (result.stale.length) {
-    emitDevEvent(`${sourceToolName}:stale`, { previewId, files: result.stale.length });
+    emitDevEvent("resolve:stale", { previewId, files: result.stale.length });
     return {
       isError: true,
       content: [{ type: "text" as const, text: `Preview is stale; refusing apply:\n${result.stale.join("\n")}` }],
-      details: { ...resolveDetails(action, reason, previewId, sourceToolName), stale: result.stale },
+      details: { ...resolveDetails(action, reason, previewId), stale: result.stale },
     };
   }
-  emitDevEvent(`${sourceToolName}:apply`, { previewId, files: result.applied });
+  emitDevEvent("resolve:apply", { previewId, files: result.applied });
   return textResult(`Applied ${previewId} to ${result.applied} files`, {
-    ...resolveDetails(action, reason, previewId, sourceToolName),
+    ...resolveDetails(action, reason, previewId),
     filesApplied: result.applied,
   });
 }
 
-function resolveDetails(
-  action: "apply" | "discard",
-  reason: string,
-  previewId: string,
-  sourceToolName: "resolve" | "ast_apply",
-) {
+function resolveDetails(action: "apply" | "discard", reason: string, previewId: string) {
   return {
     action,
     reason,
-    sourceToolName,
+    sourceToolName: "resolve",
     label: `ast_edit preview ${previewId}`,
     extra: { previewId },
     sourceResultDetails: { previewId },

@@ -3,7 +3,7 @@
   "name": "devext-doctor",
   "agent": {
     "name": "extension-devext-doctor",
-    "description": "Inspect extension diagnostics, reload runtime, and validate task-lifecycle transitions."
+    "description": "Inspect extension diagnostics and validate task-lifecycle transitions."
   },
   "version": "0.1.0",
   "defaultEnabled": true,
@@ -13,12 +13,9 @@
   "runtimeRequirements": [
     "Pi command UI",
     "Shared command UI lifecycle clears stale transient widgets/status before /devext renders and on the next unrelated input",
-    "doctor, task-lifecycle dry-run, and reload receipts use typed diagnostic blocks with explicit evidence boundaries and recovery actions",
+    "doctor and task-lifecycle dry-run receipts use typed diagnostic blocks with explicit evidence boundaries and recovery actions",
     "unknown devext actions render a typed WARN with no-action evidence and full usage recovery",
     "RPC doctor and task-lifecycle projections stay within the 10-line string-array budget while preserving evidence and recovery",
-    "reload RUN means request delegated to Pi and never claims completion from the old command frame",
-    "Pi command-context ctx.reload() for /devext reload hot reload",
-    "devext_reload requires a direct tool-context ctx.reload() host method and otherwise fails closed without queueing slash commands",
     "readable .tasks/index.json and task workspace files for /devext task-lifecycle dry-runs"
   ],
   "stateUsed": [
@@ -29,8 +26,8 @@
   ],
   "tier": "core-owned",
   "provides": {
-    "tools": ["devext_reload"],
-    "commands": ["devext doctor", "devext reload", "devext task-lifecycle <task-id> <target-status>"],
+    "tools": [],
+    "commands": ["devext doctor", "devext task-lifecycle <task-id> <target-status>"],
     "hooks": ["input"]
   },
   "uiLifecycle": {

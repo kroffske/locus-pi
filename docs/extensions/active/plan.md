@@ -91,7 +91,7 @@ mode was entered by explicit `/mode plan` rather than
 `/plan <request>`.
 The selector reuses Pi's built-in `ctx.ui.select`; tweak text goes through the
 local official-signature input adapter. No LLM-callable tool is
-involved in this flow (the separate `ask`/`askUserQuestion` tools live in the
+involved in this flow (the separate `ask` tool lives in the
 `ask-user-question` extension).
 
 ## Hook

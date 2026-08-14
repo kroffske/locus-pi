@@ -6,6 +6,21 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The public tool API now has one supported name per capability.** Agent
+  delegation uses `spawn_agent`; AST previews finish through `resolve`; human
+  questions use `ask`; and bounded continuation uses `loop`. The duplicate
+  `task`, `ast_apply`, `askUserQuestion`, `loopControl`, `devext_reload`, and
+  `locus_workload_proof` tools were removed. `/devext reload` and
+  `/devext hot-reload` were also removed in favor of Pi's built-in `/reload`.
+  `ask` retains both option-list and rich single-question schemas, and the todo
+  extension adds read-only `todo_read` beside `todo_write`.
+
+- **`loop` now performs real bounded automatic continuation.** `start` and
+  `until` persist one state machine per Pi session, dispatch follow-up turns
+  through the host, and stop on explicit completion, transport/source failure,
+  a default 20-iteration limit, or a default 30-minute deadline. `once` remains
+  available for manual one-step continuation.
+
 - **Agents now get one shipped skill for running existing workflows without a
   package-specific executor.** Inside Pi, `locus-pi-run-workflow` calls the
   native `workflow` tool. Outside Pi, it starts the registered slash command

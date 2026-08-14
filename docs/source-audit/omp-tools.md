@@ -1,6 +1,6 @@
 # Source audit: omp-tools
 
-Decision: copy-after-audit, active compatibility wrapper. Selected OMP-style tools are being ported into local `locus-pi` plugin/API surfaces. AST now has a canonical active `ast-structural-edit` plugin that registers `ast_grep`, `ast_edit`, `resolve`, and legacy `ast_apply` together. `resolve` is the primary preview finalizer, defaults to the latest pending AST preview in the current project root, and keeps `ast_apply` only as a compatibility alias.
+Decision: copy-after-audit, active compatibility wrapper. AST has one canonical `ast-structural-edit` plugin with `ast_grep`, `ast_edit`, and `resolve`. `resolve` is the only preview finalizer and defaults to the latest pending AST preview in the current project root.
 
 OMP source evidence:
 
@@ -19,7 +19,7 @@ Active wrapper contract:
 - `ast_grep` is the read-only structural search surface.
 - `ast_edit` creates a preview and never writes files directly.
 - `resolve` applies or discards the pending preview. Apply is declared as a Pi `write` approval tier and then performs stale-file checks before writes.
-- `ast_apply` remains a legacy alias for old callers.
+- The former `ast_apply` alias is removed; callers use `resolve`.
 
 Local implementation owner:
 

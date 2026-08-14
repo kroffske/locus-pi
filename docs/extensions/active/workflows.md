@@ -45,7 +45,7 @@ There is no direct one-shot completion node: `llm()` existed until 0.2.x and was
 removed so every physical model call keeps the same agent-session evidence path.
 Fusion is a composition of that path, not a second transport.
 
-Every `agent()` call in a workflow script routes through exactly the same code path as the `task` tool:
+Every `agent()` call in a workflow script routes through the same SDK child-session substrate as `spawn_agent`:
 
 ```
 agent(prompt, opts)

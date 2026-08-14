@@ -83,12 +83,6 @@ describe("security gate", () => {
         toolArgs: { action: "apply", reason: "approved by resolve", extra: { previewId: "preview-1" } },
       })
     ).filter((entry) => entry !== undefined);
-    const legacyApplyResults = (
-      await emit(h, "tool_call", {
-        toolName: "ast_apply",
-        toolArgs: { action: "apply", previewId: "preview-1", reason: "legacy caller" },
-      })
-    ).filter((entry) => entry !== undefined);
     const genericEditResults = (
       await emit(h, "tool_call", { toolName: "edit", toolArgs: { path: "sample.ts" } })
     ).filter((entry) => entry !== undefined);
@@ -99,7 +93,6 @@ describe("security gate", () => {
     expect(previewResults).toEqual([]);
     expect(discardResults).toEqual([]);
     expect(applyResults).toEqual([]);
-    expect(legacyApplyResults).toEqual([]);
     expect(genericEditResults).toEqual([]);
     expect(genericWriteResults).toEqual([]);
     expect(getAuditEvents()).toEqual(
@@ -123,13 +116,6 @@ describe("security gate", () => {
           decision: "allow",
           actionType: "filesystem-write",
           toolOrCommand: "resolve",
-          target: "preview-1",
-        }),
-        expect.objectContaining({
-          extensionId: "security-gate",
-          decision: "allow",
-          actionType: "filesystem-write",
-          toolOrCommand: "ast_apply",
           target: "preview-1",
         }),
         expect.objectContaining({

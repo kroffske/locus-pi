@@ -1,11 +1,11 @@
 /**
  * Characterization tests for the `extensions/agents` entrypoint zones that had no
- * coverage before T-126 W2 split them into submodules: the `locus_workload_proof`
- * tool, the shared spawn-tool approval details, the fleet-menu close notification,
+ * coverage before T-126 W2 split them into submodules: the spawn-tool approval
+ * details, the fleet-menu close notification,
  * the bounded observer widget, and the loop-round submenu config the drill builds
  * from a run journal. Written and seen green against the unmodified entrypoint.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,52 +30,18 @@ function tempRoot(prefix: string): string {
   return root;
 }
 
-describe("locus_workload_proof tool", () => {
-  it("records the claim, returns the proof path, and writes a durable proof file", async () => {
-    const root = tempRoot("locus-agents-workload-proof-");
-    const h = createHarness(root, { sessionId: "proof-session" });
-    agents(h.pi);
-
-    const tool = h.tools.get("locus_workload_proof");
-    expect(tool).toBeDefined();
-    expect(tool?.approval).toBe("write");
-
-    const result = await runTool(h, "locus_workload_proof", { summary: "read three files" });
-
-    expect(result.isError).not.toBe(true);
-    const first = result.content?.[0];
-    expect(first?.type === "text" ? first.text : undefined).toBe("Workload proof recorded: read three files");
-    const details = result.details as { proofPath?: string; source?: string } | undefined;
-    expect(details?.source).toBe("locus-workload-proof");
-    expect(typeof details?.proofPath).toBe("string");
-    const written = JSON.parse(readFileSync(details!.proofPath!, "utf8")) as Record<string, unknown>;
-    expect(written.version).toBe("locus.agent.workload-proof.v1");
-    expect(written.sessionId).toBe("proof-session");
-    expect(written.toolNames).toContain("locus_workload_proof");
-  });
-
-  it("rejects a params shape that does not match the schema", async () => {
-    const h = createHarness(tempRoot("locus-agents-workload-proof-bad-"));
-    agents(h.pi);
-
-    const result = await runTool(h, "locus_workload_proof", {});
-
-    expect(result.isError).toBe(true);
-  });
-});
-
 describe("spawn tool approval details", () => {
-  it("names the requested agent and the single-task bound on both spawn surfaces", () => {
+  it("names the requested agent and the single-task bound on the canonical spawn surface", () => {
     const h = createHarness();
     agents(h.pi);
 
-    for (const name of ["spawn_agent", "task"]) {
-      const format = h.tools.get(name)?.formatApprovalDetails;
-      expect(format).toBeTypeOf("function");
-      expect(format!({ agent: "reviewer", task: "Review" })).toEqual(["Agent: reviewer", "Tasks: 1"]);
-      expect(format!({ task: "Review" })).toEqual(["Agent: task", "Tasks: 1"]);
-      expect(format!(undefined)).toEqual(["Agent: task", "Tasks: 1"]);
-    }
+    const format = h.tools.get("spawn_agent")?.formatApprovalDetails;
+    expect(format).toBeTypeOf("function");
+    expect(format!({ agent: "reviewer", task: "Review" })).toEqual(["Agent: reviewer", "Tasks: 1"]);
+    expect(format!({ task: "Review" })).toEqual(["Agent: task", "Tasks: 1"]);
+    expect(format!(undefined)).toEqual(["Agent: task", "Tasks: 1"]);
+    expect(h.tools.has("task")).toBe(false);
+    expect(h.tools.has("locus_workload_proof")).toBe(false);
   });
 });
 

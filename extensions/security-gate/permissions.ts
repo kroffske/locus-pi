@@ -170,8 +170,8 @@ export function classifyToolCall(toolName: string, args: unknown): ToolCallClass
   if (toolName === "ast_edit") {
     return { actionType: "preview", target: astEditTarget(record), dangerous: false };
   }
-  if (toolName === "resolve" || toolName === "ast_apply") {
-    return classifyAstPreviewFinalizer(toolName, record);
+  if (toolName === "resolve") {
+    return classifyAstPreviewFinalizer(record);
   }
   if (["write", "edit"].includes(toolName)) {
     return {
@@ -207,14 +207,11 @@ export function classifyToolCall(toolName: string, args: unknown): ToolCallClass
   return { actionType: "tool", target: toolName, dangerous: false };
 }
 
-function classifyAstPreviewFinalizer(
-  toolName: "resolve" | "ast_apply",
-  record: Record<string, unknown>,
-): ToolCallClassification {
+function classifyAstPreviewFinalizer(record: Record<string, unknown>): ToolCallClassification {
   const action = String(record.action ?? "");
   return {
     actionType: action === "apply" ? "filesystem-write" : "preview",
-    target: astPreviewTarget(record, toolName),
+    target: astPreviewTarget(record, "resolve"),
     dangerous: false,
   };
 }

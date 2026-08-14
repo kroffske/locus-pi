@@ -11,7 +11,7 @@ import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-
 import agents from "../../../extensions/agents/index.js";
 import { createHarness } from "../../test-harness.js";
 
-// Every directly spawned agent (`spawn_agent` / `task`) owns its own transcript
+// Every directly spawned agent (`spawn_agent`) owns its own transcript
 // block: a LOCUS rail with the agent's petname and live status, the task title
 // it works on, and — when the child returns text — that answer marked with a
 // left bar so it reads as the agent's own words.
@@ -28,10 +28,10 @@ const theme: ThemeLike = {
   },
 };
 
-function spawnAgentTool(name: "spawn_agent" | "task" = "spawn_agent"): ToolDefinition {
+function spawnAgentTool(): ToolDefinition {
   const harness = createHarness();
   agents(harness.pi);
-  return harness.tools.get(name)!;
+  return harness.tools.get("spawn_agent")!;
 }
 
 function render(tool: ToolDefinition, result: ToolResult, options: ToolRenderResultOptions, width = 80): string[] {
@@ -64,13 +64,11 @@ afterEach(() => {
 });
 
 describe("spawn_agent tool card", () => {
-  it("owns the tool shell for both registered names", () => {
-    const spawn = spawnAgentTool("spawn_agent");
+  it("owns the tool shell for the canonical registered name", () => {
+    const spawn = spawnAgentTool();
     expect(spawn.renderShell).toBe("self");
     expect(spawn.renderCall!({}, theme, {} as ToolRenderContext).render(80)).toEqual([]);
-    const task = spawnAgentTool("task");
-    expect(task.renderShell).toBe("self");
-    expect(task.renderResult).toBeDefined();
+    expect(spawn.renderResult).toBeDefined();
   });
 
   it("renders one completed agent block with petname, title, elapsed, and the barred answer", () => {

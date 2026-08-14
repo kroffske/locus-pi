@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/ask-tool.ts — The two ask tool declarations.
+ * extensions/ask-user-question/ask-tool.ts — The canonical ask tool declaration.
  *
  * What each tool accepts (the TypeBox schema and its TypeScript mirror, kept
  * side by side so a schema edit cannot drift from the type the flow reads) and
@@ -11,7 +11,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
-import { askLegacy } from "./legacy-ask.js";
+import { askRichQuestion } from "./legacy-ask.js";
 import type { OmpQuestion } from "./question-prompt.js";
 import { askOmpCompatible } from "./question-runner.js";
 import { renderAskResult } from "./result-card.js";
@@ -26,13 +26,14 @@ const OmpAskQuestion = Type.Object({
   options: Type.Array(OmpAskOption, { description: "available options" }),
   multi: Type.Optional(Type.Boolean({ description: "allow multiple selections" })),
   recommended: Type.Optional(Type.Number({ description: "recommended option index" })),
+  timeoutMs: Type.Optional(Type.Number({ minimum: 1000, maximum: 300000 })),
 });
 
 const OmpAskParams = Type.Object({
   questions: Type.Array(OmpAskQuestion, { minItems: 1, description: "questions to ask" }),
 });
 
-const LegacyAskUserQuestionParams = Type.Object({
+const RichAskParamsSchema = Type.Object({
   question: Type.String({ description: "The question to ask the user", maxLength: 500 }),
   kind: Type.Union(
     [Type.Literal("select"), Type.Literal("multi-select"), Type.Literal("text"), Type.Literal("editor")],
@@ -52,10 +53,10 @@ const LegacyAskUserQuestionParams = Type.Object({
   reason: Type.Optional(Type.String({ description: "Why this question is being asked", maxLength: 500 })),
 });
 
-export type LegacyAskKind = "select" | "multi-select" | "text" | "editor";
-export interface LegacyAskParams {
+export type RichAskKind = "select" | "multi-select" | "text" | "editor";
+export interface RichAskParams {
   question: string;
-  kind: LegacyAskKind;
+  kind: RichAskKind;
   options?: string[];
   allowCustom?: boolean;
   default?: string | string[];
@@ -68,29 +69,20 @@ export interface OmpAskParams {
   questions: OmpQuestion[];
 }
 
+const AskParams = Type.Union([OmpAskParams, RichAskParamsSchema]);
+
 export function registerAskTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask",
-    description: "Ask the interactive user one or more OMP-compatible option questions.",
-    parameters: OmpAskParams,
+    description: "Ask the interactive user one or more option questions, or one rich select, text, or editor question.",
+    parameters: AskParams,
     approval: "read",
     async execute(_toolCallId, params, signal, _update, ctx) {
-      const valid = validateParams(OmpAskParams, params);
+      const valid = validateParams(AskParams, params);
       if (!valid.ok) return valid.result;
-      return askOmpCompatible(pi, valid.value as OmpAskParams, ctx, signal, "ask");
-    },
-    renderResult: renderAskResult,
-  });
-
-  pi.registerTool({
-    name: "askUserQuestion",
-    description: "Compatibility alias for the OMP-compatible ask tool.",
-    parameters: LegacyAskUserQuestionParams,
-    approval: "read",
-    async execute(_toolCallId, params, signal, _update, ctx) {
-      const valid = validateParams(LegacyAskUserQuestionParams, params);
-      if (!valid.ok) return valid.result;
-      return askLegacy(pi, valid.value as LegacyAskParams, ctx, signal);
+      return "questions" in valid.value
+        ? askOmpCompatible(pi, valid.value as OmpAskParams, ctx, signal, "ask")
+        : askRichQuestion(pi, valid.value as RichAskParams, ctx, signal);
     },
     renderResult: renderAskResult,
   });

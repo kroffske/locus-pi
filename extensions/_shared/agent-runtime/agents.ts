@@ -419,7 +419,7 @@ function truncatePlain(value: string, width: number): string {
 }
 
 function isMutatingTool(tool: string): boolean {
-  return ["bash", "edit", "write", "ast_edit", "resolve", "task"].includes(tool);
+  return ["bash", "edit", "write", "ast_edit", "resolve"].includes(tool);
 }
 
 function isDirectory(candidate: string): boolean {

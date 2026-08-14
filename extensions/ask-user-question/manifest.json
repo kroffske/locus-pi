@@ -3,7 +3,7 @@
   "name": "ask-user-question",
   "agent": {
     "name": "extension-ask-user-question",
-    "description": "Handle human-in-the-loop ask prompts, including the legacy askUserQuestion alias."
+    "description": "Handle human-in-the-loop prompts through one canonical ask tool."
   },
   "version": "0.1.0",
   "defaultEnabled": true,
@@ -22,7 +22,7 @@
   "stateUsed": ["decision session entries", "Pi custom decision entries"],
   "tier": "core-owned",
   "provides": {
-    "tools": ["ask", "askUserQuestion"],
+    "tools": ["ask"],
     "commands": [],
     "hooks": []
   },
@@ -31,11 +31,6 @@
     "tools": [
       {
         "name": "ask",
-        "taxonomy": ["overlay-selector", "blocking-prompt"],
-        "persistent": ["decision entries"]
-      },
-      {
-        "name": "askUserQuestion",
         "taxonomy": ["overlay-selector", "blocking-prompt"],
         "persistent": ["decision entries"]
       }

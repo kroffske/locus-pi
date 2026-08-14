@@ -24,6 +24,7 @@ export interface OmpQuestion {
   options: Array<{ label: string }>;
   multi?: boolean;
   recommended?: number;
+  timeoutMs?: number;
 }
 
 export interface AskSelection {

@@ -1,12 +1,11 @@
 /**
  * extensions/agents/index.ts — Extension entrypoint.
  *
- * Registers the `locus_workload_proof` tool, the `spawn_agent`/`task` spawn tools,
+ * Registers the `spawn_agent` tool,
  * and the `/ps` and `/agent` commands, and owns the per-session wiring those
  * surfaces share: the session epoch a drill leases against, the fleet-menu
  * controller, and the fallback focus shortcut.
  */
-import { registerAgentWorkloadProofHooks } from "../_shared/agent-runtime/agent-workload-proof.js";
 import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
 import { FLEET_FOCUS_FALLBACK_SHORTCUT, fleetMenuState } from "../_shared/agent-runtime/fleet-menu.js";
 import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
@@ -18,11 +17,9 @@ import { createAgentFleetMenuController } from "./fleet-menu-controller.js";
 import { installAgentInterruptGuard } from "./interrupt-guard.js";
 import { disposeAgentSessionViewers } from "./session-viewer.js";
 import { registerAgentSpawnTools } from "./task-tool.js";
-import { registerWorkloadProofTool } from "./workload-proof-tool.js";
 
 /** Registers safe catalog commands and fail-closed agent execution tools. */
 export default function agents(pi: ExtensionAPI): void {
-  registerAgentWorkloadProofHooks(pi);
   let agentSessionEpoch = 0;
   const agentSessionAuthority: AgentSessionAuthority = {
     capture: () => agentSessionEpoch,
@@ -54,7 +51,6 @@ export default function agents(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (_event, ctx) => {
     refreshAgents(getProjectRoot(ctx));
   });
-  registerWorkloadProofTool(pi);
   registerAgentSpawnTools(pi);
   registerAgentCommands(pi, { openFleetMenu: fleetMenu.open, agentSessionAuthority });
 }

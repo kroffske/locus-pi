@@ -10,6 +10,9 @@ export type LoopCommandParse =
   | { action: "input" }
   | { action: "help" }
   | { action: "status" }
+  | { action: "stop"; reason?: string }
+  | { action: "start"; source: "goal" | "workflow"; runId?: string; prompt?: string }
+  | { action: "until"; source: "goal" | "workflow"; runId?: string; condition?: string }
   | { action: "once"; source?: string; runId?: string; prompt?: string }
   | { action: "unsupported"; value: string };
 
@@ -24,6 +27,24 @@ export function parseLoopCommand(raw: string): LoopCommandParse {
   if (trimmed === "status") return { action: "status" };
   if (trimmed === "help" || trimmed === "?") return { action: "help" };
   const [action, ...rest] = trimmed.split(/\s+/);
+  if (action === "stop") {
+    const reason = rest.join(" ");
+    return { action: "stop", ...(reason ? { reason } : {}) };
+  }
+  if (action === "start" || action === "until") {
+    const [source, maybeRunId, ...tail] = rest;
+    if (source !== "goal" && source !== "workflow") return { action: "unsupported", value: trimmed };
+    if (source === "workflow") {
+      const value = tail.join(" ");
+      return action === "start"
+        ? { action, source, ...(maybeRunId ? { runId: maybeRunId } : {}), ...(value ? { prompt: value } : {}) }
+        : { action, source, ...(maybeRunId ? { runId: maybeRunId } : {}), ...(value ? { condition: value } : {}) };
+    }
+    const value = [maybeRunId, ...tail].filter(Boolean).join(" ");
+    return action === "start"
+      ? { action, source, ...(value ? { prompt: value } : {}) }
+      : { action, source, ...(value ? { condition: value } : {}) };
+  }
   if (action !== "once") return { action: "unsupported", value: action ?? "" };
   const [source, maybeRunId, ...promptParts] = rest;
   if (source === undefined) return { action: "once" };
@@ -37,7 +58,7 @@ export function parseLoopCommand(raw: string): LoopCommandParse {
   }
   return {
     action: "once",
-    source: source as "goal" | "review",
+    source,
     prompt: [maybeRunId, ...promptParts].filter(Boolean).join(" "),
   };
 }

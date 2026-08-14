@@ -82,7 +82,7 @@ describe("loop command surfaces", () => {
       const h = createHarness(projectRoot);
       loop(h.pi);
 
-      const result = await runTool(h, "loopControl", { action: "once" });
+      const result = await runTool(h, "loop", { action: "once" });
       expect(result.isError).toBe(true);
       expect(result.details).toMatchObject({
         owner: "loop",
@@ -110,7 +110,7 @@ describe("loop command surfaces", () => {
       const h = createHarness(projectRoot);
       loop(h.pi);
 
-      const result = await runTool(h, "loopControl", { action: "once", source: "workflow" });
+      const result = await runTool(h, "loop", { action: "once", source: "workflow" });
       expect(result.isError).toBe(true);
       expect(result.details).toMatchObject({
         owner: "loop",

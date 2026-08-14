@@ -1,6 +1,8 @@
 # Source audit: agents
 
-Decision: command-side single-agent `/agent run` plus tool-safe `spawn_agent`/`task`, both on the local `createAgentSdkSessionExecutor` / public `createAgentSession` SDK path. This slice keeps `agents` as a local `.agents/agents/*.md` catalog and routes both triggers through the same `executeAgentRunBoundary`; `/agent run` additionally owns the shared live row/panel. One tool call accepts one `task` string and creates one child. Parallel jobs belong to workflow orchestration.
+Decision: command-side single-agent `/agent run` plus canonical tool `spawn_agent`, both on the local `createAgentSdkSessionExecutor` adapter over Pi's public `createAgentSession` SDK path. One tool call accepts one `task` string and creates one child. Parallel jobs belong to workflow orchestration.
+
+T-162 update: the duplicate `task` registration and `locus_workload_proof` subsystem were removed. `task` had the same schema and executor as `spawn_agent`, so it was a name alias rather than another capability. Workload proof wrote a model-supplied claim, while the active SDK executor derives its counters and tool names from real child lifecycle events and did not read that claim for success. Historical notes below retain the old names only to explain earlier implementation stages.
 
 T-113 update: the programmatic `task` tool introduced real headless child spawning from tool `execute()` via host SDK `createAgentSession` (`extensions/_shared/agent-runtime/agent-sdk-host.ts`, `createAgentSdkSessionExecutor`). `ctx.newSession` is structurally unreachable from a tool ctx, so the importable SDK was the correct substrate. The current `/agent run` path now uses that same SDK executor and `executeAgentRunBoundary`, plus command-side live rows; an older host without `createAgentSession` degrades to an honest fail-closed for either trigger.
 
@@ -64,7 +66,7 @@ Source note for T-120: the prompt shape is adapted from checkout-relative `pi-su
 
 Current local state:
 
-- `extensions/agents/index.ts` is the entrypoint; it calls `task-tool.ts` to register primary `task`, `workload-proof-tool.ts` to register the proof-evidence tool `locus_workload_proof`, and `command-router.ts` to register `/agent` and `/ps` through the shared command UI lifecycle helper that clears transient `agents` widgets/status on the next unrelated user input or slash command.
+- `extensions/agents/index.ts` is the entrypoint; it calls `task-tool.ts` to register canonical `spawn_agent` and `command-router.ts` to register `/agent` and `/ps`.
 - `/agent list` can show markdown definitions from project `.agents/agents`, user `~/.agents/agents`, and bundled `.agents/agents`.
 - Agent catalog records preserve local metadata: `tools`, `spawns`, `model`, `thinking-level`, `blocking`, and opaque nested `output`.
 - `task.md` and `quick_task.md` carry ordinary frontmatter in the same `.agents` catalog as the other definitions.
@@ -73,8 +75,7 @@ Current local state:
 - `/agent drill <row-id|agent|last>` opens the shared inline custom UI over the Locus live store, with scroll and close keys, when the Pi host exposes custom UI; otherwise it reports an honest unavailable message in the `agents` widget.
 - Fleet input uses `/ps` or registered `shift+down`; bare `up`/`down` stay with Pi. Aggregate/group rows remain visible headings, while only leaf rows are actionable and aggregate targets receive child-selection guidance.
 - `/agent run` writes a best-effort `.locus/runtime/artifacts/*.json` result artifact with launch metadata, model role metadata when available, exact text, diagnostics, lifecycle entry ids, and child output stats. Unknown-agent errors also write a diagnostic artifact, but that artifact is not execution proof.
-- `locus_workload_proof` writes diagnostic persisted evidence under `.locus/runtime/agent-workload-proof/*.json` for reviewer and agent flows that have performed bounded child workload. This persisted evidence does not control parser success by itself.
-- `spawn_agent`/`task` spawns one real headless child session for one required `task` string and returns exact child text to the caller; it returns `isError=true` when the host cannot provide `createAgentSession`, when a child run fails/blocks/cancels, when text is empty, or when agent resolution fails.
+- `spawn_agent` spawns one real headless child session for one required `task` string and returns exact child text to the caller; it returns `isError=true` when the host cannot provide `createAgentSession`, when a child run fails/blocks/cancels, when text is empty, or when agent resolution fails.
 - `extensions/_shared/agent-runtime/agent-executor-host.ts` retains the former replacement-session adapter and its parser/host tests, but it is not the current `/agent run` executor, and it no longer holds any code the live path runs. Active slash/tool execution owns parsing, artifacts, diagnostics, cancellation and stats through `_shared/agent-runtime/agent-sdk-host.ts` plus the shared run boundary.
 - `extensions/_shared/agent-runtime/agent-execution-prompt.ts` owns the prompt capsule and text-result layer both executors share: capsule construction, model-role and system-prompt embedding, bounded parent-context assembly, kickoff-prompt formatting, and the empty-result guard. It is the entire production surface the SDK executor imports.
 - `extensions/_shared/agent-runtime/agent-context-extras.ts` owns opt-in memory and skill suffix resolution, bounded line/byte clamps, default `MEMORY.md` lookup, and non-fatal diagnostics when requested assets are missing.
@@ -96,8 +97,8 @@ Current local state:
 Implementation boundary:
 
 - Do not keep the old deterministic summary as execution proof.
-- `task` is product-ready: retained SDK-host tests and release-candidate Pi smoke cover tool-context child spawn through `createAgentSession`, genuine child workload, abort/timeout handling, JSONL evidence export, and exact final-text return. Keep the honest fail-closed for hosts that do not expose `createAgentSession`.
-- `/agent run` and `task` both use `createAgentSession`; `ctx.newSession` is not part of either active execution path.
+- `spawn_agent` is product-ready: retained SDK-host tests cover tool-context child spawn through `createAgentSession`, genuine child workload, abort/timeout handling, JSONL evidence export, and exact final-text return. Keep the honest fail-closed for hosts that do not expose `createAgentSession`.
+- `/agent run` and `spawn_agent` both use `createAgentSession`; `ctx.newSession` is not part of either active execution path.
 - Keep discovery scoped to `.agents/agents` so agent files have one local convention.
 - Keep `/agent drill` scoped to bounded Locus row/transcript observability. Do not claim exact pi-subagents conversation-viewer parity; any broader port requires a separate parity review.
 
