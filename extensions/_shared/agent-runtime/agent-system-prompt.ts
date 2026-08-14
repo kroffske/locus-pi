@@ -5,6 +5,8 @@ import type { AgentRunRequest } from "./agent-runner.js";
 
 export interface AgentSystemPromptOptions extends Pick<AgentContextExtrasOptions, "env" | "readFile" | "exists"> {
   diagnostics?: string[];
+  /** Fusion-only profile: preserve package identity/persona, suppress package context extras. */
+  suppressContextExtras?: boolean;
 }
 
 export function buildAgentSystemPrompt(
@@ -13,17 +15,25 @@ export function buildAgentSystemPrompt(
 ): string | undefined {
   const instructions = request.agent.systemPrompt?.trim();
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
-  const extras = buildAgentContextExtrasText({
-    cwd,
-    ...(request.projectRoot === undefined ? {} : { projectRoot: request.projectRoot }),
-    env: options.env ?? process.env,
-    ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
-    ...(options.exists === undefined ? {} : { exists: options.exists }),
-  });
+  const extras =
+    options.suppressContextExtras === true
+      ? { enabled: false, diagnostics: [], text: undefined }
+      : buildAgentContextExtrasText({
+          cwd,
+          ...(request.projectRoot === undefined ? {} : { projectRoot: request.projectRoot }),
+          env: options.env ?? process.env,
+          ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
+          ...(options.exists === undefined ? {} : { exists: options.exists }),
+        });
   if (options.diagnostics !== undefined && extras.diagnostics.length > 0)
     options.diagnostics.push(...extras.diagnostics);
 
-  if ((instructions === undefined || instructions === "") && extras.text === undefined && !extras.enabled)
+  if (
+    (instructions === undefined || instructions === "") &&
+    extras.text === undefined &&
+    !extras.enabled &&
+    options.suppressContextExtras !== true
+  )
     return undefined;
 
   const lines = [

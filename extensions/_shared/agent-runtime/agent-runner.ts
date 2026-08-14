@@ -14,6 +14,7 @@ import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
 export type ApprovalTier = "allow" | "prompt" | "deny";
+export type AgentCapabilityMode = "tool-free" | "agent";
 
 /**
  * The closed failure-cause list, owned by this envelope and defined in the zero-import
@@ -40,6 +41,8 @@ export interface AgentRunRequest {
   maxDepth: number;
   allowedTools: string[];
   approvalTier: ApprovalTier;
+  /** Runtime-owned Fusion capability intent. Ordinary agent calls leave this absent. */
+  capabilityMode?: AgentCapabilityMode;
   modelRoleResolution?: ModelRoleResolution;
   /**
    * Set when the caller declared a tier that no layer assigns, so the child ran on
@@ -76,6 +79,8 @@ export interface AgentRunResult {
    * Never derived from the requested selector.
    */
   executedModel?: string;
+  /** Exact pre-prompt host readback. Absent means no live readback was available. */
+  activeToolNames?: string[];
   evidence?: EvidenceEvaluation;
   childSession?: SessionRecord;
   diagnostics: string[];
@@ -242,6 +247,7 @@ export function createAgentRunRequest(
   // caller — the artifact test passed only because it built its request literal
   // directly and never went through this function.
   if (input.modelRoleFallback !== undefined) request.modelRoleFallback = input.modelRoleFallback;
+  if (input.capabilityMode !== undefined) request.capabilityMode = input.capabilityMode;
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
   if (input.repositoryCheckScripts !== undefined) request.repositoryCheckScripts = input.repositoryCheckScripts;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
@@ -330,6 +336,8 @@ export function writeAgentRunResultArtifact(
     // executed value comes from the host readback carried on the result; the
     // fallback note comes from the request, because the caller knew it first.
     executedModel: result.executedModel,
+    capabilityMode: request.capabilityMode,
+    activeToolNames: result.activeToolNames,
     // The note is written before the child exists and says "the child inherited the
     // parent session model" — a PAST-TENSE claim about a child. It is only true once a
     // child actually RAN, so a call that died in `createSession` (unavailable

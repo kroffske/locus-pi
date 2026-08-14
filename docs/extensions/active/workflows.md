@@ -35,9 +35,11 @@ One way a workflow reaches a model:
   `opts.handoffs` it returns a bounded list of complete text work units. Both use
   the runtime-owned repair path. Trusted compatibility scripts may still use
   `opts.schema` for a larger validated value.
-- **`fusion()`** — validates a panel of 2–10 explicit model selectors, runs its
-  isolated members through ordinary full-tool `agent()` calls, and asks a separate
-  judge call for one final answer. It receives no ambient conversation history.
+- **`fusion()`** — validates a panel of 2–10 explicit model selectors and one
+  homogeneous capability mode, runs isolated members, and asks a separate judge
+  call for one final answer. `mode: "tool-free"` gives every leg an empty active
+  tool registry; `mode: "agent"` keeps the ordinary catalog-agent capability
+  path. It receives no ambient conversation history.
 
 There is no direct one-shot completion node: `llm()` existed until 0.2.x and was
 removed so every physical model call keeps the same agent-session evidence path.
@@ -439,8 +441,8 @@ operator explicitly enables it.
 
 ```text
 /fusion                                      # interactive menu or passive status
-/fusion configure                            # choose 2–10 members and one judge
-/fusion set --members provider/a,provider/b --judge provider/judge
+/fusion configure                            # choose one mode, 2–10 members, and one judge
+/fusion set --mode tool-free --members provider/a,provider/b --judge provider/judge
 /fusion enable
 /fusion disable
 /fusion status
@@ -450,13 +452,17 @@ operator explicitly enables it.
 The interactive selector reads `modelRegistry.getAvailable()`, so it shows only
 models the current Pi host can actually use rather than every model known to a
 provider. Configuration is project-local at
-`.pi/locus-pi/fusion/config.json`. Members must be unique, and the judge must be
+`.pi/locus-pi/fusion/config.json`. Version 2 requires an explicit homogeneous
+`tool-free` or `agent` mode. Operational commands reject legacy version 1
+configuration. `/fusion configure` and `/fusion set` may replace it atomically,
+but the replacement remains disabled until the operator reviews the selected
+mode and runs `/fusion enable`. Members must be unique, and the judge must be
 different from every member. Enabling fails closed when the roster is incomplete
 or a selected model is no longer available.
 
 The tool accepts `question`, optional explicit `context`, and an optional final
 `output` instruction. It never forwards ambient session history. A direct run
-uses the same full-tool Fusion calls and writes the same packet,
+uses the same mode-specific Fusion calls and writes the same packet,
 answers, journal, result envelope, and readable output under
 `.pi/locus-pi/runs/<runId>/` as the Workflow DSL primitive. Disabling removes
 `fusion` from Pi's active tools immediately while leaving `/fusion` available for
@@ -1436,7 +1442,7 @@ agent(prompt, opts?)          // Run a catalog/local agent; returns exact child 
 agent(prompt, {choice, …})    // Standard machine route; returns one declared exact string
 agent(prompt, {handoffs, …})  // Standard dynamic decomposition; returns bounded text units
 agent(prompt, {schema, …})    // Advanced compatibility; returns the validated shaped value
-fusion(question, options)     // 2-10 isolated answers -> separate judge; returns only the judge answer
+fusion(question, options)     // Required homogeneous mode + 2-10 isolated answers -> separate judge
 fusion(question, {schema, …}) // Same panel; validates only the judge's final answer
 publishArtifact(name, text)   // Persist workflow-authored text; return full digest-bound reference
 publishPrimaryArtifact(name, text) // Publish the run's one primary semantic document
@@ -1456,9 +1462,23 @@ now()                         // Recorded wall clock (ms); replayed on --resume
 random()                      // Recorded randomness in [0,1); replayed on --resume
 ```
 
-`fusion()` defaults to prompt-only context and never reads ambient chat history.
+`fusion()` requires `mode: "tool-free" | "agent"`; every member and the judge
+use that same mode. Each selector still requires `model` or `modelRole` and may
+also name an existing catalog `agent`. Tool-free legs retain the selected
+catalog persona and ordinary execution metadata, but the package supplies their
+complete system prompt, disables extension, skill, prompt-template, theme, and
+context-file discovery, and starts them with no active tools. The host reads the
+active tool registry before the first prompt and fails the leg without prompting
+if that readback is missing or non-empty. Agent-mode legs keep the existing
+catalog-agent tool and parent-permission behavior. Ordinary `agent()` calls are
+unchanged.
+
+Fusion defaults to prompt-only context and never reads ambient chat history.
 Explicit `context: { mode: "provided", text }` is copied verbatim into the
-Fusion packet artifact. Member answers default to 8,000 characters, the judge
+Fusion packet artifact. When reconnaissance is needed, run it as an ordinary
+visible `agent()` or child-workflow stage and pass its bounded text through this
+explicit context field; Fusion does not discover it automatically. Member
+answers default to 8,000 characters, the judge
 answer to 16,000, and the complete judge prompt has a fixed 160,000-character
 ceiling. All declared members are required; a member failure stops before the
 judge runs. Larger panels may need a lower member answer bound because preflight
@@ -1467,7 +1487,11 @@ all declared model selectors before the first child, and overlapping Fusion
 calls reserve their complete worst-case invocation counts atomically. A resume
 tries recorded answers without requiring the old models to remain configured;
 Fusion fails before any fresh child if one of its recorded legs is missing or
-divergent. Run without `--resume` to execute a new panel.
+divergent. The mode is part of the replay key. Replayed legs retain the declared
+mode but do not claim a fresh host active-tool readback. Fresh results persist
+the declared mode and exact host readback in per-call evidence, the workflow
+journal, and the readable run report. Run without `--resume` to execute a new
+panel.
 
 `awaitOperator()` accepts exactly one non-empty compact reason of at most 200
 characters. It is a control declaration, not model output and not a thrown

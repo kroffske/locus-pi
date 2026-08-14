@@ -23,6 +23,15 @@ The boundary still validates local agent-run policy such as depth, turn budget,
 and allow-list data before spawning through the Pi host, but it does not reduce
 the parent Pi permissions into a smaller child permission set.
 
+Fusion is the narrow exception owned by the workflow runtime. Every Fusion call
+declares one homogeneous mode for all members and its judge. `agent` mode uses
+the default child behavior above. `tool-free` mode is not a permission sandbox;
+it is a host-verified capability shape for a model-only leg. The package disables
+resource discovery, constructs a package-owned system prompt, requests no tools,
+and requires Pi's active-tool readback to equal `[]` before sending the first
+prompt. Missing or non-empty readback fails closed. Ordinary agents do not
+inherit this Fusion-only marker or behavior.
+
 ## Completion contract
 
 A general agent may finish without tool calls. It is **not required to call
@@ -82,9 +91,10 @@ block.
 
 ## Status table
 
-| by design                                                      | not supported                                           | planned later                                                             |
-| -------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Default child agents inherit parent session rights.            | Per-child reduced permission sandboxes.                 | Revisit scoped child permissions if Pi exposes a supported host contract. |
-| General agents may complete without tool calls.                | Treating tool calls as a universal success requirement. | Profile-specific evidence policies can become more explicit.              |
-| Workflow `.mjs` files run as trusted local orchestration code. | Treating workflow scripts as sandboxed code.            | More workflow audit and launch metadata can be added.                     |
-| Security enforcement delegates to Pi original.                 | Local beta `security-gate` blocking global execution.   | Promote local security work only after a real blocking contract exists.   |
+| by design                                                                 | not supported                                           | planned later                                                             |
+| ------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Default child agents inherit parent session rights.                       | Per-child reduced permission sandboxes.                 | Revisit scoped child permissions if Pi exposes a supported host contract. |
+| Tool-free Fusion verifies an empty active-tool registry before prompting. | Treating tool-free Fusion as a general sandbox.         | Revisit stronger isolation only through a supported Pi host contract.     |
+| General agents may complete without tool calls.                           | Treating tool calls as a universal success requirement. | Profile-specific evidence policies can become more explicit.              |
+| Workflow `.mjs` files run as trusted local orchestration code.            | Treating workflow scripts as sandboxed code.            | More workflow audit and launch metadata can be added.                     |
+| Security enforcement delegates to Pi original.                            | Local beta `security-gate` blocking global execution.   | Promote local security work only after a real blocking contract exists.   |

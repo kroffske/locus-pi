@@ -773,6 +773,7 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
       "modelRoleFallback",
       "thinking",
       "resumeFromRunId",
+      "capabilityMode",
     ],
     "string",
   );
@@ -854,6 +855,15 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   if (value.evidenceWarnings !== undefined && !isStringArray(value.evidenceWarnings)) {
     return "Field evidenceWarnings must be an array of strings.";
   }
+  if (value.activeToolNames !== undefined && !isStringArray(value.activeToolNames)) {
+    return "Field activeToolNames must be an array of strings.";
+  }
+  if (value.replayed === true && value.activeToolNames !== undefined) {
+    return "Field activeToolNames cannot be present when replayed is true.";
+  }
+  if (value.capabilityMode !== undefined && !isOneOf(value.capabilityMode, ["tool-free", "agent"])) {
+    return "Field capabilityMode must be tool-free or agent.";
+  }
   if (value.answerArtifact !== undefined && !isArtifactRef(value.answerArtifact))
     return "Field answerArtifact is invalid.";
   if (value.transcriptArtifact !== undefined && !isArtifactRef(value.transcriptArtifact)) {
@@ -934,6 +944,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "modelRole",
     "thinking",
     "replayed",
+    "capabilityMode",
   ],
   agent_end: [
     "phase",
@@ -971,6 +982,8 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "modelRoleFallback",
     "thinking",
     "replayed",
+    "capabilityMode",
+    "activeToolNames",
   ],
   error: [
     "source",
@@ -995,6 +1008,9 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "executedModel",
     "modelRoleFallback",
     "thinking",
+    "replayed",
+    "capabilityMode",
+    "activeToolNames",
     // Post-child script/artifact failures use `error` as the sole terminal line.
     // The child already ran, so its usage belongs here just as it does on agent_end.
     "usage",

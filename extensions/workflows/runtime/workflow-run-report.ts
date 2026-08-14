@@ -397,6 +397,7 @@ function reportReadme(options: {
   );
   lines.push(...failureSection(input));
   lines.push(...budgetSection(input));
+  lines.push(...fusionCapabilitySection(input.journal));
   const retryLines = retriedCallLines(input.journal);
   lines.push("", "## Documents", "");
   if (documents.length === 0) {
@@ -434,6 +435,52 @@ function reportReadme(options: {
   lines.push(...retryLines);
   lines.push("");
   return lines.join("\n");
+}
+
+function fusionCapabilitySection(journal: readonly WorkflowJournalLine[]): string[] {
+  const calls = journal.filter(
+    (
+      line,
+    ): line is WorkflowJournalLine & {
+      kind: "agent_end" | "error";
+      capabilityMode: "tool-free" | "agent";
+      callId: string;
+    } =>
+      (line.kind === "agent_end" || line.kind === "error") &&
+      line.capabilityMode !== undefined &&
+      line.callId !== undefined,
+  );
+  if (calls.length === 0) return [];
+  return [
+    "",
+    "## Fusion capability evidence",
+    "",
+    "Declared mode and host active-tool readback are separate facts. Replayed calls start no child and therefore carry no live readback.",
+    "",
+    "| Call | Leg | Declared mode | Host active tools | Execution |",
+    "| --- | --- | --- | --- | --- |",
+    ...calls.map((line) => {
+      const tools =
+        line.activeToolNames === undefined
+          ? "not recorded"
+          : line.activeToolNames.length === 0
+            ? "none (`[]`)"
+            : line.activeToolNames.map((name) => markdownTableCell(name, true)).join(", ");
+      const execution =
+        line.replayed === true ? "replayed; no child ran" : line.replayed === false ? "fresh" : "not recorded";
+      return `| ${markdownTableCell(line.callId, true)} | ${markdownTableCell(line.label ?? line.agent ?? "agent")} | ${markdownTableCell(line.capabilityMode, true)} | ${tools} | ${execution} |`;
+    }),
+  ];
+}
+
+function markdownTableCell(value: string, code = false): string {
+  const escaped = singleLine(value)
+    .replace(/&/gu, "&amp;")
+    .replace(/\|/gu, "&#124;")
+    .replace(/`/gu, "&#96;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;");
+  return code ? `<code>${escaped}</code>` : escaped;
 }
 
 /**

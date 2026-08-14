@@ -27,6 +27,7 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
 export interface AgentExecutionPromptCapsule {
   version: "locus.agent.prompt.v1";
   agentName: string;
+  capabilityMode?: "tool-free" | "agent";
   agentDefinitionPath?: string;
   task: string;
   projectRoot: string;
@@ -50,6 +51,7 @@ export function createAgentExecutionPromptCapsule(
   const capsule: AgentExecutionPromptCapsule = {
     version: "locus.agent.prompt.v1",
     agentName: request.agent.name,
+    ...(request.capabilityMode === undefined ? {} : { capabilityMode: request.capabilityMode }),
     task: request.task,
     projectRoot: request.projectRoot ?? "",
     workingDirectory: request.workingDirectory ?? request.projectRoot ?? "",
@@ -61,7 +63,11 @@ export function createAgentExecutionPromptCapsule(
   if (request.agent.filePath !== undefined) capsule.agentDefinitionPath = request.agent.filePath;
   if (request.modelRoleResolution !== undefined)
     capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
-  const agentSystemPrompt = buildAgentSystemPrompt(request, { diagnostics, env: effectivePromptEnv });
+  const agentSystemPrompt = buildAgentSystemPrompt(request, {
+    diagnostics,
+    env: effectivePromptEnv,
+    suppressContextExtras: request.capabilityMode === "tool-free",
+  });
   if (agentSystemPrompt !== undefined) capsule.agentSystemPrompt = agentSystemPrompt;
   if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
   const parentContextText = assembleParentContext(request.parentContext);
