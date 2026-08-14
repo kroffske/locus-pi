@@ -93,6 +93,8 @@ export interface SdkAgentSessionLike {
   prompt(text: string, options?: { source?: string; streamingBehavior?: "steer" | "followUp" }): Promise<void>;
   getSessionStats(): SdkSessionStatsLike;
   getLastAssistantText(): string | undefined;
+  /** Pi 0.83 host readback. Required for fresh tool-free Fusion sessions. */
+  getActiveToolNames?(): string[];
   exportToJsonl(outputPath?: string): string; // SYNC
   /**
    * Full readable render of the same session (`AgentSession.exportToHtml`,
@@ -116,6 +118,8 @@ export interface SdkCreateSessionResultLike {
 export interface SdkCreateSessionOptionsLike {
   cwd?: string;
   tools?: string[];
+  /** Host-level default suppression. Tool-free Fusion always requests `all`. */
+  noTools?: "all" | "builtin";
   /** Tool names disabled after any allowlist is applied. */
   excludeTools?: string[];
   /** Custom tools registered for this child session. */
@@ -131,6 +135,16 @@ export interface SdkCreateSessionOptionsLike {
    *  default host adapter appends this through DefaultResourceLoader so Pi keeps
    *  its normal base prompt, tool instructions, context files, and skills. */
   appendSystemPrompt?: string;
+  /** Internal loader materialization contract; stripped before createAgentSession. */
+  resourceLoaderOptions?: {
+    noExtensions: true;
+    noSkills: true;
+    noPromptTemplates: true;
+    noThemes: true;
+    noContextFiles: true;
+    systemPrompt: string;
+    appendSystemPrompt: [];
+  };
   resourceLoader?: unknown;
 }
 
@@ -936,6 +950,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
 /** Filled by the child-session run once a session exists; empty when none was created. */
 interface ExecutedModelObservation {
   executedModel?: string;
+  activeToolNames?: string[];
 }
 
 /**
@@ -976,7 +991,11 @@ async function runWithSdkSession(
     promptEnv,
     observed,
   );
-  return observed.executedModel === undefined ? result : { ...result, executedModel: observed.executedModel };
+  return {
+    ...result,
+    ...(observed.executedModel === undefined ? {} : { executedModel: observed.executedModel }),
+    ...(observed.activeToolNames === undefined ? {} : { activeToolNames: observed.activeToolNames }),
+  };
 }
 
 async function runChildSession(
@@ -1039,7 +1058,22 @@ async function runChildSession(
   if (model !== undefined && model !== null) sessionOptions.model = model;
   if (thinkingLevel !== undefined) sessionOptions.thinkingLevel = thinkingLevel;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
-  if (appendSystemPrompt !== undefined) sessionOptions.appendSystemPrompt = appendSystemPrompt;
+  if (request.capabilityMode === "tool-free") {
+    sessionOptions.noTools = "all";
+    sessionOptions.tools = [];
+    sessionOptions.customTools = [];
+    sessionOptions.resourceLoaderOptions = {
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+      systemPrompt: appendSystemPrompt,
+      appendSystemPrompt: [],
+    };
+  } else if (appendSystemPrompt !== undefined) {
+    sessionOptions.appendSystemPrompt = appendSystemPrompt;
+  }
   let created: SdkCreateSessionResultLike;
   try {
     created = await createSession(sessionOptions);
@@ -1073,6 +1107,35 @@ async function runChildSession(
   }
 
   const session = created.session;
+  let childSession = createSdkSessionRecord(request, session.sessionId);
+  let activeToolNames: string[] | undefined;
+  if (request.capabilityMode !== undefined) {
+    try {
+      const readback = session.getActiveToolNames?.();
+      if (readback !== undefined && (!Array.isArray(readback) || !readback.every((name) => typeof name === "string"))) {
+        throw new Error("AgentSession.getActiveToolNames() returned an unexpected shape.");
+      }
+      activeToolNames = readback === undefined ? undefined : [...readback];
+      if (activeToolNames !== undefined) observed.activeToolNames = activeToolNames;
+    } catch (error) {
+      const reason = `Active tool readback failed before child prompt: ${errorMessage(error)}`;
+      agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+      disposeQuietly(session);
+      return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
+    }
+  }
+  if (request.capabilityMode === "tool-free" && activeToolNames === undefined) {
+    const reason = "Tool-free Fusion requires AgentSession.getActiveToolNames() before child prompt.";
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    disposeQuietly(session);
+    return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
+  }
+  if (request.capabilityMode === "tool-free" && activeToolNames!.length > 0) {
+    const reason = `Tool-free Fusion child exposed active tools before prompt: ${activeToolNames!.join(", ")}.`;
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    disposeQuietly(session);
+    return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
+  }
   // The one honest source for "which model WOULD run": the session itself, after the
   // host built it. Anything computed before this line is the request talking to
   // itself. It is deliberately NOT `observed.executedModel` yet — a built session is
@@ -1082,7 +1145,6 @@ async function runChildSession(
   // requested-vs-executed conflation this task exists to remove, one step later.
   const sessionModelSelector = modelSelectorFromModel(session.model) ?? EXECUTED_MODEL_UNAVAILABLE;
   const requestedSelector = modelSelectorFromModel(model);
-  let childSession = createSdkSessionRecord(request, session.sessionId);
   let childOutputStats: AgentChildOutputStats | undefined;
   let childTrace: AgentChildTrace | undefined;
   let childTraceAttempted = false;
@@ -1506,20 +1568,28 @@ async function materializeSdkSessionOptions(
   mod: unknown,
   opts: SdkCreateSessionOptionsLike,
 ): Promise<Record<string, unknown>> {
-  const { appendSystemPrompt, ...sessionOptions } = opts;
-  if (appendSystemPrompt === undefined) return sessionOptions;
+  const { appendSystemPrompt, resourceLoaderOptions, ...sessionOptions } = opts;
+  if (appendSystemPrompt === undefined && resourceLoaderOptions === undefined) return sessionOptions;
   if (!isRecord(mod) || typeof mod.DefaultResourceLoader !== "function") {
     throw new AgentSdkUnavailableError(
-      "Installed Pi host does not expose DefaultResourceLoader for appendSystemPrompt.",
+      "Installed Pi host does not expose DefaultResourceLoader for package-owned prompt resources.",
     );
   }
   const DefaultResourceLoader = mod.DefaultResourceLoader as new (options: Record<string, unknown>) => {
     reload?: () => Promise<void> | void;
   };
-  const loaderOptions: Record<string, unknown> = {
-    cwd: opts.cwd,
-    appendSystemPromptOverride: (base: string[]) => [...base, appendSystemPrompt],
-  };
+  const loaderOptions: Record<string, unknown> =
+    resourceLoaderOptions === undefined
+      ? {
+          cwd: opts.cwd,
+          appendSystemPromptOverride: (base: string[]) => [...base, appendSystemPrompt!],
+        }
+      : {
+          cwd: opts.cwd,
+          ...resourceLoaderOptions,
+          systemPromptOverride: () => resourceLoaderOptions.systemPrompt,
+          appendSystemPromptOverride: () => [],
+        };
   if (typeof mod.getAgentDir === "function") loaderOptions.agentDir = (mod.getAgentDir as () => string)();
   const loader = new DefaultResourceLoader(loaderOptions);
   await loader.reload?.();

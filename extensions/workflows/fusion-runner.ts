@@ -29,6 +29,7 @@ import {
   type WorkflowFusionContext,
   type WorkflowFusionJudge,
   type WorkflowFusionMember,
+  type WorkflowFusionMode,
   type WorkflowJournalLine,
 } from "./runtime/workflow-runtime.js";
 
@@ -37,6 +38,7 @@ export interface DirectFusionRunOptions {
   ctx: ExtensionContext;
   signal: AbortSignal;
   question: string;
+  mode: WorkflowFusionMode;
   members: readonly WorkflowFusionMember[];
   judge: WorkflowFusionJudge;
   context?: WorkflowFusionContext;
@@ -111,6 +113,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
   const failureLines: WorkflowJournalLine[] = [];
   try {
     answer = await runtime.dsl.fusion(options.question, {
+      mode: options.mode,
       members: options.members,
       judge: options.judge,
       ...(options.context === undefined ? {} : { context: options.context }),

@@ -6,6 +6,16 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Fusion now requires one explicit capability mode for every member and its
+  judge.** `tool-free` keeps catalog personas while disabling package discovery
+  and requiring an empty Pi active-tool readback before the first prompt;
+  `agent` keeps the existing catalog-agent capability path. Workflow and direct
+  Fusion persist the declared mode and fresh host readback in evidence, journals,
+  and reports, while replay records the mode without claiming a live readback.
+  Direct Fusion configuration is now version 2: operational commands reject
+  version 1, and explicit configure/set replacement is atomic and remains
+  disabled until reviewed and enabled.
+
 - **The `/ps` agent viewer now gives the transcript more room and clearer
   boundaries.** While one agent's transcript is open, the lower fleet panel
   shows only that agent instead of the full roster. The viewer frame uses the

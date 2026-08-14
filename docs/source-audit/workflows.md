@@ -38,14 +38,27 @@ or borrowed runtime implementation was identified for this source-audit slice.
   terminal settlement. Native command completion (`command-completions.ts`) returns full argument strings
   for grammar-owned tokens and yields free-text tails.
 - `extensions/workflows/fusion-config.ts` owns the project-local
-  `.pi/locus-pi/fusion/config.json` boundary, the available-model projection,
-  closed member/judge validation, and `/fusion set` grammar. `fusion-surface.ts`
-  owns registration, active-tool reconciliation, interactive selection, command
-  presentation, and translation into a direct run. `fusion-runner.ts` owns that
-  run's ordinary Workflow journal, child bridge, artifact store, result envelope,
-  and readable report. Disabled means absent from `pi.getActiveTools()`; it
-  remains registered in the complete inventory so `/fusion enable` can activate
-  it immediately without a reload.
+  `.pi/locus-pi/fusion/config.json` boundary, required version 2 homogeneous
+  capability mode, available-model projection, closed member/judge validation,
+  and `/fusion set` grammar. Operational reads reject legacy version 1;
+  configure/set may replace it through one atomic write and always leave the
+  upgraded configuration disabled. `fusion-surface.ts` owns registration,
+  active-tool reconciliation, interactive selection, command presentation, and
+  translation into a direct run. `fusion-runner.ts` owns that run's ordinary
+  Workflow journal, child bridge, artifact store, result envelope, and readable
+  report. Disabled means absent from `pi.getActiveTools()`; it remains registered
+  in the complete inventory so `/fusion enable` can activate it immediately
+  without a reload.
+- Fusion does not add a child transport. `workflow-runtime.ts` attaches the
+  runtime-owned `tool-free` or `agent` capability marker only to internal Fusion
+  legs and includes it in replay identity. `workflow-agent-bridge.ts` maps that
+  marker onto the existing agent boundary. `agent-sdk-host.ts` keeps agent mode
+  on the ordinary catalog-agent path; tool-free mode uses Pi's
+  `DefaultResourceLoader` with package-owned prompt text, all five discovery
+  sources disabled, and `noTools: "all"` plus empty tool arrays. Before the first
+  prompt it requires an exact empty `getActiveToolNames()` readback. Mode and
+  fresh readback flow through per-call results, journal lines, and the readable
+  report; replay retains the declared mode without inventing a live readback.
 - `extensions/workflows/workflow-command-launcher.ts` is the single command
   execution policy used by flat and compatibility command routes. It owns the
   current session lease, exclusive background launch, non-exclusive tool

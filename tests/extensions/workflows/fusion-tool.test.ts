@@ -7,6 +7,7 @@ import { fusionConfigPath, loadFusionConfig } from "../../../extensions/workflow
 import { runDirectFusion, type DirectFusionRunOptions } from "../../../extensions/workflows/fusion-runner.js";
 import { registerFusionSurface } from "../../../extensions/workflows/fusion-surface.js";
 import type { DirectFusionRunResult } from "../../../extensions/workflows/fusion-runner.js";
+import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import workflows from "../../../extensions/workflows/index.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
@@ -36,6 +37,28 @@ function completedDirectResult(root: string): DirectFusionRunResult {
 }
 
 describe("direct Fusion surface", () => {
+  it("keeps the package manifest aligned with the version-2 two-mode contract", () => {
+    const manifest = JSON.parse(
+      readFileSync(path.join(process.cwd(), "extensions", "workflows", "manifest.json"), "utf8"),
+    ) as { runtimeRequirements: string[]; stateUsed: string[]; tests: string[] };
+    const runtimeContract = manifest.runtimeRequirements.join("\n");
+    const stateContract = manifest.stateUsed.join("\n");
+
+    expect(runtimeContract).toContain("required homogeneous tool-free or agent mode");
+    expect(runtimeContract).toContain("status, enable, run and tool execution reject version 1");
+    expect(runtimeContract).toContain("replay retains the declaration without claiming live readback");
+    expect(runtimeContract).toContain("prompt, agent, capabilityMode, maxToolCalls");
+    expect(runtimeContract).toContain('ordinary agent calls and Fusion agent mode receive allowedTools ["*"]');
+    expect(runtimeContract).toContain(
+      "tool-free Fusion is the explicit exception with empty allowedTools plus host noTools enforcement",
+    );
+    expect(runtimeContract).not.toContain('every workflow child always receives allowedTools ["*"]');
+    expect(runtimeContract).not.toContain("same full-tool Fusion runtime");
+    expect(stateContract).toContain("fusion/config.json version 2");
+    expect(stateContract).toContain("required homogeneous tool-free or agent mode");
+    expect(manifest.tests).toContain("tests/shared/workflows/workflow-run-report.test.ts");
+  });
+
   it("registers a described tool but keeps it inactive by default", async () => {
     const harness = createHarness(temporaryRoot());
     harness.pi.setActiveTools(["workflow", "fusion"]);
@@ -62,7 +85,7 @@ describe("direct Fusion surface", () => {
     await emit(harness, "session_start");
     const command = harness.commands.get("fusion")!;
 
-    await command.handler("set --members test/alpha,test/beta --judge test/judge", harness.ctx);
+    await command.handler("set --mode agent --members test/alpha,test/beta --judge test/judge", harness.ctx);
     expect(harness.activeTools).toEqual(["workflow"]);
     await command.handler("enable", harness.ctx);
     expect(harness.activeTools).toEqual(["workflow", "fusion"]);
@@ -73,8 +96,9 @@ describe("direct Fusion surface", () => {
     expect(harness.activeTools).toEqual(["workflow"]);
 
     expect(await loadFusionConfig(harness.ctx)).toEqual({
-      version: 1,
+      version: 2,
       enabled: false,
+      mode: "agent",
       members: ["test/alpha", "test/beta"],
       judge: "test/judge",
     });
@@ -91,11 +115,11 @@ describe("direct Fusion surface", () => {
       ],
     });
     registerFusionSurface(harness.pi);
-    harness.selectQueue.push("2", "test/alpha", "test/beta", "test/judge");
+    harness.selectQueue.push("tool-free", "2", "test/alpha", "test/beta", "test/judge");
 
     await harness.commands.get("fusion")!.handler("configure", harness.ctx);
 
-    expect(harness.selectCalls[1]?.options).toEqual(
+    expect(harness.selectCalls[2]?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ value: "test/alpha" }),
         expect.objectContaining({ value: "test/beta" }),
@@ -104,6 +128,7 @@ describe("direct Fusion surface", () => {
       ]),
     );
     expect(await loadFusionConfig(harness.ctx)).toMatchObject({
+      mode: "tool-free",
       members: ["test/alpha", "test/beta"],
       judge: "test/judge",
     });
@@ -123,6 +148,75 @@ describe("direct Fusion surface", () => {
     expect(harness.notifications).toContainEqual(expect.stringContaining("Fusion remains inactive"));
   });
 
+  it("strictly rejects v1 operational paths and recovers only through explicit disabled v2 configuration", async () => {
+    const root = temporaryRoot();
+    mkdirSync(path.dirname(fusionConfigPath(root)), { recursive: true });
+    writeFileSync(
+      fusionConfigPath(root),
+      '{"version":1,"enabled":true,"members":["test/alpha","test/beta"],"judge":"test/judge"}\n',
+      "utf8",
+    );
+    const harness = createHarness(root, {
+      models: [
+        { provider: "test", id: "alpha" },
+        { provider: "test", id: "beta" },
+        { provider: "test", id: "judge" },
+      ],
+    });
+    const runFusion = vi.fn(async () => completedDirectResult(root));
+    registerFusionSurface(harness.pi, { runFusion });
+    const command = harness.commands.get("fusion")!;
+
+    for (const operation of ["status", "enable", "run question"]) {
+      await command.handler(operation, harness.ctx);
+      expect(harness.widgets.get("fusion")).toContain("Fusion config is incompatible with version 2");
+    }
+    const toolResult = await runTool(harness, "fusion", { question: "question" });
+    expect(toolResult).toMatchObject({
+      isError: true,
+      content: [
+        expect.objectContaining({ text: expect.stringContaining("Fusion config is incompatible with version 2") }),
+      ],
+    });
+    expect(runFusion).not.toHaveBeenCalled();
+
+    await command.handler("set --mode tool-free --members test/alpha,test/beta --judge test/judge", harness.ctx);
+
+    expect(await loadFusionConfig(harness.ctx)).toEqual({
+      version: 2,
+      enabled: false,
+      mode: "tool-free",
+      members: ["test/alpha", "test/beta"],
+      judge: "test/judge",
+    });
+    expect(harness.widgets.get("fusion")).toContain(
+      "Fusion configuration was upgraded and left disabled; run /fusion enable after reviewing the selected mode.",
+    );
+    expect(harness.activeTools).not.toContain("fusion");
+
+    writeFileSync(
+      fusionConfigPath(root),
+      '{"version":1,"enabled":true,"members":["test/alpha","test/beta"],"judge":"test/judge"}\n',
+      "utf8",
+    );
+    harness.selectQueue.push("configure", "agent", "2", "test/alpha", "test/beta", "test/judge");
+    await command.handler("", harness.ctx);
+    expect(harness.selectCalls[0]).toMatchObject({
+      title: "Fusion · configuration review required",
+      options: expect.arrayContaining([expect.objectContaining({ value: "configure" })]),
+    });
+    expect(await loadFusionConfig(harness.ctx)).toEqual({
+      version: 2,
+      enabled: false,
+      mode: "agent",
+      members: ["test/alpha", "test/beta"],
+      judge: "test/judge",
+    });
+    expect(harness.widgets.get("fusion")).toContain(
+      "Fusion configuration was upgraded and left disabled; run /fusion enable after reviewing the selected mode.",
+    );
+  });
+
   it("exposes configured Fusion to the main-session tool API without forwarding ambient history", async () => {
     const root = temporaryRoot();
     const harness = createHarness(root, {
@@ -135,7 +229,7 @@ describe("direct Fusion surface", () => {
     const runFusion = vi.fn(async (_options: DirectFusionRunOptions) => completedDirectResult(root));
     registerFusionSurface(harness.pi, { runFusion });
     const command = harness.commands.get("fusion")!;
-    await command.handler("set --members test/alpha,test/beta --judge test/judge", harness.ctx);
+    await command.handler("set --mode tool-free --members test/alpha,test/beta --judge test/judge", harness.ctx);
     await command.handler("enable", harness.ctx);
 
     const result = await runTool(harness, "fusion", {
@@ -149,6 +243,7 @@ describe("direct Fusion surface", () => {
     expect(runFusion).toHaveBeenCalledOnce();
     expect(runFusion.mock.calls[0]?.[0]).toMatchObject({
       question: "Which migration is safer?",
+      mode: "tool-free",
       context: { mode: "provided", text: "Downtime must remain below four minutes." },
       members: [{ model: "test/alpha" }, { model: "test/beta" }],
       judge: { model: "test/judge" },
@@ -168,7 +263,7 @@ describe("direct Fusion surface", () => {
     const runFusion = vi.fn(async (_options: DirectFusionRunOptions) => completedDirectResult(root));
     registerFusionSurface(harness.pi, { runFusion });
     const command = harness.commands.get("fusion")!;
-    await command.handler("set --members test/alpha,test/beta --judge test/judge", harness.ctx);
+    await command.handler("set --mode agent --members test/alpha,test/beta --judge test/judge", harness.ctx);
     await command.handler("enable", harness.ctx);
 
     await command.handler("run Which migration is safer?", harness.ctx);
@@ -192,7 +287,7 @@ describe("direct Fusion surface", () => {
     const runFusion = vi.fn(async (_options: DirectFusionRunOptions) => completedDirectResult(root));
     registerFusionSurface(harness.pi, { runFusion });
     const command = harness.commands.get("fusion")!;
-    await command.handler("set --members test/alpha,test/beta --judge test/judge", harness.ctx);
+    await command.handler("set --mode agent --members test/alpha,test/beta --judge test/judge", harness.ctx);
     await command.handler("enable", harness.ctx);
     harness.ctx.modelRegistry!.getAvailable = () => [
       { provider: "test", id: "alpha" },
@@ -231,6 +326,7 @@ describe("direct Fusion runner", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       question: "Which migration is safer?",
+      mode: "tool-free",
       members: [
         { label: "member-01", model: "test/alpha" },
         { label: "member-02", model: "test/beta" },
@@ -238,6 +334,8 @@ describe("direct Fusion runner", () => {
       judge: { label: "judge", model: "test/judge" },
       createExecutor: ({ model }): AgentExecutor => ({
         async run(request: AgentRunRequest) {
+          expect(request).toMatchObject({ capabilityMode: "tool-free", allowedTools: [] });
+          expect(request.agent).toMatchObject({ readOnly: true, allowedTools: [], tools: [] });
           const id = (model as { id?: string } | undefined)?.id ?? "unknown";
           executed.push(id);
           return {
@@ -246,6 +344,7 @@ describe("direct Fusion runner", () => {
             reason: "answered",
             text: id === "judge" ? "Use the reversible migration." : `${id} evidence`,
             executedModel: `test/${id}`,
+            activeToolNames: [],
             diagnostics: [],
             lifecycleEntryIds: [],
           };
@@ -267,6 +366,21 @@ describe("direct Fusion runner", () => {
     );
     const envelope = JSON.parse(readFileSync(path.join(result.runDir, "runtime", "result.json"), "utf8"));
     expect(envelope).toMatchObject({ ok: true, disposition: { status: "completed" } });
+    const persistedJournal = readWorkflowRunJournalState(root, result.runId);
+    expect(persistedJournal.diagnostics).toEqual([]);
+    expect(
+      persistedJournal.lines
+        .filter((line) => line.kind === "agent_end")
+        .map((line) => ({ capabilityMode: line.capabilityMode, activeToolNames: line.activeToolNames })),
+    ).toEqual([
+      { capabilityMode: "tool-free", activeToolNames: [] },
+      { capabilityMode: "tool-free", activeToolNames: [] },
+      { capabilityMode: "tool-free", activeToolNames: [] },
+    ]);
+    const report = readFileSync(path.join(result.runDir, "outputs", "README.md"), "utf8");
+    expect(report).toContain("Declared mode | Host active tools");
+    expect(report).toContain("tool-free");
+    expect(report).toContain("`[]`");
   });
 
   it("releases the shared workflow workspace when failure reporting throws", async () => {
@@ -305,6 +419,7 @@ describe("direct Fusion runner", () => {
       ctx: harness.ctx,
       signal: new AbortController().signal,
       question: "Which migration is safer?",
+      mode: "agent",
       members: [
         { label: "member-01", model: "test/alpha" },
         { label: "member-02", model: "test/beta" },

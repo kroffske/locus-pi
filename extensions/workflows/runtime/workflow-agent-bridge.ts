@@ -245,19 +245,28 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
     }
-    // A workflow-selected catalog role contributes its prompt/model identity, not
-    // a hidden capability downgrade. Every workflow child receives the host's
-    // full available tool surface. `allowedTools: ["*"]` is the SDK contract.
-    const agent: AgentDefinition = {
-      ...selectedAgent,
-      allowedTools: ["*"],
-      tools: ["*"],
-      readOnly: false,
-      permissionMode: "inherit-parent",
-    };
+    // Fusion tool-free is the only internal caller allowed to narrow this path.
+    // Ordinary agent() and Fusion agent mode keep the established wildcard surface.
+    const agent: AgentDefinition =
+      req.capabilityMode === "tool-free"
+        ? {
+            ...selectedAgent,
+            allowedTools: [],
+            tools: [],
+            readOnly: true,
+            permissionMode: "inherit-parent",
+          }
+        : {
+            ...selectedAgent,
+            allowedTools: ["*"],
+            tools: ["*"],
+            readOnly: false,
+            permissionMode: "inherit-parent",
+          };
 
     // 2. Pi still owns operator approval. Workflow source cannot maintain a
-    //    second capability policy: every call uses the wildcard tool set.
+    //    second capability policy; only the runtime-owned Fusion marker selects
+    //    the closed tool-free shape above.
     const approvalTier: "allow" = "allow";
     const permissionMode = resolvePermissionMode({
       agent,
@@ -382,7 +391,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     const request = createAgentRunRequest(agent, childTask, {
       maxTurns,
       approvalTier,
-      allowedTools: ["*"],
+      allowedTools: req.capabilityMode === "tool-free" ? [] : ["*"],
+      ...(req.capabilityMode === undefined ? {} : { capabilityMode: req.capabilityMode }),
       modelRoleResolution,
       // Travels on the REQUEST because the run-result artifact is written from the
       // request, inside the boundary, before this bridge ever sees a result.
@@ -561,6 +571,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         permissionMode,
         workspaceMode,
         readOnly: agent.readOnly,
+        ...(boundary.activeToolNames === undefined ? {} : { activeToolNames: boundary.activeToolNames }),
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(boundary.executedModel !== undefined ? { executedModel: boundary.executedModel } : {}),
         // Same gate as the settled path below, for the same reason: the note is past
@@ -651,6 +662,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       permissionMode,
       workspaceMode,
       readOnly: agent.readOnly,
+      ...(boundary.activeToolNames === undefined ? {} : { activeToolNames: boundary.activeToolNames }),
     };
     return result;
   };
