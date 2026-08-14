@@ -221,6 +221,8 @@ extensions/workflows/background-run-registry.ts
 extensions/workflows/catalog-viewer.ts
 extensions/workflows/command-completions.ts
 extensions/workflows/command-parser.ts
+extensions/workflows/command/receipts.ts
+extensions/workflows/command/run.ts
 extensions/workflows/command-router.ts
 extensions/workflows/examples/README.md
 extensions/workflows/examples/implement/README.md
@@ -310,6 +312,7 @@ scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
 scripts/check-workflow-source-shape.ts
 scripts/materialize-public-repository.ts
+skills/locus-pi-run-workflow/SKILL.md
 skills/locus-pi-workflows/SKILL.md
 skills/locus-pi-workflows/references/INDEX.md
 skills/locus-pi-workflows/references/bounded-candidate-search.md
@@ -366,6 +369,7 @@ tests/extensions/workflows/workflow-catalog.test.ts
 tests/extensions/workflows/workflow-command-completions.test.ts
 tests/extensions/workflows/workflow-command-launcher.test.ts
 tests/extensions/workflows/workflow-command-surfaces.test.ts
+tests/extensions/workflows/command/run-receipts.test.ts
 tests/extensions/workflows/workflow-diagram-artifacts.test.ts
 tests/extensions/workflows/workflow-failure-surfaces.test.ts
 tests/extensions/workflows/workflow-handoff-integration.test.ts
@@ -399,6 +403,7 @@ tests/integration/operator-status.test.ts
 tests/integration/package-boundary.test.ts
 tests/integration/public-registration.test.ts
 tests/integration/repository-governance.test.ts
+tests/integration/workflow-run-skill.test.ts
 tests/shared/agents/agent-command-run.test.ts
 tests/shared/agents/agent-evidence-evaluator.test.ts
 tests/shared/agents/agent-executor-host.test.ts

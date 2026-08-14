@@ -91,7 +91,7 @@ interface RunOutcome {
 function digestFor(root: string, outcome: RunOutcome): string {
   const harness = createHarness(root, { sessionId: `digest-${outcome.runId}` });
   const transcript = createWorkflowTranscript(harness.ctx, "stages", "tool");
-  transcript.start(outcome.runId);
+  transcript.start(outcome.runId, outcome.runDir);
   for (const line of outcome.journal) transcript.event(line);
   return transcript.finish(outcome.raw).digest;
 }

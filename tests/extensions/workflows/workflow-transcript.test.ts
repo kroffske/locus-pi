@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { createWorkflowTranscript } from "../../../extensions/workflows/workflow-transcript.js";
 import {
   announceCommandWorkflowStart,
-  createWorkflowTranscript,
   persistCommandWorkflowTranscript,
   WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
-} from "../../../extensions/workflows/workflow-transcript.js";
+} from "../../../extensions/workflows/command/receipts.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
@@ -17,10 +17,10 @@ import { compactWorkflowParentRows } from "../../../extensions/workflows/progres
 import { createHarness } from "../../test-harness.js";
 
 describe("workflow persistent transcript", () => {
-  it("buffers command lifecycle, then persists one digest after the idle barrier without a model turn", async () => {
+  it("persists an already-idle command digest without waiting or starting a model turn", async () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "/private/path/demo.workflow.mjs", "command");
-    transcript.start("run-1");
+    transcript.start("run-1", "/tmp/run-1");
     const completion = transcript.finish({
       runId: "run-1",
       runDir: "/tmp/run-1",
@@ -45,7 +45,7 @@ describe("workflow persistent transcript", () => {
       expect(entry.options).toEqual({ triggerTurn: false });
       expect(entry.options).not.toHaveProperty("deliverAs");
     }
-    expect(harness.waitForIdleCalls).toBe(1);
+    expect(harness.waitForIdleCalls).toBe(0);
     expect(harness.customMessageDeliveries).toEqual(["append"]);
     expect(harness.notifications).toEqual([]);
   });
@@ -80,7 +80,7 @@ describe("workflow persistent transcript", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "broken", "command");
     const errorLine: WorkflowJournalLine = { ts: "t", runId: "run-2", kind: "error", message: "same failure" };
-    transcript.start("run-2");
+    transcript.start("run-2", "/tmp/run-2");
     transcript.event(errorLine);
     const failedRun: RunWorkflowScriptResult = {
       runId: "run-2",
@@ -101,10 +101,10 @@ describe("workflow persistent transcript", () => {
     expect(String(failures[0]?.message.content)).toContain("failed");
   });
 
-  it("prints the exact prose result in a separate unbounded message after the bounded run digest", async () => {
+  it("queues exact prose before the bounded terminal receipt", async () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
-    transcript.start("20260731-215554-ea90");
+    transcript.start("20260731-215554-ea90", "/tmp/run-ea90");
     const exactResult = `# Implementation Plan\n\n${"Full result line. ".repeat(400)}\nUNTRUNCATED_RESULT_SENTINEL`;
     const resultTextPath = "/tmp/run-ea90/outputs/workflow-result.md";
     const completion = transcript.finish({
@@ -120,14 +120,7 @@ describe("workflow persistent transcript", () => {
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
     expect(harness.sentMessages).toHaveLength(2);
     expect(harness.sentMessages[0]?.message).toMatchObject({
-      customType: WORKFLOW_RUN_CUSTOM_TYPE,
-      display: true,
-      details: { eventKind: "workflow_end", runId: "20260731-215554-ea90" },
-    });
-    expect(harness.sentMessages[0]?.message.content).not.toContain("UNTRUNCATED_RESULT_SENTINEL");
-    expect(harness.sentMessages[1]?.message).toMatchObject({
       customType: WORKFLOW_RESULT_CUSTOM_TYPE,
-      content: exactResult,
       display: true,
       details: {
         eventKind: "workflow_result",
@@ -135,18 +128,25 @@ describe("workflow persistent transcript", () => {
         resultTextPath,
       },
     });
-    expect(String(harness.sentMessages[1]?.message.content).length).toBeGreaterThan(4096);
+    expect(harness.sentMessages[0]?.message.content).toBe(exactResult);
+    expect(harness.sentMessages[1]?.message).toMatchObject({
+      customType: WORKFLOW_RUN_CUSTOM_TYPE,
+      display: true,
+      details: { eventKind: "workflow_end", runId: "20260731-215554-ea90", resultPersisted: true },
+    });
+    expect(harness.sentMessages[1]?.message.content).not.toContain("UNTRUNCATED_RESULT_SENTINEL");
+    expect(String(harness.sentMessages[0]?.message.content).length).toBeGreaterThan(4096);
     expect(harness.sentMessages.map((entry) => entry.options)).toEqual([
       { triggerTurn: false },
       { triggerTurn: false },
     ]);
     expect(harness.customMessageDeliveries).toEqual(["append", "append"]);
-    expect(harness.waitForIdleCalls).toBe(1);
+    expect(harness.waitForIdleCalls).toBe(0);
   });
 
   it("renders waiting and operator cancellation as distinct terminal outcomes", () => {
     const awaiting = createWorkflowTranscript(createHarness().ctx, "review", "tool");
-    awaiting.start("awaiting-run");
+    awaiting.start("awaiting-run", "/tmp/awaiting-run");
     const awaitingCompletion = awaiting.finish({
       runId: "awaiting-run",
       runDir: "/tmp/awaiting-run",
@@ -161,7 +161,7 @@ describe("workflow persistent transcript", () => {
     expect(awaitingCompletion.digest).not.toContain("finished");
 
     const cancelled = createWorkflowTranscript(createHarness().ctx, "review", "tool");
-    cancelled.start("cancelled-run");
+    cancelled.start("cancelled-run", "/tmp/cancelled-run");
     const cancelledCompletion = cancelled.finish({
       runId: "cancelled-run",
       runDir: "/tmp/cancelled-run",
@@ -179,7 +179,7 @@ describe("workflow persistent transcript", () => {
   it("preserves semantic failure summary and unresolved row ids without a technical error", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "semantic-stop", "tool");
-    transcript.start("semantic-failure");
+    transcript.start("semantic-failure", "/tmp/semantic-failure");
     const intermediateError: WorkflowJournalLine = {
       ts: "t",
       runId: "semantic-failure",
@@ -210,7 +210,7 @@ describe("workflow persistent transcript", () => {
 
   it("uses a journal error only as fallback when no final semantic diagnostic exists", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "fallback-stop", "tool");
-    transcript.start("fallback-failure");
+    transcript.start("fallback-failure", "/tmp/fallback-failure");
     transcript.event({ ts: "t", runId: "fallback-failure", kind: "error", message: "host bridge failed" });
 
     const completion = transcript.finish({
@@ -227,7 +227,7 @@ describe("workflow persistent transcript", () => {
 
   it("uses a journal error as fallback when the script returns only ok:false", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "live-smoke", "tool");
-    transcript.start("agent-auth-failure");
+    transcript.start("agent-auth-failure", "/tmp/agent-auth-failure");
     transcript.event({
       ts: "t",
       runId: "agent-auth-failure",
@@ -252,7 +252,7 @@ describe("workflow persistent transcript", () => {
   it("records result-persistence failure once as the terminal workflow verdict", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "persistence-warning", "command");
-    transcript.start("run-persistence-warning");
+    transcript.start("run-persistence-warning", "/tmp/run-persistence-warning");
 
     const completion = transcript.finish({
       runId: "run-persistence-warning",
@@ -278,7 +278,7 @@ describe("workflow persistent transcript", () => {
   it("says where the unabridged result text is and which command opens it", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "review", "command");
-    transcript.start("20260726-212752-98cc");
+    transcript.start("20260726-212752-98cc", "/tmp/run-98cc");
     const longResult = `# Code Review\n\n## Reviewed scope\n\n${"Detail line that runs well past the digest line cap. ".repeat(8)}`;
 
     const completion = transcript.finish({
@@ -305,7 +305,7 @@ describe("workflow persistent transcript", () => {
     // ending in "..." and, below it, only a journal path — no way to read why.
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
-    transcript.start("20260730-162453-000e");
+    transcript.start("20260730-162453-000e", "/tmp/run-000e");
 
     const completion = transcript.finish({
       runId: "20260730-162453-000e",
@@ -333,7 +333,7 @@ describe("workflow persistent transcript", () => {
     const transcript = createWorkflowTranscript(harness.ctx, "bounded", "tool");
     agentLiveStore.reset();
     try {
-      transcript.start("run-bounded");
+      transcript.start("run-bounded", "/tmp/run-bounded");
       for (let index = 0; index < 40; index += 1) {
         const line: WorkflowJournalLine = {
           ts: `t${index}`,
@@ -410,7 +410,7 @@ describe("workflow persistent transcript", () => {
       expect(visible[0]?.displayName).toBe(child.displayName);
 
       const transcript = createWorkflowTranscript(harness.ctx, "cancel-smoke", "tool");
-      transcript.start("run-cancelled");
+      transcript.start("run-cancelled", "/tmp/run-cancelled");
       transcript.event(start);
       transcript.event(end);
       const completion = transcript.finish({
@@ -433,10 +433,10 @@ describe("workflow persistent transcript", () => {
   });
 
   it("never sends when waitForIdle is unavailable and reports the missing persistence barrier", async () => {
-    const harness = createHarness();
+    const harness = createHarness(process.cwd(), { isStreaming: true });
     delete harness.ctx.waitForIdle;
     const transcript = createWorkflowTranscript(harness.ctx, "fallback", "command");
-    transcript.start("run-3");
+    transcript.start("run-3", "/tmp/run-3");
     transcript.event({
       ts: "t",
       runId: "run-3",
@@ -466,7 +466,7 @@ describe("workflow persistent transcript", () => {
   it("suppresses a delayed idle continuation after its session lease becomes stale", async () => {
     const harness = createHarness(process.cwd(), { isStreaming: true });
     const transcript = createWorkflowTranscript(harness.ctx, "reload-safe", "command");
-    transcript.start("run-reload-safe");
+    transcript.start("run-reload-safe", "/tmp/run-reload-safe");
     const completion = transcript.finish({
       runId: "run-reload-safe",
       runDir: "/tmp/run-reload-safe",
@@ -506,11 +506,11 @@ describe("workflow persistent transcript", () => {
     expect(harness.customMessageDeliveries).toEqual(["append"]);
 
     // A second start is not a second boundary.
-    expect(transcript.start("20260726-183012-a6aa")).toBeUndefined();
+    expect(transcript.start("20260726-183012-a6aa", "/repo/.pi/locus-pi/runs/20260726-183012-a6aa")).toBeUndefined();
 
     const busy = createHarness(process.cwd(), { isStreaming: true });
     const busyTranscript = createWorkflowTranscript(busy.ctx, "review", "command");
-    const busyAnnouncement = busyTranscript.start("20260726-183500-b2c4");
+    const busyAnnouncement = busyTranscript.start("20260726-183500-b2c4", "/tmp/b2c4");
     expect(announceCommandWorkflowStart(busy.pi, busy.ctx, busyAnnouncement!)).toBe(false);
     expect(busy.sentMessages).toEqual([]);
     expect(busy.customMessageDeliveries).toEqual([]);
@@ -518,7 +518,7 @@ describe("workflow persistent transcript", () => {
 
   it("keeps one row per agent: the started row becomes the finished row", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
-    transcript.start("20260726-183012-a6aa");
+    transcript.start("20260726-183012-a6aa", "/tmp/a6aa");
     transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
     transcript.event({
       ts: "t1",
@@ -554,7 +554,7 @@ describe("workflow persistent transcript", () => {
 
   it("never folds an agent without an end event into a clean run", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
-    transcript.start("20260726-183012-a6aa");
+    transcript.start("20260726-183012-a6aa", "/tmp/a6aa");
     transcript.event({ ts: "t1", runId: "r", kind: "agent_start", agent: "reviewer", callId: "call-9" });
     const completion = transcript.finish({
       runId: "20260726-183012-a6aa",
@@ -570,7 +570,7 @@ describe("workflow persistent transcript", () => {
 
   it("renders the operator gate as its own block naming the stage, the tool, and the questions", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool");
-    transcript.start("20260726-183012-a6aa");
+    transcript.start("20260726-183012-a6aa", "/tmp/a6aa");
     transcript.event({ ts: "t0", runId: "r", kind: "phase", phase: "clarify" });
     const completion = transcript.finish({
       runId: "20260726-183012-a6aa",
@@ -604,7 +604,7 @@ describe("workflow persistent transcript", () => {
     const transcript = createWorkflowTranscript(createHarness().ctx, "review", "tool", {
       input: "b09e8e8 — feat(workflows): schema uniqueness",
     });
-    transcript.start("20260726-183412-b2c4");
+    transcript.start("20260726-183412-b2c4", "/tmp/b2c4");
     transcript.event({
       ts: "t1",
       runId: "r",

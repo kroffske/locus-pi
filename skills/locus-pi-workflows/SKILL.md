@@ -1,42 +1,17 @@
 ---
 name: locus-pi-workflows
-description: Find, run, inspect, design, and build locus-pi workflows. Use for saved `.workflow.mjs` agent graphs, workflow run artifacts, or any request to create a workflow.
+description: Design, review, and build new locus-pi `.workflow.mjs` agent graphs. Use when the user asks to create, design, write, author, or revise a workflow. Do not use merely to run an existing workflow.
 ---
 
-# locus-pi workflows
+# locus-pi workflow authoring
 
 A workflow is reviewed trusted JavaScript that makes a visible graph of child
 `agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,
 and publication. Agents own interpretation and complete reader-facing text.
 
-This skill has two jobs: operate existing workflows and author new ones.
-
-## Operate an existing workflow
-
-```text
-/workflows list
-/workflows info <name>
-/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]
-/workflows status <runId>
-/workflows result <runId|last>
-/workflows continue <runId>
-/workflows stop [runId|last]
-```
-
-New Project workflows use one folder namespace:
-`.pi/workflows/<name>/<name>.workflow.mjs`. Direct sibling files named
-`<child>.workflow.mjs` are runnable as `<name>/<child>`. Resolution chooses the
-whole namespace from the nearest Project source, then User, then Package; it
-never mixes children from different sources. Existing flat Project/User
-`<name>.workflow.mjs` files remain compatible standalone workflows. Run evidence lives under
-`.pi/locus-pi/runs/<runId>/`; `outputs/` contains the human projection and
-`runtime/result.json` contains the terminal envelope. Agent-authored files are
-separate, under the workflow workspace described below.
-
-When a run ends with `awaiting_operator`, inspect its question and artifacts,
-then use `/workflows continue <runId>` to answer the named handoff. Use
-`/workflows stop [runId|last]` for cancellation; stopping is not a continuation
-answer and terminal cancellation follows runtime settlement.
+This skill owns authoring only. For running, starting, resuming, or monitoring
+the current run of an existing workflow, use the shipped
+`locus-pi-run-workflow` skill.
 
 ## Authoring is continuous by default
 

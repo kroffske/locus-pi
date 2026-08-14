@@ -17,7 +17,6 @@ import {
 } from "../_shared/operator/operator-interaction.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { listWorkflowRunIds, readWorkflowRunResultText, resolveWorkflowRunId } from "./runtime/workflow-journal.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
 import { WORKFLOW_RUN_STORAGE_PATTERN } from "./runtime/workflow-run-layout.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "./catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "./command-completions.js";
@@ -25,17 +24,9 @@ import {
   buildWorkflowRunCommand,
   formatWorkflowCommandToken,
   parseContinueCommand,
-  parseRunCommand,
   parseWorkflowCommandToken,
-  workflowRunRecoveryUsage,
   workflowRunUsage,
 } from "./command-parser.js";
-import {
-  isOneShotCommandMode,
-  preflightWorkflowCommandTarget,
-  workflowCommandIdleBlock,
-  workflowFreshLaunchPolicyError,
-} from "./launch-guard.js";
 import type { WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";
 import { clearWorkflowWidget, presentWorkflowHandoffPumpResult } from "./operator-surface.js";
 import {
@@ -44,8 +35,6 @@ import {
   errorMessage,
   listExampleNames,
   workflowHelpBlock,
-  workflowNotFoundBlock,
-  workflowRunConflictBlock,
   workflowStopBlock,
   workflowUnknownCommandBlock,
   workflowWarningBlock,
@@ -66,6 +55,7 @@ import {
   type WorkflowBrowserIntent,
 } from "./workflow-catalog.js";
 import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
+import { handleWorkflowRunCommand } from "./command/run.js";
 
 /** Bounded preview for hosts without custom UI; the file path carries the rest. */
 const WORKFLOW_RESULT_WIDGET_LINES = 40;
@@ -385,112 +375,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       return;
     }
 
-    // A canonical run command starts a live progress panel.
-    const parsedRun = parseRunCommand(rawText.trimStart());
-    if (parsedRun !== null) {
-      if (parsedRun.missingResumeId === true) {
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          workflowWarningBlock("Missing run id after --resume.", `Retry: ${workflowRunRecoveryUsage(parsedRun)}`),
-        );
-        return;
-      }
-      if (parsedRun.missingOutputDir === true) {
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          workflowWarningBlock(
-            "Missing project-relative path after --output-dir.",
-            `Retry: ${workflowRunRecoveryUsage(parsedRun)}`,
-          ),
-        );
-        return;
-      }
-      if (parsedRun.input !== undefined && parsedRun.input.length > WORKFLOW_INPUT_MAX_CHARS) {
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          workflowWarningBlock(
-            `Workflow input exceeds the ${WORKFLOW_INPUT_MAX_CHARS}-character limit.`,
-            "Retry with a shorter semantic request.",
-          ),
-        );
-        return;
-      }
-      const idleBlock = workflowCommandIdleBlock(ctx);
-      if (idleBlock !== undefined) {
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          workflowWarningBlock(
-            idleBlock,
-            "Recovery: wait for the current response to finish, then retry the same /workflows run command.",
-          ),
-        );
-        return;
-      }
-      const scriptRef = parsedRun.scriptRef;
-      const workingDirectory = getWorkingDirectory(ctx);
-      const targetPreflight = preflightWorkflowCommandTarget(scriptRef, projectRoot, workingDirectory);
-      if (targetPreflight.status === "not-found") {
-        setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
-        return;
-      }
-      // Confinement and other resolution failures deliberately continue
-      // through the runner once. That owner creates the canonical failed
-      // run and result.json instead of losing durable operator evidence.
-      const target = targetPreflight.status === "resolved" ? targetPreflight.target : undefined;
-
-      if (target !== undefined) {
-        const launchPolicyError = workflowFreshLaunchPolicyError({
-          target,
-          projectRoot,
-          ...(parsedRun.outputDir === undefined ? {} : { outputDir: parsedRun.outputDir }),
-          ...(parsedRun.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsedRun.resumeFromRunId }),
-        });
-        if (launchPolicyError !== undefined) {
-          setOperatorWidget(
-            ctx,
-            "workflows",
-            workflowWarningBlock(launchPolicyError, workflowRunRecoveryUsage(parsedRun)),
-          );
-          return;
-        }
-      }
-
-      const launched = commandLauncher.launch({
-        ctx,
-        scriptRef,
-        ...(targetPreflight.status === "runner-durable-failure" ? { targetKind: targetPreflight.targetKind } : {}),
-        ...(target === undefined ? {} : { target }),
-        ...(parsedRun.input === undefined ? {} : { input: parsedRun.input }),
-        ...(parsedRun.outputDir === undefined ? {} : { outputDir: parsedRun.outputDir }),
-        ...(parsedRun.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsedRun.resumeFromRunId }),
-        ...(ctx.waitForIdle === undefined ? {} : { waitForIdle: () => ctx.waitForIdle!() }),
-      });
-      if (launched.status === "started") {
-        // A `tui` session and a long-lived `rpc` session both outlive the turn, so
-        // the run stays detached and the operator keeps the prompt. The one-shot
-        // output modes do not: the host disposes the session when the turn ends,
-        // and the detached run's captured ctx goes stale before its first child
-        // session ("This extension ctx is stale after session replacement or
-        // reload"). There the command holds the turn open until the run settles.
-        if (isOneShotCommandMode(ctx)) await commandLauncher.awaitActive();
-      } else if (launched.status === "busy") {
-        setOperatorWidget(ctx, "workflows", workflowRunConflictBlock(launched.owner));
-      } else if (launched.status === "stale") {
-        setOperatorWidget(
-          ctx,
-          "workflows",
-          workflowWarningBlock(
-            "Workflow not started: this extension session has already shut down.",
-            "Recovery: wait for Pi to finish reloading, then retry the same /workflows run command.",
-          ),
-        );
-      }
-      return;
-    }
+    if (await handleWorkflowRunCommand(rawText, ctx, pi, commandLauncher)) return;
 
     const available = text.startsWith("run") ? listExampleNames() : [];
     setOperatorWidget(ctx, "workflows", workflowUnknownCommandBlock(text, available));

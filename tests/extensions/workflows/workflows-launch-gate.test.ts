@@ -399,16 +399,16 @@ describe("/workflows run launch gate", () => {
     });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
-      await waitForBackground(() => h.sentMessages.length === 1);
+      await waitForBackground(() => h.sentMessages.length === 2);
 
       expect(h.ctx.isIdle()).toBe(true);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(h.sentMessages).toHaveLength(1);
+      expect(h.sentMessages).toHaveLength(2);
       expect(
         h.sentMessages.every((entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined),
       ).toBe(true);
-      expect(h.customMessageDeliveries).toEqual(["append"]);
-      expect(h.waitForIdleCalls).toBe(1);
+      expect(h.customMessageDeliveries).toEqual(["append", "append"]);
+      expect(h.waitForIdleCalls).toBe(0);
     } finally {
       spy.mockRestore();
     }

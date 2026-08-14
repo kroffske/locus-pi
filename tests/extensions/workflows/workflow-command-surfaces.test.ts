@@ -25,7 +25,7 @@ import { buildRunDetailBlock } from "../../../extensions/workflows/run-evidence.
 import {
   WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
-} from "../../../extensions/workflows/workflow-transcript.js";
+} from "../../../extensions/workflows/command/receipts.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const roots: string[] = [];

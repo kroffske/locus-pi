@@ -60,7 +60,7 @@ describe("workflow failure surfaces", () => {
       journal: [],
       resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
     };
-    transcript.start("run-1");
+    transcript.start("run-1", "/tmp/run-1");
 
     const digest = transcript.finish(failed).digest;
 

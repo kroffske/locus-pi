@@ -1,9 +1,10 @@
 # locus-pi
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, eight
-curated Package workflow trees with seven runnable children, and two skills that teach an agent how to find, run,
-and author them — through a deliberately narrow npm artifact.
+Installing it gives a Pi session eleven extensions, a bundled agent catalog,
+eight curated Package workflow trees with seven runnable children, and three
+skills that teach an agent how to run, author, and coordinate them — through a
+deliberately narrow npm artifact.
 
 The package is built on deterministic decomposition, bounded capabilities, and
 inspectable run evidence: the structure of a workflow carries the work, so a run
@@ -144,6 +145,30 @@ command; they are not removed yet. In the catalog, each row leads with the
 workflow name and a compact `[P]`, `[U]`, or `[PKG]` badge for its Project,
 User, or Package source; history rows insert the run id after the name.
 
+### Run from another agent
+
+The package ships `locus-pi-run-workflow`, a capability-based run skill. In a
+Pi session it calls the native `workflow` tool. In a host without that tool it
+starts the installed Pi command surface directly; there is no
+package-specific workflow executor:
+
+```bash
+pi --mode json -p --no-session --approve \
+  '/workflows run live-smoke -- inspect this project'
+```
+
+Pass the slash command as one process argument. `--approve` grants Pi's broad
+trust for project-local settings, packages, extensions, prompts, and resources;
+workflow JavaScript runs with host authority and is not sandboxed. A non-Pi
+caller reads only terminal custom-message events with
+`customType: "locus-workflow-run"`: `workflow_start` exposes the absolute
+`runDir`, `journalPath`, and `resultPath`, `workflow_rejected` closes a
+pre-start refusal, and `workflow_end` carries terminal workflow status plus
+`resultPersisted`. Pi may exit successfully after a typed workflow rejection or
+failure, so the receipt, not the process exit code, decides the outcome. See the
+[workflow manual](docs/extensions/active/workflows.md#run-from-an-agent-without-a-wrapper)
+for the exact contract.
+
 ### Watching a run
 
 `/workflows run` starts one interactive run in the background and returns the
@@ -186,15 +211,21 @@ The package declares its skills through `package.json#pi.skills`, and Pi loads
 package skills automatically and enabled: their descriptions are in the system
 prompt from the first session, and the full text loads on demand.
 
-[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) is
-the operation and authoring skill, also reachable through
-`/skill:locus-pi-workflows`. It covers finding a workflow, running one, reading
-the result envelope, the name resolution order, and design-first authoring: a
-raw request writes and reviews a readable `.design.md` agent graph before
+[`skills/locus-pi-run-workflow/SKILL.md`](skills/locus-pi-run-workflow/SKILL.md)
+owns requests to run, start, resume, or monitor the current run of an existing
+workflow. It uses the native `workflow` tool when available and otherwise
+invokes the registered slash command through `pi --mode json -p`, then follows
+typed receipts and the canonical journal/result paths. Native-only `items` and
+`continuation` requests fail as unsupported when the structured tool is absent;
+the external route never drops them.
+
+[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) owns
+workflow authoring, also reachable through `/skill:locus-pi-workflows`. A raw
+creation request writes and reviews a readable `.design.md` agent graph before
 creating the matching source in the same turn. An explicit design-only request
 pauses before source; `Build design: <exact path>` and `Build approved design:
-<exact path>` remain build-only compatibility forms. Its
-compact Markdown pattern cards load only after the author selects a topology.
+<exact path>` remain build-only compatibility forms. Its compact Markdown
+pattern cards load only after the author selects a topology.
 
 [`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
 the thin execution protocol for the shipped planning pair. The main Pi agent
@@ -216,7 +247,7 @@ installed package command; no project-local script or `tsx` is required:
 npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
 ```
 
-Both skills are plain [Agent Skills](https://agentskills.io/specification)
+All three skills are plain [Agent Skills](https://agentskills.io/specification)
 directories, so other hosts can read them too. Claude Code and Codex discover
 skills only under their own roots, so link the installed directory into the root
 that host uses instead of copying it — a copy stops matching the package on the

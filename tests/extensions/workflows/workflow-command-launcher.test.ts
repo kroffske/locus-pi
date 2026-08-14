@@ -25,12 +25,13 @@ describe("workflow command launcher", () => {
     const observed: string[] = [];
     const terminals: string[] = [];
     let nextRun = 0;
+    let launcher: ReturnType<typeof createWorkflowCommandLauncher>;
     const runScript = vi.fn(async (options: RunWorkflowScriptOptions) => {
       const runId = `launcher-run-${++nextRun}`;
       options.onRunStart?.({ runId, runDir: `/tmp/${runId}` });
       return completedResult(runId);
     });
-    const launcher = createWorkflowCommandLauncher({
+    launcher = createWorkflowCommandLauncher({
       pi: harness.pi,
       runScript,
       createObserver(request) {
@@ -41,6 +42,7 @@ describe("workflow command launcher", () => {
           onEvent: () => {},
           onResult(result) {
             observed.push(`result:${request.scriptRef}:${result.runId}`);
+            observed.push(`settled:${request.scriptRef}:${String(launcher.hasActiveCommandRun())}`);
           },
           onError(error) {
             observed.push(`error:${String(error)}`);
@@ -95,13 +97,95 @@ describe("workflow command launcher", () => {
     expect(observed).toEqual([
       "start:ordinary:launcher-run-1:/tmp/launcher-run-1",
       "result:ordinary:launcher-run-1",
+      "settled:ordinary:true",
       "finally:ordinary",
       "start:continued:launcher-run-2:/tmp/launcher-run-2",
       "result:continued:launcher-run-2",
+      "settled:continued:true",
       "finally:continued",
       `start:${scriptPathRef}:launcher-run-3:/tmp/launcher-run-3`,
       `result:${scriptPathRef}:launcher-run-3`,
+      `settled:${scriptPathRef}:true`,
       `finally:${scriptPathRef}`,
     ]);
+  });
+
+  it("keeps the command slot busy until terminal callbacks drain", async () => {
+    const harness = createHarness();
+    let releaseResult!: () => void;
+    const resultGate = new Promise<void>((resolve) => {
+      releaseResult = resolve;
+    });
+    const launcher = createWorkflowCommandLauncher({
+      pi: harness.pi,
+      runScript: async (options) => {
+        options.onRunStart?.({ runId: "first-run", runDir: "/tmp/first-run" });
+        return completedResult("first-run");
+      },
+      createObserver: () => ({
+        onRunStart() {},
+        onEvent() {},
+        async onResult() {
+          await resultGate;
+        },
+        onError() {},
+        onFinally() {},
+        onRejected() {},
+      }),
+      onTerminal() {},
+    });
+    launcher.startSession(harness.ctx);
+
+    expect(launcher.launch({ ctx: harness.ctx, scriptRef: "first" })).toEqual({ status: "started" });
+    await vi.waitFor(() => expect(launcher.hasActiveCommandRun()).toBe(true));
+    expect(launcher.launch({ ctx: harness.ctx, scriptRef: "second" })).toEqual({
+      status: "busy",
+      owner: "settling workflow callbacks",
+    });
+
+    releaseResult();
+    await launcher.awaitActive();
+    expect(launcher.hasActiveCommandRun()).toBe(false);
+  });
+
+  it("owns detached observer callback failures and releases the command slot", async () => {
+    const harness = createHarness();
+    const unhandled = vi.fn();
+    const onTerminal = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const launcher = createWorkflowCommandLauncher({
+      pi: harness.pi,
+      runScript: async (options) => {
+        options.onRunStart?.({ runId: "callback-error", runDir: "/tmp/callback-error" });
+        return completedResult("callback-error");
+      },
+      createObserver: () => ({
+        onRunStart() {},
+        onEvent() {},
+        onResult() {
+          throw new Error("observer failed");
+        },
+        onError() {},
+        onFinally() {},
+        onRejected() {},
+      }),
+      onTerminal,
+    });
+    launcher.startSession(harness.ctx);
+
+    try {
+      expect(launcher.launch({ ctx: harness.ctx, scriptRef: "first" })).toEqual({ status: "started" });
+      await vi.waitFor(() => expect(harness.notifications.at(-1)).toContain("observer failed"));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+      await expect(launcher.awaitActive()).rejects.toThrow("observer failed");
+      expect(launcher.hasActiveCommandRun()).toBe(false);
+      expect(onTerminal).not.toHaveBeenCalled();
+      expect(launcher.launch({ ctx: harness.ctx, scriptRef: "second" })).toEqual({ status: "started" });
+      await expect(launcher.awaitActive()).rejects.toThrow("observer failed");
+      expect(onTerminal).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 });

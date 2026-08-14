@@ -124,7 +124,7 @@ describe("design-first readable workflow authoring", () => {
   it("keeps CLI syntax target-first on every active manual speaker", () => {
     const canonical = "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]";
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
+      "skills/locus-pi-run-workflow/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/references/patterns.md",
     ]) {

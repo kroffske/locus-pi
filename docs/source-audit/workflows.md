@@ -65,6 +65,19 @@ or borrowed runtime implementation was identified for this source-audit slice.
   attachment, runner `onRunStart` binding, terminal observation, stop/shutdown,
   and the shared started/busy/stale result. `index.ts` supplies a rendering
   observer; the launcher does not define operator copy or widget layout.
+- `extensions/workflows/command/run.ts` owns the `/workflows run` branch and
+  emits a closed typed rejection for every idle return before a run identity.
+  A busy or unreadable interactive host keeps the existing widget-only refusal:
+  Pi would otherwise steer `sendMessage` into the active parent response. The
+  external run skill instead starts a fresh one-shot Pi JSON session and applies
+  a 30-second caller-side gate for either typed start or rejection.
+  `extensions/workflows/command/receipts.ts` owns typed start, rejection, end,
+  and exact-result messages. The start exposes the canonical run, journal, and
+  result paths; the end distinguishes expected `resultPath` from
+  `resultPersisted` runtime truth. Terminal observers run only after the shared
+  background registry settles, and the terminal receipt is persisted before
+  the handoff pump may open a continuation dialog. No package-specific workflow
+  executor or second event schema sits between the external agent and Pi.
 - `extensions/workflows/background-run-registry.ts` owns the process-local stable
   session/project identity, a generation-scoped callback lease, abort controller,
   and terminal promise for command and tool runs. Tool control is non-exclusive
