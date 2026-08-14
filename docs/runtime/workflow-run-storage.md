@@ -92,6 +92,30 @@ back to `runtime/result.json` when the readable copy is missing.
 
 The artifact index, not `outputs/`, is continuation authority.
 
+## Direct Pi observability
+
+An external agent that invokes `/workflows run` through
+`pi --mode json -p --no-session --approve` reuses this storage contract. The
+typed `workflow_start` receipt reports the absolute existing paths:
+
+```text
+/workflows run <name|path> --output-dir <path>
+```
+
+```text
+runDir       <projectRoot>/.pi/locus-pi/runs/<runId>
+journalPath  <runDir>/runtime/journal.ndjson
+resultPath   <runDir>/runtime/result.json
+```
+
+The calling agent may tail `journalPath` to inspect real phases, logs, and agent
+events, then read `resultPath` for terminal truth when `workflow_end` reports
+`resultPersisted:true`. The start receipt names the canonical expected path
+before that file exists; a post-identity runner escape or failed result write
+reports `resultPersisted:false`. Direct Pi invocation creates no duplicate log,
+receipt, or cache directory. The durable journal, not a spinner or process exit
+code, is the source for deciding whether work progressed.
+
 `runtime/result.json` is a readable, mutable projection. For the owner-specific
 `post-code-review` resume and operator handoff paths, the runtime also writes
 `launch-binding.json` once after validated launch state is established. Those

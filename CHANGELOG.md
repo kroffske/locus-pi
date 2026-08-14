@@ -6,6 +6,16 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Agents now get one shipped skill for running existing workflows without a
+  package-specific executor.** Inside Pi, `locus-pi-run-workflow` calls the
+  native `workflow` tool. Outside Pi, it starts the registered slash command
+  directly with `pi --mode json -p`; typed start, rejection, and terminal
+  receipts expose the canonical run, journal, and result paths. The skill treats
+  Pi's process exit as transport status rather than workflow success, leaves an
+  awaiting-operator handoff unanswered, and documents `--approve` as broad Pi
+  project trust with no sandbox. `locus-pi-workflows` now owns authoring only,
+  so run and create requests have distinct routing descriptions.
+
 - **Fusion now requires one explicit capability mode for every member and its
   judge.** `tool-free` keeps catalog personas while disabling package discovery
   and requiring an empty Pi active-tool readback before the first prompt;

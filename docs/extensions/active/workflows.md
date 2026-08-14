@@ -433,6 +433,65 @@ If either option is repeated, the last supplied value wins. Use the conventional
 after the delimiter is forwarded byte-for-byte as semantic input. The delimiter
 works the same way for `/workflow-run`.
 
+### Run from an agent without a wrapper
+
+The installed `locus-pi-run-workflow` skill chooses the execution surface by
+capability. When the structured `workflow` tool is available, the agent calls it
+directly with `name` or `scriptPath` plus optional `input`, `items`,
+`outputDir`, `resumeFromRunId`, or an approved `continuation`. It does not spawn
+Pi or translate the request into shell text.
+
+`items` and `continuation` are native-tool-only fields. When either is required
+and the structured tool is unavailable, the caller stops as unsupported; it
+does not route through the slash command and silently drop the field.
+
+An agent outside Pi invokes the registered command directly in JSON print mode:
+
+```bash
+pi --mode json -p --no-session --approve \
+  '/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]'
+```
+
+The complete slash command is one process argument. A caller should use an argv
+array and must not interpolate the target, an option value, or semantic input as
+shell syntax. Apply one token rule to the target and every `--output-dir` or
+`--resume` value: a simple token remains unchanged; a value containing
+whitespace, quotes, backslashes, or controls uses the command parser's JSON
+string-token form. Reject a command-token value beginning with `-`; quoting does
+not make a reserved Pi option token valid. The output directory remains a safe
+project-relative path and the resume value remains a real saved run id. Semantic
+input remains unchanged after `--`.
+
+`--approve` grants broad Pi project trust: Pi may load project settings,
+packages, extensions, prompts, context files, and other local resources. The
+approval is not limited to the selected workflow, and neither Pi nor the
+workflow runtime provides an OS, filesystem, subprocess, or network sandbox.
+Run only in a trusted project with reviewed workflow sources.
+
+Pi's JSON stream repeats a custom message at `message_start` and `message_end`.
+The caller interprets only terminal records whose `message.role` is `custom` and
+whose `message.customType` is `locus-workflow-run`, then branches on
+`message.details.eventKind`:
+
+| Event               | Meaning                                                                                                                |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `workflow_start`    | Accepted run identity plus absolute `runDir`, `journalPath`, and canonical expected `resultPath`.                      |
+| `workflow_rejected` | Typed pre-start refusal with a closed `code`; no run identity was created.                                             |
+| `workflow_end`      | Authoritative `workflowStatus`, run paths, and `resultPersisted` truth after the background run and callbacks settled. |
+
+The skill requires either `workflow_start` or `workflow_rejected` within 30
+seconds. That is a caller policy, not a second runtime protocol. After start,
+the Pi process remains attached until `workflow_end`; the caller may read or
+tail `journalPath` for durable liveness and then read `resultPath` when
+`resultPersisted:true`. No second log directory or wrapper event schema exists.
+
+Pi process status is transport evidence only. A registered slash command can
+emit `workflow_rejected` or a failed `workflow_end` and still leave Pi with exit
+code `0`; callers must use the typed receipt for semantic success. When the
+workflow settles as `awaiting_operator`, report the unanswered handoff and stop.
+Do not synthesize an answer or launch continuation without explicit operator
+input.
+
 ### Direct Fusion from the main session
 
 Fusion also has a model-callable `fusion` tool. It is disabled by default, so it
@@ -696,7 +755,7 @@ The background run installs a compact `belowEditor` widget. Its header identifie
 
 The detached run adapter and transcript callbacks carry the originating Pi session generation; late completion therefore cannot write through them into a new session. The progress component's live-store listener and spinner timer are instead session-owned resources: the extension disposes them synchronously on session start/shutdown and idempotently on terminal, error, and `finally` paths, even when a runner ignores abort and settles later. `session_shutdown` (including reload) also aborts active work. This lifecycle uses Pi's documented [`session_shutdown`](https://pi.dev/docs/latest/extensions#events), [`input`/`turn_end`](https://pi.dev/docs/latest/extensions#events), and [`setWidget(key, undefined)` cleanup](https://pi.dev/docs/latest/extensions#widgets-status-and-footer) seams, plus the one shared agent-row formatter.
 
-Transcript persistence follows the Pi surface that started the run. The slash-command path publishes a run-boundary banner at launch and a bounded digest at settlement, both with `customType: "locus-workflow-run"`. When the workflow returns prose, it then publishes that exact text separately with `customType: "locus-workflow-result"`; this result message is intentionally untruncated so the operator can read and copy it directly from scrollback. Structured, non-text results do not fabricate a prose message and remain available through persisted evidence. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and synchronously appends the bounded digest followed by the optional full result before awaiting either send. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Every published record is stored and participates in later LLM context.
+Transcript persistence follows the Pi surface that started the run. The slash-command path publishes a run-boundary banner at launch and a bounded digest at settlement, both with `customType: "locus-workflow-run"`. When the workflow returns prose, it publishes that exact text separately with `customType: "locus-workflow-result"`; this result message is intentionally untruncated so the operator can read and copy it directly from scrollback. Structured, non-text results do not fabricate a prose message and remain available through persisted evidence. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and synchronously appends the optional full result followed by the bounded terminal digest before awaiting either send. Result-first ordering lets an attached CLI receive exact prose before the authoritative `workflow_end` closes its Pi session. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Every published record is stored and participates in later LLM context.
 
 The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Digests on both paths cap each line at 160 characters and keep at most 20 agent rows plus the terminal verdict and one evidence path, so a digest stays within 4096 characters; the separate command result message deliberately does not use those bounds. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Workflow agent lines use the stable catalog `agent` plus `label` and status, not the workflow parent-row petname: the live panel may collapse that parent in favour of an SDK child with a different canonical petname. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the completion messages remain correctly levelled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, completion persistence stops and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
 
@@ -1008,15 +1067,16 @@ working model in a scratch project so child agents actually spawn:
    ```json
    { "packages": ["<absolute path to your locus-pi checkout>"] }
    ```
-2. Drive the `workflow` tool from that dir. (Slash commands only render to the TUI, so
-   for a non-interactive run ask the agent to call the tool.)
+2. Drive the registered slash command directly in JSON print mode:
    ```
    cd .test_pi
-   pi -p --approve --no-session --model "<provider/model>" \
-     'Call the workflow tool with script="live-smoke" and input="hello".'
+   pi --mode json -p --approve --no-session --model "<provider/model>" \
+     '/workflows run live-smoke -- hello'
    ```
-3. Verify it actually spawned child agents — don't trust the chat summary, read the journal:
+3. Read the terminal `locus-workflow-run` receipt, then verify the child-agent
+   evidence in its `journalPath` and the final envelope in its `resultPath`:
    ```
+   cat .test_pi/.pi/locus-pi/runs/<runId>/runtime/journal.ndjson
    cat .test_pi/.pi/locus-pi/runs/<runId>/runtime/result.json
    ```
    A real run shows `agent_end` events with `status: "completed"` and a non-empty

@@ -39,10 +39,10 @@ import { registerWorkflowTool } from "./workflow-tool.js";
 import { registerFusionSurface } from "./fusion-surface.js";
 import {
   announceCommandWorkflowStart,
-  createWorkflowTranscript,
+  persistCommandWorkflowRejection,
   persistCommandWorkflowTranscript,
-  registerWorkflowTranscriptRenderers,
-} from "./workflow-transcript.js";
+} from "./command/receipts.js";
+import { createWorkflowTranscript, registerWorkflowTranscriptRenderers } from "./workflow-transcript.js";
 
 export default function workflows(pi: ExtensionAPI): void {
   registerWorkflowTranscriptRenderers(pi);
@@ -100,8 +100,10 @@ export default function workflows(pi: ExtensionAPI): void {
       const transcript = createWorkflowTranscript(request.ctx, request.scriptRef, "command", {
         ...(request.input === undefined ? {} : { input: request.input }),
       });
+      let startedRun: { runId: string; runDir: string } | undefined;
       return {
         onRunStart({ runId, runDir }) {
+          startedRun = { runId, runDir };
           sessionRunIds.add(runId);
           const announcement = transcript.start(runId, runDir);
           // The run boundary is published while the session is still idle from
@@ -132,11 +134,34 @@ export default function workflows(pi: ExtensionAPI): void {
           } else {
             setOperatorWidget(request.ctx, "workflows", buildWorkflowResultBlock(result, request.ctx.mode !== "tui"));
           }
-          await persistCommandWorkflowTranscript(pi, request.ctx, transcriptCompletion, isCurrent);
+          const published = await persistCommandWorkflowTranscript(pi, request.ctx, transcriptCompletion, isCurrent);
+          if (!published && isCurrent()) throw new Error("Workflow terminal receipt was not published.");
         },
-        onError(error) {
+        async onError(error, isCurrent) {
           cleanupPanel();
           setOperatorWidget(request.ctx, "workflows", workflowBackgroundFailureBlock(error));
+          if (startedRun === undefined) {
+            const published = await persistCommandWorkflowRejection(
+              pi,
+              request.ctx,
+              {
+                code: "runner_prestart_failed",
+                target: request.scriptRef,
+                text: `Workflow not started: ${errorMessage(error)}`,
+              },
+              isCurrent,
+            );
+            if (!published && isCurrent()) throw new Error("Workflow rejection receipt was not published.");
+            return;
+          }
+          completedRunIds.add(startedRun.runId);
+          const published = await persistCommandWorkflowTranscript(
+            pi,
+            request.ctx,
+            transcript.fail(error, startedRun.runId, startedRun.runDir),
+            isCurrent,
+          );
+          if (!published && isCurrent()) throw new Error("Workflow terminal receipt was not published.");
         },
         onFinally() {
           cleanupPanel();
