@@ -24,21 +24,24 @@ const taskReviewTarget: PromptShelfTarget = {
 
 describe("prompt shelf parser", () => {
   it.each([
-    ["", "project", "summary", undefined],
-    ["show", "project", "show", undefined],
-    ["read", "project", "show", undefined],
-    ["set show", "project", "write", "show"],
-    ["set read", "project", "write", "read"],
-    ["show this wording", "project", "write", "show this wording"],
-    ["legacy prompt", "project", "write", "legacy prompt"],
-    ["--task T-205", "task", "summary", undefined],
-    ["--task T-205 show", "task", "show", undefined],
-    ["--task=T-205 set read", "task", "write", "read"],
-  ])("parses %j without losing compatibility", (input, targetType, actionKind, prompt) => {
+    ["", "project", "summary", undefined, undefined],
+    ["show", "project", "show", undefined, undefined],
+    ["read", "project", "show", undefined, undefined],
+    ["set show", "project", "write", "show", "explicit"],
+    ["set read", "project", "write", "read", "explicit"],
+    ["show this wording", "project", "write", "show this wording", "legacy"],
+    ["legacy prompt", "project", "write", "legacy prompt", "legacy"],
+    ["--task T-205", "task", "summary", undefined, undefined],
+    ["--task T-205 show", "task", "show", undefined, undefined],
+    ["--task=T-205 set read", "task", "write", "read", "explicit"],
+  ])("parses %j without losing compatibility", (input, targetType, actionKind, prompt, source) => {
     const parsed = parsePromptShelfCommand(input);
     expect(parsed.target.type).toBe(targetType);
     expect(parsed.action.kind).toBe(actionKind);
-    if (parsed.action.kind === "write") expect(parsed.action.prompt).toBe(prompt);
+    if (parsed.action.kind === "write") {
+      expect(parsed.action.prompt).toBe(prompt);
+      expect(parsed.action.source).toBe(source);
+    }
   });
 
   it.each(["set", "--task", "--task="])("fails closed for incomplete input %j", (input) => {
@@ -90,6 +93,17 @@ describe("prompt shelf blocks", () => {
       expect(controls.length).toBeGreaterThan(0);
       expect(controls.every((control) => control.includes("/review --task T-205"))).toBe(true);
     }
+  });
+
+  it("marks legacy writes and points to the scoped set spelling", () => {
+    const block = promptShelfChangeBlock("review", taskReviewTarget, "legacy");
+    const text = renderOperatorBlockPlain(block, 80).join("\n");
+    expect(text).toContain("Review prompt saved. Deprecated:");
+    expect(text).toContain("/review --task T-205 set <prompt>");
+
+    const boundedText = renderOperatorBlockPlain(block, 80, { maxLines: 4 }).join("\n");
+    expect(boundedText).toContain("Review prompt saved. Deprecated:");
+    expect(boundedText).toContain("/review --task T-205 set <prompt>");
   });
 
   it("preserves type, target, and recovery action at 146/80/48 columns", () => {

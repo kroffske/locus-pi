@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Package diagnostics now fail when the declared extension inventory is
+  incomplete.** `locus-pi doctor` still prints every `ok` and `missing`
+  entrypoint, but now exits with status 1 when any path from
+  `package.json#pi.extensions` is absent instead of reporting process success.
+
+- **Prompt-shelf writes now guide callers to the explicit `set` syntax.**
+  `/review`, `/todos`, and `/goal prompt` continue to accept compatible
+  free-form writes with their existing stored-content behavior and now mark
+  that spelling as deprecated with the equivalent scoped `set <prompt>` command. Empty,
+  `show`, and `read` forms remain read-only.
+
 - **The public tool API now has one supported name per capability.** Agent
   delegation uses `spawn_agent`; AST previews finish through `resolve`; human
   questions use `ask`; and bounded continuation uses `loop`. The duplicate

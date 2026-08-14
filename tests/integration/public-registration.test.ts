@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import type { ExtensionFactory } from "../../extensions/_shared/host/pi-api.js";
 import { loadExtensionAgentCatalog } from "../../extensions/agents/catalog.js";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
+import { createHarness } from "../test-harness.js";
 
 interface PackageJson {
   files: string[];
@@ -278,6 +281,10 @@ function packageWorkflowNamesFromIndex(markdown: string): string[] {
   return [...section.matchAll(/^\| `([^`]+)`/gm)].map((match) => match[1]!);
 }
 
+function topLevelCommands(commands: string[]): string[] {
+  return [...new Set(commands.map((command) => command.trim().split(/\s+/u)[0]!))].sort();
+}
+
 describe("public registration contract", () => {
   it("declares the eleven supported active entrypoints", () => {
     expect(pkg.pi.extensions).toEqual([
@@ -294,6 +301,23 @@ describe("public registration contract", () => {
       "./extensions/workflows/index.ts",
     ]);
     expect(pkg.files.some((file) => file.startsWith("extensions/beta/"))).toBe(false);
+  });
+
+  it("keeps runtime slash-command registration aligned with extension manifests", async () => {
+    for (const entrypoint of pkg.pi.extensions) {
+      const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+      const module = (await import(pathToFileURL(path.join(root, entrypoint)).href)) as {
+        default: ExtensionFactory;
+      };
+      const harness = createHarness();
+
+      await module.default(harness.pi);
+
+      expect([...harness.commands.keys()].sort(), `runtime commands differ from ${manifestPath}`).toEqual(
+        topLevelCommands(manifest.provides.commands),
+      );
+    }
   });
 
   it("publishes one resolvable dedicated agent for every default extension", () => {

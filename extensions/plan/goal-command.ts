@@ -39,9 +39,9 @@ export const COMMAND_HELP = [
   "- /goal complete                   Mark active goal as complete.",
   "- /goal continue                   Write a bounded next-step continuation prompt.",
   "- /goal budget <N|off>             Set token budget or clear budget limit.",
-  "- /goal prompt <text>              Save old goal prompt shelf.",
+  "- /goal prompt set <text>          Save the Goal prompt shelf.",
+  "- /goal prompt <text>              Legacy-compatible write; prefer set.",
   "- Add --task <task-id> with /goal prompt to keep task-backed artifact explicit.",
-  "- /goal show | pause | resume | drop | complete | continue | budget",
 ].join("\n");
 
 export async function handleGoalCommand(
