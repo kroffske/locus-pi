@@ -80,6 +80,7 @@ function inlineCodeList(value: string): string[] {
 
 function countRegularFiles(directory: string): number {
   return readdirSync(directory, { withFileTypes: true }).reduce((count, entry) => {
+    if (entry.name === ".DS_Store") return count;
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) return count + countRegularFiles(entryPath);
     return count + (entry.isFile() ? 1 : 0);
