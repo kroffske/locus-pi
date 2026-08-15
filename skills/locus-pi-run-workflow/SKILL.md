@@ -26,7 +26,7 @@ one workflow file.
 
 Tool availability wins; do not guess from the host product name. Require one
 exact saved workflow name or project-relative `.workflow.mjs` path. A request to
-create or redesign a workflow belongs to `locus-pi-workflows` instead.
+create or redesign a workflow belongs to `workflow-locus-pi` instead.
 
 ## Native Pi path
 

@@ -1,9 +1,9 @@
 ---
-name: locus-pi-workflows
+name: workflow-locus-pi
 description: Design, review, and build new locus-pi `.workflow.mjs` agent graphs. Use when the user asks to create, design, write, author, or revise a workflow. Do not use merely to run an existing workflow.
 ---
 
-# locus-pi workflow authoring
+# workflow-locus-pi
 
 A workflow is reviewed trusted JavaScript that makes a visible graph of child
 `agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,

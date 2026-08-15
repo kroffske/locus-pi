@@ -1,7 +1,7 @@
 # Workflow pattern catalog
 
 > **Advanced compatibility archive.** New standard authoring reads the compact
-> cards under `skills/locus-pi-workflows/references/` after producing an approved
+> cards under `skills/workflow-locus-pi/references/` after producing an approved
 > design. Do not copy this file's raw schemas, validators, parsers, renderers, or
 > recovery shapes into standard generated source. This catalog remains shipped
 > so existing reviewed workflows can understand their historical techniques.

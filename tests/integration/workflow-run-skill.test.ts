@@ -7,7 +7,7 @@ const root = process.cwd();
 describe("shipped workflow run skill", () => {
   it("routes by host capability and treats typed receipts as workflow truth", () => {
     const runSkill = readFileSync(path.join(root, "skills/locus-pi-run-workflow/SKILL.md"), "utf8");
-    const authoringSkill = readFileSync(path.join(root, "skills/locus-pi-workflows/SKILL.md"), "utf8");
+    const authoringSkill = readFileSync(path.join(root, "skills/workflow-locus-pi/SKILL.md"), "utf8");
 
     for (const contract of [
       "If a structured tool named `workflow` is available",

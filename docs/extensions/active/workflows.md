@@ -296,7 +296,7 @@ hand-authored workflow diagram documents `requirements-grill`.
 ## Authoring patterns
 
 New workflows use the progressive-disclosure cards under
-`skills/locus-pi-workflows/references/`. The index maps requirements and common
+`skills/workflow-locus-pi/references/`. The index maps requirements and common
 names to small standard topologies; the author reads only the selected card.
 Cards are algorithms and snippets, not Package workflows. Saving a local workflow
 does not add it to the Package registry.
@@ -1134,7 +1134,7 @@ requests may use `Build design: <exact design path>` or the compatibility form
 bytes; there is no separate token or persisted design digest. If the algorithm
 changes materially, revise and re-review the design before source is created or
 replaced. The bundled `workflow-author` agent and
-`skills/locus-pi-workflows/SKILL.md` own the exact protocol.
+`skills/workflow-locus-pi/SKILL.md` own the exact protocol.
 
 An owner-approved `plan.md` plus its canonical `steps.md` may be the Design
 input for an optional project-local sequential workflow. `workflow-author`
@@ -1146,7 +1146,7 @@ is a visibly separate child after that implementer. The reviewed Design states
 whether review is advisory or blocking and whether any finite retry exists.
 Plan approval alone does not start workflow authoring, no runtime parser reads
 `steps.md`, and this path adds no Package workflow. See the
-[Plan-to-sequential pattern card](../../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+[Plan-to-sequential pattern card](../../../skills/workflow-locus-pi/references/plan-to-sequential-workflow.md).
 
 Design and Build are for a graph the fixed template cannot express — a reviewer
 between steps, a bounded revision loop, concurrency, a different publication. The

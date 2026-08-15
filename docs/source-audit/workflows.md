@@ -593,7 +593,7 @@ Large approved execution uses a frozen catalog. A programmatic embedder may pass
 exact caller `items`, which has no Locus items count or character policy; an
 operator-facing `workflow-author` Build preferably renders complete canonical
 `steps.md` blocks as literal author-known prompts in project-local source. The
-new `skills/locus-pi-workflows/references/plan-to-sequential-workflow.md` card
+new `skills/workflow-locus-pi/references/plan-to-sequential-workflow.md` card
 keeps one complete task per sequential implementer and allows one visibly
 separate reviewer after each task. Plan approval does not replace workflow
 authoring's continuous Design -> review -> Build sequence: a raw request first

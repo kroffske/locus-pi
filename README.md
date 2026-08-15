@@ -220,8 +220,8 @@ typed receipts and the canonical journal/result paths. Native-only `items` and
 `continuation` requests fail as unsupported when the structured tool is absent;
 the external route never drops them.
 
-[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) owns
-workflow authoring, also reachable through `/skill:locus-pi-workflows`. A raw
+[`skills/workflow-locus-pi/SKILL.md`](skills/workflow-locus-pi/SKILL.md) owns
+workflow authoring, also reachable through `/skill:workflow-locus-pi`. A raw
 creation request writes and reviews a readable `.design.md` agent graph before
 creating the matching source in the same turn. An explicit design-only request
 pauses before source; `Build design: <exact path>` and `Build approved design:

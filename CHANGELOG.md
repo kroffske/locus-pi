@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The workflow-authoring skill is now named `workflow-locus-pi`.** Its
+  package path, on-demand skill command, agent references, manuals, source
+  audit, tests, and public inventory now use that one Locus Pi-specific name.
+  The former `locus-pi-workflows` name is removed rather than kept as a
+  compatibility alias.
+
 - **Workflow folders may now be group-only.** A namespace can contain direct
   `<group>/<child>` workflow files without a runnable root. `/workflows list`
   renders an unselectable group header, children remain directly runnable, and
@@ -46,7 +52,7 @@ This file records user-visible changes to the public package.
   receipts expose the canonical run, journal, and result paths. The skill treats
   Pi's process exit as transport status rather than workflow success, leaves an
   awaiting-operator handoff unanswered, and documents `--approve` as broad Pi
-  project trust with no sandbox. `locus-pi-workflows` now owns authoring only,
+  project trust with no sandbox. `workflow-locus-pi` now owns authoring only,
   so run and create requests have distinct routing descriptions.
 
 - **Fusion now requires one explicit capability mode for every member and its
