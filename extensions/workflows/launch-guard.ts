@@ -14,6 +14,7 @@ import {
   postCodeReviewFreshLaunchError,
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
+  WorkflowGroupOnlyError,
   type ResolvedWorkflowTarget,
 } from "./runtime/workflow-runner.js";
 import { isWorkflowSavedName } from "./runtime/workflow-saved-name.js";
@@ -46,6 +47,7 @@ export function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefi
 export type WorkflowCommandTargetPreflight =
   | { status: "resolved"; target: ResolvedWorkflowTarget }
   | { status: "not-found" }
+  | { status: "group-only"; workflowName: string }
   | { status: "runner-durable-failure"; targetKind: "name" | "scriptPath" };
 
 export function preflightWorkflowCommandTarget(
@@ -64,6 +66,7 @@ export function preflightWorkflowCommandTarget(
     };
   } catch (error) {
     if (error instanceof WorkflowNameNotFoundError) return { status: "not-found" };
+    if (error instanceof WorkflowGroupOnlyError) return { status: "group-only", workflowName: error.workflowName };
     return {
       status: "runner-durable-failure",
       targetKind: isWorkflowSavedName(scriptRef) ? "name" : "scriptPath",

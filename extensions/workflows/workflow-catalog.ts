@@ -63,6 +63,17 @@ export interface WorkflowCatalogCurrentRow extends WorkflowCatalogRow {
   target: ResolvedWorkflowTarget;
 }
 
+/** A non-runnable namespace header with direct runnable children. */
+export interface WorkflowCatalogGroup {
+  name: string;
+  rootName: string;
+  children: readonly string[];
+  source: ResolvedWorkflowTarget["source"];
+  sourceLabel: "Project" | "User" | "Package";
+  sourceLocator: string;
+  description: string;
+}
+
 export interface WorkflowCatalogHistoryRow extends WorkflowCatalogRow {
   kind: "history";
   runId: string;
@@ -76,6 +87,7 @@ export interface WorkflowCatalogModel {
   totalRoots: number;
   totalChildren: number;
   current: WorkflowCatalogCurrentRow[];
+  groups: WorkflowCatalogGroup[];
   history: WorkflowCatalogHistoryRow[];
 }
 
@@ -122,18 +134,33 @@ export function buildWorkflowCatalogModel(
   query?: string,
 ): WorkflowCatalogModel {
   const definitions = listWorkflowDefinitions(projectRoot, workingDirectory);
+  const groups: WorkflowCatalogGroup[] = definitions
+    .filter((definition) => definition.root === undefined)
+    .map((definition) => {
+      const source = definition.children[0]!.source;
+      return {
+        name: definition.rootRef,
+        rootName: definition.rootRef,
+        children: definition.children.map((child) => child.ref),
+        source,
+        sourceLabel: workflowSourceLabel(source),
+        sourceLocator: `${source}:${definition.rootRef}`,
+        description: "Group-only namespace; choose a child workflow.",
+      };
+    });
   const catalogRows: WorkflowCatalogCurrentRow[] = definitions.flatMap((definition) => {
     const rootChildren = definition.children.map((child) => child.ref);
-    return [definition.root, ...definition.children].map((target) => {
+    const targets = definition.root === undefined ? definition.children : [definition.root, ...definition.children];
+    return targets.map((target) => {
       const meta = readWorkflowMeta(target.path);
-      const isRoot = target === definition.root;
-      const label = isRoot ? definition.root.ref : target.ref.slice(definition.root.ref.length + 1);
+      const isRoot = definition.root !== undefined && target === definition.root;
+      const label = isRoot ? definition.rootRef : target.ref.slice(definition.rootRef.length + 1);
       return {
         kind: "current",
         target,
         name: target.ref,
         label,
-        rootName: definition.root.ref,
+        rootName: definition.rootRef,
         role: isRoot ? "root" : "child",
         children: isRoot ? rootChildren : [],
         source: target.source,
@@ -147,14 +174,15 @@ export function buildWorkflowCatalogModel(
     });
   });
   const recentRows = recentWorkflowRows(projectRoot);
-  const filteredCurrent = filterCurrentWorkflowRows(catalogRows, query);
+  const filteredCurrent = filterCurrentWorkflowRows(catalogRows, groups, query);
   const matches = (row: WorkflowCatalogRow): boolean => workflowCatalogRowMatches(row, query);
   return {
     query,
     totalCurrent: catalogRows.length,
-    totalRoots: catalogRows.filter((row) => row.role === "root").length,
+    totalRoots: catalogRows.filter((row) => row.role === "root").length + groups.length,
     totalChildren: catalogRows.filter((row) => row.role === "child").length,
     current: filteredCurrent,
+    groups: filterWorkflowGroups(groups, query),
     history: recentRows.filter(matches),
   };
 }
@@ -164,10 +192,22 @@ export function buildWorkflowCatalogBlockFromModel(
   model: WorkflowCatalogModel,
   options: WorkflowCatalogOptions = {},
 ): OperatorBlock {
-  const { query, totalRoots, totalChildren, current: filteredCatalog, history: filteredRecent } = model;
+  const {
+    query,
+    totalRoots,
+    totalChildren,
+    current: filteredCatalog,
+    groups: filteredGroups,
+    history: filteredRecent,
+  } = model;
   const totalSummary = `${totalRoots} top-level workflow(s) · ${totalChildren} child workflow(s)`;
 
-  if (query !== undefined && filteredCatalog.length === 0 && filteredRecent.length === 0) {
+  if (
+    query !== undefined &&
+    filteredCatalog.length === 0 &&
+    filteredGroups.length === 0 &&
+    filteredRecent.length === 0
+  ) {
     return {
       type: "VIEW",
       subject: "Workflow catalog",
@@ -180,12 +220,15 @@ export function buildWorkflowCatalogBlockFromModel(
 
   if (options.compact === true) {
     const compactBody = compactWorkflowCatalogBody(filteredRecent, filteredCatalog, query);
+    const groupLines = filteredGroups.map(
+      (group) => `${group.name} · ${workflowSourceBadge(group.source)} · group-only (not runnable)`,
+    );
     const compactTotals = `${totalSummary} · ${filteredRecent.length} history row(s); details may be omitted by host line budget`;
     return {
       type: "VIEW",
       subject: "Workflow catalog",
       primary: query === undefined ? `${totalSummary}.` : `Matches for ${JSON.stringify(query)}.`,
-      body: compactBody.lines,
+      body: [...groupLines, ...compactBody.lines],
       metadata: [compactTotals, WORKFLOW_DISPLAY_ORDER_LEGEND, WORKFLOW_SOURCE_LEGEND],
       controls: [`Run: ${workflowRunUsage()} · Filter: /workflows list <query>`],
     };
@@ -203,18 +246,21 @@ export function buildWorkflowCatalogBlockFromModel(
     "[P] Project",
     rowsForSource(filteredCatalog, "project"),
     query === undefined ? "none found" : "no matches",
+    filteredGroups.filter((group) => group.source === "project"),
   );
   appendWorkflowCatalogGroup(
     body,
     "[U] User",
     rowsForSource(filteredCatalog, "personal"),
     query === undefined ? "none found" : "no matches",
+    filteredGroups.filter((group) => group.source === "personal"),
   );
   appendWorkflowCatalogGroup(
     body,
     "[PKG] Package",
     rowsForSource(filteredCatalog, "package"),
     query === undefined ? "none installed" : "no matches",
+    filteredGroups.filter((group) => group.source === "package"),
   );
 
   return {
@@ -323,6 +369,17 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
   if (requested !== undefined) {
     const row = model.current.find((candidate) => candidate.name === requested);
     if (row === undefined) {
+      const group = model.groups.find((candidate) => candidate.name === requested);
+      if (group !== undefined) {
+        return {
+          type: "WARN",
+          subject: "Workflow info",
+          primary: `Workflow namespace ${JSON.stringify(group.name)} is group-only; it has no runnable root.`,
+          body: [`children: ${group.children.join(", ")}`, "Choose a child workflow by its qualified name."],
+          metadata: ["No workflow JavaScript was imported or evaluated."],
+          controls: ["Run or inspect a child: /workflows <run|info> <group>/<child>"],
+        };
+      }
       return {
         type: "WARN",
         subject: "Workflow info",
@@ -393,7 +450,7 @@ function workflowContractLines(): string[] {
     "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), outputDir(), invokeWorkflow(), publishPrimaryFile(), promptFile(), workspace()",
     "durability: outputDir() selects a confined stable project namespace distinct from run evidence; invokeWorkflow() runs one saved child level with source-bound item checkpoints and shared cancellation/concurrency/physical-call budget; publishPrimaryFile() exposes a verified non-empty file reference",
     "resolver: the nearest Project namespace wins, checking .pi/workflows, .claude/workflows, and .agents/workflows at each level; then User; then Package",
-    "registration: a canonical folder owns <workflow>.workflow.mjs plus direct child entries; existing flat Project/User entries remain standalone workflows",
+    "registration: a canonical folder owns an optional <workflow>.workflow.mjs plus direct child entries; without the root it is a non-runnable group-only namespace; existing flat Project/User entries remain standalone workflows",
   ];
 }
 
@@ -757,6 +814,7 @@ function workflowCatalogRowMatches(row: WorkflowCatalogRow, query: string | unde
 
 function filterCurrentWorkflowRows(
   rows: readonly WorkflowCatalogCurrentRow[],
+  groups: readonly WorkflowCatalogGroup[],
   query: string | undefined,
 ): WorkflowCatalogCurrentRow[] {
   if (query === undefined) return [...rows];
@@ -770,7 +828,32 @@ function filterCurrentWorkflowRows(
     const matchingChildren = children.filter((row) => workflowCatalogRowMatches(row, query));
     if (matchingChildren.length > 0) filtered.push(root, ...matchingChildren);
   }
+  for (const group of groups) {
+    const children = rows.filter((row) => row.role === "child" && row.rootName === group.name);
+    if (workflowCatalogGroupMatches(group, query, false)) {
+      filtered.push(...children);
+      continue;
+    }
+    filtered.push(...children.filter((row) => workflowCatalogRowMatches(row, query)));
+  }
   return filtered;
+}
+
+function filterWorkflowGroups(
+  groups: readonly WorkflowCatalogGroup[],
+  query: string | undefined,
+): WorkflowCatalogGroup[] {
+  if (query === undefined) return [...groups];
+  return groups.filter((group) => workflowCatalogGroupMatches(group, query, true));
+}
+
+function workflowCatalogGroupMatches(group: WorkflowCatalogGroup, query: string, includeChildren: boolean): boolean {
+  const needle = query.toLocaleLowerCase();
+  return (
+    group.name.toLocaleLowerCase().includes(needle) ||
+    group.description.toLocaleLowerCase().includes(needle) ||
+    (includeChildren && group.children.some((child) => child.toLocaleLowerCase().includes(needle)))
+  );
 }
 
 function appendWorkflowCatalogGroup(
@@ -778,16 +861,33 @@ function appendWorkflowCatalogGroup(
   title: string,
   rows: readonly (WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow)[],
   empty: string,
+  groups: readonly WorkflowCatalogGroup[] = [],
 ): void {
   out.push("", `${title}:`);
-  if (rows.length === 0) {
+  if (rows.length === 0 && groups.length === 0) {
     out.push(`  (${empty})`);
     return;
   }
+  const groupByName = new Map(groups.map((group) => [group.name, group]));
+  const emittedGroups = new Set<string>();
   for (const row of rows) {
+    if (row.kind === "current" && row.role === "child") {
+      const group = groupByName.get(row.rootName);
+      if (group !== undefined && !emittedGroups.has(group.name)) {
+        appendWorkflowGroupOnlyHeader(out, group);
+        emittedGroups.add(group.name);
+      }
+    }
     const prefix = row.kind === "current" && row.role === "child" ? "    ├ " : "  ";
     out.push(`${prefix}${passiveCatalogRowLine(row)}`);
   }
+  for (const group of groups) {
+    if (!emittedGroups.has(group.name)) appendWorkflowGroupOnlyHeader(out, group);
+  }
+}
+
+function appendWorkflowGroupOnlyHeader(out: string[], group: WorkflowCatalogGroup): void {
+  out.push(`  ${group.name} · ${workflowSourceBadge(group.source)} · group-only (not runnable)`);
 }
 
 function workflowCompositionDetailLines(row: WorkflowCatalogRow): string[] {

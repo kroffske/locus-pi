@@ -6,6 +6,13 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow folders may now be group-only.** A namespace can contain direct
+  `<group>/<child>` workflow files without a runnable root. `/workflows list`
+  renders an unselectable group header, children remain directly runnable, and
+  `/workflows run`/`info` explain that the group itself is not runnable. Adding
+  `<group>/<group>.workflow.mjs` later enables the root without renaming or
+  mixing its children.
+
 - **Package diagnostics now fail when the declared extension inventory is
   incomplete.** `locus-pi doctor` still prints every `ok` and `missing`
   entrypoint, but now exits with status 1 when any path from
@@ -102,11 +109,12 @@ This file records user-visible changes to the public package.
   sibling name to the exact folder namespace and source selected for the root.
 
 - **Workflow authoring now defines the complete tree before source.**
-  `workflow-author` writes `.pi/workflows/<name>/<name>.design.md` with an exact
-  root/child `Entries` table, reviews it, then builds the same-named root and only
-  the declared direct children. It pauses only for explicit design-only work and
-  cannot report success until every source passes identity, import, graph, and
-  source-shape checks.
+  `workflow-author` writes `.pi/workflows/<name>/<name>.design.md` with an
+  explicit `runnable root` or `group-only` namespace and exact `Entries` table,
+  reviews it, then builds only the declared direct children plus the root when
+  declared. It never fabricates a root, pauses only for explicit design-only
+  work, and cannot report success until every source passes identity, import,
+  graph, and source-shape checks.
 
 - **Interactive workflow launches can select a fresh durable workspace.**
   `/workflows run <name> --output-dir <project-relative-path> [input]` passes the

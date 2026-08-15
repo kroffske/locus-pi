@@ -10,15 +10,24 @@ The complete runtime, trust, replay, and artifact reference is
 A plain request to create, design, write, or author a workflow runs one ordered
 authoring sequence: create `.pi/workflows/<name>/`, write
 `<name>/<name>.design.md`, review and revise that design against the request and
-standard source profile, then write `<name>/<name>.workflow.mjs` plus exactly the
-direct children declared by the design. Build checks every source identity and
-module load and does not run the workflow.
+standard source profile, then write exactly the direct `.workflow.mjs` entries
+declared by the design. A `runnable root` design includes
+`<name>/<name>.workflow.mjs`; a `group-only` design omits it and writes only
+its direct children. Build checks every source identity and module load and does
+not run the workflow.
 
 The folder is the workflow namespace and public name. Its same-named file is the
 standard operator entry point. A direct `<child>.workflow.mjs` is a runnable
 child with logical ref `<name>/<child>`; do not repeat the root prefix in the
 child filename. New authoring always uses this layout. Existing flat Project or
 User files remain runtime-compatible standalone workflows.
+
+A folder may intentionally be group-only: it can contain direct child workflow
+files without `<name>.workflow.mjs`. The children remain runnable by their
+qualified refs, while the folder name is a non-runnable catalog header. Adding
+the same-named root later makes that namespace runnable without renaming its
+children. Group-only folders must not be mixed with lower-precedence User or
+Package children; the first source that owns the namespace owns all of it.
 
 The design always precedes source. The author stops after design only when the
 user explicitly asks for `design only`, `pause after design`, `do not build`, or

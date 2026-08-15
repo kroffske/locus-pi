@@ -4,8 +4,10 @@
 > predate the exact-text/`choice` profile and deliberately retain advanced raw
 > schemas or validators for compatibility. New workflow source uses one
 > continuous Design -> review -> Build sequence: a raw request first writes and
-> reviews `.pi/workflows/<name>/<name>.design.md`, then creates the matching root
-> and declared direct child sources in the same folder. Only explicit `Design only` wording pauses after design;
+> reviews `.pi/workflows/<name>/<name>.design.md`, then creates exactly the
+> declared entries in the same folder. A `runnable root` design includes the
+> matching root; a `group-only` design omits it and contains only direct children.
+> Only explicit `Design only` wording pauses after design;
 > `Build design:` and `Build approved design:` remain Build-only compatibility
 > forms. The source keeps only the nodes and mechanisms its reviewed graph needs.
 
@@ -52,10 +54,12 @@ and `throw` statements — not of the words where a comment happens to mention o
 | [`post-code-review/necessity.workflow.mjs`](./post-code-review/necessity.workflow.mjs)                       | `standard` |    32 |              0 |            0 |       0 | npm package · public repository |
 | [`post-code-review/synthesis.workflow.mjs`](./post-code-review/synthesis.workflow.mjs)                       | `standard` |    28 |              0 |            0 |       0 | npm package · public repository |
 
-**This directory is the Package registry.** Every `<workflow>/` folder owns a
-matching `<workflow>.workflow.mjs` root and any direct child workflow files.
-Roots run as `<workflow>`; children run as `<workflow>/<child>`. Discovery reads
-the folders on each call, so there is no separate registry to keep in sync.
+**This directory is the Package registry.** A `<workflow>/` folder may own a
+matching `<workflow>.workflow.mjs` root plus direct child workflow files, or it
+may be group-only and contain only direct children. Roots run as `<workflow>`;
+children run as `<workflow>/<child>`. A group-only folder is a catalog header,
+not a runnable target. Discovery reads the folders on each call, so there is no
+separate registry to keep in sync.
 
 Flat `/workflow-run <name>` remains a compatibility alias for the canonical
 `/workflows run <name>` form.

@@ -22,9 +22,11 @@ request may also say `Design workflow: <requirement>`.
 
 Author performs one continuous sequence: create `.pi/workflows/<name>/`, write
 `.pi/workflows/<name>/<name>.design.md` first, review it against the request and
-source profile, revise until no material mismatch remains, then create the root
-and exactly the declared direct child `.workflow.mjs` entries. Never create
-source before the design. Never run the workflow.
+source profile, revise until no material mismatch remains, then create exactly
+the declared direct `.workflow.mjs` entries. If `Entries` declares a runnable
+root, that set includes `<name>.workflow.mjs`; if it declares `group-only`, it
+contains no root and only its direct children. Never create source before the design,
+invent a fake root, or run the workflow.
 
 ### Design-only
 
@@ -49,10 +51,12 @@ project-relative path is required. Missing, outside-project, non-design, or
 name-mismatched paths fail loudly. Build uses the design bytes present at that
 path when it reads them; there is no separate approval token or stored digest.
 
-Build reviews the design, creates one matching folder-owned root plus exactly
-the direct child entries declared by `Entries`, validates every source identity
-and module load, and stops without running. If the reviewed graph needs a material change, update
-and re-review the design before building; do not hide the change in source. Ask
+Build reviews the design, creates an optional folder-owned root only when
+`Entries` declares a `runnable root`, plus exactly the direct child entries
+declared by `Entries`. A `group-only` design creates no root and never receives
+a fake one. Build validates every source identity and module load, then stops without running.
+If the reviewed graph needs a material change, update and
+re-review the design before building; do not hide the change in source. Ask
 the user only when the change would alter the requested result.
 
 ### Plan/catalog authoring input
@@ -116,12 +120,18 @@ Primary output: `<name>.md`
 Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
+Namespace: `runnable root` (include the `<name>` entry below) or `group-only`
+(omit the root entry; children remain directly runnable)
+
 ## Entries
 
-| Ref              | Role  | Responsibility         | Invoked by |
-| ---------------- | ----- | ---------------------- | ---------- |
-| `<name>`         | root  | <standard entry point> | operator   |
-| `<name>/<child>` | child | <one bounded subtask>  | `<node>`   |
+| Ref              | Entry kind    | Responsibility         | Invoked by |
+| ---------------- | ------------- | ---------------------- | ---------- |
+| `<name>`         | runnable root | <standard entry point> | operator   |
+| `<name>/<child>` | direct child  | <one bounded subtask>  | `<node>`   |
+
+For `group-only`, omit the `<name>` row entirely. Declare every direct child
+that Build must create; do not declare grandchildren or an implicit root.
 
 ## Algorithm
 
@@ -239,11 +249,12 @@ The SDK timeout is a later transport backstop, not authored workflow policy.
 
 ## Build checks
 
-After writing the canonical root and declared child source files:
+After writing the declared root, when present, and declared child source files:
 
-1. Confirm the design `Entries` table and built source set match exactly. Root
-   identity is `<name>`; child identity is `<name>/<child>` while its filename is
-   only `<child>.workflow.mjs`.
+1. Confirm the design namespace declaration, `Entries` table, and built source
+   set match exactly. A `runnable root` has root identity `<name>`; a `group-only`
+   namespace has no root source. In both cases child identity is `<name>/<child>`
+   while its filename is only `<child>.workflow.mjs`.
 2. Confirm `meta.profile` is `"standard"`.
 3. Run the repository source-identity assessment against the exact bytes.
 4. Import the module and require `meta` plus a default function.
@@ -260,7 +271,8 @@ and the source checker all pass. A missing command or non-zero checker exit is a
 Build failure: repair the design/source and rerun the checks. Never report a
 workflow as a successful Build after a failed or skipped check.
 
-Return the design path and, when built, the root and child refs, selected pattern, graph
+Return the design path and, when built, the namespace kind plus its root (when
+declared) and child refs, selected pattern, graph
 summary, design-review result, and checks performed. For Design-only or
 Revise-design-only, explicitly say source was not created. For Author, Revise,
 or Build, explicitly say the workflow was built but not run. Return the exact copyable launch command

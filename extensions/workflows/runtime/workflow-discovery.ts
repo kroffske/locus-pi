@@ -1,9 +1,11 @@
 /**
  * Saved-workflow discovery and identity.
  *
- * A directory named `<root>` owns one `<root>.workflow.mjs` entry and every
- * sibling `<child>.workflow.mjs` directly inside it. Resolution selects that
- * whole namespace from one source; children never fall through independently.
+ * A directory named `<root>` owns an optional `<root>.workflow.mjs` entry and
+ * every sibling `<child>.workflow.mjs` directly inside it. Resolution selects
+ * that whole namespace from one source; children never fall through
+ * independently. A namespace without its root entry is a group-only catalog
+ * namespace: children remain runnable, while the group itself is not.
  */
 
 import path from "node:path";
@@ -32,7 +34,10 @@ export interface ResolvedWorkflowTarget {
 }
 
 export interface WorkflowDefinition {
-  root: ResolvedWorkflowTarget;
+  /** Undefined for a group-only namespace; never synthesize a runnable target. */
+  root?: ResolvedWorkflowTarget;
+  rootRef: string;
+  namespacePath: string;
   children: readonly ResolvedWorkflowTarget[];
   legacyFlat: boolean;
 }
@@ -72,6 +77,16 @@ export class WorkflowNameNotFoundError extends Error {
   }
 }
 
+export class WorkflowGroupOnlyError extends Error {
+  readonly workflowName: string;
+
+  constructor(name: string) {
+    super(`Workflow namespace is group-only and has no runnable root: ${name}`);
+    this.name = "WorkflowGroupOnlyError";
+    this.workflowName = name;
+  }
+}
+
 export function workflowTargetComposition(target: Pick<ResolvedWorkflowTarget, "ref">): WorkflowTargetComposition {
   const { root, child } = workflowSavedNameParts(target.ref);
   return child === undefined
@@ -95,10 +110,9 @@ export function listPackagedWorkflowEntries(): PackagedWorkflowEntry[] {
     if (namespace.state === "blocked") throw new Error(namespace.error);
     if (namespace.state === "ready") {
       entries.push(
-        ...[namespace.definition.root, ...namespace.definition.children].map((target) => ({
-          name: target.ref,
-          path: target.path,
-        })),
+        ...(namespace.definition.root === undefined ? [] : [namespace.definition.root])
+          .concat(namespace.definition.children)
+          .map((target) => ({ name: target.ref, path: target.path })),
       );
     }
   }
@@ -142,7 +156,7 @@ export function listWorkflowCatalogTargets(
   workingDirectory = projectRoot,
 ): ResolvedWorkflowTarget[] {
   return listWorkflowDefinitions(projectRoot, workingDirectory).flatMap((definition) => [
-    definition.root,
+    ...(definition.root === undefined ? [] : [definition.root]),
     ...definition.children,
   ]);
 }
@@ -290,7 +304,10 @@ function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDire
     const namespace = inspectNamespace(search, composition.rootRef, projectRoot);
     if (namespace.state === "missing") continue;
     if (namespace.state === "blocked") throw new Error(namespace.error);
-    const candidates = [namespace.definition.root, ...namespace.definition.children];
+    const candidates = [
+      ...(namespace.definition.root === undefined ? [] : [namespace.definition.root]),
+      ...namespace.definition.children,
+    ];
     const target = candidates.find((candidate) => candidate.ref === name);
     if (target !== undefined) return target;
     if (composition.role === "child") {
@@ -298,6 +315,7 @@ function resolveSavedWorkflowPath(name: string, projectRoot: string, workingDire
         `Workflow child ${JSON.stringify(composition.childRef)} does not exist in namespace ${JSON.stringify(composition.rootRef)}`,
       );
     }
+    if (namespace.definition.root === undefined) throw new WorkflowGroupOnlyError(name);
   }
   throw new WorkflowNameNotFoundError(name);
 }
@@ -331,6 +349,8 @@ function inspectNamespace(search: WorkflowSearchDirectory, root: string, project
         state: "ready",
         definition: {
           root: { kind: "name", ref: root, path: targetPath, source: search.source },
+          rootRef: root,
+          namespacePath: search.directory,
           children: [],
           legacyFlat: true,
         },
@@ -345,10 +365,11 @@ function inspectNamespace(search: WorkflowSearchDirectory, root: string, project
   try {
     const safeFolder = confinedWorkflowSourcePath(folderPath, search.source, projectRoot, root);
     const rootPath = path.join(safeFolder, `${root}${WORKFLOW_ENTRY_SUFFIX}`);
-    if (workflowEntryState(rootPath) !== "regular-file") {
-      return { state: "blocked", error: `Workflow namespace has no regular root entry: ${rootPath}` };
+    const rootPresent = workflowEntryState(rootPath) !== "missing";
+    if (rootPresent && workflowEntryState(rootPath) !== "regular-file") {
+      return { state: "blocked", error: `Workflow namespace root entry is not a regular file: ${rootPath}` };
     }
-    const targetRoot = confinedWorkflowSourcePath(rootPath, search.source, projectRoot, root);
+    const targetRoot = rootPresent ? confinedWorkflowSourcePath(rootPath, search.source, projectRoot, root) : undefined;
     const entries = readdirSync(safeFolder, { withFileTypes: true })
       .filter((entry) => entry.name.endsWith(WORKFLOW_ENTRY_SUFFIX))
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -366,10 +387,17 @@ function inspectNamespace(search: WorkflowSearchDirectory, root: string, project
       const safeChild = confinedWorkflowSourcePath(childPath, search.source, projectRoot, entry.name);
       children.push({ kind: "name", ref: `${root}/${child}`, path: safeChild, source: search.source });
     }
+    if (targetRoot === undefined && children.length === 0) {
+      return { state: "blocked", error: `Workflow namespace has no direct workflow entries: ${safeFolder}` };
+    }
     return {
       state: "ready",
       definition: {
-        root: { kind: "name", ref: root, path: targetRoot, source: search.source },
+        ...(targetRoot === undefined
+          ? {}
+          : { root: { kind: "name", ref: root, path: targetRoot, source: search.source } }),
+        rootRef: root,
+        namespacePath: safeFolder,
         children,
         legacyFlat: false,
       },
