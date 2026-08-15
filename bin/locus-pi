@@ -60,11 +60,14 @@ function printDoctor() {
   console.log(`${pkg.name} ${pkg.version}`);
   console.log(`package root: ${root}`);
   console.log(`pi extensions: ${extensions.length}`);
+  let allPresent = true;
   for (const extensionPath of extensions) {
     const absolutePath = join(root, extensionPath);
     const status = existsSync(absolutePath) ? "ok" : "missing";
+    if (status === "missing") allPresent = false;
     console.log(`- ${status}: ${extensionPath}`);
   }
+  if (!allPresent) process.exitCode = 1;
 }
 
 switch (command) {

@@ -86,7 +86,7 @@ export async function handlePromptShelf(
       return;
     }
     writePromptCommand(target, parsed.action.prompt);
-    setPromptShelfOperatorBlock(ctx, kind, promptShelfChangeBlock(kind, target), "aboveEditor");
+    setPromptShelfOperatorBlock(ctx, kind, promptShelfChangeBlock(kind, target, parsed.action.source), "aboveEditor");
   } catch (error) {
     setPromptShelfOperatorBlock(ctx, kind, promptShelfErrorBlock(kind, error, parsed.targetLabel), "aboveEditor");
   }

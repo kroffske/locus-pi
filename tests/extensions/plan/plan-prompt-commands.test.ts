@@ -549,6 +549,8 @@ describe("default prompt commands", () => {
     await h.commands.get("review")!.handler("Legacy review body", h.ctx);
     const artifactPath = promptPath(root, "review");
     const saved = readFileSync(artifactPath, "utf8");
+    expect(h.widgets.get("review")).toContain("Review prompt saved. Deprecated:");
+    expect(h.widgets.get("review")).toContain("/review set <prompt>");
 
     await h.commands.get("review")!.handler("", h.ctx);
     expect(h.widgets.get("review")).toContain("[VIEW] Review prompt shelf");
@@ -563,6 +565,7 @@ describe("default prompt commands", () => {
 
     await h.commands.get("review")!.handler("set show", h.ctx);
     expect(h.widgets.get("review")).toContain("[CHANGE] Review prompt shelf");
+    expect(h.widgets.get("review")).not.toContain("Legacy free-form syntax is deprecated");
     expect(readFileSync(artifactPath, "utf8")).toContain("\nshow\n");
 
     const literalSaved = readFileSync(artifactPath, "utf8");
