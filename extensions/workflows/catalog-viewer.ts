@@ -508,7 +508,7 @@ function catalogBody(
   const contentFits = desiredCurrentHeight + desiredHistoryHeight <= height;
   const currentHeight = contentFits ? desiredCurrentHeight : Math.max(1, Math.ceil(height * 0.6));
   const historyHeight = contentFits ? desiredHistoryHeight : Math.max(1, height - currentHeight);
-  const visibleRoots = model.current.filter((row) => row.role === "root").length;
+  const visibleRoots = model.current.filter((row) => row.role === "root").length + model.groups.length;
   const visibleChildren = model.current.filter((row) => row.role === "child").length;
   const lines = [
     style(
@@ -538,7 +538,7 @@ function catalogBody(
 
 function groupedCurrentDesiredHeight(model: WorkflowCatalogModel): number {
   const groups = currentSourceGroups(model);
-  return 1 + groups.reduce((total, group) => total + 1 + Math.max(1, group.rows.length * 2), 0);
+  return 1 + groups.reduce((total, group) => total + 1 + group.groups.length + Math.max(1, group.rows.length * 2), 0);
 }
 
 function groupedCurrentCatalog(
@@ -559,14 +559,25 @@ function groupedCurrentCatalog(
       groupStart,
     });
     if (group.rows.length === 0) {
+      for (const header of group.groups) entries.push({ text: groupOnlyHeaderLine(header, theme), groupStart });
       entries.push({ text: model.query === undefined ? "  (none found)" : "  (no matches)", groupStart });
       continue;
     }
+    const groupByName = new Map(group.groups.map((header) => [header.name, header]));
+    const emittedGroups = new Set<string>();
     for (const row of group.rows) {
+      const header = row.role === "child" ? groupByName.get(row.rootName) : undefined;
+      if (header !== undefined && !emittedGroups.has(header.name)) {
+        entries.push({ text: groupOnlyHeaderLine(header, theme), groupStart });
+        emittedGroups.add(header.name);
+      }
       const rowIndex = model.current.indexOf(row);
       for (const text of rowLines(row, rowIndex === selectedIndex, width, theme, true)) {
         entries.push({ text, rowIndex, groupStart });
       }
+    }
+    for (const header of group.groups) {
+      if (!emittedGroups.has(header.name)) entries.push({ text: groupOnlyHeaderLine(header, theme), groupStart });
     }
   }
   const selectedLine = Math.max(
@@ -585,14 +596,31 @@ function groupedCurrentCatalog(
   );
 }
 
+function groupOnlyHeaderLine(header: WorkflowCatalogModel["groups"][number], theme: WorkflowCatalogTheme): string {
+  return style(theme, "muted", `  ${header.name} · ${workflowSourceBadge(header.source)} · group-only (not runnable)`);
+}
+
 function currentSourceGroups(model: WorkflowCatalogModel): Array<{
   label: string;
   rows: WorkflowCatalogModel["current"];
+  groups: WorkflowCatalogModel["groups"];
 }> {
   return [
-    { label: "[P] Project", rows: model.current.filter((row) => row.source === "project") },
-    { label: "[U] User", rows: model.current.filter((row) => row.source === "personal") },
-    { label: "[PKG] Package", rows: model.current.filter((row) => row.source === "package") },
+    {
+      label: "[P] Project",
+      rows: model.current.filter((row) => row.source === "project"),
+      groups: model.groups.filter((group) => group.source === "project"),
+    },
+    {
+      label: "[U] User",
+      rows: model.current.filter((row) => row.source === "personal"),
+      groups: model.groups.filter((group) => group.source === "personal"),
+    },
+    {
+      label: "[PKG] Package",
+      rows: model.current.filter((row) => row.source === "package"),
+      groups: model.groups.filter((group) => group.source === "package"),
+    },
   ];
 }
 

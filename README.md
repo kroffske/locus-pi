@@ -198,9 +198,10 @@ oldest-first, or type `/workflows continue <runId>` to name one directly.
 
 ### Where a name resolves from
 
-Every directory is scanned on each call. A canonical `<name>/` folder owns its
-same-named root and direct children; the nearest Project namespace wins as a
-whole, then User, then Package. Root and child refs are `<name>` and
+Every directory is scanned on each call. A canonical `<name>/` folder owns an
+optional same-named root and its direct children; without that root it is a
+group-only, non-runnable catalog namespace. The nearest Project namespace wins
+as a whole, then User, then Package. Root and child refs are `<name>` and
 `<name>/<child>`. Existing flat Project/User `<name>.workflow.mjs` files remain
 compatible standalone roots. A workflow written for another host's DSL is not
 portable here.

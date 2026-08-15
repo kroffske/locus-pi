@@ -15,6 +15,7 @@ export type WorkflowTranscriptRejectionCode =
   | "missing_output_dir"
   | "input_too_long"
   | "workflow_not_found"
+  | "workflow_group_only"
   | "launch_policy_refused"
   | "workflow_run_busy"
   | "runner_prestart_failed"

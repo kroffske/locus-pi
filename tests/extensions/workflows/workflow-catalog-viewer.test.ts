@@ -122,6 +122,26 @@ describe("focused workflow catalog", () => {
     expect(rendered).toContain("  └ necessity · [PKG]");
   });
 
+  it("renders a group-only header once and keeps its filtered children selectable", () => {
+    const root = emptyProject();
+    const namespace = path.join(root, ".pi", "workflows", "airflow-dag-builder");
+    writeWorkflow(namespace, "implement", source("airflow-dag-builder/implement", "Implement DAG"));
+    writeWorkflow(namespace, "plan", source("airflow-dag-builder/plan", "Plan DAG"));
+    const model = buildWorkflowCatalogModel(root, root, "airflow-dag-builder");
+    const { viewer } = createViewer(model, root, 48);
+
+    expect(model.current.map((row) => row.name)).toEqual(["airflow-dag-builder/implement", "airflow-dag-builder/plan"]);
+    const initial = viewer.render(100).join("\n");
+    expect(initial.match(/group-only \(not runnable\)/gu)).toHaveLength(1);
+    expect(initial.match(/└ implement · \[P\]/gu)).toHaveLength(1);
+    expect(initial.match(/└ plan · \[P\]/gu)).toHaveLength(1);
+
+    viewer.handleInput("down");
+    expect(viewer.render(100).join("\n")).toContain(">   └ plan · [P]");
+    viewer.handleInput("enter");
+    expect(viewer.render(100).join("\n")).toContain("[VIEW] [P] airflow-dag-builder/plan");
+  });
+
   it("truncates catalog detail without adding a path fallback", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);

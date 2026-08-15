@@ -502,11 +502,13 @@ ${skill[1] ?? ""}
     const authorRoute = author.split("### Author\n")[1]?.split("### Design-only\n")[0] ?? "";
     const designOnlyRoute = author.split("### Design-only\n")[1]?.split("### Revise\n")[0] ?? "";
     const buildRoute = author.split("### Build\n")[1]?.split("## Design method\n")[0] ?? "";
-    expect(authorRoute).toContain(
-      "then create the root\nand exactly the declared direct child `.workflow.mjs` entries",
-    );
+    expect(authorRoute).toContain("then create exactly\nthe declared direct `.workflow.mjs` entries");
+    expect(authorRoute).toContain("if it declares `group-only`, it\ncontains no root");
     expect(designOnlyRoute).toContain("must not create or edit a\n`.workflow.mjs`");
-    expect(buildRoute).toContain("creates one matching folder-owned root plus exactly\nthe direct child entries");
+    expect(buildRoute).toContain(
+      "creates an optional folder-owned root only when\n`Entries` declares a `runnable root`, plus exactly the direct child entries",
+    );
+    expect(buildRoute).toContain("A `group-only` design creates no root");
     expect(buildRoute).toContain("stops without running");
   });
 
@@ -517,7 +519,7 @@ ${skill[1] ?? ""}
     expect(author).toMatch(/exact copyable launch command/u);
   });
 
-  it("defines one folder-owned root and explicit direct child entry contract", () => {
+  it("defines an optional runnable root or group-only direct child contract", () => {
     for (const relativePath of [
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
@@ -526,6 +528,8 @@ ${skill[1] ?? ""}
     ]) {
       const text = source(relativePath);
       expect(text).toContain(".pi/workflows/<name>/<name>.design.md");
+      expect(text).toContain("runnable root");
+      expect(text).toContain("group-only");
       expect(text).toMatch(/<(?:name|root)>\/<child>/u);
       expect(text).toMatch(/## Entries|`Entries` table/u);
       expect(text).toMatch(/direct child|direct sibling/iu);

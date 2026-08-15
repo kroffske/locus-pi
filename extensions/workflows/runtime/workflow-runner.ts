@@ -87,6 +87,7 @@ import {
   workflowTargetComposition,
   WORKFLOW_ENTRY_SUFFIX,
   WorkflowNameNotFoundError,
+  WorkflowGroupOnlyError,
   type PackagedWorkflowEntry,
   type ResolvedWorkflowTarget,
   type WorkflowTargetKind,
@@ -100,6 +101,7 @@ export {
   packagedWorkflowPath,
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
+  WorkflowGroupOnlyError,
 };
 export type { PackagedWorkflowEntry, ResolvedWorkflowTarget, WorkflowTargetKind };
 import {

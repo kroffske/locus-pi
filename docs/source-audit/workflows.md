@@ -120,9 +120,10 @@ or borrowed runtime implementation was identified for this source-audit slice.
   workflow ref, then run id, then source badge. The same model partitions current
   rows into Project, User, and Package display sections in resolver-precedence
   order and leaves History separate. Generic folder composition comes from the
-  resolver itself: one root precedes its indented short-name children, and one
-  winning source owns the complete namespace. Compact projections retain exact
-  root, child, and history totals plus explicit notice that detail lines may be omitted.
+  resolver itself: a runnable root (when present) or an unselectable group header
+  precedes its indented short-name children, and one winning source owns the
+  complete namespace. Compact projections retain exact root, child, group, and
+  history totals plus explicit notice that detail lines may be omitted.
 - `extensions/workflows/examples/implement/implement.workflow.mjs` is the
   standalone prepared-work remediation owner. It keeps plan normalization,
   `execute`/`no-work`/`needs-operator` routing, one human decision, independent

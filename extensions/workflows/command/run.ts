@@ -79,6 +79,11 @@ export async function handleWorkflowRunCommand(
     setOperatorWidget(ctx, "workflows", workflowNotFoundBlock(scriptRef));
     return reject("workflow_not_found", `Workflow not found: ${scriptRef}`);
   }
+  if (targetPreflight.status === "group-only") {
+    const message = `Workflow namespace ${JSON.stringify(targetPreflight.workflowName)} is group-only; choose a child workflow.`;
+    setOperatorWidget(ctx, "workflows", workflowWarningBlock(message, "Retry with /workflows run <group>/<child>."));
+    return reject("workflow_group_only", `Workflow not started: ${message}`);
+  }
   const target = targetPreflight.status === "resolved" ? targetPreflight.target : undefined;
   if (target !== undefined) {
     const launchPolicyError = workflowFreshLaunchPolicyError({

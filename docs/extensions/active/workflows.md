@@ -237,8 +237,8 @@ logical artifact identities to digest-bound bytes.
 
 These eight roots and seven child refs are what
 `extensions/workflows/examples/` currently holds, and that directory **is** the
-Package registry — a folder is registered by its same-named root entry, with
-direct child entries discovered beneath it. The set stays small
+Package registry — a folder is registered by its same-named root entry or by
+one or more direct child entries when it is group-only. The set stays small
 because it is a public surface: `package.json#files` still decides what an
 install ships, and a package-boundary test fails when the two disagree, so a
 workflow that resolves in a checkout can never be missing after `npm i`.
@@ -331,8 +331,11 @@ Starting at the command's working directory and walking upward to the project
 root, each level checks `.pi/workflows/`, `.claude/workflows/`, then
 `.agents/workflows/`; User `~/.pi/workflows/` and Package follow.
 
-A canonical namespace is `<root>/<root>.workflow.mjs` plus direct sibling
-`<child>.workflow.mjs` entries. The root runs as `<root>` and a child runs as
+A canonical namespace is a `<root>/` folder with an optional
+`<root>.workflow.mjs` entry plus direct sibling `<child>.workflow.mjs` entries.
+When the root entry exists, the root runs as `<root>` and a child runs as
+`<root>/<child>`. Without the root entry, the namespace is group-only: the
+folder is a non-runnable catalog header and only children run as
 `<root>/<child>`. Once a source owns `<root>`, that whole namespace wins: a
 missing child does not fall through to User or Package. Existing flat
 `<root>.workflow.mjs` Project/User entries remain compatible standalone roots,
@@ -869,12 +872,14 @@ and History stay adjacent when the terminal has spare rows; unused height remain
 below the lists instead of splitting them. Very low terminals use a compact
 one-line fallback.
 
-Every canonical folder is one catalog tree and one resolver namespace. The root
-row is the standard entry point and shows its child count; direct children follow
-with indentation and short labels. Each remains directly runnable through its
-qualified `<root>/<child>` ref. Namespace precedence is atomic, so the catalog
+Every canonical folder is one catalog tree and one resolver namespace. A
+group-only namespace is shown as an unselectable header with its direct children
+indented below it; a namespace with a root shows the standard root row and its
+child count. Runnable children remain directly addressable through their
+qualified `<root>/<child>` refs. Namespace precedence is atomic, so the catalog
 cannot show a Project root with User or Package children. `/workflows info
-<exact-ref>` shows composition and a safe source locator for both roles.
+<exact-ref>` explains group-only status or shows composition and a safe source
+locator for a runnable root or child.
 
 RPC, print, and TUI hosts without the focused viewer receive the same model as a
 bounded passive projection. It includes exact root, child, and history row totals
@@ -1115,10 +1120,12 @@ Authoring is design-first and continuous by default. A raw request first creates
 numbered algorithm, graph
 table, node responsibilities, inputs, complete outputs, roles, consumers,
 edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. The
-author reviews and revises that design, then creates the same-named root and
-exactly its declared direct child `.workflow.mjs` files in the same turn. Build
-checks every logical ref, filename, module load, and source shape but does not
-run the workflow.
+author reviews and revises that design, then creates exactly its declared direct
+`.workflow.mjs` entries in the same turn. The design explicitly declares either
+a `runnable root`, which includes the same-named root, or a `group-only`
+namespace, which omits the root and contains only direct children. Build checks
+every logical ref, filename, module load, and source shape but does not run the
+workflow; it never invents a root.
 
 The author stops after design only when the user explicitly asks for `design
 only`, `pause after design`, `do not build`, or equivalent wording. Build-only

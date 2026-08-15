@@ -21,10 +21,12 @@ import {
   packagedWorkflowPath,
   listWorkflowCatalogTargets,
   resolveWorkflowTarget,
+  WorkflowGroupOnlyError,
   runWorkflowScript,
 } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { isPostCodeReviewTargetIdentity } from "../../../extensions/workflows/runtime/workflow-saved-name.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { preflightWorkflowCommandTarget } from "../../../extensions/workflows/launch-guard.js";
 import {
   workflowJournalFile,
   workflowRunRuntimeDir,
@@ -33,6 +35,96 @@ import { workflowResultFile } from "../../../extensions/workflows/runtime/workfl
 import { createHarness } from "../../test-harness.js";
 
 describe("workflow operator catalog", () => {
+  it("supports group-only namespaces without synthesizing a runnable root", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-group-only-"));
+    const previousHome = process.env.HOME;
+    try {
+      const namespace = path.join(root, ".pi", "workflows", "airflow-dag-builder");
+      mkdirSync(namespace, { recursive: true });
+      writeFileSync(path.join(namespace, "plan.workflow.mjs"), 'export default () => "plan";\n', "utf8");
+      writeFileSync(path.join(namespace, "implement.workflow.mjs"), 'export default () => "implement";\n', "utf8");
+
+      const names = listWorkflowCatalogTargets(root, root).map((target) => target.ref);
+      expect(names).toContain("airflow-dag-builder/plan");
+      expect(names).toContain("airflow-dag-builder/implement");
+      expect(names).not.toContain("airflow-dag-builder");
+      expect(resolveWorkflowTarget({ name: "airflow-dag-builder/plan" }, root, root)).toMatchObject({
+        source: "project",
+        ref: "airflow-dag-builder/plan",
+      });
+      expect(() => resolveWorkflowTarget({ name: "airflow-dag-builder" }, root, root)).toThrow(WorkflowGroupOnlyError);
+      expect(preflightWorkflowCommandTarget("airflow-dag-builder", root, root)).toMatchObject({
+        status: "group-only",
+        workflowName: "airflow-dag-builder",
+      });
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.groups).toMatchObject([
+        expect.objectContaining({
+          name: "airflow-dag-builder",
+          children: ["airflow-dag-builder/implement", "airflow-dag-builder/plan"],
+        }),
+      ]);
+      const groupList = renderOperatorBlockPlain(buildWorkflowCatalogBlock(root, root, "airflow-dag-builder"), 120, {
+        maxLines: 20,
+      }).join("\n");
+      expect(groupList).toContain("airflow-dag-builder");
+      expect(groupList).toContain("group-only (not runnable)");
+      expect(groupList.match(/group-only \(not runnable\)/gu)).toHaveLength(1);
+      expect(groupList.match(/airflow-dag-builder\/plan/gu)).toHaveLength(1);
+      expect(buildWorkflowCatalogModel(root, root, "airflow-dag-builder").current.map((row) => row.name)).toEqual([
+        "airflow-dag-builder/implement",
+        "airflow-dag-builder/plan",
+      ]);
+      expect(model.current.filter((row) => row.source === "project").map((row) => row.name)).toEqual([
+        "airflow-dag-builder/implement",
+        "airflow-dag-builder/plan",
+      ]);
+      expect(buildWorkflowInfoBlock(root, root, "airflow-dag-builder").primary).toMatch(/group-only/u);
+
+      writeFileSync(path.join(namespace, "airflow-dag-builder.workflow.mjs"), 'export default () => "root";\n', "utf8");
+      expect(resolveWorkflowTarget({ name: "airflow-dag-builder" }, root, root)).toMatchObject({
+        ref: "airflow-dag-builder",
+        source: "project",
+      });
+      expect(buildWorkflowCatalogModel(root, root).groups).toHaveLength(0);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps group-only ownership atomic across lower sources", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-group-owner-"));
+    const home = mkdtempSync(path.join(tmpdir(), "wf-catalog-group-home-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = home;
+      const projectNamespace = path.join(root, ".pi", "workflows", "atomic-group");
+      const personalNamespace = path.join(home, ".pi", "workflows", "atomic-group");
+      mkdirSync(projectNamespace, { recursive: true });
+      mkdirSync(personalNamespace, { recursive: true });
+      writeFileSync(path.join(projectNamespace, "plan.workflow.mjs"), 'export default () => "project";\n', "utf8");
+      writeFileSync(
+        path.join(personalNamespace, "implement.workflow.mjs"),
+        'export default () => "personal";\n',
+        "utf8",
+      );
+
+      const model = buildWorkflowCatalogModel(root, root);
+      expect(model.current.filter((row) => row.source === "project").map((row) => row.name)).toEqual([
+        "atomic-group/plan",
+      ]);
+      expect(() => resolveWorkflowTarget({ name: "atomic-group/implement" }, root, root)).toThrow(/does not exist/u);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["an external file symlink", "file"],
     ["an external ancestor symlink", "ancestor"],
@@ -806,7 +898,9 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unassigned role degrades and is recorded");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain("the nearest Project namespace wins");
-      expect(namedText).toContain("a canonical folder owns <workflow>.workflow.mjs plus direct child entries");
+      expect(namedText).toContain(
+        "a canonical folder owns an optional <workflow>.workflow.mjs plus direct child entries",
+      );
       expect((globalThis as Record<string, unknown>).__workflowInfoImported).toBeUndefined();
 
       expect(buildWorkflowInfoBlock(root, root).controls).toContain(`Run: ${workflowRunUsage()}`);

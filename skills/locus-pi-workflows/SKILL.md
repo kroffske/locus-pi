@@ -24,8 +24,10 @@ sequence in the same turn:
 3. Review the design against the request, selected pattern, graph contract, and
    standard source profile. Revise the design until the review finds no material
    mismatch.
-4. Build `.pi/workflows/<name>/<name>.workflow.mjs` plus exactly the direct child
-   entries declared by the reviewed design.
+4. Build exactly the direct `.workflow.mjs` entries declared by the reviewed
+   design. A `runnable root` design includes
+   `.pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
+   and builds only its direct children. Never invent a root.
 5. Validate source identity, module load, graph correspondence, and standard
    source shape. Do not run the workflow unless the user separately asks to run it.
 
@@ -70,12 +72,18 @@ Primary output: `<name>.md`
 Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
+Namespace: `runnable root` (include the `<name>` entry below) or `group-only`
+(omit the root entry; children remain directly runnable)
+
 ## Entries
 
-| Ref              | Role  | Responsibility         | Invoked by |
-| ---------------- | ----- | ---------------------- | ---------- |
-| `<name>`         | root  | <standard entry point> | operator   |
-| `<name>/<child>` | child | <one bounded subtask>  | `<node>`   |
+| Ref              | Entry kind    | Responsibility         | Invoked by |
+| ---------------- | ------------- | ---------------------- | ---------- |
+| `<name>`         | runnable root | <standard entry point> | operator   |
+| `<name>/<child>` | direct child  | <one bounded subtask>  | `<node>`   |
+
+For `group-only`, omit the `<name>` row entirely. Declare every direct child
+that Build must create; do not declare grandchildren or an implicit root.
 
 1. <numbered algorithm>
 
@@ -309,12 +317,13 @@ a large structured plan.
 
 ## Build checks
 
-Build writes one canonical folder matching the reviewed design:
-`.pi/workflows/<name>/<name>.workflow.mjs` plus only its declared direct child
-entries. It then checks:
+Build writes one canonical folder matching the reviewed design: an optional
+`.pi/workflows/<name>/<name>.workflow.mjs` only when the namespace is declared
+`runnable root`, plus only its declared direct child entries. A `group-only`
+namespace has no root source and never receives a fake one. It then checks:
 
 - the design `Entries` table and source set match exactly;
-- root `meta.name` equals `<name>`; each child `meta.name` equals
+- when present, root `meta.name` equals `<name>`; each child `meta.name` equals
   `<name>/<child>` and its filename is `<child>.workflow.mjs`;
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
