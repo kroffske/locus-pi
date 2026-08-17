@@ -147,7 +147,7 @@ export function createWorkflowOperatorHandoffService(
       let workspace: WorkflowHandoffWorkspaceReuseBinding;
       try {
         const targetInput =
-          handoff.target.kind === "scriptPath" ? { scriptPath: handoff.target.ref } : { script: handoff.target.ref };
+          handoff.target.kind === "scriptPath" ? { scriptPath: handoff.target.ref } : { name: handoff.target.ref };
         target = resolveWorkflowTarget(targetInput, getProjectRoot(ctx), getWorkingDirectory(ctx));
         assertWorkflowHandoffContinuationEligibility(
           handoff,
