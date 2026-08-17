@@ -6,6 +6,10 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The workflow catalog makes the active choice easier to scan.** The selected
+  workflow name now carries the strongest emphasis, its description reads as
+  supporting text, and source badges and catalog paths stay visually secondary.
+
 - **The workflow catalog now has Project, User, Package, and History tabs.**
   Tab or Right moves forward, Left moves back, and Up/Down selects only inside
   the active source. Descriptions wrap at word boundaries, rows no longer expose
