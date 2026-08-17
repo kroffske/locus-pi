@@ -760,6 +760,7 @@ function validateStandardValueUses(
     if (value.kind === "runtime-status" && isRuntimeStatusIdentityUse(identifier)) continue;
     if (isWholeValueReturnUse(identifier)) continue;
     if (isPublishedArtifactContinuationUse(identifier, value, dslBindings)) continue;
+    if (isPublishedArtifactHandoffDetailUse(identifier, value, dslBindings)) continue;
     if (isUnchangedScheduledValueUse(identifier, value, dslBindings)) continue;
     errors.add("standard profile forwards opaque semantic, model, file, host, and runtime values only as whole values");
   }
@@ -1305,6 +1306,54 @@ function isPublishedArtifactContinuationUse(
     return false;
   }
 
+  const declaration = handoffPair.parent();
+  if (declaration?.kind() !== "object") return false;
+  const call = declaration.ancestors().find((ancestor) => ancestor.kind() === "call_expression");
+  if (call === undefined || standardCallArguments(call)[0]?.id() !== declaration.id()) return false;
+  const callee = unwrapStandardParentheses(callCallee(call));
+  return callee !== undefined && directStandardDslCall(callee, dslBindings) === "awaitOperator";
+}
+
+function isPublishedArtifactHandoffDetailUse(
+  identifier: SgNode,
+  provenance: StandardValueProvenance,
+  dslBindings: ReadonlySet<string>,
+): boolean {
+  if (
+    provenance.kind !== "runtime-value" ||
+    provenance.sourceMethod === undefined ||
+    !STANDARD_PUBLISHED_ARTIFACT_METHODS.has(provenance.sourceMethod)
+  ) {
+    return false;
+  }
+  const detailPair = identifier.ancestors().find((ancestor) => ancestor.kind() === "pair");
+  if (
+    detailPair === undefined ||
+    staticObjectKey(detailPair.field("key")) !== "detailArtifactRef" ||
+    !nodeWithinStandardNode(identifier, detailPair.field("value") ?? undefined)
+  ) {
+    return false;
+  }
+  const question = detailPair.parent();
+  const questions = question?.parent();
+  const questionsPair = questions?.parent();
+  if (
+    question?.kind() !== "object" ||
+    questions?.kind() !== "array" ||
+    questionsPair?.kind() !== "pair" ||
+    staticObjectKey(questionsPair.field("key")) !== "questions"
+  ) {
+    return false;
+  }
+  const handoff = questionsPair.parent();
+  const handoffPair = handoff?.parent();
+  if (
+    handoff?.kind() !== "object" ||
+    handoffPair?.kind() !== "pair" ||
+    staticObjectKey(handoffPair.field("key")) !== "operatorHandoff"
+  ) {
+    return false;
+  }
   const declaration = handoffPair.parent();
   if (declaration?.kind() !== "object") return false;
   const call = declaration.ancestors().find((ancestor) => ancestor.kind() === "call_expression");

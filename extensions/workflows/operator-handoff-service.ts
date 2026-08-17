@@ -9,7 +9,9 @@ import {
   releaseWorkflowHandoffClaim,
   workflowContinuationForHandoff,
   type WorkflowOperatorHandoffEnvelope,
+  type WorkflowOperatorQuestion,
 } from "./runtime/workflow-handoff.js";
+import { readWorkflowArtifactRecord, type WorkflowArtifactRef } from "./runtime/workflow-artifacts.js";
 import {
   listWorkflowRunIds,
   readWorkflowRunResult,
@@ -21,6 +23,7 @@ import {
   type WorkflowHandoffWorkspaceReuseBinding,
 } from "./runtime/workflow-runner.js";
 import { errorMessage } from "../_shared/host/error-text.js";
+import { safeToolText } from "../_shared/host/safe-output.js";
 import type {
   ActionableWorkflowHandoff,
   WorkflowHandoffLaunchResult,
@@ -66,14 +69,18 @@ export function createWorkflowOperatorHandoffService(
           const state = projectWorkflowHandoffState(projectRoot, read.handoff);
           switch (state.status) {
             case "pending":
-              items.push({ status: "actionable", handoff: actionableWorkflowHandoff(read.handoff), state: "pending" });
+              items.push({
+                status: "actionable",
+                handoff: actionableWorkflowHandoff(projectRoot, read.handoff),
+                state: "pending",
+              });
               break;
             case "retryable":
               // Answerable again, but only on an explicit operator ask: its previous
               // continuation consumed an answer and then failed or was cancelled.
               items.push({
                 status: "actionable",
-                handoff: actionableWorkflowHandoff(read.handoff),
+                handoff: actionableWorkflowHandoff(projectRoot, read.handoff),
                 state: "retryable",
               });
               break;
@@ -129,7 +136,7 @@ export function createWorkflowOperatorHandoffService(
         if (state.status === "resolved") {
           return { message: `Workflow handoff was resolved by continuation ${state.childRunId}.` };
         }
-        return actionableWorkflowHandoff(read.handoff);
+        return actionableWorkflowHandoff(projectRoot, read.handoff);
       } catch (error) {
         return { message: errorMessage(error) };
       }
@@ -218,13 +225,47 @@ function releaseUnboundClaim(
   }
 }
 
-function actionableWorkflowHandoff(handoff: WorkflowOperatorHandoffEnvelope): ActionableWorkflowHandoff {
+function actionableWorkflowHandoff(
+  projectRoot: string,
+  handoff: WorkflowOperatorHandoffEnvelope,
+): ActionableWorkflowHandoff {
   return {
     runId: handoff.originRunId,
     title: handoff.title,
-    questions: handoff.questions,
+    questions: handoff.questions.map((question) => actionableQuestion(projectRoot, question)),
     value: handoff,
   };
+}
+
+function actionableQuestion(
+  projectRoot: string,
+  question: WorkflowOperatorQuestion,
+): ActionableWorkflowHandoff["questions"][number] {
+  const ref = question.detailArtifactRef;
+  if (ref === undefined) return question;
+  const read = readWorkflowArtifactRecord(projectRoot, ref.runId, ref.artifactId);
+  if (read.status !== "ready") {
+    throw new Error(`Workflow handoff question detail is unavailable: ${read.message}`);
+  }
+  if (!sameArtifactRef(read.record, ref)) {
+    throw new Error("Workflow handoff question detail does not match its artifact reference.");
+  }
+  if (!read.record.mediaType.startsWith("text/")) {
+    throw new Error("Workflow handoff question detail must be a text artifact.");
+  }
+  const safe = safeToolText(read.bytes.toString("utf8"), 4096).text;
+  const lines = safe.split(/\r?\n/u);
+  const detailText = lines.length <= 12 ? safe : [...lines.slice(0, 12), `… more detail in ${ref.name}`].join("\n");
+  return { ...question, detailText };
+}
+
+function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef): boolean {
+  return (
+    left.runId === right.runId &&
+    left.artifactId === right.artifactId &&
+    left.name === right.name &&
+    left.sha256 === right.sha256
+  );
 }
 
 function contextIdleWaiter(ctx: ExtensionContext): (() => Promise<void>) | undefined {

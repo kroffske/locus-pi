@@ -53,6 +53,7 @@ export interface WorkflowOperatorSelectQuestion {
   kind: "select";
   id: string;
   prompt: string;
+  detailArtifactRef?: WorkflowArtifactRef;
   options: Array<{ label: string }>;
   recommended?: string;
   allowCustom?: boolean;
@@ -62,6 +63,7 @@ export interface WorkflowOperatorTextQuestion {
   kind: "text";
   id: string;
   prompt: string;
+  detailArtifactRef?: WorkflowArtifactRef;
 }
 
 export type WorkflowOperatorQuestion = WorkflowOperatorSelectQuestion | WorkflowOperatorTextQuestion;
@@ -198,6 +200,7 @@ export function createWorkflowOperatorHandoffEnvelope(input: {
       throw new Error("operatorHandoff continuation artifact is not present in the terminal artifact projection");
     }
   }
+  assertQuestionDetailArtifactRefs(declaration.questions, declaration.continuationArtifactRefs, input.runId);
   const envelope: WorkflowOperatorHandoffEnvelope = {
     version: WORKFLOW_OPERATOR_HANDOFF_VERSION,
     handoffId: stableWorkflowHandoffId(input.runId),
@@ -244,6 +247,7 @@ export function normalizeWorkflowOperatorHandoffEnvelope(value: unknown): Workfl
       throw new Error("Every operatorHandoff continuation artifact must belong to originRunId");
     }
   }
+  assertQuestionDetailArtifactRefs(declaration.questions, declaration.continuationArtifactRefs, record.originRunId);
   return {
     version: WORKFLOW_OPERATOR_HANDOFF_VERSION,
     handoffId: record.handoffId,
@@ -568,7 +572,7 @@ export function projectWorkflowHandoffState(
 function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuestion {
   const record = requireRecord(value, `operatorHandoff question ${index + 1}`);
   if (record.kind === "select") {
-    const allowed = ["allowCustom", "id", "kind", "options", "prompt", "recommended"];
+    const allowed = ["allowCustom", "detailArtifactRef", "id", "kind", "options", "prompt", "recommended"];
     requireAllowedKeys(record, allowed, `operatorHandoff select question ${index + 1}`);
     const id = normalizeQuestionId(record.id);
     const prompt = normalizeBoundedString(record.prompt, `operatorHandoff question ${id} prompt`, MAX_PROMPT_CHARS);
@@ -602,25 +606,52 @@ function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuest
     if (record.allowCustom !== undefined && typeof record.allowCustom !== "boolean") {
       throw new Error(`operatorHandoff question ${id} allowCustom must be boolean`);
     }
+    const detailArtifactRef =
+      record.detailArtifactRef === undefined ? undefined : normalizeArtifactRef(record.detailArtifactRef);
     return {
       kind: "select",
       id,
       prompt,
+      ...(detailArtifactRef !== undefined ? { detailArtifactRef } : {}),
       options,
       ...(recommended !== undefined ? { recommended } : {}),
       ...(record.allowCustom !== undefined ? { allowCustom: record.allowCustom } : {}),
     };
   }
   if (record.kind === "text") {
-    requireAllowedKeys(record, ["id", "kind", "prompt"], `operatorHandoff text question ${index + 1}`);
+    requireAllowedKeys(
+      record,
+      ["detailArtifactRef", "id", "kind", "prompt"],
+      `operatorHandoff text question ${index + 1}`,
+    );
     const id = normalizeQuestionId(record.id);
+    const detailArtifactRef =
+      record.detailArtifactRef === undefined ? undefined : normalizeArtifactRef(record.detailArtifactRef);
     return {
       kind: "text",
       id,
       prompt: normalizeBoundedString(record.prompt, `operatorHandoff question ${id} prompt`, MAX_PROMPT_CHARS),
+      ...(detailArtifactRef !== undefined ? { detailArtifactRef } : {}),
     };
   }
   throw new Error(`operatorHandoff question ${index + 1} kind must be select or text`);
+}
+
+function assertQuestionDetailArtifactRefs(
+  questions: readonly WorkflowOperatorQuestion[],
+  continuationArtifactRefs: readonly WorkflowArtifactRef[],
+  originRunId: string,
+): void {
+  for (const question of questions) {
+    const ref = question.detailArtifactRef;
+    if (ref === undefined) continue;
+    if (ref.runId !== originRunId) {
+      throw new Error(`operatorHandoff question ${question.id} detail artifact must belong to originRunId`);
+    }
+    if (!continuationArtifactRefs.some((candidate) => sameArtifactRef(candidate, ref))) {
+      throw new Error(`operatorHandoff question ${question.id} detail artifact must be a continuation artifact`);
+    }
+  }
 }
 
 function normalizeQuestionId(value: unknown): string {

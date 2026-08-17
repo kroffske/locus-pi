@@ -160,6 +160,65 @@ function persistLaunchBinding(root: string, runId: string): void {
 }
 
 describe("workflow operator handoff service", () => {
+  it("renders a verified blocker artifact beside three choices and custom input", async () => {
+    const root = realpathSync(mkdtempSync(path.join(tmpdir(), "workflow-handoff-detail-")));
+    roots.push(root);
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "alpha.workflow.mjs"),
+      `export default (dsl) => {
+  const blocker = dsl.publishArtifact("planning-blocker.md", "# Planning Blocker\\n\\n## Question\\nWhich queue should own retries?\\n");
+  dsl.awaitOperator({
+    reason: "planning blocker",
+    operatorHandoff: {
+      title: "Resolve planning blocker",
+      questions: [{
+        kind: "select",
+        id: "planning-decision",
+        prompt: "Choose how planning should proceed.",
+        detailArtifactRef: blocker,
+        options: [
+          { label: "Use the safest assumption" },
+          { label: "Keep an explicit prerequisite" },
+          { label: "Reduce to evidenced scope" }
+        ],
+        recommended: "Use the safest assumption",
+        allowCustom: true
+      }],
+      continuationArtifactRefs: [blocker]
+    }
+  });
+  return "blocked";
+};
+`,
+      "utf8",
+    );
+    const sourceHarness = createHarness(root);
+    const source = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      name: "alpha",
+      outputDir: "outputs/alpha",
+    });
+    expect(source.ok, source.error).toBe(true);
+
+    const service = createWorkflowOperatorHandoffService({ launch: vi.fn(() => ({ status: "started" as const })) });
+    const controller = new WorkflowOperatorHandoffController(service);
+    const uiHarness = createHarness(root);
+    uiHarness.customInputQueue.push("\r");
+
+    await expect(controller.pump(uiHarness.ctx, { runId: source.runId })).resolves.toMatchObject({
+      status: "started",
+    });
+    const frame = uiHarness.customRenderFrames[0]?.join("\n") ?? "";
+    expect(frame).toContain("Which queue should own retries?");
+    expect(frame).toContain("Use the safest assumption (Recommended)");
+    expect(frame).toContain("Keep an explicit prerequisite");
+    expect(frame).toContain("Reduce to evidenced scope");
+    expect(frame).toContain("Other (type your own)");
+  });
+
   it.each([
     { label: "identity-only", metadata: { workspacePhysicalIdentity: "handoff-workspace" } },
     {

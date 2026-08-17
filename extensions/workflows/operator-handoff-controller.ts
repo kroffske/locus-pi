@@ -19,12 +19,14 @@ export interface WorkflowHandoffSelectQuestion {
   options: Array<{ label: string }>;
   recommended?: string;
   allowCustom?: boolean;
+  detailText?: string;
 }
 
 export interface WorkflowHandoffTextQuestion {
   kind: "text";
   id: string;
   prompt: string;
+  detailText?: string;
 }
 
 export type WorkflowHandoffQuestion = WorkflowHandoffSelectQuestion | WorkflowHandoffTextQuestion;
@@ -328,6 +330,7 @@ function operatorQuestionSpec(
       allowCustom: true,
       progressText: `Question 1 of ${queueLength}${questionProgress}`,
       contextText: workflowHandoffContext(handoff),
+      ...(question.detailText === undefined ? {} : { detailText: question.detailText }),
     };
   }
   return {
@@ -340,6 +343,8 @@ function operatorQuestionSpec(
     })),
     allowCustom: question.allowCustom === true,
     progressText: `Question 1 of ${queueLength}${questionProgress}`,
+    contextText: workflowHandoffContext(handoff),
+    ...(question.detailText === undefined ? {} : { detailText: question.detailText }),
   };
 }
 

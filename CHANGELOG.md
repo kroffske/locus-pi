@@ -6,6 +6,13 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow questions can show their source evidence beside the choices.** A
+  select or text question may bind one published continuation artifact as
+  `detailArtifactRef`. The runtime verifies its identity and digest, redacts and
+  bounds the text, then renders it above the options together with the workflow
+  and run identity. This lets planning workflows show the concrete blocker,
+  three suggested answers, and the custom-answer row in one TUI block.
+
 - **A workflow workspace now owns its active-run lock.** The runtime writes
   `.locus-pi-workflow.lock` inside `outputDir` instead of retaining the lock in
   a separate hashed state directory. Removing the workspace therefore clears
