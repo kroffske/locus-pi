@@ -1082,15 +1082,84 @@ export default (dsl, input) => dsl.agent(input);
       signal: new AbortController().signal,
       name: "composed/worker",
       input: "direct child",
-      outputDir: "outputs/composed-direct",
       createExecutor: executor(() => "direct done"),
     });
     expect(direct.ok, direct.error).toBe(true);
+    expect(direct.workspaceDirRelative).toBe("tmp/composed/worker");
     expect(readWorkflowRunSummary(root, direct.runId!).status).toBe("completed");
     expect(readWorkflowRunScriptSnapshot(root, direct.runId!)).toMatchObject({
       kind: "ready",
       target: { kind: "name", ref: "composed/worker", source: "project" },
     });
+  });
+
+  it("resumes a qualified child in its persisted pre-upgrade default workspace", async () => {
+    const root = project();
+    writeWorkflowTree(root, "composed", {
+      worker: `export const meta = { name: "composed/worker", profile: "standard" };
+export default (dsl) => dsl.outputDir();
+`,
+    });
+    const harness = createHarness(root);
+    const legacyWorkspace = "tmp/composed";
+    const first = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "composed/worker",
+      outputDir: legacyWorkspace,
+    });
+    expect(first.ok, first.error).toBe(true);
+
+    const persisted = JSON.parse(readFileSync(workflowResultFile(first.runDir), "utf8")) as Record<string, unknown>;
+    writeFileSync(
+      workflowResultFile(first.runDir),
+      `${JSON.stringify({ ...persisted, workspaceDirExplicit: false })}\n`,
+      "utf8",
+    );
+
+    const resumed = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "composed/worker",
+      resumeFromRunId: first.runId,
+    });
+
+    expect(resumed.ok, resumed.error).toBe(true);
+    expect(resumed.workspaceDirRelative).toBe(legacyWorkspace);
+  });
+
+  it("does not implicitly reuse a persisted workspace for a different workflow target", async () => {
+    const root = project();
+    writeWorkflow(root, "alpha", `export default (dsl) => dsl.outputDir();\n`);
+    writeWorkflow(root, "beta", `export default (dsl) => dsl.outputDir();\n`);
+    const harness = createHarness(root);
+    const first = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "alpha",
+    });
+    expect(first.ok, first.error).toBe(true);
+
+    let calls = 0;
+    const resumed = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "beta",
+      resumeFromRunId: first.runId,
+      createExecutor: executor(() => {
+        calls += 1;
+        return "must not run";
+      }),
+    });
+
+    expect(resumed.ok).toBe(false);
+    expect(resumed.error).toContain("outputDir must equal the source workspace");
+    expect(calls).toBe(0);
+    expect(existsSync(path.join(root, "tmp", "beta"))).toBe(false);
   });
 
   it("skips changed opaque payload in one namespace but runs it in a fresh namespace", async () => {

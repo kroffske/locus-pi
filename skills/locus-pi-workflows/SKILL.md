@@ -171,10 +171,12 @@ work by default.
 
 The runtime injects one exact absolute workflow workspace into every child
 prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
-session working directory inside the project. Name the assigned relative file
-and tell writers to replace it idempotently. Use `projectRoot()` only when an
-agent needs source context. Do not add JavaScript path parsers, directory
-collectors, permission fields, or alternate writable roots.
+session working directory inside the project. A directly launched qualified
+child keeps both components (`group/child` -> `<pwd>/tmp/group/child/`); an
+invoked child shares its parent's selected workspace. Name the assigned
+relative file and tell writers to replace it idempotently. Use `projectRoot()`
+only when an agent needs source context. Do not add JavaScript path parsers,
+directory collectors, permission fields, or alternate writable roots.
 
 Workflow `input` remains semantic text. A main agent that already knows exact
 work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow

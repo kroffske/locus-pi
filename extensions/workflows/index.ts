@@ -114,6 +114,9 @@ export default function workflows(pi: ExtensionAPI): void {
             panel = installWorkflowProgress(request.ctx, WORKFLOW_LIVE_WIDGET_KEY, request.scriptRef, runId, {
               scope: "workflow",
               declaredStages: preparation.declaredStages,
+              ...(request.continuation === undefined
+                ? {}
+                : { continuationSourceRunId: request.continuation.originRunId }),
             });
             sessionPanels.add(panel);
           }

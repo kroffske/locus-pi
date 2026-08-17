@@ -84,7 +84,6 @@ import {
   packagedWorkflowPath,
   resolveOwnedWorkflowChild,
   resolveWorkflowTarget,
-  workflowTargetComposition,
   WORKFLOW_ENTRY_SUFFIX,
   WorkflowNameNotFoundError,
   WorkflowGroupOnlyError,
@@ -960,9 +959,7 @@ export function resolveExampleScriptPath(scriptRef: string, projectRoot: string)
 }
 
 function workflowDefaultOutputName(target: ResolvedWorkflowTarget): string {
-  return target.kind === "name"
-    ? workflowTargetComposition(target).rootRef
-    : path.basename(target.path, WORKFLOW_ENTRY_SUFFIX);
+  return target.kind === "name" ? target.ref : path.basename(target.path, WORKFLOW_ENTRY_SUFFIX);
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,8 +1770,20 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         "Cannot resume workflow: the source workspace was selected explicitly; repeat it with outputDir.",
       );
     }
+    const resumeSourceTargetMatches =
+      resumeSourceBinding?.result.target !== undefined &&
+      persistedTargetIdentityKey(
+        resumeSourceBinding.result.target,
+        projectRoot,
+        resumeSourceBinding.result.scriptIdentity?.sourcePath,
+      ) === targetIdentityKey(target, projectRoot);
+    const resumeReuseOutput =
+      resumeSourceWorkspace !== undefined && opts.outputDir === undefined && resumeSourceTargetMatches
+        ? resolveWorkflowOutputDirectoryForReuse(projectRoot, resumeSourceWorkspace, { create: false })
+        : undefined;
     const candidateOutputPath =
       handoffReuseOutput ??
+      resumeReuseOutput ??
       resolveWorkflowOutputDirectoryPath(
         projectRoot,
         opts.outputDir,
@@ -1801,6 +1810,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     const resolvedOutput =
       handoffReuseOutput ??
+      resumeReuseOutput ??
       resolveWorkflowOutputDirectory(projectRoot, opts.outputDir, workflowDefaultOutputName(target), workingDirectory, {
         create: !hasResume,
       });

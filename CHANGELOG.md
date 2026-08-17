@@ -6,6 +6,15 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Folder-qualified workflows now keep their own workspace and visible run
+  history.** A direct run such as `airflow-dag-builder/plan` defaults to
+  `tmp/airflow-dag-builder/plan`, so sibling entries no longer contend for the
+  namespace root. When an operator answer starts a continuation, its live panel
+  names the source run and retains that run's available settled agents above the
+  new work instead of appearing to reset. Current-run counters stay independent;
+  if process-local history has already expired, the panel says so and points to
+  the durable run status.
+
 - **Wide agent summaries no longer crash the workflow TUI at the terminal
   edge.** Shared live rows now measure terminal columns with `visibleWidth()`
   and truncate by columns, including emoji and other double-width graphemes. A
