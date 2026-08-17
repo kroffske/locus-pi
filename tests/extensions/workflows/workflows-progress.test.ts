@@ -68,6 +68,138 @@ function renderHarnessWidget(harness: ReturnType<typeof createHarness>, key = "w
 }
 
 describe("workflow progress widget", () => {
+  it("keeps the source run agents visible when an operator answer starts a continuation", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 160 } };
+    const sourceRunId = "20260817-150519-076c";
+    const currentRunId = "20260817-151356-e575";
+
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_start",
+        agent: "inspector",
+        label: "inspect live Airflow planning evidence",
+        ts: 1,
+        runId: sourceRunId,
+      }),
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_start",
+        agent: "router",
+        label: "route planning readiness",
+        ts: 2.1,
+        runId: sourceRunId,
+      }),
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_end",
+        agent: "router",
+        label: "route planning readiness",
+        status: "completed",
+        durationMs: 8_000,
+        ts: 2.2,
+        runId: sourceRunId,
+      }),
+    );
+    agentLiveStore.patch(
+      workflowAgentLiveRowId(
+        line({
+          kind: "agent_start",
+          agent: "inspector",
+          label: "inspect live Airflow planning evidence",
+          ts: 1,
+          runId: sourceRunId,
+        }),
+      ),
+      { tokenCount: { input: 5_000, output: 100 } },
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_end",
+        agent: "inspector",
+        label: "inspect live Airflow planning evidence",
+        status: "completed",
+        durationMs: 77_000,
+        ts: 2,
+        runId: sourceRunId,
+      }),
+    );
+
+    const component = new WorkflowProgressComponent(tui, {}, "airflow-dag-builder/plan", currentRunId, {
+      scope: "workflow",
+      continuationSourceRunId: sourceRunId,
+      declaredStages: [{ title: "inspect" }, { title: "operator-gate" }, { title: "continue" }],
+    });
+    pushProgress(component, line({ kind: "phase", phase: "continue", ts: 3, runId: currentRunId }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_start",
+        agent: "scope-writer",
+        label: "apply the operator answer",
+        ts: 4,
+        runId: currentRunId,
+      }),
+    );
+
+    const rendered = component.render(160).join("\n");
+    expect(rendered).toContain("continues #076c");
+    expect(rendered).toContain("previous run #076c");
+    expect(rendered).toContain("inspect live Airflow planning evidence");
+    expect(rendered).toContain("route planning readiness");
+    expect(rendered).toContain("apply the operator answer");
+    expect(rendered).toContain("stage 3/3 · continue");
+    expect(rendered).toContain("0/1 done");
+    expect(rendered).toContain("tok —");
+    expect(rendered).toContain("○ inspect");
+    expect(rendered).toContain("○ operator-gate");
+
+    tui.terminal.rows = 12;
+    const constrained = component.render(160).join("\n");
+    expect(constrained).toContain("(+2 earlier agents)");
+    expect(constrained).not.toContain("previous run #076c");
+    expect(constrained).not.toContain("inspect live Airflow planning evidence");
+    expect(constrained).not.toContain("route planning readiness");
+    expect(constrained).toContain("apply the operator answer");
+
+    component.dispose();
+    agentLiveStore.reset();
+  });
+
+  it("shows an explicit source-history fallback when retained continuation rows are unavailable", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 140 } };
+    const component = new WorkflowProgressComponent(tui, {}, "airflow-dag-builder/plan", "current-run", {
+      scope: "workflow",
+      continuationSourceRunId: "20260817-150519-076c",
+      declaredStages: [{ title: "continue" }],
+    });
+    pushProgress(component, line({ kind: "phase", phase: "continue", ts: 1, runId: "current-run" }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_start",
+        agent: "writer",
+        label: "continue current work",
+        ts: 2,
+        runId: "current-run",
+      }),
+    );
+
+    const rendered = component.render(140).join("\n");
+    expect(rendered).toContain("continues #076c");
+    expect(rendered).toContain("previous run #076c · history unavailable");
+    expect(rendered).toContain("/workflows status 076c");
+    expect(rendered).toContain("0/1 done");
+    expect(rendered).toContain("continue current work");
+
+    component.dispose();
+    agentLiveStore.reset();
+  });
+
   it("renders phase, agent transitions, durations, and stays inside the terminal budget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1", {

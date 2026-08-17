@@ -201,11 +201,12 @@ work by default.
 
 The runtime prepends one exact absolute workflow workspace to every child
 prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
-session working directory inside the project. Source may call `outputDir()` when
-it needs the project-relative identity, but authors should only need to name the
-assigned relative file and the idempotent replacement rule. Use `projectRoot()`
-for source context. Do not add permission/tool fields, another default writable
-root, a path parser, or an information-gathering script.
+session working directory inside the project; a qualified child keeps both name
+components, so `group/child` uses `<pwd>/tmp/group/child/`. Source may call
+`outputDir()` when it needs the project-relative identity, but authors should
+only need to name the assigned relative file and the idempotent replacement
+rule. Use `projectRoot()` for source context. Do not add permission/tool fields,
+another default writable root, a path parser, or an information-gathering script.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. Lists come from one of

@@ -28,9 +28,11 @@ modules use its constructors instead of rebuilding the prefix.
 ## Workflow workspace: agent-owned files
 
 `dsl.outputDir()` returns the project-relative workspace identity. The default
-is `tmp/<workflow-name>` below the verified Pi working directory. The runtime
-creates the resolved absolute directory before the first child and prepends it
-exactly once to every child task.
+is `tmp/<workflow-name>` below the verified Pi working directory. A directly
+launched qualified child such as `group/child` therefore uses
+`tmp/group/child`; only `invokeWorkflow()` deliberately shares its parent's
+already-selected workspace. The runtime creates the resolved absolute directory
+before the first child and prepends it exactly once to every child task.
 
 Agents write intermediate and final files there under their assigned names.
 Workflow JavaScript passes exact text or file names between agents; it does not

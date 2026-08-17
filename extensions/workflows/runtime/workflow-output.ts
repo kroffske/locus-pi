@@ -103,7 +103,7 @@ export interface WorkflowRootLease {
   readonly record: WorkflowLeaseRecord;
 }
 
-function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string, workflowBaseName: string): string {
+function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string, workflowName: string): string {
   const lexicalRoot = path.resolve(projectRoot);
   const lexicalWorkingDirectory = path.resolve(workingDirectory);
   if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalWorkingDirectory)) {
@@ -122,8 +122,11 @@ function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string,
   }
   const relativeWorkingDirectory = path.relative(lexicalRoot, lexicalWorkingDirectory).split(path.sep).join("/");
   const prefix = relativeWorkingDirectory === "" ? "tmp" : `${relativeWorkingDirectory}/tmp`;
-  if (OUTPUT_COMPONENT.test(workflowBaseName)) return `${prefix}/${workflowBaseName}`;
-  const identity = createHash("sha256").update(workflowBaseName).digest("hex");
+  const workflowNameParts = workflowName.split("/");
+  if (workflowNameParts.every((part) => OUTPUT_COMPONENT.test(part))) {
+    return `${prefix}/${workflowNameParts.join("/")}`;
+  }
+  const identity = createHash("sha256").update(workflowName).digest("hex");
   return `${prefix}/by-workflow-name/${identity}`;
 }
 

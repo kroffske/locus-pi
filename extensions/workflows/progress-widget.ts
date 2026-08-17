@@ -79,6 +79,8 @@ export interface WorkflowProgressOptions {
   scope?: "fleet" | "workflow";
   /** Statically declared stages (`meta.phases`): titles plus their planned detail. */
   declaredStages?: readonly WorkflowDeclaredStage[];
+  /** Source run whose settled agents stay visible while an operator continuation runs. */
+  continuationSourceRunId?: string;
   /** Render coalescing window; `0` renders on every change. Defaults to the shared 4 fps ceiling. */
   renderMinIntervalMs?: number;
   /**
@@ -280,16 +282,24 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   private visibleRows(): AgentLiveRow[] {
     const all = [...agentLiveStore.rows.values()];
+    const sourceRunId = this.options.continuationSourceRunId;
+    const sourceRows = sourceRunId === undefined ? [] : all.filter((row) => row.workflowRunId === sourceRunId);
     let visible: AgentLiveRow[];
     if (this.#knownRowIds.size > 0) {
-      visible = compactWorkflowParentRows(selectAgentLiveRowsForParents(all, this.#knownRowIds));
+      const currentRows = selectAgentLiveRowsForParents(all, this.#knownRowIds);
+      visible = compactWorkflowParentRows([
+        ...new Map([...sourceRows, ...currentRows].map((row) => [row.id, row])).values(),
+      ]);
     } else if (this.options.scope !== "workflow") {
       visible = compactWorkflowParentRows(all);
     } else {
       const prefix = `workflow:${this.runId}:`;
       const scopedParentIds = new Set(all.filter((row) => row.id.startsWith(prefix)).map((row) => row.id));
       const scoped = all.filter(
-        (row) => row.id.startsWith(prefix) || (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
+        (row) =>
+          row.workflowRunId === sourceRunId ||
+          row.id.startsWith(prefix) ||
+          (row.parentRowId !== undefined && scopedParentIds.has(row.parentRowId)),
       );
       visible = compactWorkflowParentRows(scoped);
     }
@@ -321,7 +331,11 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       frontier.length === 0 ? "stage —" : `stage ${stageIndex}/${frontier.length} · ${current?.title ?? "waiting"}`;
     const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
     const replayedText = replayedCount > 0 ? ` · replayed ${replayedCount}` : "";
-    const leaves = selectFleetMenuLeafRows(rows);
+    const currentRows =
+      this.options.continuationSourceRunId === undefined
+        ? rows
+        : rows.filter((row) => row.workflowRunId !== this.options.continuationSourceRunId);
+    const leaves = selectFleetMenuLeafRows(currentRows);
     const counts = countAgentLiveStatuses(leaves);
     const terminalCount = counts.done + counts.cancelled + counts.error;
     const tokenTotal = leaves.reduce(
@@ -338,9 +352,13 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const mediumCommands =
       this.done === undefined ? "/ps inspect agents · /workflows stop last" : "/workflows status last";
     const shortCommands = this.done === undefined ? "/workflows stop last" : "/workflows status last";
-    const full = `◆ WORKFLOW · ${this.scriptRef} │ ${tokenText} │ ${stage} · ${state} │ ${progressText}`;
-    const medium = `◆ WF ${this.scriptRef} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${progressText}`;
-    const compact = `◆ ${this.scriptRef} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state}`;
+    const continuationText =
+      this.options.continuationSourceRunId === undefined
+        ? ""
+        : ` · continues #${shortWorkflowRunId(this.options.continuationSourceRunId)}`;
+    const full = `◆ WORKFLOW · ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stage} · ${state} │ ${progressText}`;
+    const medium = `◆ WF ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${progressText}`;
+    const compact = `◆ ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state}`;
     const projections: ReadonlyArray<readonly [string, string]> = [
       [full, fullCommands],
       [full, mediumCommands],
@@ -365,8 +383,14 @@ export class WorkflowProgressComponent implements CustomUiComponent {
    */
   private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
     const leaves = selectFleetMenuLeafRows(orderAgentLiveRows(rows));
+    const sourceRunId = this.options.continuationSourceRunId;
+    const previousLeaves = sourceRunId === undefined ? [] : leaves.filter((row) => row.workflowRunId === sourceRunId);
+    const currentLeaves =
+      sourceRunId === undefined ? leaves : leaves.filter((row) => row.workflowRunId !== sourceRunId);
     const current =
-      leaves.find((row) => row.status === "working") ?? leaves.find((row) => row.status === "queued") ?? leaves.at(-1);
+      currentLeaves.find((row) => row.status === "working") ??
+      currentLeaves.find((row) => row.status === "queued") ??
+      currentLeaves.at(-1);
     const rowWidth = Math.max(1, width - 2);
     const panel = new AgentLivePanel({
       spinnerIndex: this.#spinnerIndex,
@@ -376,17 +400,50 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     });
     // Only the current row keeps its sub-lines (latest message / live tool action);
     // settled rows stay one line each so the roster fits a short terminal.
-    const agentLines = leaves.map((row) => ({
-      settled: row !== current,
-      lines: (row === current ? panel.renderRows([row], rowWidth) : [panel.renderRow(row, rowWidth)]).map(
+    const renderAgentLines = (row: AgentLiveRow) =>
+      (row === current ? panel.renderRows([row], rowWidth) : [panel.renderRow(row, rowWidth)]).map(
         (line) => `  ${line}`,
-      ),
+      );
+    const currentAgentLines = currentLeaves.map((row) => ({
+      settled: row !== current,
+      hiddenAgents: 1,
+      lines: renderAgentLines(row),
     }));
+    const previousRunBlock =
+      sourceRunId === undefined
+        ? []
+        : previousLeaves.length === 0
+          ? [
+              {
+                settled: true,
+                hiddenAgents: 0,
+                lines: [
+                  this.#fg(
+                    "dim",
+                    truncate(
+                      `  ↳ previous run #${shortWorkflowRunId(sourceRunId)} · history unavailable · /workflows status ${shortWorkflowRunId(sourceRunId)}`,
+                      width,
+                    ),
+                  ),
+                ],
+              },
+            ]
+          : [
+              {
+                settled: true,
+                hiddenAgents: previousLeaves.length,
+                lines: [
+                  this.#fg("dim", truncate(`  ↳ previous run #${shortWorkflowRunId(sourceRunId)}`, width)),
+                  ...previousLeaves.flatMap((row) => renderAgentLines(row)),
+                ],
+              },
+            ];
     const pendingLines = (fleetViewedRowId() === undefined ? this.pendingStageLines(width) : []).map((line) => ({
       settled: false,
+      hiddenAgents: 0,
       lines: [line],
     }));
-    const roster = [...agentLines, ...pendingLines];
+    const roster = [...previousRunBlock, ...currentAgentLines, ...pendingLines];
     if (roster.length === 0) return [this.#fg("dim", truncate("  waiting for workflow agents…", width))];
     return clampRosterLines(roster, budget, width);
   }
@@ -884,23 +941,23 @@ function collapseConsecutiveDuplicateLines(lines: string[]): string[] {
  * are what an operator steers on. The collapse is announced, never silent.
  */
 function clampRosterLines(
-  entries: readonly { settled: boolean; lines: string[] }[],
+  entries: readonly { settled: boolean; hiddenAgents?: number; lines: string[] }[],
   budget: number,
   width: number,
 ): string[] {
   const all = entries.flatMap((entry) => entry.lines);
   if (all.length <= budget) return all;
-  let dropped = 0;
+  let hiddenAgents = 0;
   const kept = [...entries];
   while (kept.flatMap((entry) => entry.lines).length + 1 > budget) {
     const index = kept.findIndex((entry) => entry.settled);
     if (index < 0) break;
-    kept.splice(index, 1);
-    dropped += 1;
+    const [removed] = kept.splice(index, 1);
+    hiddenAgents += removed?.hiddenAgents ?? 1;
   }
   const lines = kept.flatMap((entry) => entry.lines);
-  if (dropped === 0) return lines.slice(0, budget);
-  return [truncate(`  (+${dropped} earlier agents)`, width), ...lines].slice(0, budget);
+  if (hiddenAgents === 0) return lines.slice(0, budget);
+  return [truncate(`  (+${hiddenAgents} earlier agents)`, width), ...lines].slice(0, budget);
 }
 
 function fitLines(

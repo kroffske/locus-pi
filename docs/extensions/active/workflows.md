@@ -1599,11 +1599,13 @@ and `/workflows continue <runId>` takes a named run.
 `tmp/<workflow-name>` beneath Pi's verified session working directory, or to the
 explicit safe project-relative workspace selected by the programmatic tool's
 `outputDir` or `/workflows run <name|path> --output-dir <path>`. The runtime
-creates its absolute path before the first child and names it exactly once in
-every child task. Agent files keep their exact names; the runtime does not
-rename, move, or clean them. Absolute overrides, traversal, whitespace tricks,
-backslashes, out-of-project working directories, and symlink escapes fail before
-a child starts.
+preserves a qualified child's complete saved name, so `group/child` defaults to
+`tmp/group/child`; an invoked child still shares its parent's selected
+workspace. The runtime creates its absolute path before the first child and
+names it exactly once in every child task. Agent files keep their exact names;
+the runtime does not rename, move, or clean them. Absolute overrides, traversal,
+whitespace tricks, backslashes, out-of-project working directories, and symlink
+escapes fail before a child starts.
 
 For `post-code-review`, the explicit namespace is also a freshness boundary:
 fresh semantic input cannot reuse a prior durable namespace. Choose a new
