@@ -70,7 +70,7 @@ describe("focused workflow catalog", () => {
     expect((globalThis as Record<string, unknown>).__workflowViewerExecuted).toBeUndefined();
   });
 
-  it("renders each catalog entry without exposing a source path", () => {
+  it("shows the active catalog directory without adding file paths to rows", () => {
     const root = projectWithWorkflows({
       alpha: source("alpha", "Alpha workflow"),
       beta: source("beta", "Beta workflow"),
@@ -84,21 +84,23 @@ describe("focused workflow catalog", () => {
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toContain(model.current[0]!.originPath);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    └ Alpha workflow · profile=");
+    expect(lines[row + 1]).toContain("    · Alpha workflow");
+    expect(lines.join("\n")).not.toContain("profile=");
     expect(lines.join("\n")).not.toContain(model.current[0]!.originPath);
+    expect(lines.join("\n")).toContain(`Catalog: ${path.join(root, ".pi", "workflows")}`);
 
     viewer.handleInput("down");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> beta · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
-    expect(lines[row + 1]).toContain("    └ Beta workflow · profile=");
+    expect(lines[row + 1]).toContain("    · Beta workflow");
 
-    for (let index = 1; index < model.current.length; index += 1) viewer.handleInput("down");
+    viewer.handleInput("left");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> alpha · run 20260101-000001-alpha · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    └ historical run snapshot · profile=");
+    expect(lines[row + 1]).toContain("    · historical run snapshot");
   });
 
   it("keeps source sections and folder hierarchy readable at narrow widths", () => {
@@ -106,20 +108,24 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
+    viewer.handleInput("right");
+    viewer.handleInput("right");
     for (const width of [40, 48, 80]) {
       const lines = viewer.render(width);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       const narrow = lines.join("\n");
-      expect(narrow).toContain("[P] Project");
-      expect(narrow).toContain("[U] User");
-      expect(narrow).toContain("[PKG] Package");
+      expect(narrow).toContain(width < 64 ? "P 1" : "Project 1");
+      expect(narrow).toContain(width < 64 ? "U 0" : "User 0");
+      expect(narrow).toContain(width < 64 ? "[PKG 12]" : "[Package 12]");
       expect(narrow).toContain("necessity");
       expect(narrow).toContain("  └ necessity");
-      expect(narrow).toContain("9 children");
+      expect(narrow).toContain("7 children");
     }
     const rendered = viewer.render(80).join("\n");
     expect(rendered).toContain("post-code-review · [PKG] · 7 children");
     expect(rendered).toContain("  └ necessity · [PKG]");
+    expect(rendered).toContain("      · Challenge proposed review fixes");
+    expect(rendered).not.toContain("    └ Challenge proposed review fixes");
   });
 
   it("renders a group-only header once and keeps its filtered children selectable", () => {
@@ -142,27 +148,52 @@ describe("focused workflow catalog", () => {
     expect(viewer.render(100).join("\n")).toContain("[VIEW] [P] airflow-dag-builder/plan");
   });
 
-  it("truncates catalog detail without adding a path fallback", () => {
-    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+  it("wraps catalog detail at word boundaries without adding profile or path noise", () => {
+    const description = "Alpha workflow description uses complete words across the available terminal width";
+    const root = projectWithWorkflows({ alpha: source("alpha", description) });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 18);
 
-    const detailLine = viewer.render(48).find((line) => line.includes("└")) ?? "";
-    expect(detailLine).toContain("    └ Alpha workflow · profile=");
-    expect(detailLine).not.toContain(model.current[0]!.originPath);
+    const rendered = viewer.render(48).join("\n");
+    expect(rendered).toContain("    · Alpha workflow description uses complete");
+    expect(rendered).toContain("      words across the available terminal width");
+    expect(rendered).not.toContain("profile=");
+    expect(rendered).not.toContain(model.current[0]!.originPath);
   });
 
-  it("keeps Current and History adjacent when a tall terminal has spare rows", () => {
+  it("keeps Project, User, Package, and History as persistent source tabs", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     writeRun(root, "20260101-000001-alpha", "alpha");
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
-    const lines = viewer.render(146);
-    const historyHeading = lines.findIndex((line) => line.includes("History [R] review-only"));
-    expect(historyHeading).toBeGreaterThanOrEqual(0);
-    expect(lines[historyHeading - 1]).toContain("└ ");
-    expect(lines.slice(1, historyHeading).some((line) => line.trim() === "")).toBe(false);
+    expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 12  History 1");
+    viewer.handleInput("left");
+    const history = viewer.render(146).join("\n");
+    expect(history).toContain("Project 1  User 0  Package 12  [History 1]");
+    expect(history).toContain("alpha · run 20260101-000001-alpha · [P]");
+    expect(history).not.toContain("> alpha · [P]");
+  });
+
+  it("cycles catalog tabs with Tab plus named, ANSI, and application arrow keys", () => {
+    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer } = createViewer(model, root, 18);
+
+    viewer.handleInput("tab");
+    expect(viewer.render(100).join("\n")).toContain("[User 0]");
+    viewer.handleInput("right");
+    expect(viewer.render(100).join("\n")).toContain("[Package 12]");
+    viewer.handleInput("\x1b[C");
+    expect(viewer.render(100).join("\n")).toContain("[History 0]");
+    viewer.handleInput("\x1bOC");
+    expect(viewer.render(100).join("\n")).toContain("[Project 1]");
+    viewer.handleInput("left");
+    expect(viewer.render(100).join("\n")).toContain("[History 0]");
+    viewer.handleInput("\x1b[D");
+    expect(viewer.render(100).join("\n")).toContain("[Package 12]");
+    viewer.handleInput("\x1bOD");
+    expect(viewer.render(100).join("\n")).toContain("[User 0]");
   });
 
   it("reports deletion and returns without losing the selected row", () => {
@@ -253,7 +284,8 @@ describe("focused workflow catalog", () => {
     expect(viewer.render(80).join("\n")).toContain("› [Back] Start Edit Review");
     expect(fg).toHaveBeenCalledWith("success", "[VIEW]");
     expect(fg).toHaveBeenCalledWith("success", "Source:");
-    expect(fg).toHaveBeenCalledWith("success", "Locator:");
+    expect(fg).toHaveBeenCalledWith("success", "Catalog:");
+    expect(fg).toHaveBeenCalledWith("success", "Path:");
     expect(fg).toHaveBeenCalledWith("warning", "› [Back]");
     expect(fg).toHaveBeenCalledWith("success", "Start");
 
@@ -281,8 +313,7 @@ describe("focused workflow catalog", () => {
       expect(lines[0]).toContain(width >= 48 ? "[SELECT]" : "[");
     }
     const narrowCatalog = viewer.render(48).join("\n");
-    expect(narrowCatalog).toContain("↑/↓ select · Enter inspect · Esc close");
-    expect(narrowCatalog).toContain("/workflows info");
+    expect(narrowCatalog).toContain("Tab/←/→ · ↑/↓ Enter · Esc");
     viewer.handleInput("enter");
     for (const width of [146, 80, 48, 8, 1]) {
       const lines = viewer.render(width);
@@ -339,13 +370,13 @@ describe("focused workflow catalog", () => {
 
     const compact = viewer.render(48).join("\n");
     expect(compact).toContain("beta · [P] · Beta workflow");
-    expect(compact).not.toMatch(/\b(?:Project|User|Package)\b/u);
+    if (rows < 6) expect(compact).not.toMatch(/\b(?:Project|User|Package)\b/u);
     if (rows === 6) {
       expect(compact).toContain("[SELECT] Workflow catalog");
-      expect(compact).toContain("↑/↓ Enter · Esc");
+      expect(compact).toContain("[P 2]");
     } else if (rows === 5) {
       expect(viewer.render(48)).toHaveLength(2);
-      expect(compact).toContain("↑/↓ Enter · Esc");
+      expect(compact).toContain("[P 2]");
     } else {
       expect(viewer.render(48)).toEqual(["beta · [P] · Beta workflow"]);
     }
@@ -362,7 +393,7 @@ describe("focused workflow catalog", () => {
     const { viewer, terminal } = createViewer(model, root, 6);
 
     expect(viewer.render(48).join("\n")).toContain("alpha · [P] · Alpha workflow");
-    for (let index = 0; index < model.current.length; index += 1) viewer.handleInput("down");
+    viewer.handleInput("left");
     expect(viewer.render(48).join("\n")).toContain("alpha · run 20260101-000001-alpha · [P]");
     viewer.handleInput("enter");
     terminal.rows = 32;
@@ -377,7 +408,7 @@ describe("focused workflow catalog", () => {
       const model = buildWorkflowCatalogModel(root, root);
       const { viewer } = createViewer(model, root, rows);
 
-      for (let index = 0; index < model.current.length; index += 1) viewer.handleInput("down");
+      viewer.handleInput("left");
 
       const rendered = viewer.render(48).join("\n");
       expect(rendered).toContain("alpha · run 20260101-000001-alpha · [P]");
@@ -392,7 +423,7 @@ describe("focused workflow catalog", () => {
     const { viewer } = createViewer(model, root, rows);
 
     const rendered = viewer.render(48).join("\n");
-    expect(rendered).toContain("No workflow rows.");
+    expect(rendered).toContain("No workflow rows in this source.");
     expect(rendered).not.toContain("[C]");
     expect(rendered).not.toContain("[R:");
   });
@@ -452,6 +483,37 @@ describe("focused workflow catalog", () => {
         sourceState: expect.objectContaining({ kind: "ready" }),
       }),
     );
+  });
+
+  it("offers copy actions for a folder-owned Package namespace", () => {
+    const root = emptyProject();
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer, done } = createViewer(model, root, 18);
+
+    viewer.handleInput("enter");
+    expect(viewer.render(120).join("\n")).toContain("› [Back] Start Edit Review Copy to Project Copy to User");
+    for (let index = 0; index < 4; index += 1) viewer.handleInput("tab");
+    expect(viewer.render(120).join("\n")).toContain("› [Copy to Project]");
+    viewer.handleInput("enter");
+
+    expect(done).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "copy-project", row: expect.objectContaining({ source: "package" }) }),
+    );
+  });
+
+  it("copies a Package namespace from the TUI without filling or submitting the editor", async () => {
+    const root = emptyProject();
+    const harness = createHarness(root);
+    harness.customInputQueue.push("enter", "tab", "tab", "tab", "tab", "enter");
+    workflows(harness.pi);
+
+    await harness.commands.get("workflows")!.handler("list", harness.ctx);
+
+    expect(harness.widgets.get("workflows")).toContain('Copied workflow "implement" to Project');
+    expect(existsSync(path.join(root, ".pi", "workflows", "implement", "implement.workflow.mjs"))).toBe(true);
+    expect(harness.editorText).toBe("");
+    expect(harness.sentMessages).toEqual([]);
+    expect(harness.sentUserMessages).toEqual([]);
   });
 
   it("cycles source actions both ways with named, ANSI, and application arrow keys", () => {
@@ -557,7 +619,7 @@ describe("focused workflow catalog", () => {
     const reached = collectIdentityPages(viewer, width, 160);
 
     expect(reached).toContain(history.sourceLocator);
-    expect(reached).not.toContain(history.originPath);
+    expect(reached).toContain(history.originPath);
     expect(reached).toContain(history.snapshot.sha256);
     expect(viewer.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
   });

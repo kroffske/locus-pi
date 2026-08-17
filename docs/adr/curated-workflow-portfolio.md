@@ -4,7 +4,24 @@
 - Date: 2026-07-17
 - Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05, 2026-08-10, 2026-08-17
 
-## Decision
+## 2026-08-17 amendment: retire overlapping legacy namespaces
+
+The active Package portfolio now has four namespaces: runnable `implement`,
+`live-smoke`, and `post-code-review`, plus group-only `task`. Together they
+expose twelve runnable names: three roots, seven `post-code-review/*` children,
+and `task/plan` plus `task/implement`.
+
+`requirements-grill`, `review`, and `review-fix` are removed rather than kept as
+legacy catalog entries. Task planning and request refinement belong to
+`task/plan`; modular evidence-backed review belongs to `post-code-review`;
+applying an authorized plan or review belongs to `implement`. `task/implement`
+remains distinct because it owns one exact planned step and the shared task
+workspace/history protocol.
+
+Historical sections below record the decisions that produced the retired
+workflows; they no longer describe resolvable Package entries.
+
+## Historical decision
 
 ~~The Package registry remains a strict allowlist.~~ (See the second 2026-07-27
 amendment: the registry is now the shipped `examples/` directory, scanned by

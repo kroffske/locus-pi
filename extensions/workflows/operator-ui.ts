@@ -23,6 +23,7 @@ import type { WorkflowBackgroundStopResult } from "./background-run-registry.js"
 import { workflowRunUsage } from "./command-parser.js";
 import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "./workflow-catalog.js";
 import { compactOperatorLine } from "../_shared/operator/operator-ui.js";
+import { copyDestinationLabel, type WorkflowCopyResult } from "./workflow-copy.js";
 
 /** Package names shared with resolution and catalog enumeration, scanned per call. */
 export function listExampleNames(): string[] {
@@ -45,7 +46,7 @@ export function workflowHelpBlock(): OperatorBlock {
       "Stop: /workflows stop [runId|last]",
     ],
     metadata: [
-      "Compatibility aliases remain available: /workflow-list, /workflow-info, /workflow-status, /workflow-result, /workflow-run, /workflow-continue, and /workflow-stop.",
+      "Emergency compatibility alias: /workflow-stop. Use /workflows <subcommand> for every other operation.",
       "A command starts execution only when the Pi session is provably idle.",
     ],
   };
@@ -133,6 +134,29 @@ export function workflowNotFoundBlock(name: string): OperatorBlock {
     body: [`Available curated Package workflows: ${available}`],
     metadata: ["No workflow execution was started."],
     controls: ["Recovery: /workflows list [query]"],
+  };
+}
+
+export function workflowCopyBlock(result: WorkflowCopyResult): OperatorBlock {
+  const destination = copyDestinationLabel(result.destination);
+  if (result.status === "exists") {
+    return {
+      type: "WARN",
+      subject: "Workflow copy",
+      primary: `${destination} workflow ${JSON.stringify(result.rootName)} already exists. Nothing was copied.`,
+      metadata: [`conflict: ${result.conflictPath}`],
+      controls: ["Rename or remove the existing namespace manually, then retry from /workflows list."],
+    };
+  }
+  return {
+    type: "VIEW",
+    subject: "Workflow copy",
+    primary: `Copied workflow ${JSON.stringify(result.rootName)} to ${destination}.`,
+    metadata: [
+      `namespace: ${result.destinationPath}`,
+      "The complete root namespace, direct children, and resources were copied without changing the Package source.",
+    ],
+    controls: ["Reopen /workflows list to inspect the new first-wins source."],
   };
 }
 

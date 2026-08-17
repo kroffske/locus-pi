@@ -49,7 +49,7 @@ describe("workflow replay live-row answer hydration", () => {
       };
     });
     try {
-      await harness.commands.get("workflows")!.handler("run review", harness.ctx);
+      await harness.commands.get("workflows")!.handler("run task/plan", harness.ctx);
       for (
         let attempt = 0;
         attempt < 50 && agentLiveStore.rows.get(workflowAgentLiveRowId(fixture.end))?.finalAnswer === undefined;

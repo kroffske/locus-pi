@@ -201,7 +201,7 @@ describe("/workflows status <runId> declared-versus-observed", () => {
 
 describe("curated workflow declarations", () => {
   it("declares exactly the phase() titles each curated workflow actually emits, in order", () => {
-    const declaring = ["task/implement", "task/plan", "requirements-grill", "review", "review-fix"] as const;
+    const declaring = ["task/implement", "task/plan"] as const;
 
     for (const name of declaring) {
       const file = packagedWorkflowPath(name);

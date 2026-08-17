@@ -242,13 +242,6 @@ extensions/workflows/examples/post-code-review/simplicity.workflow.mjs
 extensions/workflows/examples/post-code-review/style.workflow.mjs
 extensions/workflows/examples/post-code-review/synthesis.workflow.mjs
 extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs
-extensions/workflows/examples/requirements-grill/requirements-grill-pipeline.svg
-extensions/workflows/examples/requirements-grill/requirements-grill.workflow.mjs
-extensions/workflows/examples/review-fix/review-fix.workflow.mjs
-extensions/workflows/examples/review/README.md
-extensions/workflows/examples/review/resources/interrogator.prompt.md
-extensions/workflows/examples/review/resources/verifier.prompt.md
-extensions/workflows/examples/review/review.workflow.mjs
 extensions/workflows/fusion-config.ts
 extensions/workflows/fusion-runner.ts
 extensions/workflows/fusion-surface.ts
@@ -294,6 +287,7 @@ extensions/workflows/runtime/workflow-runtime.ts
 extensions/workflows/runtime/workflow-script-identity.ts
 extensions/workflows/runtime/workflow-worktree.ts
 extensions/workflows/workflow-catalog.ts
+extensions/workflows/workflow-copy.ts
 extensions/workflows/workflow-command-launcher.ts
 extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-tool-card.ts
@@ -357,14 +351,12 @@ tests/extensions/workflows/implement-workflow.test.ts
 tests/extensions/workflows/live-smoke-workflow.test.ts
 tests/extensions/workflows/task-implement-workflow.test.ts
 tests/extensions/workflows/task-plan-workflow.test.ts
-tests/extensions/workflows/requirements-grill-workflow.test.ts
 tests/extensions/workflows/review-prompt-config.test.ts
-tests/extensions/workflows/review-remediation-workflows.test.ts
-tests/extensions/workflows/review-workflow.test.ts
 tests/extensions/workflows/workflow-authoring-contract.test.ts
 tests/extensions/workflows/workflow-background-runs.test.ts
 tests/extensions/workflows/workflow-catalog-viewer.test.ts
 tests/extensions/workflows/workflow-catalog.test.ts
+tests/extensions/workflows/workflow-copy.test.ts
 tests/extensions/workflows/workflow-command-completions.test.ts
 tests/extensions/workflows/workflow-command-launcher.test.ts
 tests/extensions/workflows/workflow-command-surfaces.test.ts

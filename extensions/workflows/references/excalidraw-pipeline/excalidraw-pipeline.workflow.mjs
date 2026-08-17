@@ -4,7 +4,7 @@
 // separate runs, because a workflow run has no way to stop and ask a human:
 // `ask` refuses without a UI and child agent sessions are headless. The human
 // gate is therefore a file the operator edits between the runs, exactly like
-// `review` -> `review-fix`.
+// `post-code-review` -> `implement`.
 //
 //   /workflows run <this file> draft <what the diagram should show>
 //     One agent writes .tasks/excalidraw-pipeline/<run>/diagram-request.md.

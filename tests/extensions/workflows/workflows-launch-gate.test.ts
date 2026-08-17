@@ -217,7 +217,6 @@ describe("/workflows run launch gate", () => {
 
   it.each([
     { command: "workflows", args: "run post-code-review", mode: "tui" as const },
-    { command: "workflow-run", args: "post-code-review", mode: "tui" as const },
     { command: "workflows", args: "run post-code-review", mode: "print" as const },
   ])("rejects post-code-review omission on $command ($mode)", async ({ command, args, mode }) => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-surface-"));
@@ -599,12 +598,10 @@ describe("/workflows run launch gate", () => {
   });
 
   it.each(["\t", "\n", "\u00a0"])(
-    "forwards option values after %j separators on canonical and flat commands",
+    "forwards option values after %j separators on the canonical command",
     async (separator) => {
       const canonicalRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-options-canonical-"));
-      const flatRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-options-flat-"));
       const canonical = registerCommandHarness(canonicalRoot);
-      const flat = registerCommandHarness(flatRoot);
       const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
         runId: "run-options",
         runDir: "/tmp/run-options",
@@ -616,16 +613,9 @@ describe("/workflows run launch gate", () => {
       try {
         const tail = `live-smoke --output-dir${separator}tmp/reviews/review-1 --resume${separator}run-old request`;
         await canonical.commands.get("workflows")!.handler(`run ${tail}`, canonical.ctx);
-        await flat.commands.get("workflow-run")!.handler(tail, flat.ctx);
 
-        expect(spy).toHaveBeenCalledTimes(2);
+        expect(spy).toHaveBeenCalledTimes(1);
         expect(spy.mock.calls[0]?.[0]).toMatchObject({
-          name: "live-smoke",
-          outputDir: "tmp/reviews/review-1",
-          resumeFromRunId: "run-old",
-          input: "request",
-        });
-        expect(spy.mock.calls[1]?.[0]).toMatchObject({
           name: "live-smoke",
           outputDir: "tmp/reviews/review-1",
           resumeFromRunId: "run-old",
@@ -634,16 +624,13 @@ describe("/workflows run launch gate", () => {
       } finally {
         spy.mockRestore();
         rmSync(canonicalRoot, { recursive: true, force: true });
-        rmSync(flatRoot, { recursive: true, force: true });
       }
     },
   );
 
-  it("preserves delimiter input including trailing whitespace on canonical and flat commands", async () => {
+  it("preserves delimiter input including trailing whitespace on the canonical command", async () => {
     const canonicalRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-delimiter-canonical-"));
-    const flatRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-delimiter-flat-"));
     const canonical = registerCommandHarness(canonicalRoot);
-    const flat = registerCommandHarness(flatRoot);
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
       runId: "run-delimiter",
       runDir: "/tmp/run-delimiter",
@@ -654,15 +641,12 @@ describe("/workflows run launch gate", () => {
     });
     try {
       await canonical.commands.get("workflows")!.handler("run live-smoke -- exact  input  ", canonical.ctx);
-      await flat.commands.get("workflow-run")!.handler("live-smoke -- exact  input  ", flat.ctx);
 
-      expect(spy).toHaveBeenCalledTimes(2);
+      expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", input: "exact  input  " });
-      expect(spy.mock.calls[1]?.[0]).toMatchObject({ name: "live-smoke", input: "exact  input  " });
     } finally {
       spy.mockRestore();
       rmSync(canonicalRoot, { recursive: true, force: true });
-      rmSync(flatRoot, { recursive: true, force: true });
     }
   });
 
@@ -960,8 +944,7 @@ describe("/workflows run launch gate", () => {
       expect(widget).toContain("[ERROR]");
       expect(widget).toContain("Available curated Package workflows:");
       expect(widget).toContain("live-smoke");
-      expect(widget).toContain("requirements-grill");
-      expect(widget).toContain("review");
+      expect(widget).toContain("post-code-review");
       expect(widget).not.toContain("plan-build-review");
       expect(widget).toContain("/workflows list");
       expect(widget).not.toContain("Cannot find module");

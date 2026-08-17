@@ -13,8 +13,7 @@ import { packagedExamplesDir, packagedWorkflowPath } from "../../../extensions/w
 const RETIRED_DIAGRAM_SUFFIXES = [".diagram.mjs", ".excalidraw", ".png"];
 
 /** Every example that still has a hand-authored diagram. */
-const DRAWN = ["requirements-grill", "post-code-review"] as const;
-const ROSTER_DRAWN = ["requirements-grill"] as const;
+const DRAWN = ["post-code-review"] as const;
 
 function diagramPath(name: string): string {
   const workflowPath = packagedWorkflowPath(name);
@@ -74,39 +73,8 @@ describe("curated workflow diagrams", () => {
     expect(svg, svgPath).not.toMatch(/llm\(/iu);
   });
 
-  it.each(ROSTER_DRAWN)("names every phase, artifact and agent the %s workflow actually declares", (name) => {
-    const source = readFileSync(packagedWorkflowPath(name), "utf8");
-    const svg = readFileSync(diagramPath(name), "utf8");
-
-    const phases = declaredNames(source, /\bphase\("([^"]+)"\)/gu);
-    const artifacts = declaredNames(source, /\bartifact:\s*"([^"]+)"/gu).concat(
-      declaredNames(source, /\bpublishArtifact\("([^"]+)"/gu),
-    );
-
-    // The point of pinning both lists: a stage renamed or an artifact added in
-    // the workflow leaves the picture quietly wrong, and a wrong picture is
-    // read as truth longer than missing prose would be.
-    expect(phases.length, `${name} should declare phases`).toBeGreaterThan(0);
-    for (const phase of phases) expect(svg, `${name} diagram omits phase ${phase}`).toContain(phase);
-    for (const artifact of new Set(artifacts)) {
-      expect(svg, `${name} diagram omits artifact ${artifact}`).toContain(artifact);
-    }
-
-    // The agents are the point of these diagrams, so each one is named on it.
-    const agents = declaredNames(source, /\bid:\s*"([^"]+)"/gu);
-    expect(agents.length, `${name} should declare an agent roster`).toBeGreaterThan(0);
-    for (const agent of agents) expect(svg, `${name} diagram omits agent ${agent}`).toContain(agent);
-  });
-
   it("does not retain the removed critic-loop diagram for the minimal plan graph", () => {
     expect(() => readFileSync(diagramPath("plan"), "utf8")).toThrow();
-  });
-
-  it("shows that requirements-grill refuses an empty request before it spends an agent", () => {
-    const svg = readFileSync(diagramPath("requirements-grill"), "utf8");
-
-    expect(svg).toMatch(/Empty request/u);
-    expect(svg).toMatch(/before the first agent is spawned|before any agent runs/u);
   });
 
   it("shows every post-code-review workflow boundary, phase, model role, and Markdown handoff", () => {

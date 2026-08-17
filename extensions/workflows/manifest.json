@@ -17,7 +17,6 @@
     "workflow semantic input is only optional text of at most 16000 characters; the closed programmatic tool may separately carry unrestricted items:string[] whose exact order, bytes, whitespace, empty strings and duplicates are preserved through a frozen dsl.items() snapshot with no automatic child metadata or item-list count/size/content policy, while non-arrays, non-string members, nested arrays, null and unknown top-level fields fail before child execution; the tool may also carry closed continuation metadata with one originRunId and 1-8 complete artifact refs, all from that origin, while duplicate identities, malformed refs, object-valued input, and continuation combined with replay-only resumeFromRunId fail before child execution",
     "saved workflow names resolve project .pi/workflows first (canonical), then the additional project directories .claude/workflows and .agents/workflows, then ~/.pi/workflows, then the packaged examples directory extensions/workflows/examples; every directory including that one accepts only the pi-native <name>.workflow.mjs filename, so a foreign host's <name>.js is never resolved and a script authored against another workflow DSL is not portable here; a Package workflow is registered by the existence of its entry file, and a package-boundary test fails when package.json#files does not ship what the directory resolves",
     "standard authoring is one continuous Design -> review -> Build sequence: a raw requirement delegated to workflow-author first writes and reviews .pi/workflows/<name>/<name>.design.md with an explicit `runnable root` or `group-only` namespace and exact Entries table (group-only omits the root), selected pattern, numbered algorithm, explicit node/input/output/capability/consumer graph, concurrency, bounds, handoffs, mechanisms and failure exits, then writes exactly the declared direct sources, including the same-named root only when declared, validates every logical identity and module load, and never runs them; only explicit Design only wording pauses after design; Build design: <path> and Build approved design: <path> remain compatible Build-only requests; material graph changes return to Design, and the shipped skill loads compact Markdown pattern cards progressively instead of copying full research workflows",
-    "curated review and review-fix write their stage prompts inline in the workflow script under one COMMON contract, so the retained script snapshot covers the prompt bytes; review keeps exactly two neighboring resources/*.prompt.md role charters (interrogator, verifier) that are too long to inline, and runtime resolves those from the original workflow source, rejects path and symlink escapes, snapshots bytes once, and records SHA-256 evidence; both entries declare answer counts, id patterns, and string/array bounds in agent({schema}) so a violation is re-asked by the runtime retry instead of ending the run, and bound free-text handoffs with per-call maxAnswerChars; review sends fresh semantic text to a shaped clarifier, either continues or persists exact intent/questions and declares one generic structured operator handoff over those refs, then the host verifies and atomically claims a two-artifact continuation before five bounded coverage-reconciled review stages and runtime-owned review.md with no publisher agent; review-fix receives semantic text plus exactly one host-continuation reference named review.md; the host verifies the successful source run, the full reference, the digest and terminal-projection membership and copies the bytes in before the module starts, and since 2026-07-29 the script neither re-derives that proof nor asserts the bytes came from a Package review verify-review stage, so the operator's closed-continuation choice plus the host's verification of it are what bind the source run, at the accepted residual risk of remediating against another run's review; it asks a full-tool shaped selector for 1-20 id/note/dependency units, rejects invalid ids, notes, edges and cycles, computes stable topological order, runs one writer per selected finding with direct-dependency results, then a checker instructed not to edit with bounded baseline-frozen repository_check and a fresh dependency-aware re-review; it has no imported helper or publisher, keeps self-contained-static identity, leaves writer changes in the launch checkout, and never commits, pushes, creates a pull request, merges, or deploys",
     "each run owns one canonical .pi/locus-pi/runs/<runId>/ evidence root split into outputs for the human projection and runtime for machine state; deliberate agent files live separately in the project-local workflow workspace, defaulting to <pwd>/tmp/<workflow-name>; runtime/artifacts/index.json records runId, artifactId, name, sha256, media type, size, relative path, stage, provenance, and optional source lineage; every agent attempt persists its exact answer, while a fresh child must also contribute its confined Pi transcript and result envelope; replay persists a new answer with replay provenance but fabricates no child evidence; index ownership, path/symlink confinement, duplicate identities, bounded text, transcript headers, and digest reads fail closed; only explicit publishArtifact/publishPrimaryArtifact records enter outputs and the newest 20 published/primary refs enter runtime/result.json plus the native workflow tool result, so call evidence stays out of the reader folder while a later run receives source-truth refs instead of guessing ids; the full index remains canonical",
     "DSL publishArtifact(name,text) persists and exposes a supporting workflow-authored document, while publishPrimaryArtifact(name,text) declares the one semantic result and a second declaration fails closed; both return the complete {runId,artifactId,name,sha256} reference; consumeTextArtifact(ref) accepts only a complete prior-run text reference from an ok source run, verifies identity, media type, size, path and digest, then copies bytes into the current run with source lineage plus verified source target/artifact metadata and its validated terminal string result/ref projection; agent({artifact}) gives the automatic runtime-only answer record a stable logical name",
     "repository_check is available to full-tool workflow children; the workflow bridge freezes exact package script commands before any child can write, and the tool accepts exactly one still-matching baseline script name with no arguments or shell text, while the host fixes package-manager argv, timeout, output bound, cwd and cleanup and runs the trusted operator-owned script in a disposable external Git worktree containing current tracked/untracked source bytes; writer-added or modified commands are refused, the operator checkout is never its cwd, and package script execution is not an OS or network sandbox",
@@ -27,15 +26,15 @@
     "/workflows run is an explicit operator command: it resolves the launch target, claims one stable session/project background identity with a generation-scoped callback lease, returns the editor while runWorkflowScript continues, and does not pass through model-tool approval or open a second Locus-owned prompt; the programmatic workflow tool remains awaited but registers non-exclusive control with the same owner without occupying the slash-command slot",
     "/workflows run checks the real Pi command context ctx.isIdle before target resolution, transcript creation, or execution; because Pi 0.83.0 invokes extension commands during streaming and would route sendMessage without deliverAs to agent.steer, a busy or unreadable idle state fails closed with a warning, zero sendMessage calls, and zero workflow execution; a second slash run under the same stable session/project identity conflicts until its predecessor settles, while canonical /workflows stop [runId|last] and flat /workflow-stop compatibility alias are the sole operator cancellation paths for slash- and tool-launched workflows and report stopping until settlement",
     "the installed locus-pi-run-workflow skill runs, starts, resumes, or monitors the current run of an existing workflow: it uses the native workflow tool when that structured capability exists; outside Pi it invokes the registered /workflows run surface directly through pi --mode json -p with the slash command as one argv element and refuses native-only items or continuation instead of dropping them; every external target, output-dir, and resume value uses the same simple-token or JSON string-token encoding rule for whitespace, quotes, backslashes, and controls, while a leading-hyphen command value is rejected because quoting does not make a reserved option token valid; semantic input remains unchanged after --; the caller applies a 30-second gate for typed workflow_start or workflow_rejected, keeps Pi attached until workflow_end, and reads the canonical runDir, journalPath, resultPath, workflowStatus, and resultPersisted fields; Pi exit status is transport evidence rather than workflow success, awaiting_operator remains unanswered, --approve is the existing broad Pi project trust boundary rather than workflow-only approval, and neither Pi nor the workflow runtime is a sandbox",
-    "bare /workflows is the canonical visible command and opens a TUI command menu with descriptions beside all eight exact verbs dashboard, list, info, status, result, run, continue, and stop; RPC, print/no-UI, and TUI hosts without select/interactive UI receive the same typed help fallback; direct /workflows <subcommand> forms remain available, while flat /workflow-run, /workflow-stop, /workflow-list, /workflow-info, /workflow-status, /workflow-result, and /workflow-continue commands route through the same owners as compatibility aliases until parity is proven; Pi native slash filtering and Tab expose the complete flat names, while command-owned argument completion supplies workflow names, persisted run ids, last, --answer, and replay ids without consuming free-text catalog queries, paths, or semantic input",
+    "bare /workflows is the canonical visible command and opens a TUI command menu with descriptions beside all eight exact verbs dashboard, list, info, status, result, run, continue, and stop; RPC, print/no-UI, and TUI hosts without select/interactive UI receive the same typed help fallback; direct /workflows <subcommand> forms remain available, and only /workflow-stop remains as an emergency compatibility alias; command completion defers persisted handoff scanning until a continue argument is actually requested, so ordinary command typing does not synchronously traverse run evidence",
     "Pi 0.83.0 is the minimum supported workflow host: all four Pi peer ranges start at 0.83.0, exact development dependencies and lockfile entries use 0.83.0, and tool-origin question projection waits for agent_settled rather than the intermediate turn_end event",
     "actionable awaiting_operator results carry one strict runner-enriched generic handoff envelope over bounded select/text questions, exact terminal artifact refs, origin, and self-contained-static target/script identity; legacy reason-only waits remain readable but not actionable, malformed or forged envelopes fail closed, continuation re-verifies current identity and artifacts, and result.json remains immutable",
     "one source-adjacent atomic claim sidecar excludes parallel continuation across Pi processes, binds to the child run inside the runner, stores no raw answer, releases launch failure, recovers bounded stale pre-start claims, and projects successful/newly-awaiting children as resolved while failed/cancelled children remain retryable",
     "the session-scoped direct-question queue reads durable actionable handoffs oldest-first, shows Question 1 of N, and launches at most one continuation; the /workflows menu provides contextual workflow/run selection for info, result, run, continue, and stop rather than one combined picker; Escape is an answer rather than a postponement — the workflow's continuation receives the question list with an explicit operator-declined note, and each question carries either the answer given before the refusal or a declined marker; nothing reopens automatically except questions published by runs the current Pi session launched, so a new session never raises an older run's question at start or on its first settled turn, while the menu's continue entry opens the oldest pending item project-wide, /workflows continue <runId> opens a named one, and canonical /workflows stop is the cancellation path",
-    "TUI handoffs use one non-overlay inline select/text component shared narrowly with ask, RPC uses native bidirectional extension UI requests, JSON/print requires /workflows continue with explicit --answer (flat /workflow-continue remains a compatibility alias), and embedded child observation remains session.subscribe; Locus serializes its own inline components but Pi exposes no global third-party UI focus lock",
+    "TUI handoffs use one non-overlay inline select/text component shared narrowly with ask, RPC uses native bidirectional extension UI requests, JSON/print requires /workflows continue with explicit --answer, and embedded child observation remains session.subscribe; Locus serializes its own inline components but Pi exposes no global third-party UI focus lock",
     "/workflows dashboard plus interactive TUI /workflows status and /workflows status <runId> open a persisted disk-only run viewer with run to stage to evidence to content navigation; it groups indexed answers, transcripts, result envelopes, published/consumed text, and journal logs by stage, re-reads and digest-verifies artifacts before rendering, refuses changed, malformed, missing, oversized, or tampered evidence, and owns no live session state",
     "static workflow help, passive list/info/status/detail fallbacks, launch errors, and headless settled receipts use typed operator blocks; interactive TUI /workflows list, info, dashboard, and status use workflow-owned focused custom components, while RPC, print/no-UI, and TUI without custom UI keep bounded static status/detail and the existing live progress panel remains domain-owned",
-    "workflow history uses [R] independently from persisted source tags [P]/[U]/[PKG]; passive TUI bounds status/detail to 10/20 rows, RPC to 4/1 rows, and all variants point to persisted run evidence",
+    "workflow history uses [R] independently from persisted source tags [P]/[U]/[PKG]; the focused catalog presents Project, User, Package, and History as source tabs, shows active catalog and selected source paths, wraps descriptions at word boundaries, and copies complete folder-owned namespaces to Project/User without merging or overwriting; passive TUI bounds status/detail to 10/20 rows, RPC to 4/1 rows, and all variants point to persisted run evidence",
     "programmatic workflow tool declares exec approval metadata to the Pi host; approval details warn that the reviewed file has full host Node.js/module access and that approval is consent, not capability isolation",
     "programmatic workflow tool stays headless and does not add a launch prompt",
     "the direct fusion tool is registered by the default workflows extension but removed from pi.getActiveTools by default; /fusion configures one required homogeneous tool-free or agent mode, 2-10 unique concrete member models and a separate judge from modelRegistry.getAvailable, persists version-2 project-local configuration under .pi/locus-pi/fusion/config.json, and uses pi.setActiveTools to enable or disable the tool immediately without changing unrelated active tools; status, enable, run and tool execution reject version 1, while explicit configure/set atomically replace it with reviewed enabled:false version 2; every invocation revalidates enabled state and current model availability before creating a run, forwards no ambient history, and executes through the same mode-specific Fusion runtime, child bridge, journal, artifacts, result envelope, and report as dsl.fusion; tool-free requires exact empty host active-tool readback before prompt, fresh terminal evidence separates declared mode from readback, and replay retains the declaration without claiming live readback",
@@ -100,7 +99,6 @@
     "<pwd>/tmp/<workflow-name>/ by default (or an explicit safe project-relative outputDir) for agent-authored intermediate and final files",
     ".pi/locus-pi/runs/<runId>/runtime/operator-handoff-claim.json when an actionable handoff is claimed; mutable claim metadata never becomes an artifact and never stores the answer",
     ".pi/locus-pi/runs/<runId>/runtime/artifacts/index.json plus answers, fresh child transcripts/result envelopes, workflow-published text, and verified prior-run input copies",
-    "uncommitted source changes in the operator launch checkout when review-fix applies an agent-selected validated finding DAG from one immutable continued review.md",
     "in-memory workflow journal + intermediate JS results",
     "process-local background-run registry keyed by stable session/project identity, with one exclusive active slash run plus non-exclusive tool controls, generation-scoped callback leases, typed abort reasons, controllers, and terminal promises",
     "process-shared agentLiveStore.rows parent/child live-row state for workflow progress rendering and agents-entrypoint drill/control, with explicit workflowRunId provenance, command-only workflow stop eligibility, display-time collapse of workflow parent rows after SDK child rows exist, and store-owned retention/pruning of workflow subtrees: newest five fully terminal runs remain available while older terminal runs are removed; active, queued, and zero-row runs are untouched",
@@ -112,17 +110,7 @@
   "tier": "core-owned",
   "provides": {
     "tools": ["workflow", "fusion"],
-    "commands": [
-      "workflows",
-      "workflow-run",
-      "workflow-stop",
-      "workflow-list",
-      "workflow-info",
-      "workflow-status",
-      "workflow-result",
-      "workflow-continue",
-      "fusion"
-    ],
+    "commands": ["workflows", "workflow-stop", "fusion"],
     "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled"]
   },
   "uiLifecycle": {
@@ -134,35 +122,8 @@
         "persistent": [".pi/locus-pi/runs/**"]
       },
       {
-        "name": "workflow-run",
-        "taxonomy": ["transient-widget", "status", "artifact-write", "no-ui"],
-        "transient": ["widget:workflows", "status:locus contribution workflow.run"],
-        "persistent": [".pi/locus-pi/runs/**"]
-      },
-      {
         "name": "workflow-stop",
         "taxonomy": ["transient-widget", "status", "artifact-write", "no-ui"],
-        "transient": ["widget:workflows", "status:locus contribution workflow.run"],
-        "persistent": [".pi/locus-pi/runs/**"]
-      },
-      {
-        "name": "workflow-list",
-        "taxonomy": ["transient-widget", "overlay-selector", "no-ui"],
-        "transient": ["widget:workflows"]
-      },
-      {
-        "name": "workflow-info",
-        "taxonomy": ["transient-widget", "overlay-selector", "no-ui"],
-        "transient": ["widget:workflows"]
-      },
-      {
-        "name": "workflow-status",
-        "taxonomy": ["transient-widget", "overlay-selector", "no-ui"],
-        "transient": ["widget:workflows"]
-      },
-      {
-        "name": "workflow-continue",
-        "taxonomy": ["transient-widget", "status", "overlay-selector", "artifact-write", "no-ui"],
         "transient": ["widget:workflows", "status:locus contribution workflow.run"],
         "persistent": [".pi/locus-pi/runs/**"]
       },
@@ -209,12 +170,10 @@
     "tests/extensions/workflows/workflow-run-viewer.test.ts",
     "tests/extensions/workflows/workflow-catalog.test.ts",
     "tests/extensions/workflows/workflow-catalog-viewer.test.ts",
-    "tests/extensions/workflows/requirements-grill-workflow.test.ts",
+    "tests/extensions/workflows/workflow-copy.test.ts",
     "tests/extensions/workflows/task-plan-workflow.test.ts",
     "tests/extensions/workflows/task-implement-workflow.test.ts",
     "tests/extensions/workflows/review-prompt-config.test.ts",
-    "tests/extensions/workflows/review-workflow.test.ts",
-    "tests/extensions/workflows/review-remediation-workflows.test.ts",
     "tests/extensions/workflows/workflow-diagram-artifacts.test.ts",
     "tests/extensions/workflows/workflow-transcript.test.ts",
     "tests/extensions/workflows/workflow-background-runs.test.ts",

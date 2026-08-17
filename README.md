@@ -2,7 +2,7 @@
 
 `locus-pi` is a Pi extension package for Locus agentic-development workflows.
 Installing it gives a Pi session eleven extensions, a bundled agent catalog,
-eight curated Package workflow trees with seven runnable children, and three
+four curated Package workflow namespaces with twelve runnable names, and three
 skills that teach an agent how to run, author, and coordinate them — through a
 deliberately narrow npm artifact.
 
@@ -31,8 +31,8 @@ pi list                        # what Pi actually loads, per scope
 npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the eight curated
-workflow roots and their seven children resolve out of the installed package, so nothing has to be copied
+Then start Pi in a trusted project and run `/workflows list`: the four curated
+workflow namespaces and their twelve runnable names resolve out of the installed package, so nothing has to be copied
 anywhere. Inside a session, `/devext doctor` gives the same kind of compact
 inventory view.
 
@@ -67,7 +67,7 @@ contains exactly these eleven entrypoints:
 | `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
 | `status-line`         | Replaces Pi's interactive footer with one violet row for model, working directory/worktree, branch, context, cumulative tokens, compaction state, and existing extension statuses.                                                                     |
 | `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
-| `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, flat `/workflow-*` compatibility aliases, and the `workflow` tool for trusted JavaScript orchestration.                                                              |
+| `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, the emergency `/workflow-stop` alias, and the `workflow` tool for trusted JavaScript orchestration.                                                                  |
 
 Each extension ships its `manifest.json` and a manual under
 [`docs/extensions/active/`](docs/extensions/active/README.md). Every default
@@ -81,17 +81,15 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers seven Package workflow namespaces: six runnable
-roots plus the group-only `task` namespace. Nine qualified refs are runnable
-children: seven under `post-code-review`, plus `task/plan` and `task/implement`.
+The installed package registers four Package workflow namespaces. `implement`,
+`live-smoke`, and `post-code-review` are runnable roots; `task` is group-only.
+Together they expose twelve runnable names: the three roots, seven
+`post-code-review/*` children, and `task/plan` plus `task/implement`.
 
 | Workflow                      | Intended use                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `implement`                   | Applies authorized REQUIRED work from a plan or review, independently verifies it, and allows one corrective pass.               |
 | `live-smoke`                  | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
-| `requirements-grill`          | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
-| `review`                      | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
-| `review-fix`                  | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
 | `task/plan`                   | Maps one task, writes `context.md`, `plan.md`, dynamic `steps.md`, and a reviewable generated execution script.                  |
 | `task/implement`              | Gives one approved exact step to one implementation agent, which changes, verifies, and records only that step.                  |
 | `post-code-review`            | Runs one scoped, four-lane parallel code review and publishes an independently verified `post-code-review.md`.                   |
@@ -104,9 +102,16 @@ children: seven under `post-code-review`, plus `task/plan` and `task/implement`.
 | `post-code-review/synthesis`  | Re-verifies the scope and four lane reports, removes unsupported claims, and authors the final report.                           |
 
 The Package registry is the shipped `extensions/workflows/examples/` directory
-itself: each `<name>/` owns `<name>.workflow.mjs` plus any direct child entries.
+itself: each `<name>/` owns one namespace with an optional same-named root plus
+any direct child entries.
 The npm allowlist ships every registered source explicitly, plus the
 post-code-review README and SVG diagram.
+
+The focused catalog separates Project, User, Package, and History into tabs,
+shows the active catalog directory, and wraps descriptions at word boundaries.
+Inspecting a folder-owned namespace offers safe copy actions to Project or User.
+Copy preserves its root/children/resources, keeps group-only namespaces
+group-only, and refuses to merge or overwrite an existing destination.
 
 Inspect and run them from the canonical command menu:
 
@@ -139,9 +144,8 @@ Bare `/workflows` opens the interactive command menu when TUI selection is
 available; other hosts receive the typed help fallback. Its exact verbs are
 `dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop`,
 each shown with a short description, and direct typed forms such as
-`/workflows run live-smoke` always work. Flat `/workflow-*` commands remain
-compatibility aliases while their behavior reaches parity with the unified
-command; they are not removed yet. In the catalog, each row leads with the
+`/workflows run live-smoke` always work. Only `/workflow-stop` remains as an
+emergency flat compatibility alias. In the catalog, each row leads with the
 workflow name and a compact `[P]`, `[U]`, or `[PKG]` badge for its Project,
 User, or Package source; history rows insert the run id after the name.
 

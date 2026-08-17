@@ -362,9 +362,6 @@ describe("workflow operator catalog", () => {
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
-      "requirements-grill",
-      "review",
-      "review-fix",
       "task/implement",
       "task/plan",
     ]);
@@ -394,9 +391,6 @@ describe("workflow operator catalog", () => {
         "post-code-review/simplicity",
         "post-code-review/style",
         "post-code-review/synthesis",
-        "requirements-grill",
-        "review",
-        "review-fix",
         "task/implement",
         "task/plan",
       ]);
@@ -876,8 +870,10 @@ describe("workflow operator catalog", () => {
       });
       expect(namedText).toContain("source locator: .pi/workflows/alpha.workflow.mjs");
       expect(namedText).not.toContain(path.resolve(root));
-      expect(namedText).toContain("static top-level export const meta.description, meta.profile, and meta.phases only");
-      expect(namedText).toContain("profile: unclassified");
+      expect(namedText).toContain(
+        "metadata: static meta.description/profile/phases; profile classifies source shape, not runtime behavior; module not evaluated",
+      );
+      expect(namedText).toContain("authoring profile: unclassified (no recognized source-shape contract)");
       // A workflow that declares no phases produces no phase lines at all.
       expect(namedText).not.toContain("phases:");
       expect(namedText).toContain("DSL: agent(), parallel(), pipeline(), phase(), log(), workflow()");

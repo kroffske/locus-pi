@@ -61,9 +61,6 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review/simplicity",
   "post-code-review/style",
   "post-code-review/synthesis",
-  "requirements-grill",
-  "review",
-  "review-fix",
 ] as const;
 
 function publicReadmeWorkflowNames(): string[] {
@@ -90,9 +87,6 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
   "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
   "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
-  "requirements-grill": "extensions/workflows/examples/requirements-grill/requirements-grill.workflow.mjs",
-  review: "extensions/workflows/examples/review/review.workflow.mjs",
-  "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -316,9 +310,11 @@ describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("eight curated Package workflow trees with seven runnable children");
-    expect(prose).toContain("the eight curated workflow roots and their seven children");
-    expect(prose).toContain("each `<name>/` owns `<name>.workflow.mjs` plus any direct child entries");
+    expect(prose).toContain("four curated Package workflow namespaces with twelve runnable names");
+    expect(prose).toContain("the four curated workflow namespaces and their twelve runnable names");
+    expect(prose).toContain(
+      "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
+    );
   });
 
   it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {

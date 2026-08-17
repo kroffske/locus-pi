@@ -72,7 +72,7 @@ describe("workflow command receipts", () => {
   it("does not steer a typed rejection into a busy Pi response", async () => {
     const h = harness({ isStreaming: true });
 
-    await run(h, "run review");
+    await run(h, "run live-smoke");
 
     expect(h.sentMessages).toEqual([]);
     expect(h.widgets.get("workflows")).toContain("Pi is busy streaming");
@@ -93,7 +93,7 @@ describe("workflow command receipts", () => {
     });
     const h = harness();
     try {
-      await run(h, "run review");
+      await run(h, "run live-smoke");
       await vi.waitFor(() => expect(runScript).toHaveBeenCalledTimes(1));
 
       await run(h, "run task/plan");
@@ -109,18 +109,18 @@ describe("workflow command receipts", () => {
     await emit(h, "session_start");
     await emit(h, "session_shutdown");
 
-    await run(h, "run review");
+    await run(h, "run live-smoke");
 
-    expectLastRejection(h, "session_stale", "review");
+    expectLastRejection(h, "session_stale", "live-smoke");
   });
 
   it("persists a typed rejection when the runner fails before publishing a run identity", async () => {
     vi.spyOn(runner, "runWorkflowScript").mockRejectedValue(new Error("runner rejected before identity"));
     const h = harness({ mode: "print" });
 
-    await run(h, "run review");
+    await run(h, "run live-smoke");
 
-    expectLastRejection(h, "runner_prestart_failed", "review");
+    expectLastRejection(h, "runner_prestart_failed", "live-smoke");
   });
 
   it.each(["busy", "unreadable"] as const)(
@@ -132,7 +132,7 @@ describe("workflow command receipts", () => {
         throw new Error("late runner rejection");
       });
       const h = harness();
-      await run(h, "run review");
+      await run(h, "run live-smoke");
       if (hostState === "busy") h.setStreaming(true);
       else
         h.ctx.isIdle = () => {
@@ -150,7 +150,7 @@ describe("workflow command receipts", () => {
   it("publishes absolute durable paths in the typed start receipt", () => {
     const h = harness();
     const runDir = "/repo/.pi/locus-pi/runs/run-paths";
-    const announcement = createWorkflowTranscript(h.ctx, "review", "command").start("run-paths", runDir)!;
+    const announcement = createWorkflowTranscript(h.ctx, "live-smoke", "command").start("run-paths", runDir)!;
 
     expect(announceCommandWorkflowStart(h.pi, h.ctx, announcement)).toBe(true);
     expect(h.sentMessages.at(-1)?.message.details).toEqual({
@@ -164,7 +164,7 @@ describe("workflow command receipts", () => {
 
   it("degrades a start receipt safely when the host idle probe throws", () => {
     const h = harness();
-    const announcement = createWorkflowTranscript(h.ctx, "review", "command").start(
+    const announcement = createWorkflowTranscript(h.ctx, "live-smoke", "command").start(
       "run-unreadable",
       "/repo/.pi/locus-pi/runs/run-unreadable",
     )!;
@@ -178,7 +178,7 @@ describe("workflow command receipts", () => {
 
   it("owns an async start-send rejection without an unhandled promise", async () => {
     const h = harness();
-    const announcement = createWorkflowTranscript(h.ctx, "review", "command").start(
+    const announcement = createWorkflowTranscript(h.ctx, "live-smoke", "command").start(
       "run-async-start-failure",
       "/repo/.pi/locus-pi/runs/run-async-start-failure",
     )!;
@@ -229,7 +229,7 @@ describe("workflow command receipts", () => {
       return sendMessage(message, options);
     });
 
-    await expect(run(h, "run review")).rejects.toThrow("Workflow terminal receipt was not published");
+    await expect(run(h, "run live-smoke")).rejects.toThrow("Workflow terminal receipt was not published");
     expect(h.sentMessages.at(0)?.message.details).toMatchObject({ eventKind: "workflow_start" });
   });
 

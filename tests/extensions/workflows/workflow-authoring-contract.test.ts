@@ -129,9 +129,7 @@ describe("design-first readable workflow authoring", () => {
     ]) {
       expect(source(relativePath)).toContain(canonical);
     }
-    expect(source("docs/extensions/active/workflows.md")).toContain(
-      "/workflow-run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]",
-    );
+    expect(source("docs/extensions/active/workflows.md")).not.toContain("/workflow-run <name|path>");
     for (const relativePath of ["docs/extensions/active/workflows.md", "docs/runtime/workflow-run-storage.md"]) {
       const text = source(relativePath);
       expect(text).toContain("/workflows run <name|path> --output-dir <path>");
@@ -800,11 +798,8 @@ ${skill[1] ?? ""}
       "post-code-review/simplicity": "standard",
       "post-code-review/style": "standard",
       "post-code-review/synthesis": "standard",
-      "requirements-grill": "legacy",
-      "review-fix": "legacy",
-      review: "legacy",
     });
-    expect(packagedWorkflowNames()).toHaveLength(15);
+    expect(packagedWorkflowNames()).toHaveLength(12);
     for (const name of [
       "implement",
       "live-smoke",

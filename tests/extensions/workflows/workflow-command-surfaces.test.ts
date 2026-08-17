@@ -414,14 +414,15 @@ describe("/workflows help and unknown commands", () => {
     expect(parseRunCommand("run post-code-review -- --")).toEqual({ scriptRef: "post-code-review", input: "--" });
   });
 
-  it("registers the complete run grammar on canonical and compatibility commands", () => {
+  it("registers the complete run grammar only on the canonical command", () => {
     const h = createHarness(makeRoot());
     workflows(h.pi);
 
     expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
     expect(workflowRunUsage()).toBe("/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]");
-    expect(h.commands.get("workflow-run")?.description).toBe(
-      `Compatibility alias for ${workflowRunUsage()}: ${workflowRunUsage("<name|path>", "/workflow-run")}`,
+    expect(h.commands.has("workflow-run")).toBe(false);
+    expect(h.commands.get("workflow-stop")?.description).toBe(
+      "Compatibility alias for /workflows stop [runId|last]: /workflow-stop",
     );
   });
 
@@ -514,58 +515,36 @@ describe("/workflows help and unknown commands", () => {
 
     expect(widget).toContain("Unknown workflow command: run");
     expect(widget).toContain("Available curated Package workflows:");
-    expect(widget).toContain("review");
+    expect(widget).toContain("post-code-review");
   });
 });
 
-describe("flat /workflow-* aliases", () => {
-  it("keep every flat alias on the same parser and operator surface", async () => {
+describe("flat workflow command compatibility", () => {
+  it("keeps only the emergency stop alias", async () => {
     const h = wideHarness(makeRoot());
-    const cases = [
-      ["workflow-list", ""],
-      ["workflow-info", "missing"],
-      ["workflow-status", "missing"],
-      ["workflow-result", "missing"],
-      ["workflow-run", "missing"],
-      ["workflow-continue", "missing"],
-      ["workflow-stop", "missing"],
-    ] as const;
-
-    // dashboard has no flat alias by contract; this assertion documents that
-    // the root command vocabulary and flat compatibility surface differ.
-    expect(h.commands.has("workflow-dashboard")).toBe(false);
-    for (const [name, args] of cases) {
-      const command = h.commands.get(name);
-      expect(command, `${name} must be registered`).toBeDefined();
-      await command!.handler(args, h.ctx);
-      expect(h.widgets.get("workflows") ?? "").not.toContain("Unknown workflow command");
-    }
+    expect(h.commands.get("workflow-stop")).toBeDefined();
+    for (const name of [
+      "workflow-dashboard",
+      "workflow-list",
+      "workflow-info",
+      "workflow-status",
+      "workflow-result",
+      "workflow-run",
+      "workflow-continue",
+    ])
+      expect(h.commands.has(name), name).toBe(false);
   });
 
-  it("matches canonical command output and side effects in fresh harnesses", async () => {
-    const cases = [
-      ["list", "workflow-list", ""],
-      ["info missing", "workflow-info", "missing"],
-      ["status missing", "workflow-status", "missing"],
-      ["result missing", "workflow-result", "missing"],
-      ["continue missing", "workflow-continue", "missing"],
-      ["stop missing", "workflow-stop", "missing"],
-      ["run missing", "workflow-run", "missing"],
-    ] as const;
+  it("matches canonical stop output and side effects", async () => {
+    const root = makeRoot();
+    const canonical = wideHarness(root);
+    await canonical.commands.get("workflows")!.handler("stop missing", canonical.ctx);
 
-    for (const [canonicalText, aliasName, aliasArgs] of cases) {
-      const root = makeRoot();
-      const canonical = wideHarness(root);
-      await canonical.commands.get("workflows")!.handler(canonicalText, canonical.ctx);
+    const alias = wideHarness(root);
+    await alias.commands.get("workflow-stop")!.handler("missing", alias.ctx);
 
-      const alias = wideHarness(root);
-      await alias.commands.get(aliasName)!.handler(aliasArgs, alias.ctx);
-
-      expect(widgetOf(alias), aliasName).toBe(widgetOf(canonical));
-      expect(alias.editorText, aliasName).toBe(canonical.editorText);
-      expect(alias.notifications, aliasName).toEqual(canonical.notifications);
-      expect(alias.sentMessages, aliasName).toEqual(canonical.sentMessages);
-    }
+    expect(widgetOf(alias)).toBe(widgetOf(canonical));
+    expect(alias.notifications).toEqual(canonical.notifications);
   });
 });
 
@@ -575,7 +554,7 @@ describe("/workflows status run list", () => {
 
     expect(widget).toContain("No workflow runs yet.");
     expect(widget).toContain("status: ok; total=0 shown=0 older=0");
-    expect(widget).toContain('Run one: /workflows run requirements-grill "<your request>"');
+    expect(widget).toContain('Run one: /workflows run task/plan "<your request>"');
   });
 
   it("renders one wide row per run with the agent and status columns", async () => {
@@ -638,22 +617,17 @@ describe("/workflows status run list", () => {
     expect(readSummary).not.toHaveBeenCalled();
   });
 
-  it("warns for malformed selectors on canonical and flat passive commands before evidence reads", async () => {
+  it("warns for malformed selectors on canonical passive commands before evidence reads", async () => {
     const readJournal = vi.spyOn(workflowJournal, "readWorkflowRunJournalState");
     const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
 
     for (const selector of MALFORMED_RUN_SELECTORS) {
-      for (const surface of ["canonical", "flat"] as const) {
-        const harness = compactHarness(makeRoot());
-        if (surface === "canonical")
-          await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
-        else await harness.commands.get("workflow-status")!.handler(selector, harness.ctx);
-
-        const widget = widgetOf(harness);
-        expect(widget, `${surface}: ${selector}`).toContain("[WARN] Workflow run");
-        expect(widget, `${surface}: ${selector}`).toContain("Workflow run not found:");
-        expect(widget, `${surface}: ${selector}`).toContain("Recovery: /workflows status");
-      }
+      const harness = compactHarness(makeRoot());
+      await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
+      const widget = widgetOf(harness);
+      expect(widget, selector).toContain("[WARN] Workflow run");
+      expect(widget, selector).toContain("Workflow run not found:");
+      expect(widget, selector).toContain("Recovery: /workflows status");
     }
     expect(readJournal).not.toHaveBeenCalled();
     expect(readSummary).not.toHaveBeenCalled();
@@ -664,24 +638,18 @@ describe("/workflows status run list", () => {
     const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
 
     for (const selector of MALFORMED_RUN_SELECTORS) {
-      for (const surface of ["canonical", "flat"] as const) {
-        const harness = createHarness(makeRoot());
-        harness.ctx.hasUI = true;
-        const custom = vi.fn(async () => {
-          throw new Error("custom renderer failed");
-        }) as NonNullable<typeof harness.ctx.ui.custom>;
-        harness.ctx.ui.custom = custom;
-        workflows(harness.pi);
-
-        if (surface === "canonical")
-          await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
-        else await harness.commands.get("workflow-status")!.handler(selector, harness.ctx);
-
-        const widget = widgetOf(harness);
-        expect(widget, `${surface}: ${selector}`).toContain("[WARN] Workflow run");
-        expect(widget, `${surface}: ${selector}`).toContain("Workflow run not found:");
-        expect(custom, `${surface}: ${selector}`).not.toHaveBeenCalled();
-      }
+      const harness = createHarness(makeRoot());
+      harness.ctx.hasUI = true;
+      const custom = vi.fn(async () => {
+        throw new Error("custom renderer failed");
+      }) as NonNullable<typeof harness.ctx.ui.custom>;
+      harness.ctx.ui.custom = custom;
+      workflows(harness.pi);
+      await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
+      const widget = widgetOf(harness);
+      expect(widget, selector).toContain("[WARN] Workflow run");
+      expect(widget, selector).toContain("Workflow run not found:");
+      expect(custom, selector).not.toHaveBeenCalled();
     }
     expect(readJournal).not.toHaveBeenCalled();
     expect(readSummary).not.toHaveBeenCalled();
@@ -733,25 +701,15 @@ describe("/workflows argument rejections", () => {
     expect(unwrapped).toContain("Retry: /workflows run alpha --output-dir <path> --resume run-old [--] [input]");
   });
 
-  it.each([
-    [
-      "canonical",
-      "run alpha --output-dir tmp/first --output-dir",
-      "/workflows run alpha --output-dir tmp/first --output-dir <path>",
-    ],
-    [
-      "flat",
-      "alpha --output-dir tmp/first --output-dir",
-      "/workflows run alpha --output-dir tmp/first --output-dir <path>",
-    ],
-  ] as const)("preserves an accepted duplicate outputDir on %s recovery", async (surface, command, expected) => {
+  it("preserves an accepted duplicate outputDir on canonical recovery", async () => {
     const h = wideHarness(makeRoot());
-    if (surface === "canonical") await h.commands.get("workflows")!.handler(command, h.ctx);
-    else await h.commands.get("workflow-run")!.handler(command, h.ctx);
+    await h.commands.get("workflows")!.handler("run alpha --output-dir tmp/first --output-dir", h.ctx);
     const unwrapped = widgetOf(h)
       .replace(/[│╭╮╰╯─]/gu, "")
       .replace(/\s+/gu, " ");
-    expect(unwrapped).toContain(`Retry: ${expected} [--resume <runId>] [--] [input]`);
+    expect(unwrapped).toContain(
+      "Retry: /workflows run alpha --output-dir tmp/first --output-dir <path> [--resume <runId>] [--] [input]",
+    );
   });
 
   it("requires a source run id for a continuation", async () => {

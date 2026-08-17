@@ -2,7 +2,7 @@
  * extensions/workflows/index.ts — Extension entrypoint.
  *
  * Registers the `workflow` tool (./workflow-tool.js) and the `/workflows`
- * command plus its flat `/workflow-*` aliases (./command-router.js). Owns only
+ * command plus the emergency `/workflow-stop` alias (./command-router.js). Owns only
  * the per-session wiring those two need: the live progress panels, the
  * completed-run bookkeeping, the command launcher, and the operator handoff
  * controller. Every surface it renders lives in a submodule.
@@ -236,7 +236,7 @@ export default function workflows(pi: ExtensionAPI): void {
   // No handoff pump here on purpose, and the run scope resets to empty: a session
   // opens on the operator's terms. An unanswered question from an earlier session
   // stays readable in its run's evidence and is reopened only when the operator
-  // asks (bare `/workflows`, then `continue`, or `/workflow-continue <runId>`) —
+  // asks (bare `/workflows`, then `continue`, or `/workflows continue <runId>`) —
   // never as a modal the new session starts with, and never on its first settled
   // turn either.
   pi.on("session_start", (_event, ctx) => {
