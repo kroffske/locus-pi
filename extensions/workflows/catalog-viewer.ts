@@ -715,7 +715,7 @@ function catalogLocationLines(
   const label = directories.length === 1 ? "Catalog" : "Catalogs";
   return directories.flatMap((directory, index) => {
     const prefix = index === 0 ? `${label}: ` : "          ";
-    return wrapTextWithAnsi(`${style(theme, "success", prefix)}${style(theme, "muted", directory)}`, width);
+    return wrapTextWithAnsi(`${style(theme, "dim", prefix)}${style(theme, "muted", directory)}`, width);
   });
 }
 
