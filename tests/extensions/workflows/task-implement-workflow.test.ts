@@ -3,10 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { standardWorkflowSourceShapeErrors } from "../../../extensions/workflows/workflow-source-shape.js";
 
-const workflowPath = path.join(
-  process.cwd(),
-  "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
-);
+const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/task/implement.workflow.mjs");
 
 async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promise<unknown>> {
   const module = (await import(workflowPath)) as {
@@ -16,7 +13,7 @@ async function loadWorkflow(): Promise<(dsl: unknown, input?: unknown) => Promis
   return module.default!;
 }
 
-describe("Package workflow: plan-implement", () => {
+describe("Package workflow: task/implement", () => {
   it("is one standard agent call with no parser, loop, reviewer, or model pin", () => {
     const source = readFileSync(workflowPath, "utf8");
 

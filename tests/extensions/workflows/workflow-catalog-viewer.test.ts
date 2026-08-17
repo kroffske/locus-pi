@@ -115,7 +115,7 @@ describe("focused workflow catalog", () => {
       expect(narrow).toContain("[PKG] Package");
       expect(narrow).toContain("necessity");
       expect(narrow).toContain("  └ necessity");
-      expect(narrow).toContain("7 children");
+      expect(narrow).toContain("9 children");
     }
     const rendered = viewer.render(80).join("\n");
     expect(rendered).toContain("post-code-review · [PKG] · 7 children");

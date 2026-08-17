@@ -1,6 +1,5 @@
 import path from "node:path";
-import { Box, Text } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionContext, ThemeLike } from "../_shared/host/pi-api.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
 import { formatDuration } from "../_shared/agent-runtime/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
@@ -12,12 +11,10 @@ import {
 } from "./runtime/workflow-result.js";
 import { workflowJournalFile } from "./runtime/workflow-run-layout.js";
 import { notifyOperator } from "../_shared/operator/operator-notify.js";
-import {
-  WORKFLOW_RESULT_CUSTOM_TYPE,
-  WORKFLOW_RUN_CUSTOM_TYPE,
-  type WorkflowTranscriptAnnouncement,
-  type WorkflowTranscriptCompletion,
-} from "./command/receipts.js";
+import { type WorkflowTranscriptAnnouncement, type WorkflowTranscriptCompletion } from "./command/receipts.js";
+import { workflowCompletionPresentation } from "./command/completion-presentation.js";
+
+export { registerWorkflowTranscriptRenderers } from "./command/completion-presentation.js";
 
 /**
  * One custom message type carries both bounded run-boundary records. The name
@@ -45,28 +42,6 @@ export interface WorkflowTranscript {
   finish(res: RunWorkflowScriptResult): WorkflowTranscriptCompletion;
   /** Terminal fallback when the runner rejects after publishing a run identity. */
   fail(error: unknown, runId: string, runDir: string): WorkflowTranscriptCompletion;
-}
-
-/** Replace Pi's raw `[custom-type]` fallback with distinct operator-facing cards. */
-export function registerWorkflowTranscriptRenderers(pi: ExtensionAPI): void {
-  if (pi.registerMessageRenderer === undefined) return;
-  pi.registerMessageRenderer(WORKFLOW_RUN_CUSTOM_TYPE, (message, { outputPad }, theme) => {
-    if (typeof message.content !== "string") return undefined;
-    const eventKind = message.details?.eventKind;
-    const title =
-      eventKind === "workflow_start"
-        ? "Workflow started"
-        : eventKind === "workflow_rejected"
-          ? "Workflow rejected"
-          : eventKind === "workflow_end"
-            ? "Workflow finished"
-            : "Workflow run";
-    return workflowTranscriptCard(title, message.content, outputPad, theme);
-  });
-  pi.registerMessageRenderer(WORKFLOW_RESULT_CUSTOM_TYPE, (message, { outputPad }, theme) => {
-    if (typeof message.content !== "string") return undefined;
-    return workflowTranscriptCard("Workflow result", message.content, outputPad, theme);
-  });
 }
 
 interface PendingAgentRow {
@@ -189,9 +164,10 @@ export function createWorkflowTranscript(
       const summary = disposition.summary.startsWith("awaiting operator · ")
         ? disposition.summary.slice("awaiting operator · ".length)
         : disposition.summary;
+      const hasExactResultText = typeof res.result === "string" && res.result.trim() !== "";
       const parts = [
         formatWorkflowTerminalLifecycle(safeTarget, disposition),
-        compactTranscriptText(summary),
+        ...(!hasExactResultText || disposition.status !== "completed" ? [compactTranscriptText(summary)] : []),
         ...((disposition.status === "completed" || disposition.status === "awaiting_operator") && agentCount > 0
           ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`]
           : []),
@@ -210,9 +186,17 @@ export function createWorkflowTranscript(
       // unabridged text is, and which command shows it — otherwise the operator
       // is left with a sentence fragment and no way forward. A failed run that
       // still produced text needs it just as much as a clean one.
+      const fileLines: string[] = [];
+      const commandLines: string[] = [];
+      if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
+        fileLines.push(firstTranscriptLine(`primary file: ${res.primaryFile.absolutePath}`));
+      }
+      if (res.workspaceDir !== undefined && res.workspaceDir !== "") {
+        fileLines.push(firstTranscriptLine(`workspace: ${res.workspaceDir}`));
+      }
       if (res.resultTextPath !== undefined && res.resultTextPath !== "") {
-        bodyLines.push(firstTranscriptLine(`result: ${res.resultTextPath}`));
-        bodyLines.push(firstTranscriptLine(`read the full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
+        fileLines.push(firstTranscriptLine(`full result: ${res.resultTextPath}`));
+        commandLines.push(firstTranscriptLine(`read full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
       } else if (disposition.status !== "completed") {
         // A run that ended badly and produced NO prose result — a script that
         // returned a structured `{ok:false}` is the common case — used to leave
@@ -220,25 +204,22 @@ export function createWorkflowTranscript(
         // The reason it failed is in the structured result, so this names the one
         // command that prints it. `/workflows result` deliberately refuses a
         // non-prose result, so pointing there would send them to a dead end.
-        bodyLines.push(firstTranscriptLine(`read the full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
+        commandLines.push(firstTranscriptLine(`read full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
       }
-      if (res.workspaceDir !== undefined && res.workspaceDir !== "") {
-        bodyLines.push(firstTranscriptLine(`workspace: ${res.workspaceDir}`));
-        if (res.workspaceDirRelative !== undefined && res.workspaceDirRelative !== "") {
-          bodyLines.push(
-            firstTranscriptLine(`workspace reuse: reused when outputDir remains ${res.workspaceDirRelative}`),
-          );
-        }
+      const presentation = workflowCompletionPresentation(res, safeTarget);
+      if (presentation.generatedRunCommand !== undefined) {
+        commandLines.push(`run generated plan: ${presentation.generatedRunCommand}`);
       }
-      if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
-        bodyLines.push(firstTranscriptLine(`primary file: ${res.primaryFile.absolutePath}`));
+      if (res.runDir !== undefined && res.runDir !== "") {
+        fileLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
       }
+      appendTranscriptGroup(bodyLines, "Files", fileLines);
+      appendTranscriptGroup(bodyLines, "Commands", commandLines);
       if (res.failureDiagnostic !== undefined) {
+        bodyLines.push("Failure");
         for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {
           bodyLines.push(firstTranscriptLine(line));
         }
-      } else if (res.runDir !== undefined && res.runDir !== "") {
-        bodyLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
       }
       const headerLines = [
         workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),
@@ -256,6 +237,8 @@ export function createWorkflowTranscript(
         lineCount: bodyLines.length,
         ...(typeof res.result === "string" && res.result.trim() !== "" ? { resultText: res.result } : {}),
         ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
+        ...(res.primaryFile?.absolutePath !== undefined ? { primaryFilePath: res.primaryFile.absolutePath } : {}),
+        ...(presentation.nextAction === undefined ? {} : { nextAction: presentation.nextAction }),
       };
       return completion;
     },
@@ -309,10 +292,9 @@ export function createWorkflowTranscript(
   }
 }
 
-function workflowTranscriptCard(title: string, content: string, outputPad: number, theme: ThemeLike): Box {
-  const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
-  box.addChild(new Text(`${theme.fg("accent", theme.bold(title))}\n${content}`, 0, 0));
-  return box;
+function appendTranscriptGroup(lines: string[], title: string, entries: readonly string[]): void {
+  if (entries.length === 0) return;
+  lines.push(title, ...entries);
 }
 
 /**

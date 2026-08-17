@@ -1,11 +1,11 @@
-// plan-implement.workflow.mjs
+// task/implement.workflow.mjs
 //
 // Executes exactly one caller-selected step. JavaScript does not parse a plan,
 // choose a step, loop over work, grade the answer, or build a report. The main
 // Pi agent owns the todo queue and starts one top-level run per exact step.
 
 export const meta = {
-  name: "plan-implement",
+  name: "task/implement",
   profile: "standard",
   description: "Gives one exact plan step to one implementation agent and returns that agent's result.",
   phases: [
@@ -23,7 +23,7 @@ export default async function runWorkflow(dsl, input) {
   phase("implement-step");
   log("Agent implementation: executing one exact plan step.");
   return await agent(
-    `You are the implementation agent in the Package workflow \`plan-implement\`.
+    `You are the implementation agent in the Package workflow \`task/implement\`.
 
 Execute exactly the one step below. From the filesystem note above, use these places:
 use \`pwd\` for project changes and the workflow workspace for plan/history

@@ -1590,13 +1590,13 @@ describe("workflow progress widget", () => {
       expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
       expect(persisted[0]).toContain("● workflow started");
       expect(persisted[0]).toContain(`runDir: ${path.join(root, ".pi", "locus-pi", "runs")}`);
-      expect(persisted[1]).toBe(exactResult);
-      expect(persisted[2]).toContain("✓ workflow slow.workflow.mjs finished · Complete implementation plan line.");
-      expect(persisted[2]).not.toContain("UNTRUNCATED_COMMAND_RESULT");
+      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished");
+      expect(persisted[1]).not.toContain("Complete implementation plan line.");
+      expect(persisted[2]).toBe(exactResult);
       expect(harness.sentMessages.map((entry) => entry.message.customType)).toEqual([
         "locus-workflow-run",
-        "locus-workflow-result",
         "locus-workflow-run",
+        "locus-workflow-result",
       ]);
       expect(harness.sentMessages.every((entry) => entry.message.display === true)).toBe(true);
       expect(

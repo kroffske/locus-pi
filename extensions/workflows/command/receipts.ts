@@ -48,6 +48,10 @@ export interface WorkflowTranscriptCompletion {
   lineCount: number;
   resultText?: string;
   resultTextPath?: string;
+  /** Semantic workflow-owned file shown as the result destination in the TUI. */
+  primaryFilePath?: string;
+  /** Human-only continuation hint rendered after the exact result text. */
+  nextAction?: string;
 }
 
 export function announceCommandWorkflowStart(
@@ -145,6 +149,7 @@ export async function persistCommandWorkflowTranscript(
     notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage is unavailable.");
     return false;
   }
+  const sendMessage = pi.sendMessage.bind(pi);
   const message: ExtensionMessage = {
     customType: WORKFLOW_RUN_CUSTOM_TYPE,
     content: completion.digest,
@@ -159,35 +164,37 @@ export async function persistCommandWorkflowTranscript(
       resultPersisted: completion.resultPersisted,
       lineCount: completion.lineCount,
       ...(completion.resultTextPath === undefined ? {} : { resultTextPath: completion.resultTextPath }),
+      ...(completion.primaryFilePath === undefined ? {} : { primaryFilePath: completion.primaryFilePath }),
     },
   };
   try {
     if (!isCurrent()) return false;
-    const pendingMessages: Array<Promise<void>> = [];
-    if (completion.resultText !== undefined) {
-      pendingMessages.push(
-        Promise.resolve(
-          pi.sendMessage(
-            {
-              customType: WORKFLOW_RESULT_CUSTOM_TYPE,
-              content: completion.resultText,
-              display: true,
-              details: {
-                eventKind: "workflow_result",
-                runId: completion.runId,
-                ...(completion.resultTextPath === undefined ? {} : { resultTextPath: completion.resultTextPath }),
-              },
+    const resultMessage: ExtensionMessage | undefined =
+      completion.resultText === undefined
+        ? undefined
+        : {
+            customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+            content: completion.resultText,
+            display: true,
+            details: {
+              eventKind: "workflow_result",
+              runId: completion.runId,
+              ...(completion.resultTextPath === undefined ? {} : { resultTextPath: completion.resultTextPath }),
+              ...(completion.primaryFilePath === undefined ? {} : { primaryFilePath: completion.primaryFilePath }),
+              ...(completion.nextAction === undefined ? {} : { nextAction: completion.nextAction }),
             },
-            { triggerTurn: false },
-          ),
-        ),
-      );
-    }
-    // Pi emits each idle custom-message event synchronously. Queue exact result
-    // first and the authoritative terminal receipt last so headless stdin may
-    // close on workflow_end without racing the prose result.
-    pendingMessages.push(Promise.resolve(pi.sendMessage(message, { triggerTurn: false })));
-    await Promise.all(pendingMessages);
+          };
+    // Pi routes each call synchronously. Invoke the whole ordered set before
+    // awaiting either promise so a new parent turn cannot appear between cards.
+    // TUI ends on the useful result; headless keeps workflow_end last as terminal
+    // protocol truth.
+    const orderedMessages =
+      ctx.mode === "tui"
+        ? [message, ...(resultMessage === undefined ? [] : [resultMessage])]
+        : [...(resultMessage === undefined ? [] : [resultMessage]), message];
+    await Promise.all(
+      orderedMessages.map((orderedMessage) => Promise.resolve(sendMessage(orderedMessage, { triggerTurn: false }))),
+    );
     return true;
   } catch {
     notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage failed.");

@@ -439,14 +439,14 @@ or borrowed runtime implementation was identified for this source-audit slice.
   the entry under `resources/`; runtime resolves, confines, snapshots, and
   hashes them. Repository/forge evidence remains child-session-owned. The
   review entry imports nothing and retains `self-contained-static` identity.
-- `extensions/workflows/examples/plan/plan.workflow.mjs` and
-  `extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs` are
+- `extensions/workflows/examples/task/plan.workflow.mjs` and
+  `extensions/workflows/examples/task/implement.workflow.mjs` are
   the second curated pair and add no runtime primitive. Both now use the
   machine-checked `standard` source profile. `plan` makes two direct default-agent
   calls: the reconnaissance prompt writes and returns `context.md`, then the
   planning prompt receives that exact text and writes `plan.md` plus dynamic complete `## S<n>` blocks in
   `steps.md`. It publishes `plan.md` by host-validated workspace reference.
-  `plan-implement` makes one direct default-agent call with one exact step; that
+  `task/implement` makes one direct default-agent call with one exact step; that
   agent owns the project change, verification, and full replacement of
   `history/S<n>.md`. Neither script names a model or contains a critic, schema,
   parser, step selector, todo manager, loop, reviewer, grader, report renderer,
@@ -602,9 +602,9 @@ matching root and declared direct children in the same turn. Only explicit `Desi
 design; `Build design:` and `Build approved design:` remain Build-only
 compatibility forms. No file was added under the Package workflow registry.
 
-Package `plan` gained a third `scripting` agent that renders
+Package `task/plan` gained a third `scripting` agent that renders
 `execute.workflow.mjs` into the run's workflow workspace from the fixed template
-`examples/plan/resources/execute-template.prompt.md`, loaded through
+`examples/task/resources/execute-template.prompt.md`, loaded through
 `promptFile()`. The generated file is standard-profile source with one literal
 node per canonical `## S<n>` block plus a summary node; the workflow itself
 neither builds nor runs it. It is written only under the workflow workspace, never

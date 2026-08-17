@@ -72,7 +72,7 @@ describe("workflow command launcher", () => {
     ).toEqual({ status: "started" });
     await vi.waitFor(() => expect(terminals).toEqual(["ordinary", "continued"]));
 
-    const scriptPathRef = "extensions/workflows/examples/plan/plan.workflow.mjs";
+    const scriptPathRef = "extensions/workflows/examples/task/plan.workflow.mjs";
     expect(
       launcher.launch({
         ctx: harness.ctx,

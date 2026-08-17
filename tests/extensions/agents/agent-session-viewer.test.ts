@@ -212,8 +212,8 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
-  it("renders the transcript frame in the theme accent color", () => {
-    const row = agentLiveStore.begin({ id: "accent-frame", agentName: "reviewer", label: "Review" });
+  it("renders the transcript frame in the muted border color", () => {
+    const row = agentLiveStore.begin({ id: "muted-frame", agentName: "reviewer", label: "Review" });
     const fg = vi.fn((color: string, text: string) => `<${color}>${text}</${color}>`);
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
@@ -226,11 +226,11 @@ describe("AgentSessionViewer", () => {
     );
 
     const rendered = viewer.render(80).join("\n");
-    expect(rendered).toContain("<accent>┌─ [agent");
-    expect(rendered).toContain("<accent>├─ REQUEST");
-    expect(rendered).toContain("<accent>├─ RUNTIME");
-    expect(rendered).toContain("<accent>╘═ STATUS:");
-    expect(fg.mock.calls.every(([color]) => color === "accent")).toBe(true);
+    expect(rendered).toContain("<borderMuted>┌─ [agent");
+    expect(rendered).toContain("<borderMuted>├─ REQUEST");
+    expect(rendered).toContain("<borderMuted>├─ RUNTIME");
+    expect(rendered).toContain("<borderMuted>╘═ STATUS:");
+    expect(fg.mock.calls.every(([color]) => color === "borderMuted")).toBe(true);
     viewer.dispose();
   });
 
@@ -355,7 +355,7 @@ describe("AgentSessionViewer", () => {
     expect(write).toHaveBeenCalledWith("\u001b[?1000h\u001b[?1006h");
     const initial = viewer.render(80).join("\n");
     expect(initial).toContain("wheel-11");
-    expect(initial.match(/Message to Agent/gu)).toHaveLength(1);
+    expect(initial).not.toContain("Message to Agent");
 
     viewer.handleInput("\u001b[<64;10;5M");
     const scrolled = viewer.render(80).join("\n");
@@ -561,7 +561,7 @@ describe("AgentSessionViewer", () => {
 
     const initial = viewer.render(80);
     expect(initial).toHaveLength(tui.terminal.rows - 1);
-    expect(initial.join("\n").match(/Message to Agent/gu)).toHaveLength(1);
+    expect(initial.join("\n")).not.toContain("Message to Agent");
     expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
     expect(initial.at(-1)).toMatch(/^╘═ STATUS: queued/u);
     viewer.handleInput("h");
@@ -644,7 +644,7 @@ describe("AgentSessionViewer", () => {
 
     const rendered = viewer.render(80);
     expect(rendered).toHaveLength(terminal.rows - 1);
-    expect(rendered.join("\n").match(/Message to Agent/gu)).toHaveLength(1);
+    expect(rendered.join("\n")).toContain("↵ send · ⇧↵ newline");
     viewer.handleInput("o");
     viewer.handleInput("k");
     viewer.handleInput("\r");

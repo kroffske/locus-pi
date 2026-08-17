@@ -3,7 +3,7 @@ package-lock.json
 public-repository-files.txt
 # The fenced blocks here are an exact source template an agent concatenates and
 # substitutes. Reformatting them changes indentation the generated file depends on.
-extensions/workflows/examples/plan/resources/execute-template.prompt.md
+extensions/workflows/examples/task/resources/execute-template.prompt.md
 coverage/
 dist/
 .locus/

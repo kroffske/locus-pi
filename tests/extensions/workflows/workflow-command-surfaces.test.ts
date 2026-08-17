@@ -259,7 +259,6 @@ describe("/workflows help and unknown commands", () => {
       { expanded: true, outputPad: 0 },
       theme,
     );
-
     expect(start?.render(100).join("\n")).toContain("Workflow started");
     expect(end?.render(100).join("\n")).toContain("Workflow finished");
   });

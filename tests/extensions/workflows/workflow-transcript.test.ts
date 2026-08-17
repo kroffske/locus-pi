@@ -71,7 +71,7 @@ describe("workflow persistent transcript", () => {
     });
 
     expect(completion.digest).toContain("workspace: /repo/tmp/checkout-fix");
-    expect(completion.digest).toContain("reused when outputDir remains tmp/checkout-fix");
+    expect(completion.digest).not.toContain("workspace reuse:");
     expect(completion.digest).toContain("primary file: /repo/tmp/checkout-fix/plan.md");
     expect(completion.digest).toContain("journal: /repo/.pi/locus-pi/runs/20260806-020358-988a/runtime/journal.ndjson");
   });
@@ -101,8 +101,8 @@ describe("workflow persistent transcript", () => {
     expect(String(failures[0]?.message.content)).toContain("failed");
   });
 
-  it("queues exact prose before the bounded terminal receipt", async () => {
-    const harness = createHarness();
+  it("queues exact prose before the bounded terminal receipt for protocol callers", async () => {
+    const harness = createHarness(process.cwd(), { mode: "json" });
     const transcript = createWorkflowTranscript(harness.ctx, "plan", "command");
     transcript.start("20260731-215554-ea90", "/tmp/run-ea90");
     const exactResult = `# Implementation Plan\n\n${"Full result line. ".repeat(400)}\nUNTRUNCATED_RESULT_SENTINEL`;
@@ -293,8 +293,8 @@ describe("workflow persistent transcript", () => {
 
     // The verdict line itself stays bounded — it enters model context.
     for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
-    expect(completion.digest).toContain("result: /tmp/run-98cc/result.md");
-    expect(completion.digest).toContain("read the full result: /workflows result 98cc");
+    expect(completion.digest).toContain("full result: /tmp/run-98cc/result.md");
+    expect(completion.digest).toContain("read full result: /workflows result 98cc");
     expect(completion.digest).toContain("journal: /tmp/run-98cc/runtime/journal.ndjson");
   });
 
@@ -322,7 +322,7 @@ describe("workflow persistent transcript", () => {
     });
 
     for (const line of completion.digest.split("\n")) expect(line.length).toBeLessThanOrEqual(160);
-    expect(completion.digest).toContain("read the full reason: /workflows status 000e");
+    expect(completion.digest).toContain("read full reason: /workflows status 000e");
     // `/workflows result` refuses a non-prose result, so it must not be offered here.
     expect(completion.digest).not.toContain("/workflows result");
     expect(completion.digest).toContain("journal: /tmp/run-000e/runtime/journal.ndjson");
@@ -356,9 +356,9 @@ describe("workflow persistent transcript", () => {
       });
 
       expect(harness.sentMessages).toEqual([]);
-      // 22 bounded body lines plus the failed run's one recovery pointer.
-      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 23 });
-      expect(completion.digest).toContain("read the full reason: /workflows status");
+      // 22 bounded body lines plus grouped file and recovery-command metadata.
+      expect(completion).toMatchObject({ eventKind: "workflow_end", lineCount: 25 });
+      expect(completion.digest).toContain("read full reason: /workflows status");
       expect(completion.digest.match(/final failure/g)).toHaveLength(1);
       expect(completion.digest).not.toContain("intermediate journal failure");
       expect(
