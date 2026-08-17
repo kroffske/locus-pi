@@ -397,6 +397,10 @@ These are all rules enforced for `meta.profile: "standard"`:
   returned by `publishArtifact`, `publishPrimaryArtifact`, or
   `publishPrimaryFile` may also appear unchanged as a direct array element only
   at `awaitOperator({ operatorHandoff: { continuationArtifactRefs: [...] } })`.
+  A published reference may also flow unchanged to one question's
+  `detailArtifactRef` when that exact ref appears in the continuation array; the
+  runtime reads and bounds its text for UI instead of letting workflow source
+  inspect or interpolate it.
   Another runtime value, property, nesting layer, or derived form remains
   rejected. This source-shape rule checks only the static producer and sink; the
   host runtime verifies that every reference belongs to the terminal source run

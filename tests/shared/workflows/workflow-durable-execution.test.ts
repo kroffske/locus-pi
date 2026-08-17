@@ -25,6 +25,7 @@ import {
   referenceWorkflowPrimaryFile,
   releaseWorkflowRootLease,
   resolveWorkflowOutputDirectory,
+  WORKFLOW_OUTPUT_LOCK_FILE,
   workflowOutputStateDir,
 } from "../../../extensions/workflows/runtime/workflow-output.js";
 import {
@@ -1389,7 +1390,7 @@ export default (dsl, input) => dsl.agent(input);
     expect(changed.primaryFile).toBeUndefined();
     expect(changed.primaryOutputPath).toBeUndefined();
     expect(calls).toBe(firstCalls);
-    expect(existsSync(path.join(workflowOutputStateDir(root, outputDir), "lease"))).toBe(false);
+    expect(existsSync(path.join(root, outputDir, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
   });
 
   it("uses one persisted resume binding for workspace, owner, semantic, and replay checks", async () => {
@@ -1469,7 +1470,7 @@ export default (dsl, input) => dsl.agent(input);
     expect(resumed.error).toMatch(/no valid host launch binding|malformed persisted metadata/u);
     expect(resumed.childRuns ?? []).toEqual([]);
     expect(calls).toBe(0);
-    expect(existsSync(path.join(workflowOutputStateDir(root, outputDir), "lease"))).toBe(false);
+    expect(existsSync(path.join(root, outputDir, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
   });
 
   it("rejects a tampered host launch binding before owner resume work", async () => {
@@ -1506,7 +1507,7 @@ export default (dsl, input) => dsl.agent(input);
     expect(resumed.ok).toBe(false);
     expect(resumed.error).toContain("no valid host launch binding");
     expect(resumed.childRuns ?? []).toEqual([]);
-    expect(existsSync(path.join(workflowOutputStateDir(root, outputDir), "lease"))).toBe(false);
+    expect(existsSync(path.join(root, outputDir, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
   });
 
   it.each([
@@ -2290,20 +2291,18 @@ export default (dsl, input) => dsl.agent(input);
 });
 
 describe("fenced output leases and atomic checkpoints", () => {
-  it("retries the live mkdir-to-owner-write acquisition window", async () => {
+  it("retries the live lock-create-to-write acquisition window", async () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/racing-owner", "unused", root);
-    const leaseDir = path.join(workflowOutputStateDir(root, output.identity), "lease");
-    const ownerFile = path.join(leaseDir, "owner.json");
+    const lockFile = path.join(output.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE);
     const child = spawn(
       process.execPath,
       [
         "-e",
         `const fs = require("node:fs");
-fs.mkdirSync(${JSON.stringify(leaseDir)}, { recursive: true });
-fs.writeFileSync(${JSON.stringify(ownerFile)}, "");
+fs.writeFileSync(${JSON.stringify(lockFile)}, "", { flag: "wx" });
 process.stdout.write("ready\\n");
-setTimeout(() => fs.writeFileSync(${JSON.stringify(ownerFile)}, JSON.stringify({
+setTimeout(() => fs.writeFileSync(${JSON.stringify(lockFile)}, JSON.stringify({
   schema: "locus-pi.workflow-output-lease.v1",
   rootRunId: "racing-owner",
   outputDir: ${JSON.stringify(output.relativePath)},
@@ -2342,20 +2341,32 @@ setTimeout(() => process.exit(0), 150);`,
     releaseWorkflowRootLease(first);
   });
 
+  it("allows a new owner after the output directory is removed", () => {
+    const root = project();
+    const output = resolveWorkflowOutputDirectory(root, "outputs/cleared", "unused", root);
+    acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "old-run" });
+    rmSync(output.absolutePath, { recursive: true, force: true });
+
+    const recreated = resolveWorkflowOutputDirectory(root, "outputs/cleared", "unused", root);
+    const replacement = acquireWorkflowRootLease({ projectRoot: root, output: recreated, rootRunId: "new-run" });
+
+    expect(replacement.lockFile).toBe(path.join(recreated.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE));
+    expect(existsSync(replacement.lockFile)).toBe(true);
+    releaseWorkflowRootLease(replacement);
+  });
+
   it("keys leases by the physical output target across platform case aliases", () => {
     const root = project();
     const stored = resolveWorkflowOutputDirectory(root, "outputs/CaseAlias", "unused", root);
     const alias = resolveWorkflowOutputDirectory(root, "outputs/casealias", "unused", root);
     const first = acquireWorkflowRootLease({ projectRoot: root, output: stored, rootRunId: "stored-case" });
+    const aliasSeesStoredLock = existsSync(path.join(alias.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE));
 
-    if (alias.physicalPath === stored.physicalPath) {
-      expect(alias.identity).toBe(stored.identity);
-      expect(workflowOutputStateDir(root, alias.identity)).toBe(workflowOutputStateDir(root, stored.identity));
+    if (aliasSeesStoredLock) {
       expect(() => acquireWorkflowRootLease({ projectRoot: root, output: alias, rootRunId: "alias-case" })).toThrow(
         "owned by live run stored-case",
       );
     } else {
-      expect(alias.identity).not.toBe(stored.identity);
       const independent = acquireWorkflowRootLease({ projectRoot: root, output: alias, rootRunId: "alias-case" });
       releaseWorkflowRootLease(independent);
     }
@@ -2366,11 +2377,9 @@ setTimeout(() => process.exit(0), 150);`,
   it("reclaims a provably dead local owner and refuses an unreadable owner", () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/reclaim", "unused", root);
-    const state = workflowOutputStateDir(root, output.identity);
-    const leaseDir = path.join(state, "lease");
-    mkdirSync(leaseDir, { recursive: true });
+    const lockFile = path.join(output.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE);
     writeFileSync(
-      path.join(leaseDir, "owner.json"),
+      lockFile,
       `${JSON.stringify({
         schema: "locus-pi.workflow-output-lease.v1",
         rootRunId: "dead",
@@ -2384,46 +2393,44 @@ setTimeout(() => process.exit(0), 150);`,
     const reclaimed = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "replacement" });
     releaseWorkflowRootLease(reclaimed);
 
-    mkdirSync(leaseDir);
-    writeFileSync(path.join(leaseDir, "owner.json"), "not json\n", "utf8");
+    writeFileSync(lockFile, "not json\n", "utf8");
     expect(() => acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "blocked" })).toThrow(
       "verify no writer is active",
     );
   });
 
-  it("fails closed on a symlinked lease directory without touching its external sentinel", () => {
+  it("fails closed on a symlinked lock file without touching its external sentinel", () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/symlinked-lease", "unused", root);
-    const stateDir = workflowOutputStateDir(root, output.identity);
-    mkdirSync(stateDir, { recursive: true });
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-lease-outside-"));
     const sentinel = path.join(outside, "sentinel.txt");
     writeFileSync(sentinel, "do-not-touch\n", "utf8");
-    symlinkSync(outside, path.join(stateDir, "lease"), "dir");
+    const lockFile = path.join(output.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE);
+    symlinkSync(sentinel, lockFile, "file");
 
     expect(() => acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "symlinked-lease" })).toThrow(
       "symlink",
     );
     expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
 
-    rmSync(path.join(stateDir, "lease"), { force: true });
+    rmSync(lockFile, { force: true });
     rmSync(outside, { recursive: true, force: true });
   });
 
-  it("fails closed on lease release after lease-directory replacement", () => {
+  it("fails closed on lease release after lock-file replacement", () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/replaced-lease", "unused", root);
     const lease = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "replaced-lease" });
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-release-outside-"));
     const sentinel = path.join(outside, "sentinel.txt");
     writeFileSync(sentinel, "do-not-touch\n", "utf8");
-    rmSync(lease.leaseDir, { recursive: true, force: true });
-    symlinkSync(outside, lease.leaseDir, "dir");
+    rmSync(lease.lockFile, { force: true });
+    symlinkSync(sentinel, lease.lockFile, "file");
 
     expect(() => releaseWorkflowRootLease(lease)).toThrow("symlink");
     expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
 
-    rmSync(lease.leaseDir, { force: true });
+    rmSync(lease.lockFile, { force: true });
     rmSync(outside, { recursive: true, force: true });
   });
 

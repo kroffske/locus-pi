@@ -596,6 +596,16 @@ given before the refusal. A retryable handoff — one whose continuation consume
 an answer and then failed — never reopens unprompted; the idle pump prints a
 one-line notice (once per session) naming the run; `/workflows` then opens the
 menu so `continue` can reopen it.
+
+A question may bind one published continuation artifact as
+`detailArtifactRef`. Before the question becomes actionable, the runtime proves
+that the reference belongs to the source run and is one of its continuation
+artifacts. The question service then re-reads and digest-verifies the indexed
+text, redacts secrets, bounds it to 4096 bytes and 12 lines, and renders it above
+the choices. Select questions retain the workflow/run context line and may show
+declared options plus the built-in custom-answer row; workflow JavaScript never
+parses or interpolates the artifact text into UI strings.
+
 Only `/workflows stop` cancels a workflow; flat `/workflow-stop` remains a
 compatibility alias for the same cancellation owner.
 
@@ -818,7 +828,9 @@ operatorHandoff? })` records one bounded run-local declaration and does not
 modify the script's returned `result`; the last declaration wins. A reason-only
 declaration remains readable but is not directly actionable.
 `operatorHandoff` declares a title, one or more bounded select/text questions,
-and exact continuation artifact refs owned by the current run. The runner
+and exact continuation artifact refs owned by the current run. A question may
+also name one unchanged published ref as `detailArtifactRef`, but that ref must
+appear in the same continuation list. The runner
 supplies the version, stable handoff id, origin, and verified
 self-contained-static target/script identity. At finalization, controlling
 signal cancellation wins over failure, failure wins over a handoff declaration,

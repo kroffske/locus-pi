@@ -2,8 +2,8 @@
  * Stable workflow outputs and cross-run coordination.
  *
  * Run evidence remains under the run id. This module owns the separate
- * project-relative user-output namespace, its single-root lease, primary-file
- * references, and atomic completed-item checkpoints.
+ * project-relative user-output namespace, its workspace-local single-root
+ * lease, primary-file references, and atomic completed-item checkpoints.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -20,7 +20,6 @@ import {
   readSync,
   realpathSync,
   renameSync,
-  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -36,6 +35,7 @@ export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
 const ITEM_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const CHECKPOINT_SCHEMA = "locus-pi.workflow-checkpoint.v1" as const;
 const LEASE_SCHEMA = "locus-pi.workflow-output-lease.v1" as const;
+export const WORKFLOW_OUTPUT_LOCK_FILE = ".locus-pi-workflow.lock";
 const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
@@ -98,7 +98,8 @@ interface WorkflowLeaseRecord {
 export interface WorkflowRootLease {
   readonly projectRoot: string;
   readonly stateDir: string;
-  readonly leaseDir: string;
+  readonly workspaceDir: string;
+  readonly lockFile: string;
   readonly record: WorkflowLeaseRecord;
 }
 
@@ -335,7 +336,8 @@ export function acquireWorkflowRootLease(input: {
   const stateDir = workflowOutputStateDir(projectRoot, input.output.identity);
   ensureDirectoryWithoutSymlinks(projectRoot, stateDir);
   assertWorkflowStatePath(projectRoot, stateDir, stateDir, "directory", true);
-  const leaseDir = path.join(stateDir, "lease");
+  const workspaceDir = input.output.absolutePath;
+  const lockFile = path.join(workspaceDir, WORKFLOW_OUTPUT_LOCK_FILE);
   const record: WorkflowLeaseRecord = {
     schema: LEASE_SCHEMA,
     rootRunId: input.rootRunId,
@@ -347,23 +349,19 @@ export function acquireWorkflowRootLease(input: {
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      assertWorkflowStatePath(projectRoot, stateDir, leaseDir, "directory", false);
-      mkdirSync(leaseDir);
+      assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false);
       try {
-        const ownerFile = path.join(leaseDir, "owner.json");
-        assertWorkflowStatePath(projectRoot, stateDir, leaseDir, "directory", true);
-        assertWorkflowStatePath(projectRoot, stateDir, ownerFile, "file", false);
-        writeNewDurableJson(ownerFile, record, { syncParentDirectory: true });
+        writeNewDurableJson(lockFile, record, { syncParentDirectory: true });
       } catch (error) {
-        // An owner may have won the mkdir-to-owner-write window. Leave its
-        // lease intact so the outer EEXIST path can inspect it.
-        if (!isNodeError(error, "EEXIST")) removeLeaseDirectory(projectRoot, stateDir, leaseDir);
+        // An owner may have won the create-to-write window. Leave its lock
+        // intact so the outer EEXIST path can inspect it.
+        if (!isNodeError(error, "EEXIST")) removeLeaseFile(projectRoot, workspaceDir, lockFile);
         throw error;
       }
-      return { projectRoot, stateDir, leaseDir, record };
+      return { projectRoot, stateDir, workspaceDir, lockFile, record };
     } catch (error) {
       if (!isNodeError(error, "EEXIST")) throw error;
-      const current = readLeaseRecordDuringAcquisition(projectRoot, stateDir, leaseDir);
+      const current = readLeaseRecordDuringAcquisition(projectRoot, workspaceDir, lockFile);
       if (current === undefined) continue;
       const liveness = processLiveness(current.pid);
       if (liveness === "alive") {
@@ -373,19 +371,19 @@ export function acquireWorkflowRootLease(input: {
       }
       if (liveness === "unverifiable") {
         throw new Error(
-          `workflow outputDir ${JSON.stringify(input.output.relativePath)} has an unverifiable owner pid ${current.pid}; verify the process and remove ${leaseDir} only after proving it stopped`,
+          `workflow outputDir ${JSON.stringify(input.output.relativePath)} has an unverifiable owner pid ${current.pid}; verify the process and remove ${lockFile} only after proving it stopped`,
         );
       }
-      const staleDir = path.join(stateDir, `lease-stale-${randomUUID()}`);
-      assertWorkflowStatePath(projectRoot, stateDir, leaseDir, "directory", true);
-      assertWorkflowStatePath(projectRoot, stateDir, staleDir, "directory", false);
+      const staleFile = `${lockFile}.stale-${randomUUID()}`;
+      assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", true);
+      assertWorkflowStatePath(projectRoot, workspaceDir, staleFile, "file", false);
       try {
-        renameSync(leaseDir, staleDir);
+        renameSync(lockFile, staleFile);
       } catch (renameError) {
         if (isNodeError(renameError, "ENOENT")) continue;
         throw renameError;
       }
-      removeLeaseDirectory(projectRoot, stateDir, staleDir);
+      removeLeaseFile(projectRoot, workspaceDir, staleFile);
     }
   }
   throw new Error(
@@ -394,7 +392,7 @@ export function acquireWorkflowRootLease(input: {
 }
 
 export function assertWorkflowRootLease(lease: WorkflowRootLease): void {
-  const current = readLeaseRecord(lease.projectRoot, lease.stateDir, lease.leaseDir);
+  const current = readLeaseRecord(lease.projectRoot, lease.workspaceDir, lease.lockFile);
   if (
     current.fencingToken !== lease.record.fencingToken ||
     current.rootRunId !== lease.record.rootRunId ||
@@ -406,11 +404,7 @@ export function assertWorkflowRootLease(lease: WorkflowRootLease): void {
 
 export function releaseWorkflowRootLease(lease: WorkflowRootLease): void {
   assertWorkflowRootLease(lease);
-  const ownerFile = path.join(lease.leaseDir, "owner.json");
-  assertWorkflowStatePath(lease.projectRoot, lease.stateDir, ownerFile, "file", true);
-  unlinkSync(ownerFile);
-  assertWorkflowStatePath(lease.projectRoot, lease.stateDir, lease.leaseDir, "directory", true);
-  rmdirSync(lease.leaseDir);
+  removeLeaseFile(lease.projectRoot, lease.workspaceDir, lease.lockFile);
 }
 
 export function readWorkflowCompletedCheckpoint(
@@ -759,39 +753,37 @@ function assertOpenedPrimaryFileIdentity(
   }
 }
 
-function readLeaseRecord(projectRoot: string, stateDir: string, leaseDir: string): WorkflowLeaseRecord {
-  const file = path.join(leaseDir, "owner.json");
+function readLeaseRecord(projectRoot: string, workspaceDir: string, lockFile: string): WorkflowLeaseRecord {
   let value: unknown;
   try {
-    assertWorkflowStatePath(projectRoot, stateDir, leaseDir, "directory", true);
-    assertWorkflowStatePath(projectRoot, stateDir, file, "file", true);
-    value = readJson(file);
+    assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", true);
+    value = readJson(lockFile);
   } catch (error) {
     throw new Error(
-      `workflow output lease owner is unreadable at ${file}; verify no writer is active before manual removal: ${String(error)}`,
+      `workflow output lease owner is unreadable at ${lockFile}; verify no writer is active before manual removal: ${String(error)}`,
     );
   }
   if (!isLeaseRecord(value)) {
     throw new Error(
-      `workflow output lease owner is unverifiable at ${file}; verify no writer is active before removal`,
+      `workflow output lease owner is unverifiable at ${lockFile}; verify no writer is active before removal`,
     );
   }
   return value;
 }
 
-/** A new owner creates its directory before owner.json; tolerate only that bounded window. */
+/** A new owner creates its lock before durable JSON is complete; tolerate only that bounded window. */
 function readLeaseRecordDuringAcquisition(
   projectRoot: string,
-  stateDir: string,
-  leaseDir: string,
+  workspaceDir: string,
+  lockFile: string,
 ): WorkflowLeaseRecord | undefined {
   let lastError: unknown;
   for (let attempt = 0; attempt < LEASE_OWNER_READ_ATTEMPTS; attempt += 1) {
     try {
-      return readLeaseRecord(projectRoot, stateDir, leaseDir);
+      return readLeaseRecord(projectRoot, workspaceDir, lockFile);
     } catch (error) {
       lastError = error;
-      if (!assertWorkflowStatePath(projectRoot, stateDir, leaseDir, "directory", false)) return undefined;
+      if (!assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false)) return undefined;
       if (attempt + 1 < LEASE_OWNER_READ_ATTEMPTS) {
         Atomics.wait(LEASE_OWNER_READ_WAIT, 0, 0, LEASE_OWNER_READ_RETRY_MS);
       }
@@ -824,12 +816,8 @@ function processLiveness(pid: number): "alive" | "dead" | "unverifiable" {
   }
 }
 
-function removeLeaseDirectory(projectRoot: string, stateDir: string, directory: string): void {
-  const owner = path.join(directory, "owner.json");
-  assertWorkflowStatePath(projectRoot, stateDir, directory, "directory", true);
-  if (assertWorkflowStatePath(projectRoot, stateDir, owner, "file", false)) unlinkSync(owner);
-  assertWorkflowStatePath(projectRoot, stateDir, directory, "directory", true);
-  rmdirSync(directory);
+function removeLeaseFile(projectRoot: string, workspaceDir: string, lockFile: string): void {
+  if (assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false)) unlinkSync(lockFile);
 }
 
 function writeNewDurableJson(file: string, value: unknown, options: { syncParentDirectory?: boolean } = {}): void {

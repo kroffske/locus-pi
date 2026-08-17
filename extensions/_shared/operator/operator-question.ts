@@ -37,6 +37,8 @@ export interface OperatorQuestionSpec {
    * and never which of several running things stopped for an answer.
    */
   contextText?: string;
+  /** Verified caller-owned detail rendered above the answer choices. */
+  detailText?: string;
   navigation?: OperatorQuestionNavigation;
   initialAnswer?: OperatorQuestionInitialAnswer;
 }
@@ -149,7 +151,11 @@ class OperatorQuestionComponent implements CustomUiComponent {
     // Provenance goes in the body, not a badge: a narrow terminal drops all but
     // the first badge, and dropping either "who is asking" or "which question of
     // how many" is worse than one extra line.
-    const questionBody = this.#spec.contextText ? [this.#spec.contextText, ...rest] : rest;
+    const questionBody = [
+      ...(this.#spec.contextText ? [this.#spec.contextText] : []),
+      ...(this.#spec.detailText ? splitLines(this.#spec.detailText) : []),
+      ...rest,
+    ];
     const body =
       this.#mode === "custom"
         ? [
@@ -358,6 +364,7 @@ function normalizeSpec(spec: OperatorQuestionSpec): NormalizedOperatorQuestionSp
   if (question === "") throw new TypeError("Operator question must not be empty.");
   const allowCustom = spec.allowCustom !== false;
   const customLabel = spec.customLabel?.trim() || DEFAULT_CUSTOM_LABEL;
+  const detailText = spec.detailText?.trim();
   if (spec.options.length === 0 && !allowCustom) {
     throw new TypeError("Operator question must declare an option or allow custom input.");
   }
@@ -391,6 +398,7 @@ function normalizeSpec(spec: OperatorQuestionSpec): NormalizedOperatorQuestionSp
     subject: spec.subject?.trim() || "Question",
     allowCustom,
     customLabel,
+    ...(detailText === undefined || detailText === "" ? {} : { detailText }),
   };
 }
 

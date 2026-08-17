@@ -6,6 +6,24 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Workflow questions can show their source evidence beside the choices.** A
+  select or text question may bind one published continuation artifact as
+  `detailArtifactRef`. The runtime verifies its identity and digest, redacts and
+  bounds the text, then renders it above the options together with the workflow
+  and run identity. This lets planning workflows show the concrete blocker,
+  three suggested answers, and the custom-answer row in one TUI block.
+
+- **A workflow workspace now owns its active-run lock.** The runtime writes
+  `.locus-pi-workflow.lock` inside `outputDir` instead of retaining the lock in
+  a separate hashed state directory. Removing the workspace therefore clears
+  its ownership and allows an ordinary workflow to recreate and reuse that
+  path, while concurrent live runs still conflict and durable child checkpoints
+  remain separate.
+
+- **The workflow catalog makes the active choice easier to scan.** The selected
+  workflow name now carries the strongest emphasis, its description reads as
+  supporting text, and source badges and catalog paths stay visually secondary.
+
 - **The workflow catalog now has Project, User, Package, and History tabs.**
   Tab or Right moves forward, Left moves back, and Up/Down selects only inside
   the active source. Descriptions wrap at word boundaries, rows no longer expose

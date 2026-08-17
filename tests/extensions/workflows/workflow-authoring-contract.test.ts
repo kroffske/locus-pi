@@ -424,6 +424,32 @@ ${skill[1] ?? ""}
     ).toEqual([]);
   });
 
+  it("allows one published artifact ref as verified question detail and continuation input", () => {
+    expect(
+      standardWorkflowSourceShapeErrors(
+        standardSource(`export default async function run(dsl) {
+  const blockerRef = dsl.publishArtifact("planning-blocker.md", "# Question\\nChoose a policy.");
+  dsl.awaitOperator({
+    reason: "planning blocked",
+    operatorHandoff: {
+      title: "Planning blocker",
+      questions: [{
+        kind: "select",
+        id: "decision",
+        prompt: "How should planning proceed?",
+        detailArtifactRef: blockerRef,
+        options: [{ label: "Use an assumption" }],
+        allowCustom: true,
+      }],
+      continuationArtifactRefs: [blockerRef],
+    },
+  });
+  return true;
+}`),
+      ),
+    ).toEqual([]);
+  });
+
   it.each([
     [
       "unrelated runtime value",

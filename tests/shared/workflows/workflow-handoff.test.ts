@@ -382,6 +382,45 @@ describe("workflow operator handoff", () => {
     expect(result).not.toHaveProperty("operatorHandoff");
   });
 
+  it("requires question detail to be one of the verified continuation artifacts", async () => {
+    const root = project();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "detached-detail.workflow.mjs"),
+      `export default async function run(dsl) {
+  const intent = dsl.publishArtifact("intent.md", "intent");
+  const detail = dsl.publishArtifact("planning-blocker.md", "question detail");
+  dsl.awaitOperator({
+    reason: "needs input",
+    operatorHandoff: {
+      title: "Question",
+      questions: [{
+        kind: "select",
+        id: "answer",
+        prompt: "Answer?",
+        detailArtifactRef: detail,
+        options: [{ label: "Continue" }]
+      }],
+      continuationArtifactRefs: [intent],
+    },
+  });
+  return "prepared";
+}
+`,
+      "utf8",
+    );
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "detached-detail",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("detail artifact must be a continuation artifact");
+    expect(result).not.toHaveProperty("operatorHandoff");
+  });
+
   it("requires fresh self-contained target/script identity before continuation", async () => {
     const root = project();
     const { handoff } = await sourceRun(root);
