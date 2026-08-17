@@ -6,6 +6,13 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **A workflow workspace now owns its active-run lock.** The runtime writes
+  `.locus-pi-workflow.lock` inside `outputDir` instead of retaining the lock in
+  a separate hashed state directory. Removing the workspace therefore clears
+  its ownership and allows an ordinary workflow to recreate and reuse that
+  path, while concurrent live runs still conflict and durable child checkpoints
+  remain separate.
+
 - **The workflow catalog makes the active choice easier to scan.** The selected
   workflow name now carries the strongest emphasis, its description reads as
   supporting text, and source badges and catalog paths stay visually secondary.

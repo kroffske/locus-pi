@@ -5,13 +5,14 @@ must never resolve to the same directory.
 
 ```text
 <pwd>/tmp/<workflow-name>/
+  .locus-pi-workflow.lock    active workspace owner; absent when idle
   <agent-authored intermediate and final files>
 
 <projectRoot>/.pi/locus-pi/
   runs/<runId>/
     outputs/    human-readable host projection
     runtime/    machine evidence and continuation authority
-  workflow-state/v1/    workspace leases and completed-item checkpoints
+  workflow-state/v1/    completed-item checkpoints
 ```
 
 `pwd` is Pi's session working directory. The runtime verifies both its lexical
@@ -44,10 +45,14 @@ SHA-256 digest without copying or interpreting content.
 One fenced lease owns each physical workspace. Concurrent runs targeting the
 same default or explicit workspace fail closed. Parallel callers choose distinct
 explicit directories. Saved children inherit the root workspace and lease.
-Lease acquisition, stale-owner replacement, and release prove the complete
-`workflow-state/<namespace>/lease/owner.json` ancestor chain before reading or
-mutating it. A symlinked or dangling lease directory is unsafe evidence, never
-an absent owner, and cannot redirect cleanup to an external sentinel.
+The active owner is stored atomically as `.locus-pi-workflow.lock` inside the
+workspace itself, so deleting that workspace also clears its ownership and a
+later ordinary launch may recreate it. Lease acquisition, stale-owner
+replacement, and release prove the complete workspace and lock-file ancestor
+chain before reading or mutating it. A symlinked lock is unsafe evidence, never
+an absent owner, and cannot redirect cleanup to an external sentinel. Durable
+completed-item checkpoints remain under `workflow-state/v1/` and are not lock
+files.
 
 `runWorkspaceDir()` is removed and throws
 `WorkflowRunWorkspaceRemovedError`. A run-local `workspace/` directory is not
