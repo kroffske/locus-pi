@@ -1,3 +1,4 @@
+import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentLiveRow, AgentLiveStatus } from "./agent-sdk-host.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"];
@@ -292,8 +293,8 @@ function assembleRowLine(
   const right = segments.length > 0 ? `${ROW_SEP}${segments.join(ROW_SEP)}` : "";
   if (title === "") return clampLine(`${left}${right}`, width);
   const full = `${left}  ${title}${right}`;
-  if (!Number.isFinite(width) || full.length <= width) return full;
-  const room = Math.floor(width) - left.length - 2 - right.length;
+  if (!Number.isFinite(width) || visibleWidth(full) <= width) return full;
+  const room = Math.floor(width) - visibleWidth(left) - 2 - visibleWidth(right);
   if (room >= 2) return `${left}  ${truncate(title, room)}${right}`;
   return clampLine(`${left}${right}`, width);
 }
@@ -666,8 +667,9 @@ export function formatDurationCoarse(ms: number | undefined): string {
 }
 
 export function truncate(value: string, width: number): string {
-  if (value.length <= width) return value;
-  if (width <= 0) return "";
-  if (width <= 3) return value.slice(0, width);
-  return `${value.slice(0, width - 3)}...`;
+  const safeWidth = Math.max(0, Math.floor(width));
+  if (visibleWidth(value) <= safeWidth) return value;
+  const ellipsis = safeWidth > 3 ? "..." : "";
+  if (value.includes("\u001b")) return truncateToWidth(value, safeWidth, ellipsis);
+  return `${sliceByColumn(value, 0, Math.max(0, safeWidth - visibleWidth(ellipsis)))}${ellipsis}`;
 }

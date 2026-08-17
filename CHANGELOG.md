@@ -6,6 +6,12 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Wide agent summaries no longer crash the workflow TUI at the terminal
+  edge.** Shared live rows now measure terminal columns with `visibleWidth()`
+  and truncate by columns, including emoji and other double-width graphemes. A
+  210-column workflow panel therefore cannot emit the 211-column summary line
+  that Pi rejects as an uncaught render exception.
+
 - **Answers now continue folder-qualified workflows by saved name.** The
   operator handoff service preserves a persisted `target.kind: "name"` when it
   resolves the continuation. Names such as `airflow-dag-builder/plan` no longer
