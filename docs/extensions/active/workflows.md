@@ -87,30 +87,31 @@ with real session ids. See "Run a real workflow (live)" below.
 
 ## Curated Package workflows
 
-| Workflow                      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `implement`                   | **Prepared work to verified changes**: one agent normalizes a named plan or review into `implementation-plan.md`; a runtime choice routes to execution, an intentional no-op, or one operator decision. Execution applies REQUIRED work by default, independently verifies the live diff, permits one verifier-backed correction, and publishes `implementation-report.md`. RECOMMENDED work requires explicit opt-in; NO_ACTION work and illustrative snippets never become automatic patches.                                                                                                                                                                                                                           |
-| `live-smoke`                  | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `requirements-grill`          | **Requirements refinement**, and three agents declared in one `GRILL_AGENTS` roster. A `scout` searches the repository and reports what exists, a `challenger` reopens the files that context names and attacks the request, and a `synthesizer` composes the handoff with the full inherited tool set. Nothing loops and nothing branches, so no stage declares an answer shape. The script owns no search of its own: the keyword-guessing `rg` call it used to run is gone, and ripgrep is no longer a package requirement. An empty request fails before the first child; its length is bounded by the host's `WORKFLOW_INPUT_MAX_CHARS`, not a second time by the entry. The synthesizer's exact text is the result. |
-| `review`                      | **Question-led code review**: semantic text first reaches a shaped clarifier. It either continues or persists exact intent/questions and stops; a later text answer call attaches those two refs through host continuation. Five sequential agents then resolve scope, inventory the change, plan review units, ask falsifiable questions, and verify them independently. Runtime bounds every handoff and accepts runtime-owned `review.md` as exact verifier text; coverage ids are prompt discipline the verifier reports, and there is no publisher agent.                                                                                                                                                            |
-| `review-fix`                  | **Human-gated remediation**: semantic text plus host continuation supplies the immutable terminal `review.md` answer from a Package `review` run. A shaped selector plans 1–20 finding units and dependencies; deterministic code validates ids, notes, edges, cycles, and context bounds before writers. Stable topological order gives one writer to each selected finding, then a checker and fresh dependency-aware re-review run.                                                                                                                                                                                                                                                                                    |
-| `task/plan`                   | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator.                                                                                                                                                                                                  |
-| `task/implement`              | **One approved step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                                                                                    |
-| `post-code-review`            | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                                                                                                                                                                                                                                                                                     |
-| `post-code-review/scope`      | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `post-code-review/boundaries` | **Architecture lane**: one Luna/high agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review/simplicity` | **Delete-first lane**: one Luna/high agent reopens `review-scope.md` and writes evidence-backed duplication, empty-wrapper, redundant-guard, dead-path, and unnecessary-depth findings to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review/contracts`  | **Contract lane**: one Luna/xhigh agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `post-code-review/style`      | **Comments and style lane**: one Luna/high agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `post-code-review/necessity`  | **Fix-necessity challenge**: one Luna/xhigh agent reads the scope and all four lane reports, then requires each proposed fix to prove a real failure, name the guarantee owner, avoid duplicated responsibility, and be the simplest net improvement. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven.                                                                                                                                                                                                                                                                    |
-| `post-code-review/synthesis`  | **Independent final verifier**: one Luna/xhigh agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, rejects stale/duplicate/unsupported claims, grades admitted findings, and writes the final `post-code-review.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Workflow                      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `implement`                   | **Prepared work to verified changes**: one agent normalizes a named plan or review into `implementation-plan.md`; a runtime choice routes to execution, an intentional no-op, or one operator decision. Execution applies REQUIRED work by default, independently verifies the live diff, permits one verifier-backed correction, and publishes `implementation-report.md`. RECOMMENDED work requires explicit opt-in; NO_ACTION work and illustrative snippets never become automatic patches.                          |
+| `live-smoke`                  | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                            |
+| `task/plan`                   | **Task to plan files**: one reconnaissance agent maps the live repository and writes `context.md`; one planning agent writes `plan.md` plus a dynamic `steps.md` whose complete `## S<n>` blocks are each one fresh agent's work unit; one scripting agent renders `execute.workflow.mjs` from a fixed `promptFile()` template, one literal node per block. The script owns only those three visible calls and their text handoffs, implements nothing, and returns a result that says execution waits for the operator. |
+| `task/implement`              | **One approved step to implementation history**: one implementation agent receives one complete `## S<n>` block, reads the shared plan workspace, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. The script returns the agent's exact text and does not select, loop, review, grade, or render.                                                                                                                                                   |
+| `post-code-review`            | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                                                                                    |
+| `post-code-review/scope`      | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                   |
+| `post-code-review/boundaries` | **Architecture lane**: one Luna/high agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                        |
+| `post-code-review/simplicity` | **Delete-first lane**: one Luna/high agent reopens `review-scope.md` and writes evidence-backed duplication, empty-wrapper, redundant-guard, dead-path, and unnecessary-depth findings to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                        |
+| `post-code-review/contracts`  | **Contract lane**: one Luna/xhigh agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                     |
+| `post-code-review/style`      | **Comments and style lane**: one Luna/high agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                                                                                                        |
+| `post-code-review/necessity`  | **Fix-necessity challenge**: one Luna/xhigh agent reads the scope and all four lane reports, then requires each proposed fix to prove a real failure, name the guarantee owner, avoid duplicated responsibility, and be the simplest net improvement. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven.                                                                   |
+| `post-code-review/synthesis`  | **Independent final verifier**: one Luna/xhigh agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, rejects stale/duplicate/unsupported claims, grades admitted findings, and writes the final `post-code-review.md`.                                                                                                                                                                                                                                                  |
 
-Catalog metadata exposes an authoring profile without changing execution:
-`implement`, `live-smoke`, `task/plan`, `task/implement`, and all eight `post-code-review` entries are `standard`;
-`requirements-grill`, `review`, and `review-fix` are `legacy`. A workflow with no
-literal profile is shown as `unclassified`. New generated source declares
-`meta.profile: "standard"`; the other labels document compatibility or portfolio
-intent and do not weaken runtime checks.
+All twelve shipped names use the `standard` source profile. `/workflows info`
+explains that this profile classifies source shape, not runtime behavior or model
+choice; catalog rows omit the internal label.
+
+The retired `requirements-grill`, `review`, and `review-fix` namespaces
+overlapped `task/plan`, modular `post-code-review`, and `implement`. They are no
+longer registered or packed. The following historical notes explain their former
+contracts; they are not instructions for a current Package workflow.
+
+### Retired review-family history
 
 `review` always receives a non-empty semantic string. A shaped
 clarifier decides `continue` or `needs_operator`. Continue starts the five review
@@ -235,7 +236,7 @@ remains the machine-readable run envelope, while
 `.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
 logical artifact identities to digest-bound bytes.
 
-These seven namespaces and nine child refs are what
+These four namespaces and nine child refs are what
 `extensions/workflows/examples/` currently holds, and that directory **is** the
 Package registry — a folder is registered by its same-named root entry or by
 one or more direct child entries when it is group-only. The set stays small
@@ -291,8 +292,8 @@ stash, and destructive cleanup. Every call uses Pi's default workflow agent and
 its configured model route; neither workflow source names a provider, model,
 model role, or specialized agent.
 
-The old `plan` critic-loop SVG was removed with the loop. The remaining
-hand-authored workflow diagram documents `requirements-grill`.
+The old `plan` critic-loop and retired `requirements-grill` diagrams are removed.
+The remaining hand-authored Package diagram documents `post-code-review`.
 
 ## Authoring patterns
 
@@ -435,7 +436,7 @@ If either option is repeated, the last supplied value wins. Use the conventional
 `--` end-of-options delimiter when semantic input begins with `--resume`,
 `--output-dir`, `--`, or another option-looking token; the entire remainder
 after the delimiter is forwarded byte-for-byte as semantic input. The delimiter
-works the same way for `/workflow-run`.
+works the same way for `/workflows run`.
 
 ### Run from an agent without a wrapper
 
@@ -536,7 +537,7 @@ Every finished-run surface is bounded on purpose: the chat digest caps a line at
 terminal width. So a run whose result **is** prose — a review, a plan, an answer —
 writes that text verbatim to `outputs/workflow-result.md`, and both the digest
 and the panel name that file plus the command that opens it. `/workflows result`
-(flat alias `/workflow-result`) opens the full text in a scrollable read-only screen:
+opens the full text in a scrollable read-only screen:
 `↑/↓` and PageUp/PageDown scroll, Home/End jump, Esc closes. A host without custom
 UI gets a bounded preview plus the exact path, which is the copy that is never
 truncated. The native workflow tool's operator card also renders this exact text
@@ -558,29 +559,22 @@ or a full run id. A short suffix matching more than one run is refused with the 
 match count and the listed candidates — never opened as the wrong run, and never
 reported as missing when runs were found.
 
-The same owners are also available as flat commands:
+Only the emergency stop owner remains available as a flat command:
 
 ```
-/workflow-run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]
 /workflow-stop [runId|last]
-/workflow-list [query]
-/workflow-info [name]
-/workflow-status [runId]
-/workflow-result [runId|last]
-/workflow-continue <runId> [--answer <text>]
 ```
 
-Pi's native slash-command filtering exposes these complete names and Tab selects
-them without first entering `/workflows`. Direct typed `/workflows <subcommand>`
-forms remain supported and keep their argument completion for workflow names,
-persisted run ids, `last`, and replay ids. Flat commands are compatibility
-aliases, not a second implementation; keep them until parity with the unified
-menu is proven. Catalog queries, paths, and semantic input remain free text.
+Direct typed `/workflows <subcommand>` forms retain argument completion for
+workflow names, persisted run ids, `last`, and replay ids. Completion does not
+scan persisted handoffs while the operator types the root command or any
+subcommand other than `continue`; this keeps ordinary input responsive on slow
+mounted filesystems. Catalog queries, paths, and semantic input remain free text.
 
 `/workflows run` adapts to the host's run mode. In `tui` and `rpc` the session
 outlives the turn, so the run is detached: the command returns immediately, the
-live panel streams it, and `/workflows stop` can cancel it. Flat `/workflow-run`
-and `/workflow-stop` commands remain compatibility aliases. In the one-shot output
+live panel streams it, and `/workflows stop` can cancel it. `/workflow-stop`
+remains the emergency compatibility alias. In the one-shot output
 modes (`pi -p`, `--mode json`) the host disposes the session when the turn ends —
 a detached run would lose the ctx its child sessions need — so the command holds
 the turn open until the run settles and its result is persisted. A headless
@@ -605,8 +599,8 @@ menu so `continue` can reopen it.
 Only `/workflows stop` cancels a workflow; flat `/workflow-stop` remains a
 compatibility alias for the same cancellation owner.
 
-`/workflows continue <runId>` collects answers interactively in TUI and RPC;
-flat `/workflow-continue` remains a compatibility alias. `--answer` is the
+`/workflows continue <runId>` collects answers interactively in TUI and RPC.
+`--answer` is the
 explicit non-interactive path and accepts exactly one
 question: closed selections require an exact label, while custom-enabled
 questions accept other non-empty text. Multi-question handoffs fail closed
@@ -862,16 +856,14 @@ would split workflow progress from `/agent drill` and fleet control.
 `/workflows list [query]` is a read model over the same first-wins resolver used
 by `/workflows run`: scan-based discovery for Project, User, and Package alike.
 It does not add a separate UI-only registry or change resolution semantics. The
-catalog displays current workflows in explicit `Project`, `User`, and `Package`
-sections, in the same precedence order used for execution. `History` remains a
-separate review-only section. Every current row is one selectable two-line block
-whose row identity leads with the workflow name and a compact source badge
-(`[P]`, `[U]`, or `[PKG]`); its detail line carries the one-line description and
-profile. Root rows precede their indented short-name child rows. The catalog
-does not expose absolute origin paths; inspection uses a source-relative locator. Current sections
-and History stay adjacent when the terminal has spare rows; unused height remains
-below the lists instead of splitting them. Very low terminals use a compact
-one-line fallback.
+focused catalog presents `Project`, `User`, `Package`, and review-only `History`
+as persistent tabs. Tab or Right moves forward, Left moves back, and Up/Down
+selects only inside the active source. Every row leads with the workflow name and
+a compact source badge (`[P]`, `[U]`, or `[PKG]`); descriptions wrap at word
+boundaries and omit the internal authoring-profile label. Root rows precede
+their indented short-name children. The active tab shows its absolute catalog
+directory, while inspection shows the exact selected entry path. Very low
+terminals retain a compact source-tab projection.
 
 Every canonical folder is one catalog tree and one resolver namespace. A
 group-only namespace is shown as an unselectable header with its direct children
@@ -896,8 +888,8 @@ retained snapshot availability. `[R]` means run history; `[P]`, `[U]`, and
 `[PKG]` are compact source badges, not alternative registries. Tree grouping
 never rewrites persisted run identity.
 
-In an interactive Pi TUI with custom UI support, Up/Down moves across every
-selectable current or history row and Enter opens the exact selected source in an
+In an interactive Pi TUI with custom UI support, Up/Down moves across the active
+tab and Enter opens the exact selected source in an
 `Inspect` viewer. Current selections are revalidated through the same resolver.
 A deleted target, unreadable file, or new higher-precedence shadow produces an
 explicit state and never switches paths. A valid current source is read in full
@@ -941,11 +933,18 @@ actions use the success color (normally green). `[VIEW]`, `Source:`, `Path:`, an
 the equivalent history metadata labels use the same semantic success styling so
 metadata stays distinct from highlighted code:
 
-- A ready current source offers `Back`, `Start`, `Edit`, and `Review`.
+- A ready current source offers `Back`, `Start`, `Edit`, and `Review`. A
+  folder-owned Package namespace also offers `Copy to Project` and `Copy to
+User`; Project/User sources offer the opposite editable destination.
 - A history source offers `Back` and `Review`; it never offers `Start` or `Edit`.
 - A failed current read offers only `Back`. An unavailable or `stale` history
   snapshot keeps `Review` only when the prompt identifies the run and names the
   snapshot state; it never substitutes current source.
+
+Copying claims one destination namespace and preserves the complete folder —
+root when present, direct children, README files, prompts, diagrams, and other
+resources. A group-only namespace remains group-only. An existing destination
+folder or compatible flat root is reported and never merged or overwritten.
 
 `Back` and cancellation return no intent. `Start`, `Edit`, and `Review` return a
 typed intent from the custom component. The `/workflows` command awaits the
@@ -961,8 +960,9 @@ shipped with this package, so the handoff points at a surface that exists after
 `pi install`; it is reachable as `/agent run workflow-author` or
 `task { agent: "workflow-author" }`.
 Historical review keeps the exact run/snapshot identity. The browser itself does
-not submit editor text, import a module, write a file, mutate history, send a
-message, or claim success if the editor setter is missing or fails.
+does not submit editor text, import a module, mutate history, send a message, or
+claim success if the editor setter is missing or fails. Copy actions are the one
+explicit filesystem mutation and report their exact destination.
 
 RPC, print/no-UI, and TUI hosts without custom UI keep an honest passive
 projection. Empty, no-match, history-only, unavailable-source, and narrow-terminal
@@ -1221,8 +1221,8 @@ A workflow with several stages, agents, branches, parallel groups, or persisted
 handoffs keeps a visual map beside its source: exactly one hand-authored
 `<name>-pipeline.svg`. It is edited directly. There is no generator, no
 rendering dependency, and no exported preview to keep in sync;
-[`extensions/workflows/examples/requirements-grill/requirements-grill-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/requirements-grill/requirements-grill-pipeline.svg)
-is the remaining reference shape.
+[`extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg)
+is the remaining Package reference shape.
 
 This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,
 its `.excalidraw` document, and a rendered PNG — on 2026-07-28. Three files had
@@ -1387,8 +1387,8 @@ export const meta = {
 Rules:
 
 - **Optional.** A workflow without `phases` is valid and every surface renders
-  exactly as before. The curated `requirements-grill`, `review`, and `review-fix`
-  declare theirs; single-stage `live-smoke` does not.
+  exactly as before. `task/plan` and `task/implement` declare theirs;
+  single-stage `live-smoke` does not.
 - **Literal only, all or nothing.** Each entry is an object literal with a
   non-empty static string `title` and an optional static string `detail`. One
   computed value, template interpolation, spread, or non-object element discards

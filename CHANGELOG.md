@@ -6,6 +6,26 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The workflow catalog now has Project, User, Package, and History tabs.**
+  Tab or Right moves forward, Left moves back, and Up/Down selects only inside
+  the active source. Descriptions wrap at word boundaries, rows no longer expose
+  authoring-profile jargon, and source inspection shows the exact catalog and
+  entry paths. Folder-owned namespaces can be copied intact to Project or User;
+  group-only namespaces remain group-only, and existing destinations are never
+  merged or overwritten.
+
+- **The Package workflow and command portfolios are smaller.** The overlapping
+  `requirements-grill`, `review`, and `review-fix` namespaces are retired;
+  `implement`, `live-smoke`, the group-only `task` pair, and modular
+  `post-code-review` remain. `/workflows <subcommand>` is the sole command family
+  for list, info, status, result, run, and continue; only `/workflow-stop`
+  remains as an emergency compatibility alias.
+
+- **Typing `/workflows` no longer scans persisted handoffs on every input
+  change.** Command completion defers that synchronous disk work until the
+  operator actually types `continue `, preventing slow mounted filesystems such
+  as WSL project volumes from freezing ordinary command entry.
+
 - **Planning and one-step execution now form the visible `task` workflow
   family.** The Package names are `task/plan` and `task/implement`; the shared
   group-only `task` namespace makes their relationship clear while remaining

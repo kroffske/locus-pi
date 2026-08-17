@@ -342,9 +342,6 @@ describe("consilium reference workflow", () => {
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
-      "requirements-grill",
-      "review",
-      "review-fix",
       "task/implement",
       "task/plan",
     ]);

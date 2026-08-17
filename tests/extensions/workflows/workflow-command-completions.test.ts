@@ -1,12 +1,14 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   workflowArgumentCompletions,
   workflowFlatCommandCompletions,
 } from "../../../extensions/workflows/command-completions.js";
 import workflows from "../../../extensions/workflows/index.js";
+import { WorkflowOperatorHandoffController } from "../../../extensions/workflows/operator-handoff-controller.js";
+import * as workflowJournal from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness, emit } from "../../test-harness.js";
@@ -14,6 +16,7 @@ import { createHarness, emit } from "../../test-harness.js";
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -45,6 +48,34 @@ function project(): string {
 }
 
 describe("workflow command argument completion", () => {
+  it("keeps ordinary command typing off the persisted handoff scan", async () => {
+    const root = project();
+    const persistedRunIds = vi.spyOn(workflowJournal, "listWorkflowRunIds");
+    const eligibleRunIds = vi
+      .spyOn(WorkflowOperatorHandoffController.prototype, "eligibleRunIds")
+      .mockReturnValue(["20260724-130000-new"]);
+    const harness = createHarness(root);
+    harness.ctx.cwd = root;
+    workflows(harness.pi);
+    await emit(harness, "session_start");
+    const complete = harness.commands.get("workflows")?.getArgumentCompletions;
+    expect(complete).toBeTypeOf("function");
+    if (complete === undefined) throw new Error("expected workflow argument completion");
+
+    complete("");
+    complete("r");
+    complete("run a");
+    complete("info a");
+    expect(eligibleRunIds).not.toHaveBeenCalled();
+    expect(persistedRunIds).not.toHaveBeenCalled();
+
+    complete("stop ");
+    expect(persistedRunIds).toHaveBeenCalledOnce();
+
+    expect(complete("continue ")).toContainEqual(expect.objectContaining({ value: "continue 20260724-130000-new" }));
+    expect(eligibleRunIds).toHaveBeenCalledOnce();
+  });
+
   it("offers the complete root command vocabulary, including result and continue", () => {
     const root = project();
     const labels = workflowArgumentCompletions("", root, root)?.map(
@@ -227,48 +258,25 @@ describe("workflow command argument completion", () => {
     }
   });
 
-  it("registers flat commands as thin routes with native argument completions", async () => {
+  it("registers only the stop compatibility command with native argument completions", async () => {
     const root = project();
     const harness = createHarness(root);
     workflows(harness.pi);
     await emit(harness, "session_start");
 
-    expect([...harness.commands.keys()]).toEqual(
-      expect.arrayContaining([
-        "workflows",
-        "workflow-run",
-        "workflow-stop",
-        "workflow-list",
-        "workflow-info",
-        "workflow-status",
-        "workflow-result",
-        "workflow-continue",
-      ]),
-    );
-    expect(harness.commands.get("workflow-run")?.getArgumentCompletions?.("a")).toContainEqual(
-      expect.objectContaining({ value: "alpha", label: "alpha" }),
-    );
-    expect(harness.commands.get("workflow-run")?.getArgumentCompletions?.("alpha ")).toEqual([
-      expect.objectContaining({ value: "alpha --output-dir ", label: "--output-dir" }),
-      expect.objectContaining({ value: "alpha --resume ", label: "--resume" }),
-      expect.objectContaining({ value: "alpha -- ", label: "--" }),
-    ]);
-    expect(harness.commands.get("workflow-run")?.getArgumentCompletions?.('"alpha workflow" ')).toEqual([
-      expect.objectContaining({ value: '"alpha workflow" --output-dir ', label: "--output-dir" }),
-      expect.objectContaining({ value: '"alpha workflow" --resume ', label: "--resume" }),
-      expect.objectContaining({ value: '"alpha workflow" -- ', label: "--" }),
-    ]);
-    expect(harness.commands.get("workflow-status")?.getArgumentCompletions?.("20260724-13")).toContainEqual(
-      expect.objectContaining({ value: "20260724-130000-new" }),
-    );
-    expect(harness.commands.get("workflow-result")?.getArgumentCompletions?.("20260724-13")).toContainEqual(
-      expect.objectContaining({ value: "20260724-130000-new" }),
-    );
+    expect(harness.commands.has("workflows")).toBe(true);
+    for (const name of [
+      "workflow-run",
+      "workflow-list",
+      "workflow-info",
+      "workflow-status",
+      "workflow-result",
+      "workflow-continue",
+    ])
+      expect(harness.commands.has(name), name).toBe(false);
     expect(harness.commands.get("workflow-stop")?.getArgumentCompletions?.("")).toContainEqual(
       expect.objectContaining({ value: "last", label: "last" }),
     );
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260724-130000-new ")).toEqual([]);
-    expect(harness.commands.get("workflow-list")?.getArgumentCompletions?.("auth")).toBeNull();
   });
 
   it("keeps flat completion values scoped to the command argument buffer", () => {

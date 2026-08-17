@@ -13,8 +13,7 @@ Node.js host access and is not sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
 currently `implement`, `live-smoke`, `post-code-review` and its children,
-`requirements-grill`, `review`, `review-fix`, `task/plan`, and
-`task/implement`. A skeleton copied out of this catalog becomes one by being
+`task/plan`, and `task/implement`. A skeleton copied out of this catalog becomes one by being
 saved there, with the package-surface review that implies; saved anywhere else it
 stays yours.
 
@@ -49,10 +48,10 @@ enough that the barrier pays for itself. One session that gathers both sides
 keeps their vocabulary consistent; two sessions plus a merge stage cost three
 calls to save one.
 
-## Staged text pipeline (the review-family shape)
+## Staged text pipeline (retired review-family compatibility shape)
 
-This is the default shape for multi-step work on a single subject, and the one
-the curated `review` and `review-fix` workflows use. Every stage is one
+This was the compatibility shape used by the retired `review` and `review-fix`
+Package workflows. Every stage is one
 `agent()` with one coherent cognitive job; each handoff is the previous stage's
 exact text; the workflow never parses that text.
 
@@ -218,9 +217,7 @@ Rules that make the shape work:
   failure in the simpler shape, or a hard safety boundary where failure would
   mutate source, spend money, or be externally visible.
 
-Runnable examples to adapt: `extensions/workflows/examples/review/` and
-`extensions/workflows/examples/review-fix/`, with the reader algorithm in
-`examples/review/README.md`. For the same shape with loops inside it — an
+The old runnable examples are no longer shipped. For the same shape with loops inside it — an
 operator clarification round that pauses the run, and a draft/critique loop that
 exits on a shaped verdict — read the tracked pair
 `extensions/workflows/examples/task/`.
@@ -322,8 +319,7 @@ the runtime hands a violation back to the child with the validator's own message
 and lets it try again. The same rule written as a `throw` ends the run instead.
 What stays in script code is what no declared keyword can say.
 
-`review-fix` is the shipped worked example. Its selector schema
-([`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs)):
+The retired `review-fix` workflow was the worked example. Its selector schema was:
 
 ```js
 const FINDING_SELECTOR_SCHEMA = freezeSchema({
@@ -401,10 +397,9 @@ to pass is to name a real id. Splitting the old function in two is what makes it
 safe: `findingPlanErrors` decides, `orderFindingPlan` only merges and sorts, and
 neither one can quietly do the other's job.
 
-A **cross-field invariant** is the same idea inside one answer. `review`'s
-clarifier declares `decision` and `questions` separately, and no schema can say
-that one constrains the other
-([`review.workflow.mjs`](../examples/review/review.workflow.mjs)):
+A **cross-field invariant** is the same idea inside one answer. The retired
+`review` clarifier declared `decision` and `questions` separately, and no schema
+could say that one constrains the other:
 
 ```js
 // inside clarifierDecisionErrors, this call's `validate`
@@ -607,17 +602,15 @@ stage fails closed. Everything narrative stays a plain `agent()` call.
 
 Add `minLength` / `maxLength` / `pattern` on strings and `minItems` / `maxItems`
 on arrays rather than re-checking them afterwards — see "Bounds belong in the
-schema, invariants belong in the script" above, and
-[`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs) for
-the shipped version. An impossible declaration (`minItems` above `maxItems`, a
+schema, invariants belong in the script" above. An impossible declaration (`minItems` above `maxItems`, a
 bound on the wrong type, a `pattern` that does not compile) is refused before the
 first child call, so it cannot burn the retry budget and surface as an
 unexplained exhaustion.
 
 ## Bounded loop plus judge
 
-Two shipped loops use this shape: `review`'s interrogation rounds and `plan`'s
-drafting rounds. Both follow the same three rules —
+The retired `review` interrogation rounds and the current `task/plan` drafting
+rounds use this shape. Both follow the same three rules —
 
 1. the judge returns a **declared enum** plus the concrete gaps or defects that
    justify another round, never prose the script greps;
@@ -820,7 +813,7 @@ Two rules keep the gate honest:
   checks projection membership, digest and size before your module runs. Assert the
   SHAPE you require — how many artifacts, under which names — and read them.
 
-`review` → `review-fix` is the shipped example of this shape; the
+The retired `review` → `review-fix` pair was the Package example of this shape; the
 `excalidraw-pipeline` reference uses a plain file the operator edits instead, which is
 the cheaper variant when there is no question list to render.
 

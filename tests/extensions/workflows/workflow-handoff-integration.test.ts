@@ -305,7 +305,7 @@ describe("workflow actionable handoff integration", () => {
     expect(harness.customComponents).toHaveLength(1);
   });
 
-  it("continues one explicit answer in JSON mode through the flat command without interactive UI", async () => {
+  it("continues one explicit answer in JSON mode through the canonical command without interactive UI", async () => {
     const sourceRunId = "20260725-123000-source";
     const root = projectWithHandoff(sourceRunId);
     const harness = createHarness(root, {
@@ -318,10 +318,10 @@ describe("workflow actionable handoff integration", () => {
     await emit(harness, "session_start");
     await flushBackground();
 
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.(`${sourceRunId} `)).toEqual([
-      expect.objectContaining({ value: `${sourceRunId} --answer `, label: "--answer" }),
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.(`continue ${sourceRunId} `)).toEqual([
+      expect.objectContaining({ value: `continue ${sourceRunId} --answer `, label: "--answer" }),
     ]);
-    await harness.commands.get("workflow-continue")!.handler(`${sourceRunId} --answer Last commit`, harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${sourceRunId} --answer Last commit`, harness.ctx);
     await waitFor(() => requests.length === 1);
 
     expect(requests[0]).toMatchObject({
@@ -426,7 +426,7 @@ describe("workflow actionable handoff integration", () => {
 
     expect(harness.widgets.get("workflows")).toContain("operatorHandoff title");
     expect(harness.widgets.get("workflows")).not.toContain("No workflow needs an answer");
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260725")).toEqual([]);
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.("continue 20260725")).toEqual([]);
   });
 
   it("lets a valid actionable handoff win over malformed historical evidence", async () => {
@@ -441,8 +441,8 @@ describe("workflow actionable handoff integration", () => {
     mockRuns(requests, ["20260725-135100-child"]);
     workflows(harness.pi);
     await harness.commands.get("workflows")!.handler("unexpected", harness.ctx);
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260725")).toEqual([
-      expect.objectContaining({ value: actionableRunId }),
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.("continue 20260725")).toEqual([
+      expect.objectContaining({ value: `continue ${actionableRunId}` }),
     ]);
 
     await harness.commands.get("workflows")!.handler(`continue ${actionableRunId}`, harness.ctx);

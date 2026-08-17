@@ -420,8 +420,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   latest bounded journal `error` message; status/detail and the final transcript
   fallback expose it instead of collapsing a failed run to a generic workflow
   error. The run-level token/cost budget is summed from `agent_end` `usage`.
-- `extensions/workflows/examples/review/review.workflow.mjs` is a curated
-  review composition, not a new runtime primitive. A fresh semantic string goes
+- The retired `extensions/workflows/examples/review/review.workflow.mjs` was a
+  curated review composition, not a new runtime primitive. A fresh semantic string went
   first to a shaped read-only clarifier. It either continues or publishes exact
   intent/question refs, declares a generic structured operator handoff, and
   stops. The workflow host then projects those questions directly and supplies
@@ -456,8 +456,8 @@ or borrowed runtime implementation was identified for this source-audit slice.
   passes the exact matching block to one top-level run per active step,
   preserves unrelated todos, pauses on blocked history, and reconstructs a new session by
   reading `steps.md` and `history/*.md` semantically.
-- `extensions/workflows/examples/review-fix/review-fix.workflow.mjs` is the
-  curated remediation exception. It accepts only semantic text plus host
+- The retired `extensions/workflows/examples/review-fix/review-fix.workflow.mjs`
+  was the curated remediation exception. It accepted semantic text plus host
   continuation containing one complete immutable `review.md` ref. The artifact owner
   verifies the successful source run, full reference, digest and terminal-projection
   membership before copying bytes into the new run; since 2026-07-29 (owner decision 6)
@@ -561,13 +561,16 @@ in TUI when interactive select is available; each of its exact verbs —
 `dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop` —
 has a description beside it. RPC, headless hosts, and TUI without select
 receive the same help as a typed-command fallback. Direct typed
-`/workflows <subcommand>` forms remain supported. Flat `/workflow-run`,
-`/workflow-stop`, `/workflow-list`, `/workflow-info`, `/workflow-status`,
-`/workflow-result`, and
-`/workflow-continue` registrations exist for native slash filtering and Tab
-selection. They route through the same handlers as the unified command and stay
-as compatibility aliases until parity is proven; no duplicate launcher or
-cancellation owner exists.
+`/workflows <subcommand>` forms remain supported. Only `/workflow-stop` remains
+as an emergency compatibility alias; no duplicate launcher or cancellation
+owner exists. Argument completion defers the durable handoff scan until the
+operator actually types `continue `, keeping ordinary command entry off the
+synchronous run-evidence path.
+
+The focused catalog uses Project, User, Package, and History tabs over the same
+resolver-backed model. Folder-owned namespaces may be copied intact to Project
+or User; destination claiming refuses an existing folder or compatible flat
+root, and group-only namespaces remain group-only.
 
 ## Workflow-author boundary
 

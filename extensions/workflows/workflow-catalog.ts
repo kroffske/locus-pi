@@ -99,7 +99,9 @@ export type WorkflowSourceReadState =
       message: string;
     };
 
-export type WorkflowBrowserAction = "start" | "edit" | "review";
+export type WorkflowEditorAction = "start" | "edit" | "review";
+export type WorkflowCopyAction = "copy-project" | "copy-personal";
+export type WorkflowBrowserAction = WorkflowEditorAction | WorkflowCopyAction;
 
 export type WorkflowBrowserIntent =
   | {
@@ -316,6 +318,9 @@ export function readSelectedWorkflowSource(
  * The returned text is editable but never submitted here.
  */
 export function buildWorkflowActionPrompt(intent: WorkflowBrowserIntent): string {
+  if (intent.action === "copy-project" || intent.action === "copy-personal") {
+    throw new Error(`Workflow copy action ${JSON.stringify(intent.action)} does not produce an editor prompt.`);
+  }
   if (intent.row.kind === "history" && intent.action !== "review") {
     throw new Error(`Historical workflow actions are review-only; received ${JSON.stringify(intent.action)}.`);
   }
@@ -395,8 +400,8 @@ export function buildWorkflowInfoBlock(projectRoot: string, workingDirectory: st
       body: [
         `source: ${row.sourceLabel} (${row.source})`,
         `target: ${row.target.kind}:${row.target.ref}`,
-        `profile: ${row.profile}`,
-        "metadata: static top-level export const meta.description, meta.profile, and meta.phases only; the module was not imported or evaluated",
+        `authoring profile: ${authoringProfileExplanation(row.profile)}`,
+        "metadata: static meta.description/profile/phases; profile classifies source shape, not runtime behavior; module not evaluated",
         ...workflowCompositionDetailLines(row),
         ...declaredPhaseLines(row.phases),
         ...workflowContractLines(),
@@ -441,9 +446,10 @@ function declaredPhaseLines(phases: readonly WorkflowMetaPhase[]): string[] {
 
 function workflowContractLines(): string[] {
   return [
-    "trust: executed workflow files are reviewed JavaScript with full Pi host Node.js/module access; inspection and info are inert text/static-metadata reads",
-    "history: run rows inspect only their validated retained snapshot; they never fall back to current source and are never runnable from the browser",
-    "agent models: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role degrades and is recorded, and agent_end reports the read-back executedModel",
+    "agent models: explicit model, then role, agent tier, then session model",
+    "trust: reviewed workflow JavaScript runs with full Pi host access; info and catalog do not evaluate modules",
+    "history: uses only the validated retained snapshot; no current-source fallback and no browser launch",
+    "model routing: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role degrades and is recorded, and agent_end reports the read-back executedModel",
     'agents: agent() is the single model-calling primitive and returns exact non-empty child text; opts.agent selects a discovered catalog prompt/model role, omitted agent uses role "default", and every workflow child always receives tools ["*"] with write/edit/bash available; legacy capability fields are ignored; opts.schema opts into a validated shaped answer instead of text',
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
@@ -914,7 +920,14 @@ function passiveCatalogRowLine(row: WorkflowCatalogCurrentRow | WorkflowCatalogH
   // Stage count only: the full declaration belongs to /workflows info, and a
   // catalog row that grows with the pipeline stops being scannable.
   const phases = row.phases.length > 0 ? ` · phases=${row.phases.length}` : "";
-  return `${name}${run} · ${workflowSourceBadge(row.source)}${composition} · ${row.description}${phases} · profile=${row.profile} · /workflows info ${row.name}`;
+  return `${name}${run} · ${workflowSourceBadge(row.source)}${composition} · ${row.description}${phases} · /workflows info ${row.name}`;
+}
+
+function authoringProfileExplanation(profile: WorkflowAuthoringProfile): string {
+  if (profile === "standard") return "standard (compact public source shape; not a runtime mode)";
+  if (profile === "integration") return "integration (integration-test source shape; not a runtime mode)";
+  if (profile === "legacy") return "legacy (compatibility source shape; not a runtime mode)";
+  return "unclassified (no recognized source-shape contract)";
 }
 
 export function workflowSourceBadge(source: WorkflowCatalogRow["source"]): "[P]" | "[U]" | "[PKG]" {
@@ -937,7 +950,10 @@ function compareCatalogRows(a: WorkflowCatalogRow, b: WorkflowCatalogRow): numbe
 }
 
 function compactCatalogText(value: string): string {
-  return value.length <= DESCRIPTION_MAX_CHARS ? value : `${value.slice(0, DESCRIPTION_MAX_CHARS - 3)}...`;
+  if (value.length <= DESCRIPTION_MAX_CHARS) return value;
+  const candidate = value.slice(0, DESCRIPTION_MAX_CHARS - 1);
+  const boundary = candidate.lastIndexOf(" ");
+  return `${(boundary > DESCRIPTION_MAX_CHARS / 2 ? candidate.slice(0, boundary) : candidate).trimEnd()}…`;
 }
 
 function compactWorkflowCatalogLine(value: string): string {

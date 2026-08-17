@@ -53,7 +53,7 @@ export function buildRunsListBlock(projectRoot: string, limit: number, compact =
       subject: "Workflow runs",
       primary: "No workflow runs yet.",
       metadata: ["status: ok; total=0 shown=0 older=0", WORKFLOW_SOURCE_LEGEND],
-      controls: ['Run one: /workflows run requirements-grill "<your request>"'],
+      controls: ['Run one: /workflows run task/plan "<your request>"'],
     };
   }
   const shownIds = ids.slice(0, Math.max(0, Math.min(limit, ids.length)));

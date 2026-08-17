@@ -1,6 +1,6 @@
 /**
  * extensions/workflows/command-completions.ts — Argument completions for
- * `/workflows` and its flat `/workflow-*` aliases.
+ * `/workflows` and the retained flat `/workflow-stop` alias.
  *
  * The `/workflows` grammar is the source of truth: the flat aliases delegate
  * here and strip their own verb back off, so a token can never be completed
@@ -9,7 +9,6 @@
 
 import type { CommandArgumentCompletion } from "../_shared/host/pi-api.js";
 import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
-import type { FlatWorkflowCommand } from "./command-router.js";
 import {
   formatWorkflowCommandToken,
   parseWorkflowCommandToken,
@@ -18,7 +17,7 @@ import {
   WORKFLOW_RUN_OPTION_DESCRIPTORS,
 } from "./command-parser.js";
 import { listExampleNames } from "./operator-ui.js";
-import { buildWorkflowCatalogModel } from "./workflow-catalog.js";
+import { listWorkflowCatalogTargets } from "./runtime/workflow-runner.js";
 
 export function workflowArgumentCompletions(
   rawPrefix: string,
@@ -44,7 +43,7 @@ export function workflowArgumentCompletions(
   const continuationRunIds = (): readonly string[] => actionableRunIds?.slice(0, 20) ?? runIds();
   const workflowNames = (): string[] => {
     try {
-      return buildWorkflowCatalogModel(projectRoot, workingDirectory).current.map((row) => row.name);
+      return listWorkflowCatalogTargets(projectRoot, workingDirectory).map((target) => target.ref);
     } catch {
       return listExampleNames();
     }
@@ -168,7 +167,7 @@ function workflowRunOptionCompletions(
 }
 
 export function workflowFlatCommandCompletions(
-  command: FlatWorkflowCommand,
+  command: WorkflowCompletionCommand,
   rawPrefix: string,
   projectRoot: string,
   workingDirectory = projectRoot,
@@ -192,6 +191,8 @@ export function workflowFlatCommandCompletions(
     value: completion.value.startsWith(verbPrefix) ? completion.value.slice(verbPrefix.length) : completion.value,
   }));
 }
+
+type WorkflowCompletionCommand = "run" | "stop" | "list" | "info" | "status" | "result" | "continue";
 
 function workflowContinueArgumentCompletions(
   rawPrefix: string,
