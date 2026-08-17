@@ -6,6 +6,11 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Answers now continue folder-qualified workflows by saved name.** The
+  operator handoff service preserves a persisted `target.kind: "name"` when it
+  resolves the continuation. Names such as `airflow-dag-builder/plan` no longer
+  pass through the legacy `script` alias and become mistaken filesystem paths.
+
 - **Workflow questions can show their source evidence beside the choices.** A
   select or text question may bind one published continuation artifact as
   `detailArtifactRef`. The runtime verifies its identity and digest, redacts and

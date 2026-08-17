@@ -163,9 +163,9 @@ describe("workflow operator handoff service", () => {
   it("renders a verified blocker artifact beside three choices and custom input", async () => {
     const root = realpathSync(mkdtempSync(path.join(tmpdir(), "workflow-handoff-detail-")));
     roots.push(root);
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".pi", "workflows", "test-question"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "alpha.workflow.mjs"),
+      path.join(root, ".pi", "workflows", "test-question", "answer.workflow.mjs"),
       `export default (dsl) => {
   const blocker = dsl.publishArtifact("planning-blocker.md", "# Planning Blocker\\n\\n## Question\\nWhich queue should own retries?\\n");
   dsl.awaitOperator({
@@ -198,7 +198,7 @@ describe("workflow operator handoff service", () => {
       pi: sourceHarness.pi,
       ctx: sourceHarness.ctx,
       signal: new AbortController().signal,
-      name: "alpha",
+      name: "test-question/answer",
       outputDir: "outputs/alpha",
     });
     expect(source.ok, source.error).toBe(true);
@@ -208,8 +208,9 @@ describe("workflow operator handoff service", () => {
     const uiHarness = createHarness(root);
     uiHarness.customInputQueue.push("\r");
 
-    await expect(controller.pump(uiHarness.ctx, { runId: source.runId })).resolves.toMatchObject({
+    await expect(controller.pump(uiHarness.ctx, { runId: source.runId })).resolves.toEqual({
       status: "started",
+      sourceRunId: source.runId,
     });
     const frame = uiHarness.customRenderFrames[0]?.join("\n") ?? "";
     expect(frame).toContain("Which queue should own retries?");
