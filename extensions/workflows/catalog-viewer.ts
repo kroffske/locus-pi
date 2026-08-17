@@ -29,6 +29,7 @@ const SOURCE_FRAME_ROWS = 2;
 
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
+  bold?(text: string): string;
 }
 
 interface WorkflowCatalogKeybindings {
@@ -649,23 +650,44 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
-  const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
-  if (!expanded) return [style(theme, selected ? "accent" : "text", fitLine(first, width))];
+  if (!expanded) {
+    const summary = fitLine(`${selected ? ">" : " "} ${catalogRowSummary(row)}`, width);
+    return [selected ? bold(theme, style(theme, "accent", summary)) : style(theme, "text", summary)];
+  }
   const isChild = row.kind === "current" && row.role === "child";
   const pathPrefix = isChild ? "      · " : "    · ";
   const continuationPrefix = isChild ? "        " : "      ";
   const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
   const details = wrapPlain(row.description, Math.max(1, detailWidth));
   return [
-    style(theme, selected ? "accent" : "text", fitLine(first, width)),
-    ...details.map((detail, index) =>
-      style(
-        theme,
-        selected ? "accent" : "muted",
-        fitLine(`${index === 0 ? pathPrefix : continuationPrefix}${detail}`, width),
-      ),
-    ),
+    fitLine(styledCatalogRowIdentity(row, selected, theme), width),
+    ...details.map((detail, index) => {
+      const prefix = index === 0 ? pathPrefix : continuationPrefix;
+      return fitLine(
+        `${selected ? bold(theme, style(theme, "accent", prefix)) : style(theme, "muted", prefix)}${style(
+          theme,
+          selected ? "text" : "muted",
+          detail,
+        )}`,
+        width,
+      );
+    }),
   ];
+}
+
+function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean, theme: WorkflowCatalogTheme): string {
+  const marker = selected ? bold(theme, style(theme, "accent", ">")) : " ";
+  const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const composition =
+    row.kind !== "current" || row.role === "child" || row.children.length === 0
+      ? ""
+      : ` · ${row.children.length} children`;
+  const identity = selected
+    ? bold(theme, style(theme, "accent", `${treeName}${run}`))
+    : style(theme, "text", `${treeName}${run}`);
+  const metadata = style(theme, "muted", ` · ${workflowSourceBadge(row.source)}${composition}`);
+  return `${marker} ${identity}${metadata}`;
 }
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
@@ -759,6 +781,10 @@ function asOperatorTheme(value: unknown): OperatorThemeLike | undefined {
 
 function style(theme: WorkflowCatalogTheme, color: string, text: string): string {
   return typeof theme.fg === "function" ? theme.fg(color, text) : text;
+}
+
+function bold(theme: WorkflowCatalogTheme, text: string): string {
+  return typeof theme.bold === "function" ? theme.bold(text) : text;
 }
 
 function terminalRows(tui: CustomUiTui): number {
