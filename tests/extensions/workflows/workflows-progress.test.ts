@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
@@ -1096,6 +1097,48 @@ describe("workflow progress widget", () => {
       expect(active).not.toContain("[current task]");
       expect(active).not.toContain("{");
       expect(active).not.toContain("tool=bash");
+    } finally {
+      agentLiveStore.reset();
+    }
+  });
+
+  it("keeps a wide-character agent message inside the exact terminal width", () => {
+    agentLiveStore.reset();
+    try {
+      const width = 210;
+      const runId = "wide-message-r1";
+      const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: width } };
+      const component = new WorkflowProgressComponent(tui, {}, "handoff-smoke/answer", runId, {
+        scope: "workflow",
+      });
+      const parentLine = line({
+        kind: "agent_start",
+        agent: "default",
+        label: "route planning readiness",
+        phase: "readiness-route",
+        ts: 1,
+        runId,
+      });
+      const parentRowId = workflowAgentLiveRowId(parentLine);
+      pushProgress(component, parentLine);
+      const child = agentLiveStore.begin({
+        parentRowId,
+        agentName: "default",
+        label: "route planning readiness",
+        isolated: false,
+        noMcp: false,
+      });
+      agentLiveStore.patch(child.id, {
+        status: "working",
+        latestMessage:
+          "Based on my analysis, I can now determine whether we have enough verified evidence. Requirements: 1. ✅ Target behavior " +
+          "x".repeat(240),
+      });
+
+      const rendered = component.render(width);
+      expect(rendered.some((renderedLine) => renderedLine.includes("✅ Target behavior"))).toBe(true);
+      expect(rendered.every((renderedLine) => visibleWidth(renderedLine) <= width)).toBe(true);
+      component.dispose();
     } finally {
       agentLiveStore.reset();
     }
