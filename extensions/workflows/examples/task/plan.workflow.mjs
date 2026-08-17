@@ -1,4 +1,4 @@
-// plan.workflow.mjs
+// task/plan.workflow.mjs
 //
 // Turns one task into four agent-authored files in the shared workflow
 // workspace: context.md, plan.md, steps.md, and a runnable execute.workflow.mjs
@@ -10,7 +10,7 @@
 // and then explicitly runs the next script.
 
 export const meta = {
-  name: "plan",
+  name: "task/plan",
   profile: "standard",
   description: "Maps one task, writes a plan and its steps, then renders the execute script that runs them.",
   phases: [
@@ -30,7 +30,7 @@ export default async function runWorkflow(dsl, input) {
   phase("reconnaissance");
   log("Agent reconnaissance: mapping the task against the live repository.");
   const contextText = await agent(
-    `You are the reconnaissance agent in the Package workflow \`plan\`.
+    `You are the reconnaissance agent in the Package workflow \`task/plan\`.
 
 Inspect the live project before making claims. Do not modify project source,
 configuration, documentation, or tests. Workflow files belong only in the
@@ -56,7 +56,7 @@ ${taskText}
   phase("planning");
   log("Agent planning: writing plan.md and the exact implementation steps.");
   await agent(
-    `You are the planning agent in the Package workflow \`plan\`.
+    `You are the planning agent in the Package workflow \`task/plan\`.
 
 Do not modify project source, configuration, documentation, or tests. Write only
 workflow files in the workflow workspace named in the filesystem note above.
@@ -95,13 +95,13 @@ Planning may be informed by fresh-agent analysis of top-level work units, but
 reconcile it into one final owner-readable \`plan.md\` and one frozen
 \`steps.md\` catalog before execution. Do not create a nested manager or
 recursive task dispatcher. Default execution remains main Pi todo state plus
-one top-level Plan Implement run per exact step.
+one top-level Task Implement run per exact step.
 
 End \`plan.md\` with the next-action choices, and state plainly that nothing is
 executed until the owner reviews \`plan.md\` and \`steps.md\` and starts execution
 themselves. The choices are: run the generated \`execute.workflow.mjs\` this run
 renders from a fixed template; or execute the frozen exact blocks through main Pi
-todo state, one Plan Implement run per step; or hand both artifacts to
+todo state, one Task Implement run per step; or hand both artifacts to
 \`workflow-author\` as a normal authoring request for a bespoke sequential
 project-local workflow. The ordinary continuous request writes Design, reviews
 it, and Builds matching source in the same turn. Do not inject \`Design only\` or a later
@@ -149,7 +149,7 @@ Do not start implementation, do not create implementation todos, and do not run 
 
 After the owner approves, the owner picks one route:
 A. Run the generated script by explicit path: /workflows run <workflow workspace>/execute.workflow.mjs
-B. Execute steps.md through main Pi todo state with the locus-task-workflow skill: one plan-implement run per exact step.
+B. Execute steps.md through main Pi todo state with the locus-task-workflow skill: one task/implement run per exact step.
 C. For a bespoke graph, send workflow-author: Author a sequential project-local workflow from the approved plan.md and steps.md in this workflow workspace. workflow-author performs the ordinary continuous sequence in that same turn: write Design, review it, and Build matching source. Do not add Design only or a later Build request unless the user separately asks to pause after design.
 
 Route A runs trusted JavaScript with full filesystem, subprocess, and network authority. Read execute.workflow.mjs before running it.`;

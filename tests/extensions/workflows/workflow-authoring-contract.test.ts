@@ -92,10 +92,9 @@ describe("design-first readable workflow authoring", () => {
   });
 
   const planAuthoringSurfaces = [
-    "extensions/workflows/examples/plan/plan.workflow.mjs",
-    "extensions/workflows/examples/plan/README.md",
-    "extensions/workflows/examples/plan-implement/README.md",
-    "extensions/workflows/examples/plan/resources/execute-template.prompt.md",
+    "extensions/workflows/examples/task/plan.workflow.mjs",
+    "extensions/workflows/examples/task/README.md",
+    "extensions/workflows/examples/task/resources/execute-template.prompt.md",
     "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
     "skills/locus-task-workflow/SKILL.md",
   ];
@@ -111,14 +110,14 @@ describe("design-first readable workflow authoring", () => {
     expect(text).not.toContain("Build approved design: <exact design path>");
   });
 
-  it("documents continuous workflow-author design review and build in Plan Implement", () => {
-    const text = source("extensions/workflows/examples/plan-implement/README.md");
-    expect(text).toContain("a normal authoring request writes Design, reviews it,");
-    expect(text).toContain("Builds the matching workflow continuously");
-    expect(text).toContain("only when the user explicitly asks for `Design only` or a pause");
-    expect(text).toContain("agent-injected `Design only` or approval turn");
-    expect(text).toMatch(/must not create a\s+separate/u);
-    expect(text).toContain("Build request");
+  it("documents the task family boundary and continuous bespoke authoring route", () => {
+    const text = source("extensions/workflows/examples/task/README.md");
+    expect(text).toContain("`task` is a group-only Package namespace");
+    expect(text).toContain("`task/plan` to prepare a task");
+    expect(text).toContain("`task/implement` to execute one approved step");
+    expect(text).toMatch(/The author writes Design,\s+reviews it, and Builds matching source in the same turn/u);
+    expect(text).toContain("only the user may separately request a pause");
+    expect(text).toContain("`task/implement` is intentionally different from the separate `implement`");
   });
 
   it("keeps CLI syntax target-first on every active manual speaker", () => {
@@ -791,8 +790,8 @@ ${skill[1] ?? ""}
     expect(profiles).toEqual({
       implement: "standard",
       "live-smoke": "standard",
-      "plan-implement": "standard",
-      plan: "standard",
+      "task/implement": "standard",
+      "task/plan": "standard",
       "post-code-review": "standard",
       "post-code-review/boundaries": "standard",
       "post-code-review/contracts": "standard",
@@ -809,8 +808,8 @@ ${skill[1] ?? ""}
     for (const name of [
       "implement",
       "live-smoke",
-      "plan",
-      "plan-implement",
+      "task/implement",
+      "task/plan",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",

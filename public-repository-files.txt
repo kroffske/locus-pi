@@ -220,6 +220,7 @@ extensions/workflows/background-run-registry.ts
 extensions/workflows/catalog-viewer.ts
 extensions/workflows/command-completions.ts
 extensions/workflows/command-parser.ts
+extensions/workflows/command/completion-presentation.ts
 extensions/workflows/command/receipts.ts
 extensions/workflows/command/run.ts
 extensions/workflows/command-router.ts
@@ -227,11 +228,10 @@ extensions/workflows/examples/README.md
 extensions/workflows/examples/implement/README.md
 extensions/workflows/examples/implement/implement.workflow.mjs
 extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs
-extensions/workflows/examples/plan-implement/README.md
-extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs
-extensions/workflows/examples/plan/README.md
-extensions/workflows/examples/plan/plan.workflow.mjs
-extensions/workflows/examples/plan/resources/execute-template.prompt.md
+extensions/workflows/examples/task/README.md
+extensions/workflows/examples/task/implement.workflow.mjs
+extensions/workflows/examples/task/plan.workflow.mjs
+extensions/workflows/examples/task/resources/execute-template.prompt.md
 extensions/workflows/examples/post-code-review/README.md
 extensions/workflows/examples/post-code-review/boundaries.workflow.mjs
 extensions/workflows/examples/post-code-review/contracts.workflow.mjs
@@ -355,8 +355,8 @@ tests/extensions/workflows/evidence-honesty.test.ts
 tests/extensions/workflows/fusion-tool.test.ts
 tests/extensions/workflows/implement-workflow.test.ts
 tests/extensions/workflows/live-smoke-workflow.test.ts
-tests/extensions/workflows/plan-implement-workflow.test.ts
-tests/extensions/workflows/plan-workflow.test.ts
+tests/extensions/workflows/task-implement-workflow.test.ts
+tests/extensions/workflows/task-plan-workflow.test.ts
 tests/extensions/workflows/requirements-grill-workflow.test.ts
 tests/extensions/workflows/review-prompt-config.test.ts
 tests/extensions/workflows/review-remediation-workflows.test.ts
@@ -368,6 +368,7 @@ tests/extensions/workflows/workflow-catalog.test.ts
 tests/extensions/workflows/workflow-command-completions.test.ts
 tests/extensions/workflows/workflow-command-launcher.test.ts
 tests/extensions/workflows/workflow-command-surfaces.test.ts
+tests/extensions/workflows/command/completion-presentation.test.ts
 tests/extensions/workflows/command/run-receipts.test.ts
 tests/extensions/workflows/workflow-diagram-artifacts.test.ts
 tests/extensions/workflows/workflow-failure-surfaces.test.ts

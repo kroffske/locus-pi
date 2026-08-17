@@ -12,8 +12,9 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 Node.js host access and is not sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
-currently `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
-and `review-fix`. A skeleton copied out of this catalog becomes one by being
+currently `implement`, `live-smoke`, `post-code-review` and its children,
+`requirements-grill`, `review`, `review-fix`, `task/plan`, and
+`task/implement`. A skeleton copied out of this catalog becomes one by being
 saved there, with the package-surface review that implies; saved anywhere else it
 stays yours.
 
@@ -222,7 +223,7 @@ Runnable examples to adapt: `extensions/workflows/examples/review/` and
 `examples/review/README.md`. For the same shape with loops inside it — an
 operator clarification round that pauses the run, and a draft/critique loop that
 exits on a shaped verdict — read the tracked pair
-`extensions/workflows/examples/plan/` and `examples/plan-implement/`.
+`extensions/workflows/examples/task/`.
 
 ## Writing one stage task
 
@@ -666,18 +667,13 @@ const review = await agent(`Review the implementation:\n${build}`, {
 return review;
 ```
 
-When the operator must inspect or reuse the plan, use the shipped `plan` →
-`plan-implement` pair instead. `plan` returns an accepted ordered `plan.md` whose
-`## Outcome` names the primary result, consumer, location, required behavior,
-usability proof, and supporting evidence before any steps. `plan-implement`
-consumes that verified artifact, publishes `implementation-tasks.md`, and
-advances one task only after an independent review accepts it. Declared
-dependencies are enforced for subset selection. Structured check evidence,
-run-attributable unexpected changes, and the primary-result grade are
-fail-closed; the terminal primary
-document is `workflow-summary.md`, while `implementation-report.md` remains
-supporting evidence. A repair verdict retries the same task once, and stable
-labels let `--resume` replay completed calls rather than applying them again.
+When the operator must inspect or reuse the plan, use the shipped `task/plan` →
+`task/implement` pair instead. `task/plan` writes `plan.md`, a frozen `steps.md`
+catalog, and a reviewable generated execution script, then stops. After explicit
+owner approval, main Pi starts one top-level `task/implement` run per exact
+`## S<n>` block in the shared workflow workspace. Each run writes
+`history/S<n>.md`; blocked or failed checks stop continuation. The group-only
+`task` root is not runnable, and the two children never invoke one another.
 
 ## Ordered pipeline
 

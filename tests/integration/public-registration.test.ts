@@ -338,8 +338,6 @@ describe("public registration contract", () => {
     expect(packagedWorkflowNames()).toEqual([
       "implement",
       "live-smoke",
-      "plan",
-      "plan-implement",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",
@@ -351,6 +349,8 @@ describe("public registration contract", () => {
       "requirements-grill",
       "review",
       "review-fix",
+      "task/implement",
+      "task/plan",
     ]);
   });
 

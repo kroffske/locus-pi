@@ -81,9 +81,9 @@ repository rather than in the npm artifact.
 
 ## Curated Package workflows
 
-The installed package registers eight Package workflow roots and seven runnable
-children. `post-code-review` is the standard root entry and the seven qualified
-refs are source-bound children in the same folder namespace.
+The installed package registers seven Package workflow namespaces: six runnable
+roots plus the group-only `task` namespace. Nine qualified refs are runnable
+children: seven under `post-code-review`, plus `task/plan` and `task/implement`.
 
 | Workflow                      | Intended use                                                                                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -92,8 +92,8 @@ refs are source-bound children in the same folder namespace.
 | `requirements-grill`          | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
 | `review`                      | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
 | `review-fix`                  | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
-| `plan`                        | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
-| `plan-implement`              | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
+| `task/plan`                   | Maps one task, writes `context.md`, `plan.md`, dynamic `steps.md`, and a reviewable generated execution script.                  |
+| `task/implement`              | Gives one approved exact step to one implementation agent, which changes, verifies, and records only that step.                  |
 | `post-code-review`            | Runs one scoped, four-lane parallel code review and publishes an independently verified `post-code-review.md`.                   |
 | `post-code-review/scope`      | Resolves a function, file, commit, range, diff, or local PR into an exact review boundary.                                       |
 | `post-code-review/boundaries` | Audits ownership, placement, dependency direction, coupling, facades, and seams.                                                 |
@@ -231,7 +231,7 @@ pattern cards load only after the author selects a topology.
 [`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
 the thin execution protocol for the shipped planning pair. The main Pi agent
 uses one shared `tmp/<select-name>` workspace, appends single-line step
-references to session todos, and starts one top-level `plan-implement` run with
+references to session todos, and starts one top-level `task/implement` run with
 the exact matching block from `steps.md`. A failed step stops the queue; a later
 session reconstructs it by reading `steps.md` and `history/*.md`.
 

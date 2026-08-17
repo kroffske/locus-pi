@@ -17,9 +17,7 @@ import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
-interface ViewerTui extends CustomUiTui {
-  terminal?: { rows: number; columns: number; write?(data: string): void };
-}
+type ViewerTui = CustomUiTui & { terminal?: { rows: number; columns: number; write?(data: string): void } };
 
 interface NativeComponentModule {
   AssistantMessageComponent: new (
@@ -58,14 +56,13 @@ interface NativeComponentModule {
 }
 
 interface NativeInputComponent extends Component {
+  children?: Component[];
   focused: boolean;
   handleInput(data: string): void;
   dispose?(): void;
 }
 
-interface ViewerKeybindings {
-  matches(data: string, keybinding: string): boolean;
-}
+type ViewerKeybindings = { matches(data: string, keybinding: string): boolean };
 
 type NativeToolComponent = Component & {
   updateArgs(args: unknown): void;
@@ -117,12 +114,16 @@ export class AgentViewerCapability {
     keybindings: ViewerKeybindings | undefined,
     onSubmit: (value: string) => void,
     onCancel: () => void,
+    theme: unknown,
   ): NativeInputComponent | undefined {
     const Input = this.module.ExtensionEditorComponent;
     if (typeof Input !== "function" || keybindings === undefined) return undefined;
-    const input = new Input(tui as TUI, keybindings, "Message to Agent", undefined, onSubmit, onCancel, {
-      autocompleteMaxVisible: 4,
-    });
+    const input = new Input(tui as TUI, keybindings, "", undefined, onSubmit, onCancel, { autocompleteMaxVisible: 4 });
+    const chrome = input.children;
+    if (chrome?.length === 9) {
+      chrome[6]!.render = (width) => [fitLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
+      input.children = [chrome[0]!, chrome[4]!, chrome[6]!, chrome[8]!];
+    }
     input.focused = true;
     return input;
   }
@@ -395,7 +396,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   #dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
-    return accentText(this.theme, dividerLine(label, width, style));
+    return themeText(this.theme, "borderMuted", dividerLine(label, width, style));
   }
 
   #isHistoricalRound(): boolean {
@@ -439,6 +440,7 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.keybindings,
       (value) => this.#submitInput(value),
       () => this.#close(),
+      this.theme,
     );
     return this.#input;
   }
@@ -534,9 +536,7 @@ function noTranscriptLines(row: AgentLiveRow | undefined): string[] {
 const ACTIVE_SESSION_VIEWERS_KEY = Symbol.for("locus-pi.active-agent-session-viewers.v1");
 const MOUSE_SCROLL_LEASES_PROPERTY = "__locusPiMouseScrollLeases";
 
-interface MouseScrollLease {
-  owners: number;
-}
+type MouseScrollLease = { owners: number };
 
 interface ActiveSessionViewerRegistry extends Set<() => void> {
   [MOUSE_SCROLL_LEASES_PROPERTY]?: Map<object, MouseScrollLease>;
@@ -642,9 +642,9 @@ function dividerLine(label: string, width: number, style: DividerStyle = "sectio
   return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
 }
 
-function accentText(theme: unknown, text: string): string {
+function themeText(theme: unknown, tone: "borderMuted" | "muted", text: string): string {
   if (!isRecord(theme) || typeof theme.fg !== "function") return text;
-  return String(theme.fg.call(theme, "accent", text));
+  return String(theme.fg.call(theme, tone, text));
 }
 
 function formatAgentSessionStart(row: AgentLiveRow): string {

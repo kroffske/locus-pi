@@ -59,12 +59,12 @@ describe("workflow operator catalog", () => {
       });
 
       const model = buildWorkflowCatalogModel(root, root);
-      expect(model.groups).toMatchObject([
+      expect(model.groups).toContainEqual(
         expect.objectContaining({
           name: "airflow-dag-builder",
           children: ["airflow-dag-builder/implement", "airflow-dag-builder/plan"],
         }),
-      ]);
+      );
       const groupList = renderOperatorBlockPlain(buildWorkflowCatalogBlock(root, root, "airflow-dag-builder"), 120, {
         maxLines: 20,
       }).join("\n");
@@ -87,7 +87,7 @@ describe("workflow operator catalog", () => {
         ref: "airflow-dag-builder",
         source: "project",
       });
-      expect(buildWorkflowCatalogModel(root, root).groups).toHaveLength(0);
+      expect(buildWorkflowCatalogModel(root, root).groups.map((group) => group.name)).toEqual(["task"]);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -354,8 +354,6 @@ describe("workflow operator catalog", () => {
     expect(descriptions.map(({ name }) => name)).toEqual([
       "implement",
       "live-smoke",
-      "plan",
-      "plan-implement",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",
@@ -367,6 +365,8 @@ describe("workflow operator catalog", () => {
       "requirements-grill",
       "review",
       "review-fix",
+      "task/implement",
+      "task/plan",
     ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
@@ -379,16 +379,13 @@ describe("workflow operator catalog", () => {
   it("exposes exactly the curated Package registry through the catalog model", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-curated-"));
     try {
-      const packageNames = buildWorkflowCatalogModel(root, root)
-        .current.filter((row) => row.source === "package")
-        .map((row) => row.name);
+      const model = buildWorkflowCatalogModel(root, root);
+      const packageNames = model.current.filter((row) => row.source === "package").map((row) => row.name);
 
       // Package rows are ordered as top-level folders with root before children.
       expect(packageNames).toEqual([
         "implement",
         "live-smoke",
-        "plan",
-        "plan-implement",
         "post-code-review",
         "post-code-review/boundaries",
         "post-code-review/contracts",
@@ -400,6 +397,8 @@ describe("workflow operator catalog", () => {
         "requirements-grill",
         "review",
         "review-fix",
+        "task/implement",
+        "task/plan",
       ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {

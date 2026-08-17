@@ -6,6 +6,14 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **Planning and one-step execution now form the visible `task` workflow
+  family.** The Package names are `task/plan` and `task/implement`; the shared
+  group-only `task` namespace makes their relationship clear while remaining
+  non-runnable, so planning still stops for owner review and explicit approval.
+  The old `plan` and `plan-implement` names are removed instead of retained as
+  duplicate aliases. The separate `implement` workflow keeps its distinct
+  post-code-review remediation contract.
+
 - **Workflow folders may now be group-only.** A namespace can contain direct
   `<group>/<child>` workflow files without a runnable root. `/workflows list`
   renders an unselectable group header, children remain directly runnable, and
@@ -62,8 +70,17 @@ This file records user-visible changes to the public package.
 - **The `/ps` agent viewer now gives the transcript more room and clearer
   boundaries.** While one agent's transcript is open, the lower fleet panel
   shows only that agent instead of the full roster. The viewer frame uses the
-  theme accent color, and the interactive input keeps one concise
-  `Message to Agent` heading instead of repeating it above the editor.
+  theme's muted border color so native tool calls remain visually distinct.
+  The interactive input drops its redundant heading and extra vertical gaps,
+  leaving one compact send/newline hint beneath the editor.
+
+- **Finished workflow transcripts now end on the useful result.** Interactive
+  runs render `Workflow started`, then the bounded `Workflow finished` receipt,
+  then the exact `Workflow result`; non-interactive JSON keeps its existing
+  terminal-receipt ordering. The completion receipt no longer repeats a clipped
+  prose result and groups primary/workspace/result/journal files separately from
+  copyable commands. A Package `task/plan` result names `plan.md` in its card and
+  shows a review-and-approval-gated continuation through `task/implement`.
 
 - **Post-code review now states whether work is mandatory and hands it to a
   separate verified implementation workflow.** Final reports use `READY`,

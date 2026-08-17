@@ -334,8 +334,6 @@ describe("consilium reference workflow", () => {
     expect([...packagedWorkflowNames()].sort()).toEqual([
       "implement",
       "live-smoke",
-      "plan",
-      "plan-implement",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",
@@ -347,6 +345,8 @@ describe("consilium reference workflow", () => {
       "requirements-grill",
       "review",
       "review-fix",
+      "task/implement",
+      "task/plan",
     ]);
     expect(packagedWorkflowNames()).not.toContain("consilium");
 

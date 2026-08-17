@@ -51,8 +51,8 @@ function recursiveTypeScriptFiles(directory: string): string[] {
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "implement",
   "live-smoke",
-  "plan",
-  "plan-implement",
+  "task/implement",
+  "task/plan",
   "post-code-review",
   "post-code-review/boundaries",
   "post-code-review/contracts",
@@ -80,8 +80,8 @@ const PI_PACKAGES = [
 const PACKAGE_WORKFLOW_PATHS = {
   implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
-  plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
-  "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
+  "task/implement": "extensions/workflows/examples/task/implement.workflow.mjs",
+  "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
   "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
   "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
@@ -491,8 +491,8 @@ describe("npm public package boundary", () => {
 
     expect(packedPaths.has(skillPath)).toBe(true);
     for (const contract of [
-      'name: "plan"',
-      'name: "plan-implement"',
+      'name: "task/plan"',
+      'name: "task/implement"',
       "tmp/<select-name>",
       "resumeFromRunId",
       "todo_write",
@@ -528,7 +528,7 @@ describe("npm public package boundary", () => {
     // paraphrase turns "here is the plan" back into an unattended run.
     expect(source).toContain("Planning and execution are two separate user turns");
     expect(source).toContain("## Stop and hand the plan to the user");
-    expect(source).toMatch(/Do not create todos\. Do not call\s+`plan-implement`/u);
+    expect(source).toMatch(/Do not create todos\. Do not call\s+`task\/implement`/u);
     expect(source).toMatch(/not an instruction to you/u);
     expect(source).toMatch(/Approval is a new user turn/u);
     expect(source).toContain("Only after the user approved the todo route");

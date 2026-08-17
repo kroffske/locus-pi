@@ -1,6 +1,13 @@
-# plan
+# task workflows
 
-`plan` is the planning half of the shipped task workflow. It accepts one task,
+`task` is a group-only Package namespace. It is not runnable by itself; use
+`task/plan` to prepare a task and `task/implement` to execute one approved step.
+The shared prefix makes the relationship visible without pretending that
+planning approval and implementation are one automatic run.
+
+## `task/plan`
+
+`task/plan` is the planning half of the shipped task workflow. It accepts one task,
 uses one agent to map the live repository, one planning agent to write the plan
 and its dynamic implementation queue, and one scripting agent to render the
 execute script that would run that queue.
@@ -23,7 +30,7 @@ the script. The agents inspect and write; JavaScript only orders the three calls
 passes the reconnaissance text to the planner, and hands the scripting agent its
 fixed template through `promptFile()`.
 
-**The run stops there.** `plan` implements nothing and starts nothing. It writes
+**The run stops there.** `task/plan` implements nothing and starts nothing. It writes
 files and returns a result that says so. Execution is a separate act the owner
 takes after reading `plan.md`, `steps.md`, and `execute.workflow.mjs`.
 
@@ -98,17 +105,17 @@ outcome:
 - **Ownership boundary** — configuration, common, or platform modules.
 
 Do not enumerate every tiny operation in one handoff. Do not combine unrelated
-work merely to reduce task count. If analysis changes the catalog, rerun `plan`
+work merely to reduce task count. If analysis changes the catalog, rerun `task/plan`
 and deliberately replace the queue before execution; never mutate active exact
 blocks implicitly.
 
 ## Execution choices
 
 Nothing below happens until the operator has read the planning files and asked
-for it. A finished `plan` run is a document, not a queued job.
+for it. A finished `task/plan` run is a document, not a queued job.
 
 Default execution remains main Pi todo state plus one top-level
-`plan-implement` run per frozen exact block. The installed
+`task/implement` run per frozen exact block. The installed
 `locus-task-workflow` skill owns that orchestration; neither Package workflow
 parses the catalog or dispatches another workflow.
 
@@ -124,7 +131,7 @@ reviews it, and Builds matching source in the same turn. Do not inject `Design
 only` or a second Build request; only the user may separately request a pause
 after design. Plan renders only its fixed template into the workflow workspace
 and never writes a registered project workflow. Any optional reviewer after a
-generated step belongs to the bespoke design, not to Plan or Plan Implement
+generated step belongs to the bespoke design, not to Task Plan or Task Implement
 execution semantics.
 
 ## Run and resume
@@ -132,8 +139,8 @@ execution semantics.
 Direct command use keeps the default workspace:
 
 ```text
-/workflows run plan Move the cron job into a DAG
-/workflows run plan --resume <runId> Move the cron job into a DAG
+/workflows run task/plan Move the cron job into a DAG
+/workflows run task/plan --resume <runId> Move the cron job into a DAG
 ```
 
 Resume requires unchanged workflow source and input. The runtime replays every
@@ -141,9 +148,32 @@ completed answer and reruns the first unfinished call, so a run that failed in
 scripting replays reconnaissance and planning. Workspace files survive a failed
 run, so the agents can replace incomplete outputs.
 
-For the complete `plan → session todos → one step per run` protocol, use the
+For the complete `task/plan → session todos → one task/implement run per step`
+protocol, use the
 installed `locus-task-workflow` skill. It calls both Package workflows with the
 same explicit `tmp/<select-name>` workspace.
+
+## `task/implement`
+
+`task/implement` executes exactly one complete step copied from the approved
+`steps.md`. One implementation agent reinspects the live project, changes only
+that step's allowed scope, runs its checks, and fully replaces
+`history/S<n>.md` with `Status: completed` or `Status: blocked`.
+
+The workflow does not accept a whole plan and does not select or loop over
+steps. It has no parser, todo manager, reviewer, report renderer, nested
+workflow, or model pin. Main Pi owns the dynamic todo queue and starts one
+top-level `task/implement` run per exact block, always with the same explicit
+workflow workspace used by `task/plan`.
+
+If one step fails or reports blocked, earlier histories stay complete and later
+steps do not start. Retry only the active step. The implementation result is
+returned unchanged; the caller marks a todo complete only after the history
+records successful required checks.
+
+`task/implement` is intentionally different from the separate `implement`
+workflow. `task/implement` executes one approved planning step; `implement`
+applies selected findings from a post-code review.
 
 ## Boundaries
 
@@ -157,6 +187,6 @@ same explicit `tmp/<select-name>` workspace.
 - A missing task is handed to the agents as an explicit blocking input gap;
   they must not invent implementation work.
 - The final catalog is frozen before execution; catalog changes require a new
-  Plan run and deliberate queue rebuild.
+  `task/plan` run and deliberate queue rebuild.
 - Workflow JavaScript is trusted code, not a sandbox. Runtime approval is
   consent to execute the shipped script, not design approval.

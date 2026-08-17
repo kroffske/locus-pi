@@ -96,9 +96,9 @@ describe("workflow command receipts", () => {
       await run(h, "run review");
       await vi.waitFor(() => expect(runScript).toHaveBeenCalledTimes(1));
 
-      await run(h, "run plan");
+      await run(h, "run task/plan");
 
-      expectLastRejection(h, "workflow_run_busy", "plan");
+      expectLastRejection(h, "workflow_run_busy", "task/plan");
     } finally {
       gate.resolve();
     }
@@ -189,7 +189,7 @@ describe("workflow command receipts", () => {
   });
 
   it("publishes a terminal receipt without waitForIdle in one-shot JSON mode", async () => {
-    const h = harness();
+    const h = harness({ mode: "json" });
     delete h.ctx.waitForIdle;
     const transcript = createWorkflowTranscript(h.ctx, "headless", "command");
     transcript.start("run-headless-idle", "/tmp/run-headless-idle");

@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-17
-- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05, 2026-08-10
+- Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05, 2026-08-10, 2026-08-17
 
 ## Decision
 
@@ -15,14 +15,14 @@ a permission posture that the package can support as a public promise.
 
 The accepted Package portfolio is:
 
-| Workflow             | Product role                | Why it belongs                                                                                                                                                                    |
-| -------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Child-session diagnostic    | It proves the installed host can create real child sessions through two full-tool agents performing a minimal file-listing action.                                                |
-| `requirements-grill` | Requirements refinement     | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
-| `review`             | Evidence-backed code review | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
-| `review-fix`         | Human-directed fixes        | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
-| `plan`               | Task to plan files          | It uses one reconnaissance agent and one planning agent to write a repository map, plan, and dynamic list of complete implementation steps.                                       |
-| `plan-implement`     | One step to changes         | It gives one exact step to one implementation agent, which changes only that scope, verifies it, and records durable step history.                                                |
+| Workflow             | Product role                 | Why it belongs                                                                                                                                                                    |
+| -------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`         | Child-session diagnostic     | It proves the installed host can create real child sessions through two full-tool agents performing a minimal file-listing action.                                                |
+| `requirements-grill` | Requirements refinement      | It turns a recurring cross-project intake problem into a bounded structured handoff.                                                                                              |
+| `review`             | Evidence-backed code review  | It preserves exact operator intent, supports explicit split-run clarification, and produces a digest-bound runtime-owned report.                                                  |
+| `review-fix`         | Human-directed fixes         | It lets a shaped selector turn an immutable review into a validated dependency graph, gives each selected finding one writer, and independently checks and re-reviews the result. |
+| `task/plan`          | Task to plan files           | It maps the repository, writes a plan and dynamic list of complete implementation steps, then stops for owner review.                                                             |
+| `task/implement`     | One approved step to changes | It gives one approved exact step to one implementation agent, which changes only that scope, verifies it, and records durable step history.                                       |
 
 `review` keeps review and remediation separate. It is an agent pipeline, not an
 evidence adapter. Since the 2026-07-26 amendment to the prompt-resource ADR
@@ -772,6 +772,22 @@ edits the live checkout, a separate agent verifies the result, and at most one
 verifier-backed corrective pass is allowed. A remaining defect is blocked rather
 than looped. The workflow never treats a review snippet as a patch and never
 commits, pushes, opens a pull request, merges, or deploys.
+
+## Amendment 2026-08-17 — one visible task workflow family
+
+The two task-lifecycle entries move from unrelated top-level names `plan` and
+`plan-implement` to the group-only `task` namespace as `task/plan` and
+`task/implement`. The shared prefix makes their relationship visible in the
+catalog and command surface. The `task` root has no workflow source and is not
+runnable; starting it would imply an automatic plan-to-implementation path that
+the approval contract explicitly forbids.
+
+The rename is a clean public migration, not an alias expansion. The old names
+are removed from the current Package registry so operators see one canonical
+pair. Existing immutable run records remain readable because historical target
+identity is persisted with each run. The separate top-level `implement`
+workflow keeps its distinct purpose: applying selected findings from an already
+prepared plan or review, rather than executing one frozen `steps.md` block.
 
 ## Consequences
 

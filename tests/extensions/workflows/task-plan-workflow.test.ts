@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { buildWorkflowCatalogModel } from "../../../extensions/workflows/workflow-catalog.js";
+import { resolveWorkflowTarget, runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { standardWorkflowSourceShapeErrors } from "../../../extensions/workflows/workflow-source-shape.js";
 import { createHarness } from "../../test-harness.js";
 
-const workflowDirectory = path.join(process.cwd(), "extensions/workflows/examples/plan");
+const workflowDirectory = path.join(process.cwd(), "extensions/workflows/examples/task");
 const workflowPath = path.join(workflowDirectory, "plan.workflow.mjs");
 const templateRelativePath = "resources/execute-template.prompt.md";
 const templatePath = path.join(workflowDirectory, templateRelativePath);
@@ -29,7 +30,7 @@ function temporaryProject(): string {
   const root = mkdtempSync(path.join(tmpdir(), "locus-plan-minimal-"));
   temporaryRoots.push(root);
   const agentDir = path.join(root, ".agents", "agents");
-  const workflowDir = path.join(root, ".pi", "workflows");
+  const workflowDir = path.join(root, ".pi", "workflows", "task");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(path.join(workflowDir, path.dirname(templateRelativePath)), { recursive: true });
   writeFileSync(
@@ -80,7 +81,22 @@ function failed(request: AgentRunRequest, reason: string) {
   };
 }
 
-describe("Package workflow: plan", () => {
+describe("Package workflow: task/plan", () => {
+  it("shares a group-only Package namespace with task/implement", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-task-family-"));
+    temporaryRoots.push(root);
+    expect(buildWorkflowCatalogModel(root, root).groups).toContainEqual(
+      expect.objectContaining({
+        name: "task",
+        source: "package",
+        children: ["task/implement", "task/plan"],
+      }),
+    );
+    expect(() => resolveWorkflowTarget({ name: "task" }, root, root)).toThrow(
+      /group-only and has no runnable root: task/u,
+    );
+  });
+
   it("is a standard three-agent graph with no model pin or script-owned planning logic", () => {
     const source = readFileSync(workflowPath, "utf8");
 
@@ -155,7 +171,7 @@ describe("Package workflow: plan", () => {
       expect(calls[1]?.prompt, boundary.source).toMatch(boundary);
     }
     expect(calls[1]?.prompt).toMatch(/one frozen\s+`steps\.md` catalog before execution/u);
-    expect(calls[1]?.prompt).toContain("one Plan Implement run per step");
+    expect(calls[1]?.prompt).toContain("one Task Implement run per step");
     expect(calls[1]?.prompt).toContain("`workflow-author` as a normal authoring request");
     expect(calls[1]?.prompt).toMatch(/nothing is\s+executed until the owner reviews/u);
     expect(calls[1]?.prompt).toMatch(/plan approval starts neither implementation\s+nor workflow authoring/u);
@@ -241,7 +257,7 @@ describe("Package workflow: plan", () => {
       pi: firstHarness.pi,
       ctx: firstHarness.ctx,
       signal: new AbortController().signal,
-      name: "plan",
+      name: "task/plan",
       input: task,
       outputDir: "tmp/cron-to-dag",
       createExecutor: firstExecutor,
@@ -274,7 +290,7 @@ describe("Package workflow: plan", () => {
       pi: resumedHarness.pi,
       ctx: resumedHarness.ctx,
       signal: new AbortController().signal,
-      name: "plan",
+      name: "task/plan",
       input: task,
       outputDir: "tmp/cron-to-dag",
       resumeFromRunId: first.runId,

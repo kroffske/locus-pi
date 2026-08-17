@@ -52,7 +52,7 @@ programmatic embedder owns the frozen list. Plan approval alone does not start
 workflow authoring; once the user requests that workflow, the ordinary continuous
 design -> review -> build sequence applies unless they explicitly request design only.
 
-The Package `plan` workflow already renders `execute.workflow.mjs` into its own
+The Package `task/plan` workflow already renders `execute.workflow.mjs` into its own
 workflow workspace from a fixed template — one literal implementation node per
 `## S<n>` block, then a summary node. That file is an unregistered draft that
 resolves only by explicit path, and the owner reviews it before running it. Use
