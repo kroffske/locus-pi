@@ -14,166 +14,58 @@ interface PackageJson {
   pi: { extensions: string[] };
   repository: { url: string };
 }
-
 interface ExtensionManifest {
   docsPath: string;
-  provides: {
-    tools: string[];
-    commands: string[];
-    hooks: string[];
-    shortcuts?: string[];
-  };
+  provides: { tools: string[]; commands: string[]; hooks: string[]; shortcuts?: string[] };
+  risk: string;
   sourceAuditPath: string | null;
   tests: string[];
 }
-
-interface ExtensionMapRow {
-  dependencies: string[];
-  entrypoint: string;
-  files: number;
-  manifest: string;
-  manual: string;
-}
-
-interface ManifestSurfaceRow {
+interface ExtensionDocRow {
   tools: string[];
   commands: string[];
   hooks: string[];
-  shortcuts: string[];
+  risk: string;
+  manual: string;
 }
-
-type ExtensionCatalogRow = Omit<ExtensionMapRow, "files">;
-
-const sourceAuditUrlPrefix = "https://github.com/kroffske/locus-pi/blob/main/";
-const sourceExtensions = new Set([".cjs", ".js", ".mjs", ".mts", ".ts", ".tsx"]);
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const extensionIndex = readFileSync(path.join(root, "docs/extension-index.md"), "utf8");
-const extensionCatalog = readFileSync(path.join(root, "docs/extension-catalog.md"), "utf8");
-const ownershipMatrix = readFileSync(path.join(root, "docs/extension-ownership-matrix.md"), "utf8");
+const extensionDocs = readFileSync(path.join(root, "docs/extensions.md"), "utf8");
+const workflowDocs = readFileSync(path.join(root, "docs/workflows.md"), "utf8");
+const sourceExtensions = new Set([".cjs", ".js", ".mjs", ".mts", ".ts", ".tsx"]);
 
 function extensionIdFromEntrypoint(entrypoint: string): string {
   const match = /^\.\/extensions\/([^/]+)\/index\.ts$/.exec(entrypoint);
-  if (!match?.[1]) {
-    throw new Error(`invalid default extension entrypoint: ${entrypoint}`);
-  }
-  return match[1];
-}
-
-function inlineCode(value: string): string {
-  const match = /^`([^`]+)`$/.exec(value.trim());
-  if (!match?.[1]) {
-    throw new Error(`expected one inline-code value, received: ${value}`);
-  }
+  if (!match?.[1]) throw new Error(`invalid default extension entrypoint: ${entrypoint}`);
   return match[1];
 }
 
 function inlineCodeList(value: string): string[] {
   if (value === "—") return [];
   const items = [...value.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
-  if (items.length === 0) {
-    throw new Error(`expected inline-code list or em dash, received: ${value}`);
-  }
+  if (items.length === 0) throw new Error(`expected inline-code list or em dash, received: ${value}`);
   return items;
 }
 
-function countRegularFiles(directory: string): number {
-  return readdirSync(directory, { withFileTypes: true }).reduce((count, entry) => {
-    if (entry.name === ".DS_Store") return count;
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) return count + countRegularFiles(entryPath);
-    return count + (entry.isFile() ? 1 : 0);
-  }, 0);
-}
-
-function parseExtensionMap(markdown: string): Map<string, ExtensionMapRow> {
-  const defaultSection = markdown.split("## Default extensions\n")[1]?.split("\n## ")[0];
-  if (!defaultSection) {
-    throw new Error("missing Default extensions section");
-  }
-
-  const rows = new Map<string, ExtensionMapRow>();
-  for (const line of defaultSection.split("\n")) {
+function parseExtensionRows(markdown: string): Map<string, ExtensionDocRow> {
+  const rows = new Map<string, ExtensionDocRow>();
+  for (const line of markdown.split("\n")) {
     if (!line.startsWith("| `")) continue;
     const columns = line
       .split("|")
       .slice(1, -1)
       .map((column) => column.trim());
-    if (columns.length !== 11) {
-      throw new Error(`invalid extension map row: ${line}`);
-    }
-
-    const id = inlineCode(columns[0] ?? "");
-    if (rows.has(id)) {
-      throw new Error(`duplicate extension map row: ${id}`);
-    }
-    const dependencyCell = columns[8] ?? "";
-    rows.set(id, {
-      files: Number.parseInt(columns[1] ?? "", 10),
-      entrypoint: inlineCode(columns[5] ?? ""),
-      manifest: inlineCode(columns[6] ?? ""),
-      manual: inlineCode(columns[7] ?? ""),
-      dependencies:
-        dependencyCell === "none" ? [] : [...dependencyCell.matchAll(/`([^`]+)`/g)].map((match) => match[1]!),
-    });
-  }
-  return rows;
-}
-
-function parseManifestSurfaces(markdown: string): Map<string, ManifestSurfaceRow> {
-  const section = markdown.split("## Manifest-declared public surfaces\n")[1]?.split("\n## ")[0];
-  if (!section) throw new Error("missing Manifest-declared public surfaces section");
-
-  const rows = new Map<string, ManifestSurfaceRow>();
-  for (const line of section.split("\n")) {
-    if (!line.startsWith("| `")) continue;
-    const columns = line
-      .split("|")
-      .slice(1, -1)
-      .map((column) => column.trim());
-    if (columns.length !== 5) throw new Error(`invalid manifest surface row: ${line}`);
-    const id = inlineCode(columns[0] ?? "");
+    if (columns.length !== 6) throw new Error(`invalid extension reference row: ${line}`);
+    const id = /^`([^`]+)`$/.exec(columns[0] ?? "")?.[1];
+    const manual = /\[`([^`]+)`\]\([^)]+\)/.exec(columns[5] ?? "")?.[1];
+    if (!id || !manual) throw new Error(`invalid extension reference row: ${line}`);
     rows.set(id, {
       tools: inlineCodeList(columns[1] ?? ""),
       commands: inlineCodeList(columns[2] ?? ""),
       hooks: inlineCodeList(columns[3] ?? ""),
-      shortcuts: inlineCodeList(columns[4] ?? ""),
-    });
-  }
-  return rows;
-}
-
-function parseExtensionCatalog(markdown: string): Map<string, ExtensionCatalogRow> {
-  const section = markdown.split("## Public roster\n")[1]?.split("\n## ")[0];
-  if (!section) {
-    throw new Error("missing Public roster section");
-  }
-
-  const rows = new Map<string, ExtensionCatalogRow>();
-  for (const line of section.split("\n")) {
-    if (!line.startsWith("| `")) continue;
-    const columns = line
-      .split("|")
-      .slice(1, -1)
-      .map((column) => column.trim());
-    if (columns.length !== 8) {
-      throw new Error(`invalid extension catalog row: ${line}`);
-    }
-
-    const id = inlineCode(columns[0] ?? "");
-    if (rows.has(id)) {
-      throw new Error(`duplicate extension catalog row: ${id}`);
-    }
-    const dependencyCell = columns[5] ?? "";
-    rows.set(id, {
-      entrypoint: inlineCode(columns[2] ?? ""),
-      manifest: inlineCode(columns[3] ?? ""),
-      manual: inlineCode(columns[4] ?? ""),
-      dependencies:
-        dependencyCell === "none"
-          ? []
-          : [...dependencyCell.matchAll(/`([^`]+)`/g)].map((match) => match[1]!.split("/")[0]!),
+      risk: columns[4] ?? "",
+      manual,
     });
   }
   return rows;
@@ -196,26 +88,22 @@ function importedSpecifiers(filePath: string): string[] {
     filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const specifiers: string[] = [];
-
   function visit(node: ts.Node): void {
     if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
       ts.isStringLiteral(node.moduleSpecifier)
-    ) {
+    )
       specifiers.push(node.moduleSpecifier.text);
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [argument] = node.arguments;
-      if (node.arguments.length === 1 && argument && ts.isStringLiteral(argument)) {
-        specifiers.push(argument.text);
-      }
+      if (node.arguments.length === 1 && argument && ts.isStringLiteral(argument)) specifiers.push(argument.text);
     } else if (
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&
       ts.isStringLiteral(node.argument.literal)
-    ) {
+    )
       specifiers.push(node.argument.literal.text);
-    }
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
@@ -226,15 +114,14 @@ function featureDependencyGraph(extensionIds: string[]): Map<string, string[]> {
   return new Map(
     extensionIds.map((sourceId) => {
       const dependencies = new Set<string>();
-      const directory = path.join(root, "extensions", sourceId);
-      for (const filePath of sourceFiles(directory)) {
+      for (const filePath of sourceFiles(path.join(root, "extensions", sourceId))) {
         for (const specifier of importedSpecifiers(filePath)) {
           if (!specifier.startsWith(".")) continue;
-          const targetPath = path.relative(root, path.resolve(path.dirname(filePath), specifier));
-          const [topLevel, targetId] = targetPath.split(path.sep);
-          if (topLevel === "extensions" && targetId && targetId !== "_shared" && targetId !== sourceId) {
+          const [topLevel, targetId] = path
+            .relative(root, path.resolve(path.dirname(filePath), specifier))
+            .split(path.sep);
+          if (topLevel === "extensions" && targetId && targetId !== "_shared" && targetId !== sourceId)
             dependencies.add(targetId);
-          }
         }
       }
       return [sourceId, [...dependencies].sort()] as const;
@@ -242,48 +129,12 @@ function featureDependencyGraph(extensionIds: string[]): Map<string, string[]> {
   );
 }
 
-function documentedDependencyGraph(markdown: string): Map<string, string[]> {
-  const section = markdown.split("## Direct feature dependency graph\n")[1]?.split("\n## ")[0];
-  if (!section) {
-    throw new Error("missing Direct feature dependency graph section");
-  }
-
-  const graph = new Map<string, string[]>();
-  const bullets: string[] = [];
-  let currentBullet = "";
-  for (const line of section.split("\n")) {
-    if (line.startsWith("- ")) {
-      if (currentBullet) bullets.push(currentBullet);
-      currentBullet = line;
-    } else if (currentBullet && line.trim() === "") {
-      bullets.push(currentBullet);
-      currentBullet = "";
-    } else if (currentBullet) {
-      currentBullet += `\n${line}`;
-    }
-  }
-  if (currentBullet) bullets.push(currentBullet);
-
-  for (const bullet of bullets) {
-    const edge = /`([^`]+) → ([^`/]+)(?:\/[^`]*)?`/.exec(bullet);
-    if (edge?.[1] && edge[2]) {
-      graph.set(edge[1], [edge[2]]);
-    } else if (bullet.includes("no direct feature imports")) {
-      for (const match of bullet.matchAll(/`([^`]+)`/g)) {
-        graph.set(match[1]!, []);
-      }
-    }
-  }
-  return graph;
-}
-
-function packageWorkflowNamesFromIndex(markdown: string): string[] {
-  const section = markdown.split("## Package workflows\n")[1]?.split("\n## ")[0] ?? "";
-  return [...section.matchAll(/^\| `([^`]+)`/gm)].map((match) => match[1]!);
-}
-
 function topLevelCommands(commands: string[]): string[] {
-  return [...new Set(commands.map((command) => command.trim().split(/\s+/u)[0]!))].sort();
+  return [...new Set(commands.map((command) => command.trim().split(/\s+/u)[0]!).filter(Boolean))].sort();
+}
+
+function documentedWorkflowNames(markdown: string): string[] {
+  return [...markdown.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]!);
 }
 
 describe("public registration contract", () => {
@@ -308,13 +159,9 @@ describe("public registration contract", () => {
     for (const entrypoint of pkg.pi.extensions) {
       const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
-      const module = (await import(pathToFileURL(path.join(root, entrypoint)).href)) as {
-        default: ExtensionFactory;
-      };
+      const module = (await import(pathToFileURL(path.join(root, entrypoint)).href)) as { default: ExtensionFactory };
       const harness = createHarness();
-
       await module.default(harness.pi);
-
       expect([...harness.commands.keys()].sort(), `runtime commands differ from ${manifestPath}`).toEqual(
         topLevelCommands(manifest.provides.commands),
       );
@@ -333,8 +180,6 @@ describe("public registration contract", () => {
   });
 
   it("resolves exactly the workflows the packaged examples directory holds", () => {
-    // No allowlist backs this: the names come from scanning the shipped
-    // directory, in entry-filename order.
     expect(packagedWorkflowNames()).toEqual([
       "implement",
       "live-smoke",
@@ -355,94 +200,39 @@ describe("public registration contract", () => {
     ]);
   });
 
-  it("keeps the public extension catalog aligned with package, manifests, manuals, and source imports", () => {
+  it("keeps the compact extension reference aligned with manifests and source imports", () => {
     const extensionIds = pkg.pi.extensions.map(extensionIdFromEntrypoint);
-    const catalogRows = parseExtensionCatalog(extensionCatalog);
-    expect([...catalogRows.keys()].sort()).toEqual([...extensionIds].sort());
-
+    const rows = parseExtensionRows(extensionDocs);
+    expect([...rows.keys()].sort()).toEqual([...extensionIds].sort());
     for (const [index, entrypoint] of pkg.pi.extensions.entries()) {
       const id = extensionIds[index]!;
       const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
-      const catalogRow = catalogRows.get(id);
-
-      expect(catalogRow, `missing extension catalog row: ${id}`).toBeDefined();
-      expect(catalogRow?.entrypoint).toBe(entrypoint.slice(2));
-      expect(catalogRow?.manifest).toBe(path.relative(root, manifestPath));
-      expect(catalogRow?.manual).toBe(manifest.docsPath);
-      expect(existsSync(path.join(root, entrypoint)), `missing entrypoint: ${entrypoint}`).toBe(true);
-      expect(existsSync(manifestPath), `missing manifest: ${manifestPath}`).toBe(true);
-      expect(existsSync(path.join(root, manifest.docsPath)), `missing docsPath from ${manifestPath}`).toBe(true);
-    }
-
-    const sourceGraph = featureDependencyGraph(extensionIds);
-    const catalogGraph = new Map([...catalogRows].map(([id, row]) => [id, row.dependencies]));
-    expect(catalogGraph).toEqual(sourceGraph);
-    expect(extensionCatalog).toContain("`agents → workflows`");
-    expect(extensionCatalog).toContain("`loop → workflows/run-read.ts`");
-  });
-
-  it("keeps the public extension map aligned with package, manifests, manuals, and source imports", () => {
-    const extensionIds = pkg.pi.extensions.map(extensionIdFromEntrypoint);
-    const mapRows = parseExtensionMap(extensionIndex);
-    const surfaceRows = parseManifestSurfaces(extensionIndex);
-    expect([...mapRows.keys()].sort()).toEqual([...extensionIds].sort());
-    expect([...surfaceRows.keys()].sort()).toEqual([...extensionIds].sort());
-
-    const sharedCount = Number.parseInt(/Its (\d+) recursive\s+regular files/u.exec(extensionIndex)?.[1] ?? "", 10);
-    expect(sharedCount).toBe(countRegularFiles(path.join(root, "extensions/_shared")));
-
-    for (const [index, entrypoint] of pkg.pi.extensions.entries()) {
-      const id = extensionIds[index]!;
-      const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
-      const mapRow = mapRows.get(id);
-      const surfaceRow = surfaceRows.get(id);
-
-      expect(mapRow, `missing extension map row: ${id}`).toBeDefined();
-      expect(surfaceRow, `missing manifest surface row: ${id}`).toBeDefined();
-      expect(mapRow?.files).toBe(countRegularFiles(path.dirname(path.join(root, entrypoint))));
-      expect(mapRow?.entrypoint).toBe(entrypoint.slice(2));
-      expect(mapRow?.manifest).toBe(path.relative(root, manifestPath));
-      expect(mapRow?.manual).toBe(manifest.docsPath);
-      expect(existsSync(path.join(root, entrypoint)), `missing entrypoint: ${entrypoint}`).toBe(true);
-      expect(existsSync(manifestPath), `missing manifest: ${manifestPath}`).toBe(true);
-      expect(existsSync(path.join(root, manifest.docsPath)), `missing docsPath from ${manifestPath}`).toBe(true);
-      expect(surfaceRow).toEqual({
+      expect(rows.get(id)).toEqual({
         tools: manifest.provides.tools,
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
-        shortcuts: manifest.provides.shortcuts ?? [],
+        risk: manifest.risk,
+        manual: manifest.docsPath,
       });
-      for (const testPath of manifest.tests) {
+      expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);
+      expect(pkg.files).toContain(manifest.docsPath);
+      expect(manifest.sourceAuditPath).toBeNull();
+      for (const testPath of manifest.tests)
         expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);
-      }
-
-      if (manifest.sourceAuditPath !== null) {
-        expect(manifest.sourceAuditPath.startsWith(sourceAuditUrlPrefix), manifestPath).toBe(true);
-        const repositoryPath = manifest.sourceAuditPath.slice(sourceAuditUrlPrefix.length);
-        expect(existsSync(path.join(root, repositoryPath)), `missing source audit from ${manifestPath}`).toBe(true);
-      }
     }
-
     const sourceGraph = featureDependencyGraph(extensionIds);
-    const columnGraph = new Map([...mapRows].map(([id, row]) => [id, row.dependencies]));
-    const sectionGraph = documentedDependencyGraph(extensionIndex);
-    expect(columnGraph).toEqual(sourceGraph);
-    expect(sectionGraph).toEqual(sourceGraph);
     expect([...sourceGraph].filter(([, dependencies]) => dependencies.length > 0)).toEqual([
       ["agents", ["workflows"]],
       ["loop", ["workflows"]],
     ]);
-    expect(extensionIndex).toContain("`loop → workflows/run-read.ts`");
+    expect(extensionDocs).toContain("`agents → workflows`");
+    expect(extensionDocs).toContain("`loop → workflows/run-read.ts`");
   });
 
-  it("keeps all sixteen Package workflows aligned across the public index and ownership matrix", () => {
-    const workflowNames = packagedWorkflowNames();
-    expect(workflowNames).toHaveLength(16);
-    expect(packageWorkflowNamesFromIndex(extensionIndex).sort()).toEqual([...workflowNames].sort());
-    expect(ownershipMatrix).toContain("Sixteen Package workflow names");
-    expect(ownershipMatrix).not.toContain("Only four Package names");
+  it("keeps all sixteen Package workflows in the public workflow guide", () => {
+    expect(documentedWorkflowNames(workflowDocs).sort()).toEqual([...packagedWorkflowNames()].sort());
+    expect(workflowDocs).toContain("`task` is a group-only namespace");
   });
 
   it("binds the MIT package to the clean repository identity", () => {

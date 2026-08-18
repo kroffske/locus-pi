@@ -3,7 +3,7 @@
 The bundled entry point is
 [`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md).
 The complete runtime, trust, replay, and artifact reference is
-[`docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md).
+[`REFERENCE.md`](REFERENCE.md).
 
 ## Contract: Design, review, Build
 

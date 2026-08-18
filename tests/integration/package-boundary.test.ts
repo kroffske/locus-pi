@@ -67,10 +67,10 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "workflow-creator/svg",
 ] as const;
 
-function publicReadmeWorkflowsSection(): string {
-  const section = publicReadme.split("\n## Workflows\n")[1]?.split("\n## ")[0];
-  if (section === undefined) throw new Error("README is missing the Workflows section");
-  return section;
+function publicReadmeWorkflowNames(): string[] {
+  const section = publicReadme.split("## Curated Package workflows\n")[1]?.split("\n## ")[0];
+  if (section === undefined) throw new Error("README is missing the Curated Package workflows section");
+  return [...section.matchAll(/^\| `([^`]+)`/gmu)].map((match) => match[1]!).sort();
 }
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
@@ -316,23 +316,13 @@ beforeAll(() => {
 
 describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
-    const section = publicReadmeWorkflowsSection();
-    expect(section).toContain("extensions/workflows/examples/");
-
-    const headings = [...section.matchAll(/^### (\S+)$/gmu)].map((match) => match[1]!);
-    const namespaces = [...new Set(EXPECTED_PACKAGE_WORKFLOW_NAMES.map((name) => name.split("/")[0]!))];
-    expect([...headings].sort()).toEqual([...namespaces].sort());
-
-    for (const name of EXPECTED_PACKAGE_WORKFLOW_NAMES) {
-      const [namespace, child] = name.split("/") as [string, string?];
-      const subsection = section.split(`### ${namespace}\n`)[1]?.split("\n### ")[0];
-      expect(subsection, `README documents the ${namespace} namespace`).toBeDefined();
-      if (child) {
-        expect(subsection, `README names ${name} in its ${namespace} section`).toMatch(
-          new RegExp(`\`(?:${namespace}/)?${child}\``, "u"),
-        );
-      }
-    }
+    expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
+    const prose = publicReadme.replace(/\s+/gu, " ");
+    expect(prose).toContain("five curated Package workflow namespaces with sixteen runnable names");
+    expect(prose).toContain("the five curated workflow namespaces and their sixteen runnable names");
+    expect(prose).toContain(
+      "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
+    );
   });
 
   it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {

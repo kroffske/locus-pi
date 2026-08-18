@@ -76,11 +76,10 @@ describe("design-first readable workflow authoring", () => {
     "skills/locus-pi-workflows/SKILL.md",
     ".agents/agents/workflow-author.md",
     "extensions/workflows/AUTHORING.md",
-    "docs/extensions/active/workflows.md",
+    "extensions/workflows/REFERENCE.md",
     "extensions/workflows/workflow-tool.ts",
     "extensions/workflows/manifest.json",
     "extensions/workflows/examples/README.md",
-    "docs/source-audit/workflows.md",
   ];
 
   it.each(authoringSurfaces)("keeps Design -> review -> Build continuous by default on %s", (relativePath) => {
@@ -129,8 +128,8 @@ describe("design-first readable workflow authoring", () => {
     ]) {
       expect(source(relativePath)).toContain(canonical);
     }
-    expect(source("docs/extensions/active/workflows.md")).not.toContain("/workflow-run <name|path>");
-    for (const relativePath of ["docs/extensions/active/workflows.md", "docs/runtime/workflow-run-storage.md"]) {
+    expect(source("extensions/workflows/REFERENCE.md")).not.toContain("/workflow-run <name|path>");
+    for (const relativePath of ["extensions/workflows/REFERENCE.md", "docs/workflows.md"]) {
       const text = source(relativePath);
       expect(text).toContain("/workflows run <name|path> --output-dir <path>");
       expect(text).not.toContain("/workflows run --output-dir <path>");
@@ -141,7 +140,7 @@ describe("design-first readable workflow authoring", () => {
     "skills/locus-pi-workflows/SKILL.md",
     ".agents/agents/workflow-author.md",
     "extensions/workflows/AUTHORING.md",
-    "docs/extensions/active/workflows.md",
+    "extensions/workflows/REFERENCE.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
     expect(source(relativePath)).toContain("npx @kroffske/locus-pi check-workflow-source");
   });
@@ -156,7 +155,7 @@ describe("design-first readable workflow authoring", () => {
   });
 
   it("keeps the manual hello-world inside the enforced input-normalization grammar", () => {
-    expect(source("docs/extensions/active/workflows.md")).toContain(
+    expect(source("extensions/workflows/REFERENCE.md")).toContain(
       'const task = typeof input === "string" && input.trim() ? input.trim() : "list the cwd";',
     );
   });
@@ -166,7 +165,7 @@ describe("design-first readable workflow authoring", () => {
       "extensions/workflows/AUTHORING.md",
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
       "README.md",
     ];
@@ -184,7 +183,7 @@ describe("design-first readable workflow authoring", () => {
       "extensions/workflows/AUTHORING.md",
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
       "README.md",
     ];
@@ -200,13 +199,13 @@ describe("design-first readable workflow authoring", () => {
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/runtime/workflow-run-storage.md",
+      "docs/workflows.md",
     ]) {
       const text = source(relativePath);
       expect(text).toContain("<pwd>/tmp/<workflow-name>");
       expect(text).not.toContain("outputs/<workflow-name>");
     }
-    const storage = source("docs/runtime/workflow-run-storage.md");
+    const storage = source("docs/workflows.md");
     expect(storage).toContain("runs/<runId>/");
     expect(storage).toContain("outputs/    human-readable host projection");
     expect(storage).toContain("runtime/    machine evidence and continuation authority");
@@ -256,7 +255,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toMatch(/acknowledgement/iu);
@@ -547,7 +546,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toContain(".pi/workflows/<name>/<name>.design.md");
@@ -603,7 +602,7 @@ ${skill[1] ?? ""}
     for (const relativePath of [
       "skills/locus-pi-workflows/SKILL.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
       "extensions/workflows/references/patterns.md",
     ]) {
       const text = source(relativePath);
@@ -616,7 +615,7 @@ ${skill[1] ?? ""}
     expect(authoring).toContain("requires at least one work item");
     expect(authoring).not.toContain("requires at least one caller-supplied item");
     expect(authoring).not.toContain("[...items]");
-    expect(source("docs/extensions/active/workflows.md")).toContain("10,000 physical attempts/run");
+    expect(source("extensions/workflows/REFERENCE.md")).toContain("10,000 physical attempts/run");
   });
 
   it("omits default per-attempt fuse fields from standard authoring output", () => {
@@ -624,7 +623,7 @@ ${skill[1] ?? ""}
       "extensions/workflows/AUTHORING.md",
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ].flatMap((relativePath) => declaredStandardDocSnippets(relativePath));
 
     for (const snippet of standardSnippets) {
@@ -635,7 +634,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toMatch(/omit(?:s)? `maxToolCalls` and `timeoutMs`/iu);
@@ -651,7 +650,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).not.toMatch(/maxItems\s*:\s*64/u);
@@ -670,7 +669,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toContain("plan.md");
@@ -693,9 +692,8 @@ ${skill[1] ?? ""}
   it("links canonical agent, authority, event, and human-unit budget semantics", () => {
     const skill = source("skills/locus-pi-workflows/SKILL.md");
     const author = source(".agents/agents/workflow-author.md");
-    const manual = source("docs/extensions/active/workflows.md");
-    const agentsAudit = source("docs/source-audit/agents.md");
-    const workflowsAudit = source("docs/source-audit/workflows.md");
+    const manual = source("extensions/workflows/REFERENCE.md");
+    const agentsManual = source("extensions/agents/README.md");
 
     expect(manual).toContain('agent(prompt, { agent: "default" })');
     expect(manual).toContain("project `.agents/agents/`");
@@ -718,8 +716,8 @@ ${skill[1] ?? ""}
       );
       expect(text).toMatch(/SDK timeout.*later transport backstop/isu);
     }
-    expect(agentsAudit).toContain("project -> user -> package precedence");
-    expect(workflowsAudit).toContain("no Locus items count or character policy");
+    expect(agentsManual).toContain("project -> user -> package precedence");
+    expect(manual).toContain("no Locus items count or character policy");
   });
 
   it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {
@@ -778,7 +776,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/SKILL.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toContain("invokeWorkflow");
@@ -794,7 +792,7 @@ ${skill[1] ?? ""}
       "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
       ".agents/agents/workflow-author.md",
       "extensions/workflows/AUTHORING.md",
-      "docs/extensions/active/workflows.md",
+      "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
       expect(text).toMatch(/fresh model (?:output|discovery)/iu);

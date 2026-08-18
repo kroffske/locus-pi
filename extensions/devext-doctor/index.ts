@@ -103,7 +103,7 @@ function doctorBlock(compact = false): OperatorBlock {
       ],
       metadata: [
         "Evidence boundary: inventory/manifests snapshot only; not runtime proof.",
-        "Details: docs/extension-index.md; manifests under extensions/**",
+        "Details: docs/extensions.md; manifests under extensions/**",
       ],
       controls: ["Action: /devext task-lifecycle <id> <status>"],
     };
@@ -127,7 +127,7 @@ function doctorBlock(compact = false): OperatorBlock {
     metadata: [
       "Evidence boundary: inventory/manifests snapshot only; disabled or listed extensions are not runtime-proven.",
       "Cleanup: clears on next unrelated input.",
-      "Details: docs/extension-index.md; manifests under extensions/**",
+      "Details: docs/extensions.md; manifests under extensions/**",
     ],
     controls: ["Action: /devext task-lifecycle <task-id> <target-status>"],
   };

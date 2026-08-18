@@ -1,21 +1,6 @@
-# Workflows — Pi-native Dynamic-Workflow Runtime
+# Workflow runtime and DSL reference
 
-**behaviorStatus:** `active`
-**defaultEnabled:** `true` (default-loaded via `package.json#pi.extensions`)
-**ownershipStatus:** `locus-specific`
-**risk:** `critical`
-
-> **Canonical DSL / authoring reference.** This file is the single source of truth for
-> writing a `<name>.workflow.mjs`: the DSL surface, options, schema, trust model, name
-> resolution, run commands, result/journal layout, and the "what is NOT supported"
-> contract. Co-located pointer for in-extension reach: `extensions/workflows/AUTHORING.md`
-> (a thin link back here). To AUTHOR a new workflow from requirements, delegate to the
-> `workflow-author` catalog agent (`.agents/agents/workflow-author.md`); its persona
-> carries the operational contract inline and points here for edge-cases. Any other
-> copy should be a thin link to this page, not a fork. The in-extension pointer is
-> `extensions/workflows/AUTHORING.md`.
-
----
+This is the advanced implementation reference for the `workflows` extension. New operators should start with [`README.md`](README.md) and [`../../docs/workflows.md`](../../docs/workflows.md); workflow authors should start with [`AUTHORING.md`](AUTHORING.md).
 
 ## What it is
 
@@ -66,25 +51,6 @@ authoring handle; it is not enforced.
 
 ---
 
-## STATUS
-
-**Runtime works — proven live.** The agent bridge, journal, runner, examples, and test
-suite are implemented and unit-tested against a mocked `createAgentSession` (same injection
-pattern as `agent-sdk-host.test.ts`), AND verified end-to-end live: running the `live-smoke`
-example through `pi` with a real model spawned two real child agent sessions that completed
-with real session ids. See "Run a real workflow (live)" below.
-
-### PENDING SEAMS
-
-| Seam                                | Location                                                                                                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bounded concurrency                 | `extensions/workflows/runtime/workflow-runtime.ts` `runScheduled()`                                         | DONE. `parallel()`/`pipeline()` run through a bounded worker pool (`SCHEDULER_WIDTH = 4`) that preserves input ordering; width bounds each `runScheduled` call, not globally, so nested fan-out used to multiply. The **global limiter** now exists: every run applies `DEFAULT_WORKFLOW_BUDGET.concurrency` to the leaf `AgentConcurrencyGate` (see "Run budget"). `SCHEDULER_WIDTH` tuning and worktree-isolated real concurrency remain a future scheduler task.                                                                                                                             |
-| Git-worktree isolation              | `workflow-agent-bridge.ts`, `workflow-worktree.ts`                                                          | DONE for `workspaceMode: "worktree"` / `"temporary-worktree"`: each isolated agent gets a retained `.pi/locus-pi/runs/<runId>/runtime/worktrees/<call-id>/` git worktree before child execution. Merge-back remains out of scope.                                                                                                                                                                                                                                                                                                                                                               |
-| Trusted script execution            | `extensions/workflows/runtime/workflow-runner.ts` `loadWorkflowScript()`                                    | Author scripts are **reviewed trusted input**. Default `self-contained-static` restricts declared module edges for identity evidence; explicit `entry-only` keeps full modular Node.js access. Neither mode isolates capabilities. A real isolate is a future seam, not current protection.                                                                                                                                                                                                                                                                                                     |
-| Owner-default agent + model routing | `extensions/workflows/runtime/workflow-runtime.ts`, `workflow-agent-bridge.ts`, `.agents/agents/default.md` | DONE. Bare `agent(prompt)` resolves to catalog agent `default`; explicit `agent(prompt, { agent: "quick_task" })` keeps the mechanical worker path. Model routing resolves `opts.model` → `opts.modelRole` → the agent's frontmatter tier → `ctx.model` through `ctx.modelRegistry.find`, and the resolved model is what `createSession` receives. An unresolvable concrete `provider/id` selector fails the call by name with no child spawned; an unassigned role degrades to `ctx.model` and records the degradation. `agent_end` carries `executedModel`, read back from the child session. |
-
----
-
 ## Curated Package workflows
 
 | Workflow                      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -109,195 +75,6 @@ with real session ids. See "Run a real workflow (live)" below.
 All sixteen shipped names use the `standard` source profile. `/workflows info`
 explains that this profile classifies source shape, not runtime behavior or model
 choice; catalog rows omit the internal label.
-
-The retired `requirements-grill`, `review`, and `review-fix` namespaces
-overlapped `task/plan`, modular `post-code-review`, and `implement`. They are no
-longer registered or packed. The following historical notes explain their former
-contracts; they are not instructions for a current Package workflow.
-
-### Retired review-family history
-
-`review` always receives a non-empty semantic string. A shaped
-clarifier decides `continue` or `needs_operator`. Continue starts the five review
-stages and publishes the exact intent. Needs-operator publishes exact
-`intent.md` and readable `clarification-questions.md`, returns both complete
-refs, declares `awaiting_operator` without changing that returned payload, and
-stops. A later invocation carries only non-empty answers in `input`
-and attaches those exact same-origin refs through host `continuation`; the
-runtime verifies and copies them before workflow code starts. The workflow then
-requires the successful source run's terminal result to name the same complete
-refs, publishes `clarification-answers.md`, and runs the same five stages.
-
-Every handoff remains exact text. The runtime publishes `scope.md`,
-`inventory.md`, `units.md`, `questions.md`, and finally the verifier's exact
-answer as `review.md` under the current run's artifact store. The verifier treats
-questions as hypotheses, reopens code, callers, tests, and documentation, and
-turns only confirmed problems into `### F<n>` findings. No publisher agent,
-task-local report, model-written status envelope, or path extraction participates.
-Handoffs pass forward as exact text. The entry orchestrates and bounds — non-empty
-text and per-stage character caps — and does not grade Markdown grammar: stable
-`C<n>` ids and the `C<n>: U<n>; ...` reconciliation ledgers are prompt discipline
-that the interrogator and verifier reconcile and report, not a host gate that ends
-a run. The one inventory shape the entry reads is `## No changes`: declared alone,
-it finishes the run with a `no-changes` result instead of spending unit planning,
-interrogation, and verification on an empty scope. Shaped answers that must be
-machine-read still use `agent({ schema })`, where the runtime re-asks the child
-with the validator errors before failing closed.
-
-The unit planner, interrogator, and verifier may also use `ast_index`, an
-allowlisted argv tool over the installed `ast-index` binary, for code-symbol
-relationships. Its database lives in the user cache directory, so index
-refreshes never touch reviewed source. A missing binary or index degrades to
-`grep`/`find` and is recorded as a coverage limit instead of blocking the
-review.
-
-The two review workflows have independent package directories:
-`extensions/workflows/examples/review/` and
-`extensions/workflows/examples/review-fix/`. The reader algorithm lives in
-`review/README.md`, and `extensions/workflows/examples/README.md` inventories
-every shipped example. Both entries write their stage prompts inline under one
-`COMMON` contract; `review` additionally keeps the two role charters
-`resources/interrogator.prompt.md` and `resources/verifier.prompt.md`, and
-`review-fix` keeps none. A charter file carries the stable role instructions and
-the dynamic handoffs for its one stage. `promptFile()` resolves paths relative to
-the original workflow source, rejects lexical or symlink escapes, copies bytes
-once into the run directory, and records SHA-256 evidence.
-
-The remediation call keeps operator meaning and host state separate:
-
-```json
-{
-  "name": "review-fix",
-  "input": "Fix the pagination defects; keep the public API unchanged.",
-  "continuation": {
-    "originRunId": "...",
-    "artifactRefs": [{ "runId": "...", "artifactId": "...", "name": "review.md", "sha256": "..." }]
-  }
-}
-```
-
-The continuation must contain exactly one complete immutable reference named
-`review.md`. The host verifies all four fields, that the source run succeeded,
-and that the reference is present in that run's terminal projection, then copies
-the bytes into the new run with source lineage before workflow code starts. Since
-2026-07-29 the entry checks the count and the name and reads those verified bytes:
-it no longer re-derives the host's proof, and no longer asserts that the bytes
-came from the `verify-review` stage of a Package workflow named `review` —
-provenance the host does not check and no agent can. The operator picks the source
-run through the closed `continuation` control and the host verifies what they
-picked; the accepted residual risk is remediating against a review from some other
-run, which re-running with the right source fixes. See `## Curated Package
-workflows` below for the same trade in `task/plan` → `task/implement`.
-A full-tool selector receives the operator text and immutable review,
-then returns 1–20 `{id,note,dependsOn}` units through the fail-closed shaped
-agent boundary. Deterministic code bounds all notes and handoffs, parses complete
-`### F<n>` blocks, rejects duplicate/unknown ids, duplicate/self/unknown edges,
-unselected dependencies and cycles, and computes stable Kahn order with original
-review order as its tie-break.
-
-One scope resolver receives only the selected complete finding blocks.
-Exactly one sequential write-capable agent then owns each selected finding, so
-overlapping mutations have a visible order and one accountable writer. A separate
-checker reopens the full
-diff and may call `repository_check` with only a `package.json` script whose exact
-command was frozen when the workflow runner was created, before any writer. A
-script-map addition, removal, or modification is refused in both the launch checkout and the
-materialized snapshot. The host, not the model, supplies argv, timeout, output bound, and a
-disposable external Git worktree containing the current tracked/untracked bytes;
-initialized submodule source is recursively materialized without copying Git
-administrative metadata. The operator checkout is never the command cwd. A fresh re-review
-receives the immutable original review, bounded worker answers, and check
-evidence; it reopens the source and reports every original
-finding, dependency, and regression. `agent({ artifact })` gives the automatic answers stable names:
-`scope.md`, `worker-F<n>.md`, `check-evidence.md`, and `re-review.md`. The final
-`re-review.md` answer is also the workflow result. No input helper, unit planner,
-verifier/publisher pair, `fix-report.md`, or task-local publication remains.
-
-All `review-fix` agents run in the operator's launch checkout with
-`workspaceMode: "project"` rather than in a linked worktree. That is a
-deliberate trade: the review may cover staged, unstaged, or untracked work that
-exists in no commit, and a worktree at some commit would hand the fix agent
-different code than the one that was reviewed. The compensating boundaries are
-that the operator starts the workflow explicitly, chooses every finding id,
-receives one writer per finding, and gets independent check evidence plus a
-fresh re-review. Prompts forbid commit, push, merge, deploy, and discarding
-uncommitted work the agent did not create; every change stays uncommitted for an
-ordinary diff review. Scope resolution, checking, and re-review prompts forbid
-project edits, but those agents still receive the full tool set. A declared package
-script is operator-owned executable code, so the disposable worktree is a
-mutation boundary for the checkout, not an OS/network sandbox.
-
-Both entry scripts use only the injected DSL and retain default
-`self-contained-static` identity; `review-fix` no longer imports a helper. Prompt
-resources still receive immutable run copies and SHA-256 evidence. Repository
-and private-forge evidence acquisition remains child-agent-owned. Prompt text and
-permission metadata are not a sandbox; resource, artifact, or child execution
-failure remains fail-closed.
-
-Runtime-owned Markdown under `outputs/` is the human-facing evidence. Mandatory
-`runtime/result.json`
-remains the machine-readable run envelope, while
-`.pi/locus-pi/runs/<runId>/runtime/artifacts/index.json` is the canonical map from
-logical artifact identities to digest-bound bytes.
-
-These five namespaces and twelve child refs are what
-`extensions/workflows/examples/` currently holds, and that directory **is** the
-Package registry — a folder is registered by its same-named root entry or by
-one or more direct child entries when it is group-only. The set stays small
-because it is a public surface: `package.json#files` still decides what an
-install ships, and a package-boundary test fails when the two disagree, so a
-workflow that resolves in a checkout can never be missing after `npm i`.
-
-`task` is a group-only namespace: `/workflows run task` is rejected, while
-`task/plan` and `task/implement` are runnable children. They never invoke one another, and
-planning never continues into execution by itself. The installed
-`locus-task-workflow` skill tells the main Pi agent to select one shared
-`tmp/<select-name>` workspace, run `task/plan`, read `plan.md`, `steps.md`, and the
-generated `execute.workflow.mjs` — and then stop, present them, and end the turn.
-The `task/plan` result text lists the operator's next actions; it is a description of
-those options, not an instruction to the reading agent, and neither it nor a
-plausible-looking plan is approval. Execution begins only when the operator asks
-for it in a later turn.
-
-Once they do, the skill appends one single-line step reference to `todo_write`
-per complete block and starts one top-level `task/implement` run with the exact
-matching block read from disk. Using `append` preserves unrelated session todos;
-explicitly starting each next workflow reference keeps them outside the workflow
-sequence. The main agent marks a todo complete only after `history/S<n>.md` says
-`Status: completed` and required checks passed. A failed or blocked step pauses
-automatic continuation before the next step, and the host's 20-continuation
-safety pause resumes through `/todo run`.
-
-The generated `execute.workflow.mjs` is the operator's second route. `task/plan`'s
-third agent renders it from the fixed template in
-`examples/task/resources/execute-template.prompt.md`, loaded through
-`promptFile()`: one `phase()`/`log()`/`agent()` group per `## S<n>` block in
-catalog order, then a summary agent that writes `result.md`, then
-`publishPrimaryFile("result.md")`. Every step prompt is literal author-known
-text, so the generated script parses no catalog at runtime, and each step prompt
-reads its own `history/S<n>.md` first so a rerun skips credibly completed work.
-It is written to the workflow workspace and never to `.pi/workflows/`,
-`.claude/workflows/`, or `.agents/workflows/`, so it is not a registered workflow
-and resolves only as `/workflows run <workspace>/execute.workflow.mjs`. Running
-it executes trusted JavaScript with full host authority: the operator reads it
-first, and plan approval is not run approval.
-
-This split is what makes the dynamic list recoverable without a JavaScript plan
-parser. Planning resume replays the completed reconnaissance call and reruns the
-unfinished planner. Implementation steps are already separate top-level runs;
-after a session restart, a main agent reconstructs todos by reading `steps.md`
-and `history/*.md` semantically. Old history remains evidence when a plan is
-replaced.
-
-Planning and scripting prompts forbid project edits, forbid running any step,
-and forbid executing the script they write. The implementation prompt permits only
-the current step and forbids stage/commit/push/PR/merge/deploy/remote mutation,
-stash, and destructive cleanup. Every call uses Pi's default workflow agent and
-its configured model route; neither workflow source names a provider, model,
-model role, or specialized agent.
-
-The old `plan` critic-loop and retired `requirements-grill` diagrams are removed.
-The remaining hand-authored Package diagram documents `post-code-review`.
 
 ## Authoring patterns
 
@@ -1110,26 +887,6 @@ Interactive `pi` (no `-p`) renders the live progress panel, and for
 prompt for writes according to `tools.approvalMode` and `tools.approval.*`.
 `locus-pi` no longer adds its own workflow launch gate before runtime starts.
 
-### Local subagent chain proof
-
-The project-local smoke workflow `.pi/workflows/local-test-append-smoke.workflow.mjs`
-is not part of the curated Package registry, but it is the current repository proof
-for the local subagent chain. It runs `local_file_worker` sequentially as Alpha,
-Beta, and Gamma, forwards command text between steps, writes exactly three lines to
-`.local/test.md`, and returns `ok:false` if any child result is not successful.
-
-Fresh evidence:
-
-- T-163 recorded Pi workflow run `20260628-000924-5deb`; `result.json`,
-  `journal.ndjson`, and three child `agent-sdk-*.jsonl` reports prove the
-  Alpha -> Beta -> Gamma chain completed.
-- T-164 recorded an interactive tmux/Pi run `20260628-002237-798f` under
-  `.locus/runtime/reports/tmux-qa-t164-20260628T002235Z/`. The final capture shows
-  `workflow local-test-append-smoke (...) - OK  6/6` and nested parent/child rows
-  for alpha, beta, and gamma without incoherent overlap.
-
----
-
 ## Authoring a new workflow
 
 Authoring is design-first and continuous by default. A raw request first creates
@@ -1163,7 +920,7 @@ is a visibly separate child after that implementer. The reviewed Design states
 whether review is advisory or blocking and whether any finite retry exists.
 Plan approval alone does not start workflow authoring, no runtime parser reads
 `steps.md`, and this path adds no Package workflow. See the
-[Plan-to-sequential pattern card](../../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+[Plan-to-sequential pattern card](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
 
 Design and Build are for a graph the fixed template cannot express — a reviewer
 between steps, a bounded revision loop, concurrency, a different publication. The
@@ -1299,7 +1056,7 @@ export default async function runWorkflow(dsl, input) {
 
 This example passes the machine-enforced `standard` grammar. The complete rule
 list is in
-[`extensions/workflows/AUTHORING.md`](../../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape).
+[`extensions/workflows/AUTHORING.md`](AUTHORING.md#machine-enforced-standard-source-shape).
 In a locus-pi source checkout, Build checks an authored file with:
 
 ```bash
@@ -1625,8 +1382,7 @@ in Package prompts or overloading semantic input.
 `runWorkspaceDir()` is removed and throws
 `WorkflowRunWorkspaceRemovedError`. New run evidence has no `workspace/`
 directory. Auto-captured readable material goes to `outputs/`; machine evidence
-and transcripts go to `runtime/artifacts/`. See
-`docs/runtime/workflow-run-storage.md`.
+and transcripts go to `runtime/artifacts/`. See [`docs/workflows.md`](../../docs/workflows.md).
 
 `publishPrimaryFile(relativePath)` validates a regular, non-symlink, non-empty
 file beneath the workflow workspace and exposes absolute/relative path, byte count, and
@@ -2569,8 +2325,7 @@ read the value. An agent's **frontmatter** tier in that namespace is read as the
 role it always named, so a catalog copied from an older release resolves through
 the roles table instead of refusing every call as an unresolvable provider. The
 degradation note for an unassigned one carries an extra sentence naming the
-spelling to fix. This is package history being repaired, not a hole in the
-grammar, and it is bounded on both sides: `pi/<token>` where the token names no
+spelling to fix. This compatibility rule is bounded on both sides: `pi/<token>` where the token names no
 role is an ordinary concrete selector and still fails by name, and a per-call
 `model` / `modelRole` — code written today against the current grammar — still
 refuses with the migration hint rather than being rewritten.
@@ -2638,4 +2393,4 @@ reports the rules but never resolves them into a claimed future execution graph.
 
 `workflows` is registered in `package.json#pi.extensions` and loads by default; the
 `/workflows` command and `workflow` tool are available without manual loading.
-See [docs/extension-ownership-matrix.md](../../extension-ownership-matrix.md) for the full status.
+See [Architecture and repository boundaries](../../docs/architecture.md) for the package status and publication boundary.

@@ -49,8 +49,8 @@
     "ui": []
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/ast-structural-edit.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/omp-tools.md",
+  "docsPath": "extensions/ast-structural-edit/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/ast-structural-edit/tools.test.ts",
     "tests/shared/security/security.test.ts",

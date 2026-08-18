@@ -130,8 +130,8 @@
     "ui": ["setWidget", "setStatus", "setEditorComponent", "theme", "select", "input", "editor", "confirm"]
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/plan.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/plan.md",
+  "docsPath": "extensions/plan/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/plan/plan-prompt-commands.test.ts",
     "tests/shared/operator-ui/goal-operator-ui.test.ts",

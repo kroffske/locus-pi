@@ -48,8 +48,8 @@
     "ui": ["select", "input", "editor", "custom"]
   },
   "risk": "medium",
-  "docsPath": "docs/extensions/active/ask-user-question.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/ask-user-question.md",
+  "docsPath": "extensions/ask-user-question/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/ask-user-question/ask-user-question.test.ts",
     "tests/shared/operator-ui/operator-interaction.test.ts",

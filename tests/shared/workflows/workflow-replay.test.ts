@@ -225,7 +225,7 @@ export default async function runWorkflow(dsl) {
 
 describe("workflow --resume replays recorded agent calls", () => {
   it("documents every closed replay refusal reason in the manual and manifest", () => {
-    const manual = readFileSync(path.resolve("docs/extensions/active/workflows.md"), "utf8");
+    const manual = readFileSync(path.resolve("extensions/workflows/REFERENCE.md"), "utf8");
     const manifest = readFileSync(path.resolve("extensions/workflows/manifest.json"), "utf8");
     for (const reason of Object.keys(REPLAY_REFUSAL_REASONS) as WorkflowReplayRefusalReason[]) {
       expect(manual).toContain(`\`${reason}\``);

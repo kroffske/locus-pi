@@ -1,21 +1,32 @@
 # Security Policy
 
-The latest published `@kroffske/locus-pi` release is the supported version.
-No response or remediation SLA is promised.
+## Supported releases
+
+| Version | Supported |
+| ------- | --------- |
+| `0.3.x` | Yes       |
+| `<0.3`  | No        |
+
+Unreleased source snapshots and historical commits are not supported releases.
 
 ## Report a vulnerability
 
-Use GitHub's private vulnerability-reporting form: repository **Security**
-tab → **Report a vulnerability**. Include the affected version or commit, a
-minimal reproduction, the realistic impact, and only redacted logs. Do not
-open a public issue, pull request, or discussion for a suspected
-vulnerability.
+Use GitHub private vulnerability reporting from the repository's **Security** tab. Include:
+
+- affected version, commit, extension, command, tool, or workflow;
+- a minimal reproduction and realistic impact;
+- whether filesystem writes, subprocesses, network access, browser access, models, or credentials are involved;
+- suggested mitigations, when known;
+- only redacted logs and artifacts.
+
+Do not open a public issue, pull request, discussion, or workflow transcript for a suspected vulnerability.
 
 ## Security boundaries
 
-- Workflow scripts are trusted JavaScript with full Node.js host access.
-  They are not sandboxed.
-- Pi approval settings remain the enforcement owner for approved tool
-  actions.
-- The `security-gate` extension records audit information only; it is not a
-  blocker, sandbox, or malware scanner.
+- Extension and workflow code runs inside the trusted Pi/Node.js host.
+- Project and user workflows are JavaScript and are not sandboxed.
+- Pi approval settings remain the enforcement owner for approved tool actions.
+- `security-gate` records audit observations; it is not a blocker, sandbox, malware scanner, or vulnerability-reporting channel.
+- Secret scanning, dependency auditing, path checks, and evidence journals reduce risk but do not prove a release or workflow safe.
+
+No response or remediation SLA is promised.

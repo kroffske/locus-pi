@@ -350,5 +350,5 @@ artifact against live repository evidence.
 Workflow JavaScript runs in Pi’s main Node.js process with host filesystem,
 subprocess, and network authority. Worktrees and approval are evidence and
 consent, not a sandbox. Run only reviewed files. Full DSL, trust, replay, and
-artifact details: [`../../docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md)
+artifact details: [`../../extensions/workflows/REFERENCE.md`](../../extensions/workflows/REFERENCE.md)
 and [`../../extensions/workflows/AUTHORING.md`](../../extensions/workflows/AUTHORING.md).

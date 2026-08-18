@@ -148,8 +148,8 @@
     "ui": ["setWidget", "setStatus", "notify", "custom", "select", "input", "editor", "setEditorText"]
   },
   "risk": "critical",
-  "docsPath": "docs/extensions/active/workflows.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/workflows.md",
+  "docsPath": "extensions/workflows/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/workflows/workflow-authoring-contract.test.ts",
     "tests/shared/workflows/workflow-agent-choice.test.ts",
