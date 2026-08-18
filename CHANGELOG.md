@@ -6,19 +6,34 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
-- **The task namespace hands work between stages through files, not pasted
-  text.** `task/plan` now runs two agents and writes the step catalog as one
-  `step-<n>.md` file per step (no `steps.md`); the scripting phase moved into
-  the new `task/script` workflow, which renders `execute.workflow.mjs` from the
-  approved `plan.md` and `step-<n>.md` files on demand. `task/implement` now
-  takes only a step selector (a step id such as `S1` or a step file name) and
-  reads the step contract from the workspace file itself — the owner may edit
-  `plan.md` and `step-<n>.md` after planning, and every later run deliberately
-  reads the files on disk as the contract, with no added freshness or integrity
-  checks. The Package registry therefore exposes seventeen runnable names, and
-  the `task/plan` completion card now points at per-step-file implementation
-  while `task/script` results carry the generated script's explicit run
-  command.
+- **The task namespace hands work between stages through files, and planning is
+  decomposed for a weak model.** `task/plan` is now a no-ask pipeline: one
+  scope agent freezes `request.md`/`scope.md`, one context agent writes
+  `context.md`, three parallel analysts write `analysis/*.md`, one compose
+  agent writes `plan.md` plus one `step-<n>.md` file per step (no `steps.md`),
+  three parallel reviewers write `reviews/*.md`, one bounded correction
+  replaces the plan once, and a final verifier plus runtime choice publish
+  `plan.md` — or fail closed publishing `planning-blocker.md`. The run never
+  waits for an operator: unknowns become explicit assumptions and
+  pre-implementation prerequisites, so automated callers always reach a
+  terminal artifact. `task/implement` takes only a step selector (a step id
+  such as `S1` or a step file name) and reads the step contract from the
+  workspace file itself — the owner may edit `plan.md` and `step-<n>.md` after
+  planning, and every later run deliberately reads the files on disk as the
+  contract, with no added freshness or integrity checks.
+
+- **`task/script` became the separate root workflow `task-via-script`.** The
+  one-run route now owns its whole path: `task-via-script` runs the full
+  `task/plan` pipeline as its own depth-one saved-child planning stage in the
+  same workspace (replanning across existing files preserves compatible owner
+  edits), routes a blocked plan to a fail-closed blocker instead of rendering,
+  and otherwise renders `implement.workflow.mjs` (previously
+  `execute.workflow.mjs`) from the fixed template, one literal node per step
+  file. The generated draft still resolves only by explicit path and is never
+  executed by the render run. The Package registry still exposes seventeen
+  runnable names; the `task/plan` completion card points at per-step-file
+  implementation or a rerun after a fail-closed blocker, while
+  `task-via-script` results carry the generated script's explicit run command.
 
 - **Public documentation is now organized for external readers.** Cross-cutting guides are limited to `docs/`, extension manuals live beside their source as `extensions/<name>/README.md`, and historical ADR, PRD, milestone, and source-audit working notes are excluded from the public repository and npm documentation surface.
 

@@ -1,102 +1,99 @@
 # task workflows
 
 `task` is a group-only Package namespace. It is not runnable by itself; use
-`task/plan` to prepare a task, `task/implement` to execute one approved step,
-and `task/script` to optionally render the sequential execute script from the
-approved files. The shared prefix makes the relationship visible without
-pretending that planning approval and implementation are one automatic run.
+`task/plan` to prepare a task, and `task/implement` to execute one approved step.
+The shared prefix makes the relationship visible without pretending that
+planning approval and implementation are one automatic run. The one-run
+alternative lives beside the namespace as the separate root workflow
+`task-via-script`, which runs this same planning pipeline as its own stage and
+then renders a sequential implement script.
 
 ## `task/plan`
 
 `task/plan` is the planning half of the shipped task workflow. It accepts one
-task, uses one agent to map the live repository and one planning agent to write
-the plan and its dynamic implementation queue — one file per step.
-
-The workflow is intentionally small:
+task and runs a deliberately decomposed pipeline so that every stage stays
+small enough for a weak model: structure carries the run, model strength only
+accelerates it.
 
 ```text
 task
-  → reconnaissance agent
-      → context.md
-  → planning agent
-      → plan.md
-      → step-1.md … step-<n>.md
+  → scope agent            → request.md, scope.md
+  → context agent          → context.md
+  → three parallel analyses
+      → analysis/task-semantics.md
+      → analysis/repository-integration.md
+      → analysis/verification-strategy.md
+  → compose agent          → plan.md, step-1.md … step-<n>.md
+  → three parallel reviews
+      → reviews/plan-correctness.md
+      → reviews/repository-integration.md
+      → reviews/step-usability.md
+  → correction agent       → one bounded correction of plan and step files
+  → verification agent     → verification.md
+  → runtime choice         → ready | blocked
+      ready   → publish plan.md
+      blocked → blocker agent → publish planning-blocker.md
 ```
 
-There is no critic, review loop, Markdown parser, todo manager, script
-renderer, or model pin in the script. The agents inspect and write; JavaScript
-only orders the two calls and passes the reconnaissance text to the planner.
+There is no Markdown parser, todo manager, script renderer, or model pin in the
+script. The agents inspect and write; JavaScript orders the calls, holds the
+two parallel barriers, and routes the one final choice.
 
-**The run stops there.** `task/plan` implements nothing and starts nothing. It
-writes files and returns a result that says so. Execution is a separate act the
-owner takes after reading `plan.md` and the `step-<n>.md` files.
+**The run never asks the operator.** Every agent works under the same rule:
+missing evidence or an open decision becomes an explicit assumption or an exact
+pre-implementation prerequisite inside the planning files, and no concrete
+project value is ever invented. There is no operator gate and no continuation
+run, so an automated caller can always run planning to completion. When the
+final verification still finds the plan unusable, the run fails closed:
+`planning-blocker.md` becomes the published primary file, the result says
+BLOCKED, and the owner edits the task or the files and reruns.
+
+**The run stops there either way.** `task/plan` implements nothing and starts
+nothing. It writes files and returns a result that says so. Execution is a
+separate act the owner takes after reading `plan.md` and the `step-<n>.md`
+files.
 
 ## Workspace files
 
-Every child receives the same project-local workflow workspace. It defaults to
+Every stage receives the same project-local workflow workspace. It defaults to
 `<pwd>/tmp/plan/`; a caller using the `workflow` tool can select a shared
 directory such as `tmp/cron-to-dag`.
 
+- `request.md` — the exact task, byte-for-byte.
+- `scope.md` — the verbatim request plus outcome, targets, boundary,
+  exclusions, and open questions.
 - `context.md` — repository facts, relevant files, constraints, and unknowns.
+- `analysis/*.md` — the three independent analyses behind the plan.
 - `plan.md` — coherent top-level work units followed by outcome, approach,
-  dependencies, exclusions, and verification.
+  assumptions and prerequisites, dependencies, exclusions, and verification.
 - `step-<n>.md` — the executable task catalog, one file per step in execution
   order. Each file is one complete flat `## S<n> — ...` block with enough
   context for one fresh implementation agent; the `S<n>` in the heading matches
   the `<n>` in the file name.
-- `execute.workflow.mjs` — rendered later by `task/script`, only when the owner
-  chooses that route.
+- `reviews/*.md` — the three independent reviews of the proposed plan.
+- `verification.md` — the final standalone check with its ready or blocked
+  conclusion.
+- `planning-blocker.md` — written only when the run fails closed; names what
+  failed and what the owner can change before rerunning.
 
-The planner fully replaces `plan.md` and the `step-<n>.md` catalog on every
-successful run, deleting leftover step files a new shorter catalog does not
-replace. A selected workspace name is not a run id or audit id; callers may
-reuse it when they intend to replace the plan.
+The pipeline fully replaces its assigned files on every successful run,
+deleting leftover step files a new shorter catalog does not replace. A selected
+workspace name is not a run id or audit id; callers may reuse it when they
+intend to replace the plan.
 
 **The files on disk are the contract.** After planning, the owner may edit
-`plan.md` and any `step-<n>.md` before execution; `task/script` and
-`task/implement` read whatever the files say at run time and add no freshness or
-integrity checks. Deliberate owner edits are a feature; keeping the edited
+`plan.md` and any `step-<n>.md` before execution; `task/implement` and
+`task-via-script` read whatever the files say at run time and add no freshness
+or integrity checks. Deliberate owner edits are a feature; keeping the edited
 catalog coherent is the owner's responsibility.
-
-## `task/script` and the generated execute script
-
-`task/script` is the optional rendering step. One scripting agent reads
-`plan.md` and the frozen `step-<n>.md` catalog from the workspace and fully
-replaces `execute.workflow.mjs`. `resources/execute-template.prompt.md` holds
-both the agent's charter and the fixed source template it fills. The agent
-substitutes only a description, each step id, each step title, and each verbatim
-`## S<n>` block; it changes nothing else. The result is one
-`phase()`/`log()`/`agent()` group per step file in catalog order, then a summary
-agent that writes `result.md` from `plan.md` and `history/*.md`, then
-`publishPrimaryFile("result.md")`.
-
-Every step prompt is literal author-known text, so the generated script parses
-no catalog at runtime. Each step prompt reads its own `history/S<n>.md` first
-and returns the existing record unchanged when that step is already credibly
-complete, which is what makes rerunning the script safe after a failed step.
-
-Two boundaries hold the trust line:
-
-- It is written to the workflow workspace, never to `.pi/workflows/`,
-  `.claude/workflows/`, or `.agents/workflows/`. It is not a registered
-  workflow and does not resolve by bare name — only
-  `/workflows run <workspace>/execute.workflow.mjs` reaches it.
-- Running it is the owner's explicit act. Workflow JavaScript runs in Pi's main
-  Node.js process with full filesystem, subprocess, and network authority, so
-  read the file before running it. Approving a plan is not approving a run, and
-  rendering is not approval to run.
-
-The template deliberately omits loops, reviewers, retries, parsers, schemas,
-`try`/`catch`, and nested workflows. A graph that needs any of those uses the
-bespoke continuous-authoring route described below.
 
 ## Decomposition contract
 
 `plan.md` defines top-level work units before the `step-<n>.md` catalog
 decomposes them. One work unit owns a migration domain or responsibility
-boundary. Planning may use fresh-agent analysis to understand those units, but
-the planning owner reconciles the result into one owner-readable plan and
-freezes the final task catalog before execution.
+boundary. The analyses inform those units, but the compose agent reconciles the
+result into one owner-readable plan and freezes the final task catalog before
+execution.
 
 Every executable task is one flat block with exactly one structural heading:
 `## S<n> — <short title>`. It has no nested structural headings. Labeled prose
@@ -129,11 +126,11 @@ Default execution remains main Pi todo state plus one top-level
 `S1`. The installed `locus-task-workflow` skill owns that orchestration;
 neither Package workflow parses the catalog or dispatches another workflow.
 
-The generated `execute.workflow.mjs` is the second route: the operator runs
-`task/script` against the same workspace, reviews the rendered file, and runs
-`/workflows run <workspace>/execute.workflow.mjs`. It runs the same frozen
-step files as one sequential graph in a single run instead of one run per
-step, which is fewer moving parts but a coarser recovery unit.
+The one-run route is the separate root workflow `task-via-script`: it runs this
+same planning pipeline as its own stage — over an empty workspace or replanning
+across an existing one while preserving compatible owner edits — and then
+renders `implement.workflow.mjs`, which the owner reviews and runs by explicit
+path. See `../task-via-script/README.md`.
 
 For a graph the fixed template does not express, send `workflow-author` a
 normal authoring request: `Author a sequential project-local workflow from the
@@ -144,7 +141,7 @@ reviews it, and Builds matching source in the same turn. Do not inject
 only the user may separately request a pause after design. Plan writes only planning files into
 the workflow workspace and never writes a registered project workflow. Any
 optional reviewer after a generated step belongs to the bespoke design, not to
-Task Plan, Task Script, or Task Implement execution semantics.
+Task Plan or Task Implement execution semantics.
 
 ## Run and resume
 
@@ -153,14 +150,14 @@ Direct command use keeps the default workspace:
 ```text
 /workflows run task/plan Move the cron job into a DAG
 /workflows run task/plan --resume <runId> Move the cron job into a DAG
-/workflows run task/script --output-dir tmp/cron-to-dag
 /workflows run task/implement --output-dir tmp/cron-to-dag -- S1
 ```
 
 Resume requires unchanged workflow source and input. The runtime replays every
 completed answer and reruns the first unfinished call, so a `task/plan` run
-that failed in planning replays reconnaissance. Workspace files survive a
-failed run, so the agents can replace incomplete outputs.
+that failed in review replays scope, context, the analyses, and compose.
+Workspace files survive a failed run, so the agents can replace incomplete
+outputs.
 
 For the complete `task/plan → session todos → one task/implement run per step`
 protocol, use the installed `locus-task-workflow` skill. It calls the Package
@@ -193,11 +190,8 @@ applies selected findings from a post-code review.
 
 ## Boundaries
 
-- Planning and scripting agents are instructed not to modify project files, not
-  to run any step, and not to execute the script they write.
-- The scripting agent writes only inside the workflow workspace. It is told
-  never to write to `.pi/workflows/`, `.claude/workflows/`, or
-  `.agents/workflows/`.
+- Planning agents are instructed not to modify project files and not to run any
+  step; the run never waits for an operator answer and fails closed instead.
 - Calls use Pi's default workflow agent and its configured model route; the
   workflow source names no provider, model, model role, or specialized agent.
 - A missing task or step selector is handed to the agents as an explicit

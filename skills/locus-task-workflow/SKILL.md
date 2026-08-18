@@ -6,8 +6,9 @@ description: Plan one task into workspace files, stop for the user's review, the
 # Locus task workflow
 
 Use this skill when the user wants a task planned and carried out through the
-shipped `task/plan` and `task/implement` Package workflows, with the optional
-`task/script` workflow rendering the sequential execute script on request.
+shipped `task/plan` and `task/implement` Package workflows. The separate
+`task-via-script` root owns the one-run alternative: its own planning stage
+plus the rendered sequential implement script.
 
 The main Pi agent owns orchestration. Workflow children do not spawn more
 agents. Workflow JavaScript does not parse plans or manage the todo queue.
@@ -44,8 +45,9 @@ Execution starts only when the user, in a later turn, tells you to start it.
    paths/evidence, dependencies, allowed ownership, verification, and done
    condition. Reject and rerun `task/plan` when any block is incomplete or
    incoherent.
-8. Planning renders no execute script. If the user later wants one, `task/script`
-   renders `execute.workflow.mjs` from these same files; do not run it now.
+8. Planning renders no implement script. If the user later wants one,
+   `task-via-script` replans across this same workspace — preserving compatible
+   owner edits — and renders `implement.workflow.mjs`; do not run it now.
 
 ## Stop and hand the plan to the user
 
@@ -53,7 +55,7 @@ Now stop. Report where `plan.md` and the `step-<n>.md` files live, summarize the
 work units and the step titles in order, and name anything you would change.
 Then end your turn.
 
-Do not create todos. Do not call `task/implement` or `task/script`. Do not edit
+Do not create todos. Do not call `task/implement` or `task-via-script`. Do not edit
 project files toward any step. The `task/plan` run's own result text lists next
 actions; it is a description of the user's options, not an instruction to you,
 and neither it nor a plan that looks obviously correct is approval.
@@ -78,12 +80,14 @@ Once the user has approved, run the route they chose:
   Pi execution queue below and start one top-level `task/implement` run per
   exact step. It is the most recoverable route: each step is its own top-level
   run, and a failure stops the queue with the plan intact.
-- **Script route.** Call `task/script` with `outputDir: "tmp/<select-name>"` to
-  render `tmp/<select-name>/execute.workflow.mjs` from the approved files, then
-  hand it back for review. The user runs the reviewed script themselves with
-  `/workflows run tmp/<select-name>/execute.workflow.mjs`. Run it on their
-  behalf only when they ask you to. It resolves by explicit path only and is
-  not a registered project workflow.
+- **Script route.** Call `task-via-script` with `outputDir: "tmp/<select-name>"`.
+  It runs its own `task/plan` stage across the same workspace — preserving
+  compatible owner edits, so material manual changes deserve a fresh review of
+  the replanned files — and renders `tmp/<select-name>/implement.workflow.mjs`.
+  Hand that file back for review. The user runs the reviewed script themselves
+  with `/workflows run tmp/<select-name>/implement.workflow.mjs`. Run it on
+  their behalf only when they ask you to. It resolves by explicit path only and
+  is not a registered project workflow.
 - **Bespoke workflow route.** When the user wants a graph the template does not
   express, hand the approved `plan.md` and the `step-<n>.md` catalog to
   `workflow-author` as a
@@ -92,8 +96,8 @@ Once the user has approved, run the route they chose:
   `Design only`, or add a later Build-only request. Only the user may separately
   request a pause after design. Plan approval starts neither implementation nor
   workflow authoring. Any optional reviewer after a generated step belongs to
-  the bespoke design, not to Task Plan, Task Script, or Task Implement execution
-  semantics.
+  the bespoke design, not to Task Plan, Task Via Script, or Task Implement
+  execution semantics.
 
 ## Create the execution queue
 

@@ -193,7 +193,7 @@ describe("public registration contract", () => {
       "post-code-review/synthesis",
       "task/implement",
       "task/plan",
-      "task/script",
+      "task-via-script",
       "workflow-creator",
       "workflow-creator/build",
       "workflow-creator/design",

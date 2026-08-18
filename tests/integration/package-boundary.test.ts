@@ -53,7 +53,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "live-smoke",
   "task/implement",
   "task/plan",
-  "task/script",
+  "task-via-script",
   "post-code-review",
   "post-code-review/boundaries",
   "post-code-review/contracts",
@@ -84,7 +84,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
   "task/implement": "extensions/workflows/examples/task/implement.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
-  "task/script": "extensions/workflows/examples/task/script.workflow.mjs",
+  "task-via-script": "extensions/workflows/examples/task-via-script/task-via-script.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
   "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
   "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
@@ -539,7 +539,7 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/Approval is a new user turn/u);
     expect(source).toContain("Only after the user approved the todo route");
     expect(source).toContain("Resuming is still execution");
-    expect(source).toContain("execute.workflow.mjs");
+    expect(source).toContain("implement.workflow.mjs");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

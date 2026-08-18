@@ -7,9 +7,9 @@ Plan is still changing, approval is missing, or the ordinary main-agent todo pat
 is more recoverable.
 
 Avoid it too when the plain `implement each step in order, then summarize` graph
-is all that is wanted: the Package `task/script` workflow renders exactly that
-into `execute.workflow.mjs` in the same workflow workspace from a fixed template,
-with no Design or Build turn. Use this card for what the template deliberately
+is all that is wanted: the Package `task-via-script` workflow replans and renders
+exactly that into `implement.workflow.mjs` in the same workflow workspace from a
+fixed template, with no Design or Build turn. Use this card for what the template deliberately
 omits — a reviewer between steps, a bounded revision loop, concurrency, or a
 different publication.
 

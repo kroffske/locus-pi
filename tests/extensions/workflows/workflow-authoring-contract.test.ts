@@ -93,7 +93,7 @@ describe("design-first readable workflow authoring", () => {
   const planAuthoringSurfaces = [
     "extensions/workflows/examples/task/plan.workflow.mjs",
     "extensions/workflows/examples/task/README.md",
-    "extensions/workflows/examples/task/resources/execute-template.prompt.md",
+    "extensions/workflows/examples/task-via-script/resources/implement-template.prompt.md",
     "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
     "skills/locus-task-workflow/SKILL.md",
   ];
@@ -814,7 +814,7 @@ ${skill[1] ?? ""}
       "live-smoke": "standard",
       "task/implement": "standard",
       "task/plan": "standard",
-      "task/script": "standard",
+      "task-via-script": "standard",
       "post-code-review": "standard",
       "post-code-review/boundaries": "standard",
       "post-code-review/contracts": "standard",
@@ -834,7 +834,7 @@ ${skill[1] ?? ""}
       "live-smoke",
       "task/implement",
       "task/plan",
-      "task/script",
+      "task-via-script",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",

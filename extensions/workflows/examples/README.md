@@ -16,15 +16,16 @@ a runtime mode or model choice.
 
 ## Current portfolio
 
-| Namespace          | Shape                                     | Why it remains                                                                                                                                                         |
-| ------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `implement`        | runnable root                             | Applies already authorized work, verifies the result independently, and permits one corrective pass.                                                                   |
-| `live-smoke`       | runnable root                             | Provides the smallest real child-session diagnostic for an installed Pi host.                                                                                          |
-| `task`             | group-only: `plan`, `script`, `implement` | Separates planning, optional script rendering, and one exact implementation step while keeping all three under one task-owned namespace and shared workspace protocol. |
-| `post-code-review` | runnable root plus 7 children             | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                                                |
-| `workflow-creator` | runnable root plus 3 children             | Turns one semantic request into an accepted Design, SVG, and checked workflow package through `design`, `svg`, and `build`.                                            |
+| Namespace          | Shape                           | Why it remains                                                                                                                                           |
+| ------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `implement`        | runnable root                   | Applies already authorized work, verifies the result independently, and permits one corrective pass.                                                     |
+| `live-smoke`       | runnable root                   | Provides the smallest real child-session diagnostic for an installed Pi host.                                                                            |
+| `task`             | group-only: `plan`, `implement` | Separates decomposed no-ask planning from one exact implementation step while keeping both under one task-owned namespace and shared workspace protocol. |
+| `task-via-script`  | runnable root                   | Owns the one-run route: its own `task/plan` planning stage, then the rendered sequential `implement.workflow.mjs` the owner runs by explicit path.       |
+| `post-code-review` | runnable root plus 7 children   | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                                  |
+| `workflow-creator` | runnable root plus 3 children   | Turns one semantic request into an accepted Design, SVG, and checked workflow package through `design`, `svg`, and `build`.                              |
 
-The registry therefore exposes seventeen runnable names across five namespaces.
+The registry therefore exposes seventeen runnable names across six namespaces.
 The retired `requirements-grill`, `review`, and `review-fix` roots overlapped
 the standard task planning, modular review, and authorized implementation
 paths. They are intentionally absent rather than retained as catalog noise.

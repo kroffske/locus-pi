@@ -17,15 +17,20 @@ export function workflowCompletionPresentation(
 ): WorkflowCompletionPresentation {
   const ref = packageTaskRef(res, safeTarget);
   if (ref === undefined || res.workspaceDir === undefined || res.workspaceDir === "") return {};
-  if (ref === "task/script") {
-    const generatedScript = path.join(res.workspaceDir, "execute.workflow.mjs");
+  const primaryFile = res.primaryFile?.absolutePath;
+  if (primaryFile === undefined || primaryFile === "") return {};
+  if (path.basename(primaryFile) === "planning-blocker.md") {
+    return {
+      nextAction: `Planning failed closed. Read ${primaryFile}, edit the task statement or the planning files it names, then rerun ${ref} on the same workspace; the run never waits for an operator answer mid-run.`,
+    };
+  }
+  if (ref === "task-via-script") {
+    const generatedScript = path.join(res.workspaceDir, "implement.workflow.mjs");
     return {
       generatedRunCommand: `/workflows run ${formatWorkflowCommandToken(generatedScript)}`,
       nextAction: `After the owner reads ${generatedScript} and explicitly approves it, run it by that explicit path; rendering is not approval to run.`,
     };
   }
-  const primaryFile = res.primaryFile?.absolutePath;
-  if (primaryFile === undefined || primaryFile === "") return {};
   const stepFiles = path.join(res.workspaceDir, "step-<n>.md");
   return {
     nextAction: `After the owner reviews and explicitly approves the plan, implement ${primaryFile} using the ${stepFiles} files, one task/implement run per step file, giving each run only the step id such as S1.`,
@@ -80,7 +85,7 @@ function detailText(value: unknown): string | undefined {
   return text === "" ? undefined : text;
 }
 
-function packageTaskRef(res: RunWorkflowScriptResult, safeTarget: string): "task/plan" | "task/script" | undefined {
+function packageTaskRef(res: RunWorkflowScriptResult, safeTarget: string): "task/plan" | "task-via-script" | undefined {
   const ref = res.target !== undefined ? (res.target.source === "package" ? res.target.ref : undefined) : safeTarget;
-  return ref === "task/plan" || ref === "task/script" ? ref : undefined;
+  return ref === "task/plan" || ref === "task-via-script" ? ref : undefined;
 }

@@ -61,20 +61,20 @@ describe("workflow completion presentation", () => {
     expect(rendered).toContain("one task/implement run per step file");
   });
 
-  it("labels the task/script result with the generated script's explicit run command", async () => {
+  it("labels the task-via-script result with the generated script's explicit run command", async () => {
     const harness = createHarness();
-    const transcript = createWorkflowTranscript(harness.ctx, "task/script", "command");
+    const transcript = createWorkflowTranscript(harness.ctx, "task-via-script", "command");
     transcript.start("run-script-tui", "/repo/.pi/locus-pi/runs/run-script-tui");
     const completion = transcript.finish({
       runId: "run-script-tui",
       runDir: "/repo/.pi/locus-pi/runs/run-script-tui",
       ok: true,
-      result: "The execute script is rendered and nothing has been executed.",
+      result: "Planning and rendering are complete and nothing has been executed.",
       workspaceDir,
       workspaceDirRelative: "tmp/plan with spaces",
       primaryFile: {
-        relativePath: "execute.workflow.mjs",
-        absolutePath: "/repo/tmp/plan with spaces/execute.workflow.mjs",
+        relativePath: "implement.workflow.mjs",
+        absolutePath: "/repo/tmp/plan with spaces/implement.workflow.mjs",
         sha256: "def456",
         bytes: 99,
       },
@@ -83,9 +83,36 @@ describe("workflow completion presentation", () => {
     });
 
     expect(completion.digest).toContain(
-      'run generated script: /workflows run "/repo/tmp/plan with spaces/execute.workflow.mjs"',
+      'run generated script: /workflows run "/repo/tmp/plan with spaces/implement.workflow.mjs"',
     );
     expect(completion.nextAction).toContain("rendering is not approval to run");
+  });
+
+  it("routes a fail-closed planning blocker to a rerun instruction instead of an implement handoff", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "task/plan", "command");
+    transcript.start("run-plan-blocked", "/repo/.pi/locus-pi/runs/run-plan-blocked");
+    const completion = transcript.finish({
+      runId: "run-plan-blocked",
+      runDir: "/repo/.pi/locus-pi/runs/run-plan-blocked",
+      ok: true,
+      result: "Planning finished BLOCKED and nothing has been implemented.",
+      workspaceDir,
+      workspaceDirRelative: "tmp/plan with spaces",
+      primaryFile: {
+        relativePath: "planning-blocker.md",
+        absolutePath: "/repo/tmp/plan with spaces/planning-blocker.md",
+        sha256: "0ff1ce",
+        bytes: 17,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/run-plan-blocked/runtime/result.json" },
+    });
+
+    expect(completion.digest).not.toContain("run generated script:");
+    expect(completion.nextAction).toContain("Planning failed closed");
+    expect(completion.nextAction).toContain("rerun task/plan on the same workspace");
+    expect(completion.nextAction).not.toContain("one task/implement run per step file");
   });
 
   it("keeps workflow_end last for non-interactive protocol callers", async () => {
