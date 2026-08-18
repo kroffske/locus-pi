@@ -19,7 +19,7 @@ drafts and one-off artifacts are not part of this map.
   catalog of the eleven public extensions, their paths, roles, and dependency
   boundaries.
 - [extension-index.md](extension-index.md) — detailed public source map for the
-  eleven retained active extensions and fifteen curated workflows, including
+  eleven retained active extensions and sixteen curated workflows, including
   entrypoint, manifest, manual, and dependency paths plus the direct feature
   dependency graph.
 - [extension-ownership-matrix.md](extension-ownership-matrix.md) — ownership and
@@ -37,7 +37,7 @@ Registered extensions: 11 active by default: `agents`, `ask-user-question`, `ast
 | Surface                                                    | Public home                                                                                                                                                                                                                                                                                       |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Install, trust, `npx` smoke and quick operator checks      | [../README.md](../README.md).                                                                                                                                                                                                                                                                     |
-| Repository-only release policies                           | `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` live at repository root and are intentionally not packed.                                                                                                                                                |
+| Repository-only release policies                           | `SECURITY.md` and `CHANGELOG.md` live at repository root and are intentionally not packed.                                                                                                                                                                                                        |
 | Default extension list                                     | `package.json#pi.extensions`; mirrored above for docs sanity.                                                                                                                                                                                                                                     |
 | Active extension manuals                                   | [extensions/active/](extensions/active/README.md).                                                                                                                                                                                                                                                |
 | Todo queue execution product contract                      | `docs/prd/todo-session-auto-continuation.md`, repository-only and intentionally not packed.                                                                                                                                                                                                       |
@@ -76,9 +76,9 @@ promotion decision says otherwise:
 ## Package Boundary
 
 The npm package intentionally ships only the eleven default entrypoints and their
-explicit local import closure, the fifteen curated Package workflows (seven
-standalone entries plus the external `post-code-review` parent and its seven
-saved children), active manifests, the
+explicit local import closure, the sixteen curated Package workflows (the four
+runnable roots, twelve direct children, and one group-only namespace represented
+only by its children), active manifests, the
 bundled agent catalog, designated user docs, and the
 `locus-pi` diagnostic CLI. `package.json#files` is the package allowlist;
 repository presence alone does not make a path public npm surface.

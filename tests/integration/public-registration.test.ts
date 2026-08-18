@@ -348,6 +348,10 @@ describe("public registration contract", () => {
       "post-code-review/synthesis",
       "task/implement",
       "task/plan",
+      "workflow-creator",
+      "workflow-creator/build",
+      "workflow-creator/design",
+      "workflow-creator/svg",
     ]);
   });
 
@@ -433,11 +437,11 @@ describe("public registration contract", () => {
     expect(extensionIndex).toContain("`loop → workflows/run-read.ts`");
   });
 
-  it("keeps all twelve Package workflows aligned across the public index and ownership matrix", () => {
+  it("keeps all sixteen Package workflows aligned across the public index and ownership matrix", () => {
     const workflowNames = packagedWorkflowNames();
-    expect(workflowNames).toHaveLength(12);
+    expect(workflowNames).toHaveLength(16);
     expect(packageWorkflowNamesFromIndex(extensionIndex).sort()).toEqual([...workflowNames].sort());
-    expect(ownershipMatrix).toContain("Twelve Package workflow names");
+    expect(ownershipMatrix).toContain("Sixteen Package workflow names");
     expect(ownershipMatrix).not.toContain("Only four Package names");
   });
 

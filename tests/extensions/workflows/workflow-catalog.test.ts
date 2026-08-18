@@ -364,6 +364,10 @@ describe("workflow operator catalog", () => {
       "post-code-review/synthesis",
       "task/implement",
       "task/plan",
+      "workflow-creator",
+      "workflow-creator/build",
+      "workflow-creator/design",
+      "workflow-creator/svg",
     ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
@@ -393,6 +397,10 @@ describe("workflow operator catalog", () => {
         "post-code-review/synthesis",
         "task/implement",
         "task/plan",
+        "workflow-creator",
+        "workflow-creator/build",
+        "workflow-creator/design",
+        "workflow-creator/svg",
       ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
@@ -437,6 +445,36 @@ describe("workflow operator catalog", () => {
         expect(renderOperatorBlockPlain(info, 80, { maxLines: 10 }).join("\n")).toContain(
           "Composition: child of post-code-review",
         );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes Workflow Creator as one root with three directly runnable children", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-creator-"));
+    try {
+      const model = buildWorkflowCatalogModel(root, root);
+      const creatorNames = [
+        "workflow-creator",
+        "workflow-creator/build",
+        "workflow-creator/design",
+        "workflow-creator/svg",
+      ];
+      expect(model.current.find((row) => row.name === "workflow-creator")).toMatchObject({
+        role: "root",
+        children: creatorNames.slice(1),
+      });
+      const parentRpc = renderOperatorBlockPlain(buildWorkflowInfoBlock(root, root, "workflow-creator"), 80, {
+        maxLines: 10,
+      }).join("\n");
+      expect(parentRpc).toContain("Composition: root");
+      expect(parentRpc).toContain("3 child workflow");
+      for (const name of creatorNames.slice(1)) {
+        expect(model.current.find((row) => row.name === name)).toMatchObject({
+          role: "child",
+          rootName: "workflow-creator",
+        });
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -628,7 +666,7 @@ describe("workflow operator catalog", () => {
       expect(rpcCatalog).toContain(
         `${compactModel.totalRoots} top-level workflow(s) · ${compactModel.totalChildren} child workflow(s)`,
       );
-      expect(rpcCatalog).toMatch(/details may be\s+omitted by host line\s+budget/u);
+      expect(rpcCatalog).toMatch(/details may\s+be omitted by host line\s+budget/u);
       expect(rpcCatalog).not.toContain("other workflow row(s)");
       expect(compactRows).toEqual(
         expect.arrayContaining([

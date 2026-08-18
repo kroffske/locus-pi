@@ -90,3 +90,6 @@ tmp/
 /test1.md
 /test2.md
 .gstack/
+
+# Local agent orientation file, intentionally untracked
+/AGENTS.md

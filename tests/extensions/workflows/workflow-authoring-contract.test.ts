@@ -824,8 +824,12 @@ ${skill[1] ?? ""}
       "post-code-review/simplicity": "standard",
       "post-code-review/style": "standard",
       "post-code-review/synthesis": "standard",
+      "workflow-creator": "standard",
+      "workflow-creator/build": "standard",
+      "workflow-creator/design": "standard",
+      "workflow-creator/svg": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(12);
+    expect(packagedWorkflowNames()).toHaveLength(16);
     for (const name of [
       "implement",
       "live-smoke",
@@ -839,6 +843,10 @@ ${skill[1] ?? ""}
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
+      "workflow-creator",
+      "workflow-creator/build",
+      "workflow-creator/design",
+      "workflow-creator/svg",
     ]) {
       expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);
     }
@@ -1791,5 +1799,25 @@ ${skill[1] ?? ""}
     expect(card.indexOf("if (round === MAX_REVIEWS) break;")).toBeLessThan(
       card.indexOf("document = await agent(`Return a complete revision"),
     );
+  });
+
+  it("ships Workflow Creator as three source-bound reviewed children without executing generated source", () => {
+    const root = source("extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs");
+    const childNames = [...root.matchAll(/\bchild:\s*"([^"]+)"/gu)].map((match) => match[1]);
+    expect(childNames).toEqual(["design", "svg", "build"]);
+    expect(root).toContain('const CHILD_KEYS = ["design", "svg", "build"]');
+    expect(root).toContain('publishPrimaryFile("workflow-package.md")');
+
+    for (const child of ["design", "svg", "build"] as const) {
+      const childSource = source(`extensions/workflows/examples/workflow-creator/${child}.workflow.mjs`);
+      expect(childSource.match(/choice:\s*\["accept",\s*"revise"\]/gu)).toHaveLength(2);
+      expect(childSource).toContain("review limit reached without acceptance");
+      expect(childSource).not.toMatch(/\bdsl\.invokeWorkflow\(/u);
+    }
+
+    const build = source("extensions/workflows/examples/workflow-creator/build.workflow.mjs");
+    expect(build).toContain("Never execute any generated workflow");
+    expect(build).toContain("check-workflow-source");
+    expect(build).toContain('publishPrimaryFile("workflow-package.md")');
   });
 });

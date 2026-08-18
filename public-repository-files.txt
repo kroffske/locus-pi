@@ -28,14 +28,10 @@
 .lintstagedrc.json
 .prettierignore
 .prettierrc.json
-AGENTS.md
 CHANGELOG.md
-CODE_OF_CONDUCT.md
-CONTRIBUTING.md
 LICENSE
 README.md
 SECURITY.md
-SUPPORT.md
 THIRD_PARTY_NOTICES.md
 bin/locus-pi
 docs/README.md
@@ -242,6 +238,11 @@ extensions/workflows/examples/post-code-review/simplicity.workflow.mjs
 extensions/workflows/examples/post-code-review/style.workflow.mjs
 extensions/workflows/examples/post-code-review/synthesis.workflow.mjs
 extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs
+extensions/workflows/examples/workflow-creator/README.md
+extensions/workflows/examples/workflow-creator/build.workflow.mjs
+extensions/workflows/examples/workflow-creator/design.workflow.mjs
+extensions/workflows/examples/workflow-creator/svg.workflow.mjs
+extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs
 extensions/workflows/fusion-config.ts
 extensions/workflows/fusion-runner.ts
 extensions/workflows/fusion-surface.ts

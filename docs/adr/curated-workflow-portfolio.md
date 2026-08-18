@@ -4,12 +4,34 @@
 - Date: 2026-07-17
 - Amended: 2026-07-20, 2026-07-21, 2026-07-22, 2026-07-25, 2026-07-26, 2026-07-27 (x2), 2026-07-28 (x3), 2026-07-29, 2026-07-30, 2026-08-05, 2026-08-10, 2026-08-17
 
+## 2026-08-17 amendment: promote Workflow Creator
+
+The active Package portfolio gains the runnable `workflow-creator` namespace
+and its direct `design`, `svg`, and `build` children. The portfolio now exposes
+sixteen runnable names across five namespaces.
+
+Workflow Creator is public because its job is repository-independent Locus Pi
+workflow authoring rather than one private project's policy. The root passes one
+semantic request through three source-bound saved children in a shared workflow
+workspace. Design fixes the agent graph and source set; SVG turns that accepted
+graph into a self-contained diagram; Build writes only those declared sources,
+reruns source-shape, identity, import, and correspondence checks, and publishes
+`workflow-package.md`. Generated Design, SVG, and source files remain in the
+operator-selected workspace rather than mutating the installed Package.
+
+Each child has two independent review decisions and at most one complete
+correction. A second rejection or any missing check fails closed. Neither the
+root nor Build executes the generated workflow. This bounded reviewed pipeline
+is the capability that distinguishes Creator from the authoring skill alone and
+earns four additional public names.
+
 ## 2026-08-17 amendment: retire overlapping legacy namespaces
 
-The active Package portfolio now has four namespaces: runnable `implement`,
-`live-smoke`, and `post-code-review`, plus group-only `task`. Together they
-expose twelve runnable names: three roots, seven `post-code-review/*` children,
-and `task/plan` plus `task/implement`.
+The active Package portfolio now has five namespaces: runnable `implement`,
+`live-smoke`, `post-code-review`, and `workflow-creator`, plus group-only `task`.
+Together they expose sixteen runnable names: four roots, seven
+`post-code-review/*` children, three `workflow-creator/*` children, and
+`task/plan` plus `task/implement`.
 
 `requirements-grill`, `review`, and `review-fix` are removed rather than kept as
 legacy catalog entries. Task planning and request refinement belong to

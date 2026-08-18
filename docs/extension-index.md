@@ -47,7 +47,7 @@ which is infrastructure rather than a public extension.
 | `security-gate`       |     3 | active | locus-specific / critical | `/security-audit` and an audit-only `tool_call` observer                                               | `extensions/security-gate/index.ts`       | `extensions/security-gate/manifest.json`       | `docs/extensions/active/security-gate.md`       | none                        | `host`, `operator`                                      | `@earendil-works/pi-tui`                                                                           |
 | `status-line`         |     3 | active | locus-specific / low      | Responsive violet TUI footer for working location, context, compaction, model, and effort              | `extensions/status-line/index.ts`         | `extensions/status-line/manifest.json`         | `docs/extensions/active/status-line.md`         | none                        | `agent-runtime`, `host`, `operator`                     | `@earendil-works/pi-tui`                                                                           |
 | `todo-context`        |    14 | active | compat-wrapper / high     | Session `todo_read`/`todo_write`, bounded opt-in settled continuation, and operator `/todo`            | `extensions/todo-context/index.ts`        | `extensions/todo-context/manifest.json`        | `docs/extensions/active/todo-context.md`        | none                        | `host`, `operator`, `project`, `runtime`                | `@sinclair/typebox`                                                                                |
-| `workflows`           |    78 | active | locus-specific / critical | Workflow runtime, `/workflows`, `workflow`, opt-in `/fusion` + `fusion`, and four Package namespaces   | `extensions/workflows/index.ts`           | `extensions/workflows/manifest.json`           | `docs/extensions/active/workflows.md`           | none                        | `agent-runtime`, `host`, `model`, `operator`            | `@ast-grep/napi`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@sinclair/typebox` |
+| `workflows`           |    83 | active | locus-specific / critical | Workflow runtime, `/workflows`, `workflow`, opt-in `/fusion` + `fusion`, and five Package namespaces   | `extensions/workflows/index.ts`           | `extensions/workflows/manifest.json`           | `docs/extensions/active/workflows.md`           | none                        | `agent-runtime`, `host`, `model`, `operator`            | `@ast-grep/napi`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@sinclair/typebox` |
 
 ## Manifest-declared public surfaces
 
@@ -88,8 +88,8 @@ an extension edge.
 
 `extensions/workflows/examples/` is the registry: every `<name>/` directory
 owns an optional `<name>/<name>.workflow.mjs` and any direct child entries. It
-currently holds four namespaces: three runnable roots, one group-only namespace,
-and nine runnable children:
+currently holds five namespaces: four runnable roots, one group-only namespace,
+and twelve runnable children:
 
 | Workflow                      | Purpose                                                                                                      |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -105,6 +105,10 @@ and nine runnable children:
 | `post-code-review/style`      | Reviews comments and evidence-backed project style, including request-local `style.md` criteria.             |
 | `post-code-review/necessity`  | Challenges each proposed fix for proof, ownership, duplicated responsibility, and net simplicity.            |
 | `post-code-review/synthesis`  | Independently verifies all lane claims and writes the final `post-code-review.md`.                           |
+| `workflow-creator`            | Runs accepted Design, SVG, and Build children in order and publishes `workflow-package.md`.                  |
+| `workflow-creator/design`     | Designs the requested workflow from live source and permits one independently reviewed revision.             |
+| `workflow-creator/svg`        | Draws and independently reviews the accepted workflow graph as a self-contained SVG.                         |
+| `workflow-creator/build`      | Builds and rechecks only the Design-declared sources without executing the generated workflow.               |
 
 Every workflow directory is scan-based, including this one. What separates a
 Package workflow from a project file is not the mechanism but the promise: the

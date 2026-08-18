@@ -22,8 +22,9 @@ a runtime mode or model choice.
 | `live-smoke`       | runnable root                   | Provides the smallest real child-session diagnostic for an installed Pi host.                                                          |
 | `task`             | group-only: `plan`, `implement` | Separates planning from one exact implementation step while keeping both under one task-owned namespace and shared workspace protocol. |
 | `post-code-review` | runnable root plus 7 children   | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                |
+| `workflow-creator` | runnable root plus 3 children   | Turns one semantic request into an accepted Design, SVG, and checked workflow package through `design`, `svg`, and `build`.            |
 
-The registry therefore exposes twelve runnable names across four namespaces.
+The registry therefore exposes sixteen runnable names across five namespaces.
 The retired `requirements-grill`, `review`, and `review-fix` roots overlapped
 the standard task planning, modular review, and authorized implementation
 paths. They are intentionally absent rather than retained as catalog noise.

@@ -16,8 +16,8 @@ The fix was to give every shared module a declared owner and a declared directio
 Six named layers now exist as real directories, `_shared/` holds nothing else, and
 the direction is recorded as data in `scripts/check-extension-layers.ts` and
 re-checked mechanically by `npm run check:layers`, inside both `npm run check` and
-`npm run check:push`. `AGENTS.md` states the rules a contributor must obey. This
-ADR records the layout those rules describe and why it is shaped this way.
+`npm run check:push`. This ADR records the layout those rules describe and why
+it is shaped this way.
 
 ## The layout
 
