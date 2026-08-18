@@ -13,7 +13,7 @@ import { createHarness } from "../../../test-harness.js";
 const primaryFilePath = "/repo/tmp/plan with spaces/plan.md";
 const workspaceDir = "/repo/tmp/plan with spaces";
 const nextAction =
-  "After the owner reviews and explicitly approves the plan, implement /repo/tmp/plan with spaces/plan.md using /repo/tmp/plan with spaces/steps.md, one task/implement run per exact step.";
+  "After the owner reviews and explicitly approves the plan, implement /repo/tmp/plan with spaces/plan.md using the /repo/tmp/plan with spaces/step-<n>.md files, one task/implement run per step file, giving each run only the step id such as S1.";
 
 describe("workflow completion presentation", () => {
   it("ends the TUI on the exact result with primary path, grouped metadata, and gated next action", async () => {
@@ -38,9 +38,7 @@ describe("workflow completion presentation", () => {
     expect(completion.digest).not.toContain("workspace reuse:");
     expect(completion.digest.indexOf("Files")).toBeLessThan(completion.digest.indexOf("Commands"));
     expect(completion.digest.indexOf("primary file:")).toBeLessThan(completion.digest.indexOf("workspace:"));
-    expect(completion.digest).toContain(
-      'run generated plan: /workflows run "/repo/tmp/plan with spaces/execute.workflow.mjs"',
-    );
+    expect(completion.digest).not.toContain("execute.workflow.mjs");
     expect(completion.nextAction).toBe(nextAction);
 
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
@@ -60,7 +58,34 @@ describe("workflow completion presentation", () => {
       .join("\n");
     expect(rendered).toContain(`Workflow result (${primaryFilePath})`);
     expect(rendered).toContain("Next action (after review and approval)");
-    expect(rendered).toContain("one task/implement run per exact step");
+    expect(rendered).toContain("one task/implement run per step file");
+  });
+
+  it("labels the task/script result with the generated script's explicit run command", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "task/script", "command");
+    transcript.start("run-script-tui", "/repo/.pi/locus-pi/runs/run-script-tui");
+    const completion = transcript.finish({
+      runId: "run-script-tui",
+      runDir: "/repo/.pi/locus-pi/runs/run-script-tui",
+      ok: true,
+      result: "The execute script is rendered and nothing has been executed.",
+      workspaceDir,
+      workspaceDirRelative: "tmp/plan with spaces",
+      primaryFile: {
+        relativePath: "execute.workflow.mjs",
+        absolutePath: "/repo/tmp/plan with spaces/execute.workflow.mjs",
+        sha256: "def456",
+        bytes: 99,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/run-script-tui/runtime/result.json" },
+    });
+
+    expect(completion.digest).toContain(
+      'run generated script: /workflows run "/repo/tmp/plan with spaces/execute.workflow.mjs"',
+    );
+    expect(completion.nextAction).toContain("rendering is not approval to run");
   });
 
   it("keeps workflow_end last for non-interactive protocol callers", async () => {

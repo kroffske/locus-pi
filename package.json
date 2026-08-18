@@ -218,6 +218,7 @@
     "extensions/workflows/examples/task/README.md",
     "extensions/workflows/examples/task/implement.workflow.mjs",
     "extensions/workflows/examples/task/plan.workflow.mjs",
+    "extensions/workflows/examples/task/script.workflow.mjs",
     "extensions/workflows/examples/task/resources/execute-template.prompt.md",
     "extensions/workflows/examples/post-code-review/README.md",
     "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",

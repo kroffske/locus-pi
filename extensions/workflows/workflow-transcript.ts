@@ -208,7 +208,7 @@ export function createWorkflowTranscript(
       }
       const presentation = workflowCompletionPresentation(res, safeTarget);
       if (presentation.generatedRunCommand !== undefined) {
-        commandLines.push(`run generated plan: ${presentation.generatedRunCommand}`);
+        commandLines.push(`run generated script: ${presentation.generatedRunCommand}`);
       }
       if (res.runDir !== undefined && res.runDir !== "") {
         fileLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));

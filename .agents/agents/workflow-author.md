@@ -62,18 +62,19 @@ the user only when the change would alter the requested result.
 ### Plan/catalog authoring input
 
 A Design request may name an owner-approved `plan.md` and its canonical
-`steps.md`. Read both plus
+`step-<n>.md` catalog. Read both plus
 `skills/locus-pi-workflows/references/plan-to-sequential-workflow.md`. Treat each
 complete `## S<n>` block as one frozen task prompt. Design an optional
 project-local sequential workflow only; the ordinary main-agent todo path
 remains available and is usually more recoverable.
 
-Check first whether the request needs a Design at all. The Package `task/plan` run
-already wrote `execute.workflow.mjs` beside those files from a fixed template:
-one literal implementation node per block, then a summary node. When that is the
-whole graph the owner wants, say so and point at the existing file instead of
-designing a duplicate. Design for what the template omits — a reviewer between
-steps, a bounded revision loop, concurrency, a different publication.
+Check first whether the request needs a Design at all. The Package `task/script`
+workflow renders `execute.workflow.mjs` beside those files from a fixed
+template: one literal implementation node per step file, then a summary node.
+When that is the whole graph the owner wants, say so and point at that route
+instead of designing a duplicate. Design for what the template omits — a
+reviewer between steps, a bounded revision loop, concurrency, a different
+publication.
 
 The Design records the exact Plan/catalog paths, task count, literal-versus-caller
 transport, task order/dependencies, idempotence/history rule, attempt formula,
@@ -86,7 +87,7 @@ Build sequence unless the request explicitly says Design-only.
 For the operator-facing path, Build renders every complete approved task block
 as a literal author-known prompt in generated project-local source. Use caller
 `items` only when a programmatic embedder owns and transports the frozen list.
-Never parse `steps.md` or semantic task prose at runtime, and never add a
+Never parse the `step-<n>.md` catalog or semantic task prose at runtime, and never add a
 workflow under `extensions/workflows/examples/`.
 
 Each implementer receives exactly one complete task block. Its prompt must check

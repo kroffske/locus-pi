@@ -49,11 +49,12 @@ catalog agent. A raw request is Author: Design first, review, then Build. The
 agent’s exact design template and standard source profile live in its prompt and
 the skill above.
 
-An owner-approved `plan.md` plus its canonical `steps.md` may be supplied as
-Design input for an optional sequential project-local workflow. Each complete
-`## S<n>` block remains one exact task prompt. The preferred operator-facing
-Build renders those blocks as literal author-known prompts in generated source; a programmatic
-embedder may instead transport the same frozen list through caller `items`.
+An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
+supplied as Design input for an optional sequential project-local workflow. Each
+complete `## S<n>` block remains one exact task prompt. The preferred
+operator-facing Build renders those blocks as literal author-known prompts in
+generated source; a programmatic embedder may instead transport the same frozen
+list through caller `items`.
 Neither path parses Plan prose at runtime, adds a Package example, or skips the
 ordinary Design -> review -> Build sequence. Plan approval alone does not start
 workflow authoring. The selected card

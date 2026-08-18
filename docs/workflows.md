@@ -4,26 +4,27 @@ The `workflows` extension discovers trusted JavaScript workflow modules, runs th
 
 ## Package catalog
 
-`extensions/workflows/examples/` is the shipped registry. The current package exposes sixteen runnable names:
+`extensions/workflows/examples/` is the shipped registry. The current package exposes seventeen runnable names:
 
-| Workflow                      | Purpose                                                                                         |
-| ----------------------------- | ----------------------------------------------------------------------------------------------- |
-| `implement`                   | Apply explicitly authorized plan or review work, verify it, and permit one corrective pass.     |
-| `live-smoke`                  | Prove that the installed host can start two real child sessions.                                |
-| `post-code-review`            | Run the complete scoped, parallel, independently synthesized review.                            |
-| `post-code-review/scope`      | Resolve the exact review target and Git semantics.                                              |
-| `post-code-review/boundaries` | Review ownership, placement, dependencies, coupling, and seams.                                 |
-| `post-code-review/simplicity` | Review duplication, redundant machinery, dead paths, and delete-first options.                  |
-| `post-code-review/contracts`  | Review APIs, consumers, validation, errors, defaults, docs, and tests.                          |
-| `post-code-review/style`      | Review comments and evidence-backed project style.                                              |
-| `post-code-review/necessity`  | Challenge proposed fixes for proof, ownership, and net simplicity.                              |
-| `post-code-review/synthesis`  | Verify lane claims and publish the final report.                                                |
-| `task/plan`                   | Map one task and write `context.md`, `plan.md`, `steps.md`, and a generated execution workflow. |
-| `task/implement`              | Execute and verify one approved task step.                                                      |
-| `workflow-creator`            | Design, diagram, build, and verify a workflow package without executing the generated workflow. |
-| `workflow-creator/design`     | Produce and independently review the workflow design.                                           |
-| `workflow-creator/svg`        | Produce and independently review a self-contained SVG graph.                                    |
-| `workflow-creator/build`      | Build and recheck only the design-declared source package.                                      |
+| Workflow                      | Purpose                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `implement`                   | Apply explicitly authorized plan or review work, verify it, and permit one corrective pass.         |
+| `live-smoke`                  | Prove that the installed host can start two real child sessions.                                    |
+| `post-code-review`            | Run the complete scoped, parallel, independently synthesized review.                                |
+| `post-code-review/scope`      | Resolve the exact review target and Git semantics.                                                  |
+| `post-code-review/boundaries` | Review ownership, placement, dependencies, coupling, and seams.                                     |
+| `post-code-review/simplicity` | Review duplication, redundant machinery, dead paths, and delete-first options.                      |
+| `post-code-review/contracts`  | Review APIs, consumers, validation, errors, defaults, docs, and tests.                              |
+| `post-code-review/style`      | Review comments and evidence-backed project style.                                                  |
+| `post-code-review/necessity`  | Challenge proposed fixes for proof, ownership, and net simplicity.                                  |
+| `post-code-review/synthesis`  | Verify lane claims and publish the final report.                                                    |
+| `task/plan`                   | Map one task and write `context.md`, `plan.md`, and one `step-<n>.md` file per implementation step. |
+| `task/script`                 | Render `execute.workflow.mjs` from the approved plan and step files.                                |
+| `task/implement`              | Execute and verify one approved task step named by its step selector.                               |
+| `workflow-creator`            | Design, diagram, build, and verify a workflow package without executing the generated workflow.     |
+| `workflow-creator/design`     | Produce and independently review the workflow design.                                               |
+| `workflow-creator/svg`        | Produce and independently review a self-contained SVG graph.                                        |
+| `workflow-creator/build`      | Build and recheck only the design-declared source package.                                          |
 
 `task` is a group-only namespace and is not runnable by itself.
 

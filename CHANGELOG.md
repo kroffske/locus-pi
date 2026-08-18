@@ -6,6 +6,20 @@ This file records user-visible changes to the public package.
 
 ### Changed
 
+- **The task namespace hands work between stages through files, not pasted
+  text.** `task/plan` now runs two agents and writes the step catalog as one
+  `step-<n>.md` file per step (no `steps.md`); the scripting phase moved into
+  the new `task/script` workflow, which renders `execute.workflow.mjs` from the
+  approved `plan.md` and `step-<n>.md` files on demand. `task/implement` now
+  takes only a step selector (a step id such as `S1` or a step file name) and
+  reads the step contract from the workspace file itself — the owner may edit
+  `plan.md` and `step-<n>.md` after planning, and every later run deliberately
+  reads the files on disk as the contract, with no added freshness or integrity
+  checks. The Package registry therefore exposes seventeen runnable names, and
+  the `task/plan` completion card now points at per-step-file implementation
+  while `task/script` results carry the generated script's explicit run
+  command.
+
 - **Public documentation is now organized for external readers.** Cross-cutting guides are limited to `docs/`, extension manuals live beside their source as `extensions/<name>/README.md`, and historical ADR, PRD, milestone, and source-audit working notes are excluded from the public repository and npm documentation surface.
 
 - **Workflow Creator is now installed with the Package.** The new

@@ -673,7 +673,7 @@ ${skill[1] ?? ""}
     ]) {
       const text = source(relativePath);
       expect(text).toContain("plan.md");
-      expect(text).toContain("steps.md");
+      expect(text).toContain("step-<n>.md");
       expect(text).toMatch(/literal\s+author-known/u);
       expect(text).toMatch(/caller\s+`items`|caller\s+items/u);
       expect(text).toMatch(/Plan approval.*(?:does not start|starts neither)/isu);
@@ -814,6 +814,7 @@ ${skill[1] ?? ""}
       "live-smoke": "standard",
       "task/implement": "standard",
       "task/plan": "standard",
+      "task/script": "standard",
       "post-code-review": "standard",
       "post-code-review/boundaries": "standard",
       "post-code-review/contracts": "standard",
@@ -827,12 +828,13 @@ ${skill[1] ?? ""}
       "workflow-creator/design": "standard",
       "workflow-creator/svg": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(16);
+    expect(packagedWorkflowNames()).toHaveLength(17);
     for (const name of [
       "implement",
       "live-smoke",
       "task/implement",
       "task/plan",
+      "task/script",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",

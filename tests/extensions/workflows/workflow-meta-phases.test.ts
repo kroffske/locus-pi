@@ -204,6 +204,7 @@ describe("curated workflow declarations", () => {
     const declaring = [
       "task/implement",
       "task/plan",
+      "task/script",
       "workflow-creator",
       "workflow-creator/build",
       "workflow-creator/design",

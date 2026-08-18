@@ -13,9 +13,9 @@ Node.js host access and is not sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
 currently `implement`, `live-smoke`, `post-code-review` and its children,
-`task/plan`, and `task/implement`. A skeleton copied out of this catalog becomes one by being
-saved there, with the package-surface review that implies; saved anywhere else it
-stays yours.
+`task/plan`, `task/script`, and `task/implement`. A skeleton copied out of this
+catalog becomes one by being saved there, with the package-surface review that
+implies; saved anywhere else it stays yours.
 
 ## Choose a shape
 
@@ -661,12 +661,13 @@ return review;
 ```
 
 When the operator must inspect or reuse the plan, use the shipped `task/plan` →
-`task/implement` pair instead. `task/plan` writes `plan.md`, a frozen `steps.md`
-catalog, and a reviewable generated execution script, then stops. After explicit
-owner approval, main Pi starts one top-level `task/implement` run per exact
-`## S<n>` block in the shared workflow workspace. Each run writes
-`history/S<n>.md`; blocked or failed checks stop continuation. The group-only
-`task` root is not runnable, and the two children never invoke one another.
+`task/implement` pair instead. `task/plan` writes `plan.md` and a frozen
+`step-<n>.md` catalog, then stops. After explicit owner approval, main Pi starts
+one top-level `task/implement` run per step file in the shared workflow
+workspace, passing only the step id. Each run writes `history/S<n>.md`; blocked
+or failed checks stop continuation. `task/script` optionally renders the
+sequential execute script from the same approved files. The group-only `task`
+root is not runnable, and the children never invoke one another.
 
 ## Ordered pipeline
 

@@ -134,7 +134,7 @@ function topLevelCommands(commands: string[]): string[] {
 }
 
 function documentedWorkflowNames(markdown: string): string[] {
-  return [...markdown.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]!);
+  return [...markdown.matchAll(/^\| `([^`]+)`\s+\|/gm)].map((match) => match[1]!);
 }
 
 describe("public registration contract", () => {
@@ -193,6 +193,7 @@ describe("public registration contract", () => {
       "post-code-review/synthesis",
       "task/implement",
       "task/plan",
+      "task/script",
       "workflow-creator",
       "workflow-creator/build",
       "workflow-creator/design",
@@ -230,7 +231,7 @@ describe("public registration contract", () => {
     expect(extensionDocs).toContain("`loop → workflows/run-read.ts`");
   });
 
-  it("keeps all sixteen Package workflows in the public workflow guide", () => {
+  it("keeps all seventeen Package workflows in the public workflow guide", () => {
     expect(documentedWorkflowNames(workflowDocs).sort()).toEqual([...packagedWorkflowNames()].sort());
     expect(workflowDocs).toContain("`task` is a group-only namespace");
   });

@@ -344,6 +344,7 @@ describe("consilium reference workflow", () => {
       "post-code-review/synthesis",
       "task/implement",
       "task/plan",
+      "task/script",
       "workflow-creator",
       "workflow-creator/build",
       "workflow-creator/design",

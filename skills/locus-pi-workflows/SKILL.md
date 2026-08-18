@@ -43,8 +43,8 @@ discovers a material algorithm mismatch, update and re-review the design before
 building; never hide the change in source. Ask the user only when resolving the
 mismatch would change the requested result, not for routine authoring choices.
 
-An owner-approved `plan.md` plus its canonical `steps.md` may be authoring input for an
-optional sequential project-local workflow. Read
+An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
+authoring input for an optional sequential project-local workflow. Read
 [`references/plan-to-sequential-workflow.md`](./references/plan-to-sequential-workflow.md).
 Preserve every complete task block: Build renders those blocks as literal
 author-known prompts in generated source, or uses caller `items` only when a
@@ -52,12 +52,13 @@ programmatic embedder owns the frozen list. Plan approval alone does not start
 workflow authoring; once the user requests that workflow, the ordinary continuous
 design -> review -> build sequence applies unless they explicitly request design only.
 
-The Package `task/plan` workflow already renders `execute.workflow.mjs` into its own
-workflow workspace from a fixed template — one literal implementation node per
-`## S<n>` block, then a summary node. That file is an unregistered draft that
-resolves only by explicit path, and the owner reviews it before running it. Use
-Design and Build for a graph the fixed template cannot express, such as a
-reviewer between steps, a bounded revision loop, or concurrency.
+The Package `task/script` workflow renders `execute.workflow.mjs` from the
+approved planning files into the same workflow workspace, from a fixed
+template — one literal implementation node per `step-<n>.md` file, then a
+summary node. That file is an unregistered draft that resolves only by explicit
+path, and the owner reviews it before running it. Use Design and Build for a
+graph the fixed template cannot express, such as a reviewer between steps, a
+bounded revision loop, or concurrency.
 
 ## Design contract
 
