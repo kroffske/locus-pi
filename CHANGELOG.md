@@ -385,6 +385,28 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
 
 ### Fixed
 
+- **The packaged `task/plan` workflow stops planning work its own executor
+  cannot do, and stops retyping the files it just wrote.** Every step in the
+  plan it produces is executed later by one unattended CLI agent with this
+  run's toolset, but nothing said so: an audited plan-then-implement series
+  put browser play, screenshots and a stronger-model judgement into its last
+  step and lost hours to a blocked run. Composition now states the executor's
+  reality and routes browser checks, screenshots, a stronger-model judge, and
+  anything a person must sign into a final `Operator acceptance` section of
+  `plan.md`; the step-usability review checks the same rule. The three
+  reviews must write `## Checks performed` and `## Findings`, because a
+  permitted `None.` produced six-byte review files indistinguishable from a
+  review nobody ran. Stages that write a file now return a short readback
+  instead of repeating its contents — the repetition was ~80% of the final
+  answers and injected a phantom "duplicate sections" claim into `plan.md` —
+  while verification still returns its complete text, since routing and the
+  blocker decide from that text alone. Routing takes no tools and returns one
+  quoted JSON string, after an audited run's first routing answer was rejected
+  as invalid JSON. Correction short-circuits with `No correction needed.` when
+  no review lists an actionable finding, instead of spending tool calls to
+  apply two wording fixes. Prompt text only: stage count, JavaScript
+  structure, and the standard profile are unchanged.
+
 - **`npm run check:repository` now verifies a checkout that never ran the tests.** The public
   inventory lists `dist/workflow-source-shape.mjs`, but no gate built it: the comparison
   passed only where a committed copy or an earlier test or pack run had left the file behind,
