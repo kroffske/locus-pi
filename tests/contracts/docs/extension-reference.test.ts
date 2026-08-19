@@ -1,10 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  type ExtensionManifest,
+  defaultExtensionManifests,
   extensionDocs,
-  extensionIdFromEntrypoint,
   featureDependencyGraph,
   parseExtensionRows,
   pkg,
@@ -13,13 +12,11 @@ import {
 
 describe("extension reference contract", () => {
   it("keeps the compact extension reference aligned with manifests and source imports", () => {
-    const extensionIds = pkg.pi.extensions.map(extensionIdFromEntrypoint);
+    const manifests = defaultExtensionManifests();
+    const extensionIds = manifests.map(({ id }) => id);
     const rows = parseExtensionRows(extensionDocs);
     expect([...rows.keys()].sort()).toEqual([...extensionIds].sort());
-    for (const [index, entrypoint] of pkg.pi.extensions.entries()) {
-      const id = extensionIds[index]!;
-      const manifestPath = path.join(root, path.dirname(entrypoint), "manifest.json");
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+    for (const { id, manifestPath, manifest } of manifests) {
       expect(rows.get(id)).toEqual({
         tools: manifest.provides.tools,
         commands: manifest.provides.commands,

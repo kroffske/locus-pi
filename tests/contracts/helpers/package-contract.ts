@@ -9,12 +9,35 @@ export interface PackageJson {
   repository: { url: string };
 }
 
+/**
+ * The manifest shape extension-manifest.schema.json declares. Tests read manifests through
+ * `readExtensionManifest` below rather than re-typing this per file, so a schema change lands
+ * in one place; scripts/check-extension-manifests.ts owns the validation itself.
+ */
 export interface ExtensionManifest {
-  docsPath: string;
+  id: string;
+  agent: { name: string; description: string };
+  ownershipStatus: string;
+  runtimeRequirements: string[];
+  stateUsed: string[];
   provides: { tools: string[]; commands: string[]; hooks: string[]; shortcuts?: string[] };
+  uiLifecycle?: {
+    commands?: Array<{ name: string; taxonomy: string[]; transient?: string[]; persistent: string[] }>;
+    tools?: Array<{ name: string; taxonomy: string[]; transient?: string[]; persistent: string[] }>;
+  };
+  permissions: {
+    filesystem: { read: string[]; write: string[] };
+    subprocess: string[];
+    network: string[];
+    browser: boolean;
+    models: boolean;
+    ui: string[];
+  };
   risk: string;
+  docsPath: string;
   sourceAuditPath: string | null;
   tests: string[];
+  review: { status: string; source: string; reviewedBy: string | null; reviewedAt: string | null };
 }
 
 export interface ExtensionDocRow {
@@ -35,6 +58,25 @@ export function extensionIdFromEntrypoint(entrypoint: string): string {
   const match = /^\.\/extensions\/([^/]+)\/index\.ts$/u.exec(entrypoint);
   if (!match?.[1]) throw new Error(`invalid default extension entrypoint: ${entrypoint}`);
   return match[1];
+}
+
+export function extensionManifestPath(id: string, packageRoot: string = root): string {
+  return path.join(packageRoot, "extensions", id, "manifest.json");
+}
+
+export function readExtensionManifest(id: string, packageRoot: string = root): ExtensionManifest {
+  return JSON.parse(readFileSync(extensionManifestPath(id, packageRoot), "utf8")) as ExtensionManifest;
+}
+
+/** Every manifest package.json#pi.extensions declares, in declaration order. */
+export function defaultExtensionManifests(
+  packageRoot: string = root,
+): Array<{ id: string; manifestPath: string; manifest: ExtensionManifest }> {
+  return pkg.pi.extensions.map(extensionIdFromEntrypoint).map((id) => ({
+    id,
+    manifestPath: extensionManifestPath(id, packageRoot),
+    manifest: readExtensionManifest(id, packageRoot),
+  }));
 }
 
 export function inlineCodeList(value: string): string[] {

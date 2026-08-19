@@ -9,6 +9,7 @@ import { registerFusionSurface } from "../../../extensions/workflows/fusion-surf
 import type { DirectFusionRunResult } from "../../../extensions/workflows/fusion-runner.js";
 import { readWorkflowRunJournalState } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import workflows from "../../../extensions/workflows/index.js";
+import { readExtensionManifest } from "../../contracts/helpers/package-contract.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 const roots: string[] = [];
@@ -38,9 +39,7 @@ function completedDirectResult(root: string): DirectFusionRunResult {
 
 describe("direct Fusion surface", () => {
   it("keeps the package manifest aligned with the version-2 two-mode contract", () => {
-    const manifest = JSON.parse(
-      readFileSync(path.join(process.cwd(), "extensions", "workflows", "manifest.json"), "utf8"),
-    ) as { runtimeRequirements: string[]; stateUsed: string[]; tests: string[] };
+    const manifest = readExtensionManifest("workflows");
     const runtimeContract = manifest.runtimeRequirements.join("\n");
     const stateContract = manifest.stateUsed.join("\n");
 

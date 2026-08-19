@@ -1,15 +1,10 @@
 {
   "id": "devext-doctor",
-  "name": "devext-doctor",
   "agent": {
     "name": "extension-devext-doctor",
     "description": "Inspect extension diagnostics and validate task-lifecycle transitions."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Pi command UI",
     "Shared command UI lifecycle clears stale transient widgets/status before /devext renders and on the next unrelated input",
@@ -24,7 +19,6 @@
     ".tasks/<task>/task.md Closure text",
     ".tasks/<task>/qa.md ACCEPTED evidence"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": [],
     "commands": ["devext doctor", "devext task-lifecycle <task-id> <target-status>"],

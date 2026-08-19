@@ -4,13 +4,11 @@ import { redactSecrets } from "../_shared/host/redaction.js";
 /**
  * The extension manifest shape this gate grades a capability request against. It lives here
  * rather than in a shared directory because the security gate is its only reader: nothing
- * else in the package asks whether a manifest grants a capability.
+ * else in the package asks whether a manifest grants a capability. The fields mirror
+ * extension-manifest.schema.json, so a field the schema does not declare must not appear here.
  */
 export interface PermissionManifest {
   id: string;
-  name: string;
-  version: string;
-  tier: "core-owned" | "audited-fork" | "local-experimental" | "blocked";
   provides: { tools: string[]; commands: string[]; hooks: string[] };
   permissions: {
     filesystem: { read: string[]; write: string[] };
@@ -22,8 +20,8 @@ export interface PermissionManifest {
   };
   risk: "low" | "medium" | "high" | "critical";
   review: {
-    status: "draft" | "in-review" | "reviewed" | "blocked";
-    source: "write-from-scratch" | "rewrite-first" | "fork-after-audit" | "wrapper-first" | "copy-after-audit";
+    status: "reviewed";
+    source: "write-from-scratch" | "copy-after-audit";
     reviewedBy: string | null;
     reviewedAt: string | null;
   };
@@ -85,8 +83,12 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /(?:npm|cargo)\s+publish\b/,
 ];
 
+/**
+ * Grade one capability against a manifest. There is no blocked-extension short circuit: a
+ * manifest that reaches this function is a published one, and extension-manifest.schema.json
+ * admits no unreviewed or blocked state into the published set.
+ */
 export function requirePermission(manifest: PermissionManifest, capability: string): boolean {
-  if (manifest.tier === "blocked" || manifest.review.status === "blocked") return false;
   if (capability === "browser") return manifest.permissions.browser;
   if (capability === "models") return manifest.permissions.models;
   if (capability.startsWith("ui:")) return manifest.permissions.ui.includes(capability.slice(3));

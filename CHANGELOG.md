@@ -34,6 +34,19 @@ This file records user-visible changes to the public package.
 
 - **The redundant documentation index was removed.** The root README now links directly to the four cross-cutting guides, while getting-started documents selective loading and mixed-provider configuration.
 
+- **Extension manifests are now a validated contract, and six inert fields were removed from
+  them.** `npm run check` runs the new `npm run check:manifests`, which loads exactly the
+  manifests `package.json#pi.extensions` names, validates them against
+  `extension-manifest.schema.json` with `additionalProperties: false`, and enforces unique ids,
+  resolvable `docsPath` and `tests` paths, and a bundled agent profile behind every
+  `agent.name`. Published manifests therefore no longer carry `name`, `version`,
+  `defaultEnabled`, `behaviorStatus`, `tier`, or `sourceMode`: nothing read them, the npm
+  package version owns versioning and `package.json#pi.extensions` owns activation. Enum values
+  no shipped extension used — `omp-owned-to-import`, `redesign-later`, `split-required`,
+  `no-current-owner`, `rewrite-first`, `fork-after-audit`, `wrapper-first`, and the unreviewed
+  and blocked review states — were dropped, and `status-line` was normalized onto the same
+  values as the other ten instead of remaining an unvalidated exception.
+
 - **Extension manifests now declare the hooks the runtime actually registers.** Six extensions under-declared their `input` hook, and `agents` additionally omitted `session_shutdown`, so a reader of the published manifest or of the `docs/extensions.md` reference table saw fewer hooks than the extension installs. Both surfaces now match live registration.
 
 - **The task namespace hands work between stages through files, and planning is
