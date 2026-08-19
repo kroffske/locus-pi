@@ -320,9 +320,10 @@ beforeAll(() => {
 describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
+    // The roster and its counts live inside the generated region `npm run check:generated` owns, so
+    // this file no longer pins them as prose. What stays here is the human sentence that explains the
+    // namespace rule the roster is shaped by, which nothing generates.
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("six curated Package workflow namespaces with seventeen runnable names");
-    expect(prose).toContain("the six curated workflow namespaces and their seventeen runnable names");
     expect(prose).toContain(
       "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
     );

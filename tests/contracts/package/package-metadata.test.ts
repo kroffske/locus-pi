@@ -1,21 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { pkg } from "../helpers/package-contract.js";
+import { extensionIdFromEntrypoint, pkg, publicCatalogs } from "../helpers/package-contract.js";
 
 describe("package metadata contract", () => {
-  it("declares the eleven supported active entrypoints", () => {
-    expect(pkg.pi.extensions).toEqual([
-      "./extensions/agents/index.ts",
-      "./extensions/ask-user-question/index.ts",
-      "./extensions/ast-structural-edit/index.ts",
-      "./extensions/devext-doctor/index.ts",
-      "./extensions/loop/index.ts",
-      "./extensions/model/index.ts",
-      "./extensions/plan/index.ts",
-      "./extensions/security-gate/index.ts",
-      "./extensions/status-line/index.ts",
-      "./extensions/todo-context/index.ts",
-      "./extensions/workflows/index.ts",
-    ]);
+  it("activates exactly the extensions the generated catalog publishes", () => {
+    // The catalog is generated from this same list, so a divergence means the artifact was not
+    // regenerated after an entrypoint moved. `npm run build:catalogs` is the fix.
+    expect(pkg.pi.extensions.map(extensionIdFromEntrypoint)).toEqual(publicCatalogs.extensions.map(({ id }) => id));
     expect(pkg.files.some((file) => file.startsWith("extensions/beta/"))).toBe(false);
   });
 

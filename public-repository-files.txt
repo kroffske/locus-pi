@@ -38,6 +38,7 @@ SECURITY.md
 SUPPORT.md
 THIRD_PARTY_NOTICES.md
 bin/locus-pi
+dist/public-catalogs.json
 dist/workflow-source-shape.mjs
 docs/architecture.md
 docs/extensions.md
@@ -287,6 +288,7 @@ public-repository-files.txt
 public-repository.json
 scripts/README.md
 scripts/audit-sources.ts
+scripts/build-public-catalogs.ts
 scripts/build-workflow-source-shape.ts
 scripts/check-extension-layers.ts
 scripts/check-extension-manifests.ts
@@ -296,6 +298,7 @@ scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
 scripts/check-workflow-source-shape.ts
+scripts/extension-manifest-sources.ts
 scripts/markdown-links.ts
 scripts/materialize-public-repository.ts
 scripts/sync-pi-host-version.mjs
@@ -312,6 +315,7 @@ skills/locus-pi-workflows/references/sequential-text.md
 skills/locus-task-workflow/SKILL.md
 tests/contracts/agents/extension-agent-catalog.test.ts
 tests/contracts/docs/extension-reference.test.ts
+tests/contracts/docs/generated-catalogs.test.ts
 tests/contracts/extensions/manifest-schema.test.ts
 tests/contracts/extensions/runtime-registration.test.ts
 tests/contracts/helpers/package-contract.ts

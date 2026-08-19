@@ -13,10 +13,12 @@ publication tool noted below.
 | Script                             | npm script                                     | Role                                        |
 | ---------------------------------- | ---------------------------------------------- | ------------------------------------------- |
 | `audit-sources.ts`                 | `audit:sources` (part of `check:fast`)         | Source-ownership and attribution gate       |
+| `build-public-catalogs.ts`         | `build:catalogs` / `check:generated`           | Writes and verifies the two public catalogs |
 | `build-workflow-source-shape.ts`   | `build:workflow-source` (`prepack`)            | Builds the shipped workflow-shape validator |
 | `check-extension-layers.ts`        | `check:layers` (part of `check:fast`)          | `extensions/_shared` layer and import rules |
 | `check-extension-manifests.ts`     | `check:manifests` (part of `check:fast`)       | Manifest schema and declared-path contract  |
 | `check-markdown-links.ts`          | `check:links` (part of `check`)                | Internal links in published Markdown        |
+| `extension-manifest-sources.ts`    | — (library)                                    | The one reader of the active manifest set   |
 | `check-pi-host-version.mjs`        | `check:pi-host` (part of `check:fast`)         | Pi CLI/SDK version coherence                |
 | `check-public-repository.ts`       | `check:repository` (part of `check`)           | Public-tree inventory and hygiene           |
 | `check-pull-request-policy.ts`     | `check:pull-request`                           | Branch and release policy for PRs           |
@@ -32,7 +34,8 @@ The composite gates that bind them together:
   Pi host version, tests, and source audit. The inner loop while editing; it
   is not release-complete.
 - `npm run check` — `check:fast` plus formatting, published Markdown links,
-  the repository inventory, and release metadata. The canonical gate:
+  the generated public catalogs, the repository inventory, and release
+  metadata. The canonical gate:
   deterministic, offline, and read-only, and exactly what CI runs. Everything
   CI adds after it needs the network (`npm audit`) or the runner environment
   (`locus-pi doctor`, `pi --version`, the pack candidate).
@@ -111,7 +114,38 @@ Verifies the package version is valid semver, `CHANGELOG.md` has a dated
 matches `v<version>`. The changelog-heading check is shared with the
 pull-request policy script.
 
+### extension-manifest-sources.ts
+
+The one resolver of the active extension manifest set — exactly the manifests
+`package.json#pi.extensions` declares. `check-extension-manifests.ts` and
+`build-public-catalogs.ts` both read it, so the validating gate and the
+generator can never disagree about which files are in the set. It classifies
+each entry instead of throwing, because the checker reports every finding
+while the generator must stop at the first unreadable file.
+
 ## Build
+
+### build-public-catalogs.ts
+
+Two enumerable public sets — the extensions `package.json#pi.extensions`
+activates and the workflow names `extensions/workflows/examples/` resolves —
+were transcribed by hand into three documentation pages and two contract
+tests, and each copy could drift on its own. This script resolves both from
+the readers that own them (`extension-manifest-sources.ts`, and the packaged
+workflow discovery the registry itself uses) and writes them once, into
+`dist/public-catalogs.json` and into the fenced `<!-- locus:…:start -->`
+regions of `README.md`, `docs/extensions.md`, and `docs/workflows.md`.
+
+`npm run build:catalogs` writes; `npm run check:generated` re-renders into
+memory and fails on any committed byte that differs, naming the write command.
+The output is formatted with the repository Prettier config, so a regenerated
+table cannot be correct and still fail `format:check`. It never imports a
+workflow module: names come from the same directory scan the registry uses,
+and each purpose line from a bounded static parse of the source text.
+
+Unlike `dist/workflow-source-shape.mjs`, which `prepack` builds, the catalog
+artifact is committed: contract tests read it, so a fresh clone must have it
+before anything is built.
 
 ### build-workflow-source-shape.ts
 

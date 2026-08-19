@@ -1,6 +1,7 @@
 # Dependencies and build output
 node_modules/
 dist/*
+!dist/public-catalogs.json
 !dist/workflow-source-shape.mjs
 coverage/
 test-results/

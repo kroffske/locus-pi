@@ -40,16 +40,28 @@ export interface ExtensionManifest {
   review: { status: string; source: string; reviewedBy: string | null; reviewedAt: string | null };
 }
 
-export interface ExtensionDocRow {
-  tools: string[];
-  commands: string[];
-  hooks: string[];
-  risk: string;
-  manual: string;
+/**
+ * The committed artifact `npm run build:catalogs` writes. Contract tests compare the working tree
+ * against it, so the two public catalogs are asserted from one machine-owned source instead of a list
+ * re-typed per test; `npm run check:generated` owns the other half, artifact against documentation.
+ */
+export interface PublicCatalogs {
+  extensions: Array<{
+    id: string;
+    tools: string[];
+    commands: string[];
+    hooks: string[];
+    risk: string;
+    ownership: string;
+  }>;
+  workflows: Array<{ name: string; namespace: string }>;
 }
 
 export const root = process.cwd();
 export const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
+export const publicCatalogs = JSON.parse(
+  readFileSync(path.join(root, "dist/public-catalogs.json"), "utf8"),
+) as PublicCatalogs;
 export const extensionDocs = readFileSync(path.join(root, "docs/extensions.md"), "utf8");
 export const workflowDocs = readFileSync(path.join(root, "docs/workflows.md"), "utf8");
 const sourceExtensions = new Set([".cjs", ".js", ".mjs", ".mts", ".ts", ".tsx"]);
@@ -77,36 +89,6 @@ export function defaultExtensionManifests(
     manifestPath: extensionManifestPath(id, packageRoot),
     manifest: readExtensionManifest(id, packageRoot),
   }));
-}
-
-export function inlineCodeList(value: string): string[] {
-  if (value === "—") return [];
-  const items = [...value.matchAll(/`([^`]+)`/gu)].map((match) => match[1]!);
-  if (items.length === 0) throw new Error(`expected inline-code list or em dash, received: ${value}`);
-  return items;
-}
-
-export function parseExtensionRows(markdown: string): Map<string, ExtensionDocRow> {
-  const rows = new Map<string, ExtensionDocRow>();
-  for (const line of markdown.split("\n")) {
-    if (!line.startsWith("| `")) continue;
-    const columns = line
-      .split("|")
-      .slice(1, -1)
-      .map((column) => column.trim());
-    if (columns.length !== 6) throw new Error(`invalid extension reference row: ${line}`);
-    const id = /^`([^`]+)`$/u.exec(columns[0] ?? "")?.[1];
-    const manual = /\[`([^`]+)`\]\([^)]+\)/u.exec(columns[5] ?? "")?.[1];
-    if (!id || !manual) throw new Error(`invalid extension reference row: ${line}`);
-    rows.set(id, {
-      tools: inlineCodeList(columns[1] ?? ""),
-      commands: inlineCodeList(columns[2] ?? ""),
-      hooks: inlineCodeList(columns[3] ?? ""),
-      risk: columns[4] ?? "",
-      manual,
-    });
-  }
-  return rows;
 }
 
 function sourceFiles(directory: string): string[] {
@@ -169,8 +151,4 @@ export function featureDependencyGraph(extensionIds: string[]): Map<string, stri
 
 export function topLevelCommands(commands: string[]): string[] {
   return [...new Set(commands.map((command) => command.trim().split(/\s+/u)[0]!).filter(Boolean))].sort();
-}
-
-export function documentedWorkflowNames(markdown: string): string[] {
-  return [...markdown.matchAll(/^\| `([^`]+)`\s+\|/gmu)].map((match) => match[1]!);
 }

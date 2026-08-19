@@ -5,32 +5,41 @@ import {
   defaultExtensionManifests,
   extensionDocs,
   featureDependencyGraph,
-  parseExtensionRows,
   pkg,
+  publicCatalogs,
   root,
 } from "../helpers/package-contract.js";
 
 describe("extension reference contract", () => {
-  it("keeps the compact extension reference aligned with manifests and source imports", () => {
+  /**
+   * The reference table in docs/extensions.md is generated from this catalog, and
+   * `npm run check:generated` proves the published table still matches it. What is left to prove
+   * here is the other half: that the committed catalog still matches the manifests it came from.
+   */
+  it("keeps the generated extension catalog equal to the manifests it is built from", () => {
     const manifests = defaultExtensionManifests();
-    const extensionIds = manifests.map(({ id }) => id);
-    const rows = parseExtensionRows(extensionDocs);
-    expect([...rows.keys()].sort()).toEqual([...extensionIds].sort());
-    for (const { id, manifestPath, manifest } of manifests) {
-      expect(rows.get(id)).toEqual({
+    expect(publicCatalogs.extensions).toEqual(
+      manifests.map(({ id, manifest }) => ({
+        id,
         tools: manifest.provides.tools,
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
         risk: manifest.risk,
-        manual: manifest.docsPath,
-      });
+        ownership: manifest.ownershipStatus,
+      })),
+    );
+
+    for (const { manifestPath, manifest } of manifests) {
       expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);
       expect(pkg.files).toContain(manifest.docsPath);
       expect(manifest.sourceAuditPath).toBeNull();
       for (const testPath of manifest.tests)
         expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);
     }
-    const sourceGraph = featureDependencyGraph(extensionIds);
+  });
+
+  it("keeps the documented feature dependency graph equal to the source imports", () => {
+    const sourceGraph = featureDependencyGraph(publicCatalogs.extensions.map(({ id }) => id));
     expect([...sourceGraph].filter(([, dependencies]) => dependencies.length > 0)).toEqual([
       ["agents", ["workflows"]],
       ["loop", ["workflows"]],

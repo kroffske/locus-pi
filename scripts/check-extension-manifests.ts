@@ -13,6 +13,10 @@
  * than silently skipping a rule. No validation library is added for this: the package ships
  * three runtime dependencies and none of them is a JSON Schema validator.
  *
+ * Which files are the manifest set is not decided here: `scripts/extension-manifest-sources.ts`
+ * resolves it, so this gate and `scripts/build-public-catalogs.ts` can never disagree about
+ * which manifests are active. This file owns only what a rejected manifest means.
+ *
  * Every manifest field and the consumer that reads it:
  *
  *   id                  extensions/agents/catalog.ts, scripts/audit-sources.ts, this checker
@@ -37,21 +41,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { extensionManifestSources } from "./extension-manifest-sources.js";
 
 const SCHEMA_FILE = "extension-manifest.schema.json";
 const BUNDLED_AGENTS_DIR = path.join(".agents", "agents");
-const ENTRYPOINT_PATTERN = /^\.\/extensions\/([^/]+)\/index\.ts$/u;
 
 /** One rejected manifest. `field` is the path inside the manifest, so each finding names one edit. */
 export interface ManifestProblem {
   file: string;
   field: string;
   message: string;
-}
-
-interface PackageJson {
-  files: string[];
-  pi: { extensions: string[] };
 }
 
 type SchemaNode = Record<string, unknown>;
@@ -91,55 +90,52 @@ if (process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.res
  * the first, so one run reports the whole edit list.
  */
 export function extensionManifestProblems(root: string): ManifestProblem[] {
-  const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-  const entrypoints = packageJson.pi?.extensions;
-  if (!Array.isArray(entrypoints)) {
-    return [{ file: "package.json", field: "pi.extensions", message: "must be an array of extension entrypoints" }];
+  const { packageFiles, declarationProblem, sources } = extensionManifestSources(root);
+  if (declarationProblem) {
+    return [{ file: "package.json", field: "pi.extensions", message: declarationProblem }];
   }
 
   const schema = JSON.parse(readFileSync(path.join(root, SCHEMA_FILE), "utf8")) as SchemaNode;
   assertSupportedSchema(schema, "#");
 
-  const packagedFiles = new Set(Array.isArray(packageJson.files) ? packageJson.files : []);
+  const packagedFiles = new Set(packageFiles);
   const problems: ManifestProblem[] = [];
   const seenIds = new Map<string, string>();
   const seenAgents = new Map<string, string>();
 
-  for (const [index, entrypoint] of entrypoints.entries()) {
-    const match = typeof entrypoint === "string" ? ENTRYPOINT_PATTERN.exec(entrypoint) : null;
-    if (!match?.[1]) {
+  for (const source of sources) {
+    if (source.state === "invalid-entrypoint") {
       problems.push({
         file: "package.json",
-        field: `pi.extensions[${index}]`,
-        message: `is not an ./extensions/<id>/index.ts entrypoint: ${String(entrypoint)}`,
+        field: `pi.extensions[${source.index}]`,
+        message: `is not an ./extensions/<id>/index.ts entrypoint: ${String(source.entrypoint)}`,
       });
       continue;
     }
-    const directory = match[1];
-    const file = `extensions/${directory}/manifest.json`;
-    const absolute = path.join(root, "extensions", directory, "manifest.json");
-    if (!existsSync(absolute)) {
-      problems.push({ file, field: "", message: "declared by package.json#pi.extensions but missing" });
+    if (source.state === "missing") {
+      problems.push({ file: source.file, field: "", message: "declared by package.json#pi.extensions but missing" });
+      continue;
+    }
+    if (source.state === "unreadable") {
+      problems.push({ file: source.file, field: "", message: `is not readable JSON: ${source.reason}` });
       continue;
     }
 
-    let manifest: unknown;
-    try {
-      manifest = JSON.parse(readFileSync(absolute, "utf8"));
-    } catch (error) {
-      problems.push({ file, field: "", message: `is not readable JSON: ${(error as Error).message}` });
-      continue;
-    }
-
+    const { directory, file, manifest } = source;
     const schemaProblems = validate(schema, manifest, "", schema);
     problems.push(...schemaProblems.map((problem) => ({ file, ...problem })));
     if (schemaProblems.length > 0) continue;
 
     // The manifest matched the schema, so every field below has its declared shape.
     problems.push(
-      ...crossFileProblems(root, directory, manifest as ManifestShape, packagedFiles, seenIds, seenAgents).map(
-        (problem) => ({ file, ...problem }),
-      ),
+      ...crossFileProblems(
+        root,
+        directory,
+        manifest as unknown as ManifestShape,
+        packagedFiles,
+        seenIds,
+        seenAgents,
+      ).map((problem) => ({ file, ...problem })),
     );
   }
   return problems;
