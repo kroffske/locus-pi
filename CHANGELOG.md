@@ -28,6 +28,14 @@ This file records user-visible changes to the public package.
   questions travel only through `workflow_ask` on stages that declared
   `ask: true`.
 
+- **Pi compatibility is now an open-ended minimum contract instead of a `0.83.x` ceiling.** The four Pi peer dependencies accept `>=0.83.0`, while development and CI continue to pin one exact, jointly updated Pi version. `npm run sync:pi-host` updates all four exact development packages from the selected CLI, `npm run check:pi-host` verifies the installed CLI and SDK packages before the suite, and selective-loading coverage runs through that installed host contract without hard-coding its version.
+
+- **Package contract tests now follow their owners.** The former mixed `public-registration` integration file is split across package metadata, runtime registration, extension-agent catalog, workflow catalog, and documentation-reference contracts. A new host contract verifies full and selective package loading through Pi's package/resource loader.
+
+- **The redundant documentation index was removed.** The root README now links directly to the four cross-cutting guides, while getting-started documents selective loading and mixed-provider configuration.
+
+- **Extension manifests now declare the hooks the runtime actually registers.** Six extensions under-declared their `input` hook, and `agents` additionally omitted `session_shutdown`, so a reader of the published manifest or of the `docs/extensions.md` reference table saw fewer hooks than the extension installs. Both surfaces now match live registration.
+
 - **The task namespace hands work between stages through files, and planning is
   decomposed for a weak model.** `task/plan` is now a no-ask pipeline: one
   scope agent freezes `request.md`/`scope.md`, one context agent writes

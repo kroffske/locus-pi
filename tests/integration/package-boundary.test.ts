@@ -360,12 +360,18 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("requires Pi 0.83.0 in both the published peer contract and exact development baseline", () => {
+  it("keeps an open Pi peer floor and one exact tested development baseline", () => {
+    const testedVersions = new Set(PI_PACKAGES.map((packageName) => pkg.devDependencies[packageName]));
+    expect(testedVersions.size).toBe(1);
+    const testedVersion = [...testedVersions][0]!;
+    expect(testedVersion).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u);
     for (const packageName of PI_PACKAGES) {
-      expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.83.0");
-      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe("0.83.0");
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.83.0")).toBe(true);
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.82.0")).toBe(false);
+      const peerRange = pkg.peerDependencies[packageName]!;
+      expect(peerRange, `${packageName} peer floor`).toBe(">=0.83.0");
+      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe(testedVersion);
+      expect(supportsPiVersion(peerRange, testedVersion)).toBe(true);
+      expect(supportsPiVersion(peerRange, "999.0.0")).toBe(true);
+      expect(supportsPiVersion(peerRange, "0.82.999")).toBe(false);
     }
   });
 
@@ -793,14 +799,15 @@ describe("npm public package boundary", () => {
 });
 
 function supportsPiVersion(range: string, version: string): boolean {
-  const match = /^\^(\d+)\.(\d+)\.(\d+)$/u.exec(range);
+  const match = /^>=\s*(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/u.exec(range);
   if (match === null) return false;
   const floor = match.slice(1).map((part) => Number(part));
-  const candidate = version.split(".").map((part) => Number(part));
+  const candidate = version
+    .split("-", 1)[0]!
+    .split(".")
+    .map((part) => Number(part));
   if (floor.length !== 3 || candidate.length !== 3 || candidate.some((part) => !Number.isSafeInteger(part)))
     return false;
-  if (candidate[0] !== floor[0]) return false;
-  if (floor[0] === 0 && candidate[1] !== floor[1]) return false;
   for (let index = 0; index < 3; index += 1) {
     if (candidate[index]! > floor[index]!) return true;
     if (candidate[index]! < floor[index]!) return false;

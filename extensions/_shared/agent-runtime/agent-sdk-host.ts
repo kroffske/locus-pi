@@ -87,7 +87,7 @@ export interface SdkAgentSessionLike {
    * for. Structurally opaque: `modelSelectorFromModel` formats it.
    */
   readonly model?: unknown;
-  /** Pi 0.83.0 conversation history; optional for structural mocks. */
+  /** Pi conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
   prompt(text: string, options?: { source?: string; streamingBehavior?: "steer" | "followUp" }): Promise<void>;
@@ -98,7 +98,7 @@ export interface SdkAgentSessionLike {
   exportToJsonl(outputPath?: string): string; // SYNC
   /**
    * Full readable render of the same session (`AgentSession.exportToHtml`,
-   * present in `@earendil-works/pi-coding-agent` 0.83.0). Optional here because
+   * present in the supported `@earendil-works/pi-coding-agent` host contract). Optional here because
    * an older peer or a structural mock may not have it — and its absence is
    * RECORDED as a named warning beside the transcript, never skipped silently.
    * The package's export map blocks a deep import of the renderer, so this

@@ -20,14 +20,50 @@ Start a new Pi session in a trusted project:
 
 `live-smoke` is the smallest runtime check: it starts two child-agent jobs that list the current project directory.
 
-## Avoid duplicate registrations
+## Load only selected extensions
 
-Pi can load the same package from user and project scope at the same time. Duplicate registrations usually surface as duplicate tool or command names.
+Pi installs the package once and can filter which entrypoints it loads. Use `pi config` for an interactive global or project-local selection, or store an explicit package filter in `~/.pi/agent/settings.json` or `.pi/settings.json`.
 
-Inspect and remove the unwanted source identity:
+For example, this profile loads only the workflow extension and disables the bundled skills:
+
+```json
+{
+  "packages": [
+    {
+      "source": "npm:@kroffske/locus-pi",
+      "extensions": ["extensions/workflows/index.ts"],
+      "skills": []
+    }
+  ]
+}
+```
+
+Filtering is a loading boundary, not an installation boundary: the npm tarball and production dependencies are still installed, and an enabled extension may import helper modules owned by another feature directory without registering that feature's entrypoint.
+
+## Mix with another Pi package
+
+Pi can load several package sources in one process. Before enabling another implementation of the same capability, explicitly exclude the overlapping Locus entrypoint. Do not rely on package order to override a tool: duplicate tool names are order-sensitive, duplicate commands are disambiguated by the host, and hooks compose according to each event's rules.
+
+Example: keep the Locus agent launcher and use workflows from another package:
+
+```json
+{
+  "packages": [
+    {
+      "source": "npm:@kroffske/locus-pi",
+      "extensions": ["extensions/agents/index.ts"],
+      "skills": []
+    },
+    "npm:@vendor/other-workflows"
+  ]
+}
+```
+
+## Registration scopes
+
+The same package identity can be configured globally and for a project. Use `pi list` and `pi config` to inspect the effective source and filters. Remove only the unwanted scope:
 
 ```bash
-pi list
 pi remove npm:@kroffske/locus-pi
 pi remove npm:@kroffske/locus-pi -l
 ```

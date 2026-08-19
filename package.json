@@ -292,7 +292,6 @@
     "skills/locus-pi-workflows/references/sequential-text.md",
     "skills/locus-task-workflow/SKILL.md",
     "README.md",
-    "docs/README.md",
     "docs/getting-started.md",
     "docs/extensions.md",
     "docs/workflows.md",
@@ -321,7 +320,7 @@
   },
   "scripts": {
     "build:workflow-source": "tsx scripts/build-workflow-source-shape.ts",
-    "check": "npm run check:layers && npm run check:workflow-source && npm run typecheck && npm test && npm run audit:sources",
+    "check": "npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test && npm run audit:sources",
     "check:layers": "tsx scripts/check-extension-layers.ts",
     "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
     "check:push": "npm run check && npm run check:repository && npm run check:release && npm run pack:json > /dev/null",
@@ -336,7 +335,10 @@
     "test": "vitest run",
     "pack:dry": "npm run build:workflow-source && npm pack --dry-run --ignore-scripts",
     "prepack": "npm run build:workflow-source",
-    "audit:sources": "node --import tsx scripts/audit-sources.ts"
+    "audit:sources": "node --import tsx scripts/audit-sources.ts",
+    "check:pi-host": "node scripts/check-pi-host-version.mjs",
+    "test:host-loading": "vitest run tests/contracts/host/selective-package-loading.test.ts",
+    "sync:pi-host": "node scripts/sync-pi-host-version.mjs"
   },
   "dependencies": {
     "@ast-grep/lang-python": "^0.0.6",
@@ -344,17 +346,17 @@
     "@sinclair/typebox": "^0.34.41"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": "^0.83.0",
-    "@earendil-works/pi-ai": "^0.83.0",
-    "@earendil-works/pi-coding-agent": "^0.83.0",
-    "@earendil-works/pi-tui": "^0.83.0",
+    "@earendil-works/pi-agent-core": ">=0.83.0",
+    "@earendil-works/pi-ai": ">=0.83.0",
+    "@earendil-works/pi-coding-agent": ">=0.83.0",
+    "@earendil-works/pi-tui": ">=0.83.0",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
-    "@earendil-works/pi-tui": "0.83.0",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
     "@types/node": "^24.0.0",
     "lint-staged": "^16.4.0",
     "prettier": "^3.9.5",

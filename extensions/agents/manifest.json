@@ -20,7 +20,7 @@
     "agent observe / agent summary render an on-demand bounded snapshot of current and recent live rows from agentLiveStore.rows; done/cancelled/error rows stay terminal, not running, with currentTools/currentToolArgs/currentToolStartMs cleared and elapsedMs frozen at terminal transition",
     "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
     "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
-    "no first-class createAgentSession JSON schema/response_format mode is present in the declared Pi SDK 0.83.0 peer; agent output is text-only",
+    "the current adapter does not use a first-class createAgentSession JSON schema/response_format mode; agent output remains text-only even when a newer Pi host exposes additional structured-output capabilities",
     "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
     "spawn_agent is the canonical subagent-spawn tool; it accepts one required task string, streams the generated live agent name into the tool card at kickoff, creates one child, returns exact text in content, and keeps runtime metadata in details",
     "SDK children always exclude spawn_agent after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow when the profile allows it",
@@ -73,7 +73,7 @@
       "agent ps",
       "ps"
     ],
-    "hooks": ["session_start", "before_agent_start"],
+    "hooks": ["session_start", "session_shutdown", "before_agent_start", "input"],
     "shortcuts": ["shift+down"]
   },
   "uiLifecycle": {
@@ -133,7 +133,7 @@
     "tests/extensions/agents/agent-drill.test.ts",
     "tests/extensions/agents/agent-fleet-menu.test.ts",
     "tests/extensions/agents/agent-live-store-entrypoints.test.ts",
-    "tests/integration/public-registration.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/shared/operator-interaction.test.ts"
   ],
   "review": {

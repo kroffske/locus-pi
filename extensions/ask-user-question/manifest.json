@@ -54,7 +54,7 @@
     "tests/extensions/ask-user-question/ask-user-question.test.ts",
     "tests/shared/operator-ui/operator-interaction.test.ts",
     "tests/shared/operator-ui/operator-question.test.ts",
-    "tests/integration/public-registration.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/shared/operator-interaction.test.ts"
   ],
   "review": {

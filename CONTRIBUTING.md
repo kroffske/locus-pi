@@ -14,21 +14,35 @@ Do not push directly to `main` or `dev`.
 
 ## Development setup
 
-Use Node.js `>=22.19.0` and Pi `0.83.x`.
+Use Node.js `>=22.19.0`. Run the Pi version pinned in the four `@earendil-works/pi-*` development dependencies. The open-ended peer range does not block later host versions; the exact development pin records the version the repository suite has actually exercised.
 
 ```bash
 npm ci --ignore-scripts
 npm run hooks:install
+npm run check:pi-host
 pi install -l .
 ```
 
 The tracked pre-commit hook expects `gitleaks` for staged secret scanning.
 
+### Test a newer Pi host
+
+Use the version reported by the actual CLI you intend to support, then update all four Pi development packages and the lockfile together:
+
+```bash
+PI_BIN="$(command -v pi)" npm run sync:pi-host
+npm run check
+```
+
+`sync:pi-host` reads the version from the selected CLI, updates all four Pi development packages and `package-lock.json` together, and then runs the CLI/SDK consistency check. Set `PI_BIN` when the intended host is not the first `pi` on `PATH`.
+
+Do not narrow the peer range to the tested patch or minor version. The exact development version records what was exercised; the peer range records the minimum supported host contract.
+
 ## Before changing an extension
 
 Read:
 
-- `README.md` and `docs/README.md`;
+- `README.md`, `docs/getting-started.md`, and `docs/architecture.md`;
 - `package.json#pi.extensions`;
 - `extensions/<name>/README.md`;
 - `extensions/<name>/manifest.json`;
