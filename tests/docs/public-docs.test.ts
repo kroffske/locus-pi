@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
-const expectedDocs = ["README.md", "architecture.md", "extensions.md", "getting-started.md", "workflows.md"];
+const expectedDocs = ["architecture.md", "extensions.md", "getting-started.md", "workflows.md"];
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
   pi: { extensions: string[] };
 };
@@ -48,7 +48,6 @@ describe("public documentation topology", () => {
   it("links the public entry pages", () => {
     const readme = readFileSync(path.join(root, "README.md"), "utf8");
     for (const relativePath of [
-      "docs/README.md",
       "docs/getting-started.md",
       "docs/extensions.md",
       "docs/workflows.md",

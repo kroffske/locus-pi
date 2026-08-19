@@ -2,7 +2,7 @@
 
 `locus-pi` is MIT-licensed. No paid support, response-time guarantee, or service-level agreement is provided.
 
-Before opening a report, read [`README.md`](README.md), [`docs/README.md`](docs/README.md), and the relevant `extensions/<name>/README.md`.
+Before opening a report, read [`README.md`](README.md), [`docs/getting-started.md`](docs/getting-started.md), and the relevant `extensions/<name>/README.md`.
 
 Use:
 

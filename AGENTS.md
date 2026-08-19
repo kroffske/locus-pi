@@ -24,7 +24,7 @@ npm run hooks:install
 npm run check:push
 ```
 
-Use Node.js `>=22.19.0` and Pi `0.83.x`. The pre-commit hook formats staged files, checks whitespace and secrets, runs TypeScript validation, and blocks commits on protected branch names. CI repeats deterministic source, test, repository, dependency, and package checks.
+Use Node.js `>=22.19.0`. Pi has a minimum peer floor of `0.83.0`; local development and CI run the exact version jointly pinned in the four `@earendil-works/pi-*` development dependencies and `package-lock.json`. Use `npm run sync:pi-host` to move that tested baseline to the selected installed CLI. The pre-commit hook formats staged files, checks whitespace and secrets, runs TypeScript validation, and blocks commits on protected branch names. CI repeats deterministic source, test, repository, dependency, and package checks.
 
 ## Extension ownership layers
 

@@ -7,7 +7,7 @@ The package favors explicit orchestration, bounded execution, and inspectable ru
 ## Requirements
 
 - Node.js `>=22.19.0`
-- Pi `0.83.x` (peer floor `0.83.0`)
+- Pi `>=0.83.0`; development and CI test the exact version pinned in `devDependencies` and `package-lock.json`
 - A trusted project and reviewed workflow sources
 
 ## Install
@@ -37,7 +37,7 @@ Remove the package with the same source identity:
 pi remove npm:@kroffske/locus-pi
 ```
 
-Source-checkout installation, duplicate-registration recovery, and uninstall details are in [Getting started](docs/getting-started.md).
+Source-checkout installation, selective loading, mixed-provider guidance, and uninstall details are in [Getting started](docs/getting-started.md).
 
 ## Included extensions
 
@@ -97,7 +97,6 @@ Review local workflow sources before running them, especially when they can writ
 
 ## Documentation
 
-- [Documentation map](docs/README.md)
 - [Getting started](docs/getting-started.md)
 - [Extension reference](docs/extensions.md)
 - [Workflow guide](docs/workflows.md)
