@@ -38,6 +38,7 @@ import {
   createWorkflowSharedExecutionState,
   snapshotWorkflowItems,
   workflowGroupFailureEnvelope,
+  WORKFLOW_NO_OPERATOR_PRELUDE,
   type WorkflowSavedChildResult,
   type WorkflowSharedExecutionState,
 } from "./workflow-runtime.js";
@@ -239,6 +240,9 @@ interface WorkflowRunnerCoordination {
   output: WorkflowOutputDirectory;
   ancestry: readonly { sourcePath: string; scriptSha256: string }[];
   budget: WorkflowBudget;
+  /** Run-level no-operator mode. Lives on coordination so a saved child can
+   *  neither drop nor weaken it: one run, one guarantee. */
+  noOperator?: true;
   expectedChildSource?: ExpectedWorkflowChildSource;
 }
 
@@ -314,6 +318,16 @@ export interface RunWorkflowScriptOptions {
    * four per-call axes additionally have an author surface in `agent(prompt, opts)`.
    */
   budget?: Partial<WorkflowBudget>;
+  /**
+   * Run-level guarantee for unattended launches: while on, ANY request for
+   * operator input — `dsl.awaitOperator()` or a stage's `agent({ ask: true })`
+   * — fails closed with a named reason instead of parking the run or mounting
+   * a question. No auto-answer exists; a fabricated operator input would be
+   * worse than the refusal. Saved children inherit the mode through run
+   * coordination and cannot unset it. Off by default everywhere, including
+   * print/json launches (the split-run pause is a designed headless state).
+   */
+  noOperator?: true;
   createExecutor?: (o: {
     model?: unknown;
     live?: import("../../_shared/agent-runtime/agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
@@ -854,6 +868,9 @@ class SavedChildExecutionOwner {
       output: this.options.coordination.output,
       ancestry: [...this.options.coordination.ancestry, { sourcePath: source.path, scriptSha256: source.scriptSha256 }],
       budget: this.options.coordination.budget,
+      ...(this.options.coordination.noOperator === undefined
+        ? {}
+        : { noOperator: this.options.coordination.noOperator }),
       expectedChildSource: { canonicalPath: source.path, scriptSha256: source.scriptSha256 },
     };
     try {
@@ -1033,7 +1050,26 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     source: "runtime",
     message: formatWorkflowBudgetPrelude(budget),
   };
+  // Inherited coordination is the only authority for children: a saved child
+  // can neither drop nor introduce the mode, exactly like `budget`.
+  const noOperator =
+    inheritedCoordination !== undefined
+      ? inheritedCoordination.noOperator
+      : opts.noOperator === true
+        ? true
+        : undefined;
+  const noOperatorPrelude: WorkflowJournalLine | undefined =
+    noOperator === undefined
+      ? undefined
+      : {
+          ts: new Date().toISOString(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: WORKFLOW_NO_OPERATOR_PRELUDE,
+        };
   journal.initialize(budgetPrelude);
+  if (noOperatorPrelude !== undefined) journal.write(noOperatorPrelude);
 
   const requestedResumeFromRunId = opts.resumeFromRunId;
   const requestedSemanticInput = workflowSemanticInputIdentity(opts.input);
@@ -1063,7 +1099,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const childRuns: WorkflowChildRunEvidence[] = [];
   let leaseReleased = false;
   const hasResume = requestedResumeFromRunId !== undefined;
-  const preludeLines: WorkflowJournalLine[] = [budgetPrelude];
+  const preludeLines: WorkflowJournalLine[] = [
+    budgetPrelude,
+    ...(noOperatorPrelude === undefined ? [] : [noOperatorPrelude]),
+  ];
   const emitPrelude = (line: WorkflowJournalLine): void => {
     preludeLines.push(line);
     journal.write(line);
@@ -1909,6 +1948,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         output: stableOutput,
         ancestry: [{ sourcePath: realpathSync(target.path), scriptSha256: scriptIdentity.scriptSha256 }],
         budget,
+        ...(noOperator === undefined ? {} : { noOperator }),
       };
     }
     if (coordination === undefined) {
@@ -2087,6 +2127,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(opts.input !== undefined ? { args: opts.input } : {}),
     ...(opts.createExecutor !== undefined ? { createExecutor: opts.createExecutor } : {}),
     ...(opts.resolveModel !== undefined ? { resolveModel: opts.resolveModel } : {}),
+    ...(noOperator === undefined ? {} : { noOperator }),
   };
   const agentRunner = createWorkflowAgentRunner(agentBridgeOptions);
   const preflightAgentRequests = createWorkflowAgentPreflight(agentBridgeOptions);
@@ -2134,6 +2175,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     defaultMaxTurns: budget.turns,
     defaultMaxAnswerChars: budget.answerChars,
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
+    ...(noOperator === undefined ? {} : { operatorInputForbidden: true }),
     onAwaitOperator: (declaration) => {
       if (awaitOperatorDeclaration !== undefined) {
         throw new Error("awaitOperator may be declared only once per workflow run");

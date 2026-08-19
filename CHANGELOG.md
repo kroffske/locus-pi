@@ -33,6 +33,22 @@ check:links`.** Every relative link and heading anchor in published Markdown is
   can own. The parser is `scripts/markdown-links.ts`, shared with the
   package-boundary test that applies the same rule to a real `npm pack`.
 
+- **Run-level no-operator mode — `/workflows run <name> --no-operator`, tool
+  field `noOperator`.** One launch option turns the "shipped workflows do not
+  ask" convention into a runtime guarantee for unattended callers: under the
+  mode, ANY request for operator input fails closed with a named reason
+  instead of parking the run. `dsl.awaitOperator(...)` fails the run at the
+  call site (`Operator input requested but forbidden for this run
+(no-operator mode): <reason>`) with no pause envelope, while artifacts
+  published before the refusal stay on disk; an `agent({ ask: true })` stage
+  is refused before any child is spawned with the closed
+  `failureCause: "ask-unavailable"`. The journal opens with
+  `[workflow:no-operator] operator input is forbidden for this run`; saved
+  children inherit the mode through run coordination and cannot unset it.
+  No auto-answer exists under the mode. Off by default everywhere, including
+  `print`/`json` launches — a headless `awaitOperator` pause remains a
+  designed split-run state.
+
 - **Live operator questions — `agent({ ask: true })`.** A stage may let its
   child ask the operator clarifying questions through the injected
   `workflow_ask` tool: the question renders in the parent session, the answer

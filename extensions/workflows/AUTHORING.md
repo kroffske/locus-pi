@@ -165,6 +165,14 @@ remains the default. An `ask: true` stage makes the workflow unusable in
 `print`/`json` and unattended runs (the call fails closed with
 `ask-unavailable`), so a pipeline meant for automation must not declare it.
 
+The same applies to `dsl.awaitOperator(...)`: an unattended caller may launch
+any workflow with the run-level no-operator mode (`/workflows run <name>
+--no-operator`, or the `workflow` tool's `noOperator: true`), and under that
+mode every request for operator input — `awaitOperator` or an `ask: true`
+stage — fails closed with a named reason instead of pausing the run. Author
+for that reality: a workflow meant for automation asks nothing and turns
+unknowns into explicit assumptions inside its result.
+
 ## Target source shape
 
 Keep stable identities together near the top. Keep prompts,

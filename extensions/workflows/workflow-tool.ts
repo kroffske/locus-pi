@@ -115,6 +115,14 @@ const WorkflowParams = Type.Object(
         pattern: WORKFLOW_SAFE_COMPONENT_PATTERN,
       }),
     ),
+    noOperator: Type.Optional(
+      Type.Boolean({
+        description:
+          "Run-level no-operator mode for unattended launches: any request for operator input " +
+          "(dsl.awaitOperator or an agent({ ask: true }) stage) fails closed with a named reason " +
+          "instead of pausing the run. Saved children inherit the mode and cannot unset it.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -218,6 +226,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
+          ...(valid.value.noOperator === true ? { noOperator: true as const } : {}),
           onRunStart: ({ runId, runDir }) => {
             background.setRunId(runId);
             deps.onRunStarted(runId);

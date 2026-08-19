@@ -62,6 +62,12 @@ import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent
  *  the backstop — a named, documented residual, not a silent one. */
 const WORKFLOW_ASK_TURN_WAIT_ALLOWANCE_MS = 24 * 60 * 60 * 1000;
 
+/** Named refusal for an `ask: true` stage under the run-level no-operator mode.
+ *  Method-agnostic wording on purpose: the mode forbids operator input as such. */
+export const WORKFLOW_NO_OPERATOR_ASK_MESSAGE =
+  "Operator input requested but forbidden for this run (no-operator mode): the stage declared ask: true. " +
+  "No child was started. Drop the ask declaration for unattended runs, or launch without the no-operator mode.";
+
 // ---------------------------------------------------------------------------
 // Exported types
 // ---------------------------------------------------------------------------
@@ -118,6 +124,9 @@ export interface WorkflowAgentBridgeOptions {
   /** Test seam: replaces the operator-question surface `workflow_ask` mounts, so
    *  tests can script answers without a TUI. Production callers leave it unset. */
   askRequestQuestion?: WorkflowAskToolDeps["requestQuestion"];
+  /** Run-level no-operator mode: an `ask: true` stage fails closed before any
+   *  child is spawned, with the same closed cause a no-UI parent produces. */
+  noOperator?: true;
 }
 
 /**
@@ -287,6 +296,24 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       isDefaultAgent: agent.name === defaultAgentName,
     });
     const workspaceMode = resolveWorkspaceMode({ reqMode: req.workspaceMode, sandbox: req.sandbox });
+
+    if (req.operatorAsk === true && options.noOperator === true) {
+      // Run-level no-operator mode (T-165). Refused BEFORE tier resolution and
+      // before any child exists, so the declaration costs nothing. Result-shaped
+      // (not thrown) so a script may branch on the refusal explicitly; the cause
+      // stays inside the closed set — operator input genuinely is unavailable in
+      // this run, by launch policy rather than by missing UI.
+      return {
+        ok: false,
+        status: "failed",
+        failureCause: "ask-unavailable",
+        summary: WORKFLOW_NO_OPERATOR_ASK_MESSAGE,
+        diagnostics: [WORKFLOW_NO_OPERATOR_ASK_MESSAGE],
+        agent: agent.name,
+        workspaceMode,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+      };
+    }
 
     // 3. Tier resolution. This is the one place that decides which model the child
     //    runs on, and it decides it BEFORE any child is spawned so a refusal costs

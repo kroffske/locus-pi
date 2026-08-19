@@ -32,6 +32,8 @@ export interface WorkflowCommandLaunchRequest {
   input?: string;
   outputDir?: string;
   resumeFromRunId?: string;
+  /** Run-level no-operator mode (operator input fails closed). */
+  noOperator?: true;
   continuation?: WorkflowContinuation;
   operatorHandoffClaim?: WorkflowHandoffClaimLease;
   operatorHandoffWorkspaceReuse?: WorkflowHandoffWorkspaceReuseBinding;
@@ -144,6 +146,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
           ...(request.input === undefined ? {} : { input: request.input }),
           ...(request.outputDir === undefined ? {} : { outputDir: request.outputDir }),
           ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
+          ...(request.noOperator === undefined ? {} : { noOperator: request.noOperator }),
           ...(request.continuation === undefined ? {} : { continuation: request.continuation }),
           ...(request.operatorHandoffClaim === undefined ? {} : { operatorHandoffClaim: request.operatorHandoffClaim }),
           ...(request.operatorHandoffWorkspaceReuse === undefined
