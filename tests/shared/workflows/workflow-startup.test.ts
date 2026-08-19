@@ -48,7 +48,7 @@ describe("workflow startup persistence", () => {
 
     expect(result.ok).toBe(true);
     expect(announcedRunDir).toBe(result.runDir);
-    expect(result.runDir).toBe(path.join(root, ".pi", "locus-pi", "runs", result.runId));
+    expect(result.runDir).toBe(path.join(root, ".locus-pi", "runs", result.runId));
     expect(journalExistedAtAnnouncement).toBe(true);
     expect(journalAtAnnouncement).toContain("[workflow:budget]");
   });
@@ -57,7 +57,7 @@ describe("workflow startup persistence", () => {
     const root = temporaryProject();
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-startup-outside-"));
     roots.push(outside);
-    symlinkSync(outside, path.join(root, ".pi"), "dir");
+    symlinkSync(outside, path.join(root, ".locus-pi"), "dir");
     const harness = createHarness(root, { sessionId: "workflow-startup-unsafe" });
     let announced = false;
     let childCalls = 0;

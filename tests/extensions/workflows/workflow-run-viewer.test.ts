@@ -82,13 +82,13 @@ describe("workflow persisted evidence viewer", () => {
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "trusted answer" }]);
     const index = JSON.parse(
       readFileSync(
-        path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), "index.json"),
+        path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), "index.json"),
         "utf8",
       ),
     ) as { artifacts: Array<{ kind: string; relativePath: string }> };
     const answer = index.artifacts.find((record) => record.kind === "answer")!;
     writeFileSync(
-      path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), answer.relativePath),
+      path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), answer.relativePath),
       "changed after indexing",
       "utf8",
     );
@@ -120,7 +120,7 @@ describe("workflow persisted evidence viewer", () => {
     const root = makeRoot();
     const runId = `20260722-010101-${label}`;
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "answer" }]);
-    const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
     const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
     Object.assign(result, metadata);
     writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
@@ -155,10 +155,7 @@ describe("workflow persisted evidence viewer", () => {
     );
     viewer.handleInput("enter");
 
-    const indexPath = path.join(
-      workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
-      "index.json",
-    );
+    const indexPath = path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ kind: string; name: string }>;
     };

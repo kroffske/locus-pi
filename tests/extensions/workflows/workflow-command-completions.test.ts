@@ -112,6 +112,9 @@ describe("workflow command argument completion", () => {
       expect.objectContaining({ value: "run alpha --resume ", label: "--resume" }),
       expect.objectContaining({ value: "run alpha -- ", label: "--" }),
     ]);
+    expect(complete("run task/draft ")).toContainEqual(
+      expect.objectContaining({ value: "run task/draft --run-name ", label: "--run-name" }),
+    );
     expect(complete('run "alpha workflow" ')).toEqual([
       expect.objectContaining({ value: 'run "alpha workflow" --output-dir ', label: "--output-dir" }),
       expect.objectContaining({ value: 'run "alpha workflow" --resume ', label: "--resume" }),

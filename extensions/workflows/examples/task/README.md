@@ -1,12 +1,30 @@
 # task workflows
 
-`task` is a group-only Package namespace. It is not runnable by itself; use
-`task/plan` to prepare a task, and `task/implement` to execute one approved step.
+`task` is a group-only Package namespace. It is not runnable by itself. Use
+`task/draft` to translate a raw request, `task/plan` to prepare an accepted task,
+and `task/implement` to execute the complete approved plan.
 The shared prefix makes the relationship visible without pretending that
 planning approval and implementation are one automatic run. The one-run
 alternative lives beside the namespace as the separate root workflow
 `task-via-script`, which runs this same planning pipeline as its own stage and
 then renders a sequential implement script.
+
+## `task/draft`
+
+`task/draft` is the optional interactive front door. It accepts a raw request
+and uses one agent to gather only request-relevant project facts. That agent
+also returns the runtime-owned choice `ready | ask`. The drafting agent receives
+the live `workflow_ask` tool only on the `ask` branch and is instructed to group
+no more than three pivotal questions in one call. It fully replaces `draft.md`
+and stops. A ready request can run headless; a no-operator or headless run fails
+closed before the drafting child when clarification is required. It never
+invents an answer.
+
+The saved draft uses the Locus Prompt Draft structure. It states the task, one
+working end state, relevant context, the in-scope and out-of-scope direction,
+and any evidence or unresolved fragments. It is an intent mirror, not an
+implementation plan. The owner reads it before starting `task/plan` manually on
+the same workspace.
 
 ## `task/plan`
 
@@ -55,10 +73,20 @@ files.
 
 ## Workspace files
 
-Every stage receives the same project-local workflow workspace. It defaults to
-`<pwd>/tmp/plan/`; a caller using the `workflow` tool can select a shared
-directory such as `tmp/cron-to-dag`.
+Every stage receives the same project-local workflow workspace. A fresh
+`task/draft`, `task/plan`, `task/implement`, or `task-via-script` run receives a unique default beneath
+`.locus-pi/plans/`, for example
+`.locus-pi/plans/20260819-142530-a1b2-task-draft/`. The prefix is the run id:
+a sortable UTC timestamp plus a random suffix. The workflow slug keeps the
+origin visible. That folder leaf is the generated run name. A caller may instead
+select `.locus-pi/plans/<name>` with `--run-name <name>`.
 
+The manual route reuses one directory deliberately. After `task/draft`, copy
+the exact `task/plan --run-name ...` command from the completion card. Every
+later `task/implement` completion uses that same run name.
+
+- `draft-context.md` — the bounded reconnaissance behind an interactive draft.
+- `draft.md` — the accepted intent that `task/plan` reads when present.
 - `request.md` — the exact task, byte-for-byte.
 - `scope.md` — the verbatim request plus outcome, targets, boundary,
   exclusions, and open questions.
@@ -78,8 +106,9 @@ directory such as `tmp/cron-to-dag`.
 
 The pipeline fully replaces its assigned files on every successful run,
 deleting leftover step files a new shorter catalog does not replace. A selected
-workspace name is not a run id or audit id; callers may reuse it when they
-intend to replace the plan.
+workspace may be reused when the owner intends to refine a draft, replace a
+plan, or execute its approved steps. Independent work uses a fresh planning
+directory.
 
 **The files on disk are the contract.** After planning, the owner may edit
 `plan.md` and any `step-<n>.md` before execution; `task/implement` and
@@ -121,10 +150,11 @@ step files deliberately as the owner; never mutate the catalog implicitly.
 Nothing below happens until the operator has read the planning files and asked
 for it. A finished `task/plan` run is a document, not a queued job.
 
-Default execution remains main Pi todo state plus one top-level
-`task/implement` run per step file, each run given only the step id such as
-`S1`. The installed `locus-task-workflow` skill owns that orchestration;
-neither Package workflow parses the catalog or dispatches another workflow.
+Default execution is one top-level `task/implement` run on the approved planning
+workspace. One implementation agent reads the full catalog from disk and
+executes its steps in order. The installed `locus-task-workflow` skill owns the
+review and launch boundary; neither Package workflow parses the catalog or
+dispatches another workflow.
 
 The one-run route is the separate root workflow `task-via-script`: it runs this
 same planning pipeline as its own stage — over an empty workspace or replanning
@@ -148,45 +178,49 @@ Task Plan or Task Implement execution semantics.
 Direct command use keeps the default workspace:
 
 ```text
+/workflows run task/draft -- Move the cron job into a DAG
+/workflows run task/draft --run-name airflow-builder -- Move the cron job into a DAG
+/workflows run task/plan --run-name airflow-builder
+/workflows run task/implement --run-name airflow-builder
 /workflows run task/plan Move the cron job into a DAG
 /workflows run task/plan --resume <runId> Move the cron job into a DAG
-/workflows run task/implement --output-dir tmp/cron-to-dag -- S1
 ```
 
-Resume requires unchanged workflow source and input. The runtime replays every
-completed answer and reruns the first unfinished call, so a `task/plan` run
-that failed in review replays scope, context, the analyses, and compose.
-Workspace files survive a failed run, so the agents can replace incomplete
-outputs.
+Resume requires unchanged workflow source and input. For task planning targets,
+`--resume <runId>` reuses the source workspace even when the original run chose
+it explicitly; repeating `--output-dir` is optional, and a conflicting path is
+refused. The runtime replays every completed answer and reruns the first
+unfinished call, so a `task/plan` run that failed in review replays scope,
+context, the analyses, and compose. Workspace files survive a failed run, so
+the agents can replace incomplete outputs.
 
-For the complete `task/plan → session todos → one task/implement run per step`
-protocol, use the installed `locus-task-workflow` skill. It calls the Package
-workflows with the same explicit `tmp/<select-name>` workspace.
+For the complete `task/plan → owner approval → task/implement` protocol, use the
+installed `locus-task-workflow` skill. It calls both Package workflows with the
+same `.locus-pi/plans/<run-name>` workspace.
 
 ## `task/implement`
 
-`task/implement` executes exactly one approved step. Its input is a step
-selector — a step id such as `S1`, a file name such as `step-3.md`, or a bare
-number — never the step text itself. One implementation agent resolves the
-matching `step-<n>.md` in the workspace, treats that file on disk as the step
-contract, reinspects the live project, changes only that step's allowed scope,
-runs its checks, and fully replaces `history/S<n>.md` with `Status: completed`
-or `Status: blocked`.
+`task/implement` executes the complete approved plan. It needs only the same
+planning workspace used by `task/plan`; no step selector is accepted or needed.
+One implementation agent reads `plan.md`, every `step-<n>.md` in numeric order,
+and existing `history/*.md`. It treats the files on disk as the contract,
+reinspects the live project before each step, changes only that step's allowed
+scope, runs its checks, and fully replaces `history/S<n>.md` with
+`Status: completed` or `Status: blocked`.
 
-The workflow does not accept a whole plan and does not select or loop over
-steps. It has no parser, todo manager, reviewer, report renderer, nested
-workflow, or model pin. Main Pi owns the dynamic todo queue and starts one
-top-level `task/implement` run per step file, always with the same explicit
-workflow workspace used by `task/plan`.
+The workflow JavaScript does not parse or loop over steps. It has no todo
+manager, reviewer, report renderer, nested workflow, or model pin. The one
+implementation agent owns ordered execution inside a single top-level run.
 
 If one step fails or reports blocked, earlier histories stay complete and later
-steps do not start. Retry only the active step. The implementation result is
-returned unchanged; the caller marks a todo complete only after the history
-records successful required checks.
+steps do not start. A resumed or repeated run reads those histories as evidence,
+rechecks the live state, and continues only when the ordered plan remains valid.
+The workflow returns one concise summary after the final step or the first
+blocker.
 
 `task/implement` is intentionally different from the separate `implement`
-workflow. `task/implement` executes one approved planning step; `implement`
-applies selected findings from a post-code review.
+workflow. `task/implement` executes an approved task plan; `implement` applies
+selected findings from a post-code review.
 
 ## Boundaries
 
@@ -194,8 +228,8 @@ applies selected findings from a post-code review.
   step; the run never waits for an operator answer and fails closed instead.
 - Calls use Pi's default workflow agent and its configured model route; the
   workflow source names no provider, model, model role, or specialized agent.
-- A missing task or step selector is handed to the agents as an explicit
-  blocking input gap; they must not invent implementation work.
+- A missing task, plan, or valid step catalog is handed to the agents as an
+  explicit blocking input gap; they must not invent implementation work.
 - The catalog is frozen by planning and changed only deliberately: a new
   `task/plan` run replaces it, and owner edits to `step-<n>.md` are the owner's
   explicit act. The workflows add no freshness or integrity checks on top.

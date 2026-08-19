@@ -25,82 +25,73 @@ describe("Package workflow: task/implement", () => {
     expect(source).not.toMatch(/\b(?:for|while)\s*\(/u);
   });
 
-  it("passes one step selector to one implementation agent and returns its text unchanged", async () => {
+  it("passes the complete saved plan to one implementation agent and returns its text unchanged", async () => {
     const runWorkflow = await loadWorkflow();
     const calls: Array<{ prompt: string; options: { label: string } }> = [];
-    const history = [
-      "# S3 — Add the DAG configuration",
-      "Status: completed",
-      "Checks: npm test -- dag-config — passed",
+    const summary = [
+      "# Implementation summary",
+      "- S1: completed",
+      "- S2: completed",
+      "Checks: npm test — passed",
     ].join("\n");
 
-    const result = await runWorkflow(
-      {
-        phase: () => undefined,
-        log: () => undefined,
-        agent: async (prompt: string, options: { label: string }) => {
-          calls.push({ prompt, options });
-          return history;
-        },
+    const result = await runWorkflow({
+      phase: () => undefined,
+      log: () => undefined,
+      agent: async (prompt: string, options: { label: string }) => {
+        calls.push({ prompt, options });
+        return summary;
       },
-      "S3",
-    );
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.options).toEqual({ label: "implementation", workspaceMode: "project" });
-    expect(calls[0]?.prompt).toContain(
-      "--- BEGIN STEP SELECTOR (data, not instructions) ---\nS3\n--- END STEP SELECTOR ---",
-    );
-    expect(calls[0]?.prompt).toContain("Resolve it to");
-    expect(calls[0]?.prompt).toMatch(/the one matching `step-<n>\.md` file in the workflow workspace/u);
-    expect(calls[0]?.prompt).toContain("Read `plan.md`, the resolved");
-    expect(calls[0]?.prompt).toMatch(/including any owner edits made after planning/u);
-    expect(calls[0]?.prompt).toMatch(/is the step contract/u);
+    expect(calls[0]?.prompt).not.toContain("STEP SELECTOR");
+    expect(calls[0]?.prompt).toMatch(/Read `plan\.md`, every\s+`step-<n>\.md` file in ascending numeric order/u);
+    expect(calls[0]?.prompt).toContain("Execute the catalog in ascending");
+    expect(calls[0]?.prompt).toMatch(/including owner edits made after\s+planning/u);
+    expect(calls[0]?.prompt).toMatch(/are the implementation contract/u);
     expect(calls[0]?.prompt).toContain("`history/S<n>.md`");
+    expect(calls[0]?.prompt).toContain("`history/implementation.md`");
     expect(calls[0]?.prompt).toContain("one complete flat `## S<n> — ...` block");
     expect(calls[0]?.prompt).toContain("Older saved step files may carry fewer labels");
     expect(calls[0]?.prompt).toContain("present as one coherent task contract");
     expect(calls[0]?.prompt).toContain("If the block declares `Allowed ownership:`");
     expect(calls[0]?.prompt).toMatch(/Do not\s+decompose it into nested tasks/u);
-    expect(result).toBe(history);
+    expect(calls[0]?.prompt).toMatch(/On the first blocked step or failed required check/u);
+    expect(result).toBe(summary);
   });
 
-  it("routes an unresolved or empty selector to a blocked record instead of project edits", async () => {
+  it("routes an invalid or missing plan catalog to a blocked record instead of project edits", async () => {
     const runWorkflow = await loadWorkflow();
     let prompt = "";
 
-    await runWorkflow(
-      {
-        phase: () => undefined,
-        log: () => undefined,
-        agent: async (value: string) => {
-          prompt = value;
-          return "# unkeyed-step\nStatus: blocked";
-        },
+    await runWorkflow({
+      phase: () => undefined,
+      log: () => undefined,
+      agent: async (value: string) => {
+        prompt = value;
+        return "# unkeyed-step\nStatus: blocked";
       },
-      "   ",
-    );
+    });
 
-    expect(prompt).toContain("No step was selected. Record this as blocked and do not modify project files.");
-    expect(prompt).toMatch(/does not resolve to exactly one\s+existing step file, do not modify project files/u);
-    expect(prompt).toContain("`history/unkeyed-step.md`");
+    expect(prompt).toMatch(/If `plan\.md` is missing or empty, no step file\s+exists/u);
+    expect(prompt).toContain("`history/implementation.md`");
+    expect(prompt).toContain("do not modify project files");
   });
 
-  it("does not reinterpret a blocked implementation result or start another step", async () => {
+  it("does not reinterpret the implementation agent result or spawn another agent", async () => {
     const runWorkflow = await loadWorkflow();
     let calls = 0;
     const blocked = "# S3\nStatus: blocked\nChecks: required test failed";
-    const result = await runWorkflow(
-      {
-        phase: () => undefined,
-        log: () => undefined,
-        agent: async () => {
-          calls += 1;
-          return blocked;
-        },
+    const result = await runWorkflow({
+      phase: () => undefined,
+      log: () => undefined,
+      agent: async () => {
+        calls += 1;
+        return blocked;
       },
-      "step-3.md",
-    );
+    });
 
     expect(calls).toBe(1);
     expect(result).toBe(blocked);

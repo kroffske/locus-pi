@@ -21,8 +21,8 @@
   "stateUsed": [
     ".locus/runtime/goal/state.json",
     ".locus/runtime/goal/continue.md",
-    ".pi/locus-pi/runs/<runId>/runtime/journal.ndjson",
-    ".pi/locus-pi/runs/<runId>/runtime/result.json",
+    ".locus-pi/runs/<runId>/runtime/journal.ndjson",
+    ".locus-pi/runs/<runId>/runtime/result.json",
     ".locus/runtime/loop/workflow/*.json",
     ".locus/runtime/loop/sessions/*.json"
   ],
@@ -43,7 +43,7 @@
   },
   "permissions": {
     "filesystem": {
-      "read": [".locus/runtime/goal/state.json", ".pi/locus-pi/runs/**"],
+      "read": [".locus/runtime/goal/state.json", ".locus-pi/runs/**"],
       "write": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/**"]
     },
     "subprocess": [],

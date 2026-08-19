@@ -2,7 +2,7 @@
  * workflow-run-layout.ts — the complete path and confinement contract for one workflow run.
  *
  * Automatic evidence for one workflow run lives under
- * `<projectRoot>/.pi/locus-pi/runs/<runId>/`. This module owns the split
+ * `<projectRoot>/.locus-pi/runs/<runId>/`. This module owns the split
  * between two directories that are addressed by name:
  *
  *   - `outputs/` — the human-readable documents and exact terminal answer the
@@ -10,9 +10,13 @@
  *   - `runtime/` — journal, replay, result envelope, script snapshot and exact
  *     evidence. Humans can inspect it, but no file there is a deliverable.
  *
+ * Fresh Package task workspaces live separately under
+ * `<projectRoot>/.locus-pi/plans/`; workflow-output owns their selected leaf
+ * and confinement while this module owns the shared storage components.
+ *
  * This module also owns path discipline for the artifact store: the run id must
  * be a safe component and no element below the physical project root may be a
- * symlink. Checks happen before creation, so a symlinked `.pi` receives nothing.
+ * symlink. Checks happen before creation, so a symlinked `.locus-pi` receives nothing.
  */
 
 import {
@@ -37,25 +41,42 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-export const WORKFLOW_RUNTIME_DIRNAME = ".pi";
-export const WORKFLOW_EXTENSION_DIRNAME = "locus-pi";
+export const WORKFLOW_ROOT_DIRNAME = ".locus-pi";
 export const WORKFLOW_RUNS_DIRNAME = "runs";
-export const WORKFLOW_LEGACY_RUNS_DIRNAME = "workflows";
+export const WORKFLOW_PLANS_DIRNAME = "plans";
+export const WORKFLOW_LEGACY_ROOT_DIRNAME = ".pi";
+export const WORKFLOW_LEGACY_EXTENSION_DIRNAME = "locus-pi";
+export const WORKFLOW_LEGACY_RUNS_DIRNAMES = ["runs", "workflows"] as const;
 export const WORKFLOW_RUN_OUTPUTS_DIRNAME = "outputs";
 export const WORKFLOW_RUN_RUNTIME_DIRNAME = "runtime";
 export const WORKFLOW_RUN_ARTIFACTS_DIRNAME = "artifacts";
 export const WORKFLOW_RUN_JOURNAL_FILENAME = "journal.ndjson";
 export const WORKFLOW_SAFE_COMPONENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
-export const WORKFLOW_RUN_STORAGE_PATTERN = ".pi/locus-pi/runs/<runId>/";
+export const WORKFLOW_RUN_STORAGE_PATTERN = ".locus-pi/runs/<runId>/";
+export const WORKFLOW_PLANS_STORAGE_PREFIX = ".locus-pi/plans/";
 
 const WORKFLOW_RUN_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
+const TASK_WORKSPACE_TARGET_NAMES = new Set(["task/draft", "task/plan", "task/implement", "task-via-script"]);
 
-export function workflowExtensionRootDir(projectRoot: string): string {
-  return path.join(projectRoot, WORKFLOW_RUNTIME_DIRNAME, WORKFLOW_EXTENSION_DIRNAME);
+/** One owner for the Package task workflows that create or reuse planning evidence. */
+export function isTaskWorkspaceName(workflowName: string): boolean {
+  return TASK_WORKSPACE_TARGET_NAMES.has(workflowName);
+}
+
+/** Fresh Package task runs receive a unique, project-local planning workspace. */
+export function defaultTaskWorkspaceRelativePath(workflowName: string, runId: string | undefined): string | undefined {
+  if (!isTaskWorkspaceName(workflowName)) return undefined;
+  const planningRunId = assertWorkflowRunId(runId);
+  const workflowSlug = workflowName.replaceAll("/", "-");
+  return `${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/${planningRunId}-${workflowSlug}`;
+}
+
+export function workflowRootDir(projectRoot: string): string {
+  return path.join(projectRoot, WORKFLOW_ROOT_DIRNAME);
 }
 
 export function workflowRunsRootDir(projectRoot: string): string {
-  return path.join(workflowExtensionRootDir(projectRoot), WORKFLOW_RUNS_DIRNAME);
+  return path.join(workflowRootDir(projectRoot), WORKFLOW_RUNS_DIRNAME);
 }
 
 /** Validate one run id before it can select any run-owned filesystem evidence. */
@@ -70,8 +91,8 @@ export function workflowRunDir(projectRoot: string, runId: string): string {
   return workflowRunDirectoryWithin(workflowRunsRootDir(projectRoot), runId);
 }
 
-export function workflowLegacyRunDir(projectRoot: string, runId: string): string {
-  const legacyRoot = path.join(workflowExtensionRootDir(projectRoot), WORKFLOW_LEGACY_RUNS_DIRNAME);
+export function workflowLegacyRunDir(projectRoot: string, runId: string, dirname: string = "runs"): string {
+  const legacyRoot = path.join(projectRoot, WORKFLOW_LEGACY_ROOT_DIRNAME, WORKFLOW_LEGACY_EXTENSION_DIRNAME, dirname);
   return workflowRunDirectoryWithin(legacyRoot, runId);
 }
 
@@ -81,16 +102,19 @@ export function workflowLegacyRunMigrationMessage(projectRoot: string, runId: st
     assertWorkflowRunId(runId);
     const lexicalProjectRoot = path.resolve(projectRoot);
     const physicalProjectRoot = realpathSync(lexicalProjectRoot);
-    const legacyRunDir = workflowLegacyRunDir(lexicalProjectRoot, runId);
-    const expectedPhysicalLegacyRunDir = workflowLegacyRunDir(physicalProjectRoot, runId);
-    assertExistingChainIsRegular(physicalProjectRoot, expectedPhysicalLegacyRunDir);
-    const legacyStat = lstatSync(legacyRunDir, { throwIfNoEntry: false });
-    if (legacyStat === undefined || legacyStat.isSymbolicLink() || !legacyStat.isDirectory()) return undefined;
-    if (realpathSync(legacyRunDir) !== expectedPhysicalLegacyRunDir) return undefined;
-    return (
-      `Workflow run ${runId} uses the retired storage location ${legacyRunDir}. ` +
-      `This version reads only ${workflowRunDir(projectRoot, runId)}; inspect or remove the old local evidence manually.`
-    );
+    for (const dirname of WORKFLOW_LEGACY_RUNS_DIRNAMES) {
+      const legacyRunDir = workflowLegacyRunDir(lexicalProjectRoot, runId, dirname);
+      const expectedPhysicalLegacyRunDir = workflowLegacyRunDir(physicalProjectRoot, runId, dirname);
+      assertExistingChainIsRegular(physicalProjectRoot, expectedPhysicalLegacyRunDir);
+      const legacyStat = lstatSync(legacyRunDir, { throwIfNoEntry: false });
+      if (legacyStat === undefined || legacyStat.isSymbolicLink() || !legacyStat.isDirectory()) continue;
+      if (realpathSync(legacyRunDir) !== expectedPhysicalLegacyRunDir) continue;
+      return (
+        `Workflow run ${runId} uses the retired storage location ${legacyRunDir}. ` +
+        `This version reads only ${workflowRunDir(projectRoot, runId)}; inspect or remove the old local evidence manually.`
+      );
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -397,16 +421,11 @@ function workflowRunLayoutFromBoundaryRoot(boundaryRoot: string): WorkflowRunLay
   let candidate = lexicalBoundaryRoot;
   for (;;) {
     const runsRoot = path.dirname(candidate);
-    const extensionRoot = path.dirname(runsRoot);
-    const runtimeRoot = path.dirname(extensionRoot);
-    if (
-      path.basename(runsRoot) === WORKFLOW_RUNS_DIRNAME &&
-      path.basename(extensionRoot) === WORKFLOW_EXTENSION_DIRNAME &&
-      path.basename(runtimeRoot) === WORKFLOW_RUNTIME_DIRNAME
-    ) {
+    const workflowRoot = path.dirname(runsRoot);
+    if (path.basename(runsRoot) === WORKFLOW_RUNS_DIRNAME && path.basename(workflowRoot) === WORKFLOW_ROOT_DIRNAME) {
       const runId = path.basename(candidate);
       assertWorkflowRunId(runId);
-      const lexicalProjectRoot = path.dirname(runtimeRoot);
+      const lexicalProjectRoot = path.dirname(workflowRoot);
       if (workflowRunDir(lexicalProjectRoot, runId) !== candidate) {
         throw new Error("Workflow run directory does not match the canonical evidence layout.");
       }

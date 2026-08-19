@@ -1,6 +1,6 @@
 ---
 name: locus-task-workflow
-description: Plan one task into workspace files, stop for the user's review, then implement the approved steps one at a time with Package workflows and session todos.
+description: Plan one accepted task into a unique workspace, stop for review, then implement the complete approved plan with one Package workflow run.
 ---
 
 # Locus task workflow
@@ -10,8 +10,18 @@ shipped `task/plan` and `task/implement` Package workflows. The separate
 `task-via-script` root owns the one-run alternative: its own planning stage
 plus the rendered sequential implement script.
 
-The main Pi agent owns orchestration. Workflow children do not spawn more
-agents. Workflow JavaScript does not parse plans or manage the todo queue.
+`task/draft` is the optional manual stage before this skill. Use it when the
+operator asks to translate or clarify a raw request. It may interview the
+operator, then saves `draft.md` and stops. Do not insert it automatically into a
+planning request that is already accepted.
+
+For that explicit manual stage, call the `workflow` tool with
+`name: "task/draft"` and the raw request as `input`. Keep the returned planning
+workspace for the later `task/plan` call.
+
+The main Pi agent owns the review and launch boundary. Workflow JavaScript does
+not parse plans or manage a todo queue. One implementation agent reads and
+executes the approved step catalog from disk.
 
 **Planning and execution are two separate user turns.** Running `plan` never
 continues into execution. Finish planning, present the files, and end your turn.
@@ -19,20 +29,22 @@ Execution starts only when the user, in a later turn, tells you to start it.
 
 ## Start or replan
 
-1. Keep the user's complete task text unchanged.
-2. Choose one short stable `select-name`, or use the name the user supplied.
-   It must match `[A-Za-z0-9][A-Za-z0-9._-]{0,199}`.
-   The shared workflow workspace is `tmp/<select-name>`. Do not add a timestamp,
-   run id, audit id, or another nesting level. Reusing a name is allowed when the
-   user intends to replace that workspace's planning files.
-3. Call the `workflow` tool with:
-   - `name: "task/plan"`
-   - `input: <complete task text>`
-   - `outputDir: "tmp/<select-name>"`
-4. If planning fails after a run id is available, retry the same workflow with
-   the same `input` and `outputDir` plus `resumeFromRunId: <failed run id>`.
+1. Keep the user's complete accepted task text unchanged.
+2. When an accepted `task/draft` result exists, take `<run-name>` from its exact
+   `.locus-pi/plans/<run-name>` workspace and pass that leaf through `runName`.
+   Otherwise omit both `runName` and `outputDir`; the runtime creates a fresh unique planning workspace whose
+   id begins with the new run id.
+3. Call the `workflow` tool with `name: "task/plan"`. Supply `input` for a direct
+   task or an explicit refinement. When reusing an accepted draft unchanged,
+   omit `input`; `task/plan` reads `draft.md` from the shared workspace.
+4. Save the returned `workspaceDirRelative` as `<planning-workspace>` and its
+   final path component as `<run-name>`. If
+   planning fails after a run id is available, retry with the same semantic
+   input plus `resumeFromRunId: <failed run id>`. The task planning resume path
+   reuses the source workspace automatically; a conflicting `outputDir` fails.
    Do not invent a planning ledger: replay owns completed agent calls.
-5. Read `tmp/<select-name>/plan.md` and every `tmp/<select-name>/step-<n>.md`
+5. Read `<planning-workspace>/plan.md` and every
+   `<planning-workspace>/step-<n>.md`
    file. Stop if `plan.md` or the step files are missing, empty, or do not
    describe an executable task.
 6. Confirm `plan.md` first defines coherent top-level work units and that
@@ -76,16 +88,16 @@ rebuild.
 
 Once the user has approved, run the route they chose:
 
-- **Todo route (default when the user just says "go ahead").** Create the main
-  Pi execution queue below and start one top-level `task/implement` run per
-  exact step. It is the most recoverable route: each step is its own top-level
-  run, and a failure stops the queue with the plan intact.
-- **Script route.** Call `task-via-script` with `outputDir: "tmp/<select-name>"`.
+- **Task Implement route (default when the user just says "go ahead").** Start
+  one top-level `task/implement` run on the approved planning workspace. One
+  implementation agent reads every step file in order, records each result in
+  `history/`, and stops before later steps on the first blocker.
+- **Script route.** Call `task-via-script` with `runName: "<run-name>"`.
   It runs its own `task/plan` stage across the same workspace — preserving
   compatible owner edits, so material manual changes deserve a fresh review of
-  the replanned files — and renders `tmp/<select-name>/implement.workflow.mjs`.
+  the replanned files — and renders `<planning-workspace>/implement.workflow.mjs`.
   Hand that file back for review. The user runs the reviewed script themselves
-  with `/workflows run tmp/<select-name>/implement.workflow.mjs`. Run it on
+  with `/workflows run <planning-workspace>/implement.workflow.mjs --output-dir <planning-workspace>`. Run it on
   their behalf only when they ask you to. It resolves by explicit path only and
   is not a registered project workflow.
 - **Bespoke workflow route.** When the user wants a graph the template does not
@@ -99,77 +111,27 @@ Once the user has approved, run the route they chose:
   the bespoke design, not to Task Plan, Task Via Script, or Task Implement
   execution semantics.
 
-## Create the execution queue
+## Execute the approved plan
 
-Only after the user approved the todo route. Read the `step-<n>.md` files
-semantically. Create one single-line todo reference per complete
-`## S<n> — <title>` step block. Keep the full block in its file; do not put
-multiline text into todo items because todo export/edit is line-oriented.
+Only after the user approves the Task Implement route:
 
-Append the references to a dedicated `Implementation · <select-name>` phase and
-explicitly start the first reference. `append` preserves unrelated session
-todos; never replace the whole queue with `init`. One `append.items` array holds
-at most 20 references, so use multiple ordered `append` operations when needed:
-
-```json
-{
-  "context": "Implement the plan in tmp/<select-name>/plan.md",
-  "autoContinue": true,
-  "ops": [
-    {
-      "op": "append",
-      "phase": "Implementation · <select-name>",
-      "items": ["<select-name> / S1 — <title>", "<select-name> / S2 — <title>"]
-    },
-    {
-      "op": "start",
-      "task": "<select-name> / S1 — <title>"
-    }
-  ]
-}
-```
-
-If that dedicated phase already exists in the current session, reconcile its
-references with the `step-<n>.md` files and `history/`; do not append duplicates.
-
-Derive each reference only from its step id and heading title. Do not summarize,
-merge, renumber, split, or copy the body into the todo. If a step is too broad,
-rerun `task/plan`; do not hide a second planning system here.
-
-## Execute one todo
-
-For the single active workflow todo:
-
-1. Match its `S<n>` reference to the matching `step-<n>.md` file and read that
-   complete step block just in time. Do not rely on a remembered or summarized
-   copy.
-2. Call the `workflow` tool with:
+1. Reopen `plan.md` and every `step-<n>.md`. Stop if the catalog changed
+   materially since approval or is no longer coherent.
+2. Call the `workflow` tool once with:
    - `name: "task/implement"`
-   - `input: <the step id, such as S1>`
-   - `outputDir: "tmp/<select-name>"`
+   - `runName: "<run-name>"`
 
-   Pass only the selector. The workflow resolves and reads the `step-<n>.md`
-   file itself, and the file on disk is the step contract.
+   Do not pass a step selector or step text. The workflow reads the complete
+   catalog from the shared workspace and executes it in numeric order.
 
-3. Read the returned text and the corresponding
-   `tmp/<select-name>/history/S<n>.md`.
-4. Mark the exact one-line reference `done` only when the history says
-   `Status: completed` and its required checks succeeded. In the same
-   `todo_write` call, explicitly `start` the next workflow reference and keep
-   `autoContinue: true`. This keeps unrelated pending todos from entering the
-   workflow sequence.
-5. For the final workflow reference, mark it `done` with
-   `autoContinue: false`; do not automatically resume unrelated todos.
-6. On a failed workflow, missing history, `Status: blocked`, or failed required
-   check, add a note to the one-line reference, set `autoContinue: false`, and stop.
-   Never mark the todo done and never start the next step.
-
-Each reference gets a new top-level `task/implement` run. If the host pauses
-automatic execution after its 20-continuation safety limit, preserve the active
-reference and tell the operator to resume with `/todo run`.
+3. Read the returned summary and every `<planning-workspace>/history/S<n>.md`.
+   Completion requires every step to say `Status: completed` with successful
+   required checks.
+4. On a failed workflow, missing history, `Status: blocked`, or failed required
+   check, stop. Do not start a separate run for a later step.
 
 Do not call another workflow from inside either Package workflow. Do not use
-`items`, `pipeline`, or `invokeWorkflow` for this protocol.
+session todos, `items`, `pipeline`, or `invokeWorkflow` for this protocol.
 
 ## Resume in a new session
 
@@ -177,11 +139,11 @@ Resuming is still execution, so it still needs the user to ask for it. Finding a
 `step-<n>.md` catalog with unfinished history is not a reason to start.
 
 When they do ask, read the `step-<n>.md` files and every existing `history/*.md`.
-Recreate the dedicated phase from the one-line step references, marking only
-steps with a credible `Status: completed` history and successful required checks
-as complete. Keep a blocked or missing reference active, then read its exact
-block from its `step-<n>.md` file when execution resumes. This is an agent
-reading task documents, not a JavaScript parser.
+Start one new `task/implement` run with the same `runName`, or use
+`resumeFromRunId` when retrying an interrupted run with unchanged workflow
+source. The implementation agent treats completed history as evidence, checks
+the live state, and continues the ordered catalog only when earlier steps remain
+complete.
 
 If the user changed the task or step list, rerun `task/plan`, review the replacement
 files, freeze the replacement catalog, and deliberately rebuild todos. Keep old
@@ -189,8 +151,8 @@ history as evidence unless the user asks to remove it.
 
 ## Finish
 
-After all todos are complete, read `plan.md` and `history/*.md`, then fully
-replace `tmp/<select-name>/result.md` with a concise account of the delivered
+After the workflow completes, read `plan.md` and `history/*.md`, then fully
+replace `<planning-workspace>/result.md` with a concise account of the delivered
 outcome, changed files or produced evidence, checks, and remaining risks. Tell
 the user where `plan.md`, the `step-<n>.md` files, `history/`, and `result.md`
 live.

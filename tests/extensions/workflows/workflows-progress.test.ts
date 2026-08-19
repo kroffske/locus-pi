@@ -1764,7 +1764,7 @@ describe("workflow progress widget", () => {
       expect(persisted).toHaveLength(3);
       expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
       expect(persisted[0]).toContain("● workflow started");
-      expect(persisted[0]).toContain(`runDir: ${path.join(root, ".pi", "locus-pi", "runs")}`);
+      expect(persisted[0]).toContain(`runDir: ${path.join(root, ".locus-pi", "runs")}`);
       expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished");
       expect(persisted[1]).not.toContain("Complete implementation plan line.");
       expect(persisted[2]).toBe(exactResult);
@@ -2175,7 +2175,7 @@ describe("workflow progress widget", () => {
         );
         writeWorkflowRun(root, `20260101-00000${index}-rpc`);
       }
-      const longRunDir = path.join(root, ".pi", "locus-pi", "runs", "20260101-000005-rpc");
+      const longRunDir = path.join(root, ".locus-pi", "runs", "20260101-000005-rpc");
       writeFileSync(
         workflowJournalFile(longRunDir),
         `${JSON.stringify({

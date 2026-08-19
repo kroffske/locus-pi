@@ -215,6 +215,10 @@
       "namespace": "post-code-review"
     },
     {
+      "name": "task/draft",
+      "namespace": "task"
+    },
+    {
       "name": "task/implement",
       "namespace": "task"
     },

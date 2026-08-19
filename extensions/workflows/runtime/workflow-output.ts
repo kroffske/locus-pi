@@ -24,14 +24,26 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { assertWorkflowRunId, workflowExtensionRootDir } from "./workflow-run-layout.js";
+import {
+  assertWorkflowRunId,
+  defaultTaskWorkspaceRelativePath,
+  isTaskWorkspaceName,
+  workflowRootDir,
+  WORKFLOW_PLANS_DIRNAME,
+  WORKFLOW_ROOT_DIRNAME,
+} from "./workflow-run-layout.js";
 
 const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
+const WORKFLOW_PLANS_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
 /** TypeBox-compatible grammar for the same confined path accepted by the runtime. */
-export const WORKFLOW_OUTPUT_DIR_PATTERN = `^(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*$`;
+export const WORKFLOW_OUTPUT_DIR_PATTERN =
+  `^(?:(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*|` +
+  `\\${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/(?:${OUTPUT_COMPONENT_SOURCE}))$`;
 /** Shared aggregate bound for tool, command, and direct runtime callers. */
 export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
+export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
+export const WORKFLOW_RUN_NAME_PATTERN = `^${OUTPUT_COMPONENT_SOURCE}$`;
 const ITEM_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const CHECKPOINT_SCHEMA = "locus-pi.workflow-checkpoint.v1" as const;
 const LEASE_SCHEMA = "locus-pi.workflow-output-lease.v1" as const;
@@ -103,7 +115,12 @@ export interface WorkflowRootLease {
   readonly record: WorkflowLeaseRecord;
 }
 
-function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string, workflowName: string): string {
+function defaultWorkflowOutputDir(
+  projectRoot: string,
+  workingDirectory: string,
+  workflowName: string,
+  runId: string | undefined,
+): string {
   const lexicalRoot = path.resolve(projectRoot);
   const lexicalWorkingDirectory = path.resolve(workingDirectory);
   if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalWorkingDirectory)) {
@@ -120,6 +137,8 @@ function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string,
   if (!isWorkflowPathWithinRoot(physicalRoot, physicalWorkingDirectory)) {
     throw new Error("workflow working directory physical target escapes the project root");
   }
+  const taskWorkspace = defaultTaskWorkspaceRelativePath(workflowName, runId);
+  if (taskWorkspace !== undefined) return taskWorkspace;
   const relativeWorkingDirectory = path.relative(lexicalRoot, lexicalWorkingDirectory).split(path.sep).join("/");
   const prefix = relativeWorkingDirectory === "" ? "tmp" : `${relativeWorkingDirectory}/tmp`;
   const workflowNameParts = workflowName.split("/");
@@ -143,13 +162,48 @@ export function resolveWorkflowOutputDirectoryPath(
   requested: string | undefined,
   workflowName: string,
   workingDirectory: string,
+  options: { runId?: string } = {},
 ): WorkflowOutputDirectoryPath {
-  const defaultPath = defaultWorkflowOutputDir(projectRoot, workingDirectory, workflowName);
-  const relativePath = requested === undefined ? defaultPath : assertWorkflowOutputDirPath(requested);
+  const relativePath =
+    requested === undefined
+      ? defaultWorkflowOutputDir(projectRoot, workingDirectory, workflowName, options.runId)
+      : assertWorkflowOutputDirPath(normalizeRequestedOutputDir(projectRoot, workingDirectory, requested));
   const root = path.resolve(projectRoot);
   const absolutePath = path.resolve(root, ...relativePath.split("/"));
   if (!isWorkflowPathWithinRoot(root, absolutePath)) throw new Error("workflow outputDir escapes the project root");
   return { relativePath, absolutePath };
+}
+
+/** Expand a short task run name into its project-local planning workspace. */
+export function taskWorkspaceRelativePathForRunName(workflowName: string, runName: unknown): string {
+  if (!isTaskWorkspaceName(workflowName)) {
+    throw new Error("runName is supported only by Package task workflows");
+  }
+  if (typeof runName !== "string" || !OUTPUT_COMPONENT.test(runName)) {
+    throw new Error("workflow runName must be one safe folder name");
+  }
+  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${runName}`;
+}
+
+function normalizeRequestedOutputDir(projectRoot: string, workingDirectory: string, requested: string): string {
+  if (typeof requested !== "string") {
+    throw new Error("workflow outputDir must be a non-empty trimmed path");
+  }
+  if (requested.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
+    throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
+  }
+  const project = path.resolve(projectRoot);
+  let absolute: string | undefined;
+  if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) {
+    absolute = path.resolve(requested);
+  } else if (requested === "." || requested.startsWith("./") || requested.startsWith("../")) {
+    absolute = path.resolve(workingDirectory, requested);
+  }
+  if (absolute === undefined) return requested;
+  if (!isWorkflowPathWithinRoot(project, absolute) || absolute === project) {
+    throw new Error("workflow outputDir escapes the project root");
+  }
+  return path.relative(project, absolute).split(path.sep).join("/");
 }
 
 /** Resolve and create a confined project-relative output directory. */
@@ -158,13 +212,14 @@ export function resolveWorkflowOutputDirectory(
   requested: string | undefined,
   workflowName: string,
   workingDirectory: string,
-  options: { create?: boolean } = {},
+  options: { create?: boolean; runId?: string } = {},
 ): WorkflowOutputDirectory {
   const { relativePath, absolutePath } = resolveWorkflowOutputDirectoryPath(
     projectRoot,
     requested,
     workflowName,
     workingDirectory,
+    options.runId === undefined ? {} : { runId: options.runId },
   );
   const root = path.resolve(projectRoot);
   if (options.create === false) assertExistingDirectoryWithoutSymlinks(root, absolutePath);
@@ -468,7 +523,7 @@ export function commitWorkflowCompletedCheckpoint(
 
 export function workflowOutputStateDir(projectRoot: string, canonicalOutputIdentity: string): string {
   const namespace = createHash("sha256").update(canonicalOutputIdentity).digest("hex");
-  return path.join(workflowExtensionRootDir(path.resolve(projectRoot)), "workflow-state", "v1", namespace);
+  return path.join(workflowRootDir(path.resolve(projectRoot)), "workflow-state", "v1", namespace);
 }
 
 /**
@@ -664,6 +719,13 @@ export function assertWorkflowOutputDirPath(value: unknown): string {
   }
   if (value.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
     throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
+  }
+  if (value.startsWith(`${WORKFLOW_PLANS_RELATIVE_ROOT}/`)) {
+    const planName = value.slice(WORKFLOW_PLANS_RELATIVE_ROOT.length + 1);
+    if (!OUTPUT_COMPONENT.test(planName)) {
+      throw new Error(`workflow outputDir contains an unsafe planning path component: ${JSON.stringify(value)}`);
+    }
+    return value;
   }
   return assertRelativeOutputPath(value);
 }

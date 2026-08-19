@@ -63,7 +63,8 @@ Two boundaries hold the trust line:
   `.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`. It is not a
   registered workflow, cannot shadow or overwrite a saved workflow, and does
   not resolve by bare name — only
-  `/workflows run <workspace>/implement.workflow.mjs` reaches it.
+  `/workflows run <workspace>/implement.workflow.mjs --output-dir <workspace>`
+  reaches it without losing `plan.md` or `history/`.
 - Running it is the owner's explicit act. Workflow JavaScript runs in Pi's main
   Node.js process with full filesystem, subprocess, and network authority, so
   read the file before running it. Approving a plan is not approving a run, and
@@ -72,9 +73,12 @@ Two boundaries hold the trust line:
 ## Run
 
 ```text
-/workflows run task-via-script --output-dir tmp/cron-to-dag -- Move the cron job into a DAG
-/workflows run tmp/cron-to-dag/implement.workflow.mjs
+/workflows run task-via-script -- Move the cron job into a DAG
+/workflows run .locus-pi/plans/<run-name>/implement.workflow.mjs --output-dir .locus-pi/plans/<run-name>
 ```
+
+To render from an already reviewed task workspace, pass that exact
+`.locus-pi/plans/<run-name>` path through `--output-dir` instead.
 
 The second command is the owner's separate act after reading the rendered
 file. Resume follows the normal rules: the planning stage is checkpointed as a

@@ -16,6 +16,7 @@ import {
   workflowRunOptionDescriptor,
   WORKFLOW_RUN_OPTION_DESCRIPTORS,
 } from "./command-parser.js";
+import { WORKFLOW_PLANS_STORAGE_PREFIX } from "./runtime/workflow-run-layout.js";
 import { listExampleNames } from "./operator-ui.js";
 import { listWorkflowCatalogTargets } from "./runtime/workflow-runner.js";
 
@@ -112,15 +113,26 @@ function workflowRunOptionCompletions(
   const tokens = scanned.tokens;
   const completed: string[] = [];
   const commandPrefix = `run ${target}`;
+  const runNameAllowed = ["task/draft", "task/plan", "task/implement", "task-via-script"].includes(target);
 
   const optionCompletions = (partial = ""): CommandArgumentCompletion[] => {
     const stem = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} `;
+    const hasOutputDir = completed.includes("--output-dir");
+    const hasRunName = completed.includes("--run-name");
     return [
-      ...WORKFLOW_RUN_OPTION_DESCRIPTORS.map((descriptor) => ({
+      ...WORKFLOW_RUN_OPTION_DESCRIPTORS.filter(
+        (descriptor) =>
+          !(descriptor.field === "runName" && (!runNameAllowed || hasOutputDir)) &&
+          !(descriptor.field === "outputDir" && hasRunName),
+      ).map((descriptor) => ({
         value: `${stem}${descriptor.name} `,
         label: descriptor.name,
         description:
-          descriptor.field === "outputDir" ? "Select a project-relative workflow workspace" : "Resume from a prior run",
+          descriptor.field === "outputDir"
+            ? "Select a workflow workspace path"
+            : descriptor.field === "runName"
+              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for a Package task`
+              : "Resume from a prior run",
       })),
       {
         value: `${stem}-- `,
@@ -143,7 +155,7 @@ function workflowRunOptionCompletions(
     }
     const value = tokens[index + 1];
     if (value === undefined) {
-      if (descriptor?.field === "outputDir") return null;
+      if (descriptor?.field === "outputDir" || descriptor?.field === "runName") return null;
       const resumePrefix = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} --resume `;
       return matchingCompletions(
         runIds.map((runId) => ({ value: `${resumePrefix}${runId}`, label: runId })),

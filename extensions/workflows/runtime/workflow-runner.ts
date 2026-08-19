@@ -152,6 +152,7 @@ import {
   resolveWorkflowOutputDirectory,
   resolveWorkflowOutputDirectoryPath,
   resolveWorkflowOutputDirectoryForReuse,
+  taskWorkspaceRelativePathForRunName,
   type WorkflowCheckpointIdentity,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
@@ -181,6 +182,7 @@ import {
 } from "./workflow-artifacts.js";
 import {
   assertWorkflowRunId,
+  isTaskWorkspaceName,
   readWorkflowRunTextFile,
   workflowLegacyRunMigrationMessage,
   workflowRunRuntimeDir,
@@ -300,6 +302,8 @@ export interface RunWorkflowScriptOptions {
   items?: readonly string[];
   /** Optional project-relative workflow workspace. */
   outputDir?: string;
+  /** Short Package task workspace name expanded under `.locus-pi/plans/`. */
+  runName?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
   /** Atomic source-handoff claim. The runner binds it to this run before
@@ -1076,6 +1080,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   if (noOperatorPrelude !== undefined) journal.write(noOperatorPrelude);
 
   const requestedResumeFromRunId = opts.resumeFromRunId;
+  let selectedOutputDir = opts.outputDir;
   const requestedSemanticInput = workflowSemanticInputIdentity(opts.input);
   let resumeFromRunId: string | undefined;
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
@@ -1189,7 +1194,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
             // repeat the source outputDir as an ordinary option.
             workspaceDirExplicit:
               handoffReuseOutput === undefined
-                ? opts.outputDir !== undefined
+                ? resumeSourceWorkspace?.explicit === true || selectedOutputDir !== undefined
                 : opts.operatorHandoffWorkspaceReuse?.explicit === true,
             ...(targetForMetadata !== undefined && isPostCodeReviewTarget(targetForMetadata, projectRoot)
               ? {
@@ -1631,6 +1636,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       target = resolveWorkflowTarget(targetInput, projectRoot, workingDirectory);
     }
     targetForMetadata = target;
+    if (opts.runName !== undefined) {
+      if (opts.outputDir !== undefined) {
+        throw new Error("workflow runName and outputDir are mutually exclusive");
+      }
+      if (target.kind !== "name") {
+        throw new Error("workflow runName requires a saved Package task workflow name");
+      }
+      selectedOutputDir = taskWorkspaceRelativePathForRunName(target.ref, opts.runName);
+    }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     const journalLines = currentJournal(runtime);
@@ -1804,11 +1818,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       !hasResume &&
       handoffReuseOutput === undefined &&
       isPostCodeReviewTarget(target, projectRoot) &&
-      opts.outputDir === undefined
+      selectedOutputDir === undefined
     ) {
       throw new Error(postCodeReviewFreshLaunchError());
     }
-    if (resumeSourceWorkspace?.explicit === true && opts.outputDir === undefined) {
+    if (
+      resumeSourceWorkspace?.explicit === true &&
+      selectedOutputDir === undefined &&
+      !(target.kind === "name" && isTaskWorkspaceName(target.ref))
+    ) {
       throw new Error(
         "Cannot resume workflow: the source workspace was selected explicitly; repeat it with outputDir.",
       );
@@ -1821,7 +1839,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         resumeSourceBinding.result.scriptIdentity?.sourcePath,
       ) === targetIdentityKey(target, projectRoot);
     const resumeReuseOutput =
-      resumeSourceWorkspace !== undefined && opts.outputDir === undefined && resumeSourceTargetMatches
+      resumeSourceWorkspace !== undefined && selectedOutputDir === undefined && resumeSourceTargetMatches
         ? resolveWorkflowOutputDirectoryForReuse(projectRoot, resumeSourceWorkspace, { create: false })
         : undefined;
     const candidateOutputPath =
@@ -1829,9 +1847,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       resumeReuseOutput ??
       resolveWorkflowOutputDirectoryPath(
         projectRoot,
-        opts.outputDir,
+        selectedOutputDir,
         workflowDefaultOutputName(target),
         workingDirectory,
+        { runId },
       );
     if (
       resumeSourceWorkspace !== undefined &&
@@ -1854,9 +1873,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     const resolvedOutput =
       handoffReuseOutput ??
       resumeReuseOutput ??
-      resolveWorkflowOutputDirectory(projectRoot, opts.outputDir, workflowDefaultOutputName(target), workingDirectory, {
-        create: !hasResume,
-      });
+      resolveWorkflowOutputDirectory(
+        projectRoot,
+        selectedOutputDir,
+        workflowDefaultOutputName(target),
+        workingDirectory,
+        {
+          create: !hasResume,
+          runId,
+        },
+      );
     if (freshOwnerLaunch) {
       assertFreshWorkflowOutputNamespace({ projectRoot, output: resolvedOutput });
     }
@@ -1918,7 +1944,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           physicalIdentitySchemaVersion: 1,
           explicit:
             handoffReuseOutput === undefined
-              ? opts.outputDir !== undefined
+              ? selectedOutputDir !== undefined
               : opts.operatorHandoffWorkspaceReuse?.explicit === true,
         },
         semanticInput: requestedSemanticInput,

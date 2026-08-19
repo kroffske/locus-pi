@@ -203,22 +203,29 @@ describe("string-only workflow input", () => {
     }
   });
 
-  it("accepts only confined project-relative workflow workspaces in the tool schema", () => {
+  it("documents confined workflow workspaces while leaving path confinement to runtime preflight", () => {
     const { tool } = registerTool();
     const schema = tool.parameters;
     const outputDirDescription = (schema as { properties?: Record<string, { description?: string }> }).properties
       ?.outputDir?.description;
     expect(outputDirDescription).toContain("Ordinary workflows default");
+    expect(outputDirDescription).toContain("fresh Package task workflows use unique project-local plan workspaces");
     expect(outputDirDescription).toContain("fresh post-code-review launches require an explicit new outputDir");
     expect(outputDirDescription).toContain("resume repeats the source workspace");
     expect(outputDirDescription).not.toMatch(/defaults to tmp\/<workflow-name> beneath the Pi working directory\.$/u);
 
     expect(Value.Check(schema, { name: "demo", outputDir: "outputs/demo" })).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: "results.v2/task_1" })).toBe(true);
+    expect(
+      Value.Check(schema, {
+        name: "task/plan",
+        outputDir: ".locus-pi/plans/20260819-120000-a1b2-task-draft",
+      }),
+    ).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(199)}/${"b".repeat(200)}` })).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(200)}/${"b".repeat(200)}` })).toBe(false);
-    for (const outputDir of ["/tmp/demo", "../demo", "outputs/../demo", " outputs/demo", "outputs/demo/"]) {
-      expect(Value.Check(schema, { name: "demo", outputDir })).toBe(false);
+    for (const outputDir of ["/tmp/demo", "./demo", "../demo", "outputs/../demo"]) {
+      expect(Value.Check(schema, { name: "demo", outputDir })).toBe(true);
     }
   });
 
@@ -253,8 +260,39 @@ describe("string-only workflow input", () => {
       );
 
       expect(result.isError).toBe(true);
-      expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Validation failed") });
+      expect(result.content[0]).toMatchObject({
+        type: "text",
+        text: expect.stringContaining("outputDir escapes the project root"),
+      });
       expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("forwards an explicit task workspace without requiring a run id during tool preflight", async () => {
+    const { harness, tool } = registerTool();
+    const outputDir = ".locus-pi/plans/tool-selected-plan";
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "task-plan-explicit-output",
+      runDir: "/tmp/task-plan-explicit-output",
+      ok: true,
+      result: "planned",
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/task-plan-explicit-output/runtime/result.json" },
+    });
+    try {
+      const result = await tool.execute(
+        "tool-task-plan-explicit-output",
+        { name: "task/plan", outputDir },
+        new AbortController().signal,
+        () => void 0,
+        harness.ctx,
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "task/plan", outputDir });
     } finally {
       spy.mockRestore();
     }

@@ -294,7 +294,7 @@ function replayFixture(answer: string): {
 } {
   const root = temporaryProject();
   const runId = `replay-${roots.length}`;
-  const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
+  const runDir = path.join(root, ".locus-pi", "runs", runId);
   mkdirSync(runDir, { recursive: true });
   const store = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   const ref = store.recordAgentEvidence({

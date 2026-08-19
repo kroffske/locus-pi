@@ -1,5 +1,5 @@
 /**
- * workflow-journal.ts — runId generation + .pi/locus-pi/runs/<runId>/ layout
+ * workflow-journal.ts — runId generation + .locus-pi/runs/<runId>/ layout
  * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
  *
  * Owns journal persistence and read-side run discovery while workflow-runtime.ts

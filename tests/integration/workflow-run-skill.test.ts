@@ -14,7 +14,7 @@ describe("shipped workflow run skill", () => {
       "If the request supplies `items` or `continuation`",
       "stop as unsupported when that tool is unavailable",
       '"pi", "--mode", "json", "-p", "--no-session", "--approve", prompt',
-      "`target`, `outputDir`, and `resumeFromRunId`",
+      "`target`, `runName`, `outputDir`, and `resumeFromRunId`",
       "Reject a command-token value",
       "first character is `-`",
       'message.customType == "locus-workflow-run"',

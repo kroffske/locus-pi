@@ -13,7 +13,7 @@ function repository() {
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
   execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-  writeFileSync(path.join(root, ".gitignore"), ".pi/\n", "utf8");
+  writeFileSync(path.join(root, ".gitignore"), ".locus-pi/\n.pi/\n", "utf8");
   writeFileSync(path.join(root, "file.txt"), "one\n", "utf8");
   execFileSync("git", ["add", ".gitignore", "file.txt"], { cwd: root });
   execFileSync("git", ["commit", "-qm", "first"], { cwd: root });
@@ -92,7 +92,7 @@ describe("workflow runtime-owned workspace", () => {
     const outside = mkdtempSync(path.join(tmpdir(), "locus-workflow-worktree-outside-"));
     const sentinel = path.join(outside, "sentinel.txt");
     writeFileSync(sentinel, "do-not-touch\n", "utf8");
-    const runtime = path.join(repo.root, ".pi", "locus-pi", "runs", "run-escape", "runtime");
+    const runtime = path.join(repo.root, ".locus-pi", "runs", "run-escape", "runtime");
     mkdirSync(runtime, { recursive: true });
     symlinkSync(outside, path.join(runtime, "worktrees"), "dir");
 
@@ -129,7 +129,7 @@ describe("workflow runtime-owned workspace", () => {
     const outside = mkdtempSync(path.join(tmpdir(), "locus-workflow-worktree-target-"));
     const sentinel = path.join(outside, "sentinel.txt");
     writeFileSync(sentinel, "do-not-touch\n", "utf8");
-    const baseDir = path.join(repo.root, ".pi", "locus-pi", "runs", "run-target", "runtime", "worktrees");
+    const baseDir = path.join(repo.root, ".locus-pi", "runs", "run-target", "runtime", "worktrees");
     mkdirSync(baseDir, { recursive: true });
     symlinkSync(outside, path.join(baseDir, "agent-1"), "dir");
 

@@ -112,15 +112,17 @@ describe("design-first readable workflow authoring", () => {
   it("documents the task family boundary and continuous bespoke authoring route", () => {
     const text = source("extensions/workflows/examples/task/README.md");
     expect(text).toContain("`task` is a group-only Package namespace");
-    expect(text).toContain("`task/plan` to prepare a task");
-    expect(text).toContain("`task/implement` to execute one approved step");
+    expect(text).toContain("`task/draft` to translate a raw request");
+    expect(text).toContain("`task/plan` to prepare an accepted task");
+    expect(text).toContain("`task/implement` to execute the complete approved plan");
     expect(text).toMatch(/The author writes Design,\s+reviews it, and Builds matching source in the same turn/u);
     expect(text).toContain("only the user may separately request a pause");
     expect(text).toContain("`task/implement` is intentionally different from the separate `implement`");
   });
 
   it("keeps CLI syntax target-first on every active manual speaker", () => {
-    const canonical = "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]";
+    const canonical =
+      "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]";
     for (const relativePath of [
       "skills/locus-pi-run-workflow/SKILL.md",
       "extensions/workflows/AUTHORING.md",
@@ -131,7 +133,8 @@ describe("design-first readable workflow authoring", () => {
     expect(source("extensions/workflows/REFERENCE.md")).not.toContain("/workflow-run <name|path>");
     for (const relativePath of ["extensions/workflows/REFERENCE.md", "docs/workflows.md"]) {
       const text = source(relativePath);
-      expect(text).toContain("/workflows run <name|path> --output-dir <path>");
+      expect(text).toContain("--run-name <name>");
+      expect(text).toContain("--output-dir <path>");
       expect(text).not.toContain("/workflows run --output-dir <path>");
     }
   });
@@ -812,6 +815,7 @@ ${skill[1] ?? ""}
     expect(profiles).toEqual({
       implement: "standard",
       "live-smoke": "standard",
+      "task/draft": "standard",
       "task/implement": "standard",
       "task/plan": "standard",
       "task-via-script": "standard",
@@ -828,10 +832,11 @@ ${skill[1] ?? ""}
       "workflow-creator/design": "standard",
       "workflow-creator/svg": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(17);
+    expect(packagedWorkflowNames()).toHaveLength(18);
     for (const name of [
       "implement",
       "live-smoke",
+      "task/draft",
       "task/implement",
       "task/plan",
       "task-via-script",

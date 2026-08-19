@@ -672,14 +672,13 @@ describe("persisted workflow run source snapshot", () => {
   it("rejects a symlinked ancestor below the project root", () => {
     const root = temporaryRoot();
     const external = temporaryRoot();
-    mkdirSync(path.join(root, ".pi"), { recursive: true });
-    symlinkSync(external, path.join(root, ".pi", "locus-pi"));
+    symlinkSync(external, path.join(root, ".locus-pi"));
     const runId = "20260713-010105-ancestor-link";
     const source = "ancestor symlink\n";
     const sha256 = digest(source);
     const externalRunDir = path.join(external, "runs", runId);
     mkdirSync(externalRunDir, { recursive: true });
-    const snapshotPath = path.join(root, ".pi", "locus-pi", "runs", runId, "runtime", `script-${sha256}.workflow.mjs`);
+    const snapshotPath = path.join(root, ".locus-pi", "runs", runId, "runtime", `script-${sha256}.workflow.mjs`);
     mkdirSync(path.dirname(path.join(externalRunDir, "runtime", path.basename(snapshotPath))), { recursive: true });
     writeFileSync(path.join(externalRunDir, "runtime", path.basename(snapshotPath)), source);
     writeResult(externalRunDir, snapshotPath, sha256);
@@ -687,36 +686,25 @@ describe("persisted workflow run source snapshot", () => {
     expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({ kind: "invalid" });
   });
 
-  it.each([".pi", ".pi/locus-pi", ".pi/locus-pi/runs"])(
-    "rejects a snapshot behind a symlinked %s evidence ancestor",
-    (ancestor) => {
-      const root = temporaryRoot();
-      const outside = temporaryRoot();
-      const runId = "20260713-010105-ancestor-table";
-      const source = "ancestor symlink table\n";
-      const sha256 = digest(source);
-      const lexicalAncestor = path.join(root, ...ancestor.split("/"));
-      mkdirSync(path.dirname(lexicalAncestor), { recursive: true });
-      const outsideTarget = path.join(outside, path.basename(lexicalAncestor));
-      const suffix = ancestor === ".pi" ? ["locus-pi", "runs"] : ancestor.endsWith("locus-pi") ? ["runs"] : [];
-      const outsideRunDir = path.join(outsideTarget, ...suffix, runId);
-      const snapshotPath = path.join(
-        root,
-        ".pi",
-        "locus-pi",
-        "runs",
-        runId,
-        "runtime",
-        `script-${sha256}.workflow.mjs`,
-      );
-      mkdirSync(path.join(outsideRunDir, "runtime"), { recursive: true });
-      writeFileSync(path.join(outsideRunDir, "runtime", path.basename(snapshotPath)), source);
-      writeResult(outsideRunDir, snapshotPath, sha256);
-      symlinkSync(outsideTarget, lexicalAncestor, "dir");
+  it.each([".locus-pi", ".locus-pi/runs"])("rejects a snapshot behind a symlinked %s evidence ancestor", (ancestor) => {
+    const root = temporaryRoot();
+    const outside = temporaryRoot();
+    const runId = "20260713-010105-ancestor-table";
+    const source = "ancestor symlink table\n";
+    const sha256 = digest(source);
+    const lexicalAncestor = path.join(root, ...ancestor.split("/"));
+    mkdirSync(path.dirname(lexicalAncestor), { recursive: true });
+    const outsideTarget = path.join(outside, path.basename(lexicalAncestor));
+    const suffix = ancestor === ".locus-pi" ? ["runs"] : [];
+    const outsideRunDir = path.join(outsideTarget, ...suffix, runId);
+    const snapshotPath = path.join(root, ".locus-pi", "runs", runId, "runtime", `script-${sha256}.workflow.mjs`);
+    mkdirSync(path.join(outsideRunDir, "runtime"), { recursive: true });
+    writeFileSync(path.join(outsideRunDir, "runtime", path.basename(snapshotPath)), source);
+    writeResult(outsideRunDir, snapshotPath, sha256);
+    symlinkSync(outsideTarget, lexicalAncestor, "dir");
 
-      expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({ kind: "invalid" });
-    },
-  );
+    expect(readWorkflowRunScriptSnapshot(root, runId)).toMatchObject({ kind: "invalid" });
+  });
 
   it("rejects a wrong basename or path even when the bytes hash correctly", () => {
     const fixture = writeSnapshotRun("20260713-010106-wrong-name", "wrong name\n");
@@ -777,7 +765,7 @@ function writeResult(
   },
   metadata: Record<string, unknown> = {},
 ): void {
-  const projectRoot = path.dirname(path.dirname(path.dirname(path.dirname(runDir))));
+  const projectRoot = path.dirname(path.dirname(path.dirname(runDir)));
   const sourcePath =
     target.path ??
     (target.kind === "scriptPath"
@@ -827,7 +815,7 @@ function expectMalformedWorkspaceReadSurfaces(fixture: { root: string; runId: st
 }
 
 function workflowRunDirectory(root: string, runId: string): string {
-  return path.join(root, ".pi", "locus-pi", "runs", runId);
+  return path.join(root, ".locus-pi", "runs", runId);
 }
 
 function temporaryRoot(): string {

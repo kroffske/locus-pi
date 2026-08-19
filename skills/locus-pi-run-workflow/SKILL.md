@@ -46,6 +46,9 @@ to a recorded handoff. Do not spawn `pi`, build a slash-command, or call a shell
 when this tool exists. Read the returned run id, paths, disposition, result, and
 artifacts from the tool result.
 
+For Package task workflows, `runName: "<name>"` selects
+`.locus-pi/plans/<name>`. Do not combine `runName` with `outputDir`.
+
 ## External Pi path
 
 Invoke Pi in JSON print mode with the slash-command itself as one argv element:
@@ -62,17 +65,20 @@ Prefer a process API with an argv array:
 ```
 
 Build `prompt` as `/workflows run <target> [options] [--] [input]`. Format every
-command value token—`target`, `outputDir`, and `resumeFromRunId`—the same way:
+command value token—`target`, `runName`, `outputDir`, and `resumeFromRunId`—the same way:
 keep a simple token unchanged; encode values containing whitespace, quotes,
 backslashes, or controls as a JSON string token. Reject a command-token value
 whose first character is `-`: quoting does not make Pi's reserved option tokens
-valid. `outputDir` must already be a safe project-relative path, and
+valid. `outputDir` must stay inside the project; an absolute path is accepted,
+`./path` resolves from Pi's working directory, and another relative path resolves
+from the project root. `runName` must be one safe folder name. It is mutually
+exclusive with `outputDir`. The
 `resumeFromRunId` must be a real saved run id. Preserve semantic input unchanged
 after `--`. Never interpolate untrusted target, option value, or input as shell
 syntax.
 
 Canonical grammar:
-`/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]`.
+`/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]`.
 
 `--approve` trusts project-local settings, packages, extensions, prompts, and
 other Pi resources. Use it only for a project the operator has authorized.

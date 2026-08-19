@@ -52,6 +52,7 @@ function recursiveTypeScriptFiles(directory: string): string[] {
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "implement",
   "live-smoke",
+  "task/draft",
   "task/implement",
   "task/plan",
   "task-via-script",
@@ -83,6 +84,7 @@ const PI_PACKAGES = [
 const PACKAGE_WORKFLOW_PATHS = {
   implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
+  "task/draft": "extensions/workflows/examples/task/draft.workflow.mjs",
   "task/implement": "extensions/workflows/examples/task/implement.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
   "task-via-script": "extensions/workflows/examples/task-via-script/task-via-script.workflow.mjs",
@@ -329,17 +331,18 @@ describe("npm public package boundary", () => {
     );
   });
 
-  it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
+  it("keeps the .locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
+    const presentation = path.join(root, "extensions", "workflows", "workflow-tool.ts");
     const violations: string[] = [];
     for (const file of recursiveTypeScriptFiles(path.join(root, "extensions"))) {
-      if (file === owner) continue;
+      if (file === owner || file === presentation) continue;
       const source = readFileSync(file, "utf8");
       const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const visit = (node: ts.Node): void => {
         const ownsPrefix =
-          (ts.isStringLiteralLike(node) && node.text.includes(".pi/locus-pi/")) ||
-          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".pi/locus-pi/"));
+          (ts.isStringLiteralLike(node) && node.text.includes(".locus-pi/")) ||
+          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".locus-pi/"));
         if (ownsPrefix) {
           const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           violations.push(`${path.relative(root, file)}:${line}`);
@@ -505,23 +508,23 @@ describe("npm public package boundary", () => {
 
     expect(packedPaths.has(skillPath)).toBe(true);
     for (const contract of [
+      'name: "task/draft"',
       'name: "task/plan"',
       'name: "task/implement"',
-      "tmp/<select-name>",
+      ".locus-pi/plans/<run-name>",
+      "<planning-workspace>",
       "resumeFromRunId",
-      "todo_write",
-      "autoContinue",
+      'runName: "<run-name>"',
       "history/S<n>.md",
       "Status: blocked",
     ]) {
       expect(source, contract).toContain(contract);
     }
-    expect(source).toContain("The main Pi agent owns orchestration");
-    expect(source).toContain('"op": "append"');
-    expect(source).not.toContain('"op": "init"');
-    expect(source).toContain("do not put\nmultiline text into todo items");
-    expect(source).toContain("preserves unrelated session\ntodos");
-    expect(source).toContain("20-continuation safety limit");
+    expect(source).toContain("The main Pi agent owns the review and launch boundary");
+    expect(source).not.toContain("todo_write");
+    expect(source).not.toContain('"op": "append"');
+    expect(source).toContain("Do not pass a step selector or step text");
+    expect(source).toMatch(/workflow reads the complete\s+catalog from the shared workspace/u);
     expect(source).toContain("Do not call another workflow from inside either Package workflow");
     expect(source).toContain("`plan.md` first defines coherent top-level work units");
     expect(source).toMatch(/the `step-<n>\.md` files\s+are the only executable task catalog/u);
@@ -545,7 +548,7 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/Do not create todos\. Do not call\s+`task\/implement`/u);
     expect(source).toMatch(/not an instruction to you/u);
     expect(source).toMatch(/Approval is a new user turn/u);
-    expect(source).toContain("Only after the user approved the todo route");
+    expect(source).toContain("Only after the user approves the Task Implement route");
     expect(source).toContain("Resuming is still execution");
     expect(source).toContain("implement.workflow.mjs");
   });

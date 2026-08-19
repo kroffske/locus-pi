@@ -13,6 +13,7 @@ export const WORKFLOW_RESULT_CUSTOM_TYPE = "locus-workflow-result";
 export type WorkflowTranscriptRejectionCode =
   | "missing_resume_id"
   | "missing_output_dir"
+  | "missing_run_name"
   | "input_too_long"
   | "workflow_not_found"
   | "workflow_group_only"

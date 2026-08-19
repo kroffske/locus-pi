@@ -1,6 +1,6 @@
 /**
  * workflow-run-report.ts — the human-readable outputs of one workflow run,
- * under `<projectRoot>/.pi/locus-pi/runs/<runId>/outputs/`.
+ * under `<projectRoot>/.locus-pi/runs/<runId>/outputs/`.
  *
  * Everything here is deliberate: the workflow publishes supporting documents
  * and at most one primary document, while the mandatory result owner persists

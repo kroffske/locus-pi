@@ -482,7 +482,7 @@ nothing downstream depends on it being right.
 
 ## Semantic text input
 
-Both `/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]`
+Both `/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]`
 and the `workflow` tool pass one optional bounded semantic string.
 Command options precede that input. When semantic input begins with an
 option-looking token such as `--resume`, `--output-dir`, or `--`, place the
@@ -663,9 +663,9 @@ return review;
 When the operator must inspect or reuse the plan, use the shipped `task/plan` →
 `task/implement` pair instead. `task/plan` writes `plan.md` and a frozen
 `step-<n>.md` catalog, then stops. After explicit owner approval, main Pi starts
-one top-level `task/implement` run per step file in the shared workflow
-workspace, passing only the step id. Each run writes `history/S<n>.md`; blocked
-or failed checks stop continuation. The separate root `task-via-script` owns the
+one top-level `task/implement` run in the shared workflow workspace. One agent
+executes the full catalog in order and writes `history/S<n>.md`; blocked or
+failed checks stop later steps. The separate root `task-via-script` owns the
 one-run alternative: its own `task/plan` stage plus the rendered sequential
 implement script. The group-only `task` root is not runnable, and the namespace
 children never invoke one another.

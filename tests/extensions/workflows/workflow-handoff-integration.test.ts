@@ -100,7 +100,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
 }
 
 function corruptPersistedHandoff(root: string, runId: string): void {
-  const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+  const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   result.operatorHandoff = { ...(result.operatorHandoff as Record<string, unknown>), title: 42 };
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
@@ -281,7 +281,7 @@ describe("workflow actionable handoff integration", () => {
   it("does not mount a tool-origin question on turn_end and uses the fresh agent_settled context", async () => {
     const sourceRunId = "20260725-122000-source";
     const root = projectWithHandoff(sourceRunId);
-    const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", sourceRunId));
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", sourceRunId));
     const deferredPath = `${resultPath}.deferred`;
     // Hidden while the run settles, so the terminal pump finds nothing and the
     // question can only arrive through the lifecycle event under test.
