@@ -275,6 +275,7 @@
     "extensions/workflows/workflow-catalog.ts",
     "extensions/workflows/workflow-copy.ts",
     "extensions/workflows/workflow-source-shape.ts",
+    "dist/public-catalogs.json",
     "dist/workflow-source-shape.mjs",
     "extensions/workflows/workflow-command-launcher.ts",
     "extensions/workflows/workflow-tool-card.ts",
@@ -319,9 +320,11 @@
     ]
   },
   "scripts": {
+    "build:catalogs": "tsx scripts/build-public-catalogs.ts",
     "build:workflow-source": "tsx scripts/build-workflow-source-shape.ts",
-    "check": "npm run format:check && npm run check:links && npm run check:fast && npm run check:repository && npm run check:release",
+    "check": "npm run format:check && npm run check:links && npm run check:generated && npm run check:fast && npm run check:repository && npm run check:release",
     "check:fast": "npm run check:manifests && npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test && npm run audit:sources",
+    "check:generated": "tsx scripts/build-public-catalogs.ts --check",
     "check:layers": "tsx scripts/check-extension-layers.ts",
     "check:links": "tsx scripts/check-markdown-links.ts",
     "check:manifests": "tsx scripts/check-extension-manifests.ts",

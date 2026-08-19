@@ -70,7 +70,9 @@
     "public-repository.json",
     "scripts/README.md",
     "scripts/audit-sources.ts",
+    "scripts/build-public-catalogs.ts",
     "scripts/build-workflow-source-shape.ts",
+    "scripts/extension-manifest-sources.ts",
     "scripts/check-extension-layers.ts",
     "scripts/check-extension-manifests.ts",
     "scripts/check-markdown-links.ts",
@@ -215,6 +217,7 @@
     "tests/contracts/agents/extension-agent-catalog.test.ts",
     "tests/contracts/workflows/package-workflow-catalog.test.ts",
     "tests/contracts/docs/extension-reference.test.ts",
+    "tests/contracts/docs/generated-catalogs.test.ts",
     "tests/contracts/host/selective-package-loading.test.ts"
   ],
   "excludeFiles": [],

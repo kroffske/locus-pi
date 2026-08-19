@@ -6,6 +6,22 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **One machine-owned source for the two public catalogs — `npm run
+build:catalogs`, verified by `npm run check:generated`.** The extensions
+  `package.json#pi.extensions` activates and the workflow names
+  `extensions/workflows/examples/` resolves were transcribed by hand into
+  `README.md`, `docs/extensions.md`, `docs/workflows.md` and two contract
+  tests; every copy could drift alone, and a published namespace count that
+  disagreed with the directory was exactly that. Both catalogs are now resolved
+  once — from the manifest set the manifest gate validates, and from the same
+  static workflow discovery the registry itself uses — and written to the
+  checked-in `dist/public-catalogs.json` and into fenced
+  `<!-- locus:extensions:… -->` / `<!-- locus:workflows:… -->` regions of the
+  published pages, counts included. `check:generated` sits between
+  `check:links` and `check:fast` in `npm run check`, so adding or removing an
+  entrypoint or a packaged workflow without regenerating fails the gate with
+  the command that fixes it. The generator never imports a workflow module.
+
 - **A deterministic internal-link gate over published documentation — `npm run
 check:links`.** Every relative link and heading anchor in published Markdown is
   resolved against the file set that actually publishes it: `package.json#files`

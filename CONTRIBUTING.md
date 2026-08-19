@@ -54,11 +54,11 @@ Do not widen the default extension list, Package workflow registry, runtime depe
 
 `npm run check` is the canonical gate. One command, deterministic and read-only by construction — it formats nothing, generates nothing, and leaves the working tree byte-identical — and it needs no network beyond the npm cache `npm ci` already filled. It reproduces every check CI can run against this source tree, so a green `check` locally and a green CI mean the same thing.
 
-| Command              | Composition                                                                               | Use it                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `npm run check:fast` | manifests, layers, workflow source shape, typecheck, Pi host version, tests, source audit | while editing; deliberately not release-complete             |
-| `npm run check`      | `format:check`, `check:links`, then `check:fast`, `check:repository`, `check:release`     | before every commit and pull request, whatever the change is |
-| `npm run check:push` | `check` plus the dry-run pack contract                                                    | run for you by the tracked `pre-push` hook                   |
+| Command              | Composition                                                                                              | Use it                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `npm run check:fast` | manifests, layers, workflow source shape, typecheck, Pi host version, tests, source audit                | while editing; deliberately not release-complete             |
+| `npm run check`      | `format:check`, `check:links`, `check:generated`, then `check:fast`, `check:repository`, `check:release` | before every commit and pull request, whatever the change is |
+| `npm run check:push` | `check` plus the dry-run pack contract                                                                   | run for you by the tracked `pre-push` hook                   |
 
 On an Apple-silicon laptop `check:fast` takes about 17 seconds warm — 27 on the first run after `npm ci` — and `check` about 21. The four extra gates cost a few seconds, not a longer test suite, so reach for `check:fast` only inside a tight edit loop.
 
@@ -72,7 +72,15 @@ npm pack --dry-run --json --ignore-scripts
 
 Docs-only changes run the same `npm run check`: `format:check` and `check:links` are inside it. The pre-commit hook adds `git diff --check` on staged content.
 
-A future `check:generated` — regenerated artifacts verified against their sources — belongs in the `check` chain between `check:links` and `check:fast`. `package.json` cannot carry comments, so the reserved slot is recorded here.
+`check:generated` occupies the slot between `check:links` and `check:fast`: it regenerates the public catalogs into memory and fails when a committed byte differs. Two enumerable sets are machine-owned — the extensions `package.json#pi.extensions` activates and the workflow names `extensions/workflows/examples/` resolves — and both are written by one generator into `dist/public-catalogs.json` and into the fenced regions of `README.md`, `docs/extensions.md`, and `docs/workflows.md`.
+
+Never edit between a `<!-- locus:extensions:start -->` or `<!-- locus:workflows:start -->` marker and its `:end` partner. After adding or removing an extension entrypoint or a packaged workflow, run:
+
+```bash
+npm run build:catalogs
+```
+
+Then commit the regenerated artifact and documentation with the change. The prose outside the markers stays hand-written; only the enumerations and their counts are generated.
 
 ## Change expectations
 
