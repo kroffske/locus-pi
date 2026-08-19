@@ -3,7 +3,7 @@ import {
   clearViewerExternalRows,
   setViewerExternalRows,
 } from "../../../extensions/_shared/operator/viewer-geometry.js";
-import { TUI, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
+import { type TUI, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -440,7 +440,7 @@ describe("AgentSessionViewer", () => {
       args: { path: "README.md" },
     });
     const terminal = new RecordingTerminal(80, 8);
-    const tui = new TUI(terminal, false);
+    const tui = new TuiMainScreen(terminal, false);
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability(), {
       active: 2,
       list: [1, 2],
@@ -500,7 +500,7 @@ describe("AgentSessionViewer", () => {
       args: { path: "README.md" },
     });
     const terminal = new RecordingTerminal(80, 8);
-    const tui = new TUI(terminal, false);
+    const tui = new TuiMainScreen(terminal, false);
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), tallToolCapability());
     tui.addChild(viewer);
     await flushForcedRender(tui);
@@ -636,7 +636,7 @@ describe("AgentSessionViewer", () => {
     const send = vi.fn(async () => {});
     const unregister = agentLiveStore.registerInputForExecution(execution, send);
     const terminal = new RecordingTerminal(80, 24);
-    const tui = new TUI(terminal, false);
+    const tui = new TuiMainScreen(terminal, false);
     const viewer = new AgentSessionViewer(execution, tui, vi.fn(), loaded.capability, undefined, {
       matches: () => false,
     });
