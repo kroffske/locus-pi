@@ -7,6 +7,8 @@
  * so tests can mock createSession and prove the wiring.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runtime/agent-runner.js";
@@ -46,11 +48,19 @@ import type {
   WorkspaceMode,
 } from "./workflow-runtime.js";
 import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
+import { createWorkflowAskTool, WORKFLOW_ASK_NO_UI_MESSAGE, type WorkflowAskToolDeps } from "./workflow-ask-tool.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent-read-only-policy.js";
+
+/** Extra per-turn SDK-backstop headroom for `ask: true` calls. The backstop timer
+ *  cannot pause while a human is thinking; the bridge's own fuse (which DOES pause)
+ *  stays the authority on effective run time, and this allowance keeps the backstop
+ *  from firing first during a wait. A single wait longer than this still dies by
+ *  the backstop — a named, documented residual, not a silent one. */
+const WORKFLOW_ASK_TURN_WAIT_ALLOWANCE_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -105,6 +115,9 @@ export interface WorkflowAgentBridgeOptions {
   evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
   /** Project-local workflow workspace shared by the root and saved children. */
   workflowWorkspaceDir?: string;
+  /** Test seam: replaces the operator-question surface `workflow_ask` mounts, so
+   *  tests can script answers without a TUI. Production callers leave it unset. */
+  askRequestQuestion?: WorkflowAskToolDeps["requestQuestion"];
 }
 
 /**
@@ -388,6 +401,59 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       pwd: worktreePath ?? projectRoot,
       projectRoot,
     });
+    // Resolved before the request exists: the live-ask tool below records evidence
+    // into these destinations from inside the child's pending tool call.
+    const evidenceDestinations =
+      options.evidenceDestinations !== undefined && req.callId !== undefined
+        ? options.evidenceDestinations(req.callId)
+        : undefined;
+    // Live operator questions (owner decision, `.locus/soul.md` direction log
+    // 2026-08-19). The tool closure executes in THIS process while the boundary
+    // call below is in flight; its fuse and abort hooks are late-bound `let`
+    // bindings because the fuse they drive is created further down, next to the
+    // abort controller it shares.
+    let pauseAskFuse: () => void = () => {};
+    let resumeAskFuse: () => void = () => {};
+    let failAskCall: (message: string) => void = () => {};
+    const askNotes: string[] = [];
+    let askEvidenceCounter = 0;
+    const askTool =
+      req.operatorAsk === true && req.capabilityMode !== "tool-free"
+        ? createWorkflowAskTool({
+            ctx,
+            contextText: workflowAskContextText({
+              runId: options.workflowRunId,
+              agent: agent.name,
+              label: req.label,
+            }),
+            onWaitStart: () => pauseAskFuse(),
+            onWaitEnd: () => resumeAskFuse(),
+            failCall: (message) => failAskCall(message),
+            ...(options.askRequestQuestion !== undefined ? { requestQuestion: options.askRequestQuestion } : {}),
+            recordEvidence: (record) => {
+              askEvidenceCounter += 1;
+              let artifactNote = "";
+              if (evidenceDestinations !== undefined) {
+                try {
+                  mkdirSync(evidenceDestinations.resultArtifactsDir, { recursive: true });
+                  const artifactPath = join(
+                    evidenceDestinations.resultArtifactsDir,
+                    `operator-ask-${askEvidenceCounter}.json`,
+                  );
+                  writeFileSync(artifactPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+                  artifactNote = `; artifact ${artifactPath}`;
+                } catch (error) {
+                  artifactNote = `; artifact write failed: ${error instanceof Error ? error.message : String(error)}`;
+                }
+              }
+              const answered = record.entries.filter((entry) => entry.status === "answered").length;
+              askNotes.push(
+                `workflow_ask: operator answered ${answered}/${record.entries.length}` +
+                  `${record.declined ? ", declined the rest" : ""}${artifactNote}`,
+              );
+            },
+          })
+        : undefined;
     const request = createAgentRunRequest(agent, childTask, {
       maxTurns,
       approvalTier,
@@ -398,6 +464,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // request, inside the boundary, before this bridge ever sees a result.
       ...(tier.kind === "inherit" && tier.fallback !== undefined ? { modelRoleFallback: tier.fallback } : {}),
       repositoryCheckScripts,
+      // The stock `ask` is excluded from EVERY workflow child: a headless child
+      // receives its refusal as model-visible text (the recorded fabrication
+      // probe) and its option timeout answers for the operator. Live questions
+      // travel only through the injected `workflow_ask` when the stage declared
+      // `ask: true`.
+      additionalExcludeTools: ["ask"],
+      ...(askTool !== undefined ? { customTools: [askTool] } : {}),
       ...(worktreePath !== undefined ? { workingDirectory: worktreePath } : {}),
       ...(options.args !== undefined || worktreePath !== undefined
         ? {
@@ -442,10 +515,6 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
           ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
         }));
-    const evidenceDestinations =
-      options.evidenceDestinations !== undefined && req.callId !== undefined
-        ? options.evidenceDestinations(req.callId)
-        : undefined;
     const workflowParentRowId =
       options.workflowRunId !== undefined
         ? workflowAgentLiveRowId({
@@ -487,8 +556,15 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // whether or not anyone asked it to, so leaving that budget at its own default made
     // two independent deadlines race and the operator's failure text nondeterministic.
     // Here the declared fuse is the authority and the SDK budget is derived from it,
-    // strictly above it — a backstop that cannot fire first (D4).
-    const turnTimeoutMs = req.timeoutMs === undefined ? undefined : workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns);
+    // strictly above it — a backstop that cannot fire first (D4). An `ask: true` call
+    // widens the backstop by a fixed wait allowance: the backstop cannot pause during
+    // a human wait, while the fuse below can and does.
+    const turnTimeoutMs =
+      req.timeoutMs === undefined
+        ? undefined
+        : req.operatorAsk === true
+          ? workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns) + WORKFLOW_ASK_TURN_WAIT_ALLOWANCE_MS
+          : workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns);
     const executor = createExecutorFn({
       // `perCallModel ?? resolvedRoleModel ?? ctx.model`, collapsed into the one term
       // `resolveWorkflowTier` already computed. The parent model is reachable only
@@ -510,10 +586,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // that only stops waiting would leave a child burning tokens with nothing left
     // to read its answer. The run-level signal still aborts everything.
     const callAbort = new AbortController();
-    // Run cancellation and the per-call fuse share one child signal. Whichever source
-    // aborts it first owns the durable outcome; the other source must not relabel it
-    // while the executor unwinds.
-    let abortOwner: "run" | "timeout" | undefined;
+    // Run cancellation, the per-call fuse and the live-ask fail-closed path share
+    // one child signal. Whichever source aborts it first owns the durable outcome;
+    // the other sources must not relabel it while the executor unwinds.
+    let abortOwner: "run" | "timeout" | "ask-unavailable" | undefined;
+    let askFailureMessage: string | undefined;
     const abortFromRun = (): void => {
       if (abortOwner !== undefined) return;
       abortOwner = "run";
@@ -521,14 +598,44 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     };
     if (signal.aborted) abortFromRun();
     else signal.addEventListener("abort", abortFromRun, { once: true });
-    const timer =
-      req.timeoutMs === undefined
-        ? undefined
-        : setTimeout(() => {
-            if (abortOwner !== undefined) return;
-            abortOwner = "timeout";
-            callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
-          }, req.timeoutMs);
+    // The fuse is PAUSABLE: while the child is blocked on `workflow_ask`, the
+    // operator's thinking time is not the child's run time. `fuseRemainingMs`
+    // counts armed time only; the widened SDK backstop above covers the wait.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let fuseRemainingMs = req.timeoutMs;
+    let fuseArmedAt: number | undefined;
+    let askWaitDepth = 0;
+    const fireFuse = (): void => {
+      if (abortOwner !== undefined) return;
+      abortOwner = "timeout";
+      callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
+    };
+    const armFuse = (): void => {
+      if (fuseRemainingMs === undefined) return;
+      fuseArmedAt = Date.now();
+      timer = setTimeout(fireFuse, fuseRemainingMs);
+    };
+    armFuse();
+    pauseAskFuse = (): void => {
+      askWaitDepth += 1;
+      if (askWaitDepth !== 1 || timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+      if (fuseRemainingMs !== undefined && fuseArmedAt !== undefined) {
+        fuseRemainingMs = Math.max(0, fuseRemainingMs - (Date.now() - fuseArmedAt));
+      }
+    };
+    resumeAskFuse = (): void => {
+      askWaitDepth = Math.max(0, askWaitDepth - 1);
+      if (askWaitDepth !== 0 || abortOwner !== undefined || timer !== undefined) return;
+      armFuse();
+    };
+    failAskCall = (message: string): void => {
+      if (abortOwner !== undefined) return;
+      abortOwner = "ask-unavailable";
+      askFailureMessage = message;
+      callAbort.abort(new Error(message));
+    };
     let boundary;
     try {
       boundary = await executeAgentRunBoundary({
@@ -541,13 +648,16 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         // it observed — or return a late success after the fuse already fired. Finalize
         // both status and cause before the envelope is written.
         finalizeResult: (result) => {
-          if (abortOwner !== "timeout") return result;
+          if (abortOwner !== "timeout" && abortOwner !== "ask-unavailable") return result;
           const { text: _lateText, ...resultWithoutText } = result;
           return {
             ...resultWithoutText,
             status: "failed",
-            reason: `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`,
-            failureCause: "call-timeout",
+            reason:
+              abortOwner === "timeout"
+                ? `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`
+                : (askFailureMessage ?? WORKFLOW_ASK_NO_UI_MESSAGE),
+            failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
           };
         },
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
@@ -556,17 +666,20 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       if (timer !== undefined) clearTimeout(timer);
       signal.removeEventListener("abort", abortFromRun);
     }
-    if (abortOwner === "timeout") {
-      // Name the fuse. Without this the operator reads only the host's generic
-      // abort reason and cannot tell a timeout from an operator cancellation.
-      const message = `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`;
+    if (abortOwner === "timeout" || abortOwner === "ask-unavailable") {
+      // Name the fuse (or the fail-closed ask refusal). Without this the operator
+      // reads only the host's generic abort reason and cannot tell them apart.
+      const message =
+        abortOwner === "timeout"
+          ? `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`
+          : (askFailureMessage ?? WORKFLOW_ASK_NO_UI_MESSAGE);
       return {
         ok: false,
         status: "failed",
-        // The fuse is a TRANSPORT failure: the child was aborted, not answered badly.
-        failureCause: "call-timeout",
+        // Both are TRANSPORT failures: the child was aborted, not answered badly.
+        failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
         summary: message,
-        diagnostics: [...boundary.diagnostics, message],
+        diagnostics: [...boundary.diagnostics, ...askNotes, message],
         agent: agent.name,
         permissionMode,
         workspaceMode,
@@ -638,7 +751,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // Carried, never re-derived: the host declared the cause where it was known.
       ...(boundary.failureCause !== undefined ? { failureCause: boundary.failureCause } : {}),
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
-      diagnostics: degradationConfirmed ? [tier.fallback!, ...boundary.diagnostics] : boundary.diagnostics,
+      diagnostics: [...(degradationConfirmed ? [tier.fallback!] : []), ...boundary.diagnostics, ...askNotes],
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       agent: agent.name,
       ...(req.label !== undefined ? { label: req.label } : {}),
@@ -666,6 +779,18 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     };
     return result;
   };
+}
+
+/** Who is asking, in the operator's terms — rendered above the question body so
+ *  the operator can tell which of several running things stopped for an answer. */
+function workflowAskContextText(input: {
+  runId?: string | undefined;
+  agent: string;
+  label?: string | undefined;
+}): string {
+  const stage = input.label !== undefined ? `, stage "${input.label}"` : "";
+  const run = input.runId !== undefined ? `run ${input.runId}` : "an unsaved run";
+  return `Workflow ${run} — agent "${input.agent}"${stage} is asking:`;
 }
 
 /**

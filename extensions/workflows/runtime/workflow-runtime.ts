@@ -250,6 +250,9 @@ export interface WorkflowAgentRequest {
   readOnly?: true;
   /** Runtime-owned invariant: every workflow child request carries `["*"]`. */
   tools?: string[];
+  /** Stage-declared live operator questions: the bridge injects the `workflow_ask`
+   *  custom tool and this child may block on a human answer. */
+  operatorAsk?: true;
   /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
   maxToolCalls?: number;
   /** Per-call concrete model selector, e.g. "provider/id" or "provider/id:high". */
@@ -453,6 +456,16 @@ export interface WorkflowAgentOptions {
   readOnly?: true;
   /** @deprecated ignored; workflow children always receive `allowedTools: ["*"]`. */
   tools?: string[];
+  /**
+   * Let THIS child ask the operator live clarifying questions through the
+   * `workflow_ask` tool: the question renders in the parent session, the answer
+   * returns as the tool result, and the same child continues (owner decision,
+   * soul direction log 2026-08-19). Off unless declared — the tool is simply not
+   * injected, and the stock `ask` is excluded from every workflow child either
+   * way. Interactive parents only: with no UI the call fails closed with the
+   * named `ask-unavailable` cause instead of parking or degrading.
+   */
+  ask?: true;
   /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. */
   maxToolCalls?: number;
   /**
@@ -2479,6 +2492,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       prompt,
       agent: agentName,
       tools: ["*"],
+      ...(opts?.ask === true ? { operatorAsk: true as const } : {}),
       permissionMode,
       workspaceMode,
       ...(opts?.workspaceHandle !== undefined ? { workspaceHandle: opts.workspaceHandle } : {}),
@@ -3583,6 +3597,11 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     workspaceMode: req.workspaceMode ?? null,
     workspaceHandle: req.workspaceHandle ?? null,
     capabilityMode: req.capabilityMode ?? null,
+    // A call that may block on a live human answer is a different execution from
+    // one that may not: the child's toolset differs (`workflow_ask` injected) and
+    // its answer can depend on operator input. A record made under one shape must
+    // not be served to the other.
+    operatorAsk: req.operatorAsk ?? null,
   });
 }
 
