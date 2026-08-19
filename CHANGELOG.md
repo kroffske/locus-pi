@@ -385,6 +385,19 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
 
 ### Fixed
 
+- **The plan verifier no longer blocks a plan for describing something that
+  does not exist yet.** The stage that checks the finished plan reopens the live
+  project, but its prompt never said that planning implements nothing: on the
+  first hosted-model series a verifier confirmed the outcome, the fields, the
+  dependency order and the clean reviews, then ran `test -f …/index.html`, got
+  status 1, and concluded "blocked" — a blocker no plan could ever avoid,
+  since this workflow publishes a plan and stops. A weaker local model in the
+  earlier series simply never inspected the project and so never hit it. The
+  stage now states that the deliverable's absence is the expected state, that
+  it verifies the document rather than the result, and that each step's
+  verification is checked for existing and being runnable after that step has
+  been performed — never for passing today.
+
 - **The packaged `task/plan` workflow stops planning work its own executor
   cannot do, and stops retyping the files it just wrote.** Every step in the
   plan it produces is executed later by one unattended CLI agent with this
