@@ -61,7 +61,7 @@ The consolidated catalog, including commands, hooks, risk level, and direct feat
 
 ## Curated Package workflows
 
-The package scans `extensions/workflows/examples/`, which ships five curated Package workflow namespaces with seventeen runnable names; each `<name>/` owns one namespace with an optional same-named root plus any direct child entries (`task` itself is group-only).
+The package scans `extensions/workflows/examples/`, which ships six curated Package workflow namespaces with seventeen runnable names; each `<name>/` owns one namespace with an optional same-named root plus any direct child entries (`task` itself is group-only).
 
 | Workflow                      | Purpose                                                                                                                     |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -83,7 +83,7 @@ The package scans `extensions/workflows/examples/`, which ships five curated Pac
 | `workflow-creator/svg`        | Produce and independently review a self-contained SVG graph.                                                                |
 | `workflow-creator/build`      | Build and recheck only the design-declared source package.                                                                  |
 
-Use `/workflows list` for the live first-wins catalog across the five curated workflow namespaces and their seventeen runnable names, and [Workflow guide](docs/workflows.md) for commands, storage, trust, and authoring entry points.
+Use `/workflows list` for the live first-wins catalog across the six curated workflow namespaces and their seventeen runnable names, and [Workflow guide](docs/workflows.md) for commands, storage, trust, and authoring entry points.
 
 ## Trust boundary
 

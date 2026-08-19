@@ -320,8 +320,8 @@ describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("five curated Package workflow namespaces with seventeen runnable names");
-    expect(prose).toContain("the five curated workflow namespaces and their seventeen runnable names");
+    expect(prose).toContain("six curated Package workflow namespaces with seventeen runnable names");
+    expect(prose).toContain("the six curated workflow namespaces and their seventeen runnable names");
     expect(prose).toContain(
       "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
     );
