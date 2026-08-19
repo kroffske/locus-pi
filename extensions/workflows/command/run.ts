@@ -106,6 +106,7 @@ export async function handleWorkflowRunCommand(
     ...(parsed.input === undefined ? {} : { input: parsed.input }),
     ...(parsed.outputDir === undefined ? {} : { outputDir: parsed.outputDir }),
     ...(parsed.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsed.resumeFromRunId }),
+    ...(parsed.noOperator === true ? { noOperator: true as const } : {}),
     ...(ctx.waitForIdle === undefined ? {} : { waitForIdle: () => ctx.waitForIdle!() }),
   });
   if (launched.status === "started") {

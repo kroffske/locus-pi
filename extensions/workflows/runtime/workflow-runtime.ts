@@ -134,6 +134,17 @@ function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | unde
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
 export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
+
+/** Journal prelude for the run-level no-operator mode. Deliberately names the
+ *  guarantee ("operator input"), not any one method: `awaitOperator` and a
+ *  stage's `agent({ ask: true })` obey the same mode. */
+export const WORKFLOW_NO_OPERATOR_PRELUDE = "[workflow:no-operator] operator input is forbidden for this run";
+
+/** Named fail-closed refusal for an operator-input request under the mode.
+ *  The author's own reason travels inside so the terminal error stays actionable. */
+export function workflowOperatorInputForbiddenError(reason: string): string {
+  return `Operator input requested but forbidden for this run (no-operator mode): ${reason}`;
+}
 /** High per-child safety fuse. Ordinary agent work should finish far below this value.
  *  Single-sourced from the package budget contract: this name is kept because callers
  *  and tests use it, but the number lives in exactly one place. */
@@ -903,6 +914,10 @@ export interface WorkflowRuntimeOptions {
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
   /** Runner-owned sink for one out-of-band operator handoff declaration. */
   onAwaitOperator?: (declaration: WorkflowAwaitOperatorDeclaration) => void;
+  /** Run-level no-operator mode: `awaitOperator` fails closed at the call site
+   *  with a named reason instead of declaring a pause. Method-agnostic — the
+   *  same run mode makes the agent bridge refuse `agent({ ask: true })`. */
+  operatorInputForbidden?: boolean;
 }
 
 export interface WorkflowRuntime {
@@ -3277,6 +3292,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   function awaitOperator(input: WorkflowAwaitOperatorDeclaration): void {
     const declaration = normalizeWorkflowAwaitOperatorDeclaration(input);
+    if (options.operatorInputForbidden === true) {
+      // Fail closed at the call site: no pause envelope, no auto-answer. The
+      // refusal is journalled before the throw so a script that catches it
+      // cannot turn the request into silence.
+      const message = workflowOperatorInputForbiddenError(declaration.reason);
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: `[workflow:no-operator] ${message}`,
+        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      });
+      throw new Error(message);
+    }
     if (options.onAwaitOperator === undefined) {
       throw new Error("awaitOperator is not configured by the workflow runner");
     }

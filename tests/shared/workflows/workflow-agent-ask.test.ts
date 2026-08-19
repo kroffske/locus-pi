@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentRunRequest, AgentRunResult } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { createWorkflowAgentRunner } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
+import {
+  createWorkflowAgentRunner,
+  WORKFLOW_NO_OPERATOR_ASK_MESSAGE,
+} from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import { WORKFLOW_ASK_TOOL_NAME } from "../../../extensions/workflows/runtime/workflow-ask-tool.js";
 import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import type { WorkflowReplayController } from "../../../extensions/workflows/runtime/workflow-replay.js";
@@ -142,5 +145,31 @@ describe("workflow agent bridge — live ask wiring", () => {
     expect(keys[0]).not.toEqual(keys[1]);
     expect(keys[0]).toContain('"operatorAsk":null');
     expect(keys[1]).toContain('"operatorAsk":true');
+  });
+
+  it("refuses an ask stage under the run-level no-operator mode before any child exists (T-165)", async () => {
+    const h = createHarness();
+    let spawned = 0;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      noOperator: true,
+      createExecutor: () => ({
+        async run() {
+          spawned += 1;
+          return completedResult("must never run");
+        },
+      }),
+    });
+    const refused = await runner({ prompt: "asking stage", agent: "reviewer", tools: ["*"], operatorAsk: true });
+    expect(refused.ok).toBe(false);
+    expect(refused.failureCause).toBe("ask-unavailable");
+    expect(refused.summary).toBe(WORKFLOW_NO_OPERATOR_ASK_MESSAGE);
+    expect(spawned).toBe(0);
+    // A stage that does not ask is untouched by the mode.
+    const plain = await runner({ prompt: "plain stage", agent: "reviewer", tools: ["*"] });
+    expect(plain.ok).toBe(true);
+    expect(spawned).toBe(1);
   });
 });

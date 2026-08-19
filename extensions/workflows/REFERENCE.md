@@ -192,6 +192,7 @@ with the unified command is proven, and are not removed as part of this menu.
 /workflows continue <runId>       answer and continue an actionable handoff
 /workflows stop [runId|last]      request cancellation; terminal state follows settlement
 /workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
+/workflows run plan --no-operator <input>   unattended launch: any operator-input request fails closed
 ```
 
 `post-code-review` is owner-scoped: every fresh launch must name an explicit,
@@ -219,6 +220,36 @@ If either option is repeated, the last supplied value wins. Use the conventional
 `--output-dir`, `--`, or another option-looking token; the entire remainder
 after the delimiter is forwarded byte-for-byte as semantic input. The delimiter
 works the same way for `/workflows run`.
+
+### No-operator mode — `--no-operator`
+
+`--no-operator` (value-less, composable with the other run options) turns one
+launch into a run-level guarantee for unattended callers: **any request for
+operator input fails closed with a named reason instead of parking the run**.
+The mode is method-agnostic — it forbids operator input as such, not one API:
+
+- `dsl.awaitOperator(...)` under the mode does not declare a pause. It fails
+  the run at the call site: the terminal error and the journal carry
+  `Operator input requested but forbidden for this run (no-operator mode):
+<the author's reason>`, no `operatorHandoff` envelope is produced, and
+  artifacts published before the refusal stay on disk (the workspace outlives
+  the failed run, exactly as for any other failure).
+- `agent({ ask: true })` under the mode is refused before any child is
+  spawned: the call returns a result-shaped failure with the closed cause
+  `ask-unavailable` — operator input genuinely is unavailable in this run, by
+  launch policy rather than by missing UI.
+
+There is no auto-answer and no recommended-option fallback under the mode: a
+fabricated operator input would be a silent wrong success, which is worse than
+the named refusal. The run journal opens with
+`[workflow:no-operator] operator input is forbidden for this run`, so
+`/workflows status` and the persisted run evidence show the mode was active.
+Saved children inherit the mode through run coordination and cannot unset it:
+one run, one guarantee. The mode is off by default everywhere, including
+`print`/`json` launches — a headless `awaitOperator` pause is a designed
+split-run state with durable artifacts, not a hang. The programmatic `workflow`
+tool exposes the same switch as the boolean `noOperator` field; embedders use
+`RunWorkflowScriptOptions.noOperator`.
 
 ### Run from an agent without a wrapper
 
@@ -1339,7 +1370,10 @@ panel.
 characters. It is a control declaration, not model output and not a thrown
 pause. Call it only after durable handoff artifacts exist, immediately before
 returning the unchanged handoff payload. An abort or semantic/infrastructure
-failure still wins at finalization.
+failure still wins at finalization. Under the run-level no-operator mode
+(`--no-operator`, the tool's `noOperator`) the call does not declare anything:
+it fails the run closed at the call site with a named reason — see
+"No-operator mode" in the run section.
 
 If the operator answers the question, the workflow's continuation run receives
 their answer text. If they press Escape, it receives a plain-text refusal
@@ -1697,6 +1731,10 @@ rules:
   made without `ask` is never served to an asking call, and vice versa. A
   completed call replays its recorded final text as usual; an interrupted call
   re-executes and honestly asks again.
+- **The run-level no-operator mode wins.** Under `--no-operator` (or the
+  `workflow` tool's `noOperator`), an `ask: true` stage is refused before any
+  child is spawned, with the same closed `ask-unavailable` cause. See
+  "No-operator mode" above.
 
 ### Standard exact choice — `agent({ choice })`
 
