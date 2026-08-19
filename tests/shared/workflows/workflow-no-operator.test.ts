@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readWorkflowOperatorHandoff } from "../../../extensions/workflows/runtime/workflow-handoff.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
+  WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE,
   WORKFLOW_NO_OPERATOR_PRELUDE,
   workflowOperatorInputForbiddenError,
 } from "../../../extensions/workflows/runtime/workflow-runtime.js";
@@ -134,5 +135,38 @@ describe("workflow run-level no-operator mode", () => {
     // line is there even though the child was never launched with the option.
     expect(childResult.journal.some((line) => line.message === WORKFLOW_NO_OPERATOR_PRELUDE)).toBe(true);
     expect(existsSync(childRunDir)).toBe(true);
+  });
+
+  // T-168 — the headless default is resolved by the launch surfaces, so the
+  // runner keeps two obligations of its own: explain the mode to a reader who
+  // typed no flag, and never assume it.
+  it("names the headless launch in the journal so a refusal without a flag is explicable", async () => {
+    const root = project();
+    const harness = createHarness(root, { mode: "print" });
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "asking",
+      noOperator: true,
+    });
+    expect(result.ok).toBe(false);
+    const journalMessages = result.journal.filter((line) => line.kind === "log").map((line) => line.message ?? "");
+    expect(journalMessages).toContain(WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE);
+    expect(WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE).toContain("headless launch");
+  });
+
+  it("does not infer the mode from a headless host: an embedder opts in itself", async () => {
+    const root = project();
+    const harness = createHarness(root, { mode: "print" });
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "asking",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.disposition).toEqual({ status: "awaiting_operator", detail: "review clarification required" });
+    expect(result.journal.map((line) => line.message)).not.toContain(WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE);
   });
 });

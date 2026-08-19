@@ -106,7 +106,12 @@ export async function handleWorkflowRunCommand(
     ...(parsed.input === undefined ? {} : { input: parsed.input }),
     ...(parsed.outputDir === undefined ? {} : { outputDir: parsed.outputDir }),
     ...(parsed.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsed.resumeFromRunId }),
-    ...(parsed.noOperator === true ? { noOperator: true as const } : {}),
+    // Headless launches default to the no-operator mode: a `print`/`json`
+    // session has no operator to reach, so a request for operator input can
+    // only park the run until the turn is disposed. An explicit `--operator`
+    // opts back in to the designed split-run pause; an explicit
+    // `--no-operator` still turns the mode on in an interactive session.
+    ...((parsed.noOperator ?? isOneShotCommandMode(ctx)) ? { noOperator: true as const } : {}),
     ...(ctx.waitForIdle === undefined ? {} : { waitForIdle: () => ctx.waitForIdle!() }),
   });
   if (launched.status === "started") {

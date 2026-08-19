@@ -19,7 +19,7 @@ import { pathToFileURL } from "node:url";
 import { readFileSync, realpathSync } from "node:fs";
 import { constants as vmConstants, Script } from "node:vm";
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory, isOneShotHostMode } from "../../_shared/host/pi-api.js";
 import type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowDsl,
@@ -38,6 +38,7 @@ import {
   createWorkflowSharedExecutionState,
   snapshotWorkflowItems,
   workflowGroupFailureEnvelope,
+  WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE,
   WORKFLOW_NO_OPERATOR_PRELUDE,
   type WorkflowSavedChildResult,
   type WorkflowSharedExecutionState,
@@ -324,8 +325,9 @@ export interface RunWorkflowScriptOptions {
    * — fails closed with a named reason instead of parking the run or mounting
    * a question. No auto-answer exists; a fabricated operator input would be
    * worse than the refusal. Saved children inherit the mode through run
-   * coordination and cannot unset it. Off by default everywhere, including
-   * print/json launches (the split-run pause is a designed headless state).
+   * coordination and cannot unset it. The launch surfaces turn it on by
+   * default for headless (`print`/`json`) hosts, where no operator can be
+   * reached; embedders that call the runner directly opt in themselves.
    */
   noOperator?: true;
   createExecutor?: (o: {
@@ -1066,7 +1068,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           runId,
           kind: "log",
           source: "runtime",
-          message: WORKFLOW_NO_OPERATOR_PRELUDE,
+          // A headless launch turns the mode on by default, so its journal has
+          // to say why input was refused to a reader who typed no flag.
+          message: isOneShotHostMode(opts.ctx) ? WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE : WORKFLOW_NO_OPERATOR_PRELUDE,
         };
   journal.initialize(budgetPrelude);
   if (noOperatorPrelude !== undefined) journal.write(noOperatorPrelude);

@@ -169,9 +169,11 @@ The same applies to `dsl.awaitOperator(...)`: an unattended caller may launch
 any workflow with the run-level no-operator mode (`/workflows run <name>
 --no-operator`, or the `workflow` tool's `noOperator: true`), and under that
 mode every request for operator input — `awaitOperator` or an `ask: true`
-stage — fails closed with a named reason instead of pausing the run. Author
-for that reality: a workflow meant for automation asks nothing and turns
-unknowns into explicit assumptions inside its result.
+stage — fails closed with a named reason instead of pausing the run. A
+headless launch (`print`/`json`) turns that mode on by default, so any workflow
+run from a pipeline is in it unless the caller passes `--operator`. Author for
+that reality: a workflow meant for automation asks nothing and turns unknowns
+into explicit assumptions inside its result.
 
 ## Target source shape
 

@@ -9,6 +9,7 @@
  */
 
 import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { isOneShotHostMode } from "../_shared/host/pi-api.js";
 import {
   isPostCodeReviewTarget,
   postCodeReviewFreshLaunchError,
@@ -29,7 +30,7 @@ const WORKFLOW_BUSY_MESSAGE =
  * sessions need, so the command has to hold the turn open instead.
  */
 export function isOneShotCommandMode(ctx: ExtensionCommandContext): boolean {
-  return ctx.mode === "print" || ctx.mode === "json";
+  return isOneShotHostMode(ctx);
 }
 
 /** The reason a launch must not start, or `undefined` when the session is idle. */

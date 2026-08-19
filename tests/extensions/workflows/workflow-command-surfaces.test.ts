@@ -376,8 +376,36 @@ describe("/workflows help and unknown commands", () => {
       noOperator: true,
       input: "--no-operator stays input",
     });
+    // The headless opt-out is the same kind of value-less flag, and the last
+    // mode flag wins exactly like a repeated value option.
+    expect(parseRunCommand("run plan --operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: false,
+    });
+    expect(parseRunCommand("run plan --operator --output-dir tmp/auto ship the fix")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: false,
+      input: "ship the fix",
+    });
+    expect(parseRunCommand("run plan --no-operator --operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: false,
+    });
+    expect(parseRunCommand("run plan --operator --no-operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: true,
+    });
+    expect(parseRunCommand("run plan -- --operator stays input")).toEqual({
+      scriptRef: "plan",
+      input: "--operator stays input",
+    });
     // A value option cannot eat the flag as its value.
     expect(parseRunCommand("run plan --output-dir --no-operator")).toEqual({
+      scriptRef: "plan",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand("run plan --output-dir --operator")).toEqual({
       scriptRef: "plan",
       missingOutputDir: true,
     });
@@ -443,7 +471,7 @@ describe("/workflows help and unknown commands", () => {
 
     expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
     expect(workflowRunUsage()).toBe(
-      "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--no-operator] [--] [input]",
+      "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]",
     );
     expect(h.commands.has("workflow-run")).toBe(false);
     expect(h.commands.get("workflow-stop")?.description).toBe(

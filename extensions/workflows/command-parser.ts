@@ -26,10 +26,23 @@ export interface ParsedContinueCommand {
   missingAnswer?: boolean;
 }
 
-const WORKFLOW_RUN_OPTION_USAGE = "[--output-dir <path>] [--resume <runId>] [--no-operator] [--] [input]";
+const WORKFLOW_RUN_OPTION_USAGE = "[--output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]";
 
 /** Value-less run flag: run-level no-operator mode (operator input fails closed). */
 export const WORKFLOW_RUN_NO_OPERATOR_FLAG = "--no-operator";
+
+/**
+ * Value-less run flag: keep operator input available for this run. Only a
+ * headless (`print`/`json`) launch needs it, where the mode is on by default;
+ * it restores the designed `awaitOperator` split-run pause there.
+ */
+export const WORKFLOW_RUN_OPERATOR_FLAG = "--operator";
+
+/** The value-less run flags and the `noOperator` value each one asserts. */
+const WORKFLOW_RUN_MODE_FLAGS = [
+  { name: WORKFLOW_RUN_NO_OPERATOR_FLAG, noOperator: true },
+  { name: WORKFLOW_RUN_OPERATOR_FLAG, noOperator: false },
+] as const;
 
 export const WORKFLOW_RUN_OPTION_DESCRIPTORS = [
   { name: "--output-dir", field: "outputDir" },
@@ -88,6 +101,7 @@ export function workflowRunRecoveryUsage(parsed: ParsedRunCommand): string {
     parts.push("--resume", "<runId>");
   }
   if (parsed.noOperator === true) parts.push(WORKFLOW_RUN_NO_OPERATOR_FLAG);
+  else if (parsed.noOperator === false) parts.push(WORKFLOW_RUN_OPERATOR_FLAG);
   parts.push("[--]", "[input]");
   return parts.join(" ");
 }
@@ -131,15 +145,12 @@ export function parseRunCommand(text: string): ParsedRunCommand | null {
   // Match the existing command-option convention: when an option is repeated
   // before semantic input, its last supplied value wins.
   while (true) {
-    if (rest === WORKFLOW_RUN_NO_OPERATOR_FLAG) {
-      noOperator = true;
-      rest = "";
-      continue;
-    }
-    const flagSuffix = rest.slice(WORKFLOW_RUN_NO_OPERATOR_FLAG.length);
-    if (rest.startsWith(WORKFLOW_RUN_NO_OPERATOR_FLAG) && /^\s/u.test(flagSuffix)) {
-      noOperator = true;
-      rest = flagSuffix.trimStart();
+    const mode = WORKFLOW_RUN_MODE_FLAGS.find(
+      (flag) => rest === flag.name || (rest.startsWith(flag.name) && /^\s/u.test(rest.slice(flag.name.length))),
+    );
+    if (mode !== undefined) {
+      noOperator = mode.noOperator;
+      rest = rest === mode.name ? "" : rest.slice(mode.name.length).trimStart();
       continue;
     }
     const matched = workflowRunOptionAtStart(rest);
@@ -156,7 +167,7 @@ export function parseRunCommand(text: string): ParsedRunCommand | null {
       value.value === "--" ||
       value.value === "--output-dir" ||
       value.value === "--resume" ||
-      value.value === WORKFLOW_RUN_NO_OPERATOR_FLAG
+      WORKFLOW_RUN_MODE_FLAGS.some((flag) => value.value === flag.name)
     ) {
       return missing(option);
     }

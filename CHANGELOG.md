@@ -45,9 +45,23 @@ check:links`.** Every relative link and heading anchor in published Markdown is
   `failureCause: "ask-unavailable"`. The journal opens with
   `[workflow:no-operator] operator input is forbidden for this run`; saved
   children inherit the mode through run coordination and cannot unset it.
-  No auto-answer exists under the mode. Off by default everywhere, including
-  `print`/`json` launches — a headless `awaitOperator` pause remains a
-  designed split-run state.
+  No auto-answer exists under the mode.
+
+- **Headless launches (`print`/`json`) turn the no-operator mode on by
+  default, with `--operator` as the opt-out.** A one-shot host has no operator
+  to reach, so a request for human input there could only park the run until
+  the turn was disposed: what looked like a safe convention ("shipped
+  workflows do not ask") was all that kept an unattended pipeline from
+  hanging on someone else's workflow. Both launch surfaces now default
+  `noOperator` to on in those modes, and the run journal says why —
+  `[workflow:no-operator] operator input is forbidden for this run (headless
+launch: no operator can be reached)` — so a refusal is explicable to a caller
+  who typed no flag. The designed `awaitOperator` split-run pause is not
+  removed: `--operator` (tool field `noOperator: false`) restores it inside a
+  headless launch, including for a `--resume` continuation that gates again.
+  Interactive hosts (`tui`, `rpc`) are unchanged and stay opt-in, explicit
+  flags beat the default in both directions, and the runner itself never
+  infers the mode — an embedder opts in for its own run.
 
 - **Live operator questions — `agent({ ask: true })`.** A stage may let its
   child ask the operator clarifying questions through the injected
