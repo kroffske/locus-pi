@@ -326,6 +326,13 @@ check:links`.** Every relative link and heading anchor in published Markdown is
 
 ### Fixed
 
+- **`npm run check:repository` now verifies a checkout that never ran the tests.** The public
+  inventory lists `dist/workflow-source-shape.mjs`, but no gate built it: the comparison
+  passed only where a committed copy or an earlier test or pack run had left the file behind,
+  and reported it missing otherwise. The npm script now rebuilds the artifact before comparing
+  the inventory, the same way `prepack` and `pack:json` already do, so the check stands on its
+  own and the hygiene scan reads the artifact as actually built.
+
 - **Durable workflow evidence now stays bound to its recorded run and
   workspace.** Resume rejects a missing or different output workspace before
   any child executes; persisted workflow targets, run identifiers, artifact

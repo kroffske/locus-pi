@@ -153,7 +153,7 @@ Transpiles `extensions/workflows/workflow-source-shape.ts` into
 `dist/workflow-source-shape.mjs` — the only generated artifact the package
 ships. It lets workflow tooling validate `.workflow.mjs` sources without a
 TypeScript loader. Runs automatically on `npm pack` and `npm publish` via
-`prepack`.
+`prepack`, and before the public-inventory comparison via `check:repository`.
 
 ## Publication pair
 
@@ -162,8 +162,12 @@ TypeScript loader. Runs automatically on `npm pack` and `npm publish` via
 The read half: compares the working tree (tracked plus untracked, minus
 ignored) against the `public-repository-files.txt` inventory, then rejects
 forbidden internal paths, symlinks, absolute workstation paths, private key
-material, and npm auth configuration. It runs inside `npm run check`, and the
-repository-governance integration test reuses its exports.
+material, and npm auth configuration. The npm script first rebuilds
+`dist/workflow-source-shape.mjs`, because the inventory lists it while nothing
+else in the gate produces it: the comparison would otherwise pass only in a
+checkout where a prior test or pack run happened to leave it behind. It runs
+inside `npm run check`, and the repository-governance integration test reuses
+its exports.
 
 ### materialize-public-repository.ts
 
