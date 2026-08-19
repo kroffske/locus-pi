@@ -4,7 +4,29 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+### Added
+
+- **Live operator questions — `agent({ ask: true })`.** A stage may let its
+  child ask the operator clarifying questions through the injected
+  `workflow_ask` tool: the question renders in the parent session, the answer
+  returns as the tool result, and the same child continues. Esc returns an
+  "operator declined" text answer; concurrent asking children queue FIFO; the
+  per-call `timeoutMs` fuse pauses while the operator is thinking; each
+  answered call writes an `operator-ask-<n>.json` evidence artifact and a
+  diagnostics line; the replay key records the declaration. With no operator
+  UI (`print`/`json`, unattended) the call fails closed with the new
+  `failureCause: "ask-unavailable"` — never a model-visible refusal sentence,
+  never an auto-selected option. Curated Package workflows remain no-ask by
+  construction. (Owner decision, direction log 2026-08-19.)
+
 ### Changed
+
+- **The stock `ask` tool is excluded from every workflow child.** A headless
+  child received its no-UI refusal as model-visible text — the recorded
+  fabrication path — and its option timeout auto-selected an answer on the
+  operator's behalf. Workflow children now never see the stock tool; live
+  questions travel only through `workflow_ask` on stages that declared
+  `ask: true`.
 
 - **Pi compatibility is now an open-ended minimum contract instead of a `0.83.x` ceiling.** The four Pi peer dependencies accept `>=0.83.0`, while development and CI continue to pin one exact, jointly updated Pi version. `npm run sync:pi-host` updates all four exact development packages from the selected CLI, `npm run check:pi-host` verifies the installed CLI and SDK packages before the suite, and selective-loading coverage runs through that installed host contract without hard-coding its version.
 

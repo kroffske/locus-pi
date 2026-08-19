@@ -253,6 +253,7 @@
     "extensions/workflows/run-viewer.ts",
     "extensions/workflows/runtime/workflow-agent-bridge.ts",
     "extensions/workflows/runtime/workflow-artifacts.ts",
+    "extensions/workflows/runtime/workflow-ask-tool.ts",
     "extensions/workflows/runtime/workflow-budget.ts",
     "extensions/workflows/runtime/workflow-discovery.ts",
     "extensions/workflows/runtime/workflow-failure.ts",

@@ -155,6 +155,16 @@ already supplies emergency per-attempt defaults. Emit one of those fields only
 when the operator explicitly requests a narrower or raised per-attempt fuse and
 the approved Design records why. Do not mechanically sweep legacy workflows.
 
+Standard generated source also omits `ask: true`. Live operator questions
+(`agent({ ask: true })`, REFERENCE "Live operator questions") are an
+interactive capability for operator-attended workflows: the child asks through
+`workflow_ask` and continues with the answer in the same session. Declare it
+only when the approved Design names the stage that may ask and why an
+assumption is not enough — decomposing unknowns into explicit assumptions
+remains the default. An `ask: true` stage makes the workflow unusable in
+`print`/`json` and unattended runs (the call fails closed with
+`ask-unavailable`), so a pipeline meant for automation must not declare it.
+
 ## Target source shape
 
 Keep stable identities together near the top. Keep prompts,
