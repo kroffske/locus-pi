@@ -331,7 +331,7 @@
     "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
     "check:push": "npm run check && npm run pack:json > /dev/null",
     "check:release": "tsx scripts/check-release-metadata.ts",
-    "check:repository": "tsx scripts/check-public-repository.ts",
+    "check:repository": "npm run build:workflow-source > /dev/null && tsx scripts/check-public-repository.ts",
     "check:workflow-source": "tsx scripts/check-workflow-source-shape.ts",
     "format": "prettier --write --ignore-unknown .",
     "format:check": "prettier --check --ignore-unknown .",
