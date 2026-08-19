@@ -36,6 +36,7 @@ export const EXTENSION_INVENTORY: ExtensionInventoryRow[] = [
   { id: "workflows", currentStatus: "active", ownershipStatus: "locus-specific" },
   { id: "render-mermaid", currentStatus: "disabled", ownershipStatus: "compat-wrapper" },
   { id: "security-gate", currentStatus: "active", ownershipStatus: "locus-specific" },
+  { id: "status-line", currentStatus: "active", ownershipStatus: "locus-specific" },
   { id: "todo-context", currentStatus: "active", ownershipStatus: "compat-wrapper" },
   { id: "tool-router", currentStatus: "disabled", ownershipStatus: "compat-wrapper" },
   { id: "tools-ast-apply", currentStatus: "deleted", ownershipStatus: "deleted" },
