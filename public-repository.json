@@ -66,6 +66,7 @@
     "tests/shared/workflows/workflow-agent-transport.test.ts",
     "package-lock.json",
     "public-repository.json",
+    "scripts/README.md",
     "scripts/audit-sources.ts",
     "scripts/build-workflow-source-shape.ts",
     "scripts/check-extension-layers.ts",
