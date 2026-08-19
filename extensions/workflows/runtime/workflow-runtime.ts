@@ -140,6 +140,15 @@ export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
  *  stage's `agent({ ask: true })` obey the same mode. */
 export const WORKFLOW_NO_OPERATOR_PRELUDE = "[workflow:no-operator] operator input is forbidden for this run";
 
+/**
+ * The same prelude for a headless (`print`/`json`) launch, where the mode is
+ * the default rather than a typed flag. A reader who never asked for the mode
+ * still has to be able to explain a refused `awaitOperator`, so the line says
+ * that this launch has no operator to reach. The opt-out is named per surface
+ * in REFERENCE, not here.
+ */
+export const WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE = `${WORKFLOW_NO_OPERATOR_PRELUDE} (headless launch: no operator can be reached)`;
+
 /** Named fail-closed refusal for an operator-input request under the mode.
  *  The author's own reason travels inside so the terminal error stays actionable. */
 export function workflowOperatorInputForbiddenError(reason: string): string {

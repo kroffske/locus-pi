@@ -221,7 +221,7 @@ If either option is repeated, the last supplied value wins. Use the conventional
 after the delimiter is forwarded byte-for-byte as semantic input. The delimiter
 works the same way for `/workflows run`.
 
-### No-operator mode — `--no-operator`
+### No-operator mode — `--no-operator` / `--operator`
 
 `--no-operator` (value-less, composable with the other run options) turns one
 launch into a run-level guarantee for unattended callers: **any request for
@@ -245,11 +245,29 @@ the named refusal. The run journal opens with
 `[workflow:no-operator] operator input is forbidden for this run`, so
 `/workflows status` and the persisted run evidence show the mode was active.
 Saved children inherit the mode through run coordination and cannot unset it:
-one run, one guarantee. The mode is off by default everywhere, including
-`print`/`json` launches — a headless `awaitOperator` pause is a designed
-split-run state with durable artifacts, not a hang. The programmatic `workflow`
-tool exposes the same switch as the boolean `noOperator` field; embedders use
+one run, one guarantee. The programmatic `workflow` tool exposes the same switch
+as the boolean `noOperator` field; embedders use
 `RunWorkflowScriptOptions.noOperator`.
+
+**Headless launches turn the mode on by default.** In the one-shot host modes
+`print` and `json` there is no operator to reach, so a request for human input
+can only park the run until the turn is disposed. Both launch surfaces
+therefore default `noOperator` to on there, and the journal of such a run opens
+with `[workflow:no-operator] operator input is forbidden for this run (headless
+launch: no operator can be reached)` — so a refusal is explicable to a reader
+who typed no flag. Interactive hosts (`tui`, `rpc`) are unchanged: the mode
+stays opt-in, because their operator input is deliverable.
+
+The default is a default, not a removal: `--operator` (value-less, and the
+`workflow` tool's `noOperator: false`) opts back in to the designed
+`awaitOperator` split-run pause inside a headless launch, whose durable
+artifacts and continuation still work exactly as documented. Explicit always
+beats the default in both directions — `--no-operator` turns the mode on in an
+interactive session — and a repeated mode flag follows the same last-one-wins
+rule as the value options. Continuing a paused headless run with `--resume` is
+itself a headless launch, so a second operator gate is refused unless that
+continuation also passes `--operator`. The runner never infers the mode from
+the host: an embedder calling `runWorkflowScript` directly opts in itself.
 
 ### Run from an agent without a wrapper
 

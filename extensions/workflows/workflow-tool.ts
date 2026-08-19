@@ -11,7 +11,13 @@ import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import type { ThemeLike, ToolRenderContext, ToolRenderResultOptions, ToolResult } from "../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, getWorkingDirectory, textResult } from "../_shared/host/pi-api.js";
+import {
+  errorResult,
+  getProjectRoot,
+  getWorkingDirectory,
+  isOneShotHostMode,
+  textResult,
+} from "../_shared/host/pi-api.js";
 import { prepareValidatedParams, validateParams } from "../_shared/host/validation.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
@@ -120,7 +126,9 @@ const WorkflowParams = Type.Object(
         description:
           "Run-level no-operator mode for unattended launches: any request for operator input " +
           "(dsl.awaitOperator or an agent({ ask: true }) stage) fails closed with a named reason " +
-          "instead of pausing the run. Saved children inherit the mode and cannot unset it.",
+          "instead of pausing the run. Saved children inherit the mode and cannot unset it. " +
+          "Defaults to true in a headless (print/json) host, where no operator can be reached; " +
+          "pass false there to keep the designed awaitOperator split-run pause.",
       }),
     ),
   },
@@ -226,7 +234,10 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
-          ...(valid.value.noOperator === true ? { noOperator: true as const } : {}),
+          // Same default as the command surface: in a headless (`print`/`json`)
+          // host there is no operator to reach, so the mode is on unless the
+          // caller explicitly passes `noOperator: false`.
+          ...((valid.value.noOperator ?? isOneShotHostMode(ctx)) ? { noOperator: true as const } : {}),
           onRunStart: ({ runId, runDir }) => {
             background.setRunId(runId);
             deps.onRunStarted(runId);

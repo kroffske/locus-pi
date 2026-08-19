@@ -551,6 +551,16 @@ export function getSessionId(ctx: ExtensionContext): string {
   return ctx.session?.id ?? ctx.sessionManager?.getSessionId?.() ?? "unknown-session";
 }
 
+/**
+ * True for the one-shot host modes, whose session is disposed when the turn
+ * ends and which have no operator to reach: `print` and `json`. `tui` and
+ * `rpc` both deliver operator input — `rpc` to the protocol client — so they
+ * are not one-shot here.
+ */
+export function isOneShotHostMode(ctx: Pick<ExtensionContext, "mode">): boolean {
+  return ctx.mode === "print" || ctx.mode === "json";
+}
+
 export function getCommandText(args: CommandArgs): string {
   return typeof args === "string" ? args : (args.text ?? "");
 }
