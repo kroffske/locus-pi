@@ -454,6 +454,7 @@ tests/shared/workflows/workflow-group-failure.test.ts
 tests/shared/workflows/workflow-handoff.test.ts
 tests/shared/workflows/workflow-input.test.ts
 tests/shared/workflows/workflow-model-tiers.test.ts
+tests/shared/workflows/workflow-no-operator.test.ts
 tests/shared/workflows/workflow-replay.test.ts
 tests/shared/workflows/workflow-result.test.ts
 tests/shared/workflows/workflow-rounds.test.ts

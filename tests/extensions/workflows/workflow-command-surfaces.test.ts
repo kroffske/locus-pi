@@ -358,6 +358,29 @@ describe("/workflows help and unknown commands", () => {
       outputDir: "tmp/fresh",
       missingResumeId: true,
     });
+    // Run-level no-operator mode: value-less flag, composable with the value
+    // options in any order, and never swallowed into semantic input.
+    expect(parseRunCommand("run plan --no-operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: true,
+    });
+    expect(parseRunCommand("run plan --no-operator --output-dir tmp/auto ship the fix")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: true,
+      input: "ship the fix",
+    });
+    expect(parseRunCommand("run plan --output-dir tmp/auto --no-operator -- --no-operator stays input")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: true,
+      input: "--no-operator stays input",
+    });
+    // A value option cannot eat the flag as its value.
+    expect(parseRunCommand("run plan --output-dir --no-operator")).toEqual({
+      scriptRef: "plan",
+      missingOutputDir: true,
+    });
     expect(parseRunCommand("run post-code-review --resume run-old --output-dir")).toEqual({
       scriptRef: "post-code-review",
       resumeFromRunId: "run-old",
@@ -419,7 +442,9 @@ describe("/workflows help and unknown commands", () => {
     workflows(h.pi);
 
     expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
-    expect(workflowRunUsage()).toBe("/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--] [input]");
+    expect(workflowRunUsage()).toBe(
+      "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--no-operator] [--] [input]",
+    );
     expect(h.commands.has("workflow-run")).toBe(false);
     expect(h.commands.get("workflow-stop")?.description).toBe(
       "Compatibility alias for /workflows stop [runId|last]: /workflow-stop",
