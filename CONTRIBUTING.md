@@ -57,7 +57,7 @@ Do not widen the default extension list, Package workflow registry, runtime depe
 | Command              | Composition                                                                               | Use it                                                       |
 | -------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `npm run check:fast` | manifests, layers, workflow source shape, typecheck, Pi host version, tests, source audit | while editing; deliberately not release-complete             |
-| `npm run check`      | `check:fast` plus `format:check`, `check:links`, `check:repository`, `check:release`      | before every commit and pull request, whatever the change is |
+| `npm run check`      | `format:check`, `check:links`, then `check:fast`, `check:repository`, `check:release`     | before every commit and pull request, whatever the change is |
 | `npm run check:push` | `check` plus the dry-run pack contract                                                    | run for you by the tracked `pre-push` hook                   |
 
 On an Apple-silicon laptop `check:fast` takes about 17 seconds warm — 27 on the first run after `npm ci` — and `check` about 21. The four extra gates cost a few seconds, not a longer test suite, so reach for `check:fast` only inside a tight edit loop.
@@ -72,7 +72,7 @@ npm pack --dry-run --json --ignore-scripts
 
 Docs-only changes run the same `npm run check`: `format:check` and `check:links` are inside it. The pre-commit hook adds `git diff --check` on staged content.
 
-A future `check:generated` — regenerated artifacts verified against their sources — belongs in the `check` chain between `check:fast` and `format:check`. `package.json` cannot carry comments, so the reserved slot is recorded here.
+A future `check:generated` — regenerated artifacts verified against their sources — belongs in the `check` chain between `check:links` and `check:fast`. `package.json` cannot carry comments, so the reserved slot is recorded here.
 
 ## Change expectations
 
