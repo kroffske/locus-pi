@@ -319,8 +319,9 @@
   },
   "scripts": {
     "build:workflow-source": "tsx scripts/build-workflow-source-shape.ts",
-    "check": "npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test && npm run audit:sources",
+    "check": "npm run check:manifests && npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test && npm run audit:sources",
     "check:layers": "tsx scripts/check-extension-layers.ts",
+    "check:manifests": "tsx scripts/check-extension-manifests.ts",
     "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
     "check:push": "npm run check && npm run check:repository && npm run check:release && npm run pack:json > /dev/null",
     "check:release": "tsx scripts/check-release-metadata.ts",

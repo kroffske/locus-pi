@@ -15,10 +15,13 @@ const root = process.cwd();
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as PackageJson;
 const notices = await readFile(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
 const manifests = await readActiveManifests(packageJson.pi.extensions);
-const adaptedSources = new Set(["copy-after-audit", "fork-after-audit", "wrapper-first"]);
+
+// The one review.source in extension-manifest.schema.json that describes adapted third-party
+// code; write-from-scratch is the other, and it carries no attribution obligation.
+const ADAPTED_REVIEW_SOURCE = "copy-after-audit";
 
 for (const manifest of manifests) {
-  const adapted = manifest.ownershipStatus === "compat-wrapper" || adaptedSources.has(manifest.review?.source ?? "");
+  const adapted = manifest.ownershipStatus === "compat-wrapper" || manifest.review?.source === ADAPTED_REVIEW_SOURCE;
   if (!adapted) continue;
   if (manifest.review?.status !== "reviewed" || !manifest.review.reviewedBy || !manifest.review.reviewedAt) {
     throw new Error(`Adapted extension lacks completed review metadata: ${manifest.id}`);

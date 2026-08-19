@@ -1,15 +1,10 @@
 {
   "id": "loop",
-  "name": "loop",
   "agent": {
     "name": "extension-loop",
     "description": "Continue bounded goals and workflows through the canonical loop tool and /loop command."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "compat-wrapper",
-  "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "Bare /loop opens a typed editor for goal [focus] or workflow <runId> [focus]; invalid input is preserved and the editor reopens with a warning",
@@ -31,7 +26,6 @@
     ".locus/runtime/loop/workflow/*.json",
     ".locus/runtime/loop/sessions/*.json"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["loop"],
     "commands": ["loop"],

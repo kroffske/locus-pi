@@ -1,15 +1,10 @@
 {
   "id": "workflows",
-  "name": "workflows",
   "agent": {
     "name": "extension-workflows",
     "description": "Run trusted workflows, orchestration commands, workflow DSL, and shipped workflows."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Default-loaded through package.json#pi.extensions",
     "saved workflow JavaScript is reviewed trusted input executed by Node's main-context default loader; static node: imports are available under default self-contained-static identity, while local/package/dynamic/source-anchored module behavior requires literal meta.identityCoverage entry-only; either mode can retain host-process filesystem, subprocess, network, and other capabilities, so identity policy, approval metadata, the intended dsl-only authoring convention, and worktrees are not a sandbox",
@@ -109,7 +104,6 @@
     ".pi/locus-pi/runs/<runId>/runtime/artifacts/transcripts/<callId>/*.jsonl (fresh per-child SDK session evidence)",
     ".pi/locus-pi/fusion/config.json version 2 for project-local enabled state, required homogeneous tool-free or agent mode, concrete member selectors, and the separate judge selector"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["workflow", "fusion"],
     "commands": ["workflows", "workflow-stop", "fusion"],

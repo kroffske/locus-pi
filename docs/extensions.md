@@ -27,13 +27,17 @@ The other default extensions do not directly import another feature directory.
 
 ## Reading a manifest
 
-Important fields in `extensions/<name>/manifest.json`:
+`extension-manifest.schema.json` is the whole field list, and `npm run check` validates every manifest against it, so a field the schema does not declare is rejected rather than ignored. The fields are:
 
+- `id` and `agent` — extension identity and the bundled agent profile it owns;
 - `provides` — public tools, commands, hooks, and shortcuts;
-- `permissions` — declared filesystem, subprocess, network, browser, model, and UI capabilities;
+- `permissions` — declared filesystem, subprocess, network, browser, model, and UI capabilities. This is a review declaration; the package grants no capability from it and the host is not sandboxed by it;
 - `risk` — review severity, not a sandbox guarantee;
 - `runtimeRequirements` and `stateUsed` — detailed execution and persistence contracts;
+- `uiLifecycle` — per-command and per-tool UI and persistence taxonomy, for extensions that expose a surface;
 - `docsPath` — co-located extension manual;
-- `tests` and `review` — evidence ownership and review metadata.
+- `ownershipStatus`, `sourceAuditPath`, `tests`, and `review` — evidence ownership and review metadata.
+
+A manifest declares neither versioning nor activation: the npm package version covers the first and `package.json#pi.extensions` covers the second.
 
 A manifest describes the intended contract. Source and tests remain necessary evidence that the implementation matches it.

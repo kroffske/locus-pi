@@ -1,15 +1,10 @@
 {
   "id": "plan",
-  "name": "plan",
   "agent": {
     "name": "extension-plan",
     "description": "Compose plans, goals, prompt shelves, planning commands, and the goal tool."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "Prompt commands write explicit markdown prompts to visible local paths",
@@ -52,7 +47,6 @@
     "typed operator widgets for goal state and prompt shelves",
     "locus-goal-state custom entry"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["goal"],
     "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],

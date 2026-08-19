@@ -1,13 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { defaultExtensionManifests, root } from "../contracts/helpers/package-contract.js";
 
-const root = process.cwd();
 const expectedDocs = ["architecture.md", "extensions.md", "getting-started.md", "workflows.md"];
-const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
-  pi: { extensions: string[] };
-};
-const extensionIds = packageJson.pi.extensions.map((entry) => /^\.\/extensions\/([^/]+)\/index\.ts$/.exec(entry)?.[1]);
 
 describe("public documentation topology", () => {
   it("keeps docs small and free of internal history surfaces", () => {
@@ -31,13 +27,7 @@ describe("public documentation topology", () => {
 
   it("co-locates one manual with every default extension", () => {
     const index = readFileSync(path.join(root, "docs/extensions.md"), "utf8");
-    for (const id of extensionIds) {
-      expect(id).toBeTruthy();
-      const manifestPath = path.join(root, "extensions", id!, "manifest.json");
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-        docsPath: string;
-        sourceAuditPath: string | null;
-      };
+    for (const { id, manifest } of defaultExtensionManifests()) {
       expect(manifest.docsPath).toBe(`extensions/${id}/README.md`);
       expect(manifest.sourceAuditPath).toBeNull();
       expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);

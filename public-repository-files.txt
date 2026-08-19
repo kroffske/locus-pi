@@ -288,6 +288,7 @@ scripts/README.md
 scripts/audit-sources.ts
 scripts/build-workflow-source-shape.ts
 scripts/check-extension-layers.ts
+scripts/check-extension-manifests.ts
 scripts/check-pi-host-version.mjs
 scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
@@ -308,6 +309,7 @@ skills/locus-pi-workflows/references/sequential-text.md
 skills/locus-task-workflow/SKILL.md
 tests/contracts/agents/extension-agent-catalog.test.ts
 tests/contracts/docs/extension-reference.test.ts
+tests/contracts/extensions/manifest-schema.test.ts
 tests/contracts/extensions/runtime-registration.test.ts
 tests/contracts/helpers/package-contract.ts
 tests/contracts/host/selective-package-loading.test.ts

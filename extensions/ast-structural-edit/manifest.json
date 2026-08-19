@@ -1,22 +1,16 @@
 {
   "id": "ast-structural-edit",
-  "name": "AST Structural Edit",
   "agent": {
     "name": "extension-ast-structural-edit",
     "description": "Search, preview, approve, stale-check, apply, and resolve AST edits."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "compat-wrapper",
-  "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "filesystem read/write for selected project files",
     "AST engine dependencies",
     "Pi tool approval metadata for apply writes"
   ],
   "stateUsed": ["in-memory pending AST previews"],
-  "tier": "core-owned",
   "provides": {
     "tools": ["ast_grep", "ast_edit", "resolve"],
     "commands": [],

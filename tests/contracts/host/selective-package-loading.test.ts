@@ -3,10 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DefaultResourceLoader, type PackageSource, SettingsManager, VERSION } from "@earendil-works/pi-coding-agent";
-
-interface ExtensionManifest {
-  provides: { tools: string[]; commands: string[]; hooks: string[] };
-}
+import { readExtensionManifest } from "../helpers/package-contract.js";
 
 const packageRoot = process.cwd();
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as {
@@ -91,12 +88,7 @@ async function loadProfile(selectedIds: string[], includeSkills: boolean) {
 }
 
 function expectedSurfaces(selectedIds: string[], key: "tools" | "commands" | "hooks", topLevel = false): string[] {
-  const values = selectedIds.flatMap((id) => {
-    const manifest = JSON.parse(
-      readFileSync(path.join(packageRoot, "extensions", id, "manifest.json"), "utf8"),
-    ) as ExtensionManifest;
-    return manifest.provides[key];
-  });
+  const values = selectedIds.flatMap((id) => readExtensionManifest(id, packageRoot).provides[key]);
   return uniqueSorted(topLevel ? values.map((value) => value.trim().split(/\s+/u)[0]!).filter(Boolean) : values);
 }
 

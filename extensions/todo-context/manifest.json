@@ -1,15 +1,10 @@
 {
   "id": "todo-context",
-  "name": "todo-context",
   "agent": {
     "name": "extension-todo-context",
     "description": "Read and manage session todos with todo_read, todo_write, bounded continuation, and /todo."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "compat-wrapper",
-  "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "Pi tool and command registration",
     "session todo state",
@@ -33,7 +28,6 @@
     ".tasks/index.json task index",
     ".tasks/<task>/artifacts/completion-note.md"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["todo_read", "todo_write"],
     "commands": ["todo"],

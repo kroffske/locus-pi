@@ -1,15 +1,10 @@
 {
   "id": "agents",
-  "name": "agents",
   "agent": {
     "name": "extension-agents",
     "description": "Manage the agent catalog, child sessions, /agent and /ps, and the spawn_agent tool."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "agent definition catalog and validation",
@@ -60,7 +55,6 @@
     "optional child prompt skills from .agents/skills/<name>/SKILL.md and .pi/skills/<name>/SKILL.md",
     "runtime result artifacts"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["spawn_agent"],
     "commands": [

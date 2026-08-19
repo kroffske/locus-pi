@@ -1,15 +1,10 @@
 {
   "id": "model",
-  "name": "model",
   "agent": {
     "name": "extension-model",
     "description": "Route model roles and /effort while preserving Pi's active model selection."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "compat-wrapper",
-  "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "Pi setModel/getThinkingLevel/setThinkingLevel APIs",
     "Pi model registry with reasoning/thinkingLevelMap capability metadata",
@@ -27,7 +22,6 @@
     "optional session custom entry evidence",
     "read-only user model-role config fallback"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": [],
     "commands": ["model-roles", "effort"],
