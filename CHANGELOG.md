@@ -64,6 +64,23 @@ check:links`.** Every relative link and heading anchor in published Markdown is
 
 ### Changed
 
+- **Both doctors now describe the installed package instead of the project's
+  migration history.** `/devext doctor` read a hand-maintained table of
+  thirty-one rows that had drifted away from what ships: it never listed
+  `status-line`, one of the eleven entrypoints `package.json#pi.extensions`
+  activates, and it still published deleted demos, disabled experiments and
+  backlog counters (`omp`, `redesign`, `split`, `fixtures`, `deleted`) as if they
+  were evidence about an installation. `npx @kroffske/locus-pi doctor` answered
+  the same question from a different source — the declared entrypoints and the
+  files on disk — so the two disagreed. Both now read one published module,
+  `extensions/devext-doctor/package-inventory.mjs`, which resolves the declared
+  entrypoints at command time and reports, per entrypoint, whether it and its
+  manifest are present plus the `risk` and `ownership` that manifest declares.
+  Activating a twelfth extension changes both diagnostics with no edit to either
+  of them. A missing file or an unreadable manifest is now a stated problem and a
+  non-zero exit rather than a silent omission or a stack trace; the manifest
+  contract itself stays owned by `npm run check:manifests`.
+
 - **`npm run check` is now the one canonical gate, and `npm run check:fast` is the
   inner loop.** `check` runs `check:fast` — manifests, layers, workflow source
   shape, types, Pi host coherence, tests, source audit — and then the

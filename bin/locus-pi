@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -7,7 +7,6 @@ const command = process.argv[2] ?? "help";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const packagePath = join(root, "package.json");
 const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
-const extensions = pkg.pi?.extensions ?? [];
 
 function printHelp() {
   console.log(`${pkg.name} ${pkg.version}`);
@@ -56,18 +55,29 @@ async function checkWorkflowSource(args) {
   process.exitCode = 1;
 }
 
-function printDoctor() {
-  console.log(`${pkg.name} ${pkg.version}`);
-  console.log(`package root: ${root}`);
-  console.log(`pi extensions: ${extensions.length}`);
-  let allPresent = true;
-  for (const extensionPath of extensions) {
-    const absolutePath = join(root, extensionPath);
-    const status = existsSync(absolutePath) ? "ok" : "missing";
-    if (status === "missing") allPresent = false;
-    console.log(`- ${status}: ${extensionPath}`);
+/**
+ * Report the installed package surface. Reads the same module `/devext doctor` reads, so the two
+ * diagnostics cannot disagree about which extensions this installation declares.
+ */
+async function printDoctor() {
+  const inventoryUrl = pathToFileURL(join(root, "extensions/devext-doctor/package-inventory.mjs")).href;
+  const { readPackageInventory, countBy } = await import(inventoryUrl);
+  const inventory = readPackageInventory(root);
+
+  console.log(`${inventory.name} ${inventory.version}`);
+  console.log(`package root: ${inventory.packageRoot}`);
+  console.log(`declared entrypoints: ${inventory.rows.length}`);
+  for (const row of inventory.rows) {
+    const detail = row.state === "ok" ? `${row.id} (risk=${row.risk}, ownership=${row.ownership})` : row.problem;
+    console.log(`- ${row.state === "ok" ? "ok" : row.state}: ${row.entrypoint} — ${detail}`);
   }
-  if (!allPresent) process.exitCode = 1;
+  console.log(`risk: ${countBy(inventory.rows, "risk").join(" ") || "none"}`);
+  console.log(`ownership: ${countBy(inventory.rows, "ownership").join(" ") || "none"}`);
+
+  if (inventory.problems.length === 0) return;
+  console.error(`${inventory.problems.length} problem(s) found:`);
+  for (const problem of inventory.problems) console.error(`  - ${problem}`);
+  process.exitCode = 1;
 }
 
 switch (command) {
@@ -77,7 +87,7 @@ switch (command) {
     printHelp();
     break;
   case "doctor":
-    printDoctor();
+    await printDoctor();
     break;
   case "check-workflow-source":
     await checkWorkflowSource(process.argv.slice(3));
