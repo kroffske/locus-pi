@@ -78,6 +78,18 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
 
 ### Changed
 
+- **The security gate no longer ships a permission grader that graded
+  nothing.** `requirePermission` and its `PermissionManifest` shape had no
+  caller anywhere in the package: the gate classifies tool calls and audits
+  them, but never checked a capability against a manifest, so the function
+  read as an enforcement path while enforcing nothing — the most expensive
+  kind of dead code, because it invites trust. An extension manifest's
+  `permissions` field keeps exactly the meaning the schema and
+  `docs/extensions.md` already give it: a review declaration that grants no
+  capability and sandboxes nothing. `isPathAllowed` and its `isWithin` helper
+  existed only for the grader and leave with it; `SECRET_PATH_PATTERNS` and
+  `isCommandAllowed` stay, because tool-call classification reads them.
+
 - **Both doctors now describe the installed package instead of the project's
   migration history.** `/devext doctor` read a hand-maintained table of
   thirty-one rows that had drifted away from what ships: it never listed

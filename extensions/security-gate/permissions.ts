@@ -1,31 +1,4 @@
-import path from "node:path";
 import { redactSecrets } from "../_shared/host/redaction.js";
-
-/**
- * The extension manifest shape this gate grades a capability request against. It lives here
- * rather than in a shared directory because the security gate is its only reader: nothing
- * else in the package asks whether a manifest grants a capability. The fields mirror
- * extension-manifest.schema.json, so a field the schema does not declare must not appear here.
- */
-export interface PermissionManifest {
-  id: string;
-  provides: { tools: string[]; commands: string[]; hooks: string[] };
-  permissions: {
-    filesystem: { read: string[]; write: string[] };
-    subprocess: string[];
-    network: string[];
-    browser: boolean;
-    models: boolean;
-    ui: string[];
-  };
-  risk: "low" | "medium" | "high" | "critical";
-  review: {
-    status: "reviewed";
-    source: "write-from-scratch" | "copy-after-audit";
-    reviewedBy: string | null;
-    reviewedAt: string | null;
-  };
-}
 
 /** The verdict field of `AuditEvent`; not named anywhere else, so it stays module-private. */
 type AuditDecision = "allow" | "block" | "ask";
@@ -83,28 +56,6 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /(?:npm|cargo)\s+publish\b/,
 ];
 
-/**
- * Grade one capability against a manifest. There is no blocked-extension short circuit: a
- * manifest that reaches this function is a published one, and extension-manifest.schema.json
- * admits no unreviewed or blocked state into the published set.
- */
-export function requirePermission(manifest: PermissionManifest, capability: string): boolean {
-  if (capability === "browser") return manifest.permissions.browser;
-  if (capability === "models") return manifest.permissions.models;
-  if (capability.startsWith("ui:")) return manifest.permissions.ui.includes(capability.slice(3));
-  if (capability.startsWith("subprocess:"))
-    return (
-      manifest.permissions.subprocess.includes(capability.slice(11)) || manifest.permissions.subprocess.includes("*")
-    );
-  if (capability.startsWith("network:"))
-    return manifest.permissions.network.includes(capability.slice(8)) || manifest.permissions.network.includes("*");
-  if (capability.startsWith("fs:read:"))
-    return isPathAllowed(capability.slice(8), manifest.permissions.filesystem.read, []);
-  if (capability.startsWith("fs:write:"))
-    return isPathAllowed(capability.slice(9), manifest.permissions.filesystem.write, []);
-  return false;
-}
-
 export function auditEvent(event: AuditEvent): void {
   const args = event.args === undefined ? undefined : redactSecrets(event.args).text;
   auditEvents.push(args === undefined ? event : { ...event, args });
@@ -117,20 +68,6 @@ export function getAuditEvents(): AuditEvent[] {
 
 export function clearAuditEvents(): void {
   auditEvents.splice(0, auditEvents.length);
-}
-
-export function isPathAllowed(candidate: string, allowedPaths: string[], deniedPaths: string[] = []): boolean {
-  if (SECRET_PATH_PATTERNS.some((pattern) => pattern.test(candidate))) return false;
-  const resolved = path.resolve(candidate);
-  for (const denied of deniedPaths) {
-    if (isWithin(resolved, path.resolve(denied))) return false;
-  }
-  if (allowedPaths.includes("*")) return true;
-  return allowedPaths.some((allowed) => isWithin(resolved, path.resolve(allowed)));
-}
-
-function isWithin(candidate: string, root: string): boolean {
-  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 
 export function isCommandAllowed(
