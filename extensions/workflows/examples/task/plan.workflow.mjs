@@ -381,6 +381,16 @@ Ignore earlier readiness claims. Reopen \`scope.md\`, \`context.md\`, the
 current \`plan.md\`, every \`step-<n>.md\`, the three reviews, and the live
 project. Do not edit any file except \`verification.md\`.
 
+Nothing in this plan has been implemented and nothing may be implemented now:
+the deliverable the plan describes does not exist yet, and its absence is the
+expected state of the project at this moment, never a finding and never a
+blocker. You verify the document, not the result. For each step's verification,
+check that the named command or check exists and could run once the step has
+been performed — never whether it passes today. An unbuilt artifact, a missing
+target file, or a behavior that cannot be observed until a step runs is exactly
+what the plan is for; treating any of them as a defect is a misreading of this
+stage.
+
 Verify that the plan states the requested outcome and approach and that the
 step catalog is executable: every \`step-<n>.md\` is one complete flat
 \`## S<n>\` block whose \`S<n>\` matches its file name, every labeled field is
