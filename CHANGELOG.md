@@ -385,6 +385,19 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
 
 ### Fixed
 
+- **The plan verifier's answer stays the evidence the routing choice reads.**
+  Six planning stages now return a short readback instead of retyping the file
+  they wrote; the verification stage is the one that must repeat its text,
+  because the choice between "ready" and "blocked" and the blocker writer see
+  nothing but that answer — they open no files. In a hosted-model series the
+  verifier generalised the surrounding rule and replied with 95 bytes
+  ("Wrote and verified: … Conclusion: ready.") for a 3,374-byte file, so the
+  decision was made from the verifier's own conclusion line instead of its
+  evidence: the verdict happened to match, but the independent gate had
+  degraded into an echo. The instruction is now contrastive — it says the
+  answer _is_ the evidence, names who reads it and that they open no files,
+  and calls a summary or a bare conclusion line unusable.
+
 - **The plan verifier no longer blocks a plan for describing something that
   does not exist yet.** The stage that checks the finished plan reopens the live
   project, but its prompt never said that planning implements nothing: on the
