@@ -2,12 +2,11 @@
 
 `task` is a group-only Package namespace. It is not runnable by itself. Use
 `task/draft` to translate a raw request, `task/plan` to prepare an accepted task,
-and `task/implement` to execute the complete approved plan.
-The shared prefix makes the relationship visible without pretending that
-planning approval and implementation are one automatic run. The one-run
-alternative lives beside the namespace as the separate root workflow
-`task-via-script`, which runs this same planning pipeline as its own stage and
-then renders a sequential implement script.
+`task/implement-plan-template` to render the approved plan into one reviewable
+sequential workflow, and `task/substep` only when one named step must run by
+itself. The generated `implement-plan.workflow.mjs` is the sole complete-plan
+executor. Planning, rendering, generated-source approval, and execution remain
+separate operator actions.
 
 ## `task/draft`
 
@@ -74,16 +73,18 @@ files.
 ## Workspace files
 
 Every stage receives the same project-local workflow workspace. A fresh
-`task/draft`, `task/plan`, `task/implement`, or `task-via-script` run receives a unique default beneath
-`.locus-pi/plans/`, for example
+`task/draft`, `task/plan`, `task/implement-plan-template`, or `task/substep` run
+receives a unique default beneath `.locus-pi/plans/`, for example
 `.locus-pi/plans/20260819-142530-a1b2-task-draft/`. The prefix is the run id:
 a sortable UTC timestamp plus a random suffix. The workflow slug keeps the
 origin visible. That folder leaf is the generated run name. A caller may instead
 select `.locus-pi/plans/<name>` with `--run-name <name>`.
 
 The manual route reuses one directory deliberately. After `task/draft`, copy
-the exact `task/plan --run-name ...` command from the completion card. Every
-later `task/implement` completion uses that same run name.
+the exact `task/plan --run-name ...` command from the completion card. After
+planning approval, copy the `task/implement-plan-template --run-name ...`
+command. The generated workflow and every optional `task/substep` recovery run
+use that same workspace.
 
 - `draft-context.md` — the bounded reconnaissance behind an interactive draft.
 - `draft.md` — the accepted intent that `task/plan` reads when present.
@@ -103,6 +104,10 @@ later `task/implement` completion uses that same run name.
   conclusion.
 - `planning-blocker.md` — written only when the run fails closed; names what
   failed and what the owner can change before rerunning.
+- `implement-plan.workflow.mjs` — generated only after plan approval; one
+  literal implementation node per step followed by one summary node.
+- `history/S<n>.md` — idempotent result of one executed step.
+- `result.md` — summary published by the generated complete-plan workflow.
 
 The pipeline fully replaces its assigned files on every successful run,
 deleting leftover step files a new shorter catalog does not replace. A selected
@@ -111,10 +116,12 @@ plan, or execute its approved steps. Independent work uses a fresh planning
 directory.
 
 **The files on disk are the contract.** After planning, the owner may edit
-`plan.md` and any `step-<n>.md` before execution; `task/implement` and
-`task-via-script` read whatever the files say at run time and add no freshness
-or integrity checks. Deliberate owner edits are a feature; keeping the edited
-catalog coherent is the owner's responsibility.
+`plan.md` and any `step-<n>.md` before rendering. The template renderer and
+`task/substep` read whatever the files say at run time and add no freshness or
+integrity checks. Deliberate owner edits are a feature; keeping the edited
+catalog coherent is the owner's responsibility. Once
+`implement-plan.workflow.mjs` is rendered, its literal step prompts remain
+frozen until the owner deliberately renders it again.
 
 ## Decomposition contract
 
@@ -150,17 +157,21 @@ step files deliberately as the owner; never mutate the catalog implicitly.
 Nothing below happens until the operator has read the planning files and asked
 for it. A finished `task/plan` run is a document, not a queued job.
 
-Default execution is one top-level `task/implement` run on the approved planning
-workspace. One implementation agent reads the full catalog from disk and
-executes its steps in order. The installed `locus-task-workflow` skill owns the
-review and launch boundary; neither Package workflow parses the catalog or
-dispatches another workflow.
+Default execution starts by running `task/implement-plan-template` on the
+approved workspace. It does not plan or replan. One scripting agent applies a
+fixed template to `plan.md` and the ordered step catalog, then publishes
+`implement-plan.workflow.mjs` without running it. The owner reads that generated
+file and starts it by explicit path with the same workspace.
 
-The one-run route is the separate root workflow `task-via-script`: it runs this
-same planning pipeline as its own stage — over an empty workspace or replanning
-across an existing one while preserving compatible owner edits — and then
-renders `implement.workflow.mjs`, which the owner reviews and runs by explicit
-path. See `../task-via-script/README.md`.
+The generated file contains one literal `agent()` node per `step-<n>.md` file
+in order. A failed step stops the workflow before the next node. Each node reads
+its existing `history/S<n>.md` and skips only credible completed work, so the
+same generated file can be retried safely. A final summary node writes and
+publishes `result.md`.
+
+`task/substep` is not another complete-plan route. It accepts one selector such
+as `S1` and executes only the matching step. Use it for explicit recovery,
+diagnosis, or an intentionally isolated step.
 
 For a graph the fixed template does not express, send `workflow-author` a
 normal authoring request: `Author a sequential project-local workflow from the
@@ -171,7 +182,7 @@ reviews it, and Builds matching source in the same turn. Do not inject
 only the user may separately request a pause after design. Plan writes only planning files into
 the workflow workspace and never writes a registered project workflow. Any
 optional reviewer after a generated step belongs to the bespoke design, not to
-Task Plan or Task Implement execution semantics.
+the fixed implement-plan template or `task/substep` semantics.
 
 ## Run and resume
 
@@ -181,7 +192,9 @@ Direct command use keeps the default workspace:
 /workflows run task/draft -- Move the cron job into a DAG
 /workflows run task/draft --run-name airflow-builder -- Move the cron job into a DAG
 /workflows run task/plan --run-name airflow-builder
-/workflows run task/implement --run-name airflow-builder
+/workflows run task/implement-plan-template --run-name airflow-builder
+/workflows run .locus-pi/plans/airflow-builder/implement-plan.workflow.mjs --output-dir .locus-pi/plans/airflow-builder
+/workflows run task/substep --run-name airflow-builder -- S1
 /workflows run task/plan Move the cron job into a DAG
 /workflows run task/plan --resume <runId> Move the cron job into a DAG
 ```
@@ -194,33 +207,39 @@ unfinished call, so a `task/plan` run that failed in review replays scope,
 context, the analyses, and compose. Workspace files survive a failed run, so
 the agents can replace incomplete outputs.
 
-For the complete `task/plan → owner approval → task/implement` protocol, use the
-installed `locus-task-workflow` skill. It calls both Package workflows with the
-same `.locus-pi/plans/<run-name>` workspace.
+For the complete `task/plan → owner approval → render → generated-source review
+→ run` protocol, use the installed `locus-task-workflow` skill. Every command
+uses the same `.locus-pi/plans/<run-name>` workspace.
 
-## `task/implement`
+## `task/implement-plan-template`
 
-`task/implement` executes the complete approved plan. It needs only the same
-planning workspace used by `task/plan`; no step selector is accepted or needed.
-One implementation agent reads `plan.md`, every `step-<n>.md` in numeric order,
-and existing `history/*.md`. It treats the files on disk as the contract,
-reinspects the live project before each step, changes only that step's allowed
-scope, runs its checks, and fully replaces `history/S<n>.md` with
-`Status: completed` or `Status: blocked`.
+`task/implement-plan-template` is a renderer, not an executor. It needs only the
+approved planning workspace. One scripting agent reads `plan.md` and every
+`step-<n>.md` in numeric order, removes stale generated targets, and fully
+replaces `implement-plan.workflow.mjs` from the shipped fixed prompt template.
+Missing or malformed planning files leave the generated target absent, so
+publication fails closed.
 
-The workflow JavaScript does not parse or loop over steps. It has no todo
-manager, reviewer, report renderer, nested workflow, or model pin. The one
-implementation agent owns ordered execution inside a single top-level run.
+The renderer never invokes `task/plan`, never changes project source, and never
+runs the file it writes. The generated file resolves only by explicit path.
+Rendering is not approval to execute trusted JavaScript.
 
-If one step fails or reports blocked, earlier histories stay complete and later
-steps do not start. A resumed or repeated run reads those histories as evidence,
-rechecks the live state, and continues only when the ordered plan remains valid.
-The workflow returns one concise summary after the final step or the first
-blocker.
+## `task/substep`
 
-`task/implement` is intentionally different from the separate `implement`
-workflow. `task/implement` executes an approved task plan; `implement` applies
-selected findings from a post-code review.
+`task/substep` executes exactly one approved step. Its semantic input is a step
+id such as `S1`, a file name such as `step-1.md`, or a bare number. One
+implementation agent resolves that file, reinspects the live project, changes
+only the selected scope, runs its checks, and fully replaces
+`history/S<n>.md` with `Status: completed` or `Status: blocked`.
+
+The generated `implement-plan.workflow.mjs` uses the same one-step contract in
+literal prompts but does not invoke `task/substep`. This keeps the whole graph
+visible and source-reviewable. `task/substep` remains the named manual entry for
+one isolated step.
+
+`task/substep` is intentionally different from the separate `implement`
+workflow. `task/substep` executes one approved planning step; `implement`
+applies selected findings from a post-code review.
 
 ## Boundaries
 
@@ -228,8 +247,8 @@ selected findings from a post-code review.
   step; the run never waits for an operator answer and fails closed instead.
 - Calls use Pi's default workflow agent and its configured model route; the
   workflow source names no provider, model, model role, or specialized agent.
-- A missing task, plan, or valid step catalog is handed to the agents as an
-  explicit blocking input gap; they must not invent implementation work.
+- A missing task, plan, step selector, or valid step catalog is handed to the
+  agents as an explicit blocking input gap; they must not invent work.
 - The catalog is frozen by planning and changed only deliberately: a new
   `task/plan` run replaces it, and owner edits to `step-<n>.md` are the owner's
   explicit act. The workflows add no freshness or integrity checks on top.

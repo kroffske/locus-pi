@@ -38,8 +38,8 @@ export function workflowCompletionPresentation(
       nextAction: `Planning failed closed. Read ${primaryFile}, edit the task statement or the planning files it names, then run ${rerunCommand}. The run never waits for an operator answer mid-run.`,
     };
   }
-  if (ref === "task-via-script") {
-    const generatedScript = path.join(res.workspaceDir, "implement.workflow.mjs");
+  if (ref === "task/implement-plan-template") {
+    const generatedScript = path.join(res.workspaceDir, "implement-plan.workflow.mjs");
     const workspace = res.workspaceDirRelative;
     if (workspace === undefined || workspace === "") return {};
     return {
@@ -51,10 +51,10 @@ export function workflowCompletionPresentation(
   const workspace = res.workspaceDirRelative;
   const implementCommand =
     workspace === undefined || workspace === ""
-      ? "one task/implement run for the approved plan"
-      : `/workflows run task/implement ${taskWorkspaceCommandOption(workspace)}`;
+      ? "task/implement-plan-template on the approved plan workspace"
+      : `/workflows run task/implement-plan-template ${taskWorkspaceCommandOption(workspace)}`;
   return {
-    nextAction: `After the owner reviews and explicitly approves the plan, implement ${primaryFile} using the ${stepFiles} files. Start one task/implement run with the same workspace: ${implementCommand}. It reads and executes the complete step catalog in order.`,
+    nextAction: `After the owner reviews and explicitly approves ${primaryFile} and the ${stepFiles} files, render the complete implementation plan with the same workspace: ${implementCommand}. Review the generated implement-plan.workflow.mjs before running it by explicit path.`,
   };
 }
 
@@ -119,7 +119,7 @@ function detailText(value: unknown): string | undefined {
 function packageTaskRef(
   res: RunWorkflowScriptResult,
   safeTarget: string,
-): "task/draft" | "task/plan" | "task-via-script" | undefined {
+): "task/draft" | "task/plan" | "task/implement-plan-template" | undefined {
   const ref = res.target !== undefined ? (res.target.source === "package" ? res.target.ref : undefined) : safeTarget;
-  return ref === "task/draft" || ref === "task/plan" || ref === "task-via-script" ? ref : undefined;
+  return ref === "task/draft" || ref === "task/plan" || ref === "task/implement-plan-template" ? ref : undefined;
 }

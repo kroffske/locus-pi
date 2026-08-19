@@ -13,7 +13,7 @@ import { createHarness } from "../../../test-harness.js";
 const primaryFilePath = "/repo/tmp/plan with spaces/plan.md";
 const workspaceDir = "/repo/tmp/plan with spaces";
 const nextAction =
-  'After the owner reviews and explicitly approves the plan, implement /repo/tmp/plan with spaces/plan.md using the /repo/tmp/plan with spaces/step-<n>.md files. Start one task/implement run with the same workspace: /workflows run task/implement --output-dir "tmp/plan with spaces". It reads and executes the complete step catalog in order.';
+  'After the owner reviews and explicitly approves /repo/tmp/plan with spaces/plan.md and the /repo/tmp/plan with spaces/step-<n>.md files, render the complete implementation plan with the same workspace: /workflows run task/implement-plan-template --output-dir "tmp/plan with spaces". Review the generated implement-plan.workflow.mjs before running it by explicit path.';
 
 describe("workflow completion presentation", () => {
   it("ends the TUI on the exact result with primary path, grouped metadata, and gated next action", async () => {
@@ -58,12 +58,12 @@ describe("workflow completion presentation", () => {
       .join("\n");
     expect(rendered).toContain(`Workflow result (${primaryFilePath})`);
     expect(rendered).toContain("Next action (after review and approval)");
-    expect(rendered).toContain("one task/implement run with the same workspace");
+    expect(rendered).toContain("task/implement-plan-template");
   });
 
-  it("labels the task-via-script result with the generated script's explicit run command", async () => {
+  it("labels the implement-plan template result with the generated script's explicit run command", async () => {
     const harness = createHarness();
-    const transcript = createWorkflowTranscript(harness.ctx, "task-via-script", "command");
+    const transcript = createWorkflowTranscript(harness.ctx, "task/implement-plan-template", "command");
     transcript.start("run-script-tui", "/repo/.pi/locus-pi/runs/run-script-tui");
     const completion = transcript.finish({
       runId: "run-script-tui",
@@ -73,8 +73,8 @@ describe("workflow completion presentation", () => {
       workspaceDir,
       workspaceDirRelative: "tmp/plan with spaces",
       primaryFile: {
-        relativePath: "implement.workflow.mjs",
-        absolutePath: "/repo/tmp/plan with spaces/implement.workflow.mjs",
+        relativePath: "implement-plan.workflow.mjs",
+        absolutePath: "/repo/tmp/plan with spaces/implement-plan.workflow.mjs",
         sha256: "def456",
         bytes: 99,
       },
@@ -83,7 +83,7 @@ describe("workflow completion presentation", () => {
     });
 
     expect(completion.digest).toContain(
-      'run generated script: /workflows run "/repo/tmp/plan with spaces/implement.workflow.mjs" --output-dir "tmp/plan with spaces"',
+      'run generated script: /workflows run "/repo/tmp/plan with spaces/implement-plan.workflow.mjs" --output-dir "tmp/plan with spaces"',
     );
     expect(completion.nextAction).toContain("rendering is not approval to run");
   });
@@ -113,10 +113,10 @@ describe("workflow completion presentation", () => {
     expect(completion.nextAction).toContain("/workflows run task/plan --run-name 20260819-120000-a1b2-task-draft");
     expect(completion.digest).toContain("/workflows run task/plan --run-name 20260819-120000-a1b2-task-draft");
     expect(completion.nextAction).toContain("Planning reuses this exact workspace");
-    expect(completion.nextAction).not.toContain("task/implement");
+    expect(completion.nextAction).not.toContain("/workflows run task/implement --");
   });
 
-  it("hands a named completed plan to task/implement with the same run name", () => {
+  it("hands a named completed plan to the template renderer with the same run name", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "task/plan", "tool");
     const workspace = ".locus-pi/plans/airflow-builder";
@@ -138,8 +138,8 @@ describe("workflow completion presentation", () => {
       resultPersistence: { ok: true, path: "/repo/.locus-pi/runs/run-plan-named/runtime/result.json" },
     });
 
-    expect(completion.nextAction).toContain("/workflows run task/implement --run-name airflow-builder");
-    expect(completion.digest).toContain("/workflows run task/implement --run-name airflow-builder");
+    expect(completion.nextAction).toContain("/workflows run task/implement-plan-template --run-name airflow-builder");
+    expect(completion.digest).toContain("/workflows run task/implement-plan-template --run-name airflow-builder");
     expect(completion.nextAction).not.toContain("-- S1");
   });
 
@@ -167,7 +167,7 @@ describe("workflow completion presentation", () => {
     expect(completion.digest).not.toContain("run generated script:");
     expect(completion.nextAction).toContain("Planning failed closed");
     expect(completion.nextAction).toContain('/workflows run task/plan --output-dir "tmp/plan with spaces"');
-    expect(completion.nextAction).not.toContain("one task/implement run with the same workspace");
+    expect(completion.nextAction).not.toContain("task/implement-plan-template");
   });
 
   it("keeps workflow_end last for non-interactive protocol callers", async () => {

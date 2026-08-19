@@ -13,7 +13,7 @@ Node.js host access and is not sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
 currently `implement`, `live-smoke`, `post-code-review` and its children,
-`task/plan`, `task/implement`, and `task-via-script`. A skeleton copied out of this
+`task/plan`, `task/implement-plan-template`, and `task/substep`. A skeleton copied out of this
 catalog becomes one by being saved there, with the package-surface review that
 implies; saved anywhere else it stays yours.
 
@@ -660,15 +660,14 @@ const review = await agent(`Review the implementation:\n${build}`, {
 return review;
 ```
 
-When the operator must inspect or reuse the plan, use the shipped `task/plan` →
-`task/implement` pair instead. `task/plan` writes `plan.md` and a frozen
-`step-<n>.md` catalog, then stops. After explicit owner approval, main Pi starts
-one top-level `task/implement` run in the shared workflow workspace. One agent
-executes the full catalog in order and writes `history/S<n>.md`; blocked or
-failed checks stop later steps. The separate root `task-via-script` owns the
-one-run alternative: its own `task/plan` stage plus the rendered sequential
-implement script. The group-only `task` root is not runnable, and the namespace
-children never invoke one another.
+When the operator must inspect or reuse the plan, use the shipped task family.
+`task/plan` writes `plan.md` and a frozen `step-<n>.md` catalog, then stops.
+After explicit owner approval, `task/implement-plan-template` renders the
+unregistered `implement-plan.workflow.mjs` in the shared workspace without
+replanning. The owner reviews and runs that file by explicit path; its literal
+nodes write `history/S<n>.md` in order and a failed check stops later nodes.
+`task/substep` is the manual one-step recovery entry. The group-only `task` root
+is not runnable, and the Package children never invoke one another.
 
 ## Ordered pipeline
 

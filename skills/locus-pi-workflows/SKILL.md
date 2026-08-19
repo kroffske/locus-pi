@@ -52,14 +52,14 @@ programmatic embedder owns the frozen list. Plan approval alone does not start
 workflow authoring; once the user requests that workflow, the ordinary continuous
 design -> review -> build sequence applies unless they explicitly request design only.
 
-The separate Package root `task-via-script` owns the one-run alternative: it
-runs the full `task/plan` pipeline as its own planning stage in the same
-workflow workspace and renders `implement.workflow.mjs` from a fixed
-template — one literal implementation node per `step-<n>.md` file, then a
-summary node. That file is an unregistered draft that resolves only by explicit
-path, and the owner reviews it before running it. Use Design and Build for a
-graph the fixed template cannot express, such as a reviewer between steps, a
-bounded revision loop, or concurrency.
+The Package child `task/implement-plan-template` owns the fixed sequential
+renderer. After the owner approves `task/plan`, it reads that same workspace and
+renders `implement-plan.workflow.mjs` — one literal implementation node per
+`step-<n>.md` file, then a summary node. It never plans or replans. That file is
+an unregistered draft that resolves only by explicit path, and the owner reviews
+it before running it. `task/substep` is the separate manual one-step worker. Use
+Design and Build for a graph the fixed template cannot express, such as a
+reviewer between steps, a bounded revision loop, or concurrency.
 
 ## Design contract
 

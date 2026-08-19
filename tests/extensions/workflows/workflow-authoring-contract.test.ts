@@ -93,7 +93,7 @@ describe("design-first readable workflow authoring", () => {
   const planAuthoringSurfaces = [
     "extensions/workflows/examples/task/plan.workflow.mjs",
     "extensions/workflows/examples/task/README.md",
-    "extensions/workflows/examples/task-via-script/resources/implement-template.prompt.md",
+    "extensions/workflows/examples/task/resources/implement-plan-template.prompt.md",
     "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
     "skills/locus-task-workflow/SKILL.md",
   ];
@@ -114,10 +114,11 @@ describe("design-first readable workflow authoring", () => {
     expect(text).toContain("`task` is a group-only Package namespace");
     expect(text).toContain("`task/draft` to translate a raw request");
     expect(text).toContain("`task/plan` to prepare an accepted task");
-    expect(text).toContain("`task/implement` to execute the complete approved plan");
+    expect(text).toContain("`task/implement-plan-template` to render the approved plan");
+    expect(text).toContain("`task/substep` only when one named step must run by");
     expect(text).toMatch(/The author writes Design,\s+reviews it, and Builds matching source in the same turn/u);
     expect(text).toContain("only the user may separately request a pause");
-    expect(text).toContain("`task/implement` is intentionally different from the separate `implement`");
+    expect(text).toContain("`task/substep` is intentionally different from the separate `implement`");
   });
 
   it("keeps CLI syntax target-first on every active manual speaker", () => {
@@ -816,9 +817,9 @@ ${skill[1] ?? ""}
       implement: "standard",
       "live-smoke": "standard",
       "task/draft": "standard",
-      "task/implement": "standard",
+      "task/implement-plan-template": "standard",
       "task/plan": "standard",
-      "task-via-script": "standard",
+      "task/substep": "standard",
       "post-code-review": "standard",
       "post-code-review/boundaries": "standard",
       "post-code-review/contracts": "standard",
@@ -837,9 +838,9 @@ ${skill[1] ?? ""}
       "implement",
       "live-smoke",
       "task/draft",
-      "task/implement",
+      "task/implement-plan-template",
       "task/plan",
-      "task-via-script",
+      "task/substep",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",

@@ -250,19 +250,20 @@ downstream gate, and end the step catalog at the last agent-executable step.
 
 Reconcile the analyses into one final owner-readable \`plan.md\` and one frozen
 \`step-<n>.md\` catalog before execution. Do not create a nested manager or
-recursive task dispatcher. Default execution is one top-level Task Implement
-run that reads and executes the complete catalog in order.
+recursive task dispatcher. Default execution renders one plan-specific
+\`implement-plan.workflow.mjs\` from the approved catalog, then runs that
+reviewed file as the complete sequential graph.
 
 End \`plan.md\` with the next-action choices, and state plainly that nothing is
 executed until the owner reviews \`plan.md\` and the \`step-<n>.md\` files and
 starts execution themselves; the owner may edit those files first, and the
-files on disk stay the contract every later run reads. The choices are:
-execute the frozen catalog with the locus-task-workflow skill through one Task
-Implement run on this workspace; or run the Package workflow \`task-via-script\`
-on this same workspace — it replans over these files with its own planning run
-and renders the sequential \`implement.workflow.mjs\`, which the owner then runs
-by explicit path after reading it; or hand the artifacts to \`workflow-author\`
-as a normal authoring request for a bespoke sequential project-local workflow.
+files on disk stay the contract every later run reads. The choices are: render
+the fixed sequential graph with Package workflow
+\`task/implement-plan-template\` on this same workspace, then review and run the
+generated \`implement-plan.workflow.mjs\` by explicit path; run one exact step
+manually with \`task/substep\` and a selector such as \`S1\`; or hand the
+artifacts to \`workflow-author\` as a normal authoring request for a bespoke
+sequential project-local workflow.
 The ordinary continuous request writes Design, reviews it, and Builds matching
 source in the same turn. Do not inject \`Design only\` or a later Build-only
 request; only the user may separately request a pause after design. Plan writes
@@ -490,8 +491,8 @@ result. Execution waits for the owner to review these files and choose.
 Reading this result is not approval.
 
 After the owner approves, the owner picks one route:
-A. Execute the complete catalog with the locus-task-workflow skill through one task/implement run on this same workspace.
-B. Run the Package workflow task-via-script on this same workspace: it replans over these files with its own planning run, renders the sequential implement.workflow.mjs, and the owner then runs that file by explicit path after reading it.
+A. Run task/implement-plan-template on this same workspace. It renders implement-plan.workflow.mjs from the approved catalog without replanning or implementing. Review that generated file, then run it by explicit path with the same workspace.
+B. For one explicit recovery step, run task/substep with the same workspace and only the step selector, such as S1.
 C. For a bespoke graph, send workflow-author: Author a sequential project-local workflow from the approved plan.md and step-<n>.md catalog in this workflow workspace. workflow-author performs the ordinary continuous sequence in that same turn: write Design, review it, and Build matching source. Do not add Design only or a later Build request unless the user separately asks to pause after design.
 
 Generated workflow JavaScript runs in Pi's main Node.js process with full filesystem, subprocess, and network authority. Read any script before running it.`;

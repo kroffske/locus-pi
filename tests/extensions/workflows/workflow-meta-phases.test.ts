@@ -202,9 +202,9 @@ describe("/workflows status <runId> declared-versus-observed", () => {
 describe("curated workflow declarations", () => {
   it("declares exactly the phase() titles each curated workflow actually emits, in order", () => {
     const declaring = [
-      "task/implement",
+      "task/implement-plan-template",
       "task/plan",
-      "task-via-script",
+      "task/substep",
       "workflow-creator",
       "workflow-creator/build",
       "workflow-creator/design",

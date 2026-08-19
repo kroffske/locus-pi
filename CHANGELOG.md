@@ -8,13 +8,13 @@ This file records user-visible changes to the public package.
 
 - **Manual `task/draft` intent capture and unique task planning workspaces.**
   The group-only `task` namespace now exposes `task/draft` before the existing
-  `task/plan` and `task/implement` stages. One reconnaissance agent records only
+  `task/plan`, `task/implement-plan-template`, and `task/substep` stages. One reconnaissance agent records only
   request-relevant project facts and decides whether clarification is material.
   The drafting agent receives live questions only on that branch, is instructed
   to group no more than three questions, writes `draft.md`, and stops
   before planning. `task/plan` reads that saved draft when the operator starts
   it on the same workspace. Fresh `task/draft`, `task/plan`,
-  `task/implement`, and `task-via-script` runs now receive distinct
+  `task/implement-plan-template`, and `task/substep` runs now receive distinct
   `.locus-pi/plans/<generated-run-name>` directories instead of shared
   `tmp/<workflow-name>` defaults. `--run-name <name>` reuses
   `.locus-pi/plans/<name>` across the manual stages, and each completed stage
@@ -176,24 +176,22 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
   `plan.md` — or fail closed publishing `planning-blocker.md`. The run never
   waits for an operator: unknowns become explicit assumptions and
   pre-implementation prerequisites, so automated callers always reach a
-  terminal artifact. `task/implement` now needs only that planning workspace.
-  One implementation agent reads `plan.md` and every `step-<n>.md` in order,
-  records each result under `history/`, and stops before later steps on the
-  first blocker. The owner may edit `plan.md` and `step-<n>.md` after planning,
-  and implementation deliberately reads the files on disk as the contract.
+  terminal artifact. `task/substep` now takes one selector and executes only
+  the matching saved step. The owner may edit `plan.md` and `step-<n>.md` after
+  planning, and both rendering and one-step recovery deliberately read the
+  files on disk as the contract.
 
-- **`task/script` became the separate root workflow `task-via-script`.** The
-  one-run route now owns its whole path: `task-via-script` runs the full
-  `task/plan` pipeline as its own depth-one saved-child planning stage in the
-  same workspace (replanning across existing files preserves compatible owner
-  edits), routes a blocked plan to a fail-closed blocker instead of rendering,
-  and otherwise renders `implement.workflow.mjs` (previously
-  `execute.workflow.mjs`) from the fixed template, one literal node per step
-  file. The generated draft still resolves only by explicit path and is never
-  executed by the render run. The Package registry still exposes seventeen
-  runnable names; the `task/plan` completion card points at one full-plan
-  implementation run or a rerun after a fail-closed blocker, while
-  `task-via-script` results carry the generated script's explicit run command.
+- **Approved-plan rendering and step execution now have distinct names.**
+  `task/implement-plan-template` replaces the overlapping `task-via-script`
+  route. It no longer replans: one scripting agent reads the already approved
+  `plan.md` and `step-<n>.md` files and renders
+  `implement-plan.workflow.mjs` from the fixed template, one literal node per
+  step plus a summary node. Each step returns a declared completed/blocked
+  choice, so a blocked history fails the workflow before the next node starts.
+  `task/substep` replaces the ambiguous
+  `task/implement` name and executes exactly one selected step. The generated
+  file remains unregistered, resolves only by explicit path, and is never run
+  by the renderer. The Package registry count stays unchanged.
 
 - **Public documentation is now organized for external readers.** Cross-cutting guides are limited to `docs/`, extension manuals live beside their source as `extensions/<name>/README.md`, and historical ADR, PRD, milestone, and source-audit working notes are excluded from the public repository and npm documentation surface.
 
@@ -263,8 +261,9 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
   operator actually types `continue `, preventing slow mounted filesystems such
   as WSL project volumes from freezing ordinary command entry.
 
-- **Planning and full-plan execution now form the visible `task` workflow
-  family.** The Package names are `task/plan` and `task/implement`; the shared
+- **Planning, approved-plan rendering, and one-step recovery form the visible
+  `task` workflow family.** The Package names are `task/plan`,
+  `task/implement-plan-template`, and `task/substep`; the shared
   group-only `task` namespace makes their relationship clear while remaining
   non-runnable, so planning still stops for owner review and explicit approval.
   The old `plan` and `plan-implement` names are removed instead of retained as
@@ -337,7 +336,9 @@ launch: no operator can be reached)` — so a refusal is explicable to a caller
   terminal-receipt ordering. The completion receipt no longer repeats a clipped
   prose result and groups primary/workspace/result/journal files separately from
   copyable commands. A Package `task/plan` result names `plan.md` in its card and
-  shows a review-and-approval-gated continuation through `task/implement`.
+  shows a review-and-approval-gated continuation through
+  `task/implement-plan-template`; that renderer's card prints the explicit-path
+  command for `implement-plan.workflow.mjs`.
 
 - **Post-code review now states whether work is mandatory and hands it to a
   separate verified implementation workflow.** Final reports use `READY`,

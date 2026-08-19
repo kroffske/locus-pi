@@ -113,7 +113,7 @@ function workflowRunOptionCompletions(
   const tokens = scanned.tokens;
   const completed: string[] = [];
   const commandPrefix = `run ${target}`;
-  const runNameAllowed = ["task/draft", "task/plan", "task/implement", "task-via-script"].includes(target);
+  const runNameAllowed = ["task/draft", "task/plan", "task/implement-plan-template", "task/substep"].includes(target);
 
   const optionCompletions = (partial = ""): CommandArgumentCompletion[] => {
     const stem = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} `;
