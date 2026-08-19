@@ -6,6 +6,17 @@ This file records user-visible changes to the public package.
 
 ### Added
 
+- **A deterministic internal-link gate over published documentation — `npm run
+check:links`.** Every relative link and heading anchor in published Markdown is
+  resolved against the file set that actually publishes it: `package.json#files`
+  for the npm tarball, `public-repository-files.txt` for the public repository.
+  Documentation is read from inside one of those, where the rest of the
+  repository does not exist, so a link that resolves in a checkout and not in an
+  install was previously dead with nothing to catch it. `http(s)` links stay out
+  of scope on purpose — reaching them needs the network, which no offline gate
+  can own. The parser is `scripts/markdown-links.ts`, shared with the
+  package-boundary test that applies the same rule to a real `npm pack`.
+
 - **Live operator questions — `agent({ ask: true })`.** A stage may let its
   child ask the operator clarifying questions through the injected
   `workflow_ask` tool: the question renders in the parent session, the answer
@@ -20,6 +31,19 @@ This file records user-visible changes to the public package.
   construction. (Owner decision, direction log 2026-08-19.)
 
 ### Changed
+
+- **`npm run check` is now the one canonical gate, and `npm run check:fast` is the
+  inner loop.** `check` runs `check:fast` — manifests, layers, workflow source
+  shape, types, Pi host coherence, tests, source audit — and then the
+  repository-wide checks that used to be reachable only through `check:push` or a
+  separate CI step: `format:check` (`prettier --check`, never `--write`),
+  `check:links`, `check:repository`, and `check:release`. It is deterministic,
+  offline, and read-only, so a green `check` locally and a green CI now mean the
+  same thing. `check:push` is `check` plus the dry-run pack contract, and CI runs
+  one `npm run check` step instead of repeating the repository and release gates
+  after it. Only what needs the network or the runner environment stays outside:
+  the dependency audit, the extension doctor, the Pi peer version, and the pack
+  candidate.
 
 - **The stock `ask` tool is excluded from every workflow child.** A headless
   child received its no-UI refusal as model-visible text — the recorded

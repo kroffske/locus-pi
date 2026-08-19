@@ -114,6 +114,8 @@ npm audit --omit=dev
 npm pack --dry-run --json --ignore-scripts
 ```
 
+`npm run check` is the canonical gate — deterministic and read-only, and exactly what CI runs. `npm run check:fast` is the shorter inner loop for editing.
+
 See [CONTRIBUTING.md](https://github.com/kroffske/locus-pi/blob/main/CONTRIBUTING.md) before changing package surfaces, manifests, workflows, or the npm allowlist.
 
 ## License
