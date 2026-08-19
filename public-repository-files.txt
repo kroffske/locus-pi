@@ -39,7 +39,6 @@ SUPPORT.md
 THIRD_PARTY_NOTICES.md
 bin/locus-pi
 dist/workflow-source-shape.mjs
-docs/README.md
 docs/architecture.md
 docs/extensions.md
 docs/getting-started.md
@@ -288,11 +287,13 @@ public-repository.json
 scripts/audit-sources.ts
 scripts/build-workflow-source-shape.ts
 scripts/check-extension-layers.ts
+scripts/check-pi-host-version.mjs
 scripts/check-public-repository.ts
 scripts/check-pull-request-policy.ts
 scripts/check-release-metadata.ts
 scripts/check-workflow-source-shape.ts
 scripts/materialize-public-repository.ts
+scripts/sync-pi-host-version.mjs
 skills/locus-pi-run-workflow/SKILL.md
 skills/locus-pi-workflows/SKILL.md
 skills/locus-pi-workflows/references/INDEX.md
@@ -304,6 +305,13 @@ skills/locus-pi-workflows/references/human-gate.md
 skills/locus-pi-workflows/references/plan-to-sequential-workflow.md
 skills/locus-pi-workflows/references/sequential-text.md
 skills/locus-task-workflow/SKILL.md
+tests/contracts/agents/extension-agent-catalog.test.ts
+tests/contracts/docs/extension-reference.test.ts
+tests/contracts/extensions/runtime-registration.test.ts
+tests/contracts/helpers/package-contract.ts
+tests/contracts/host/selective-package-loading.test.ts
+tests/contracts/package/package-metadata.test.ts
+tests/contracts/workflows/package-workflow-catalog.test.ts
 tests/docs/public-docs.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts
@@ -383,7 +391,6 @@ tests/integration/command-ui-lifecycle.test.ts
 tests/integration/operator-status.test.ts
 tests/integration/package-boundary.test.ts
 tests/integration/package-cli.test.ts
-tests/integration/public-registration.test.ts
 tests/integration/repository-governance.test.ts
 tests/integration/workflow-run-skill.test.ts
 tests/shared/agents/agent-command-run.test.ts

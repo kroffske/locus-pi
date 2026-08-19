@@ -100,6 +100,7 @@
     "tests/extensions/workflows/live-smoke-workflow.test.ts",
     "tests/extensions/workflows/task-implement-workflow.test.ts",
     "tests/extensions/workflows/task-plan-workflow.test.ts",
+    "tests/extensions/workflows/task-via-script-workflow.test.ts",
     "tests/extensions/workflows/review-prompt-config.test.ts",
     "tests/extensions/workflows/workflow-background-runs.test.ts",
     "tests/extensions/workflows/workflow-catalog-viewer.test.ts",
@@ -197,15 +198,17 @@
     "tests/shared/workflows/workflow-workspace.test.ts",
     "tests/test-harness.ts",
     "tsconfig.json",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "scripts/check-pi-host-version.mjs",
+    "scripts/sync-pi-host-version.mjs",
+    "tests/contracts/helpers/package-contract.ts",
+    "tests/contracts/package/package-metadata.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
+    "tests/contracts/agents/extension-agent-catalog.test.ts",
+    "tests/contracts/workflows/package-workflow-catalog.test.ts",
+    "tests/contracts/docs/extension-reference.test.ts",
+    "tests/contracts/host/selective-package-loading.test.ts"
   ],
-  "excludeFiles": [
-    "tests/extensions/workflows/consilium-workflow.test.ts",
-    "tests/extensions/workflows/pipeline-demo-workflow.test.ts",
-    "tests/extensions/workflows/react-loop-workflow.test.ts",
-    "tests/extensions/plan/plan-goal-decision.test.ts",
-    "tests/shared/session/compaction.test.ts",
-    "tests/shared/workflows/workflow-runtime.test.ts"
-  ],
+  "excludeFiles": [],
   "generatedInventory": "public-repository-files.txt"
 }
