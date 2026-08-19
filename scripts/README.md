@@ -10,25 +10,34 @@ TypeScript scripts run through `tsx`; `.mjs` scripts run on plain `node`.
 Each one is bound to an npm script in `package.json`, except the manual
 publication tool noted below.
 
-| Script                             | npm script                                | Role                                        |
-| ---------------------------------- | ----------------------------------------- | ------------------------------------------- |
-| `audit-sources.ts`                 | `audit:sources` (part of `check`)         | Source-ownership and attribution gate       |
-| `build-workflow-source-shape.ts`   | `build:workflow-source` (`prepack`)       | Builds the shipped workflow-shape validator |
-| `check-extension-layers.ts`        | `check:layers` (part of `check`)          | `extensions/_shared` layer and import rules |
-| `check-pi-host-version.mjs`        | `check:pi-host` (part of `check`)         | Pi CLI/SDK version coherence                |
-| `check-public-repository.ts`       | `check:repository`                        | Public-tree inventory and hygiene           |
-| `check-pull-request-policy.ts`     | `check:pull-request`                      | Branch and release policy for PRs           |
-| `check-release-metadata.ts`        | `check:release`                           | Version, changelog, and tag consistency     |
-| `check-workflow-source-shape.ts`   | `check:workflow-source` (part of `check`) | Packaged workflow source shape              |
-| `materialize-public-repository.ts` | — (manual)                                | Generates the public copy and its inventory |
-| `sync-pi-host-version.mjs`         | `sync:pi-host` (manual)                   | Moves the Pi dev baseline in one step       |
+| Script                             | npm script                                     | Role                                        |
+| ---------------------------------- | ---------------------------------------------- | ------------------------------------------- |
+| `audit-sources.ts`                 | `audit:sources` (part of `check:fast`)         | Source-ownership and attribution gate       |
+| `build-workflow-source-shape.ts`   | `build:workflow-source` (`prepack`)            | Builds the shipped workflow-shape validator |
+| `check-extension-layers.ts`        | `check:layers` (part of `check:fast`)          | `extensions/_shared` layer and import rules |
+| `check-extension-manifests.ts`     | `check:manifests` (part of `check:fast`)       | Manifest schema and declared-path contract  |
+| `check-markdown-links.ts`          | `check:links` (part of `check`)                | Internal links in published Markdown        |
+| `check-pi-host-version.mjs`        | `check:pi-host` (part of `check:fast`)         | Pi CLI/SDK version coherence                |
+| `check-public-repository.ts`       | `check:repository` (part of `check`)           | Public-tree inventory and hygiene           |
+| `check-pull-request-policy.ts`     | `check:pull-request`                           | Branch and release policy for PRs           |
+| `check-release-metadata.ts`        | `check:release` (part of `check`)              | Version, changelog, and tag consistency     |
+| `check-workflow-source-shape.ts`   | `check:workflow-source` (part of `check:fast`) | Packaged workflow source shape              |
+| `markdown-links.ts`                | — (library)                                    | The one Markdown link parser both gates use |
+| `materialize-public-repository.ts` | — (manual)                                     | Generates the public copy and its inventory |
+| `sync-pi-host-version.mjs`         | `sync:pi-host` (manual)                        | Moves the Pi dev baseline in one step       |
 
 The composite gates that bind them together:
 
-- `npm run check` — layers, workflow source shape, typecheck, Pi host
-  version, tests, and source audit. CI runs this on every push and PR.
-- `npm run check:push` — `check` plus the repository inventory, release
-  metadata, and a dry-run pack. Mirrors the full CI gate locally.
+- `npm run check:fast` — manifests, layers, workflow source shape, typecheck,
+  Pi host version, tests, and source audit. The inner loop while editing; it
+  is not release-complete.
+- `npm run check` — `check:fast` plus formatting, published Markdown links,
+  the repository inventory, and release metadata. The canonical gate:
+  deterministic, offline, and read-only, and exactly what CI runs. Everything
+  CI adds after it needs the network (`npm audit`) or the runner environment
+  (`locus-pi doctor`, `pi --version`, the pack candidate).
+- `npm run check:push` — `check` plus a dry-run pack. The tracked `pre-push`
+  hook runs this.
 
 ## CI gates
 
@@ -51,6 +60,20 @@ Runs the standard source-shape validator over every workflow example the
 package ships (or over explicit paths passed as arguments, which must then
 declare the standard profile). Guards that shipped workflows keep passing the
 same static checks user-authored workflows go through.
+
+### check-markdown-links.ts
+
+Resolves every relative link and heading anchor in published Markdown against
+the file set that actually publishes it — `package.json#files` for the npm
+tarball, `public-repository-files.txt` for the public repository — because
+documentation is read from inside one of those, where the rest of this
+checkout does not exist. A link that resolves here and not there is dead for
+everyone who installed or cloned. `http(s)` links are deliberately out of
+scope: reaching them needs the network, so they cannot belong to an offline
+deterministic gate. The parser lives in `markdown-links.ts` and is shared with
+`tests/integration/package-boundary.test.ts`, which applies the same rule to a
+real `npm pack` result; `tests/integration/markdown-links.test.ts` proves the
+gate rejects a broken link and a broken anchor.
 
 ### audit-sources.ts
 
@@ -105,7 +128,7 @@ TypeScript loader. Runs automatically on `npm pack` and `npm publish` via
 The read half: compares the working tree (tracked plus untracked, minus
 ignored) against the `public-repository-files.txt` inventory, then rejects
 forbidden internal paths, symlinks, absolute workstation paths, private key
-material, and npm auth configuration. CI runs it on every push, and the
+material, and npm auth configuration. It runs inside `npm run check`, and the
 repository-governance integration test reuses its exports.
 
 ### materialize-public-repository.ts

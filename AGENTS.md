@@ -24,7 +24,9 @@ npm run hooks:install
 npm run check:push
 ```
 
-Use Node.js `>=22.19.0`. Pi has a minimum peer floor of `0.83.0`; local development and CI run the exact version jointly pinned in the four `@earendil-works/pi-*` development dependencies and `package-lock.json`. Use `npm run sync:pi-host` to move that tested baseline to the selected installed CLI. The pre-commit hook formats staged files, checks whitespace and secrets, runs TypeScript validation, and blocks commits on protected branch names. CI repeats deterministic source, test, repository, dependency, and package checks.
+Use Node.js `>=22.19.0`. Pi has a minimum peer floor of `0.83.0`; local development and CI run the exact version jointly pinned in the four `@earendil-works/pi-*` development dependencies and `package-lock.json`. Use `npm run sync:pi-host` to move that tested baseline to the selected installed CLI. The pre-commit hook formats staged files, checks whitespace and secrets, runs TypeScript validation, and blocks commits on protected branch names.
+
+`npm run check` is the canonical deterministic gate — formatting, manifests, layers, workflow source shape, types, Pi host coherence, tests, source audit, published links, repository inventory, and release metadata — and CI runs exactly that one command. `npm run check:fast` is the same minus the repository-wide checks, for the inner loop. Beyond `check`, CI adds only what needs the network or the runner environment: the production dependency audit, the extension doctor, the Pi peer version, and the npm pack candidate.
 
 ## Extension ownership layers
 

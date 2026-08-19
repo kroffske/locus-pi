@@ -52,16 +52,27 @@ Do not widen the default extension list, Package workflow registry, runtime depe
 
 ## Validation
 
-Code or package-boundary changes require:
+`npm run check` is the canonical gate. One command, deterministic and read-only by construction — it formats nothing, generates nothing, and leaves the working tree byte-identical — and it needs no network beyond the npm cache `npm ci` already filled. It reproduces every check CI can run against this source tree, so a green `check` locally and a green CI mean the same thing.
+
+| Command              | Composition                                                                               | Use it                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `npm run check:fast` | manifests, layers, workflow source shape, typecheck, Pi host version, tests, source audit | while editing; deliberately not release-complete             |
+| `npm run check`      | `format:check`, `check:links`, then `check:fast`, `check:repository`, `check:release`     | before every commit and pull request, whatever the change is |
+| `npm run check:push` | `check` plus the dry-run pack contract                                                    | run for you by the tracked `pre-push` hook                   |
+
+On an Apple-silicon laptop `check:fast` takes about 17 seconds warm — 27 on the first run after `npm ci` — and `check` about 21. The four extra gates cost a few seconds, not a longer test suite, so reach for `check:fast` only inside a tight edit loop.
+
+Three steps stay outside `check` because none of them checks this source tree deterministically: the dependency audit needs the registry, and the doctor and the pack candidate exercise the installed host and npm itself. CI runs them after `check`, and so should you before a release:
 
 ```bash
-npm run check
 npm audit --omit=dev
 ./bin/locus-pi doctor
 npm pack --dry-run --json --ignore-scripts
 ```
 
-Docs-only changes still require source verification, link checks, formatting, and `git diff --check`.
+Docs-only changes run the same `npm run check`: `format:check` and `check:links` are inside it. The pre-commit hook adds `git diff --check` on staged content.
+
+A future `check:generated` — regenerated artifacts verified against their sources — belongs in the `check` chain between `check:links` and `check:fast`. `package.json` cannot carry comments, so the reserved slot is recorded here.
 
 ## Change expectations
 
