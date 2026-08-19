@@ -10,7 +10,7 @@ import type { ModelRoleResolution } from "../model/model-settings.js";
 import { modelRoleResolutionRecord } from "../model/model-settings.js";
 import type { RuntimeArtifact } from "../runtime/artifacts.js";
 import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "../runtime/artifacts.js";
-import type { RepositoryCheckScripts } from "./agent-read-only-policy.js";
+import type { ReadOnlyAgentCustomTool, RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
 export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
 export type ApprovalTier = "allow" | "prompt" | "deny";
@@ -54,6 +54,13 @@ export interface AgentRunRequest {
   parentContext?: AgentParentContext;
   /** Exact package scripts frozen by a workflow before any writer child runs. */
   repositoryCheckScripts?: RepositoryCheckScripts;
+  /** Custom tools registered for the child session; their closures execute in the
+   *  PARENT process (the workflow bridge uses this for `workflow_ask`). */
+  customTools?: ReadOnlyAgentCustomTool[];
+  /** Tool names excluded on top of the host defaults (e.g. the stock `ask`, which a
+   *  headless child can only mis-serve: its no-UI refusal is model-visible text and
+   *  its option timeout auto-answers for the operator). */
+  additionalExcludeTools?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -250,6 +257,8 @@ export function createAgentRunRequest(
   if (input.capabilityMode !== undefined) request.capabilityMode = input.capabilityMode;
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
   if (input.repositoryCheckScripts !== undefined) request.repositoryCheckScripts = input.repositoryCheckScripts;
+  if (input.customTools !== undefined) request.customTools = input.customTools;
+  if (input.additionalExcludeTools !== undefined) request.additionalExcludeTools = input.additionalExcludeTools;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
   return request;
 }

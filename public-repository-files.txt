@@ -255,6 +255,7 @@ extensions/workflows/run-read.ts
 extensions/workflows/run-viewer.ts
 extensions/workflows/runtime/workflow-agent-bridge.ts
 extensions/workflows/runtime/workflow-artifacts.ts
+extensions/workflows/runtime/workflow-ask-tool.ts
 extensions/workflows/runtime/workflow-budget.ts
 extensions/workflows/runtime/workflow-discovery.ts
 extensions/workflows/runtime/workflow-failure.ts
@@ -424,6 +425,7 @@ tests/shared/security/security.test.ts
 tests/shared/session/session-core-jsonl.test.ts
 tests/shared/session/session-core.test.ts
 tests/shared/task/tasks-bridge.test.ts
+tests/shared/workflows/workflow-agent-ask.test.ts
 tests/shared/workflows/workflow-agent-bounds.test.ts
 tests/shared/workflows/workflow-agent-choice.test.ts
 tests/shared/workflows/workflow-agent-handoffs.test.ts
@@ -432,6 +434,7 @@ tests/shared/workflows/workflow-agent-transport.test.ts
 tests/shared/workflows/workflow-agent-uniqueness.test.ts
 tests/shared/workflows/workflow-agent-validate.test.ts
 tests/shared/workflows/workflow-artifacts.test.ts
+tests/shared/workflows/workflow-ask-tool.test.ts
 tests/shared/workflows/workflow-budget.test.ts
 tests/shared/workflows/workflow-continuation.test.ts
 tests/shared/workflows/workflow-durable-execution.test.ts

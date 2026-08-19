@@ -1502,6 +1502,7 @@ contract, not an enforcement or security boundary.
 | Field             | Type                                   | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------- | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent`           | string                                 | `"default"`                           | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ask`             | `true`                                 | — (off)                               | Lets THIS child ask the operator live clarifying questions through the injected `workflow_ask` tool: the question renders in the parent session, the answer returns as the tool result, and the same child continues. Interactive parents only — with no UI the call **fails closed** with `failureCause: "ask-unavailable"`. See "Live operator questions" below.                                                                                                                                                  |
 | `maxToolCalls`    | positive safe integer                  | 1,000 tool calls per attempt          | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
 | `timeoutMs`       | integer 1..2147383628                  | 24 hours per attempt                  | Emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                        |
 | `maxTurns`        | integer 1..20                          | 20 turns per attempt                  | Assistant turns for one child attempt at the host maximum. A value outside the host clamp is refused before any child starts.                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1650,6 +1651,52 @@ tell that case apart from any other by reading the message text. The same line c
 attempt trio whenever the call declared a budget, so an attempt already spent stays visible
 even when the next one ends the run. The bridge decides to throw on that typed cause and
 never on the diagnostic prose beside it.
+
+### Live operator questions — `agent({ ask: true })`
+
+A stage that declares `ask: true` gives its child ONE extra tool, `workflow_ask`:
+the child submits a list of questions (each with options; free text is always
+allowed), the question renders in the parent session through the shared
+operator-question surface, and the human's answer returns as the tool result —
+the same child continues with the answer in its own context. This is the
+interactive complement to `awaitOperator`, which stays the durable split-run
+gate: `ask` never parks a run and never creates a continuation.
+
+Owner decision, `.locus/soul.md` direction log 2026-08-19. The load-bearing
+rules:
+
+- **Off by default, per call.** The tool exists only for the one child whose
+  stage declared `ask: true`. Curated Package workflows remain no-ask by
+  construction: unknowns become explicit assumptions, not questions.
+- **The stock `ask` is excluded from every workflow child** — declared or not.
+  A headless child receives the stock tool's refusal as model-visible text (the
+  recorded fabrication probe), and its option timeout auto-answers for the
+  operator. `workflow_ask` has no timeout at all; a `recommended` option is a
+  display hint, never an automatic choice.
+- **No UI fails the call, not the sentence.** In `print`/`json` or any parent
+  without an operator surface, a `workflow_ask` call ends the child with
+  `failureCause: "ask-unavailable"` — the same fail-closed shape as the
+  wall-clock fuse, and equally non-retryable. Unattended pipelines never wait
+  on a human.
+- **Esc is an answer.** A declined question returns as ordinary text — the
+  answers already given plus an "operator declined" note — and the child
+  decides how to proceed; nothing hangs and nothing is invented.
+- **Concurrent questions queue FIFO.** One workflow question is mounted at a
+  time; children asking in parallel are serialized oldest-first, and a question
+  evicted by the operator's own editor interaction is re-mounted, not dropped.
+- **The fuse pauses while the operator thinks.** The per-call `timeoutMs` fuse
+  measures the child's effective run time, not the human's thinking time. The
+  SDK backstop cannot pause, so an `ask: true` call widens it by a fixed
+  24-hour allowance; a single wait longer than that still dies by the backstop
+  (named residual).
+- **Evidence is durable.** Each answered call writes an
+  `operator-ask-<n>.json` artifact (questions, answers, declined flag) into the
+  call's artifact directory and one `workflow_ask: operator answered N/M`
+  diagnostics line into the result envelope.
+- **Replay forks on `ask`.** The call key records the declaration, so a record
+  made without `ask` is never served to an asking call, and vice versa. A
+  completed call replays its recorded final text as usual; an interrupted call
+  re-executes and honestly asks again.
 
 ### Standard exact choice — `agent({ choice })`
 
@@ -2088,7 +2135,8 @@ the last stage of a long pipeline no longer pays for the earlier stages.
 
 The key is the call's ordinal position plus its fully resolved request: the
 prompt, catalog `agent`, `maxToolCalls`, `model`, `label`, `phase`,
-`workspaceMode`, and any `workspaceHandle`.
+`workspaceMode`, any `workspaceHandle`, and the `ask` declaration (a call that
+may block on a live human answer never shares a record with one that may not).
 A declared `schema` needs no separate field — the shape contract is already part
 of the prompt the child receives, and each schema retry is recorded as its own
 call, so a shaped stage replays its retries exactly as it ran them.
