@@ -109,7 +109,7 @@ function projectWithHandoff(
 }
 
 function corruptHandoff(root: string, runId: string): void {
-  const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+  const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   result.operatorHandoff = { ...(result.operatorHandoff as Record<string, unknown>), title: 42 };
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
@@ -120,14 +120,14 @@ function corruptPhysicalWorkspaceMetadata(
   runId: string,
   metadata: { workspacePhysicalIdentity?: string; workspacePhysicalIdentitySchemaVersion?: number },
 ): void {
-  const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+  const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   Object.assign(result, metadata);
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
 }
 
 function persistLaunchBinding(root: string, runId: string): void {
-  const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
+  const runDir = path.join(root, ".locus-pi", "runs", runId);
   const result = JSON.parse(readFileSync(workflowResultFile(runDir), "utf8")) as Record<string, unknown>;
   const target = result.target as {
     kind: "name" | "scriptPath";
@@ -279,7 +279,7 @@ describe("workflow operator handoff service", () => {
     const runId = "20260725-140200-launch-binding-result-tamper";
     const root = projectWithHandoff(runId);
     persistLaunchBinding(root, runId);
-    const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
     const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
     result.workspaceDirRelative = "other-workspace";
     result.workspaceDir = path.join(root, "other-workspace");
@@ -400,7 +400,7 @@ describe("workflow operator handoff service", () => {
     const runId = "20260725-143003-throw-release-failure";
     const root = projectWithHandoff(runId);
     const claimLockPath = path.join(
-      workflowRunRuntimeDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
+      workflowRunRuntimeDir(path.join(root, ".locus-pi", "runs", runId)),
       "operator-handoff-claim.lock",
     );
     const launch = vi.fn((): WorkflowCommandLaunchResult => {
@@ -478,7 +478,7 @@ describe("workflow operator handoff service", () => {
   it("rejects a persisted absolute external scriptPath before it becomes actionable", () => {
     const runId = "20260725-144050-external-script-path";
     const root = projectWithHandoff(runId);
-    const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
     const persisted = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
     const externalTarget = {
       kind: "scriptPath",

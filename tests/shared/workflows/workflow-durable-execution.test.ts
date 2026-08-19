@@ -25,6 +25,7 @@ import {
   referenceWorkflowPrimaryFile,
   releaseWorkflowRootLease,
   resolveWorkflowOutputDirectory,
+  WORKFLOW_OUTPUT_DIR_PATTERN,
   WORKFLOW_OUTPUT_LOCK_FILE,
   workflowOutputStateDir,
 } from "../../../extensions/workflows/runtime/workflow-output.js";
@@ -229,6 +230,13 @@ describe("stable workflow output paths", () => {
 
   it("keeps generated physical identity grammar separate from explicit outputDir grammar", () => {
     expect(() => assertWorkflowOutputDirPath("packages/docs site/tmp/files")).toThrow();
+    expect(assertWorkflowOutputDirPath(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
+      ".locus-pi/plans/20260819-120000-a1b2-task-draft",
+    );
+    expect(new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u").test(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
+      true,
+    );
+    expect(() => assertWorkflowOutputDirPath(".locus-pi/plans/nested/task-draft")).toThrow();
     expect(assertWorkflowPhysicalWorkspaceIdentity("packages/docs site/tmp/files")).toBe(
       "packages/docs site/tmp/files",
     );
@@ -236,6 +244,185 @@ describe("stable workflow output paths", () => {
     for (const invalid of ["", "/outside", "a\\b", "a\0b", ".", "..", "a/../b", "a//b", "a/./b"]) {
       expect(() => assertWorkflowPhysicalWorkspaceIdentity(invalid)).toThrow();
     }
+  });
+
+  it.each([
+    ["task/draft", "task-draft"],
+    ["task/plan", "task-plan"],
+    ["task/implement-plan-template", "task-implement-plan-template"],
+    ["task/substep", "task-substep"],
+  ])("gives every fresh %s run a distinct timestamped task workspace", async (name, slug) => {
+    const root = project();
+    writeWorkflowTree(root, "task", {
+      draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
+      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
+      plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
+      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
+    });
+
+    const firstHarness = createHarness(root);
+    const first = await runWorkflowScript({
+      pi: firstHarness.pi,
+      ctx: firstHarness.ctx,
+      signal: new AbortController().signal,
+      name,
+    });
+    const secondHarness = createHarness(root);
+    const second = await runWorkflowScript({
+      pi: secondHarness.pi,
+      ctx: secondHarness.ctx,
+      signal: new AbortController().signal,
+      name,
+    });
+
+    expect(first.ok, first.error).toBe(true);
+    expect(second.ok, second.error).toBe(true);
+    expect(first.workspaceDirRelative).toBe(`.locus-pi/plans/${first.runId}-${slug}`);
+    expect(second.workspaceDirRelative).toBe(`.locus-pi/plans/${second.runId}-${slug}`);
+    expect(second.workspaceDirRelative).not.toBe(first.workspaceDirRelative);
+  });
+
+  it("expands one runName to the same planning workspace across manual task stages", async () => {
+    const root = project();
+    writeWorkflowTree(root, "task", {
+      draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
+      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
+      plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
+      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
+    });
+
+    for (const name of ["task/draft", "task/plan", "task/implement-plan-template", "task/substep"]) {
+      const harness = createHarness(root);
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name,
+        runName: "airflow-builder",
+      });
+      expect(result.ok, result.error).toBe(true);
+      expect(result.workspaceDirRelative).toBe(".locus-pi/plans/airflow-builder");
+    }
+  });
+
+  it("rejects unsafe, non-task, and conflicting runName selections", async () => {
+    const root = project();
+    writeWorkflow(root, "ordinary", `export default (dsl) => dsl.outputDir();\n`);
+    writeWorkflowTree(root, "task", {
+      draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
+    });
+
+    for (const options of [
+      { name: "task/draft", runName: "../escape" },
+      { name: "ordinary", runName: "named" },
+      { name: "task/draft", runName: "named", outputDir: "tmp/conflict" },
+    ]) {
+      const harness = createHarness(root);
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        ...options,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/runName|mutually exclusive/u);
+    }
+  });
+
+  it("accepts confined absolute and dot-relative outputDir paths", async () => {
+    const root = project();
+    const workingDirectory = path.join(root, "packages", "docs");
+    mkdirSync(workingDirectory, { recursive: true });
+    writeWorkflow(root, "paths", `export default (dsl) => dsl.outputDir();\n`);
+
+    const absoluteHarness = createHarness(root);
+    const absolute = await runWorkflowScript({
+      pi: absoluteHarness.pi,
+      ctx: absoluteHarness.ctx,
+      signal: new AbortController().signal,
+      name: "paths",
+      outputDir: path.join(root, "custom", "absolute"),
+    });
+    expect(absolute.ok, absolute.error).toBe(true);
+    expect(absolute.workspaceDirRelative).toBe("custom/absolute");
+
+    const relativeHarness = createHarness(root);
+    relativeHarness.ctx.session = { ...relativeHarness.ctx.session!, workingDirectory };
+    const relative = await runWorkflowScript({
+      pi: relativeHarness.pi,
+      ctx: relativeHarness.ctx,
+      signal: new AbortController().signal,
+      name: "paths",
+      outputDir: "./workspace",
+    });
+    expect(relative.ok, relative.error).toBe(true);
+    expect(relative.workspaceDirRelative).toBe("packages/docs/workspace");
+  });
+
+  it.each(["task/plan", "task/substep"])(
+    "lets %s resume reuse an explicit source workspace without repeating outputDir",
+    async (name) => {
+      const root = project();
+      writeWorkflowTree(root, "task", {
+        plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
+        substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
+      });
+      const selectedWorkspace = ".locus-pi/plans/20260819-120000-a1b2-airflow-dag-builder";
+      const firstHarness = createHarness(root);
+      const first = await runWorkflowScript({
+        pi: firstHarness.pi,
+        ctx: firstHarness.ctx,
+        signal: new AbortController().signal,
+        name,
+        outputDir: selectedWorkspace,
+      });
+      expect(first.ok, first.error).toBe(true);
+
+      const resumedHarness = createHarness(root);
+      const resumed = await runWorkflowScript({
+        pi: resumedHarness.pi,
+        ctx: resumedHarness.ctx,
+        signal: new AbortController().signal,
+        name,
+        resumeFromRunId: first.runId,
+      });
+      expect(resumed.ok, resumed.error).toBe(true);
+      expect(resumed.workspaceDirRelative).toBe(selectedWorkspace);
+      expect(resumed.workspaceDirExplicit).toBe(true);
+
+      const conflictingHarness = createHarness(root);
+      const conflicting = await runWorkflowScript({
+        pi: conflictingHarness.pi,
+        ctx: conflictingHarness.ctx,
+        signal: new AbortController().signal,
+        name,
+        outputDir: ".locus-pi/plans/20260819-120001-b2c3-other-task",
+        resumeFromRunId: first.runId,
+      });
+      expect(conflicting.ok).toBe(false);
+      expect(conflicting.error).toContain("outputDir must equal the source workspace");
+    },
+  );
+
+  it("runs a generated implementation script in its selected task workspace", async () => {
+    const root = project();
+    const workspace = ".locus-pi/plans/20260819-120000-a1b2-task-implement-plan-template";
+    const scriptPath = path.join(root, workspace, "implement-plan.workflow.mjs");
+    mkdirSync(path.dirname(scriptPath), { recursive: true });
+    writeFileSync(scriptPath, `export default (dsl) => dsl.outputDir();\n`, "utf8");
+
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      scriptPath,
+      outputDir: workspace,
+    });
+
+    expect(result.ok, result.error).toBe(true);
+    expect(result.workspaceDirRelative).toBe(workspace);
+    expect(result.result).toBe(workspace);
   });
 
   it("requires an explicit fresh namespace for post-code-review", async () => {
@@ -459,7 +646,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
     expect(first.ok, first.error).toBe(true);
 
     const copiedRunId = "20260713-010103-copied-resume";
-    const copiedRunDir = path.join(root, ".pi", "locus-pi", "runs", copiedRunId);
+    const copiedRunDir = path.join(root, ".locus-pi", "runs", copiedRunId);
     mkdirSync(path.join(copiedRunDir, "runtime"), { recursive: true });
     writeFileSync(workflowResultFile(copiedRunDir), readFileSync(workflowResultFile(first.runDir), "utf8"), "utf8");
 

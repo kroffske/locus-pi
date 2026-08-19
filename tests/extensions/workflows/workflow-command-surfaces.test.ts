@@ -329,6 +329,10 @@ describe("/workflows help and unknown commands", () => {
   });
 
   it("parses a fresh output namespace and resume id before semantic input", () => {
+    expect(parseRunCommand("run task/plan --run-name airflow-builder")).toEqual({
+      scriptRef: "task/plan",
+      runName: "airflow-builder",
+    });
     expect(
       parseRunCommand(
         'run post-code-review --output-dir "tmp/post-code-review/review 1" --resume prior-run review commit HEAD',
@@ -357,6 +361,10 @@ describe("/workflows help and unknown commands", () => {
       scriptRef: "post-code-review",
       outputDir: "tmp/fresh",
       missingResumeId: true,
+    });
+    expect(parseRunCommand("run task/draft --run-name")).toEqual({
+      scriptRef: "task/draft",
+      missingRunName: true,
     });
     // Run-level no-operator mode: value-less flag, composable with the value
     // options in any order, and never swallowed into semantic input.
@@ -471,7 +479,7 @@ describe("/workflows help and unknown commands", () => {
 
     expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
     expect(workflowRunUsage()).toBe(
-      "/workflows run <name|path> [--output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]",
+      "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]",
     );
     expect(h.commands.has("workflow-run")).toBe(false);
     expect(h.commands.get("workflow-stop")?.description).toBe(
@@ -607,7 +615,7 @@ describe("/workflows status run list", () => {
 
     expect(widget).toContain("No workflow runs yet.");
     expect(widget).toContain("status: ok; total=0 shown=0 older=0");
-    expect(widget).toContain('Run one: /workflows run task/plan "<your request>"');
+    expect(widget).toContain('Draft one: /workflows run task/draft "<your request>"');
   });
 
   it("renders one wide row per run with the agent and status columns", async () => {
@@ -720,6 +728,24 @@ describe("/workflows stop", () => {
 });
 
 describe("/workflows argument rejections", () => {
+  it("rejects --run-name with no folder name after it", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --run-name");
+    expect(widget).toContain("Missing folder name after --run-name.");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
+  it("rejects --run-name together with --output-dir", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --run-name one --output-dir tmp/two");
+    expect(widget).toContain("--run-name and --output-dir are mutually exclusive.");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
+  it("rejects --run-name for an ordinary workflow", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run live-smoke --run-name one");
+    expect(widget).toContain("--run-name is supported only by Package task workflows.");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
   it("rejects --output-dir with no project-relative path after it", async () => {
     const widget = await runCommand(wideHarness(makeRoot()), "run alpha --output-dir");
     const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
@@ -734,7 +760,9 @@ describe("/workflows argument rejections", () => {
     const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
 
     expect(widget).toContain("Missing run id after --resume.");
-    expect(unwrapped).toContain("Retry: /workflows run alpha [--output-dir <path>] --resume <runId> [--] [input]");
+    expect(unwrapped).toContain(
+      "Retry: /workflows run alpha [--run-name <name> | --output-dir <path>] --resume <runId> [--] [input]",
+    );
     expect(widget).toContain("No workflow execution was started.");
   });
 

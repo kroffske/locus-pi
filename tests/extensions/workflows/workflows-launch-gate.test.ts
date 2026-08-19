@@ -245,7 +245,7 @@ describe("/workflows run launch gate", () => {
     expect(tool.formatApprovalDetails?.({ name: "reviewed-workflow", items: ["alpha", "beta"] })).toEqual([
       "Workflow: reviewed-workflow",
       "Items: 2",
-      "Workflow workspace: default <pwd>/tmp/<workflow-name>",
+      "Workflow workspace: default <pwd>/tmp/<workflow-name>, or a unique project-local plan workspace for task planning",
       "Surface: trusted-file workflow runner",
       "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
       "Isolation: none — exec approval is consent, not a sandbox",

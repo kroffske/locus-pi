@@ -49,7 +49,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const dir = path.join(root, ".pi", "locus-pi", "runs", runId);
+  const dir = path.join(root, ".locus-pi", "runs", runId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -178,15 +178,7 @@ describe("workflow run artifact store", () => {
         corruption === "external snapshot path"
           ? path.join(root, "outside.workflow.mjs")
           : corruption === "snapshot from another run"
-            ? path.join(
-                root,
-                ".pi",
-                "locus-pi",
-                "runs",
-                "other-run",
-                "runtime",
-                `script-${snapshotSha256}.workflow.mjs`,
-              )
+            ? path.join(root, ".locus-pi", "runs", "other-run", "runtime", `script-${snapshotSha256}.workflow.mjs`)
             : corruption === "wrong snapshot hash"
               ? wrongHashSnapshot
               : expectedSnapshot;
@@ -308,8 +300,7 @@ describe("workflow run artifact store", () => {
     const runId = "inventory-binding";
     const snapshotPath = path.join(
       root,
-      ".pi",
-      "locus-pi",
+      ".locus-pi",
       "runs",
       runId,
       "runtime",
@@ -331,8 +322,8 @@ describe("workflow run artifact store", () => {
     });
     const present = parseWorkflowPersistedBinding(
       {
-        target: { kind: "name", ref: "task/implement", source: "package" },
-        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/implement.workflow.mjs")),
+        target: { kind: "name", ref: "task/substep", source: "package" },
+        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/substep.workflow.mjs")),
       },
       root,
       runId,
@@ -708,23 +699,21 @@ describe("workflow run artifact store", () => {
   });
 
   it("rejects symlinked canonical-root ancestors before external artifact reads or writes", () => {
-    for (const linkedAncestor of [".pi", "locus-pi"] as const) {
+    for (const linkedAncestor of [".locus-pi", "runs"] as const) {
       const root = project();
       const external = project();
       const id = `ancestor-${linkedAncestor.replace(".", "")}`;
-      const externalPi = path.join(external, "external-pi");
       const externalLocusPi = path.join(external, "external-locus-pi");
+      const externalRuns = path.join(external, "external-runs");
       const externalRunDir =
-        linkedAncestor === ".pi"
-          ? path.join(externalPi, "locus-pi", "runs", id)
-          : path.join(externalLocusPi, "runs", id);
+        linkedAncestor === ".locus-pi" ? path.join(externalLocusPi, "runs", id) : path.join(externalRuns, id);
       mkdirSync(externalRunDir, { recursive: true });
 
-      if (linkedAncestor === ".pi") {
-        symlinkSync(externalPi, path.join(root, ".pi"));
+      if (linkedAncestor === ".locus-pi") {
+        symlinkSync(externalLocusPi, path.join(root, ".locus-pi"));
       } else {
-        mkdirSync(path.join(root, ".pi"));
-        symlinkSync(externalLocusPi, path.join(root, ".pi", "locus-pi"));
+        mkdirSync(path.join(root, ".locus-pi"));
+        symlinkSync(externalRuns, path.join(root, ".locus-pi", "runs"));
       }
 
       const externalArtifacts = workflowRunArtifactsDir(externalRunDir);
@@ -733,7 +722,7 @@ describe("workflow run artifact store", () => {
           createWorkflowArtifactStore({
             projectRoot: root,
             runId: id,
-            runDir: path.join(root, ".pi", "locus-pi", "runs", id),
+            runDir: path.join(root, ".locus-pi", "runs", id),
           }),
         /(?:directory|run path) is unsafe/u,
       );

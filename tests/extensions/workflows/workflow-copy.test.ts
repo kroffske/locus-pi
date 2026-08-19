@@ -75,10 +75,10 @@ describe("workflow namespace copy", () => {
     const destination = path.join(project, ".pi", "workflows", "task");
     expect(existsSync(path.join(destination, "task.workflow.mjs"))).toBe(false);
     expect(existsSync(path.join(destination, "plan.workflow.mjs"))).toBe(true);
-    expect(existsSync(path.join(destination, "implement.workflow.mjs"))).toBe(true);
-    expect(existsSync(path.join(destination, "script.workflow.mjs"))).toBe(false);
+    expect(existsSync(path.join(destination, "implement-plan-template.workflow.mjs"))).toBe(true);
+    expect(existsSync(path.join(destination, "substep.workflow.mjs"))).toBe(true);
     expect(resolveWorkflowTarget({ name: "task/plan" }, project, project).source).toBe("project");
-    expect(resolveWorkflowTarget({ name: "task/implement" }, project, project).source).toBe("project");
+    expect(resolveWorkflowTarget({ name: "task/substep" }, project, project).source).toBe("project");
     expect(() => resolveWorkflowTarget({ name: "task" }, project, project)).toThrow(/group-only/u);
   });
 

@@ -116,7 +116,7 @@ describe("focused workflow catalog", () => {
       const narrow = lines.join("\n");
       expect(narrow).toContain(width < 64 ? "P 1" : "Project 1");
       expect(narrow).toContain(width < 64 ? "U 0" : "User 0");
-      expect(narrow).toContain(width < 64 ? "[PKG 17]" : "[Package 17]");
+      expect(narrow).toContain(width < 64 ? "[PKG 18]" : "[Package 18]");
       expect(narrow).toContain("necessity");
       expect(narrow).toContain("  └ necessity");
       expect(narrow).toContain("7 children");
@@ -167,10 +167,10 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
-    expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 17  History 1");
+    expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 18  History 1");
     viewer.handleInput("left");
     const history = viewer.render(146).join("\n");
-    expect(history).toContain("Project 1  User 0  Package 17  [History 1]");
+    expect(history).toContain("Project 1  User 0  Package 18  [History 1]");
     expect(history).toContain("alpha · run 20260101-000001-alpha · [P]");
     expect(history).not.toContain("> alpha · [P]");
   });
@@ -183,7 +183,7 @@ describe("focused workflow catalog", () => {
     viewer.handleInput("tab");
     expect(viewer.render(100).join("\n")).toContain("[User 0]");
     viewer.handleInput("right");
-    expect(viewer.render(100).join("\n")).toContain("[Package 17]");
+    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
     viewer.handleInput("\x1b[C");
     expect(viewer.render(100).join("\n")).toContain("[History 0]");
     viewer.handleInput("\x1bOC");
@@ -191,7 +191,7 @@ describe("focused workflow catalog", () => {
     viewer.handleInput("left");
     expect(viewer.render(100).join("\n")).toContain("[History 0]");
     viewer.handleInput("\x1b[D");
-    expect(viewer.render(100).join("\n")).toContain("[Package 17]");
+    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
     viewer.handleInput("\x1bOD");
     expect(viewer.render(100).join("\n")).toContain("[User 0]");
   });
@@ -677,7 +677,7 @@ describe("focused workflow catalog", () => {
     expect(harness.editorText).toBe("/workflows run alpha");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".pi", "locus-pi", "runs"))).toBe(false);
+    expect(existsSync(path.join(root, ".locus-pi", "runs"))).toBe(false);
   });
 
   it("never calls setEditorText before the custom browser promise resolves", async () => {
@@ -778,7 +778,7 @@ describe("focused workflow catalog", () => {
     expect(setEditorText).not.toHaveBeenCalled();
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
-    expect(existsSync(path.join(root, ".pi", "locus-pi", "runs"))).toBe(false);
+    expect(existsSync(path.join(root, ".locus-pi", "runs"))).toBe(false);
   });
 
   it.each(["rpc", "print"] as const)("keeps %s passive even if a host object exposes custom UI", async (mode) => {

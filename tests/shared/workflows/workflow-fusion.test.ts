@@ -68,7 +68,7 @@ describe("dsl.fusion", () => {
     const requests: WorkflowAgentRequest[] = [];
     const root = temporaryRoot();
     const runId = "fusion-basic";
-    const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
+    const runDir = path.join(root, ".locus-pi", "runs", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
     const { dsl, getJournal } = createWorkflowRuntime({

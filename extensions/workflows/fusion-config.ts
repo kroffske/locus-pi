@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { workflowRootDir } from "./runtime/workflow-run-layout.js";
 import type { ExtensionContext, ModelLike } from "../_shared/host/pi-api.js";
 import { getProjectRoot } from "../_shared/host/pi-api.js";
 import {
@@ -48,7 +49,7 @@ export function defaultFusionConfig(): FusionConfig {
 }
 
 export function fusionConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, ".pi", "locus-pi", "fusion", "config.json");
+  return path.join(workflowRootDir(projectRoot), "fusion", "config.json");
 }
 
 export async function loadFusionConfig(ctx: ExtensionContext): Promise<FusionConfig> {

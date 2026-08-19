@@ -86,14 +86,14 @@ function fakeDsl(record: { calls: FakeCall[]; phases: string[]; published: strin
 }
 
 describe("Package workflow: task/plan", () => {
-  it("shares a group-only Package namespace with task/implement", () => {
+  it("shares a group-only Package namespace with rendering and substep entries", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-task-family-"));
     temporaryRoots.push(root);
     expect(buildWorkflowCatalogModel(root, root).groups).toContainEqual(
       expect.objectContaining({
         name: "task",
         source: "package",
-        children: ["task/implement", "task/plan"],
+        children: ["task/draft", "task/implement-plan-template", "task/plan", "task/substep"],
       }),
     );
     expect(() => resolveWorkflowTarget({ name: "task" }, root, root)).toThrow(
@@ -167,6 +167,8 @@ describe("Package workflow: task/plan", () => {
     }
 
     expect(prompts.scope).toContain("Move the cron job into a DAG");
+    expect(prompts.scope).toContain("saved draft is the primary accepted task direction");
+    expect(prompts.scope).toContain("When no saved draft exists, use the semantic task directly");
     expect(prompts.scope).toContain("Fully replace `request.md`");
     expect(prompts.scope).toContain("Fully replace `scope.md`");
     expect(prompts.context).toContain("ANSWER:scope");
@@ -178,7 +180,7 @@ describe("Package workflow: task/plan", () => {
     expect(prompts.compose).toContain("ANSWER:task-semantics");
     expect(prompts.compose).toContain("ANSWER:repository-integration");
     expect(prompts.compose).toContain("ANSWER:verification-strategy");
-    expect(prompts.compose).toContain("Move the cron job into a DAG");
+    expect(prompts.compose).toContain("ANSWER:scope");
     expect(prompts.compose).toContain("fully replace the planning files");
     expect(prompts.compose).toContain("`plan.md`");
     expect(prompts.compose).toContain("`step-1.md`, `step-2.md`");
@@ -211,9 +213,9 @@ describe("Package workflow: task/plan", () => {
     ]) {
       expect(prompts.compose, boundary.source).toMatch(boundary);
     }
-    expect(prompts.compose).toContain("one top-level Task Implement run per step file");
-    expect(prompts.compose).toMatch(/each run given\s+only the step id such as `S1`/u);
-    expect(prompts.compose).toContain("the Package workflow `task-via-script`");
+    expect(prompts.compose).toContain("`implement-plan.workflow.mjs`");
+    expect(prompts.compose).toContain("`task/implement-plan-template`");
+    expect(prompts.compose).toContain("`task/substep`");
     expect(prompts.compose).toMatch(/`workflow-author`\s+as a normal authoring request/u);
     expect(prompts.compose).toMatch(/nothing is\s+executed until the owner reviews/u);
     expect(prompts.compose).toMatch(/the owner may edit those files first/u);
@@ -236,9 +238,10 @@ describe("Package workflow: task/plan", () => {
     expect(result).toMatch(/Do not start implementation, do not\s+create implementation todos/u);
     expect(result).toContain("step-<n>.md — the frozen executable catalog");
     expect(result).toContain("You may edit plan.md and the step-<n>.md files before execution");
-    expect(result).toContain("one task/implement run per step file");
-    expect(result).toContain("giving each run only the step id, such as S1");
-    expect(result).toContain("task-via-script");
+    expect(result).toContain("task/implement-plan-template on this same workspace");
+    expect(result).toContain("implement-plan.workflow.mjs");
+    expect(result).toContain("task/substep");
+    expect(result).not.toContain("task-via-script");
     expect(result).not.toContain("task/script");
     expect(result).toContain("workflow-author");
     expect(result).toContain("Author a sequential project-local workflow");
@@ -387,7 +390,7 @@ describe("Package workflow: task/plan", () => {
     });
     expect(resumed.primaryFile?.relativePath).toBe("plan.md");
     expect(readFileSync(path.join(workspace, "step-1.md"), "utf8")).toContain("## S1");
-    expect(existsSync(path.join(workspace, "implement.workflow.mjs"))).toBe(false);
+    expect(existsSync(path.join(workspace, "implement-plan.workflow.mjs"))).toBe(false);
     expect(String(resumed.result)).toContain("This run stops here");
   });
 });

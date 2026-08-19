@@ -4,6 +4,7 @@ import type { ExtensionAPI, ThemeLike } from "../../_shared/host/pi-api.js";
 import { formatWorkflowCommandToken } from "../command-parser.js";
 import { WORKFLOW_RESULT_CUSTOM_TYPE, WORKFLOW_RUN_CUSTOM_TYPE } from "./receipts.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
+import { WORKFLOW_PLANS_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
 
 export interface WorkflowCompletionPresentation {
   generatedRunCommand?: string;
@@ -19,22 +20,52 @@ export function workflowCompletionPresentation(
   if (ref === undefined || res.workspaceDir === undefined || res.workspaceDir === "") return {};
   const primaryFile = res.primaryFile?.absolutePath;
   if (primaryFile === undefined || primaryFile === "") return {};
-  if (path.basename(primaryFile) === "planning-blocker.md") {
+  if (ref === "task/draft") {
+    const workspace = res.workspaceDirRelative;
+    if (workspace === undefined || workspace === "") return {};
+    const planCommand = `/workflows run task/plan ${taskWorkspaceCommandOption(workspace)}`;
     return {
-      nextAction: `Planning failed closed. Read ${primaryFile}, edit the task statement or the planning files it names, then rerun ${ref} on the same workspace; the run never waits for an operator answer mid-run.`,
+      nextAction: `Review ${primaryFile}. If it captures the intended task, run ${planCommand}. Planning reuses this exact workspace and remains a separate operator action.`,
     };
   }
-  if (ref === "task-via-script") {
-    const generatedScript = path.join(res.workspaceDir, "implement.workflow.mjs");
+  if (path.basename(primaryFile) === "planning-blocker.md") {
+    const workspace = res.workspaceDirRelative;
+    const rerunCommand =
+      workspace === undefined || workspace === ""
+        ? ref
+        : `/workflows run ${ref} ${taskWorkspaceCommandOption(workspace)}`;
     return {
-      generatedRunCommand: `/workflows run ${formatWorkflowCommandToken(generatedScript)}`,
+      nextAction: `Planning failed closed. Read ${primaryFile}, edit the task statement or the planning files it names, then run ${rerunCommand}. The run never waits for an operator answer mid-run.`,
+    };
+  }
+  if (ref === "task/implement-plan-template") {
+    const generatedScript = path.join(res.workspaceDir, "implement-plan.workflow.mjs");
+    const workspace = res.workspaceDirRelative;
+    if (workspace === undefined || workspace === "") return {};
+    return {
+      generatedRunCommand: `/workflows run ${formatWorkflowCommandToken(generatedScript)} --output-dir ${formatWorkflowCommandToken(workspace)}`,
       nextAction: `After the owner reads ${generatedScript} and explicitly approves it, run it by that explicit path; rendering is not approval to run.`,
     };
   }
   const stepFiles = path.join(res.workspaceDir, "step-<n>.md");
+  const workspace = res.workspaceDirRelative;
+  const implementCommand =
+    workspace === undefined || workspace === ""
+      ? "task/implement-plan-template on the approved plan workspace"
+      : `/workflows run task/implement-plan-template ${taskWorkspaceCommandOption(workspace)}`;
   return {
-    nextAction: `After the owner reviews and explicitly approves the plan, implement ${primaryFile} using the ${stepFiles} files, one task/implement run per step file, giving each run only the step id such as S1.`,
+    nextAction: `After the owner reviews and explicitly approves ${primaryFile} and the ${stepFiles} files, render the complete implementation plan with the same workspace: ${implementCommand}. Review the generated implement-plan.workflow.mjs before running it by explicit path.`,
   };
+}
+
+function taskWorkspaceCommandOption(workspace: string): string {
+  const runName = workspace.startsWith(WORKFLOW_PLANS_STORAGE_PREFIX)
+    ? workspace.slice(WORKFLOW_PLANS_STORAGE_PREFIX.length)
+    : undefined;
+  if (runName !== undefined && runName !== "" && !runName.includes("/")) {
+    return `--run-name ${formatWorkflowCommandToken(runName)}`;
+  }
+  return `--output-dir ${formatWorkflowCommandToken(workspace)}`;
 }
 
 /** Replace Pi's raw custom-message fallback with distinct operator cards. */
@@ -85,7 +116,10 @@ function detailText(value: unknown): string | undefined {
   return text === "" ? undefined : text;
 }
 
-function packageTaskRef(res: RunWorkflowScriptResult, safeTarget: string): "task/plan" | "task-via-script" | undefined {
+function packageTaskRef(
+  res: RunWorkflowScriptResult,
+  safeTarget: string,
+): "task/draft" | "task/plan" | "task/implement-plan-template" | undefined {
   const ref = res.target !== undefined ? (res.target.source === "package" ? res.target.ref : undefined) : safeTarget;
-  return ref === "task/plan" || ref === "task-via-script" ? ref : undefined;
+  return ref === "task/draft" || ref === "task/plan" || ref === "task/implement-plan-template" ? ref : undefined;
 }

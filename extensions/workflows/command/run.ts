@@ -10,6 +10,7 @@ import {
 } from "../launch-guard.js";
 import { workflowNotFoundBlock, workflowRunConflictBlock, workflowWarningBlock } from "../operator-ui.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "../runtime/workflow-runtime.js";
+import { isTaskWorkspaceName } from "../runtime/workflow-run-layout.js";
 import type { WorkflowCommandLauncher } from "../workflow-command-launcher.js";
 import { persistCommandWorkflowRejection, type WorkflowTranscriptRejectionCode } from "./receipts.js";
 
@@ -44,6 +45,19 @@ export async function handleWorkflowRunCommand(
       ),
     );
     return reject("missing_output_dir", "Workflow not started: missing project-relative path after --output-dir.");
+  }
+  if (parsed.missingRunName === true) {
+    setOperatorWidget(
+      ctx,
+      "workflows",
+      workflowWarningBlock("Missing folder name after --run-name.", `Retry: ${workflowRunRecoveryUsage(parsed)}`),
+    );
+    return reject("missing_run_name", "Workflow not started: missing folder name after --run-name.");
+  }
+  if (parsed.outputDir !== undefined && parsed.runName !== undefined) {
+    const message = "--run-name and --output-dir are mutually exclusive.";
+    setOperatorWidget(ctx, "workflows", workflowWarningBlock(message, workflowRunRecoveryUsage(parsed)));
+    return reject("launch_policy_refused", `Workflow not started: ${message}`);
   }
   if (parsed.input !== undefined && parsed.input.length > WORKFLOW_INPUT_MAX_CHARS) {
     setOperatorWidget(
@@ -86,6 +100,11 @@ export async function handleWorkflowRunCommand(
   }
   const target = targetPreflight.status === "resolved" ? targetPreflight.target : undefined;
   if (target !== undefined) {
+    if (parsed.runName !== undefined && !(target.kind === "name" && isTaskWorkspaceName(target.ref))) {
+      const message = "--run-name is supported only by Package task workflows.";
+      setOperatorWidget(ctx, "workflows", workflowWarningBlock(message, workflowRunRecoveryUsage(parsed)));
+      return reject("launch_policy_refused", `Workflow not started: ${message}`);
+    }
     const launchPolicyError = workflowFreshLaunchPolicyError({
       target,
       projectRoot,
@@ -105,6 +124,7 @@ export async function handleWorkflowRunCommand(
     ...(target === undefined ? {} : { target }),
     ...(parsed.input === undefined ? {} : { input: parsed.input }),
     ...(parsed.outputDir === undefined ? {} : { outputDir: parsed.outputDir }),
+    ...(parsed.runName === undefined ? {} : { runName: parsed.runName }),
     ...(parsed.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsed.resumeFromRunId }),
     // Headless launches default to the no-operator mode: a `print`/`json`
     // session has no operator to reach, so a request for operator input can

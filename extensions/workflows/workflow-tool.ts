@@ -30,7 +30,12 @@ import {
 import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
-import { WORKFLOW_OUTPUT_DIR_MAX_CHARS, WORKFLOW_OUTPUT_DIR_PATTERN } from "./runtime/workflow-output.js";
+import {
+  WORKFLOW_OUTPUT_DIR_MAX_CHARS,
+  WORKFLOW_RUN_NAME_MAX_CHARS,
+  WORKFLOW_RUN_NAME_PATTERN,
+  resolveWorkflowOutputDirectoryPath,
+} from "./runtime/workflow-output.js";
 import {
   formatOperatorScriptIdentity,
   safeOperatorSourceRef,
@@ -49,6 +54,7 @@ import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { createWorkflowTranscript } from "./workflow-transcript.js";
 import {
   readWorkflowRunTextFile,
+  WORKFLOW_PLANS_STORAGE_PREFIX,
   WORKFLOW_RUN_STORAGE_PATTERN,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowRunOutputsDir,
@@ -109,9 +115,15 @@ const WorkflowParams = Type.Object(
     outputDir: Type.Optional(
       Type.String({
         maxLength: WORKFLOW_OUTPUT_DIR_MAX_CHARS,
-        pattern: WORKFLOW_OUTPUT_DIR_PATTERN,
         description:
-          "Optional safe project-relative workflow workspace. Ordinary workflows default to tmp/<workflow-name> beneath the Pi working directory; fresh post-code-review launches require an explicit new outputDir, and resume repeats the source workspace.",
+          "Optional workflow workspace path. Ordinary workflows default to tmp/<workflow-name>; fresh Package task workflows use unique project-local plan workspaces; fresh post-code-review launches require an explicit new outputDir; resume repeats the source workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
+      }),
+    ),
+    runName: Type.Optional(
+      Type.String({
+        maxLength: WORKFLOW_RUN_NAME_MAX_CHARS,
+        pattern: WORKFLOW_RUN_NAME_PATTERN,
+        description: `Optional short Package task run name. The runtime expands it to ${WORKFLOW_PLANS_STORAGE_PREFIX}<runName>. Mutually exclusive with outputDir.`,
       }),
     ),
     continuation: Type.Optional(WorkflowContinuationParams),
@@ -151,9 +163,11 @@ function workflowApprovalDetails(args: unknown): string[] {
       ? typeof record.outputDir === "string"
         ? record.outputDir
         : "explicit outputDir required for fresh post-code-review (tmp/post-code-review/<review-id>)"
-      : typeof record.outputDir === "string"
-        ? record.outputDir
-        : "default <pwd>/tmp/<workflow-name>";
+      : typeof record.runName === "string"
+        ? `${WORKFLOW_PLANS_STORAGE_PREFIX}${record.runName}`
+        : typeof record.outputDir === "string"
+          ? record.outputDir
+          : "default <pwd>/tmp/<workflow-name>, or a unique project-local plan workspace for task planning";
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
@@ -177,7 +191,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     label: "workflow",
-    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional project-relative workflow workspace, and optional host-verified continuation artifacts. The workspace defaults to <pwd>/tmp/<workflow-name> for ordinary workflows; fresh post-code-review launches require an explicit new project-relative outputDir such as tmp/post-code-review/<review-id>, while resume repeats the original workspace. Automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes and reviews .pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
+    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. The workspace defaults to <pwd>/tmp/<workflow-name> for ordinary workflows; fresh Package task workflows use unique .locus-pi/plans/<generated-run-name> workspaces, while runName selects .locus-pi/plans/<runName>; fresh post-code-review launches require an explicit new outputDir such as tmp/post-code-review/<review-id>; resume repeats the original workspace. Automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates catalog sub-agents; agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes and reviews .pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
@@ -197,6 +211,23 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         return errorResult("workflow: continuation and resumeFromRunId are mutually exclusive", {
           owner: "workflows",
         });
+      }
+      if (valid.value.outputDir !== undefined && valid.value.runName !== undefined) {
+        return errorResult("workflow: runName and outputDir are mutually exclusive", { owner: "workflows" });
+      }
+      if (valid.value.outputDir !== undefined) {
+        try {
+          resolveWorkflowOutputDirectoryPath(
+            getProjectRoot(ctx),
+            valid.value.outputDir,
+            workflowTargetLabel(valid.value),
+            getWorkingDirectory(ctx),
+          );
+        } catch (error) {
+          return errorResult(`workflow: ${error instanceof Error ? error.message : String(error)}`, {
+            owner: "workflows",
+          });
+        }
       }
       if (commandLauncher.currentLease(ctx) === undefined) {
         return errorResult("workflow: this extension session has already shut down", { owner: "workflows" });
@@ -232,6 +263,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
           ...(valid.value.items !== undefined ? { items: valid.value.items } : {}),
           ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
+          ...(valid.value.runName !== undefined ? { runName: valid.value.runName } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
           // Same default as the command surface: in a headless (`print`/`json`)

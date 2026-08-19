@@ -228,7 +228,7 @@ export function publicCatalogs(
   }));
 
   // Discovery already yields a stable order: namespaces sorted, each namespace's root before its
-  // sorted children. Re-sorting flat would split `task/plan` from `task-via-script`'s namespace group.
+  // sorted children. Re-sorting flat would split one namespace's root from its grouped children.
   const workflows = packaged.map((entry): WorkflowCatalogEntry => ({
     name: entry.name,
     namespace: workflowTargetComposition({ ref: entry.name }).rootRef,

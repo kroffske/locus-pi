@@ -49,5 +49,6 @@ verifier-backed corrective pass; a remaining defect becomes `BLOCKED`.
   handoffs and runtime-owned choices select branches.
 - It does not stage, commit, push, open a pull request, merge, deploy, mutate a
   remote, stash, or discard user changes.
-- It does not replace `task/implement`: that smaller workflow remains the exact
-  one-step executor for the `task/plan` / `step-<n>.md` task loop.
+- It does not replace `task/substep` or the generated
+  `implement-plan.workflow.mjs`: those surfaces execute approved planning
+  steps, while `implement` applies selected post-code-review findings.

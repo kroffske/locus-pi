@@ -221,6 +221,9 @@ export function createWorkflowTranscript(
           bodyLines.push(firstTranscriptLine(line));
         }
       }
+      if (presentation.nextAction !== undefined) {
+        bodyLines.push("Next action", presentation.nextAction);
+      }
       const headerLines = [
         workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),
         ...formatContinuationLine(res, options.input),

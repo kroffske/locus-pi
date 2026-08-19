@@ -1,3 +1,16 @@
+---
+title: Architecture and repository boundaries
+type: overview
+status: active
+updated: 2026-08-19T22:43:06Z
+source_commit: aeb217fe8dab
+update_event: cleanup
+context: changes=S files=4
+description: Document architecture and repository boundaries.
+owner: locus-pi maintainers
+tags: [architecture, repository]
+---
+
 # Architecture and repository boundaries
 
 ## Sources of truth
@@ -42,11 +55,13 @@ The current direct feature graph has two edges:
 
 Local runtime state is intentionally outside the public source surface and ignored by Git:
 
-- `.pi/locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
-- `.pi/locus-pi/fusion/config.json` — project-local Fusion configuration;
+- `.locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
+- `.locus-pi/plans/<run-name>/` — task drafts, plans, step files, and implementation history;
+- `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
+- `.locus-pi/fusion/config.json` — project-local Fusion configuration;
 - `.locus/runtime/` — goal, loop, and diagnostic state used by Locus extensions;
 - `.tasks/` — optional local task state and explicit bridges;
-- `tmp/<workflow-name>/` or an explicit project-relative output directory — workflow-owned working files.
+- `tmp/<workflow-name>/` or an explicit project-relative output directory — non-task workflow-owned working files.
 
 Runtime state may contain project paths, prompts, model output, transcripts, or other private material. Do not commit it.
 

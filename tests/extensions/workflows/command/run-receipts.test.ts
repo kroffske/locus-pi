@@ -58,6 +58,7 @@ describe("workflow command receipts", () => {
   it.each([
     ["run alpha --resume", "missing_resume_id", "alpha"],
     ["run alpha --output-dir", "missing_output_dir", "alpha"],
+    ["run task/draft --run-name", "missing_run_name", "task/draft"],
     [`run alpha -- ${"x".repeat(WORKFLOW_INPUT_MAX_CHARS + 1)}`, "input_too_long", "alpha"],
     ["run definitely-missing", "workflow_not_found", "definitely-missing"],
     ["run post-code-review", "launch_policy_refused", "post-code-review"],

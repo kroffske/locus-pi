@@ -1,3 +1,16 @@
+---
+title: Extension reference
+type: overview
+status: active
+updated: 2026-08-19T22:43:06Z
+source_commit: aeb217fe8dab
+update_event: cleanup
+context: changes=S files=4
+description: Reference the shipped extension surface.
+owner: locus-pi maintainers
+tags: [extensions, reference]
+---
+
 # Extension reference
 
 The authoritative default list is `package.json#pi.extensions`. The table below is a readable index; each manifest remains the machine-owned declaration.

@@ -129,7 +129,7 @@ describe("workflow workspace and run evidence", () => {
     assert.ok(!outputNames.includes("plan.md"));
     assert.deepEqual(readdirSync(result.runDir).sort(), ["outputs", "runtime"]);
     assert.ok(readdirSync(workflowRunRuntimeDir(result.runDir)).includes("journal.ndjson"));
-    assert.match(result.runDir, /\.pi\/locus-pi\/runs\//u);
+    assert.match(result.runDir, /\.locus-pi\/runs\//u);
   });
 
   it("round-trips generated physical identities longer than the explicit outputDir bound", async () => {
@@ -514,7 +514,7 @@ describe("workflow workspace and run evidence", () => {
     assert.deepEqual(readdirSync(elsewhere), []);
   });
 
-  it.each([".pi", ".pi/locus-pi", ".pi/locus-pi/runs"])(
+  it.each([".locus-pi", ".locus-pi/runs"])(
     "rejects a symlinked %s ancestor for discovery and retained evidence reads",
     (ancestor) => {
       const root = project();
@@ -526,7 +526,7 @@ describe("workflow workspace and run evidence", () => {
       mkdirSync(path.dirname(lexicalAncestor), { recursive: true });
 
       const outsideTarget = path.join(outside, path.basename(lexicalAncestor));
-      const suffix = ancestor === ".pi" ? ["locus-pi", "runs"] : ancestor.endsWith("locus-pi") ? ["runs"] : [];
+      const suffix = ancestor === ".locus-pi" ? ["runs"] : [];
       const outsideRunDir = path.join(outsideTarget, ...suffix, runId);
       const outsideRuntime = path.join(outsideRunDir, "runtime");
       const outsideArtifacts = path.join(outsideRuntime, "artifacts");

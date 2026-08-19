@@ -52,9 +52,10 @@ function recursiveTypeScriptFiles(directory: string): string[] {
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "implement",
   "live-smoke",
-  "task/implement",
+  "task/draft",
+  "task/implement-plan-template",
   "task/plan",
-  "task-via-script",
+  "task/substep",
   "post-code-review",
   "post-code-review/boundaries",
   "post-code-review/contracts",
@@ -83,9 +84,10 @@ const PI_PACKAGES = [
 const PACKAGE_WORKFLOW_PATHS = {
   implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
-  "task/implement": "extensions/workflows/examples/task/implement.workflow.mjs",
+  "task/draft": "extensions/workflows/examples/task/draft.workflow.mjs",
+  "task/implement-plan-template": "extensions/workflows/examples/task/implement-plan-template.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
-  "task-via-script": "extensions/workflows/examples/task-via-script/task-via-script.workflow.mjs",
+  "task/substep": "extensions/workflows/examples/task/substep.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
   "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
   "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
@@ -329,17 +331,18 @@ describe("npm public package boundary", () => {
     );
   });
 
-  it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
+  it("keeps the .locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
+    const presentation = path.join(root, "extensions", "workflows", "workflow-tool.ts");
     const violations: string[] = [];
     for (const file of recursiveTypeScriptFiles(path.join(root, "extensions"))) {
-      if (file === owner) continue;
+      if (file === owner || file === presentation) continue;
       const source = readFileSync(file, "utf8");
       const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const visit = (node: ts.Node): void => {
         const ownsPrefix =
-          (ts.isStringLiteralLike(node) && node.text.includes(".pi/locus-pi/")) ||
-          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".pi/locus-pi/"));
+          (ts.isStringLiteralLike(node) && node.text.includes(".locus-pi/")) ||
+          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".locus-pi/"));
         if (ownsPrefix) {
           const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           violations.push(`${path.relative(root, file)}:${line}`);
@@ -505,49 +508,50 @@ describe("npm public package boundary", () => {
 
     expect(packedPaths.has(skillPath)).toBe(true);
     for (const contract of [
+      'name: "task/draft"',
       'name: "task/plan"',
-      'name: "task/implement"',
-      "tmp/<select-name>",
+      'name: "task/implement-plan-template"',
+      'name: "task/substep"',
+      ".locus-pi/plans/<run-name>",
+      "<planning-workspace>",
       "resumeFromRunId",
-      "todo_write",
-      "autoContinue",
+      'runName: "<run-name>"',
+      'scriptPath: "<planning-workspace>/implement-plan.workflow.mjs"',
       "history/S<n>.md",
       "Status: blocked",
     ]) {
       expect(source, contract).toContain(contract);
     }
-    expect(source).toContain("The main Pi agent owns orchestration");
-    expect(source).toContain('"op": "append"');
-    expect(source).not.toContain('"op": "init"');
-    expect(source).toContain("do not put\nmultiline text into todo items");
-    expect(source).toContain("preserves unrelated session\ntodos");
-    expect(source).toContain("20-continuation safety limit");
-    expect(source).toContain("Do not call another workflow from inside either Package workflow");
-    expect(source).toContain("`plan.md` first defines coherent top-level work units");
-    expect(source).toMatch(/the `step-<n>\.md` files\s+are the only executable task catalog/u);
-    expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
-    expect(source).toContain("the exact step catalog is frozen");
+    expect(source).toContain("The main Pi agent owns every review and launch boundary");
+    expect(source).not.toContain("todo_write");
+    expect(source).not.toContain('"op": "append"');
+    expect(source).toContain('input: "<step id, such as S1>"');
+    expect(source).toContain("one literal implementation node per approved step");
+    expect(source).toContain("The renderer does not invoke `task/plan`");
+    expect(source).toContain("Read `plan.md` and every `step-<n>.md`");
+    expect(source).toContain("Do not invent a combined\n   `tasks.md` catalog");
+    expect(source).toMatch(/complete flat\s+`## S<n> — <title>` heading/u);
+    expect(source).toContain("A material catalog change needs\n   fresh review before rendering");
     expect(source).toMatch(
-      /hand the approved `plan\.md`\s+and the `step-<n>\.md` catalog\s+to\s+`workflow-author`\s+as a\s+normal authoring request/u,
+      /hand the approved plan and complete step catalog to `workflow-author` as\s+a normal authoring request/u,
     );
     expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
-    expect(source).toContain("Do not author `.workflow.mjs` source yourself, inject\n  `Design only`");
+    expect(source).toContain("Do not inject `Design only`; only the user may request");
     expect(source).not.toContain("`Design only:`");
     expect(source).not.toContain("`Build approved design: <exact path>`");
-    expect(source).toMatch(
-      /optional\s+reviewer\s+after\s+a\s+generated\s+step\s+belongs\s+to\s+the\s+bespoke\s+design/u,
-    );
+    expect(source).toContain("For a graph that needs review between steps, concurrency, or a bounded revision");
 
     // Planning must not roll into execution. Without these, one confident
     // paraphrase turns "here is the plan" back into an unattended run.
-    expect(source).toContain("Planning and execution are two separate user turns");
+    expect(source).toContain("Planning, rendering, and execution are separate user turns");
     expect(source).toContain("## Stop and hand the plan to the user");
-    expect(source).toMatch(/Do not create todos\. Do not call\s+`task\/implement`/u);
-    expect(source).toMatch(/not an instruction to you/u);
-    expect(source).toMatch(/Approval is a new user turn/u);
-    expect(source).toContain("Only after the user approved the todo route");
-    expect(source).toContain("Resuming is still execution");
-    expect(source).toContain("implement.workflow.mjs");
+    expect(source).toContain("Do not render `implement-plan.workflow.mjs`, execute project changes, create");
+    expect(source).toContain("Approval must arrive in a later user turn");
+    expect(source).toContain("Only after the user approves the saved plan");
+    expect(source).toContain("Resuming is execution");
+    expect(source).toContain("implement-plan.workflow.mjs");
+    expect(source).not.toContain('name: "task/implement"');
+    expect(source).not.toContain("task-via-script");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

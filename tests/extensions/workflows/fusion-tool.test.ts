@@ -27,7 +27,7 @@ function temporaryRoot(): string {
 function completedDirectResult(root: string): DirectFusionRunResult {
   return {
     runId: "20260731-120000-test",
-    runDir: path.join(root, ".pi", "locus-pi", "runs", "20260731-120000-test"),
+    runDir: path.join(root, ".locus-pi", "runs", "20260731-120000-test"),
     workspaceDir: path.join(root, "tmp", "fusion"),
     ok: true,
     disposition: { status: "completed" },

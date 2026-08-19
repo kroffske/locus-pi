@@ -31,6 +31,7 @@ export interface WorkflowCommandLaunchRequest {
   targetKind?: ResolvedWorkflowTarget["kind"];
   input?: string;
   outputDir?: string;
+  runName?: string;
   resumeFromRunId?: string;
   /** Run-level no-operator mode (operator input fails closed). */
   noOperator?: true;
@@ -145,6 +146,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
           ...scriptInput,
           ...(request.input === undefined ? {} : { input: request.input }),
           ...(request.outputDir === undefined ? {} : { outputDir: request.outputDir }),
+          ...(request.runName === undefined ? {} : { runName: request.runName }),
           ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
           ...(request.noOperator === undefined ? {} : { noOperator: request.noOperator }),
           ...(request.continuation === undefined ? {} : { continuation: request.continuation }),

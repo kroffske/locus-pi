@@ -215,7 +215,11 @@
       "namespace": "post-code-review"
     },
     {
-      "name": "task/implement",
+      "name": "task/draft",
+      "namespace": "task"
+    },
+    {
+      "name": "task/implement-plan-template",
       "namespace": "task"
     },
     {
@@ -223,8 +227,8 @@
       "namespace": "task"
     },
     {
-      "name": "task-via-script",
-      "namespace": "task-via-script"
+      "name": "task/substep",
+      "namespace": "task"
     },
     {
       "name": "workflow-creator",

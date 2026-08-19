@@ -1,3 +1,16 @@
+---
+title: Getting started
+type: guide
+status: active
+updated: 2026-08-19T22:43:07Z
+source_commit: aeb217fe8dab
+update_event: cleanup
+context: changes=S files=4
+description: Guide installation and first runtime checks.
+owner: locus-pi maintainers
+tags: [installation, getting-started]
+---
+
 # Getting started
 
 ## Install the published package

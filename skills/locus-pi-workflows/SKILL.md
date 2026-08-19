@@ -52,14 +52,14 @@ programmatic embedder owns the frozen list. Plan approval alone does not start
 workflow authoring; once the user requests that workflow, the ordinary continuous
 design -> review -> build sequence applies unless they explicitly request design only.
 
-The separate Package root `task-via-script` owns the one-run alternative: it
-runs the full `task/plan` pipeline as its own planning stage in the same
-workflow workspace and renders `implement.workflow.mjs` from a fixed
-template — one literal implementation node per `step-<n>.md` file, then a
-summary node. That file is an unregistered draft that resolves only by explicit
-path, and the owner reviews it before running it. Use Design and Build for a
-graph the fixed template cannot express, such as a reviewer between steps, a
-bounded revision loop, or concurrency.
+The Package child `task/implement-plan-template` owns the fixed sequential
+renderer. After the owner approves `task/plan`, it reads that same workspace and
+renders `implement-plan.workflow.mjs` — one literal implementation node per
+`step-<n>.md` file, then a summary node. It never plans or replans. That file is
+an unregistered draft that resolves only by explicit path, and the owner reviews
+it before running it. `task/substep` is the separate manual one-step worker. Use
+Design and Build for a graph the fixed template cannot express, such as a
+reviewer between steps, a bounded revision loop, or concurrency.
 
 ## Design contract
 
@@ -175,7 +175,10 @@ The runtime injects one exact absolute workflow workspace into every child
 prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
 session working directory inside the project. A directly launched qualified
 child keeps both components (`group/child` -> `<pwd>/tmp/group/child/`); an
-invoked child shares its parent's selected workspace. Name the assigned
+invoked child shares its parent's selected workspace. Fresh Package task
+workflows use the runtime-owned
+`.locus-pi/plans/<generated-run-name>` exception. `runName` selects
+`.locus-pi/plans/<runName>`. Name the assigned
 relative file and tell writers to replace it idempotently. Use `projectRoot()`
 only when an agent needs source context. Do not add JavaScript path parsers,
 directory collectors, permission fields, or alternate writable roots.
@@ -236,10 +239,11 @@ selector and accepts `<root>` or `<root>/<child>` with normal Project → User �
 Package precedence. `scriptPath` remains an exact project-relative selector;
 `packageName` remains legacy compatibility for an exact Package entry.
 
-Run evidence remains under `.pi/locus-pi/runs/<runId>/` and contains only
+Run evidence remains under `.locus-pi/runs/<runId>/` and contains only
 `outputs/` plus `runtime/`. Durable user files belong under the project-local
 workspace returned by `dsl.outputDir()`, defaulting to
-`<pwd>/tmp/<workflow-name>/`. Tell writers to replace their assigned relative
+`<pwd>/tmp/<workflow-name>/`; fresh Package task workflows instead
+use `.locus-pi/plans/<generated-run-name>/`. Tell writers to replace their assigned relative
 file idempotently and never create workflow artifacts in the project root.
 `publishPrimaryFile()` returns a host-validated path, byte count, and digest for
 one regular non-empty file. Workspace files survive failed runs. Project source is
