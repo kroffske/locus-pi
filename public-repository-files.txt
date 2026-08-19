@@ -128,9 +128,9 @@ extensions/ast-structural-edit/index.ts
 extensions/ast-structural-edit/manifest.json
 extensions/ast-structural-edit/resolve.ts
 extensions/devext-doctor/README.md
-extensions/devext-doctor/extension-inventory.ts
 extensions/devext-doctor/index.ts
 extensions/devext-doctor/manifest.json
+extensions/devext-doctor/package-inventory.mjs
 extensions/loop/README.md
 extensions/loop/command-parser.ts
 extensions/loop/command-router.ts
@@ -318,6 +318,7 @@ tests/contracts/docs/extension-reference.test.ts
 tests/contracts/docs/generated-catalogs.test.ts
 tests/contracts/extensions/manifest-schema.test.ts
 tests/contracts/extensions/runtime-registration.test.ts
+tests/contracts/doctor/package-inventory.test.ts
 tests/contracts/helpers/package-contract.ts
 tests/contracts/host/selective-package-loading.test.ts
 tests/contracts/package/package-metadata.test.ts
@@ -326,6 +327,7 @@ tests/docs/public-docs.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts
 tests/extensions/agents/agent-entrypoint-surfaces.test.ts
+tests/extensions/devext-doctor/doctor-rendering.test.ts
 tests/extensions/agents/agent-fleet-menu.test.ts
 tests/extensions/agents/agent-live-store-entrypoints.test.ts
 tests/extensions/agents/agent-observer.test.ts

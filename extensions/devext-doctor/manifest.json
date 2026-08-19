@@ -11,10 +11,11 @@
     "doctor and task-lifecycle dry-run receipts use typed diagnostic blocks with explicit evidence boundaries and recovery actions",
     "unknown devext actions render a typed WARN with no-action evidence and full usage recovery",
     "RPC doctor and task-lifecycle projections stay within the 10-line string-array budget while preserving evidence and recovery",
-    "readable .tasks/index.json and task workspace files for /devext task-lifecycle dry-runs"
+    "readable .tasks/index.json and task workspace files for /devext task-lifecycle dry-runs",
+    "doctor reads package.json#pi.extensions and the declared manifests at command time and fails closed with a diagnostic when one is missing or unreadable"
   ],
   "stateUsed": [
-    "extension inventory manifests",
+    "package.json#pi.extensions and the manifest.json of each declared extension",
     ".tasks/index.json task index",
     ".tasks/<task>/task.md Closure text",
     ".tasks/<task>/qa.md ACCEPTED evidence"
@@ -49,6 +50,9 @@
   "docsPath": "extensions/devext-doctor/README.md",
   "sourceAuditPath": null,
   "tests": [
+    "tests/contracts/doctor/package-inventory.test.ts",
+    "tests/extensions/devext-doctor/doctor-rendering.test.ts",
+    "tests/integration/package-cli.test.ts",
     "tests/integration/command-ui-lifecycle.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/session/session-core-jsonl.test.ts",

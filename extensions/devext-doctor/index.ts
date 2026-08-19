@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
-import { idsByCurrentStatus, idsByOwnershipStatus } from "./extension-inventory.js";
+import { countBy, readPackageInventory } from "./package-inventory.mjs";
 import {
   planTaskLifecycleTransition,
   type TaskLifecyclePlan,
@@ -72,61 +72,46 @@ export default function devextDoctor(pi: ExtensionAPI): void {
   );
 }
 
+/**
+ * The installed package surface, not the project's migration history. Everything rendered here comes
+ * from `package.json#pi.extensions` and the manifests it points at, read at command time, so a twelfth
+ * entrypoint appears without editing this file and a missing one is reported instead of assumed.
+ */
 function doctorBlock(compact = false): OperatorBlock {
-  const activeDefaults = idsByCurrentStatus("active");
-  const compatWrappers = idsByOwnershipStatus("compat-wrapper");
-  const activeCompatWrappers = activeDefaults.filter((id) => compatWrappers.includes(id)).sort();
-  const disabledCompatWrappers = compatWrappers.filter((id) => !activeDefaults.includes(id)).sort();
-  const ompOwnedToImport = idsByOwnershipStatus("omp-owned-to-import");
-  const redesignLater = idsByOwnershipStatus("redesign-later");
-  const splitRequired = idsByOwnershipStatus("split-required");
-  const fixtures = idsByOwnershipStatus("locus-specific").filter((id) => !activeDefaults.includes(id));
-  const deleted = idsByCurrentStatus("deleted");
-  if (compact) {
-    return {
-      type: "VIEW",
-      subject: "Extension doctor",
-      primary: `${activeDefaults.length} active default extension(s).`,
-      badges: [
-        { text: "status:ok", tone: "success" },
-        { text: "diagnostic", tone: "muted" },
-      ],
-      body: [
-        `default surface: ${activeDefaults.length} active extension(s)`,
-        compactDevextLine(`active defaults: ${summarizeIds(activeDefaults)}`),
-        compactDevextLine(
-          `compat wrappers: ${activeCompatWrappers.length} active; ${summarizeDisabled(disabledCompatWrappers)}`,
-        ),
-        compactDevextLine(
-          `backlog/design: omp=${ompOwnedToImport.length} redesign=${redesignLater.length} split=${splitRequired.length} fixtures=${fixtures.length} deleted=${deleted.length}`,
-        ),
-      ],
-      metadata: [
-        "Evidence boundary: inventory/manifests snapshot only; not runtime proof.",
-        "Details: docs/extensions.md; manifests under extensions/**",
-      ],
-      controls: ["Action: /devext task-lifecycle <id> <status>"],
-    };
+  const inventory = readPackageInventory();
+  const declared = inventory.rows.length;
+  const ids = inventory.rows.map((row) => row.id).sort();
+  const healthy = inventory.problems.length === 0;
+  const line = compact ? compactDevextLine : (value: string) => value;
+  const body = [
+    line(`package: ${inventory.name} ${inventory.version}`),
+    line(`declared entrypoints: ${declared}`),
+    line(`installed: ${summarizeIds(ids)}`),
+    line(`risk: ${countBy(inventory.rows, "risk").join(" ") || "none"}`),
+    line(`ownership: ${countBy(inventory.rows, "ownership").join(" ") || "none"}`),
+  ];
+  if (!healthy) {
+    // Compact and RPC projections have a line budget the operator layer would otherwise spend
+    // shedding rows; one summarized line keeps the first fault and the count of the rest visible.
+    if (compact) body.push(line(`problems: ${summarizeProblems(inventory.problems)}`));
+    else body.push(...inventory.problems.map((problem) => `problem: ${problem}`));
   }
   return {
-    type: "VIEW",
+    type: healthy ? "VIEW" : "WARN",
     subject: "Extension doctor",
-    primary: `${activeDefaults.length} active default extension(s).`,
+    primary: line(
+      healthy
+        ? `${declared} declared entrypoint(s); every entrypoint and manifest is present.`
+        : `${declared} declared entrypoint(s); ${inventory.problems.length} problem(s) found.`,
+    ),
     badges: [
-      { text: "status:ok", tone: "success" },
+      { text: healthy ? "status:ok" : "status:degraded", tone: healthy ? "success" : "warning" },
       { text: "diagnostic", tone: "muted" },
     ],
-    body: [
-      `default surface: ${activeDefaults.length} active extension(s)`,
-      `active defaults: ${summarizeIds(activeDefaults)}`,
-      `compat wrappers: ${activeCompatWrappers.length} active; ${summarizeDisabled(disabledCompatWrappers)}`,
-      `omp backlog: ${summarizeIds(ompOwnedToImport)}`,
-      `redesign/split: ${redesignLater.length} redesign; ${splitRequired.length} split`,
-      `fixtures/deleted: ${fixtures.length} fixture(s); ${deleted.length} deleted`,
-    ],
+    body,
     metadata: [
-      "Evidence boundary: inventory/manifests snapshot only; disabled or listed extensions are not runtime-proven.",
-      "Cleanup: clears on next unrelated input.",
+      "Evidence boundary: declared entrypoints and their manifests were read from disk; this is not runtime proof that each extension loaded.",
+      "Manifest contents are reported, not validated: `npm run check:manifests` owns the manifest contract.",
       "Details: docs/extensions.md; manifests under extensions/**",
     ],
     controls: ["Action: /devext task-lifecycle <task-id> <target-status>"],
@@ -206,22 +191,15 @@ function compactDevextLine(value: string): string {
   return compactOperatorLine(value, 72);
 }
 
+function summarizeProblems(problems: string[]): string {
+  const [first, ...rest] = problems;
+  return rest.length === 0 ? (first ?? "none") : `${first}; +${rest.length} more`;
+}
+
 function summarizeIds(ids: string[]): string {
   if (ids.length === 0) return "0 total";
   const preview = ids.slice(0, DOCTOR_PREVIEW_LIMIT);
   const remaining = ids.length - preview.length;
   const more = remaining > 0 ? `, +${remaining} more` : "";
   return `${ids.length} total (${preview.join(", ")}${more})`;
-}
-
-function summarizeDisabled(ids: string[]): string {
-  if (ids.length === 0) return "0 disabled";
-  return `${ids.length} disabled (${summarizePreview(ids)})`;
-}
-
-function summarizePreview(ids: string[]): string {
-  const preview = ids.slice(0, DOCTOR_PREVIEW_LIMIT);
-  const remaining = ids.length - preview.length;
-  const more = remaining > 0 ? `, +${remaining} more` : "";
-  return `${preview.join(", ")}${more}`;
 }
