@@ -61,8 +61,8 @@
     "ui": ["editor", "setWidget", "theme"]
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/todo-context.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/todo-write.md",
+  "docsPath": "extensions/todo-context/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/todo-context/todo-context.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",

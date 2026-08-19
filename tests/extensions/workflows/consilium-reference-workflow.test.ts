@@ -342,8 +342,13 @@ describe("consilium reference workflow", () => {
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
+      "task-via-script",
       "task/implement",
       "task/plan",
+      "workflow-creator",
+      "workflow-creator/build",
+      "workflow-creator/design",
+      "workflow-creator/svg",
     ]);
     expect(packagedWorkflowNames()).not.toContain("consilium");
 

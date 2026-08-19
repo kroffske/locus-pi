@@ -52,7 +52,7 @@
     "ui": ["setWidget", "setStatus", "notify"]
   },
   "risk": "low",
-  "docsPath": "docs/extensions/active/devext-doctor.md",
+  "docsPath": "extensions/devext-doctor/README.md",
   "sourceAuditPath": null,
   "tests": [
     "tests/integration/command-ui-lifecycle.test.ts",

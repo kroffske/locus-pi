@@ -3,7 +3,7 @@
 The bundled entry point is
 [`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md).
 The complete runtime, trust, replay, and artifact reference is
-[`docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md).
+[`REFERENCE.md`](REFERENCE.md).
 
 ## Contract: Design, review, Build
 
@@ -49,11 +49,12 @@ catalog agent. A raw request is Author: Design first, review, then Build. The
 agent’s exact design template and standard source profile live in its prompt and
 the skill above.
 
-An owner-approved `plan.md` plus its canonical `steps.md` may be supplied as
-Design input for an optional sequential project-local workflow. Each complete
-`## S<n>` block remains one exact task prompt. The preferred operator-facing
-Build renders those blocks as literal author-known prompts in generated source; a programmatic
-embedder may instead transport the same frozen list through caller `items`.
+An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
+supplied as Design input for an optional sequential project-local workflow. Each
+complete `## S<n>` block remains one exact task prompt. The preferred
+operator-facing Build renders those blocks as literal author-known prompts in
+generated source; a programmatic embedder may instead transport the same frozen
+list through caller `items`.
 Neither path parses Plan prose at runtime, adds a Package example, or skips the
 ordinary Design -> review -> Build sequence. Plan approval alone does not start
 workflow authoring. The selected card
@@ -153,6 +154,16 @@ Standard generated source omits `maxToolCalls` and `timeoutMs`. The package
 already supplies emergency per-attempt defaults. Emit one of those fields only
 when the operator explicitly requests a narrower or raised per-attempt fuse and
 the approved Design records why. Do not mechanically sweep legacy workflows.
+
+Standard generated source also omits `ask: true`. Live operator questions
+(`agent({ ask: true })`, REFERENCE "Live operator questions") are an
+interactive capability for operator-attended workflows: the child asks through
+`workflow_ask` and continues with the answer in the same session. Declare it
+only when the approved Design names the stage that may ask and why an
+assumption is not enough — decomposing unknowns into explicit assumptions
+remains the default. An `ask: true` stage makes the workflow unusable in
+`print`/`json` and unattended runs (the call fails closed with
+`ask-unavailable`), so a pipeline meant for automation must not declare it.
 
 ## Target source shape
 

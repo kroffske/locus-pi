@@ -1,24 +1,24 @@
 # Plan to sequential workflow
 
 Use when an owner has approved a readable `plan.md` and its canonical
-`steps.md` catalog, and wants an optional project-local workflow to execute that
-frozen catalog as one visible sequential graph. Avoid this card when the Plan is
-still changing, approval is missing, or the ordinary main-agent todo path is
-more recoverable.
+`step-<n>.md` catalog, and wants an optional project-local workflow to execute
+that frozen catalog as one visible sequential graph. Avoid this card when the
+Plan is still changing, approval is missing, or the ordinary main-agent todo path
+is more recoverable.
 
 Avoid it too when the plain `implement each step in order, then summarize` graph
-is all that is wanted: the Package `task/plan` workflow already renders exactly that
-into `execute.workflow.mjs` in its workflow workspace from a fixed template, with
-no Design or Build turn. Use this card for what the template deliberately omits —
-a reviewer between steps, a bounded revision loop, concurrency, or a different
-publication.
+is all that is wanted: the Package `task-via-script` workflow replans and renders
+exactly that into `implement.workflow.mjs` in the same workflow workspace from a
+fixed template, with no Design or Build turn. Use this card for what the template deliberately
+omits — a reviewer between steps, a bounded revision loop, concurrency, or a
+different publication.
 
 Design input: the approved Plan plus every complete canonical `## S<n>` block
-from `steps.md`. Request ordinary continuous authoring: the author writes Design,
-reviews it, and Builds matching source in the same turn. Do not inject `Design
-only` or a later Build-only request; only the user may separately request a pause
-after design. Approving the Plan itself does not approve or start workflow
-authoring.
+from the `step-<n>.md` catalog. Request ordinary continuous authoring: the
+author writes Design, reviews it, and Builds matching source in the same turn.
+Do not inject `Design only` or a later Build-only request; only the user may
+separately request a pause after design. Approving the Plan itself does not
+approve or start workflow authoring.
 
 Graph: `task-1 implement -> optional task-1 review -> task-2 implement ->
 optional task-2 review -> ... -> publish`. Each implementer receives exactly one
@@ -37,7 +37,8 @@ author-known prompts in generated `.pi/workflows/<name>.workflow.mjs` source.
 Programmatic embedders may instead pass the same frozen blocks as caller
 `items`; that transport has no Locus items count or character policy. Neither
 lane escapes total attempts, time, context, JSON, or Node-memory limits, and
-workflow JavaScript never reparses `steps.md` or semantic task prose at runtime.
+workflow JavaScript never reparses the `step-<n>.md` catalog or semantic task
+prose at runtime.
 
 Failure: any implementer or blocking reviewer failure stops the run before the
 next task. Review is advisory or blocking only as the approved Design states.

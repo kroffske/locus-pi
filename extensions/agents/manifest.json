@@ -120,8 +120,8 @@
     ]
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/agents.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/agents.md",
+  "docsPath": "extensions/agents/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/agents/agents-discovery.test.ts",
     "tests/extensions/agents/agent-catalog-hint.test.ts",

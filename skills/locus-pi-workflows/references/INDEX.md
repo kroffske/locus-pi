@@ -10,7 +10,7 @@ Choose from the requirement, not from agent count. Read only the selected card.
 | A decision only a person may make                    | [Human gate](./human-gate.md)                                     |
 | Preserve several competing solutions before choosing | [Bounded candidate search](./bounded-candidate-search.md)         |
 | Units are unknown until runtime                      | [Dynamic orchestrator-workers](./dynamic-orchestrator-workers.md) |
-| Approved Plan plus canonical `steps.md`              | [Plan to sequential workflow](./plan-to-sequential-workflow.md)   |
+| Approved Plan plus canonical `step-<n>.md` catalog   | [Plan to sequential workflow](./plan-to-sequential-workflow.md)   |
 
 ## Canonical-name cross-reference
 

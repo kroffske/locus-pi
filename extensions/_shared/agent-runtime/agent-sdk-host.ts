@@ -1045,7 +1045,15 @@ async function runChildSession(
     : undefined;
   const effectiveTools =
     readOnlyCapabilities?.tools ?? (request.allowedTools.includes("*") ? undefined : [...request.allowedTools]);
-  const excludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent"];
+  const baseExcludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent"];
+  // Request-driven excludes stack on top of the defaults for BOTH capability
+  // shapes: the workflow bridge excludes the stock `ask` from every child (its
+  // no-UI refusal is model-visible text and its option timeout answers for the
+  // operator — both fail-open), and read-only capability lists do not cover it.
+  const excludedTools =
+    request.additionalExcludeTools === undefined || request.additionalExcludeTools.length === 0
+      ? baseExcludedTools
+      : [...new Set([...baseExcludedTools, ...request.additionalExcludeTools])];
   const sessionOptions: SdkCreateSessionOptionsLike = {
     cwd,
     // Write-capable children may run `workflow`, but no child can recursively
@@ -1054,7 +1062,8 @@ async function runChildSession(
     excludeTools: excludedTools,
   };
   if (effectiveTools !== undefined) sessionOptions.tools = effectiveTools;
-  if (readOnlyCapabilities?.customTools !== undefined) sessionOptions.customTools = readOnlyCapabilities.customTools;
+  const customTools = [...(readOnlyCapabilities?.customTools ?? []), ...(request.customTools ?? [])];
+  if (customTools.length > 0) sessionOptions.customTools = customTools;
   if (model !== undefined && model !== null) sessionOptions.model = model;
   if (thinkingLevel !== undefined) sessionOptions.thinkingLevel = thinkingLevel;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);

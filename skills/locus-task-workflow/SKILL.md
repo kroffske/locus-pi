@@ -6,7 +6,9 @@ description: Plan one task into workspace files, stop for the user's review, the
 # Locus task workflow
 
 Use this skill when the user wants a task planned and carried out through the
-shipped `task/plan` and `task/implement` Package workflows.
+shipped `task/plan` and `task/implement` Package workflows. The separate
+`task-via-script` root owns the one-run alternative: its own planning stage
+plus the rendered sequential implement script.
 
 The main Pi agent owns orchestration. Workflow children do not spawn more
 agents. Workflow JavaScript does not parse plans or manage the todo queue.
@@ -30,30 +32,33 @@ Execution starts only when the user, in a later turn, tells you to start it.
 4. If planning fails after a run id is available, retry the same workflow with
    the same `input` and `outputDir` plus `resumeFromRunId: <failed run id>`.
    Do not invent a planning ledger: replay owns completed agent calls.
-5. Read `tmp/<select-name>/plan.md` and `tmp/<select-name>/steps.md`. Stop if
-   either file is missing, empty, or does not describe an executable task.
-6. Confirm `plan.md` first defines coherent top-level work units and `steps.md`
-   is the only executable task catalog. Do not create `tasks.md`.
+5. Read `tmp/<select-name>/plan.md` and every `tmp/<select-name>/step-<n>.md`
+   file. Stop if `plan.md` or the step files are missing, empty, or do not
+   describe an executable task.
+6. Confirm `plan.md` first defines coherent top-level work units and that
+   the `step-<n>.md` files are the only executable task catalog. Do not create
+   a single combined catalog file such as `tasks.md`.
 7. Confirm every executable task is one complete flat
-   `## S<n> — <title>` block with no nested structural headings. Each block must
-   embed work-unit identity, decomposition boundary, exact goal, paths/evidence,
-   dependencies, allowed ownership, verification, and done condition. Reject
-   and rerun `task/plan` when any block is incomplete or incoherent.
-8. Read `tmp/<select-name>/execute.workflow.mjs`, the execute script the `task/plan`
-   run rendered from its fixed template. Confirm it has one node per `## S<n>`
-   block in catalog order and no machinery beyond that.
+   `## S<n> — <title>` block in its own `step-<n>.md` file, with no nested
+   structural headings and an `S<n>` that matches the `<n>` in its file name.
+   Each block must embed work-unit identity, decomposition boundary, exact goal,
+   paths/evidence, dependencies, allowed ownership, verification, and done
+   condition. Reject and rerun `task/plan` when any block is incomplete or
+   incoherent.
+8. Planning renders no implement script. If the user later wants one,
+   `task-via-script` replans across this same workspace — preserving compatible
+   owner edits — and renders `implement.workflow.mjs`; do not run it now.
 
 ## Stop and hand the plan to the user
 
-Now stop. Report where `plan.md`, `steps.md`, and `execute.workflow.mjs` live,
-summarize the work units and the step titles in order, and name anything you
-would change. Then end your turn.
+Now stop. Report where `plan.md` and the `step-<n>.md` files live, summarize the
+work units and the step titles in order, and name anything you would change.
+Then end your turn.
 
-Do not create todos. Do not call `task/implement`. Do not run
-`execute.workflow.mjs`. Do not edit project files toward any step. The `task/plan`
-run's own result text lists next actions; it is a description of the user's
-options, not an instruction to you, and neither it nor a plan that looks
-obviously correct is approval.
+Do not create todos. Do not call `task/implement` or `task-via-script`. Do not edit
+project files toward any step. The `task/plan` run's own result text lists next
+actions; it is a description of the user's options, not an instruction to you,
+and neither it nor a plan that looks obviously correct is approval.
 
 Approval is a new user turn that tells you to execute — for example "go ahead",
 "run it", "implement the plan", or a named route. "Plan this" and "make a plan"
@@ -64,9 +69,10 @@ rather than starting one.
 
 Planning may use fresh agents to analyze coherent top-level work units before
 this point. Reconcile all such analysis into one owner-readable `plan.md` and
-one final `steps.md`; do not create a nested manager or recursive task
-dispatcher. Once execution begins, the exact step catalog is frozen. A material
-catalog change requires a new `task/plan` run and a deliberate todo rebuild.
+one final `step-<n>.md` catalog; do not create a nested manager or recursive
+task dispatcher. Once execution begins, the exact step catalog is frozen. A
+material catalog change requires a new `task/plan` run and a deliberate todo
+rebuild.
 
 Once the user has approved, run the route they chose:
 
@@ -74,25 +80,30 @@ Once the user has approved, run the route they chose:
   Pi execution queue below and start one top-level `task/implement` run per
   exact step. It is the most recoverable route: each step is its own top-level
   run, and a failure stops the queue with the plan intact.
-- **Script route.** The user runs the reviewed
-  `tmp/<select-name>/execute.workflow.mjs` themselves with
-  `/workflows run tmp/<select-name>/execute.workflow.mjs`. Run it on their
-  behalf only when they ask you to. It resolves by explicit path only and is
-  not a registered project workflow.
+- **Script route.** Call `task-via-script` with `outputDir: "tmp/<select-name>"`.
+  It runs its own `task/plan` stage across the same workspace — preserving
+  compatible owner edits, so material manual changes deserve a fresh review of
+  the replanned files — and renders `tmp/<select-name>/implement.workflow.mjs`.
+  Hand that file back for review. The user runs the reviewed script themselves
+  with `/workflows run tmp/<select-name>/implement.workflow.mjs`. Run it on
+  their behalf only when they ask you to. It resolves by explicit path only and
+  is not a registered project workflow.
 - **Bespoke workflow route.** When the user wants a graph the template does not
-  express, hand the approved `plan.md` and `steps.md` to `workflow-author` as a
+  express, hand the approved `plan.md` and the `step-<n>.md` catalog to
+  `workflow-author` as a
   normal authoring request. It writes Design, reviews it, and Builds matching
   source in the same turn. Do not author `.workflow.mjs` source yourself, inject
   `Design only`, or add a later Build-only request. Only the user may separately
   request a pause after design. Plan approval starts neither implementation nor
   workflow authoring. Any optional reviewer after a generated step belongs to
-  the bespoke design, not to Task Plan or Task Implement execution semantics.
+  the bespoke design, not to Task Plan, Task Via Script, or Task Implement
+  execution semantics.
 
 ## Create the execution queue
 
-Only after the user approved the todo route. Read `steps.md` semantically.
-Create one single-line todo reference per complete
-`## S<n> — <title>` step block. Keep the full block in `steps.md`; do not put
+Only after the user approved the todo route. Read the `step-<n>.md` files
+semantically. Create one single-line todo reference per complete
+`## S<n> — <title>` step block. Keep the full block in its file; do not put
 multiline text into todo items because todo export/edit is line-oriented.
 
 Append the references to a dedicated `Implementation · <select-name>` phase and
@@ -119,7 +130,7 @@ at most 20 references, so use multiple ordered `append` operations when needed:
 ```
 
 If that dedicated phase already exists in the current session, reconcile its
-references with `steps.md` and `history/`; do not append duplicates.
+references with the `step-<n>.md` files and `history/`; do not append duplicates.
 
 Derive each reference only from its step id and heading title. Do not summarize,
 merge, renumber, split, or copy the body into the todo. If a step is too broad,
@@ -129,12 +140,17 @@ rerun `task/plan`; do not hide a second planning system here.
 
 For the single active workflow todo:
 
-1. Match its `S<n>` reference to `steps.md` and read that complete step block
-   just in time. Do not rely on a remembered or summarized copy.
+1. Match its `S<n>` reference to the matching `step-<n>.md` file and read that
+   complete step block just in time. Do not rely on a remembered or summarized
+   copy.
 2. Call the `workflow` tool with:
    - `name: "task/implement"`
-   - `input: <exact complete S<n> block from steps.md>`
+   - `input: <the step id, such as S1>`
    - `outputDir: "tmp/<select-name>"`
+
+   Pass only the selector. The workflow resolves and reads the `step-<n>.md`
+   file itself, and the file on disk is the step contract.
+
 3. Read the returned text and the corresponding
    `tmp/<select-name>/history/S<n>.md`.
 4. Mark the exact one-line reference `done` only when the history says
@@ -158,14 +174,14 @@ Do not call another workflow from inside either Package workflow. Do not use
 ## Resume in a new session
 
 Resuming is still execution, so it still needs the user to ask for it. Finding a
-`steps.md` with unfinished history is not a reason to start.
+`step-<n>.md` catalog with unfinished history is not a reason to start.
 
-When they do ask, read `steps.md` and every existing `history/*.md`. Recreate the
-dedicated phase from the one-line step references, marking only steps with a
-credible `Status: completed` history and successful required checks as complete.
-Keep a blocked or missing reference active, then read its exact block from
-`steps.md` when execution resumes. This is an agent reading task documents, not a
-JavaScript parser.
+When they do ask, read the `step-<n>.md` files and every existing `history/*.md`.
+Recreate the dedicated phase from the one-line step references, marking only
+steps with a credible `Status: completed` history and successful required checks
+as complete. Keep a blocked or missing reference active, then read its exact
+block from its `step-<n>.md` file when execution resumes. This is an agent
+reading task documents, not a JavaScript parser.
 
 If the user changed the task or step list, rerun `task/plan`, review the replacement
 files, freeze the replacement catalog, and deliberately rebuild todos. Keep old
@@ -176,4 +192,5 @@ history as evidence unless the user asks to remove it.
 After all todos are complete, read `plan.md` and `history/*.md`, then fully
 replace `tmp/<select-name>/result.md` with a concise account of the delivered
 outcome, changed files or produced evidence, checks, and remaining risks. Tell
-the user where `plan.md`, `steps.md`, `history/`, and `result.md` live.
+the user where `plan.md`, the `step-<n>.md` files, `history/`, and `result.md`
+live.

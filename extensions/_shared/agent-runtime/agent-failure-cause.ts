@@ -30,6 +30,10 @@ export const AGENT_FAILURE_CAUSES = [
   "host-turn-timeout",
   /** The per-call wall-clock fuse expired and the child was aborted. TRANSPORT. */
   "call-timeout",
+  /** A stage declared `ask: true` but the parent session cannot mount an operator
+   *  question (no UI / non-interactive mode). Fail-closed refusal declared by the
+   *  workflow bridge, never an error string left in the child's context. TRANSPORT. */
+  "ask-unavailable",
   /** The agent SDK substrate is unavailable — there is no channel to re-ask on. */
   "sdk-unavailable",
   /** Operator or run-level cancellation. Re-asking would override the operator. */

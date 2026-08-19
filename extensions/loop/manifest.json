@@ -59,8 +59,8 @@
     "ui": ["editor", "setWidget", "setStatus"]
   },
   "risk": "medium",
-  "docsPath": "docs/extensions/active/loop.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/loop.md",
+  "docsPath": "extensions/loop/README.md",
+  "sourceAuditPath": null,
   "tests": ["tests/extensions/loop/loop.test.ts", "tests/integration/public-registration.test.ts"],
   "review": {
     "status": "reviewed",

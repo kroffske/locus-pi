@@ -16,9 +16,8 @@ import {
 /**
  * The superseded replacement-session executor, retained as provenance.
  *
- * NOT A LIVE PATH. `docs/source-audit/agents.md` records that this module "retains the former
- * replacement-session adapter and its parser/host tests, but it is not the current `/agent run`
- * executor"; command execution is `runAgentLiveTask` -> `createAgentSdkSessionExecutor` ->
+ * NOT A LIVE PATH. This module retains the former replacement-session adapter and its
+ * parser/host tests for compatibility review, but it is not the current `/agent run` executor; command execution is `runAgentLiveTask` -> `createAgentSdkSessionExecutor` ->
  * `executeAgentRunBoundary`. No registered entrypoint imports anything below, and no production
  * file outside this module does either — only `tests/shared/agents/agent-executor-host.test.ts`.
  *

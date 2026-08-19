@@ -4,7 +4,68 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+### Added
+
+- **Live operator questions — `agent({ ask: true })`.** A stage may let its
+  child ask the operator clarifying questions through the injected
+  `workflow_ask` tool: the question renders in the parent session, the answer
+  returns as the tool result, and the same child continues. Esc returns an
+  "operator declined" text answer; concurrent asking children queue FIFO; the
+  per-call `timeoutMs` fuse pauses while the operator is thinking; each
+  answered call writes an `operator-ask-<n>.json` evidence artifact and a
+  diagnostics line; the replay key records the declaration. With no operator
+  UI (`print`/`json`, unattended) the call fails closed with the new
+  `failureCause: "ask-unavailable"` — never a model-visible refusal sentence,
+  never an auto-selected option. Curated Package workflows remain no-ask by
+  construction. (Owner decision, direction log 2026-08-19.)
+
 ### Changed
+
+- **The stock `ask` tool is excluded from every workflow child.** A headless
+  child received its no-UI refusal as model-visible text — the recorded
+  fabrication path — and its option timeout auto-selected an answer on the
+  operator's behalf. Workflow children now never see the stock tool; live
+  questions travel only through `workflow_ask` on stages that declared
+  `ask: true`.
+
+- **The task namespace hands work between stages through files, and planning is
+  decomposed for a weak model.** `task/plan` is now a no-ask pipeline: one
+  scope agent freezes `request.md`/`scope.md`, one context agent writes
+  `context.md`, three parallel analysts write `analysis/*.md`, one compose
+  agent writes `plan.md` plus one `step-<n>.md` file per step (no `steps.md`),
+  three parallel reviewers write `reviews/*.md`, one bounded correction
+  replaces the plan once, and a final verifier plus runtime choice publish
+  `plan.md` — or fail closed publishing `planning-blocker.md`. The run never
+  waits for an operator: unknowns become explicit assumptions and
+  pre-implementation prerequisites, so automated callers always reach a
+  terminal artifact. `task/implement` takes only a step selector (a step id
+  such as `S1` or a step file name) and reads the step contract from the
+  workspace file itself — the owner may edit `plan.md` and `step-<n>.md` after
+  planning, and every later run deliberately reads the files on disk as the
+  contract, with no added freshness or integrity checks.
+
+- **`task/script` became the separate root workflow `task-via-script`.** The
+  one-run route now owns its whole path: `task-via-script` runs the full
+  `task/plan` pipeline as its own depth-one saved-child planning stage in the
+  same workspace (replanning across existing files preserves compatible owner
+  edits), routes a blocked plan to a fail-closed blocker instead of rendering,
+  and otherwise renders `implement.workflow.mjs` (previously
+  `execute.workflow.mjs`) from the fixed template, one literal node per step
+  file. The generated draft still resolves only by explicit path and is never
+  executed by the render run. The Package registry still exposes seventeen
+  runnable names; the `task/plan` completion card points at per-step-file
+  implementation or a rerun after a fail-closed blocker, while
+  `task-via-script` results carry the generated script's explicit run command.
+
+- **Public documentation is now organized for external readers.** Cross-cutting guides are limited to `docs/`, extension manuals live beside their source as `extensions/<name>/README.md`, and historical ADR, PRD, milestone, and source-audit working notes are excluded from the public repository and npm documentation surface.
+
+- **Workflow Creator is now installed with the Package.** The new
+  `workflow-creator` namespace runs three source-bound children in order:
+  `design` writes and independently reviews the target workflow architecture,
+  `svg` draws and reviews its self-contained graph, and `build` creates and
+  rechecks only the declared source files. Each child permits at most one
+  complete correction and fails closed on a second rejection; generated files
+  stay in the selected workflow workspace and are never executed by Creator.
 
 - **Folder-qualified workflows now keep their own workspace and visible run
   history.** A direct run such as `airflow-dag-builder/plan` defaults to
@@ -1574,9 +1635,8 @@ this workflow's questions.` — through the same continuation a typed reply
   That directory is also the only route to a workflow that is both tracked in the
   repository and resolvable by name: every other directory the resolver scans —
   `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/` — is git-ignored,
-  so a copy placed there works on one machine and exists in no clone. The
-  portfolio decision and its criteria are recorded in
-  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  so a copy placed there works on one machine and exists in no clone. The current public portfolio is listed in
+  [`docs/workflows.md`](docs/workflows.md).
   Every `plan` stage is read-only; `plan-implement` writes to the launch checkout,
   which is why it is a separate workflow the operator starts deliberately.
   One name collision is deliberate and documented: the `plan` **workflow** is not
@@ -1813,9 +1873,8 @@ this workflow's questions.` — through the same continuation a typed reply
   still fails until a human looks at it.
   `excalidraw-pipeline` moved to `extensions/workflows/references/` as part of
   this: it was documented as "reference only, do not run it by name", and under a
-  scanned registry that is a location, not a note. The trade-off this accepts is
-  recorded in
-  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  scanned registry that is a location, not a note. The current public portfolio is listed in
+  [`docs/workflows.md`](docs/workflows.md).
 - **`review` asks its questions in assessed rounds, and every question id now
   carries its question.** Interrogation was one call: whatever the first reader
   thought of was the whole question set, and nothing ever checked whether a risk
@@ -2158,8 +2217,8 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
   Git commands are blocked before execution.
 - Added runtime-owned `workspace()` handles for sharing one exact linked
   worktree safely across workflow agents.
-- Recorded the strict curated-workflow selection criteria and candidate boundary
-  in `docs/adr/curated-workflow-portfolio.md`.
+- Recorded the strict curated-workflow selection criteria and candidate boundary;
+  the current public portfolio is listed in `docs/workflows.md`.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
   Package workflow, with explicit operator, workflow, agent, decision, and
   persisted-artifact ownership.
@@ -2185,8 +2244,7 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
 - **Breaking:** retired the `llm-smoke` curated Package workflow. The curated
   registry is now four names: `live-smoke`, `requirements-grill`, `review`, and
   `review-fix`. Its only job was proving `llm()` routing, and nothing was folded
-  into `live-smoke`; see the 2026-07-21 amendment in
-  `docs/adr/curated-workflow-portfolio.md`.
+  into `live-smoke`; see the current public portfolio in `docs/workflows.md`.
 
 ### Changed
 

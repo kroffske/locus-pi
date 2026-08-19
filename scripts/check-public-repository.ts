@@ -29,10 +29,12 @@ async function checkPublicRepository(root: string): Promise<void> {
   }
 
   const forbiddenPaths = [
-    /^\.(locus|tasks|planning|pi)\//,
+    /^\.(locus|tasks|planning|pi|publication)\//,
     /^\.agents\/(skills|workflows)\//,
-    /^(artifacts|benchmarks|eval|evaluation|evaluations|output|reports)\//,
-    /^docs\/(archive|extension-gallery|reports|system-design)\//,
+    /^(artifacts|benchmarks|eval|evaluation|evaluations|output|reports|transcripts)\//,
+    /^docs\/(adr|decisions|prd|source-audit|internal|archive|_archive|drafts|notes|research|proposals|specs|system-design|extension-gallery|reports|runtime|extensions)\//,
+    /^docs\/(?:milestones|roadmap).*\.md$/i,
+    /^(?:EXPORT_MANIFEST\.(?:md|json)|PUBLICATION_PLAN\.md|PUBLICATION_REMOVALS\.txt|VALIDATION_REPORT\.md)$/,
     /^extensions\/beta\//,
   ];
   const rejected = actual.filter((file) => forbiddenPaths.some((pattern) => pattern.test(file)));

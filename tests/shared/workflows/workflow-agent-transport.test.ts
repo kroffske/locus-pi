@@ -727,6 +727,48 @@ describe("agent failure cause — runtime", () => {
     expect(end?.status).toBe("completed");
     expect(end?.failureCause).toBeUndefined();
   });
+
+  it("declares ask-unavailable when a stage asks with no operator UI (T-167 fail-closed)", async () => {
+    // The bridge is the layer that knows this cause: a `workflow_ask` call in a
+    // no-UI parent must END the call with a named refusal, never leave refusal
+    // prose in the child's context (the recorded fabrication probe).
+    const h = createHarness(undefined, { mode: "print" });
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: () => ({
+        async run(request, signal) {
+          const tool = request.customTools?.find((candidate) => candidate.name === "workflow_ask");
+          expect(tool).toBeDefined();
+          const toolResult = await tool!.execute(
+            "call-1",
+            { questions: [{ question: "Which way?", options: [{ label: "A" }] }] },
+            signal,
+          );
+          expect(toolResult.isError).toBe(true);
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return {
+            status: "cancelled",
+            agentName: "reviewer",
+            reason: "aborted",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    const result = record(await runner({ prompt: "decide", agent: "reviewer", tools: ["*"], operatorAsk: true }));
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("ask-unavailable");
+    expect(result.summary).toMatch(/failed closed/u);
+    // Not retryable: re-asking with no UI would re-fail identically.
+    expect(await retriesOn(result.failureCause)).toBe(false);
+  });
 });
 
 describe("agent failure cause — the list is closed and covered", () => {

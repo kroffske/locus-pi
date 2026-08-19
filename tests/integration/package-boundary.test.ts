@@ -53,6 +53,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "live-smoke",
   "task/implement",
   "task/plan",
+  "task-via-script",
   "post-code-review",
   "post-code-review/boundaries",
   "post-code-review/contracts",
@@ -61,6 +62,10 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review/simplicity",
   "post-code-review/style",
   "post-code-review/synthesis",
+  "workflow-creator",
+  "workflow-creator/build",
+  "workflow-creator/design",
+  "workflow-creator/svg",
 ] as const;
 
 function publicReadmeWorkflowNames(): string[] {
@@ -79,6 +84,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
   "task/implement": "extensions/workflows/examples/task/implement.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
+  "task-via-script": "extensions/workflows/examples/task-via-script/task-via-script.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
   "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
   "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
@@ -87,6 +93,10 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
   "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
   "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
+  "workflow-creator": "extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs",
+  "workflow-creator/build": "extensions/workflows/examples/workflow-creator/build.workflow.mjs",
+  "workflow-creator/design": "extensions/workflows/examples/workflow-creator/design.workflow.mjs",
+  "workflow-creator/svg": "extensions/workflows/examples/workflow-creator/svg.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -310,8 +320,8 @@ describe("npm public package boundary", () => {
   it("keeps the public README workflow roster equal to the Package registry", () => {
     expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain("four curated Package workflow namespaces with twelve runnable names");
-    expect(prose).toContain("the four curated workflow namespaces and their twelve runnable names");
+    expect(prose).toContain("six curated Package workflow namespaces with seventeen runnable names");
+    expect(prose).toContain("the six curated workflow namespaces and their seventeen runnable names");
     expect(prose).toContain(
       "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
     );
@@ -506,11 +516,11 @@ describe("npm public package boundary", () => {
     expect(source).toContain("20-continuation safety limit");
     expect(source).toContain("Do not call another workflow from inside either Package workflow");
     expect(source).toContain("`plan.md` first defines coherent top-level work units");
-    expect(source).toMatch(/`steps\.md`\s+is the only executable task catalog/u);
+    expect(source).toMatch(/the `step-<n>\.md` files\s+are the only executable task catalog/u);
     expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
     expect(source).toContain("the exact step catalog is frozen");
     expect(source).toMatch(
-      /hand the approved `plan\.md`\s+and\s+`steps\.md`\s+to\s+`workflow-author`\s+as a\s+normal authoring request/u,
+      /hand the approved `plan\.md`\s+and the `step-<n>\.md` catalog\s+to\s+`workflow-author`\s+as a\s+normal authoring request/u,
     );
     expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
     expect(source).toContain("Do not author `.workflow.mjs` source yourself, inject\n  `Design only`");
@@ -529,7 +539,7 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/Approval is a new user turn/u);
     expect(source).toContain("Only after the user approved the todo route");
     expect(source).toContain("Resuming is still execution");
-    expect(source).toContain("execute.workflow.mjs");
+    expect(source).toContain("implement.workflow.mjs");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

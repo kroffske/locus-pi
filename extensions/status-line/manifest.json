@@ -35,8 +35,8 @@
     "ui": ["setFooter"]
   },
   "risk": "low",
-  "docsPath": "docs/extensions/active/status-line.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/status-line.md",
+  "docsPath": "extensions/status-line/README.md",
+  "sourceAuditPath": null,
   "tests": ["tests/extensions/status-line/status-line.test.ts", "tests/integration/public-registration.test.ts"],
   "review": {
     "status": "reviewed",

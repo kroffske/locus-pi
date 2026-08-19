@@ -13,7 +13,7 @@ import { createHarness } from "../../../test-harness.js";
 const primaryFilePath = "/repo/tmp/plan with spaces/plan.md";
 const workspaceDir = "/repo/tmp/plan with spaces";
 const nextAction =
-  "After the owner reviews and explicitly approves the plan, implement /repo/tmp/plan with spaces/plan.md using /repo/tmp/plan with spaces/steps.md, one task/implement run per exact step.";
+  "After the owner reviews and explicitly approves the plan, implement /repo/tmp/plan with spaces/plan.md using the /repo/tmp/plan with spaces/step-<n>.md files, one task/implement run per step file, giving each run only the step id such as S1.";
 
 describe("workflow completion presentation", () => {
   it("ends the TUI on the exact result with primary path, grouped metadata, and gated next action", async () => {
@@ -38,9 +38,7 @@ describe("workflow completion presentation", () => {
     expect(completion.digest).not.toContain("workspace reuse:");
     expect(completion.digest.indexOf("Files")).toBeLessThan(completion.digest.indexOf("Commands"));
     expect(completion.digest.indexOf("primary file:")).toBeLessThan(completion.digest.indexOf("workspace:"));
-    expect(completion.digest).toContain(
-      'run generated plan: /workflows run "/repo/tmp/plan with spaces/execute.workflow.mjs"',
-    );
+    expect(completion.digest).not.toContain("execute.workflow.mjs");
     expect(completion.nextAction).toBe(nextAction);
 
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
@@ -60,7 +58,61 @@ describe("workflow completion presentation", () => {
       .join("\n");
     expect(rendered).toContain(`Workflow result (${primaryFilePath})`);
     expect(rendered).toContain("Next action (after review and approval)");
-    expect(rendered).toContain("one task/implement run per exact step");
+    expect(rendered).toContain("one task/implement run per step file");
+  });
+
+  it("labels the task-via-script result with the generated script's explicit run command", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "task-via-script", "command");
+    transcript.start("run-script-tui", "/repo/.pi/locus-pi/runs/run-script-tui");
+    const completion = transcript.finish({
+      runId: "run-script-tui",
+      runDir: "/repo/.pi/locus-pi/runs/run-script-tui",
+      ok: true,
+      result: "Planning and rendering are complete and nothing has been executed.",
+      workspaceDir,
+      workspaceDirRelative: "tmp/plan with spaces",
+      primaryFile: {
+        relativePath: "implement.workflow.mjs",
+        absolutePath: "/repo/tmp/plan with spaces/implement.workflow.mjs",
+        sha256: "def456",
+        bytes: 99,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/run-script-tui/runtime/result.json" },
+    });
+
+    expect(completion.digest).toContain(
+      'run generated script: /workflows run "/repo/tmp/plan with spaces/implement.workflow.mjs"',
+    );
+    expect(completion.nextAction).toContain("rendering is not approval to run");
+  });
+
+  it("routes a fail-closed planning blocker to a rerun instruction instead of an implement handoff", async () => {
+    const harness = createHarness();
+    const transcript = createWorkflowTranscript(harness.ctx, "task/plan", "command");
+    transcript.start("run-plan-blocked", "/repo/.pi/locus-pi/runs/run-plan-blocked");
+    const completion = transcript.finish({
+      runId: "run-plan-blocked",
+      runDir: "/repo/.pi/locus-pi/runs/run-plan-blocked",
+      ok: true,
+      result: "Planning finished BLOCKED and nothing has been implemented.",
+      workspaceDir,
+      workspaceDirRelative: "tmp/plan with spaces",
+      primaryFile: {
+        relativePath: "planning-blocker.md",
+        absolutePath: "/repo/tmp/plan with spaces/planning-blocker.md",
+        sha256: "0ff1ce",
+        bytes: 17,
+      },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/run-plan-blocked/runtime/result.json" },
+    });
+
+    expect(completion.digest).not.toContain("run generated script:");
+    expect(completion.nextAction).toContain("Planning failed closed");
+    expect(completion.nextAction).toContain("rerun task/plan on the same workspace");
+    expect(completion.nextAction).not.toContain("one task/implement run per step file");
   });
 
   it("keeps workflow_end last for non-interactive protocol callers", async () => {

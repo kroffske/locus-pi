@@ -14,9 +14,8 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
  * product actually runs. `agent-sdk-host.ts` — the only production importer — takes exactly
  * three symbols from that module (`createAgentExecutionPromptCapsule`,
  * `formatAgentKickoffPrompt`, `parseAgentText`), and they are all here. Everything left in
- * `agent-executor-host.ts` is the superseded replacement-session path that
- * `docs/source-audit/agents.md` records as retained provenance: no registered entrypoint
- * reaches it.
+ * `agent-executor-host.ts` is the superseded replacement-session path retained as reviewed
+ * provenance; no registered entrypoint reaches it.
  *
  * Keeping them in one file meant a reader could not tell the live capsule builder from dead
  * provenance without tracing imports, and any edit to the live path sat next to code nobody
