@@ -37,7 +37,7 @@
   "provides": {
     "tools": ["todo_read", "todo_write"],
     "commands": ["todo"],
-    "hooks": ["agent_settled"]
+    "hooks": ["agent_settled", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -67,7 +67,7 @@
     "tests/extensions/todo-context/todo-context.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/session/session-core-jsonl.test.ts",
-    "tests/integration/public-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

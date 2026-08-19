@@ -56,7 +56,7 @@
   "provides": {
     "tools": ["goal"],
     "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],
-    "hooks": ["session_start", "before_agent_start"],
+    "hooks": ["session_start", "before_agent_start", "input"],
     "shortcuts": []
   },
   "uiLifecycle": {
@@ -139,7 +139,7 @@
     "tests/extensions/plan/plan-behavioral-mode.test.ts",
     "tests/shared/mode-state/mode-state.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
-    "tests/integration/public-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

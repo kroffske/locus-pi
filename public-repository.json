@@ -140,7 +140,6 @@
     "tests/integration/operator-status.test.ts",
     "tests/integration/package-boundary.test.ts",
     "tests/integration/package-cli.test.ts",
-    "tests/integration/public-registration.test.ts",
     "tests/integration/repository-governance.test.ts",
     "tests/integration/workflow-run-skill.test.ts",
     "tests/shared/agents/agent-command-run.test.ts",

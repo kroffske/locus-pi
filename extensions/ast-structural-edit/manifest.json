@@ -54,7 +54,7 @@
   "tests": [
     "tests/extensions/ast-structural-edit/tools.test.ts",
     "tests/shared/security/security.test.ts",
-    "tests/integration/public-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

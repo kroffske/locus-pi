@@ -33,7 +33,7 @@ describe("repository pull-request policy", () => {
       evaluatePullRequestPolicy({
         baseRef: "dev",
         headRef: "codex/example",
-        changedFiles: ["docs/README.md"],
+        changedFiles: ["docs/getting-started.md"],
         baseVersion: "0.2.0",
         headVersion: "0.2.0",
         headChangelog: releaseHeading,

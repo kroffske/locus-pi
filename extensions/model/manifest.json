@@ -31,7 +31,7 @@
   "provides": {
     "tools": [],
     "commands": ["model-roles", "effort"],
-    "hooks": ["session_start"]
+    "hooks": ["session_start", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -69,7 +69,7 @@
   "sourceAuditPath": null,
   "tests": [
     "tests/extensions/model/model.test.ts",
-    "tests/integration/public-registration.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/shared/operator-interaction.test.ts"
   ],
   "review": {

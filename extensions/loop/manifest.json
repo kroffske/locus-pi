@@ -35,7 +35,7 @@
   "provides": {
     "tools": ["loop"],
     "commands": ["loop"],
-    "hooks": ["agent_settled"]
+    "hooks": ["agent_settled", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -61,7 +61,7 @@
   "risk": "medium",
   "docsPath": "extensions/loop/README.md",
   "sourceAuditPath": null,
-  "tests": ["tests/extensions/loop/loop.test.ts", "tests/integration/public-registration.test.ts"],
+  "tests": ["tests/extensions/loop/loop.test.ts", "tests/contracts/extensions/runtime-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "copy-after-audit",

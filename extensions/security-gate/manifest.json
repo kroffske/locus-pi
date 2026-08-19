@@ -23,7 +23,7 @@
   "provides": {
     "tools": [],
     "commands": ["security-audit"],
-    "hooks": ["tool_call"]
+    "hooks": ["tool_call", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -49,7 +49,7 @@
   "risk": "critical",
   "docsPath": "extensions/security-gate/README.md",
   "sourceAuditPath": null,
-  "tests": ["tests/shared/security/security.test.ts", "tests/integration/public-registration.test.ts"],
+  "tests": ["tests/shared/security/security.test.ts", "tests/contracts/extensions/runtime-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "write-from-scratch",
