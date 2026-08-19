@@ -52,7 +52,10 @@ describe(`selective package loading through installed Pi ${VERSION}`, () => {
     expect(result.extensionIds).toEqual(["workflows"]);
     expect(result.packageSkills).toEqual(bundledSkillNames);
   });
-});
+  // Every case reloads the real Pi host off disk. That is fast in isolation and
+  // slow whenever the machine is already busy, so the suite states its own
+  // budget instead of inheriting the 5s default.
+}, 30_000);
 
 async function loadProfile(selectedIds: string[], includeSkills: boolean) {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-host-contract-"));
