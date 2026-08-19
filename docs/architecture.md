@@ -1,3 +1,16 @@
+---
+title: Architecture and repository boundaries
+type: overview
+status: active
+updated: 2026-08-19T22:43:06Z
+source_commit: aeb217fe8dab
+update_event: cleanup
+context: changes=S files=4
+description: Document architecture and repository boundaries.
+owner: locus-pi maintainers
+tags: [architecture, repository]
+---
+
 # Architecture and repository boundaries
 
 ## Sources of truth

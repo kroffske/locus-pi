@@ -1,3 +1,16 @@
+---
+title: Workflow guide
+type: guide
+status: active
+updated: 2026-08-19T22:43:07Z
+source_commit: aeb217fe8dab
+update_event: cleanup
+context: changes=S files=4
+description: Guide workflow discovery, execution, and storage.
+owner: locus-pi maintainers
+tags: [workflows, guide]
+---
+
 # Workflow guide
 
 The `workflows` extension discovers trusted JavaScript workflow modules, runs them through Pi child sessions, and persists evidence under `.locus-pi/runs/<runId>/`.
