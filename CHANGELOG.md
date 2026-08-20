@@ -4,6 +4,8 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-20
+
 ### Changed
 
 - **Workflow source validation now belongs to the Pi workflows extension.**
