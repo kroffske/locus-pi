@@ -35,7 +35,7 @@ stage starts only after its predecessor succeeds.
 
 ## Workspace artifacts
 
-The default workspace is `<pwd>/tmp/workflow-creator/`. Use `--output-dir` to
+The default workspace is a unique `.locus-pi/plans/<generated-run-name>/` directory. Use `--output-dir` to
 select a different safe project-relative directory. Successful work leaves:
 
 - `workflow.design.md` — accepted architecture, entries, graph, handoffs,
@@ -72,7 +72,7 @@ Choose a fresh request-specific workspace and describe the desired workflow as
 semantic text:
 
 ```text
-/workflows run workflow-creator --output-dir tmp/workflow-creator/<request-id> -- <describe the workflow to create>
+/workflows run workflow-creator -- <describe the workflow to create>
 ```
 
 The three child entries remain directly inspectable through `/workflows info`,

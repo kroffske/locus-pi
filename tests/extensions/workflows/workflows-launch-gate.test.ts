@@ -32,38 +32,53 @@ async function waitForBackground(predicate: () => boolean): Promise<void> {
 }
 
 describe("/workflows run launch gate", () => {
-  it("applies the fresh namespace gate to the installed Package post-code-review entry", async () => {
+  it("launches the installed Package post-code-review entry without an explicit workspace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-package-post-review-launch-"));
     const h = registerCommandHarness(root);
-    const spy = vi.spyOn(runner, "runWorkflowScript");
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-package-review",
+      runDir: "/tmp/run-package-review",
+      ok: true,
+      result: "ok",
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-package-review/result.json" },
+    });
     try {
       await h.commands.get("workflows")!.handler("run post-code-review", h.ctx);
-      expect(spy).not.toHaveBeenCalled();
-      expect(h.widgets.get("workflows") ?? "").toContain("post-code-review fresh launch requires");
-      expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
+      await waitForBackground(() => spy.mock.calls.length === 1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "post-code-review" });
+      expect(spy.mock.calls[0]?.[0].outputDir).toBeUndefined();
     } finally {
       spy.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects a fresh post-code-review command without an explicit output namespace", async () => {
+  it("launches a project post-code-review command without an explicit output namespace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-launch-"));
     mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
     writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
     const h = registerCommandHarness(root);
-    const spy = vi.spyOn(runner, "runWorkflowScript");
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-project-review",
+      runDir: "/tmp/run-project-review",
+      ok: true,
+      result: "ok",
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-project-review/result.json" },
+    });
     try {
       await h.commands.get("workflows")!.handler("run post-code-review", h.ctx);
-      expect(spy).not.toHaveBeenCalled();
-      expect(h.widgets.get("workflows") ?? "").toContain("post-code-review fresh launch requires");
+      await waitForBackground(() => spy.mock.calls.length === 1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "post-code-review" });
+      expect(spy.mock.calls[0]?.[0].outputDir).toBeUndefined();
     } finally {
       spy.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects a fresh post-code-review workflow-tool call without an explicit output namespace", async () => {
+  it("runs a fresh post-code-review tool call in a generated planning workspace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-tool-"));
     mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
     writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
@@ -73,164 +88,11 @@ describe("/workflows run launch gate", () => {
         .get("workflow")!
         .execute("tool-post-review", { name: "post-code-review" }, new AbortController().signal, () => void 0, h.ctx);
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-      expect(result.isError).toBe(true);
-      expect(text).toContain("fresh launch requires an explicit project-relative outputDir");
-      expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("does not apply the owner fresh gate when a bare name resolves to a personal shadow", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-personal-shadow-tool-"));
-    const home = mkdtempSync(path.join(os.tmpdir(), "workflow-personal-shadow-home-"));
-    const previousHome = process.env.HOME;
-    try {
-      process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
-      mkdirSync(personalDir, { recursive: true });
-      writeFileSync(path.join(personalDir, "post-code-review.workflow.mjs"), 'export default () => "personal";\n');
-      const h = registerCommandHarness(root);
-      const result = await h.tools
-        .get("workflow")!
-        .execute(
-          "tool-personal-shadow",
-          { name: "post-code-review" },
-          new AbortController().signal,
-          () => void 0,
-          h.ctx,
-        );
-      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
       expect(result.isError).not.toBe(true);
-      expect(text).not.toContain("fresh launch requires an explicit project-relative outputDir");
-      expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(true);
+      expect(text).not.toContain("fresh launch requires");
+      const workspaces = path.join(root, ".locus-pi", "plans");
+      expect(existsSync(workspaces)).toBe(true);
     } finally {
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
-      rmSync(root, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it.each([".pi", ".claude", ".agents"])("enforces the owner gate for named workflows in %s", async (directory) => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-named-source-"));
-    mkdirSync(path.join(root, directory, "workflows"), { recursive: true });
-    writeFileSync(
-      path.join(root, directory, "workflows", "post-code-review.workflow.mjs"),
-      'export default () => "ok";\n',
-    );
-    const h = registerCommandHarness(root);
-    try {
-      const result = await runner.runWorkflowScript({
-        pi: h.pi,
-        ctx: h.ctx,
-        signal: new AbortController().signal,
-        name: "post-code-review",
-      });
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain("fresh launch requires an explicit project-relative outputDir");
-      expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it.each([".pi", ".claude", ".agents"])(
-    "rejects an absolute owner path in %s without a namespace",
-    async (directory) => {
-      const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-absolute-"));
-      const workflowDir = path.join(root, directory, "workflows");
-      mkdirSync(workflowDir, { recursive: true });
-      writeFileSync(path.join(workflowDir, "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
-      const h = registerCommandHarness(root);
-      try {
-        const result = await runner.runWorkflowScript({
-          pi: h.pi,
-          ctx: h.ctx,
-          signal: new AbortController().signal,
-          scriptPath: path.join(workflowDir, "post-code-review.workflow.mjs"),
-        });
-        expect(result.ok).toBe(false);
-        expect(result.error).toContain("fresh launch requires an explicit project-relative outputDir");
-        expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.each([".pi", ".claude", ".agents"])(
-    "tool rejects an absolute owner path in %s without a namespace",
-    async (directory) => {
-      const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-absolute-tool-"));
-      const workflowDir = path.join(root, directory, "workflows");
-      mkdirSync(workflowDir, { recursive: true });
-      writeFileSync(path.join(workflowDir, "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
-      const h = registerCommandHarness(root);
-      try {
-        const result = await h.tools
-          .get("workflow")!
-          .execute(
-            "tool-post-review-absolute",
-            { scriptPath: path.join(workflowDir, "post-code-review.workflow.mjs") },
-            new AbortController().signal,
-            () => void 0,
-            h.ctx,
-          );
-        const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-        expect(result.isError).toBe(true);
-        expect(text).toContain("fresh launch requires an explicit project-relative outputDir");
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.each([
-    "./.pi/workflows/post-code-review.workflow.mjs",
-    "nested/../.pi/workflows/post-code-review.workflow.mjs",
-    ".claude/workflows/post-code-review.workflow.mjs",
-    "./.claude/workflows/post-code-review.workflow.mjs",
-    ".agents/workflows/post-code-review.workflow.mjs",
-    "nested/../.agents/workflows/post-code-review.workflow.mjs",
-  ])("rejects fresh owner path alias %s without an explicit namespace", async (scriptPath) => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-alias-"));
-    for (const directory of [".pi", ".claude", ".agents"]) {
-      mkdirSync(path.join(root, directory, "workflows"), { recursive: true });
-      writeFileSync(
-        path.join(root, directory, "workflows", "post-code-review.workflow.mjs"),
-        'export default () => "ok";\n',
-      );
-    }
-    const h = registerCommandHarness(root);
-    try {
-      const result = await h.tools
-        .get("workflow")!
-        .execute("tool-post-review-alias", { scriptPath }, new AbortController().signal, () => void 0, h.ctx);
-      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-      expect(result.isError).toBe(true);
-      expect(text).toContain("fresh launch requires an explicit project-relative outputDir");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it.each([
-    { command: "workflows", args: "run post-code-review", mode: "tui" as const },
-    { command: "workflows", args: "run post-code-review", mode: "print" as const },
-  ])("rejects post-code-review omission on $command ($mode)", async ({ command, args, mode }) => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-surface-"));
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
-    const h = createHarness(root, { mode });
-    workflows(h.pi);
-    const spy = vi.spyOn(runner, "runWorkflowScript");
-    try {
-      await h.commands.get(command)!.handler(args, h.ctx);
-      expect(spy).not.toHaveBeenCalled();
-      expect(h.widgets.get("workflows") ?? "").toContain("post-code-review fresh launch requires");
-    } finally {
-      spy.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -245,42 +107,38 @@ describe("/workflows run launch gate", () => {
     expect(tool.formatApprovalDetails?.({ name: "reviewed-workflow", items: ["alpha", "beta"] })).toEqual([
       "Workflow: reviewed-workflow",
       "Items: 2",
-      "Workflow workspace: default <pwd>/tmp/<workflow-name>, or a unique project-local plan workspace for task planning",
+      "Workflow workspace: .locus-pi/plans/<generated-run-name>",
       "Surface: trusted-file workflow runner",
       "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
       "Isolation: none — exec approval is consent, not a sandbox",
     ]);
   });
 
-  it("does not claim owner policy for a bare name before source resolution", () => {
+  it("shows the generated planning workspace for a bare name", () => {
     const h = registerHarness();
     const details = h.tools.get("workflow")!.formatApprovalDetails?.({ name: "post-code-review" }) ?? [];
 
-    expect(details[2]).toContain("owner source unresolved");
-    expect(details[2]).not.toContain("explicit outputDir required");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
-  it("uses conservative approval text for an absolute owner-looking path", () => {
+  it("shows the generated planning workspace for an absolute owner-looking path", () => {
     const h = registerHarness();
     const details =
       h.tools.get("workflow")!.formatApprovalDetails?.({
         scriptPath: path.join(process.cwd(), ".agents", "workflows", "post-code-review.workflow.mjs"),
       }) ?? [];
 
-    expect(details[2]).toContain("owner source unresolved");
-    expect(details[2]).not.toContain("default <pwd>/tmp/<workflow-name>");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it.each([
     "/outside/.pi/workflows/post-code-review.workflow.mjs",
     path.join(process.cwd(), ".pi", "workflows", "post-code-review.workflow.mjs"),
-  ])("uses conservative approval text for an absolute legacy script: %s", (script) => {
+  ])("shows the generated planning workspace for an absolute legacy script: %s", (script) => {
     const h = registerHarness();
     const details = h.tools.get("workflow")!.formatApprovalDetails?.({ script }) ?? [];
 
-    expect(details[2]).toContain("owner source unresolved");
-    expect(details[2]).not.toContain("explicit outputDir required");
-    expect(details[2]).not.toContain("default <pwd>/tmp/<workflow-name>");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it.each([
@@ -292,12 +150,11 @@ describe("/workflows run launch gate", () => {
     { scriptPath: ".agents/workflows/post-code-review.workflow.mjs" },
     { scriptPath: "nested/../.agents/workflows/post-code-review.workflow.mjs" },
     { script: ".pi/workflows/post-code-review.workflow.mjs" },
-  ])("shows the explicit fresh namespace requirement for resolved owner path %j", (args) => {
+  ])("shows the generated planning workspace for resolved owner path %j", (args) => {
     const h = registerHarness();
     const details = h.tools.get("workflow")!.formatApprovalDetails?.(args) ?? [];
 
-    expect(details[2]).toContain("explicit");
-    expect(details[2]).toContain("post-code-review");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it("does not classify escaping owner-looking paths in approval details", () => {
@@ -307,7 +164,7 @@ describe("/workflows run launch gate", () => {
         scriptPath: "../.pi/workflows/post-code-review.workflow.mjs",
       }) ?? [];
 
-    expect(details[2]).toContain("default <pwd>/tmp/<workflow-name>");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it("does not overmatch a nested non-owner suffix in approval details", () => {
@@ -317,7 +174,7 @@ describe("/workflows run launch gate", () => {
         scriptPath: "nested/post-code-review.workflow.mjs",
       }) ?? [];
 
-    expect(details[2]).toContain("default <pwd>/tmp/<workflow-name>");
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it("runs an explicit operator command without a second approval prompt", async () => {
@@ -332,10 +189,10 @@ describe("/workflows run launch gate", () => {
       resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
     });
     try {
-      await h.commands.get("workflows")!.handler("run live-smoke hello", h.ctx);
+      await h.commands.get("workflows")!.handler("run live-smoke --run-name named hello", h.ctx);
       expect(approval).not.toHaveBeenCalled();
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", input: "hello" });
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", runName: "named", input: "hello" });
       expect(h.statuses.get("locus")).toContain("WF launch · operator cmd");
       expect(h.statuses.has("workflows")).toBe(false);
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);

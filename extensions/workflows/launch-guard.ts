@@ -11,8 +11,6 @@
 import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
 import { isOneShotHostMode } from "../_shared/host/pi-api.js";
 import {
-  isPostCodeReviewTarget,
-  postCodeReviewFreshLaunchError,
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
   WorkflowGroupOnlyError,
@@ -73,15 +71,4 @@ export function preflightWorkflowCommandTarget(
       targetKind: isWorkflowSavedName(scriptRef) ? "name" : "scriptPath",
     };
   }
-}
-
-/** Reject the owner-specific fresh-review omission before a background launch. */
-export function workflowFreshLaunchPolicyError(input: {
-  target: ResolvedWorkflowTarget;
-  projectRoot?: string;
-  outputDir?: string;
-  resumeFromRunId?: string;
-}): string | undefined {
-  if (!isPostCodeReviewTarget(input.target, input.projectRoot) || input.resumeFromRunId !== undefined) return undefined;
-  return input.outputDir === undefined ? postCodeReviewFreshLaunchError() : undefined;
 }

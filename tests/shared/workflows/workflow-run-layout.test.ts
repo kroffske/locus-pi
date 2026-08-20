@@ -71,7 +71,7 @@ function workflowWorkspaceFromChildTask(task: string): string {
 }
 
 describe("workflow workspace and run evidence", () => {
-  it("uses <pwd>/tmp/<workflow-name>, gives every child that path once, and keeps run evidence separate", async () => {
+  it("uses a unique .locus-pi/plans workspace, gives every child that path once, and keeps run evidence separate", async () => {
     const root = project();
     const workingDirectory = path.join(root, "packages", "docs site");
     mkdirSync(workingDirectory, { recursive: true });
@@ -111,13 +111,13 @@ describe("workflow workspace and run evidence", () => {
       createExecutor,
     });
 
-    const workspaceDir = path.join(workingDirectory, "tmp", "files");
+    const workspaceDir = path.join(root, ".locus-pi", "plans", `${result.runId}-files`);
     assert.equal(result.ok, true, result.error);
     assert.equal(result.workspaceDir, workspaceDir);
-    assert.equal(result.workspaceDirRelative, "packages/docs site/tmp/files");
-    assert.equal(String(result.result).split("\n")[0], "packages/docs site/tmp/files");
+    assert.equal(result.workspaceDirRelative, `.locus-pi/plans/${result.runId}-files`);
+    assert.equal(String(result.result).split("\n")[0], `.locus-pi/plans/${result.runId}-files`);
     const persisted = readWorkflowRunResult(root, result.runId);
-    assert.equal(persisted?.workspacePhysicalIdentity, "packages/docs site/tmp/files");
+    assert.equal(persisted?.workspacePhysicalIdentity, `.locus-pi/plans/${result.runId}-files`);
     assert.equal(persisted?.workspacePhysicalIdentityInvalid, undefined);
     assert.deepEqual(readdirSync(workspaceDir), ["plan.md"]);
     assert.equal(readFileSync(path.join(workspaceDir, "plan.md"), "utf8"), "the plan body");
@@ -132,7 +132,7 @@ describe("workflow workspace and run evidence", () => {
     assert.match(result.runDir, /\.locus-pi\/runs\//u);
   });
 
-  it("round-trips generated physical identities longer than the explicit outputDir bound", async () => {
+  it("keeps generated workspaces under .locus-pi/plans from a deep working directory", async () => {
     const root = project();
     const workingDirectory = path.join(root, "p".repeat(150), "q".repeat(150), "r".repeat(150));
     mkdirSync(workingDirectory, { recursive: true });
@@ -151,7 +151,7 @@ describe("workflow workspace and run evidence", () => {
     });
 
     assert.equal(result.ok, true, result.error);
-    assert.ok((result.workspacePhysicalIdentity?.length ?? 0) > 400);
+    assert.equal(result.workspaceDirRelative, `.locus-pi/plans/${result.runId}-long-default`);
     const persisted = readWorkflowRunResult(root, result.runId);
     assert.equal(persisted?.workspacePhysicalIdentity, result.workspacePhysicalIdentity);
     assert.equal(persisted?.workspacePhysicalIdentityInvalid, undefined);
@@ -173,7 +173,7 @@ describe("workflow workspace and run evidence", () => {
     });
 
     assert.equal(result.ok, true, result.error);
-    assert.equal(result.workspaceDir, path.join(root, "tmp", "empty"));
+    assert.equal(result.workspaceDir, path.join(root, ".locus-pi", "plans", `${result.runId}-empty`));
     assert.equal(existsSync(result.workspaceDir!), true);
     assert.deepEqual(readdirSync(result.workspaceDir!), []);
   });

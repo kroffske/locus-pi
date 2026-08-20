@@ -61,7 +61,6 @@ describe("workflow command receipts", () => {
     ["run task/draft --run-name", "missing_run_name", "task/draft"],
     [`run alpha -- ${"x".repeat(WORKFLOW_INPUT_MAX_CHARS + 1)}`, "input_too_long", "alpha"],
     ["run definitely-missing", "workflow_not_found", "definitely-missing"],
-    ["run post-code-review", "launch_policy_refused", "post-code-review"],
   ] as const)("persists a typed pre-start rejection for %s", async (command, code, target) => {
     const h = harness();
 

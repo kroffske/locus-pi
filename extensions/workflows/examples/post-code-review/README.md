@@ -62,12 +62,13 @@ entries:
 Run the external parent with a new explicit project-relative output namespace:
 
 ```text
-/workflows run post-code-review --output-dir tmp/post-code-review/review-20260813-a review the current diff
+/workflows run post-code-review review the current diff
 ```
 
-The final path component is the review request id. Before launch, an operator
-may create `tmp/post-code-review/<review-id>/style.md` with additional comment
-and style criteria. The runtime preserves an existing regular file byte-for-byte
+The runtime creates a unique `.locus-pi/plans/<generated-run-name>` workspace.
+To provide additional comment and style criteria before launch, select an
+explicit fresh workspace with `--output-dir <path>` and create
+`<path>/style.md`. The runtime preserves an existing regular file byte-for-byte
 or creates it empty before the first agent runs. Empty means no extra criteria;
 the style lane still applies live project conventions. A symlink or non-regular
 `style.md` fails closed.
@@ -99,7 +100,7 @@ action, or verification. `NO_ACTION` items receive no fix snippet.
 Apply the default REQUIRED set with the separate Package workflow `implement`:
 
 ```text
-/workflows run implement --output-dir tmp/post-code-review/<review-id> apply REQUIRED fixes from post-code-review.md
+/workflows run implement --output-dir .locus-pi/plans/<generated-run-name> apply REQUIRED fixes from post-code-review.md
 ```
 
 Reuse the review workspace so the workflow can read the exact report. To include

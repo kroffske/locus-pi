@@ -683,7 +683,7 @@ describe("workflow operator handoff", () => {
     expect(omittedResume.error).toContain("source workspace was selected explicitly");
   });
 
-  it("reuses a default workspace whose working-directory path contains spaces", async () => {
+  it("reuses a generated default workspace when the working-directory path contains spaces", async () => {
     const root = project();
     const workingDirectory = path.join(root, "packages", "docs site");
     const workflows = path.join(workingDirectory, ".pi", "workflows");
@@ -708,7 +708,7 @@ describe("workflow operator handoff", () => {
     expect(claim.status).toBe("claimed");
     if (claim.status !== "claimed") throw new Error("expected claim");
     const workspace = readWorkflowResumeWorkspaceIdentity(root, source.runId);
-    expect(workspace.relativePath).toContain("packages/docs site/");
+    expect(workspace.relativePath).toBe(`.locus-pi/plans/${source.runId}-whitespace-handoff`);
 
     const child = await runWorkflowScript({
       pi: harness.pi,

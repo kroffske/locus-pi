@@ -10,7 +10,7 @@
  *   - `runtime/` — journal, replay, result envelope, script snapshot and exact
  *     evidence. Humans can inspect it, but no file there is a deliverable.
  *
- * Fresh Package task workspaces live separately under
+ * Fresh workflow workspaces live separately under
  * `<projectRoot>/.locus-pi/plans/`; workflow-output owns their selected leaf
  * and confinement while this module owns the shared storage components.
  *
@@ -66,14 +66,6 @@ const TASK_WORKSPACE_TARGET_NAMES = new Set([
 /** One owner for the Package task workflows that create or reuse planning evidence. */
 export function isTaskWorkspaceName(workflowName: string): boolean {
   return TASK_WORKSPACE_TARGET_NAMES.has(workflowName);
-}
-
-/** Fresh Package task runs receive a unique, project-local planning workspace. */
-export function defaultTaskWorkspaceRelativePath(workflowName: string, runId: string | undefined): string | undefined {
-  if (!isTaskWorkspaceName(workflowName)) return undefined;
-  const planningRunId = assertWorkflowRunId(runId);
-  const workflowSlug = workflowName.replaceAll("/", "-");
-  return `${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/${planningRunId}-${workflowSlug}`;
 }
 
 export function workflowRootDir(projectRoot: string): string {

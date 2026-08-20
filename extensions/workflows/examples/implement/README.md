@@ -19,7 +19,7 @@ source plan or review
 For the output of `post-code-review`, reuse that review's explicit workspace:
 
 ```text
-/workflows run implement --output-dir tmp/post-code-review/<review-id> apply REQUIRED fixes from post-code-review.md
+/workflows run implement --output-dir .locus-pi/plans/<generated-run-name> apply REQUIRED fixes from post-code-review.md
 ```
 
 `REQUIRED` is the default. Include `RECOMMENDED` only through an explicit request,

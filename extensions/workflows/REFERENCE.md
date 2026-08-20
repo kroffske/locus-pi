@@ -196,22 +196,18 @@ with the unified command is proven, and are not removed as part of this menu.
 /workflows run plan --no-operator <input>   unattended launch: any operator-input request fails closed
 ```
 
-`post-code-review` is owner-scoped: every fresh launch must name an explicit,
-new project-relative namespace, for example
-`/workflows run post-code-review --output-dir tmp/post-code-review/review-20260812-a`.
-The catalog Start action inserts `tmp/post-code-review/<review-id>` as an
-editable template; replace it before submitting. The programmatic `workflow`
-tool, canonical/flat commands, headless command mode, and direct runner all
-reject a fresh post-code-review launch without `outputDir`. Resume is the only
-supported namespace reuse and must bind to the original run's exact workspace.
-Fresh `task/draft`, `task/plan`, `task/implement-plan-template`, and `task/substep` launches instead receive
-unique `.locus-pi/plans/<generated-run-name>` workspaces. A later manual
-task stage reuses that exact path through `--output-dir`. Other workflows retain
-their existing default `tmp/<workflow-name>` behavior.
+Every fresh workflow launch receives a unique
+`.locus-pi/plans/<generated-run-name>` workspace. This includes
+`post-code-review`, so its normal start command needs no manual `outputDir`.
+Callers may still select another confined project-relative workspace with
+`--output-dir`. A fresh `post-code-review` launch cannot reuse a workspace that
+already has durable review state. Resume binds to the original run's exact
+workspace. Any workflow may select a stable `.locus-pi/plans/<name>` workspace
+with `--run-name <name>`.
 
 Each accepted `post-code-review` workspace also owns one optional operator file,
 `style.md`. Before launch, the operator may place comment and project-style
-criteria at `tmp/post-code-review/<review-id>/style.md`. After the workspace is
+criteria at `<selected-workspace>/style.md`. After the workspace is
 confined, the runtime opens the existing regular non-symlink file without
 changing it, or creates it empty before any child starts. Empty means no extra
 operator criteria. A symlink or non-regular leaf fails before review work; the
@@ -470,9 +466,10 @@ Every run is persisted to `.locus-pi/runs/<runId>/`. The runner creates
 only the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
-child. Agent-authored files use a separate project-local workspace. Ordinary
-workflows default to `<pwd>/tmp/<workflow-name>/`; task drafting and planning
-default to `.locus-pi/plans/<generated-run-name>/`. `--run-name <name>` selects `.locus-pi/plans/<name>/`. The start surface reports the resolved run directory, which matters when
+child. Agent-authored files use a separate project-local workspace. Fresh
+workflows default to `.locus-pi/plans/<generated-run-name>/`.
+`--run-name <name>` selects `.locus-pi/plans/<name>/` for any workflow. The
+start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
@@ -1414,27 +1411,26 @@ Those questions stay in their run's evidence and reopen on request: the
 `/workflows` menu's `continue` entry takes the oldest pending one project-wide,
 and `/workflows continue <runId>` takes a named run.
 
-`outputDir()` returns the project-relative workflow workspace. Ordinary runs
-default to `tmp/<workflow-name>` beneath Pi's verified session working
-directory. Fresh Package task workflow runs default to
-`.locus-pi/plans/<generated-run-name>`. The `--run-name <name>` form selects
+`outputDir()` returns the project-relative workflow workspace. Fresh runs
+default to `.locus-pi/plans/<generated-run-name>` under the project root. The
+`--run-name <name>` form selects
 `.locus-pi/plans/<name>`. The same workspace can be selected through the
 programmatic tool's `outputDir` or `/workflows run <name|path> --output-dir
 <path>`. The runtime
-preserves a qualified child's complete saved name, so `group/child` defaults to
-`tmp/group/child`; an invoked child still shares its parent's selected
-workspace. The runtime creates its absolute path before the first child and
+preserves a qualified child's complete saved name in the generated workspace
+leaf; an invoked child still shares its parent's selected workspace. The
+runtime creates its absolute path before the first child and
 names it exactly once in every child task. Agent files keep their exact names;
 the runtime does not rename, move, or clean them. Confined absolute paths are
 accepted. `./path` resolves from the agent working directory. Traversal outside
 the project, whitespace tricks, backslashes, out-of-project working directories,
 and symlink escapes fail before a child starts.
 
-For `post-code-review`, the explicit namespace is also a freshness boundary:
-fresh semantic input cannot reuse a prior durable namespace. Choose a new
-`tmp/post-code-review/<review-id>` path, or resume with the original `runId` and
-workspace. This owner policy lives at launch/runtime boundaries, not in the
-workflow JavaScript.
+For `post-code-review`, the workspace is also a freshness boundary. Its
+generated default is unique. If a caller explicitly selects a workspace, fresh
+semantic input cannot reuse prior durable state there. Resume with the original
+`runId` to reuse the source workspace. This owner policy lives at
+launch/runtime boundaries, not in the workflow JavaScript.
 
 The same owner policy materializes `style.md` inside that workspace: preserve a
 regular existing file or create an empty one before the first child. This keeps
@@ -2366,8 +2362,7 @@ A replayed call reports **no** token usage, so the run budget shown by
 ```
 
 Files deliberately written by workflow agents are outside this tree, under the
-selected project-local workflow workspace. Ordinary workflows default to
-`<pwd>/tmp/<workflow-name>/`; Package task workflows use
+selected project-local workflow workspace. Fresh workflows default to
 `.locus-pi/plans/<generated-run-name>/`.
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —

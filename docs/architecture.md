@@ -56,12 +56,12 @@ The current direct feature graph has two edges:
 Local runtime state is intentionally outside the public source surface and ignored by Git:
 
 - `.locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
-- `.locus-pi/plans/<run-name>/` — task drafts, plans, step files, and implementation history;
+- `.locus-pi/plans/<generated-run-name>/` — workflow-authored working files, including task drafts, plans, review files, and implementation history;
 - `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
 - `.locus-pi/fusion/config.json` — project-local Fusion configuration;
 - `.locus/runtime/` — goal, loop, and diagnostic state used by Locus extensions;
 - `.tasks/` — optional local task state and explicit bridges;
-- `tmp/<workflow-name>/` or an explicit project-relative output directory — non-task workflow-owned working files.
+- an explicit project-relative output directory — an optional operator override for workflow-owned working files.
 
 Runtime state may contain project paths, prompts, model output, transcripts, or other private material. Do not commit it.
 

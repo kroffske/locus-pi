@@ -46,8 +46,8 @@ to a recorded handoff. Do not spawn `pi`, build a slash-command, or call a shell
 when this tool exists. Read the returned run id, paths, disposition, result, and
 artifacts from the tool result.
 
-For Package task workflows, `runName: "<name>"` selects
-`.locus-pi/plans/<name>`. Do not combine `runName` with `outputDir`.
+For any workflow, `runName: "<name>"` selects `.locus-pi/plans/<name>`. Do not
+combine `runName` with `outputDir`.
 
 ## External Pi path
 

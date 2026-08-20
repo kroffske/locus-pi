@@ -282,8 +282,9 @@ describe("stable workflow output paths", () => {
     expect(second.workspaceDirRelative).not.toBe(first.workspaceDirRelative);
   });
 
-  it("expands one runName to the same planning workspace across manual task stages", async () => {
+  it("expands one runName to the same planning workspace across workflows", async () => {
     const root = project();
+    writeWorkflow(root, "ordinary", `export default (dsl) => dsl.outputDir();\n`);
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
       "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
@@ -291,7 +292,7 @@ describe("stable workflow output paths", () => {
       substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
-    for (const name of ["task/draft", "task/plan", "task/implement-plan-template", "task/substep"]) {
+    for (const name of ["ordinary", "task/draft", "task/plan", "task/implement-plan-template", "task/substep"]) {
       const harness = createHarness(root);
       const result = await runWorkflowScript({
         pi: harness.pi,
@@ -305,16 +306,14 @@ describe("stable workflow output paths", () => {
     }
   });
 
-  it("rejects unsafe, non-task, and conflicting runName selections", async () => {
+  it("rejects unsafe and conflicting runName selections", async () => {
     const root = project();
-    writeWorkflow(root, "ordinary", `export default (dsl) => dsl.outputDir();\n`);
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
     for (const options of [
       { name: "task/draft", runName: "../escape" },
-      { name: "ordinary", runName: "named" },
       { name: "task/draft", runName: "named", outputDir: "tmp/conflict" },
     ]) {
       const harness = createHarness(root);
@@ -425,7 +424,7 @@ describe("stable workflow output paths", () => {
     expect(result.result).toBe(workspace);
   });
 
-  it("requires an explicit fresh namespace for post-code-review", async () => {
+  it("gives post-code-review a unique default planning workspace", async () => {
     const root = project();
     writeWorkflow(root, "post-code-review", `export default () => "ok";\n`);
     const harness = createHarness(root);
@@ -437,9 +436,9 @@ describe("stable workflow output paths", () => {
       name: "post-code-review",
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("fresh launch requires an explicit project-relative outputDir");
-    expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
+    expect(result.ok, result.error).toBe(true);
+    expect(result.workspaceDirRelative).toBe(`.locus-pi/plans/${result.runId}-post-code-review`);
+    expect(existsSync(path.join(root, result.workspaceDirRelative!))).toBe(true);
   });
 
   it("creates an empty style.md before post-code-review executes", async () => {
@@ -543,7 +542,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
       outputDir: "tmp/post-code-review/review-one",
     });
     expect(fresh.ok).toBe(false);
-    expect(fresh.error).toContain("already has durable state");
+    expect(fresh.error).toContain("choose a new --run-name or --output-dir, or resume the original run");
 
     const distinctHarness = createHarness(root);
     const distinct = await runWorkflowScript({
@@ -595,7 +594,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
       outputDir: "tmp/post-code-review/removed-workspace",
     });
     expect(fresh.ok).toBe(false);
-    expect(fresh.error).toContain("already has durable state");
+    expect(fresh.error).toContain("already has durable post-code-review state");
     expect(existsSync(path.join(root, "tmp", "post-code-review"))).toBe(false);
   });
 
@@ -758,9 +757,9 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
       name: "default-space",
     });
     expect(first.ok, first.error).toBe(true);
-    expect(first.workspacePhysicalIdentity).toBe("packages/docs site/tmp/default-space");
+    expect(first.workspacePhysicalIdentity).toBe(`.locus-pi/plans/${first.runId}-default-space`);
     expect(readWorkflowRunResult(root, first.runId)).toMatchObject({
-      workspacePhysicalIdentity: "packages/docs site/tmp/default-space",
+      workspacePhysicalIdentity: `.locus-pi/plans/${first.runId}-default-space`,
     });
 
     const raw = JSON.parse(readFileSync(workflowResultFile(first.runDir), "utf8")) as Record<string, unknown>;
@@ -847,7 +846,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
     rmSync(outside, { recursive: true, force: true });
   });
 
-  it("defaults the stable namespace from the saved workflow name", async () => {
+  it("defaults a unique planning namespace from the run id and saved workflow name", async () => {
     const root = project();
     writeWorkflow(root, "default-output", `export default () => "ok";\n`);
     const harness = createHarness(root);
@@ -860,8 +859,8 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
     });
 
     expect(result.ok, result.error).toBe(true);
-    expect(result.workspaceDirRelative).toBe("tmp/default-output");
-    expect(result.workspaceDir).toBe(path.join(root, "tmp", "default-output"));
+    expect(result.workspaceDirRelative).toBe(`.locus-pi/plans/${result.runId}-default-output`);
+    expect(result.workspaceDir).toBe(path.join(root, ".locus-pi", "plans", `${result.runId}-default-output`));
   });
 
   it("derives distinct safe default namespaces for legacy names beginning with underscore or hyphen", async () => {
@@ -883,13 +882,13 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
 
     for (const result of results) {
       expect(result.ok, result.error).toBe(true);
-      expect(result.workspaceDirRelative).toMatch(/^tmp(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+$/u);
+      expect(result.workspaceDirRelative).toMatch(/^\.locus-pi\/plans\/[A-Za-z0-9][A-Za-z0-9._-]*$/u);
     }
     const namespaces = results.map((result) => result.workspaceDirRelative!);
     expect(new Set(namespaces).size).toBe(names.length);
-    expect(namespaces[2]).toBe("tmp/legacy");
-    expect(namespaces[0]).toMatch(/^tmp\/by-workflow-name\/[a-f0-9]{64}$/u);
-    expect(namespaces[1]).toMatch(/^tmp\/by-workflow-name\/[a-f0-9]{64}$/u);
+    expect(namespaces[2]).toMatch(/-legacy$/u);
+    expect(namespaces[0]).toMatch(/-_legacy$/u);
+    expect(namespaces[1]).toMatch(/--legacy$/u);
   });
 
   it.each(["/tmp/escape", "../escape", "outputs/../escape", " outputs/task", "outputs/task/"])(
@@ -1272,7 +1271,7 @@ export default (dsl, input) => dsl.agent(input);
       createExecutor: executor(() => "direct done"),
     });
     expect(direct.ok, direct.error).toBe(true);
-    expect(direct.workspaceDirRelative).toBe("tmp/composed/worker");
+    expect(direct.workspaceDirRelative).toBe(`.locus-pi/plans/${direct.runId}-composed-worker`);
     expect(readWorkflowRunSummary(root, direct.runId!).status).toBe("completed");
     expect(readWorkflowRunScriptSnapshot(root, direct.runId!)).toMatchObject({
       kind: "ready",

@@ -152,7 +152,7 @@ import {
   resolveWorkflowOutputDirectory,
   resolveWorkflowOutputDirectoryPath,
   resolveWorkflowOutputDirectoryForReuse,
-  taskWorkspaceRelativePathForRunName,
+  workflowWorkspaceRelativePathForRunName,
   type WorkflowCheckpointIdentity,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
@@ -280,13 +280,6 @@ function persistedTargetIdentityKey(target: WorkflowTargetIdentity, projectRoot:
   return workflowTargetIdentityKey(target, { projectRoot, resolvedPath: sourcePath });
 }
 
-export function postCodeReviewFreshLaunchError(): string {
-  return (
-    "post-code-review fresh launch requires an explicit project-relative outputDir, e.g. " +
-    '"tmp/post-code-review/<review-id>"; resume the original run with its exact workspace instead'
-  );
-}
-
 export interface RunWorkflowScriptOptions {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -302,7 +295,7 @@ export interface RunWorkflowScriptOptions {
   items?: readonly string[];
   /** Optional project-relative workflow workspace. */
   outputDir?: string;
-  /** Short Package task workspace name expanded under `.locus-pi/plans/`. */
+  /** Short workflow workspace name expanded under `.locus-pi/plans/`. */
   runName?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
@@ -1640,10 +1633,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       if (opts.outputDir !== undefined) {
         throw new Error("workflow runName and outputDir are mutually exclusive");
       }
-      if (target.kind !== "name") {
-        throw new Error("workflow runName requires a saved Package task workflow name");
-      }
-      selectedOutputDir = taskWorkspaceRelativePathForRunName(target.ref, opts.runName);
+      selectedOutputDir = workflowWorkspaceRelativePathForRunName(opts.runName);
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -1812,15 +1802,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         };
       }
       resumeSourceWorkspace = resumeSourceBinding.workspace;
-    }
-    if (
-      inheritedCoordination === undefined &&
-      !hasResume &&
-      handoffReuseOutput === undefined &&
-      isPostCodeReviewTarget(target, projectRoot) &&
-      selectedOutputDir === undefined
-    ) {
-      throw new Error(postCodeReviewFreshLaunchError());
     }
     if (
       resumeSourceWorkspace?.explicit === true &&

@@ -22,11 +22,7 @@ import { prepareValidatedParams, validateParams } from "../_shared/host/validati
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
 import { resolveWorkflowTarget, runWorkflowScript } from "./runtime/workflow-runner.js";
-import {
-  isPostCodeReviewTargetInput,
-  WORKFLOW_SAVED_NAME_MAX_CHARS,
-  WORKFLOW_SAVED_NAME_PATTERN,
-} from "./runtime/workflow-saved-name.js";
+import { WORKFLOW_SAVED_NAME_MAX_CHARS, WORKFLOW_SAVED_NAME_PATTERN } from "./runtime/workflow-saved-name.js";
 import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
@@ -116,14 +112,14 @@ const WorkflowParams = Type.Object(
       Type.String({
         maxLength: WORKFLOW_OUTPUT_DIR_MAX_CHARS,
         description:
-          "Optional workflow workspace path. Ordinary workflows default to tmp/<workflow-name>; fresh Package task workflows use unique project-local plan workspaces; fresh post-code-review launches require an explicit new outputDir; resume repeats the source workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
+          "Optional workflow workspace path. Fresh workflows default to unique .locus-pi/plans/<generated-run-name> workspaces; resume repeats the source workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
       }),
     ),
     runName: Type.Optional(
       Type.String({
         maxLength: WORKFLOW_RUN_NAME_MAX_CHARS,
         pattern: WORKFLOW_RUN_NAME_PATTERN,
-        description: `Optional short Package task run name. The runtime expands it to ${WORKFLOW_PLANS_STORAGE_PREFIX}<runName>. Mutually exclusive with outputDir.`,
+        description: `Optional short workflow run name. The runtime expands it to ${WORKFLOW_PLANS_STORAGE_PREFIX}<runName>. Mutually exclusive with outputDir.`,
       }),
     ),
     continuation: Type.Optional(WorkflowContinuationParams),
@@ -150,24 +146,12 @@ const WorkflowParams = Type.Object(
 function workflowApprovalDetails(args: unknown): string[] {
   const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const target = String(record.name ?? record.scriptPath ?? record.script ?? "unspecified");
-  const ownerInput = isPostCodeReviewTargetInput(record);
-  const unresolvedOwnerName =
-    ownerInput &&
-    (typeof record.name === "string" ||
-      (typeof record.script === "string" &&
-        (path.isAbsolute(record.script) || (!record.script.includes("/") && !record.script.includes("\\")))) ||
-      (typeof record.scriptPath === "string" && path.isAbsolute(record.scriptPath)));
-  const workspace = unresolvedOwnerName
-    ? "owner source unresolved; runtime will verify fresh post-code-review policy"
-    : ownerInput
-      ? typeof record.outputDir === "string"
+  const workspace =
+    typeof record.runName === "string"
+      ? `${WORKFLOW_PLANS_STORAGE_PREFIX}${record.runName}`
+      : typeof record.outputDir === "string"
         ? record.outputDir
-        : "explicit outputDir required for fresh post-code-review (tmp/post-code-review/<review-id>)"
-      : typeof record.runName === "string"
-        ? `${WORKFLOW_PLANS_STORAGE_PREFIX}${record.runName}`
-        : typeof record.outputDir === "string"
-          ? record.outputDir
-          : "default <pwd>/tmp/<workflow-name>, or a unique project-local plan workspace for task planning";
+        : `${WORKFLOW_PLANS_STORAGE_PREFIX}<generated-run-name>`;
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
@@ -191,7 +175,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     label: "workflow",
-    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. The workspace defaults to <pwd>/tmp/<workflow-name> for ordinary workflows; fresh Package task workflows use unique .locus-pi/plans/<generated-run-name> workspaces, while runName selects .locus-pi/plans/<runName>; fresh post-code-review launches require an explicit new outputDir such as tmp/post-code-review/<review-id>; resume repeats the original workspace. Automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates catalog sub-agents; agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes and reviews .pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
+    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. Fresh workflows default to unique .locus-pi/plans/<generated-run-name> workspaces; runName selects .locus-pi/plans/<runName> for any workflow; resume repeats the original workspace. Automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates catalog sub-agents; agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes and reviews .pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",

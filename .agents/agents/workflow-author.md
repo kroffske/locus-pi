@@ -192,7 +192,7 @@ Standard generated source is a readable harness:
   erase semantic/runtime provenance.
 - Use `promptFile()` only for a long or shared role charter. Routing stays in source.
 - Rely on the runtime-injected absolute workflow workspace for filesystem work.
-  It defaults to `<pwd>/tmp/<workflow-name>/`; name each assigned relative file
+  Fresh runs default to `.locus-pi/plans/<generated-run-name>/`; name each assigned relative file
   and require idempotent replacement. Use `projectRoot()` only for source
   context. Do not invent another writable root or add permission/tool fields.
 - For durable item work, start from a caller-frozen approved list, then call one
