@@ -18,15 +18,13 @@ tags: [installation, getting-started]
 ```bash
 pi install npm:@kroffske/locus-pi
 pi list
-npx @kroffske/locus-pi doctor
 ```
 
-`pi list` is the authority for registration scope. `doctor` verifies that the installed package contains all eleven declared extension entrypoints; it does not execute child agents or workflows.
+`pi list` is the authority for registration scope. Pi reports missing entrypoints and extension load failures when it loads the package.
 
 Start a new Pi session in a trusted project:
 
 ```text
-/devext doctor
 /workflows list
 /workflows run live-smoke
 ```
@@ -94,7 +92,6 @@ npm ci --ignore-scripts
 pi install .
 pi list
 npm run check
-./bin/locus-pi doctor
 ```
 
 Use either user scope (`pi install .`) or project scope (`pi install . -l`), not both for the same checkout.
@@ -104,7 +101,6 @@ Updating the checkout does not require re-registration:
 ```bash
 git pull --ff-only
 npm ci --ignore-scripts
-./bin/locus-pi doctor
 ```
 
 Start a fresh Pi session after updating so the host reloads the source.
@@ -130,7 +126,7 @@ Removing a registration does not delete Pi runtime history.
 
 ## Common failures
 
-### `doctor` reports a missing entrypoint
+### Pi reports a missing or failed extension entrypoint
 
 Reinstall dependencies for a checkout and verify that the package or checkout is complete. For npm installs, remove and reinstall the same package identity.
 

@@ -14,7 +14,6 @@ publication tool noted below.
 | ---------------------------------- | ---------------------------------------------- | ------------------------------------------- |
 | `audit-sources.ts`                 | `audit:sources` (part of `check:fast`)         | Source-ownership and attribution gate       |
 | `build-public-catalogs.ts`         | `build:catalogs` / `check:generated`           | Writes and verifies the two public catalogs |
-| `build-workflow-source-shape.ts`   | `build:workflow-source` (`prepack`)            | Builds the shipped workflow-shape validator |
 | `check-extension-layers.ts`        | `check:layers` (part of `check:fast`)          | `extensions/_shared` layer and import rules |
 | `check-extension-manifests.ts`     | `check:manifests` (part of `check:fast`)       | Manifest schema and declared-path contract  |
 | `check-markdown-links.ts`          | `check:links` (part of `check`)                | Internal links in published Markdown        |
@@ -38,7 +37,7 @@ The composite gates that bind them together:
   metadata. The canonical gate:
   deterministic, offline, and read-only, and exactly what CI runs. Everything
   CI adds after it needs the network (`npm audit`) or the runner environment
-  (`locus-pi doctor`, `pi --version`, the pack candidate).
+  (`pi --version`, the pack candidate).
 - `npm run check:push` — `check` plus a dry-run pack. The tracked `pre-push`
   hook runs this.
 
@@ -143,17 +142,8 @@ table cannot be correct and still fail `format:check`. It never imports a
 workflow module: names come from the same directory scan the registry uses,
 and each purpose line from a bounded static parse of the source text.
 
-Unlike `dist/workflow-source-shape.mjs`, which `prepack` builds, the catalog
-artifact is committed: contract tests read it, so a fresh clone must have it
-before anything is built.
-
-### build-workflow-source-shape.ts
-
-Transpiles `extensions/workflows/workflow-source-shape.ts` into
-`dist/workflow-source-shape.mjs` — the only generated artifact the package
-ships. It lets workflow tooling validate `.workflow.mjs` sources without a
-TypeScript loader. Runs automatically on `npm pack` and `npm publish` via
-`prepack`, and before the public-inventory comparison via `check:repository`.
+The catalog artifact is committed: contract tests read it, so a fresh clone
+must have it before anything is built.
 
 ## Publication pair
 
@@ -162,12 +152,8 @@ TypeScript loader. Runs automatically on `npm pack` and `npm publish` via
 The read half: compares the working tree (tracked plus untracked, minus
 ignored) against the `public-repository-files.txt` inventory, then rejects
 forbidden internal paths, symlinks, absolute workstation paths, private key
-material, and npm auth configuration. The npm script first rebuilds
-`dist/workflow-source-shape.mjs`, because the inventory lists it while nothing
-else in the gate produces it: the comparison would otherwise pass only in a
-checkout where a prior test or pack run happened to leave it behind. It runs
-inside `npm run check`, and the repository-governance integration test reuses
-its exports.
+material, and npm auth configuration. It runs inside `npm run check`, and the
+repository-governance integration test reuses its exports.
 
 ### materialize-public-repository.ts
 

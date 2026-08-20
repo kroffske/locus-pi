@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * the rule for writing them was keyed on "the slice that moves the registry" and this one's owner,
  * `extensions/agents/session-viewer.ts`, never moved. Its two consumers also both sit inside the
  * agents extension, which makes it look like single-instance state. It is not: Pi loads every
- * registered entrypoint with the module cache disabled, and `devext_reload` re-runs discovery in a
+ * registered entrypoint with the module cache disabled, and Pi reload re-runs discovery in a
  * live process, so more than one instance of `session-viewer.ts` exists at once and each one would
  * get its own viewer set if the registry were a module binding.
  *
@@ -99,7 +99,7 @@ const producerDisposed = harness.widgets.get("viewer-producer-dispose");
 await command(firstLoad, consumerPath, "test-viewer-consumer-observe-own")("", harness.ctx);
 const consumerAfterPeerDispose = harness.widgets.get("viewer-consumer-observe-own");
 
-// A second discovery pass — what \`devext_reload\` does — must adopt the same set object, and a
+// A second discovery pass — what Pi reload does — must adopt the same set object, and a
 // viewer opened by a freshly loaded instance must be visible to the older peer instance.
 const secondLoad = await loadEntrypoints();
 const secondSlot = runtimeGlobal[registryKey];

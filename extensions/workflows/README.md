@@ -16,9 +16,11 @@
 /workflows stop [runId|last]
 ```
 
-Tools: `workflow` and opt-in `fusion`. Compatibility command: `/workflow-stop`.
+Tools: `workflow`, read-only `workflow_check_source`, and opt-in `fusion`. Compatibility command: `/workflow-stop`.
 
 The `workflow` tool is the structured execution surface for agents. It supports fields that cannot always be represented safely by slash-command text, including caller `items` and approved continuations.
+
+`workflow_check_source` validates one project-relative `.workflow.mjs` file up to 512 KiB against the standard authoring grammar. It reads the source as text and never imports or executes the workflow.
 
 ## Evidence and workspaces
 

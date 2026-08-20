@@ -16,12 +16,11 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
-import { standardWorkflowSourceShapeErrors } from "../../extensions/workflows/workflow-source-shape.js";
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
   files: string[];
-  bin: Record<string, string>;
+  bin?: Record<string, string>;
   pi: { extensions: string[]; skills: string[] };
   peerDependencies: Record<string, string>;
   devDependencies: Record<string, string>;
@@ -309,7 +308,6 @@ const forbiddenPackedPaths = [
 let dryRun: PackResult;
 
 beforeAll(() => {
-  execFileSync("npm", ["run", "build:workflow-source"], { cwd: root, encoding: "utf8" });
   const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: root,
     encoding: "utf8",
@@ -354,17 +352,6 @@ describe("npm public package boundary", () => {
     expect(violations).toEqual([]);
   });
 
-  it("keeps the generated checker byte-for-byte aligned on closed grammar probes", async () => {
-    const generated = (await import(pathToFileURL(path.join(root, "dist/workflow-source-shape.mjs")).href)) as {
-      standardWorkflowSourceShapeErrors(source: string): string[];
-    };
-    for (const probe of [...CLOSED_GRAMMAR_PROBES, LITERAL_ERROR_PROBE, ...DSL_RETURN_PROVENANCE_PROBES]) {
-      expect(generated.standardWorkflowSourceShapeErrors(probe.source), probe.name).toEqual(
-        standardWorkflowSourceShapeErrors(probe.source),
-      );
-    }
-  });
-
   it("keeps an open Pi peer floor and one exact tested development baseline", () => {
     const testedVersions = new Set(PI_PACKAGES.map((packageName) => pkg.devDependencies[packageName]));
     expect(testedVersions.size).toBe(1);
@@ -407,9 +394,9 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships eleven active entrypoints, their manifests, and complete local imports", () => {
+  it("ships ten active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    expect(pkg.pi.extensions).toHaveLength(11);
+    expect(pkg.pi.extensions).toHaveLength(10);
 
     for (const entrypoint of pkg.pi.extensions) {
       const normalizedEntrypoint = entrypoint.replace(/^\.\//, "");
@@ -442,7 +429,7 @@ describe("npm public package boundary", () => {
     expect(packedWorkflowNames).toEqual(packagedWorkflowNames().sort());
     expect(packagedWorkflowNames().sort()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
     expect(packedPaths.filter((file) => forbiddenPackedPaths.some((pattern) => pattern.test(file)))).toEqual([]);
-    expect(pkg.bin).toEqual({ "locus-pi": "bin/locus-pi" });
+    expect(pkg.bin).toBeUndefined();
   });
 
   it("keeps every pattern-catalog link resolvable inside the installed package", () => {
@@ -617,7 +604,7 @@ describe("npm public package boundary", () => {
     }
   }, 30_000);
 
-  it("runs the source checker from a real consumer install and foreign cwd", () => {
+  it("runs the Pi-native source checker from a real consumer install", () => {
     const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-installed-checker-"));
     try {
       const packOutput = execFileSync("npm", ["pack", "--silent", "--json", "--pack-destination", temporaryRoot], {
@@ -647,13 +634,6 @@ describe("npm public package boundary", () => {
         ],
         { cwd: consumerRoot, encoding: "utf8" },
       );
-      const checkerOutput = execFileSync(
-        path.join(consumerRoot, "node_modules", ".bin", "locus-pi"),
-        ["check-workflow-source", ".pi/workflows/consumer.workflow.mjs"],
-        { cwd: consumerRoot, encoding: "utf8" },
-      );
-      expect(checkerOutput).toContain("standard source shape passed");
-
       const installedMatrix = [
         {
           accepted: true,
@@ -787,21 +767,47 @@ describe("npm public package boundary", () => {
         ...CLOSED_GRAMMAR_PROBES.map((probe) => ({ ...probe, accepted: false as const })),
         ...DSL_RETURN_PROVENANCE_PROBES,
       ] as const;
-      for (const probe of installedMatrix) {
+      const checks = installedMatrix.map((probe) => {
         const probePath = path.join(workflowDirectory, `${probe.name}.workflow.mjs`);
         writeFileSync(probePath, probe.source);
-        const invoke = (): string =>
-          execFileSync(
-            path.join(consumerRoot, "node_modules", ".bin", "locus-pi"),
-            ["check-workflow-source", path.relative(consumerRoot, probePath)],
-            { cwd: consumerRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-          );
-        if (probe.accepted) {
-          expect(invoke(), probe.name).toContain("standard source shape passed");
-        } else {
-          expect(invoke, probe.name).toThrow();
+        return { name: probe.name, path: path.relative(consumerRoot, probePath), accepted: probe.accepted };
+      });
+      checks.unshift({ name: "consumer", path: ".pi/workflows/consumer.workflow.mjs", accepted: true });
+
+      const toolUrl = pathToFileURL(
+        path.join(
+          consumerRoot,
+          "node_modules",
+          "@kroffske",
+          "locus-pi",
+          "extensions",
+          "workflows",
+          "workflow-source-check-tool.ts",
+        ),
+      ).href;
+      const probeScript = `
+        const { registerWorkflowSourceCheckTool } = await import(${JSON.stringify(toolUrl)});
+        let tool;
+        registerWorkflowSourceCheckTool({ registerTool(value) { tool = value; } });
+        if (!tool) throw new Error("workflow_check_source was not registered");
+        const ctx = {
+          cwd: ${JSON.stringify(consumerRoot)},
+          session: { projectRoot: ${JSON.stringify(consumerRoot)}, workingDirectory: ${JSON.stringify(consumerRoot)} },
+        };
+        const results = [];
+        for (const check of ${JSON.stringify(checks)}) {
+          const result = await tool.execute("installed-probe", { path: check.path }, new AbortController().signal, () => {}, ctx);
+          results.push({ name: check.name, accepted: check.accepted, passed: result.isError !== true });
         }
-      }
+        process.stdout.write(JSON.stringify(results));
+      `;
+      const results = JSON.parse(
+        execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", probeScript], {
+          cwd: root,
+          encoding: "utf8",
+        }),
+      ) as Array<{ name: string; accepted: boolean; passed: boolean }>;
+      for (const result of results) expect(result.passed, result.name).toBe(result.accepted);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }

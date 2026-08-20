@@ -113,8 +113,9 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 - [Packaged examples](../extensions/workflows/examples/README.md)
 - [Workflow-author skill](../skills/locus-pi-workflows/SKILL.md)
 
-Validate a standard-profile workflow source with:
+Inside Pi, validate a standard-profile workflow source with the
+`workflow_check_source` tool:
 
-```bash
-npx @kroffske/locus-pi check-workflow-source path/to/example.workflow.mjs
+```json
+{ "path": "path/to/example.workflow.mjs" }
 ```

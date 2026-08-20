@@ -349,35 +349,29 @@ that surviving results remain useful.
 ## Machine-enforced standard source shape
 
 The build gate is deliberately a small source grammar, not a second workflow
-engine. In this source checkout, run the repository-local binary against the
-exact file Build produced:
+engine. Inside Pi, call the read-only `workflow_check_source` tool with the
+project-relative path of the exact file Build produced:
 
-```bash
-./bin/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
-```
-
-From an installed/consumer project, use the package binary:
-
-```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
+```json
+{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
 ```
 
 Run the same check for every declared direct child file. Build succeeds only
 when the design `Entries` set, files, `meta.name` values, module imports, and
 source checks all agree.
 
-This installed-package command resolves the path from the project where it is
-run; it needs neither a consumer npm script nor `tsx`. The package ships a
-prebuilt ESM checker so Node never has to strip TypeScript under `node_modules`.
-Repository maintainers use `npm run check:workflow-source` with no path to check every `standard` entry
+The tool is owned by the installed `workflows` extension and resolves the path
+inside the current project. It behaves the same for a source checkout and an
+installed package. Repository maintainers use `npm run check:workflow-source`
+with no path to check every `standard` entry
 already present in the Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
 assessment or importing the module.
 
 Build remains failed until the exact source passes this checker, module import,
-identity checks, and design/source comparison. A missing checker command or a
-non-zero exit cannot be reported as a successful Build.
+identity checks, and design/source comparison. An unavailable tool or failed
+checker result cannot be reported as a successful Build.
 
 These are all rules enforced for `meta.profile: "standard"`:
 

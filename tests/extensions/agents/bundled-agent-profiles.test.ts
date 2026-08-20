@@ -29,7 +29,7 @@ function loadBundledAgent(name: string): AgentDefinition {
 describe("bundled extension-agent catalog", () => {
   it("covers every default extension and resolves its manifest description", () => {
     const entries = loadExtensionAgentCatalog();
-    expect(entries).toHaveLength(11);
+    expect(entries).toHaveLength(10);
     expect(new Set(entries.map((entry) => entry.extensionId)).size).toBe(entries.length);
     expect(new Set(entries.map((entry) => entry.agentName)).size).toBe(entries.length);
 
@@ -84,6 +84,12 @@ describe("bundled extension-agent catalog", () => {
 });
 
 describe("bundled agent profiles", () => {
+  it("gives workflow-author the Pi-native source checker", () => {
+    const definition = loadBundledAgent("workflow-author");
+
+    expect(definition.allowedTools).toContain("workflow_check_source");
+  });
+
   it("loads real default.md with reasoning-only evidence policy", () => {
     const definition = loadBundledAgent("default");
     const outcome = evaluateEvidence({

@@ -61,7 +61,7 @@ Design/source/SVG divergence also fail closed. The parent publishes nothing
 unless all three children succeed.
 
 The Build child checks every generated `.workflow.mjs` with the live
-`./bin/locus-pi check-workflow-source`, assesses source identity, imports each
+`workflow_check_source` Pi tool, assesses source identity, imports each
 module without calling its default export, checks exact metadata identities, and
 compares the source graph with both accepted artifacts. Those checks prove
 static consistency only.

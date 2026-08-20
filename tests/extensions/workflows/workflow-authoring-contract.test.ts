@@ -146,14 +146,14 @@ describe("design-first readable workflow authoring", () => {
     "extensions/workflows/AUTHORING.md",
     "extensions/workflows/REFERENCE.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
-    expect(source(relativePath)).toContain("npx @kroffske/locus-pi check-workflow-source");
+    expect(source(relativePath)).toContain("workflow_check_source");
   });
 
-  it("makes workflow-author source-checking fail closed in a source checkout", () => {
+  it("makes workflow-author source-checking fail closed through the Pi-native tool", () => {
     for (const relativePath of [".agents/agents/workflow-author.md", "skills/locus-pi-workflows/SKILL.md"]) {
       const text = source(relativePath);
-      expect(text).toContain("./bin/locus-pi check-workflow-source");
-      expect(text).toMatch(/non-zero checker exit/iu);
+      expect(text).toContain("workflow_check_source");
+      expect(text).toMatch(/(?:unavailable tool|failed checker result)/iu);
       expect(text).toMatch(/never (?:report|return).*successful Build/isu);
     }
   });
@@ -1823,7 +1823,7 @@ ${skill[1] ?? ""}
 
     const build = source("extensions/workflows/examples/workflow-creator/build.workflow.mjs");
     expect(build).toContain("Never execute any generated workflow");
-    expect(build).toContain("check-workflow-source");
+    expect(build).toContain("workflow_check_source");
     expect(build).toContain('publishPrimaryFile("workflow-package.md")');
   });
 });

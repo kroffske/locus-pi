@@ -4,6 +4,26 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-20
+
+### Changed
+
+- **Workflow source validation now belongs to the Pi workflows extension.**
+  The read-only `workflow_check_source` tool validates one confined
+  project-relative `.workflow.mjs` file without importing or executing it.
+  The bundled workflow author and `workflow-creator` use that same tool in
+  source checkouts and installed consumer projects.
+
+### Removed
+
+- **The standalone `locus-pi` executable and `devext-doctor` extension were
+  removed.** Package installation and loading remain owned by `pi install`,
+  `pi list`, and Pi's extension loader. The deleted doctor reported only a
+  static package inventory, while the unused task-lifecycle preview duplicated
+  the external `locus task update` path. Removing the executable also removes
+  its generated workflow-checker copy; the repository gate continues to check
+  every packaged standard workflow directly from the workflows owner.
+
 ## [0.4.0] - 2026-08-20
 
 ### Changed
