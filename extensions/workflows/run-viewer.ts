@@ -9,10 +9,13 @@ import {
 import {
   listWorkflowRunIds,
   readWorkflowRunJournalState,
+  readWorkflowRunResult,
   readWorkflowRunSummary,
+  workflowPersistedResultInvalidity,
   type WorkflowJournalDiagnostic,
   type WorkflowRunStatus,
 } from "./runtime/workflow-journal.js";
+import { assertWorkflowRunId } from "./runtime/workflow-run-layout.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { clamp, viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
@@ -48,6 +51,7 @@ interface RunEvidenceModel {
   runId: string;
   status: WorkflowRunStatus;
   stages: StageRow[];
+  runProblem?: string;
   artifactProblem?: string;
   journalProblem?: string;
 }
@@ -251,7 +255,11 @@ export class WorkflowRunViewer implements CustomUiComponent {
     const height = viewerRows(this.tui);
     const header = style(
       this.#theme,
-      screen.run.artifactProblem === undefined && screen.run.journalProblem === undefined ? "accent" : "warning",
+      screen.run.runProblem === undefined &&
+        screen.run.artifactProblem === undefined &&
+        screen.run.journalProblem === undefined
+        ? "accent"
+        : "warning",
       fitLine(`[VIEW] ${screen.run.runId} · ${screen.run.status} · stages`, width),
     );
     if (height === 1) return [header];
@@ -259,7 +267,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
     const bodyHeight = Math.max(0, height - 1 - footer.length);
     const body =
       screen.run.stages.length === 0
-        ? [screen.run.artifactProblem ?? "No persisted stages or evidence."]
+        ? [screen.run.runProblem ?? screen.run.artifactProblem ?? "No persisted stages or evidence."]
         : selectableWindow(
             screen.run.stages,
             this.#stageIndex,
@@ -414,11 +422,13 @@ function runRow(projectRoot: string, runId: string): RunRow {
 }
 
 function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
-  if (!isSafeRunId(runId)) {
+  try {
+    assertWorkflowRunId(runId);
+  } catch (error) {
     return {
       runId,
       status: "unknown",
-      artifactProblem: `Invalid workflow run id: ${JSON.stringify(runId)}.`,
+      artifactProblem: `${errorMessage(error)}.`,
       stages: [
         {
           key: "run",
@@ -431,6 +441,7 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
   const journalState = readWorkflowRunJournalState(projectRoot, runId);
   const journal = journalState.lines;
   const summary = readWorkflowRunSummary(projectRoot, runId);
+  const persistedInvalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId));
   const artifactState = readWorkflowArtifactIndex(projectRoot, runId);
   const records = artifactState.status === "ready" ? artifactState.index.artifacts : [];
   const stageKeys: string[] = [];
@@ -452,6 +463,9 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
     const logs = journal.filter((line) => stageKey(line.phase) === key);
     const evidence: EvidenceRow[] = [...artifacts];
     if (logs.length > 0) evidence.push({ kind: "log", stage: key, lines: logs });
+    if (persistedInvalidity !== undefined && stageIndex === 0) {
+      evidence.push({ kind: "problem", message: `Malformed persisted metadata (${persistedInvalidity}).` });
+    }
     if (artifactProblem !== undefined && stageIndex === 0) evidence.push({ kind: "problem", message: artifactProblem });
     return { key, label: key, evidence };
   });
@@ -466,6 +480,9 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
     runId,
     status: summary.status,
     stages,
+    ...(persistedInvalidity === undefined
+      ? {}
+      : { runProblem: `Malformed persisted metadata (${persistedInvalidity}).` }),
     ...(artifactProblem !== undefined ? { artifactProblem } : {}),
     ...(journalProblem !== undefined ? { journalProblem } : {}),
   };
@@ -619,10 +636,6 @@ function evidenceLabel(evidence: EvidenceRow): string {
 
 function stageKey(value: string | undefined): string {
   return value === undefined || value.trim() === "" ? "run" : value;
-}
-
-function isSafeRunId(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value) && value !== "." && value !== ".." && !value.includes("..");
 }
 
 function selectableWindow<T>(

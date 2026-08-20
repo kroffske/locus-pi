@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
@@ -17,6 +28,7 @@ import {
   workflowRunRuntimeDir,
 } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
+import { parseWorkflowPersistedBinding } from "../../../extensions/workflows/runtime/workflow-persisted-binding.js";
 import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
@@ -37,7 +49,7 @@ function project(): string {
 }
 
 function runDir(root: string, runId: string): string {
-  const dir = path.join(root, ".pi", "locus-pi", "runs", runId);
+  const dir = path.join(root, ".locus-pi", "runs", runId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -61,6 +73,24 @@ describe("workflow run artifact store", () => {
     if (record.status === "ready") assert.equal(record.bytes.toString("utf8"), "reader bytes");
     assert.equal(readWorkflowArtifactRecord(root, id, "missing-id").status, "missing");
     assert.equal(readWorkflowArtifactIndex(root, "../escape").status, "invalid");
+  });
+
+  it("classifies a dangling index as invalid and refuses to replace it", () => {
+    const root = project();
+    const id = "dangling-index";
+    const directory = runDir(root, id);
+    const artifactsDir = workflowRunArtifactsDir(directory);
+    mkdirSync(artifactsDir, { recursive: true });
+    const indexPath = path.join(artifactsDir, "index.json");
+    const missingTarget = path.join(root, "missing-index-target.json");
+    symlinkSync(missingTarget, indexPath);
+
+    const passive = readWorkflowArtifactIndex(root, id);
+    assert.equal(passive.status, "invalid");
+    if (passive.status === "invalid") assert.match(passive.message, /unsafe/u);
+    assert.throws(() => createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: directory }), /unsafe/u);
+    assert.equal(lstatSync(indexPath).isSymbolicLink(), true, "dangling symlink remains unchanged");
+    assert.equal(existsSync(missingTarget), false, "outside target remains absent");
   });
 
   it("persists exactly one explicitly primary publication", () => {
@@ -95,10 +125,11 @@ describe("workflow run artifact store", () => {
     writeFileSync(
       workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
+        runId: sourceRunId,
         ok: true,
         result: terminalResult,
         artifactRefs: [sourceRef],
-        target: { kind: "name", ref: "review", source: "package", path: "/private/ignored.workflow.mjs" },
+        target: { kind: "name", ref: "review", source: "package" },
       })}\n`,
     );
 
@@ -127,6 +158,253 @@ describe("workflow run artifact store", () => {
     assert.throws(() => current.consumeText({ ...sourceRef, runId: "../escape" }), /Invalid workflow artifact runId/u);
   });
 
+  it.each(["external snapshot path", "wrong snapshot hash", "snapshot from another run"] as const)(
+    "rejects a source identity with %s",
+    (corruption) => {
+      const root = project();
+      const sourceRunId = "snapshot-binding-source";
+      const sourceRunDir = runDir(root, sourceRunId);
+      const source = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
+      const sourceRef = source.publishText("plan.md", "exact plan");
+      const snapshotBytes = Buffer.from("snapshot bytes\n", "utf8");
+      const snapshotSha256 = createHash("sha256").update(snapshotBytes).digest("hex");
+      const expectedSnapshot = path.join(workflowRunRuntimeDir(sourceRunDir), `script-${snapshotSha256}.workflow.mjs`);
+      mkdirSync(workflowRunRuntimeDir(sourceRunDir), { recursive: true });
+      writeFileSync(expectedSnapshot, snapshotBytes);
+      const wrongHash = "a".repeat(64);
+      const wrongHashSnapshot = path.join(workflowRunRuntimeDir(sourceRunDir), `script-${wrongHash}.workflow.mjs`);
+      if (corruption === "wrong snapshot hash") writeFileSync(wrongHashSnapshot, snapshotBytes);
+      const snapshotPath =
+        corruption === "external snapshot path"
+          ? path.join(root, "outside.workflow.mjs")
+          : corruption === "snapshot from another run"
+            ? path.join(root, ".locus-pi", "runs", "other-run", "runtime", `script-${snapshotSha256}.workflow.mjs`)
+            : corruption === "wrong snapshot hash"
+              ? wrongHashSnapshot
+              : expectedSnapshot;
+      const identitySha256 = corruption === "wrong snapshot hash" ? wrongHash : snapshotSha256;
+      const result = {
+        runId: sourceRunId,
+        ok: true,
+        result: "done",
+        target: { kind: "name", ref: "task/plan", source: "package" },
+        scriptIdentity: {
+          schemaVersion: 2,
+          identityPolicy: "static-node-only-v1",
+          sourcePath: path.resolve("extensions/workflows/examples/task/plan.workflow.mjs"),
+          snapshotPath,
+          scriptSha256: identitySha256,
+          identityCoverage: "self-contained-static",
+          executionSource: "snapshot",
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          builtinImports: [],
+          unboundDependencies: [],
+        },
+        artifactRefs: [sourceRef],
+      };
+      writeFileSync(workflowResultFile(sourceRunDir), `${JSON.stringify(result)}\n`);
+
+      const current = createWorkflowArtifactStore({
+        projectRoot: root,
+        runId: "snapshot-binding-consumer",
+        runDir: runDir(root, "snapshot-binding-consumer"),
+      });
+      assert.throws(() => current.consumeText(sourceRef), /snapshot/u);
+    },
+  );
+
+  it("rejects a v2 script identity without a persisted target before consuming artifacts", () => {
+    const root = project();
+    const sourceRunId = "unbound-v2-source";
+    const sourceRunDir = runDir(root, sourceRunId);
+    const source = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    const snapshotSha256 = "a".repeat(64);
+    const result = {
+      runId: sourceRunId,
+      ok: true,
+      result: "done",
+      artifactRefs: [sourceRef],
+      scriptIdentity: {
+        schemaVersion: 2,
+        identityPolicy: "static-node-only-v1",
+        sourcePath: path.resolve("extensions/workflows/examples/task/plan.workflow.mjs"),
+        snapshotPath: path.join(workflowRunRuntimeDir(sourceRunDir), `script-${snapshotSha256}.workflow.mjs`),
+        scriptSha256: snapshotSha256,
+        identityCoverage: "self-contained-static",
+        executionSource: "snapshot",
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        builtinImports: [],
+        unboundDependencies: [],
+      },
+    };
+    writeFileSync(workflowResultFile(sourceRunDir), `${JSON.stringify(result)}\n`);
+
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "unbound-v2-consumer",
+      runDir: runDir(root, "unbound-v2-consumer"),
+    });
+    assert.throws(() => current.consumeText(sourceRef), /not usable|malformed script identity/u);
+  });
+
+  it("consumes a source artifact with a valid exact snapshot binding", () => {
+    const root = project();
+    const sourceRunId = "snapshot-binding-valid-source";
+    const sourceRunDir = runDir(root, sourceRunId);
+    const source = createWorkflowArtifactStore({ projectRoot: root, runId: sourceRunId, runDir: sourceRunDir });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    const snapshotBytes = Buffer.from("snapshot bytes\n", "utf8");
+    const snapshotSha256 = createHash("sha256").update(snapshotBytes).digest("hex");
+    const snapshotPath = path.join(workflowRunRuntimeDir(sourceRunDir), `script-${snapshotSha256}.workflow.mjs`);
+    mkdirSync(workflowRunRuntimeDir(sourceRunDir), { recursive: true });
+    writeFileSync(snapshotPath, snapshotBytes);
+    writeFileSync(
+      workflowResultFile(sourceRunDir),
+      `${JSON.stringify({
+        runId: sourceRunId,
+        ok: true,
+        result: "done",
+        target: { kind: "name", ref: "task/plan", source: "package" },
+        scriptIdentity: {
+          schemaVersion: 2,
+          identityPolicy: "static-node-only-v1",
+          sourcePath: path.resolve("extensions/workflows/examples/task/plan.workflow.mjs"),
+          snapshotPath,
+          scriptSha256: snapshotSha256,
+          identityCoverage: "self-contained-static",
+          executionSource: "snapshot",
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          builtinImports: [],
+          unboundDependencies: [],
+        },
+        artifactRefs: [sourceRef],
+      })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "snapshot-binding-valid-consumer",
+      runDir: runDir(root, "snapshot-binding-valid-consumer"),
+    });
+    assert.equal(current.consumeText(sourceRef).text, "exact plan");
+  });
+
+  it("binds present Package sources to inventory depth while preserving removed history", () => {
+    const root = project();
+    const runId = "inventory-binding";
+    const snapshotPath = path.join(
+      root,
+      ".locus-pi",
+      "runs",
+      runId,
+      "runtime",
+      `script-${"a".repeat(64)}.workflow.mjs`,
+    );
+    const identity = (sourcePath: string) => ({
+      schemaVersion: 2,
+      identityPolicy: "static-node-only-v1",
+      sourcePath,
+      snapshotPath,
+      scriptSha256: "a".repeat(64),
+      identityCoverage: "self-contained-static",
+      executionSource: "snapshot",
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      builtinImports: [],
+      unboundDependencies: [],
+    });
+    const present = parseWorkflowPersistedBinding(
+      {
+        target: { kind: "name", ref: "task/substep", source: "package" },
+        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/substep.workflow.mjs")),
+      },
+      root,
+      runId,
+    );
+    assert.equal(present.scriptIdentityInvalid, undefined);
+
+    const removedPackage = parseWorkflowPersistedBinding(
+      {
+        target: { kind: "name", ref: "plan", source: "package" },
+        scriptIdentity: identity(path.resolve("extensions/workflows/examples/removed/deep/plan.workflow.mjs")),
+      },
+      root,
+      runId,
+    );
+    assert.equal(removedPackage.scriptIdentityInvalid, undefined, "removed package history remains readable");
+
+    const removedPersonal = parseWorkflowPersistedBinding(
+      {
+        target: { kind: "name", ref: "plan", source: "personal" },
+        scriptIdentity: identity(path.join(homedir(), ".pi", "workflows", "removed", "deep", "plan.workflow.mjs")),
+      },
+      root,
+      runId,
+    );
+    assert.equal(removedPersonal.scriptIdentityInvalid, undefined, "removed personal history remains readable");
+  });
+
+  it.each([
+    [
+      "identity leaf ordering",
+      (record: Record<string, unknown>) => {
+        record.scriptIdentity = {
+          schemaVersion: 2,
+          identityPolicy: "static-node-only-v1",
+          sourcePath: path.join(process.cwd(), "extensions/workflows/examples/task/plan.workflow.mjs"),
+          snapshotPath: "/tmp/script-a.workflow.mjs",
+          scriptSha256: "a".repeat(64),
+          identityCoverage: "self-contained-static",
+          executionSource: "snapshot",
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          builtinImports: ["node:z", "node:a"],
+          unboundDependencies: [],
+        };
+      },
+    ],
+    [
+      "disposition mismatch",
+      (record: Record<string, unknown>) => {
+        record.ok = true;
+        record.disposition = { status: "failed" };
+      },
+    ],
+  ] as const)("uses canonical persisted binding for continuation: %s", (_name, corrupt) => {
+    const root = project();
+    const sourceRunId = "binding-owner-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    const result = {
+      runId: sourceRunId,
+      ok: true,
+      target: { kind: "name", ref: "plan", source: "package" },
+      artifactRefs: [sourceRef],
+      result: "done",
+    } as Record<string, unknown>;
+    corrupt(result);
+    writeFileSync(workflowResultFile(runDir(root, sourceRunId)), `${JSON.stringify(result)}\n`);
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "binding-owner-consumer",
+      runDir: runDir(root, "binding-owner-consumer"),
+    });
+
+    assert.throws(() => current.consumeText(sourceRef), /malformed (?:script identity|disposition)/u);
+  });
+
   it("refuses an indexed source artifact omitted from the terminal handoff projection", () => {
     const root = project();
     const sourceRunId = "projected-source";
@@ -140,6 +418,7 @@ describe("workflow run artifact store", () => {
     writeFileSync(
       workflowResultFile(runDir(root, sourceRunId)),
       `${JSON.stringify({
+        runId: sourceRunId,
         ok: true,
         result: "projected",
         artifactRefs: [projectedRef],
@@ -155,6 +434,63 @@ describe("workflow run artifact store", () => {
 
     assert.throws(() => current.consumeText(omittedRef), /not present in the source run terminal projection/u);
     assert.equal(current.consumeText(projectedRef).text, "projected");
+  });
+
+  it("rejects a copied source result envelope whose runId names another run", () => {
+    const root = project();
+    const sourceRunId = "bound-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({
+        runId: "different-source",
+        ok: true,
+        target: { kind: "name", ref: "review", source: "package" },
+        artifactRefs: [sourceRef],
+      })}\n`,
+    );
+
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "bound-consumer",
+      runDir: runDir(root, "bound-consumer"),
+    });
+    assert.throws(() => current.consumeText(sourceRef), /belongs to another run/u);
+    assert.equal(
+      current.list().some((record) => record.kind === "input"),
+      false,
+    );
+  });
+
+  it("rejects a legacy source result envelope without a persisted runId", () => {
+    const root = project();
+    const sourceRunId = "unbound-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({
+        ok: true,
+        target: { kind: "name", ref: "review", source: "package" },
+        artifactRefs: [sourceRef],
+      })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "unbound-consumer",
+      runDir: runDir(root, "unbound-consumer"),
+    });
+
+    assert.throws(() => current.consumeText(sourceRef), /no valid persisted runId/u);
   });
 
   it("refuses malformed optional metadata and unknown persisted fields", () => {
@@ -205,7 +541,11 @@ describe("workflow run artifact store", () => {
     mkdirSync(workflowRunRuntimeDir(legacyDir), { recursive: true });
     writeFileSync(
       workflowResultFile(legacyDir),
-      `${JSON.stringify({ ok: true, target: { kind: "name", ref: "review", source: "package" } })}\n`,
+      `${JSON.stringify({
+        runId: missingIndexRun,
+        ok: true,
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
     );
     const legacyRef = {
       runId: missingIndexRun,
@@ -224,13 +564,86 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, noTargetRun),
     });
     const ref = source.publishText("plan.md", "bytes");
-    writeFileSync(workflowResultFile(runDir(root, noTargetRun)), '{"ok":true}\n');
+    writeFileSync(
+      workflowResultFile(runDir(root, noTargetRun)),
+      `${JSON.stringify({ runId: noTargetRun, ok: true })}\n`,
+    );
     assert.throws(() => current.consumeText(ref), /not usable/u);
     assert.equal(
       current.list().some((record) => record.kind === "input"),
       false,
     );
   });
+
+  it.each([
+    { kind: "name", ref: " review", source: "package" },
+    { kind: "name", ref: "review.workflow.mjs", source: "package" },
+    { kind: "scriptPath", ref: "review.workflow.mjs", source: "personal" },
+    { kind: "scriptPath", ref: "review.workflow.mjs", source: "package" },
+    { kind: "name", ref: "review", source: "package", unexpected: true },
+    { kind: "scriptPath", ref: "review.workflow.mjs", source: "project", path: 42 },
+  ] as const)("rejects forged source-run target identity %j", (target) => {
+    const root = project();
+    const sourceRunId = "forged-target-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const sourceRef = source.publishText("plan.md", "exact plan");
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({ runId: sourceRunId, ok: true, target, artifactRefs: [sourceRef] })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "forged-target-consumer",
+      runDir: runDir(root, "forged-target-consumer"),
+    });
+
+    assert.throws(() => current.consumeText(sourceRef), /invalid target identity/u);
+  });
+
+  it.each(["external", "dangling", "directory"] as const)(
+    "rejects target-only scriptPath %s leaf during artifact provenance",
+    (kind) => {
+      const root = project();
+      const sourceRunId = "target-only-leaf-source";
+      const source = createWorkflowArtifactStore({
+        projectRoot: root,
+        runId: sourceRunId,
+        runDir: runDir(root, sourceRunId),
+      });
+      const sourceRef = source.publishText("plan.md", "exact plan");
+      const targetPath = path.join(root, ".pi", "workflows", "target.workflow.mjs");
+      mkdirSync(path.dirname(targetPath), { recursive: true });
+      if (kind === "external") {
+        const external = path.join(path.dirname(root), "external-target-only.workflow.mjs");
+        writeFileSync(external, "external");
+        symlinkSync(external, targetPath);
+      } else if (kind === "dangling") {
+        symlinkSync(path.join(root, "missing.workflow.mjs"), targetPath);
+      } else {
+        mkdirSync(targetPath);
+      }
+      writeFileSync(
+        workflowResultFile(runDir(root, sourceRunId)),
+        `${JSON.stringify({
+          runId: sourceRunId,
+          ok: true,
+          target: { kind: "scriptPath", ref: ".pi/workflows/target.workflow.mjs", source: "project" },
+          artifactRefs: [sourceRef],
+        })}\n`,
+      );
+      const current = createWorkflowArtifactStore({
+        projectRoot: root,
+        runId: "target-only-leaf-consumer",
+        runDir: runDir(root, "target-only-leaf-consumer"),
+      });
+
+      assert.throws(() => current.consumeText(sourceRef), /invalid target identity/u);
+    },
+  );
 
   it("removes orphan bytes after index persistence failure so retry can succeed", () => {
     const root = project();
@@ -286,23 +699,21 @@ describe("workflow run artifact store", () => {
   });
 
   it("rejects symlinked canonical-root ancestors before external artifact reads or writes", () => {
-    for (const linkedAncestor of [".pi", "locus-pi"] as const) {
+    for (const linkedAncestor of [".locus-pi", "runs"] as const) {
       const root = project();
       const external = project();
       const id = `ancestor-${linkedAncestor.replace(".", "")}`;
-      const externalPi = path.join(external, "external-pi");
       const externalLocusPi = path.join(external, "external-locus-pi");
+      const externalRuns = path.join(external, "external-runs");
       const externalRunDir =
-        linkedAncestor === ".pi"
-          ? path.join(externalPi, "locus-pi", "runs", id)
-          : path.join(externalLocusPi, "runs", id);
+        linkedAncestor === ".locus-pi" ? path.join(externalLocusPi, "runs", id) : path.join(externalRuns, id);
       mkdirSync(externalRunDir, { recursive: true });
 
-      if (linkedAncestor === ".pi") {
-        symlinkSync(externalPi, path.join(root, ".pi"));
+      if (linkedAncestor === ".locus-pi") {
+        symlinkSync(externalLocusPi, path.join(root, ".locus-pi"));
       } else {
-        mkdirSync(path.join(root, ".pi"));
-        symlinkSync(externalLocusPi, path.join(root, ".pi", "locus-pi"));
+        mkdirSync(path.join(root, ".locus-pi"));
+        symlinkSync(externalRuns, path.join(root, ".locus-pi", "runs"));
       }
 
       const externalArtifacts = workflowRunArtifactsDir(externalRunDir);
@@ -311,9 +722,9 @@ describe("workflow run artifact store", () => {
           createWorkflowArtifactStore({
             projectRoot: root,
             runId: id,
-            runDir: path.join(root, ".pi", "locus-pi", "runs", id),
+            runDir: path.join(root, ".locus-pi", "runs", id),
           }),
-        /directory is unsafe/u,
+        /(?:directory|run path) is unsafe/u,
       );
       assert.equal(existsSync(externalArtifacts), false, `${linkedAncestor}: no external artifact write`);
 
@@ -322,7 +733,11 @@ describe("workflow run artifact store", () => {
       const indexRead = readWorkflowArtifactIndex(root, id);
       assert.equal(indexRead.status, "invalid", `${linkedAncestor}: external index rejected`);
       if (indexRead.status === "invalid") {
-        assert.match(indexRead.message, /directory is unsafe/u, `${linkedAncestor}: rejected before external parse`);
+        assert.match(
+          indexRead.message,
+          /(?:directory|run path) is unsafe/u,
+          `${linkedAncestor}: rejected before external parse`,
+        );
       }
       assert.equal(readWorkflowArtifactRecord(root, id, "published-0001").status, "invalid");
     }
@@ -518,4 +933,69 @@ describe("workflow run artifact store", () => {
     assert.equal(index.artifacts[0]?.provenance, "replay");
     assert.equal(index.artifacts[0]?.replaySourceRunId, first.runId);
   });
+
+  it.each(["deleted", "wrong-byte", "symlinked"] as const)(
+    "refuses resume when the source snapshot is %s before replay",
+    async (mutation) => {
+      const root = project();
+      mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+      writeFileSync(
+        path.join(root, ".agents", "agents", "default.md"),
+        "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
+      );
+      mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+      writeFileSync(
+        path.join(root, ".pi", "workflows", "replay-snapshot.workflow.mjs"),
+        'export default async function runWorkflow(dsl) { return { answer: await dsl.agent("same") }; }\n',
+      );
+      const harness = createHarness(root, { sessionId: `replay-snapshot-${mutation}` });
+      let executions = 0;
+      const createExecutor = (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          executions += 1;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "recorded answer",
+            text: "recorded answer",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      });
+      const first = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "replay-snapshot",
+        createExecutor,
+      });
+      assert.equal(first.ok, true, first.error);
+      assert.ok(first.scriptIdentity?.snapshotPath);
+      const snapshotPath = first.scriptIdentity.snapshotPath;
+      if (mutation === "deleted") {
+        rmSync(snapshotPath);
+      } else if (mutation === "wrong-byte") {
+        chmodSync(snapshotPath, 0o644);
+        writeFileSync(snapshotPath, "tampered snapshot bytes\n");
+      } else {
+        const outside = path.join(root, "outside.workflow.mjs");
+        writeFileSync(outside, "outside snapshot bytes\n");
+        rmSync(snapshotPath);
+        symlinkSync(outside, snapshotPath);
+      }
+
+      const resumed = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "replay-snapshot",
+        createExecutor,
+        resumeFromRunId: first.runId,
+      });
+      assert.equal(resumed.ok, false);
+      assert.match(resumed.error ?? "", /unusable retained snapshot|snapshot/u);
+      assert.equal(executions, 1, "resume must fail before replayed or fresh child work starts");
+    },
+  );
 });

@@ -134,6 +134,26 @@ function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | unde
 
 export const DEFAULT_WORKFLOW_AGENT = "default";
 export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
+
+/** Journal prelude for the run-level no-operator mode. Deliberately names the
+ *  guarantee ("operator input"), not any one method: `awaitOperator` and a
+ *  stage's `agent({ ask: true })` obey the same mode. */
+export const WORKFLOW_NO_OPERATOR_PRELUDE = "[workflow:no-operator] operator input is forbidden for this run";
+
+/**
+ * The same prelude for a headless (`print`/`json`) launch, where the mode is
+ * the default rather than a typed flag. A reader who never asked for the mode
+ * still has to be able to explain a refused `awaitOperator`, so the line says
+ * that this launch has no operator to reach. The opt-out is named per surface
+ * in REFERENCE, not here.
+ */
+export const WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE = `${WORKFLOW_NO_OPERATOR_PRELUDE} (headless launch: no operator can be reached)`;
+
+/** Named fail-closed refusal for an operator-input request under the mode.
+ *  The author's own reason travels inside so the terminal error stays actionable. */
+export function workflowOperatorInputForbiddenError(reason: string): string {
+  return `Operator input requested but forbidden for this run (no-operator mode): ${reason}`;
+}
 /** High per-child safety fuse. Ordinary agent work should finish far below this value.
  *  Single-sourced from the package budget contract: this name is kept because callers
  *  and tests use it, but the number lives in exactly one place. */
@@ -150,6 +170,7 @@ export const DEFAULT_WORKFLOW_FUSION_JUDGE_MAX_ANSWER_CHARS = 16_000;
 /** Character bound over the exact judge prompt, including all candidate answers. */
 export const WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS = 160_000;
 const WORKFLOW_FUSION_TEXT_MAX_CHARS = 16_000;
+export type WorkflowFusionMode = "tool-free" | "agent";
 
 /** One explicit model selection. Fusion never inherits the parent model silently. */
 export type WorkflowFusionModelSelector = { model: string; modelRole?: never } | { model?: never; modelRole: string };
@@ -157,12 +178,14 @@ export type WorkflowFusionModelSelector = { model: string; modelRole?: never } |
 /** One independent answer leg. `lens` is required only by the `roles` strategy. */
 export type WorkflowFusionMember = WorkflowFusionModelSelector & {
   label: string;
+  agent?: string;
   lens?: string;
 };
 
 /** The final synthesizer is separately declared and may not repeat a member selector. */
 export type WorkflowFusionJudge = WorkflowFusionModelSelector & {
   label?: string;
+  agent?: string;
 };
 
 export type WorkflowFusionContext = { mode: "prompt-only" } | { mode: "provided"; text: string };
@@ -176,6 +199,7 @@ export interface WorkflowFusionCallLimits {
 }
 
 export interface WorkflowFusionOptions {
+  mode: WorkflowFusionMode;
   members: readonly WorkflowFusionMember[];
   judge: WorkflowFusionJudge;
   /** Default `replicate`; `roles` requires every member to declare a non-empty lens. */
@@ -200,7 +224,8 @@ type WorkflowFusionAnyOptions = WorkflowFusionOptions | WorkflowFusionSchemaOpti
 interface NormalizedWorkflowFusionSelector {
   key: string;
   display: string;
-  agentOptions: { model?: string; modelRole?: string };
+  agent: string;
+  agentOptions: { agent: string; model?: string; modelRole?: string };
 }
 
 interface NormalizedWorkflowFusionMember extends NormalizedWorkflowFusionSelector {
@@ -216,6 +241,7 @@ interface NormalizedWorkflowFusionLimits {
 }
 
 interface NormalizedWorkflowFusion {
+  mode: WorkflowFusionMode;
   question: string;
   members: NormalizedWorkflowFusionMember[];
   judge: NormalizedWorkflowFusionSelector & { label: string };
@@ -244,6 +270,9 @@ export interface WorkflowAgentRequest {
   readOnly?: true;
   /** Runtime-owned invariant: every workflow child request carries `["*"]`. */
   tools?: string[];
+  /** Stage-declared live operator questions: the bridge injects the `workflow_ask`
+   *  custom tool and this child may block on a human answer. */
+  operatorAsk?: true;
   /** Fail-closed per-child tool-call safety fuse. The first over-budget start aborts the child. */
   maxToolCalls?: number;
   /** Per-call concrete model selector, e.g. "provider/id" or "provider/id:high". */
@@ -267,6 +296,8 @@ export interface WorkflowAgentRequest {
   workspaceHandle?: string;
   /** Runtime-owned stable identity allocated before this attempt is scheduled. */
   callId?: string;
+  /** Runtime-owned and reachable only from Fusion's internal invocation path. */
+  capabilityMode?: WorkflowFusionMode;
 }
 
 export interface WorkflowAgentResult {
@@ -312,6 +343,8 @@ export interface WorkflowAgentResult {
   workspaceMode?: WorkspaceMode;
   /** Resolved host-enforced read-only capability boundary. */
   readOnly?: boolean;
+  /** Exact pre-prompt host readback. Absent on replay and unavailable live hosts. */
+  activeToolNames?: string[];
 }
 
 export interface WorkflowAgentChildTrace {
@@ -405,9 +438,7 @@ export interface WorkflowDsl {
   invokeWorkflow(input: WorkflowSavedChildInvocation): Promise<WorkflowSavedChildResult>;
 }
 
-export interface WorkflowSavedChildInvocation {
-  name?: string;
-  scriptPath?: string;
+interface WorkflowSavedChildInvocationFields {
   input?: string;
   items?: readonly string[];
   /** Stable semantic identity for this item. Opaque payload does not redefine it. */
@@ -417,6 +448,15 @@ export interface WorkflowSavedChildInvocation {
   /** Must equal this execution tree's project-relative workflow workspace. */
   outputDir: string;
 }
+
+type WorkflowSavedChildSelector =
+  | { child: string; name?: never; scriptPath?: never; packageName?: never }
+  | { child?: never; name: string; scriptPath?: never; packageName?: never }
+  | { child?: never; name?: never; scriptPath: string; packageName?: never }
+  | { child?: never; name?: never; scriptPath?: never; packageName: string };
+
+/** One target selector plus the shared child-run contract. */
+export type WorkflowSavedChildInvocation = WorkflowSavedChildInvocationFields & WorkflowSavedChildSelector;
 
 export interface WorkflowSavedChildResult {
   status: "completed" | "skipped";
@@ -436,6 +476,16 @@ export interface WorkflowAgentOptions {
   readOnly?: true;
   /** @deprecated ignored; workflow children always receive `allowedTools: ["*"]`. */
   tools?: string[];
+  /**
+   * Let THIS child ask the operator live clarifying questions through the
+   * `workflow_ask` tool: the question renders in the parent session, the answer
+   * returns as the tool result, and the same child continues (owner decision,
+   * soul direction log 2026-08-19). Off unless declared — the tool is simply not
+   * injected, and the stock `ask` is excluded from every workflow child either
+   * way. Interactive parents only: with no UI the call fails closed with the
+   * named `ask-unavailable` cause instead of parking or degrading.
+   */
+  ask?: true;
   /** Maximum tool calls per child attempt; defaults to the runtime safety fuse. */
   maxToolCalls?: number;
   /**
@@ -499,6 +549,8 @@ export interface WorkflowAgentOptions {
   workspaceHandle?: string;
   /** A choice selects WorkflowAgentChoiceOptions instead of the exact-text overload. */
   choice?: never;
+  /** A choice fallback is valid only with WorkflowAgentChoiceOptions. */
+  choiceFallback?: never;
   /** Handoffs select WorkflowAgentHandoffOptions instead of the exact-text overload. */
   handoffs?: never;
   /** A schema selects WorkflowAgentSchemaOptions instead of the exact-text overload. */
@@ -523,9 +575,11 @@ export type WorkflowAgentValidate = (value: unknown) => readonly string[];
  *  semantics. Narrative output remains exact text. */
 export interface WorkflowAgentChoiceOptions<Choices extends readonly string[] = readonly string[]> extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice: Choices;
+  /** Exact declared route used only after the normal schema-repair budget is exhausted. */
+  choiceFallback?: Choices[number];
   handoffs?: never;
   schema?: never;
   validate?: never;
@@ -545,9 +599,10 @@ export interface WorkflowAgentHandoffBounds {
  * array-of-strings schema path, including repair, replay and journal semantics. */
 export interface WorkflowAgentHandoffOptions extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice?: never;
+  choiceFallback?: never;
   handoffs: WorkflowAgentHandoffBounds;
   schema?: never;
   validate?: never;
@@ -557,9 +612,10 @@ export interface WorkflowAgentHandoffOptions extends Omit<
  *  WorkflowAgentOptions, so a shaped call can never be typed as Promise<string>. */
 export interface WorkflowAgentSchemaOptions extends Omit<
   WorkflowAgentOptions,
-  "choice" | "handoffs" | "schema" | "validate"
+  "choice" | "choiceFallback" | "handoffs" | "schema" | "validate"
 > {
   choice?: never;
+  choiceFallback?: never;
   handoffs?: never;
   schema: Record<string, unknown>;
   /** Cross-field rules the schema subset cannot declare. Runs only after schema
@@ -573,6 +629,7 @@ type WorkflowAgentAnyOptions =
 
 const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
+const FUSION_CAPABILITY_MODE = Symbol("fusion-capability-mode");
 
 interface WorkflowInvocationReservation {
   remaining: number;
@@ -582,6 +639,7 @@ interface WorkflowInvocationReservation {
 type WorkflowInternalAgentOptions = WorkflowAgentAnyOptions & {
   [FUSION_INVOCATION_RESERVATION]?: WorkflowInvocationReservation;
   [FUSION_REPLAY_REQUIRED]?: true;
+  [FUSION_CAPABILITY_MODE]?: WorkflowFusionMode;
 };
 
 export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
@@ -796,8 +854,13 @@ export interface WorkflowJournalLine {
   /** Resolved thinking/reasoning level for agent live-row display. */
   thinking?: string;
   /** True on agent lines served from a recorded run instead of a fresh child.
-   *  Absent means the call really executed; it is never inferred from anything else. */
+   *  False on current terminal agent evidence means fresh execution. On terminal
+   *  capability evidence, absence is legacy/unknown and never proves a child ran. */
   replayed?: boolean;
+  /** Declared Fusion capability contract. Absent for ordinary agent calls. */
+  capabilityMode?: WorkflowFusionMode;
+  /** Exact pre-prompt host readback. Never synthesized for replayed calls. */
+  activeToolNames?: string[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
   continuation?: WorkflowContinuationJournal;
@@ -860,6 +923,10 @@ export interface WorkflowRuntimeOptions {
   onEvent?: (line: WorkflowJournalLine) => void; // progress callback (UI streaming)
   /** Runner-owned sink for one out-of-band operator handoff declaration. */
   onAwaitOperator?: (declaration: WorkflowAwaitOperatorDeclaration) => void;
+  /** Run-level no-operator mode: `awaitOperator` fails closed at the call site
+   *  with a named reason instead of declaring a pause. Method-agnostic — the
+   *  same run mode makes the agent bridge refuse `agent({ ask: true })`. */
+  operatorInputForbidden?: boolean;
 }
 
 export interface WorkflowRuntime {
@@ -1117,26 +1184,23 @@ function normalizeTimeoutMs(timeoutMs: number): number {
 /**
  * The execution evidence a post-child failure still owns.
  *
- * The two `error` lines that carry this are emitted AFTER the child ran and returned —
- * a script `validate`/parse callback that threw, an artifact writer that failed — so
- * the run holds a real host readback at that point. Omitting it is the mirror image of
- * naming a model that never ran: `executedModel` is the single proof of execution every
- * read side keys on (`workflow-journal.ts`, `workflow-run-report.ts`), so a terminal
- * line without it is read as "no child executed" and the live row's label is cleared.
- * The one case where a child provably DID execute would then be the case that loses the
- * evidence of it.
+ * The two `error` lines that carry this are emitted after a result exists — either from
+ * a fresh child or replay. Fresh results may hold real host readback; replayed results do
+ * not. Project only facts the result actually carries, while the emitter persists the
+ * separate request-owned capability declaration and replay origin.
  *
  * `modelRoleFallback` rides along because the bridge already gates it on the same
  * readback (`workflow-agent-bridge.ts`), so it is never a claim this line invents.
  */
 function executedModelEvidence(
-  result: Pick<WorkflowAgentResult, "model" | "executedModel" | "modelRoleFallback" | "thinking">,
-): Pick<WorkflowJournalLine, "model" | "executedModel" | "modelRoleFallback" | "thinking"> {
+  result: Pick<WorkflowAgentResult, "model" | "executedModel" | "modelRoleFallback" | "thinking" | "activeToolNames">,
+): Pick<WorkflowJournalLine, "model" | "executedModel" | "modelRoleFallback" | "thinking" | "activeToolNames"> {
   return {
     ...(result.model !== undefined ? { model: result.model } : {}),
     ...(result.executedModel !== undefined ? { executedModel: result.executedModel } : {}),
     ...(result.modelRoleFallback !== undefined ? { modelRoleFallback: result.modelRoleFallback } : {}),
     ...(result.thinking !== undefined ? { thinking: result.thinking } : {}),
+    ...(result.activeToolNames !== undefined ? { activeToolNames: result.activeToolNames } : {}),
   };
 }
 
@@ -1243,6 +1307,13 @@ function normalizeAgentChoices(value: unknown): readonly string[] {
     seen.add(member);
   }
   return value as readonly string[];
+}
+
+function normalizeAgentChoiceFallback(value: unknown, choices: readonly string[]): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error("agent choiceFallback must be a string");
+  if (!choices.includes(value)) throw new Error("agent choiceFallback must be one of the declared choices");
+  return value;
 }
 
 function normalizeAgentHandoffs(value: unknown): Required<WorkflowAgentHandoffBounds> {
@@ -2019,6 +2090,11 @@ function prepareWorkflowFusion(
   assertFusionText(question, "fusion question");
   if (!isRecord(rawOptions)) throw new Error("fusion options must be an object");
 
+  const mode = rawOptions.mode;
+  if (mode !== "tool-free" && mode !== "agent") {
+    throw new Error('fusion mode must be "tool-free" or "agent"');
+  }
+
   const strategy = rawOptions.strategy ?? "replicate";
   if (strategy !== "replicate" && strategy !== "roles") {
     throw new Error('fusion strategy must be "replicate" or "roles"');
@@ -2098,6 +2174,7 @@ function prepareWorkflowFusion(
   }
 
   const normalized: NormalizedWorkflowFusion = {
+    mode,
     question,
     members,
     judge: { ...judgeSelector, label: (judgeLabel as string).trim() },
@@ -2203,10 +2280,11 @@ function workflowFusionPacket(fusionId: string, fusion: NormalizedWorkflowFusion
   const lines = [
     `# ${fusionId}`,
     "",
+    `- Mode: ${fusion.mode}`,
     `- Context: ${fusion.contextMode}`,
     `- Strategy: ${fusion.strategy}`,
     `- Members: ${fusion.members.length}`,
-    `- Judge: ${fusion.judge.key}`,
+    `- Judge: ${fusion.judge.key} (agent=${fusion.judge.agent})`,
     `- Maximum physical invocations: ${fusion.maximumPhysicalInvocations}`,
     "",
     "## Question",
@@ -2218,7 +2296,7 @@ function workflowFusionPacket(fusionId: string, fusion: NormalizedWorkflowFusion
   for (const [index, member] of fusion.members.entries()) {
     lines.push(
       "",
-      `### ${index + 1}. ${member.label} (${member.key})`,
+      `### ${index + 1}. ${member.label} (${member.key}; agent=${member.agent})`,
       "",
       buildWorkflowFusionMemberPrompt(fusion, member),
     );
@@ -2244,18 +2322,23 @@ function normalizeFusionSelector(value: unknown, field: string): NormalizedWorkf
   if (hasModel === hasModelRole) {
     throw new Error(`${field} must declare exactly one non-empty model or modelRole`);
   }
+  const rawAgent = value.agent;
+  if (rawAgent !== undefined && (typeof rawAgent !== "string" || rawAgent.trim() === "")) {
+    throw new Error(`${field}.agent must be a non-empty catalog name when provided`);
+  }
+  const agent = typeof rawAgent === "string" ? rawAgent.trim() : DEFAULT_WORKFLOW_AGENT;
   if (hasModel) {
     const normalized = model.trim();
     if (!normalized.includes("/") || normalized.startsWith("/") || normalized.endsWith("/")) {
       throw new Error(`${field}.model must be a provider/id selector`);
     }
-    return { key: `model:${normalized}`, display: normalized, agentOptions: { model: normalized } };
+    return { key: `model:${normalized}`, display: normalized, agent, agentOptions: { agent, model: normalized } };
   }
   const normalized = (modelRole as string).trim();
   if (normalized.includes("/")) {
     throw new Error(`${field}.modelRole must be a bare role name, not a provider/id selector`);
   }
-  return { key: `modelRole:${normalized}`, display: normalized, agentOptions: { modelRole: normalized } };
+  return { key: `modelRole:${normalized}`, display: normalized, agent, agentOptions: { agent, modelRole: normalized } };
 }
 
 function assertFusionText(
@@ -2433,6 +2516,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       prompt,
       agent: agentName,
       tools: ["*"],
+      ...(opts?.ask === true ? { operatorAsk: true as const } : {}),
       permissionMode,
       workspaceMode,
       ...(opts?.workspaceHandle !== undefined ? { workspaceHandle: opts.workspaceHandle } : {}),
@@ -2447,6 +2531,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
       maxToolCalls,
+      ...(opts?.[FUSION_CAPABILITY_MODE] === undefined ? {} : { capabilityMode: opts[FUSION_CAPABILITY_MODE] }),
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
     // Replay eligibility is decided from the RESOLVED request, so defaults and
@@ -2565,6 +2650,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "agent_start",
       agent: req.agent,
       ...(replayed ? { replayed: true } : {}),
+      ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
       permissionMode,
       workspaceMode,
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
@@ -2634,6 +2720,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           kind: "error",
           agent: req.agent,
           callId,
+          replayed: false,
+          ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
           ...attemptFields,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
@@ -2696,11 +2784,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         schemaCheck = checkSchema(finalResult.text ?? "");
       } catch (err) {
         // A script validator that throws — or hands back something that is not an error
-        // list — ends the run unchanged and spends no retry. The line is emitted because
-        // this attempt really ran: without it the journal holds an agent_start with no
-        // agent_end and no record of why the run stopped. It carries the attempt trio for
-        // the same reason the transport catch does — this is the attempt's terminal record —
-        // and the readback for the same reason: the child answered before the validator ran.
+        // list — ends the run unchanged and spends no retry. Without this terminal line
+        // the journal holds an agent_start with no record of why the run stopped. The
+        // explicit replay flag says whether its answer came from a child or a record;
+        // host readback is projected only when a fresh result actually carries it.
         emit({
           ts: nowFn(),
           runId,
@@ -2709,8 +2796,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           agent: req.agent,
           callId,
           ...attemptFields,
+          replayed,
           ...(req.label !== undefined ? { label: req.label } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
           ...executedModelEvidence(finalResult),
           message: err instanceof Error ? err.message : String(err),
           ...(finalResult.usage !== undefined ? { usage: finalResult.usage } : {}),
@@ -2752,10 +2841,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...(finalResult.resultArtifact !== undefined ? { resultArtifactPath: finalResult.resultArtifact } : {}),
       });
     } catch (err) {
-      // The other terminal-by-throw record of a physical attempt: evidence writing failed,
-      // so no agent_end follows. It carries the attempt trio for the same reason the
-      // transport catch above does. The artifact writer runs after the child returned, so
-      // this failure is the store's and not the call's — the readback rides along too.
+      // The other terminal-by-throw record of an attempt: evidence writing failed, so no
+      // agent_end follows. It carries the attempt trio plus explicit replay origin. The
+      // failure belongs to the store after an answer was available; host readback rides
+      // along only when that answer came from a fresh result that carries it.
       emit({
         ts: nowFn(),
         runId,
@@ -2764,8 +2853,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         agent: req.agent,
         callId,
         ...attemptFields,
+        replayed,
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
         // The call already HAD a classification when adoption failed — this record is the
         // only terminal line it gets, so dropping the cause here would turn a classified
         // timeout into an unclassified store error and leave the operator matching prose.
@@ -2784,8 +2875,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       agent: req.agent,
       callId,
       ...attemptFields,
-      ...(replayed ? { replayed: true } : {}),
+      replayed,
       ...(finalResult.readOnly !== undefined ? { readOnly: finalResult.readOnly } : {}),
+      ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
+      ...(finalResult.activeToolNames !== undefined ? { activeToolNames: finalResult.activeToolNames } : {}),
       status: finalResult.status,
       // Machine-readable cause on every non-completed call, so a reader never has to
       // match on `summary` prose to tell a timeout from a cancellation.
@@ -2861,7 +2954,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "log",
       source: "runtime",
-      message: `[fusion:start] ${fusionId} context=${fusion.contextMode} strategy=${fusion.strategy} members=${fusion.members.length} judge=${fusion.judge.key}`,
+      message: `[fusion:start] ${fusionId} mode=${fusion.mode} context=${fusion.contextMode} strategy=${fusion.strategy} members=${fusion.members.length} judge=${fusion.judge.key}`,
       ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
     });
     try {
@@ -2882,6 +2975,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
             label: `${fusionId} member ${index + 1}: ${member.label}`,
             artifact: `${fusionId}-member-${String(index + 1).padStart(2, "0")}-${workflowFusionArtifactSlug(member.label)}.md`,
             [FUSION_INVOCATION_RESERVATION]: reservation,
+            [FUSION_CAPABILITY_MODE]: fusion.mode,
             ...(options.replaySourceRunId !== undefined ? { [FUSION_REPLAY_REQUIRED]: true as const } : {}),
           };
           return () => agentDsl(buildWorkflowFusionMemberPrompt(fusion, member), memberOptions);
@@ -2908,6 +3002,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...(fusion.schema !== undefined ? { schema: fusion.schema } : {}),
         ...(fusion.validate !== undefined ? { validate: fusion.validate } : {}),
         [FUSION_INVOCATION_RESERVATION]: reservation,
+        [FUSION_CAPABILITY_MODE]: fusion.mode,
         ...(options.replaySourceRunId !== undefined ? { [FUSION_REPLAY_REQUIRED]: true as const } : {}),
       };
       const result = await agentDsl(judgePrompt, judgeOptions as WorkflowAgentSchemaOptions);
@@ -2969,8 +3064,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       // transactional failure before agentRunner; a fresh panel starts without resume.
       if (options.replaySourceRunId === undefined) {
         await options.preflightAgentRequests?.([
-          ...fusion.members.map((member) => ({ agent: DEFAULT_WORKFLOW_AGENT, ...member.agentOptions })),
-          { agent: DEFAULT_WORKFLOW_AGENT, ...fusion.judge.agentOptions },
+          ...fusion.members.map((member) => ({ ...member.agentOptions })),
+          { ...fusion.judge.agentOptions },
         ]);
       }
       return await runPreparedFusion(fusion, reservation);
@@ -2990,9 +3085,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * fed back, and resolves to the validated value. Every attempt is a real child run and is
    * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
    *
-   * `choice` is only syntax over `{ type: "string", enum: [...] }`; it reaches this
-   * same path before any request is canonicalized. A hand-written equivalent schema
-   * therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * `choice` is syntax over `{ type: "string", enum: [...] }`; it reaches this same path
+   * before any request is canonicalized. Without `choiceFallback`, a hand-written equivalent
+   * schema therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * An explicit fallback changes only exhaustion: the runtime journals the degraded route and
+   * returns that declared choice after both schema attempts fail.
    *
    * `validate` extends that loop to the rules a declared schema cannot say — referential
    * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
@@ -3010,18 +3107,36 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
     const schema = opts?.schema;
     const declaredChoice = opts?.choice;
+    const declaredChoiceFallback = opts?.choiceFallback;
     const declaredHandoffs = opts?.handoffs;
     const declaredValidate = opts?.validate;
+    if (declaredChoice === undefined && declaredChoiceFallback !== undefined) {
+      throw new Error("agent choiceFallback requires choice");
+    }
     if (declaredChoice !== undefined) {
       if (schema !== undefined) throw new Error("agent choice cannot be combined with schema");
       if (declaredHandoffs !== undefined) throw new Error("agent choice cannot be combined with handoffs");
       if (declaredValidate !== undefined) throw new Error("agent choice cannot be combined with validate");
       const choices = normalizeAgentChoices(declaredChoice);
-      const { choice: _choice, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
-      return await agentDsl(prompt, {
-        ...baseOptions,
-        schema: { type: "string", enum: [...choices] },
-      });
+      const choiceFallback = normalizeAgentChoiceFallback(declaredChoiceFallback, choices);
+      const { choice: _choice, choiceFallback: _choiceFallback, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
+      try {
+        return await agentDsl(prompt, {
+          ...baseOptions,
+          schema: { type: "string", enum: [...choices] },
+        });
+      } catch (error) {
+        if (choiceFallback === undefined || !(error instanceof SchemaValidationError)) throw error;
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: `choice fallback ${JSON.stringify(choiceFallback)} selected after ${error.attempts} schema mismatch attempts: ${error.errors.join("; ")}`,
+          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        });
+        return choiceFallback;
+      }
     }
     if (declaredHandoffs !== undefined) {
       if (schema !== undefined) throw new Error("agent handoffs cannot be combined with schema");
@@ -3186,6 +3301,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   function awaitOperator(input: WorkflowAwaitOperatorDeclaration): void {
     const declaration = normalizeWorkflowAwaitOperatorDeclaration(input);
+    if (options.operatorInputForbidden === true) {
+      // Fail closed at the call site: no pause envelope, no auto-answer. The
+      // refusal is journalled before the throw so a script that catches it
+      // cannot turn the request into silence.
+      const message = workflowOperatorInputForbiddenError(declaration.reason);
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: `[workflow:no-operator] ${message}`,
+        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      });
+      throw new Error(message);
+    }
     if (options.onAwaitOperator === undefined) {
       throw new Error("awaitOperator is not configured by the workflow runner");
     }
@@ -3505,6 +3635,12 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     permissionMode: req.permissionMode ?? null,
     workspaceMode: req.workspaceMode ?? null,
     workspaceHandle: req.workspaceHandle ?? null,
+    capabilityMode: req.capabilityMode ?? null,
+    // A call that may block on a live human answer is a different execution from
+    // one that may not: the child's toolset differs (`workflow_ask` injected) and
+    // its answer can depend on operator input. A record made under one shape must
+    // not be served to the other.
+    operatorAsk: req.operatorAsk ?? null,
   });
 }
 

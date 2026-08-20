@@ -194,6 +194,36 @@ describe("workflow operator handoff controller", () => {
     expect(frame).toContain("Question 1 of 1");
   });
 
+  it("keeps run context beside three choices and the custom-answer row", async () => {
+    const item = handoff("20260725-120000-choice", {
+      questions: [
+        {
+          kind: "select",
+          id: "planning-decision",
+          prompt: "How should planning proceed?",
+          options: [
+            { label: "Use the safest assumption" },
+            { label: "Keep an explicit prerequisite" },
+            { label: "Reduce to evidenced scope" },
+          ],
+          recommended: "Use the safest assumption",
+          allowCustom: true,
+        },
+      ],
+    });
+    const { controller: queue } = controller([item]);
+    const harness = createHarness();
+    harness.customInputQueue.push("\r");
+
+    await expect(queue.pump(harness.ctx)).resolves.toMatchObject({ status: "started" });
+    const frame = harness.customRenderFrames[0]?.join("\n") ?? "";
+    expect(frame).toContain("run #oice · awaitOperator");
+    expect(frame).toContain("Use the safest assumption (Recommended)");
+    expect(frame).toContain("Keep an explicit prerequisite");
+    expect(frame).toContain("Reduce to evidenced scope");
+    expect(frame).toContain("Other (type your own)");
+  });
+
   it("validates explicit noninteractive answers without mounting UI", async () => {
     const item = handoff("20260725-120000-explicit", {
       questions: [

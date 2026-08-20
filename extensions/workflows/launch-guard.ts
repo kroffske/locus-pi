@@ -9,11 +9,14 @@
  */
 
 import type { ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
+import { isOneShotHostMode } from "../_shared/host/pi-api.js";
 import {
   resolveWorkflowTarget,
   WorkflowNameNotFoundError,
+  WorkflowGroupOnlyError,
   type ResolvedWorkflowTarget,
 } from "./runtime/workflow-runner.js";
+import { isWorkflowSavedName } from "./runtime/workflow-saved-name.js";
 
 const WORKFLOW_BUSY_MESSAGE =
   "Workflow not started: Pi is busy streaming. Wait for the current response to finish, then retry /workflows run.";
@@ -25,7 +28,7 @@ const WORKFLOW_BUSY_MESSAGE =
  * sessions need, so the command has to hold the turn open instead.
  */
 export function isOneShotCommandMode(ctx: ExtensionCommandContext): boolean {
-  return ctx.mode === "print" || ctx.mode === "json";
+  return isOneShotHostMode(ctx);
 }
 
 /** The reason a launch must not start, or `undefined` when the session is idle. */
@@ -43,7 +46,8 @@ export function workflowCommandIdleBlock(ctx: ExtensionContext): string | undefi
 export type WorkflowCommandTargetPreflight =
   | { status: "resolved"; target: ResolvedWorkflowTarget }
   | { status: "not-found" }
-  | { status: "runner-durable-failure" };
+  | { status: "group-only"; workflowName: string }
+  | { status: "runner-durable-failure"; targetKind: "name" | "scriptPath" };
 
 export function preflightWorkflowCommandTarget(
   scriptRef: string,
@@ -53,10 +57,18 @@ export function preflightWorkflowCommandTarget(
   try {
     return {
       status: "resolved",
-      target: resolveWorkflowTarget({ script: scriptRef }, projectRoot, workingDirectory),
+      target: resolveWorkflowTarget(
+        isWorkflowSavedName(scriptRef) ? { name: scriptRef } : { scriptPath: scriptRef },
+        projectRoot,
+        workingDirectory,
+      ),
     };
   } catch (error) {
     if (error instanceof WorkflowNameNotFoundError) return { status: "not-found" };
-    return { status: "runner-durable-failure" };
+    if (error instanceof WorkflowGroupOnlyError) return { status: "group-only", workflowName: error.workflowName };
+    return {
+      status: "runner-durable-failure",
+      targetKind: isWorkflowSavedName(scriptRef) ? "name" : "scriptPath",
+    };
   }
 }

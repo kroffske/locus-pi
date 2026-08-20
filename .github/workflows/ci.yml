@@ -22,7 +22,7 @@ jobs:
   validate:
     name: Node 22 package contract
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
@@ -37,8 +37,27 @@ jobs:
           node-version: 22.19.0
           cache: npm
 
+      # The Pi host shells out to ripgrep for its grep tool. Runner images that
+      # already ship it need no package mirror at all, and the apt path is
+      # bounded on both sides: Acquire timeouts so a stalled mirror fails fast,
+      # one retry for a transient failure, and a step timeout so a mirror that
+      # hangs anyway cannot consume the whole job (it twice did, at 20 minutes).
       - name: Install workflow system dependency
-        run: sudo apt-get update && sudo apt-get install --yes ripgrep
+        timeout-minutes: 5
+        run: |
+          if command -v rg >/dev/null 2>&1; then
+            rg --version
+            exit 0
+          fi
+          for attempt in 1 2; do
+            if sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update \
+              && sudo apt-get install --yes --no-install-recommends ripgrep; then
+              exit 0
+            fi
+            echo "ripgrep install attempt ${attempt} failed" >&2
+            sleep 15
+          done
+          exit 1
 
       - name: Install exact dependencies
         run: npm ci --ignore-scripts
@@ -52,14 +71,13 @@ jobs:
           GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run check:pull-request
 
-      - name: Run source, test, and source-audit gates
+      # The one deterministic gate: formatting, manifests, layers, workflow
+      # source shape, types, Pi host coherence, tests, source audit, published
+      # links, repository inventory, and release metadata. Anything CI runs
+      # beyond this step needs the network or the runner environment, which is
+      # exactly why it is not inside `check`.
+      - name: Run the canonical gate
         run: npm run check
-
-      - name: Verify the clean repository inventory
-        run: npm run check:repository
-
-      - name: Verify release metadata consistency
-        run: npm run check:release
 
       - name: Audit production dependencies
         run: npm audit --omit=dev

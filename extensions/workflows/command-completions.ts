@@ -1,6 +1,6 @@
 /**
  * extensions/workflows/command-completions.ts — Argument completions for
- * `/workflows` and its flat `/workflow-*` aliases.
+ * `/workflows` and the retained flat `/workflow-stop` alias.
  *
  * The `/workflows` grammar is the source of truth: the flat aliases delegate
  * here and strip their own verb back off, so a token can never be completed
@@ -9,10 +9,16 @@
 
 import type { CommandArgumentCompletion } from "../_shared/host/pi-api.js";
 import { listWorkflowRunIds } from "./runtime/workflow-journal.js";
-import type { FlatWorkflowCommand } from "./command-router.js";
-import { formatWorkflowCommandToken } from "./command-parser.js";
+import {
+  formatWorkflowCommandToken,
+  parseWorkflowCommandToken,
+  scanWorkflowRunOptionTokens,
+  workflowRunOptionDescriptor,
+  WORKFLOW_RUN_OPTION_DESCRIPTORS,
+} from "./command-parser.js";
+import { WORKFLOW_PLANS_STORAGE_PREFIX } from "./runtime/workflow-run-layout.js";
 import { listExampleNames } from "./operator-ui.js";
-import { buildWorkflowCatalogModel } from "./workflow-catalog.js";
+import { listWorkflowCatalogTargets } from "./runtime/workflow-runner.js";
 
 export function workflowArgumentCompletions(
   rawPrefix: string,
@@ -38,16 +44,13 @@ export function workflowArgumentCompletions(
   const continuationRunIds = (): readonly string[] => actionableRunIds?.slice(0, 20) ?? runIds();
   const workflowNames = (): string[] => {
     try {
-      return buildWorkflowCatalogModel(projectRoot, workingDirectory).current.map((row) => row.name);
+      return listWorkflowCatalogTargets(projectRoot, workingDirectory).map((target) => target.ref);
     } catch {
       return listExampleNames();
     }
   };
   if (prefix.startsWith("info ")) {
-    return matchingCompletions(
-      workflowNames().map((name) => ({ value: `info ${formatWorkflowCommandToken(name)}`, label: name })),
-      prefix,
-    );
+    return workflowNameCompletions("info", prefix.slice("info ".length), workflowNames());
   }
   if (prefix.startsWith("status ")) {
     return matchingCompletions(
@@ -85,32 +88,96 @@ export function workflowArgumentCompletions(
   if (!prefix.startsWith("run ")) return null;
 
   const runTail = prefix.slice("run ".length);
-  const firstSpace = runTail.search(/\s/u);
-  const targetPrefix = firstSpace < 0 ? runTail : runTail.slice(0, firstSpace);
-  if (targetPrefix.includes("/") || targetPrefix.startsWith(".")) return null;
-  if (firstSpace < 0) {
-    return matchingCompletions(
-      workflowNames().map((name) => ({ value: `run ${formatWorkflowCommandToken(name)}`, label: name })),
-      prefix,
-    );
+  const parsedTarget = parseWorkflowCommandToken(runTail);
+  if (parsedTarget === undefined) {
+    return runTail === "" || runTail.startsWith('"') ? workflowNameCompletions("run", runTail, workflowNames()) : null;
+  }
+  if (parsedTarget.value.includes("/") && !workflowNames().includes(parsedTarget.value)) return null;
+  const targetToken = formatWorkflowCommandToken(parsedTarget.value);
+  const targetIsComplete = parsedTarget.rest !== "" || /\s$/u.test(runTail);
+  if (!targetIsComplete) {
+    return workflowNameCompletions("run", parsedTarget.value, workflowNames());
   }
 
-  const afterTarget = runTail.slice(firstSpace);
-  if (" --resume ".startsWith(afterTarget)) {
-    return [{ value: `run ${targetPrefix} --resume `, label: "--resume", description: "Resume from a prior run" }];
+  return workflowRunOptionCompletions(targetToken, parsedTarget.rest === "" ? " " : ` ${parsedTarget.rest}`, runIds());
+}
+
+function workflowRunOptionCompletions(
+  target: string,
+  rawTail: string,
+  runIds: readonly string[],
+): CommandArgumentCompletion[] | null {
+  const endsWithSpace = /\s$/u.test(rawTail);
+  const scanned = scanWorkflowRunOptionTokens(rawTail);
+  if (scanned === undefined) return null;
+  const tokens = scanned.tokens;
+  const completed: string[] = [];
+  const commandPrefix = `run ${target}`;
+
+  const optionCompletions = (partial = ""): CommandArgumentCompletion[] => {
+    const stem = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} `;
+    const hasOutputDir = completed.includes("--output-dir");
+    const hasRunName = completed.includes("--run-name");
+    return [
+      ...WORKFLOW_RUN_OPTION_DESCRIPTORS.filter(
+        (descriptor) =>
+          !(descriptor.field === "runName" && hasOutputDir) && !(descriptor.field === "outputDir" && hasRunName),
+      ).map((descriptor) => ({
+        value: `${stem}${descriptor.name} `,
+        label: descriptor.name,
+        description:
+          descriptor.field === "outputDir"
+            ? "Select a workflow workspace path"
+            : descriptor.field === "runName"
+              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for this workflow`
+              : "Resume from a prior run",
+      })),
+      {
+        value: `${stem}-- `,
+        label: "--",
+        description: "Pass the remaining text unchanged as semantic input",
+      },
+    ].filter((completion) => completion.label.startsWith(partial));
+  };
+
+  for (let index = 0; index < tokens.length;) {
+    const token = tokens[index] ?? "";
+    if (token === "--") {
+      // End-of-options switches the rest to opaque semantic input. Never offer
+      // option completions once that boundary has been crossed.
+      return null;
+    }
+    const descriptor = workflowRunOptionDescriptor(token);
+    if (descriptor === undefined) {
+      return index === tokens.length - 1 && !endsWithSpace && token.startsWith("-") ? optionCompletions(token) : null;
+    }
+    const value = tokens[index + 1];
+    if (value === undefined) {
+      if (descriptor?.field === "outputDir" || descriptor?.field === "runName") return null;
+      const resumePrefix = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} --resume `;
+      return matchingCompletions(
+        runIds.map((runId) => ({ value: `${resumePrefix}${runId}`, label: runId })),
+        resumePrefix,
+      );
+    }
+    if (value.startsWith("--")) return null;
+    if (descriptor.field === "resumeFromRunId" && index + 1 === tokens.length - 1 && !endsWithSpace) {
+      const resumePrefix = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} --resume `;
+      return matchingCompletions(
+        runIds.map((runId) => ({ value: `${resumePrefix}${runId}`, label: runId })),
+        `${resumePrefix}${value}`,
+      );
+    }
+
+    completed.push(token, formatWorkflowCommandToken(value));
+    index += 2;
   }
-  if (!afterTarget.startsWith(" --resume ")) return null;
-  const resumePrefix = `run ${targetPrefix} --resume `;
-  const requestedRunId = afterTarget.slice(" --resume ".length);
-  if (/\s/u.test(requestedRunId)) return null;
-  return matchingCompletions(
-    runIds().map((runId) => ({ value: `${resumePrefix}${runId}`, label: runId })),
-    `${resumePrefix}${requestedRunId}`,
-  );
+
+  return endsWithSpace ? optionCompletions() : null;
 }
 
 export function workflowFlatCommandCompletions(
-  command: FlatWorkflowCommand,
+  command: WorkflowCompletionCommand,
   rawPrefix: string,
   projectRoot: string,
   workingDirectory = projectRoot,
@@ -134,6 +201,8 @@ export function workflowFlatCommandCompletions(
     value: completion.value.startsWith(verbPrefix) ? completion.value.slice(verbPrefix.length) : completion.value,
   }));
 }
+
+type WorkflowCompletionCommand = "run" | "stop" | "list" | "info" | "status" | "result" | "continue";
 
 function workflowContinueArgumentCompletions(
   rawPrefix: string,
@@ -166,4 +235,22 @@ function workflowContinueArgumentCompletions(
 function matchingCompletions(completions: CommandArgumentCompletion[], prefix: string): CommandArgumentCompletion[] {
   const normalizedPrefix = prefix.toLowerCase();
   return completions.filter((item) => item.value.toLowerCase().startsWith(normalizedPrefix));
+}
+
+function workflowNameCompletions(
+  command: "info" | "run",
+  rawNamePrefix: string,
+  names: readonly string[],
+): CommandArgumentCompletion[] {
+  const parsedPrefix = parseWorkflowCommandToken(rawNamePrefix);
+  const labelPrefix =
+    parsedPrefix !== undefined && parsedPrefix.rest === ""
+      ? parsedPrefix.value
+      : rawNamePrefix.startsWith('"')
+        ? rawNamePrefix.slice(1)
+        : rawNamePrefix;
+  const normalizedPrefix = labelPrefix.toLowerCase();
+  return names
+    .filter((name) => name.toLowerCase().startsWith(normalizedPrefix))
+    .map((name) => ({ value: `${command} ${formatWorkflowCommandToken(name)}`, label: name }));
 }

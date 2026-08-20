@@ -371,10 +371,10 @@ export interface ExtensionContext {
   /** Real Pi run mode. Terminal component factories/custom UI are valid only in `tui`. */
   mode?: "tui" | "rpc" | "json" | "print";
   model?: ModelLike;
-  /** Current host thinking level, exposed by Pi 0.83.0. */
+  /** Current host thinking level. */
   thinkingLevel?: ThinkingLevel;
   modelRegistry?: ModelRegistryLike;
-  /** Real Pi 0.83.0 ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
+  /** Real Pi ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
   /** Abort the active parent agent turn (real Pi: ctx.abort()). */
   abort?(): void;
@@ -549,6 +549,16 @@ export function getWorkingDirectory(ctx: ExtensionContext): string {
 
 export function getSessionId(ctx: ExtensionContext): string {
   return ctx.session?.id ?? ctx.sessionManager?.getSessionId?.() ?? "unknown-session";
+}
+
+/**
+ * True for the one-shot host modes, whose session is disposed when the turn
+ * ends and which have no operator to reach: `print` and `json`. `tui` and
+ * `rpc` both deliver operator input — `rpc` to the protocol client — so they
+ * are not one-shot here.
+ */
+export function isOneShotHostMode(ctx: Pick<ExtensionContext, "mode">): boolean {
+  return ctx.mode === "print" || ctx.mode === "json";
 }
 
 export function getCommandText(args: CommandArgs): string {

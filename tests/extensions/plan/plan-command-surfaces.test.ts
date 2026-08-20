@@ -163,7 +163,9 @@ describe("/goal help and budget parsing", () => {
     expect(widget).toContain("Inspect or explicitly change the long-lived project goal.");
     expect(widget).toContain("/goal <objective>");
     expect(widget).toContain("/goal budget <N|off>");
+    expect(widget).toContain("/goal prompt set <text>");
     expect(widget).toContain("/goal prompt <text>");
+    expect(widget).toContain("Legacy-compatible write; prefer set.");
     expect(widget).toContain("/goal prompt is a different surface: the Goal prompt shelf.");
     expect(h.widgetOptions.get("goal")).toEqual({ placement: "belowEditor" });
   });

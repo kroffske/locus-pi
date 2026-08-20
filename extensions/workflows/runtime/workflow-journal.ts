@@ -1,14 +1,14 @@
 /**
- * workflow-journal.ts — runId generation + .pi/locus-pi/runs/<runId>/ layout
+ * workflow-journal.ts — runId generation + .locus-pi/runs/<runId>/ layout
  * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
  *
  * Owns journal persistence and read-side run discovery while workflow-runtime.ts
  * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
  */
 
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { realpathSync, statSync } from "node:fs";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -24,12 +24,23 @@ import type {
 import { readWorkflowArtifactRecord, type WorkflowArtifactRef } from "./workflow-artifacts.js";
 import { parseWorkflowFailureDiagnostic, type WorkflowFailureDiagnostic } from "./workflow-failure.js";
 import type { WorkflowExecutionSource, WorkflowIdentityCoverage } from "./workflow-script-identity.js";
-import { projectWorkflowDisposition, workflowResultFile, workflowResultTextFile } from "./workflow-result.js";
+import { parseWorkflowPersistedBinding } from "./workflow-persisted-binding.js";
 import {
+  projectWorkflowDisposition,
+  workflowResultFile,
+  workflowResultTextFile,
+  type WorkflowResultPersistence,
+} from "./workflow-result.js";
+import { assertWorkflowPhysicalWorkspaceIdentity, isWorkflowPathWithinRoot } from "./workflow-output.js";
+
+import {
+  assertWorkflowRunId,
   ensureWorkflowRunDir,
   appendWorkflowRunTextFile,
+  readWorkflowRunsDirectory,
   readWorkflowRunTextFile,
   readWorkflowRunFile,
+  workflowRunFileExists,
   writeWorkflowRunFile,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowJournalFile,
@@ -505,20 +516,50 @@ export interface WorkflowJournalRead {
 }
 
 export interface WorkflowRunResultEnvelope {
+  /** Present for current envelopes; absent is retained as passive legacy evidence. */
+  runId?: string;
+  /** Read-side marker: a present envelope runId was malformed or selected another run. */
+  runIdInvalid?: string;
+  /** Read-side marker: legacy envelope has no runId and cannot prove source authority. */
+  runUnbound?: string;
   ok?: boolean;
+  okInvalid?: string;
   workspaceDir?: string;
   workspaceDirRelative?: string;
+  workspaceDirInvalid?: string;
+  /** Present current-run workspace was removed/unavailable; readable, not resumable. */
+  workspaceDirUnavailable?: string;
+  workspaceDirExplicit?: boolean;
+  workspaceDirExplicitInvalid?: string;
+  workspacePhysicalIdentity?: string;
+  workspacePhysicalIdentityInvalid?: string;
+  workspacePhysicalIdentitySchemaVersion?: 1;
+  semanticInputPresent?: boolean;
+  semanticInputSha256?: string;
+  semanticInputInvalid?: string;
   disposition?: unknown;
   result?: unknown;
   error?: string;
+  errorInvalid?: string;
   failureDiagnostic?: WorkflowFailureDiagnostic;
+  failureDiagnosticInvalid?: string;
   artifactRefs?: WorkflowArtifactRef[];
+  artifactRefsInvalid?: string;
   artifactRefsOmitted?: number;
+  artifactRefsOmittedInvalid?: string;
+  resultPersistence?: WorkflowResultPersistence;
+  resultPersistenceInvalid?: string;
   target?: {
     kind: "name" | "scriptPath";
     ref: string;
     source: "project" | "personal" | "package";
   };
+  /** Read-side marker: the persisted target field was present but malformed. */
+  targetInvalid?: string;
+  /** Read-side marker: a present script identity field was malformed or unsupported. */
+  scriptIdentityInvalid?: string;
+  /** Read-side marker: a present disposition was malformed or disagreed with ok. */
+  dispositionInvalid?: string;
   scriptIdentity?: {
     schemaVersion: 1 | 2;
     identityPolicy: "legacy-unversioned" | "static-node-only-v1";
@@ -533,6 +574,33 @@ export interface WorkflowRunResultEnvelope {
     builtinImports: string[];
     unboundDependencies: string[];
   };
+}
+
+/**
+ * Project one persisted-result envelope's present-but-invalid metadata into a
+ * stable read-side diagnostic. Missing fields are legacy compatibility state,
+ * not corruption, so only parser-emitted invalid markers participate here.
+ */
+export function workflowPersistedResultInvalidity(result: WorkflowRunResultEnvelope | null): string | undefined {
+  if (result === null) return undefined;
+  const invalidFields: Array<[string, string | undefined]> = [
+    ["runId is malformed or does not match the selected run", result.runIdInvalid],
+    ["target is malformed", result.targetInvalid],
+    ["script identity is malformed", result.scriptIdentityInvalid],
+    ["disposition is malformed or inconsistent", result.dispositionInvalid],
+    ["workspace location is malformed", result.workspaceDirInvalid],
+    ["workspaceDirExplicit is malformed", result.workspaceDirExplicitInvalid],
+    ["semantic input identity is malformed", result.semanticInputInvalid],
+    ["workspace physical identity is malformed", result.workspacePhysicalIdentityInvalid],
+    ["ok field is malformed", result.okInvalid],
+    ["error field is malformed", result.errorInvalid],
+    ["failure diagnostic is malformed", result.failureDiagnosticInvalid],
+    ["artifact references are malformed", result.artifactRefsInvalid],
+    ["artifactRefsOmitted is malformed", result.artifactRefsOmittedInvalid],
+    ["result persistence is malformed", result.resultPersistenceInvalid],
+  ];
+  const invalid = invalidFields.find(([, message]) => message !== undefined);
+  return invalid === undefined ? undefined : `${invalid[0]}: ${invalid[1]}`;
 }
 
 export type WorkflowRunScriptSnapshot =
@@ -558,10 +626,17 @@ export type WorkflowRunScriptSnapshot =
 /** Run ids newest-first, ordered by a proven start timestamp. */
 export function listWorkflowRunIds(projectRoot: string): string[] {
   try {
-    return readdirSync(workflowRunsRootDir(projectRoot), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => ({ runId: entry.name, startedAt: workflowRunStartedAt(projectRoot, entry.name) }))
-      .filter((entry): entry is { runId: string; startedAt: number } => entry.startedAt !== undefined)
+    return readWorkflowRunsDirectory(projectRoot)
+      .flatMap((entry) => {
+        if (!entry.isDirectory()) return [];
+        try {
+          assertWorkflowRunId(entry.name);
+          const startedAt = workflowRunStartedAt(projectRoot, entry.name);
+          return startedAt === undefined ? [] : [{ runId: entry.name, startedAt }];
+        } catch {
+          return [];
+        }
+      })
       .sort((left, right) => right.startedAt - left.startedAt || right.runId.localeCompare(left.runId))
       .map((entry) => entry.runId);
   } catch {
@@ -573,7 +648,7 @@ function workflowRunStartedAt(projectRoot: string, runId: string): number | unde
   const runDir = workflowRunDir(projectRoot, runId);
   const journalPath = workflowJournalFile(runDir);
   const resultPath = workflowResultFile(runDir);
-  if (!existsSync(journalPath) && !existsSync(resultPath)) return undefined;
+  if (!workflowRunFileExists(runDir, journalPath) && !workflowRunFileExists(runDir, resultPath)) return undefined;
 
   const canonical = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-|$)/u.exec(runId);
   if (canonical !== null) {
@@ -698,10 +773,14 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
       "modelRoleFallback",
       "thinking",
       "resumeFromRunId",
+      "capabilityMode",
     ],
     "string",
   );
   if (stringProblem !== undefined) return stringProblem;
+  if (value.resumeFromRunId !== undefined && !isCanonicalWorkflowRunId(value.resumeFromRunId)) {
+    return "Field resumeFromRunId must be a canonical workflow run id.";
+  }
 
   const numberProblem = optionalFieldsProblem(
     value,
@@ -775,6 +854,15 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   }
   if (value.evidenceWarnings !== undefined && !isStringArray(value.evidenceWarnings)) {
     return "Field evidenceWarnings must be an array of strings.";
+  }
+  if (value.activeToolNames !== undefined && !isStringArray(value.activeToolNames)) {
+    return "Field activeToolNames must be an array of strings.";
+  }
+  if (value.replayed === true && value.activeToolNames !== undefined) {
+    return "Field activeToolNames cannot be present when replayed is true.";
+  }
+  if (value.capabilityMode !== undefined && !isOneOf(value.capabilityMode, ["tool-free", "agent"])) {
+    return "Field capabilityMode must be tool-free or agent.";
   }
   if (value.answerArtifact !== undefined && !isArtifactRef(value.answerArtifact))
     return "Field answerArtifact is invalid.";
@@ -856,6 +944,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "modelRole",
     "thinking",
     "replayed",
+    "capabilityMode",
   ],
   agent_end: [
     "phase",
@@ -893,6 +982,8 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "modelRoleFallback",
     "thinking",
     "replayed",
+    "capabilityMode",
+    "activeToolNames",
   ],
   error: [
     "source",
@@ -917,6 +1008,9 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "executedModel",
     "modelRoleFallback",
     "thinking",
+    "replayed",
+    "capabilityMode",
+    "activeToolNames",
     // Post-child script/artifact failures use `error` as the sole terminal line.
     // The child already ran, so its usage belongs here just as it does on agent_end.
     "usage",
@@ -1073,7 +1167,7 @@ function isEvidenceEvaluation(value: unknown): boolean {
 function isWorkflowRunSummary(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
-    typeof value.runId === "string" &&
+    isCanonicalWorkflowRunId(value.runId) &&
     isOneOf(value.status, ["running", "completed", "awaiting_operator", "cancelled", "failed", "unknown"]) &&
     (value.phase === null || typeof value.phase === "string") &&
     [value.agentsStarted, value.agentsEnded, value.agentsReplayed, value.errors].every(
@@ -1084,6 +1178,15 @@ function isWorkflowRunSummary(value: unknown): boolean {
     (value.lastTs === null || typeof value.lastTs === "string") &&
     typeof value.hasResult === "boolean"
   );
+}
+
+function isCanonicalWorkflowRunId(value: unknown): value is string {
+  try {
+    assertWorkflowRunId(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1103,17 +1206,32 @@ export type WorkflowRunIdResolution =
   | { status: "ambiguous"; matched: number; candidates: string[] };
 
 export function resolveWorkflowRunId(projectRoot: string, selector: string): WorkflowRunIdResolution {
-  const runIds = listWorkflowRunIds(projectRoot);
   const wanted = selector.trim();
+  const special = wanted === "" || wanted === "last" || wanted === "latest";
+  let fullSelector: string | undefined;
+  if (!special) {
+    try {
+      fullSelector = assertWorkflowRunId(wanted);
+    } catch {
+      // A short selector has its own deliberately smaller grammar below.
+    }
+  }
+  const shortSelector = special ? null : /^#?([a-zA-Z0-9]+)$/u.exec(wanted);
+  if (!special && fullSelector === undefined && shortSelector === null) return { status: "not-found" };
+
+  const runIds = listWorkflowRunIds(projectRoot);
   if (wanted === "" || wanted === "last" || wanted === "latest") {
     const newest = runIds[0];
     return newest === undefined ? { status: "not-found" } : { status: "resolved", runId: newest };
   }
-  if (runIds.includes(wanted)) return { status: "resolved", runId: wanted };
-  const legacyMessage = workflowLegacyRunMigrationMessage(projectRoot, wanted);
-  if (legacyMessage !== undefined) return { status: "legacy", runId: wanted, message: legacyMessage };
-  const needle = wanted.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
-  if (needle === "") return { status: "not-found" };
+  if (fullSelector !== undefined && runIds.includes(fullSelector)) {
+    return { status: "resolved", runId: fullSelector };
+  }
+  const legacyMessage =
+    fullSelector === undefined ? undefined : workflowLegacyRunMigrationMessage(projectRoot, fullSelector);
+  if (legacyMessage !== undefined) return { status: "legacy", runId: fullSelector!, message: legacyMessage };
+  if (shortSelector === null) return { status: "not-found" };
+  const needle = shortSelector[1]!.toLowerCase();
   const matches = runIds.filter((runId) =>
     runId
       .replace(/[^a-zA-Z0-9]/gu, "")
@@ -1131,7 +1249,9 @@ export function resolveWorkflowRunId(projectRoot: string, selector: string): Wor
 }
 
 export type WorkflowRunResultText =
-  { status: "ready"; runId: string; path: string; text: string } | { status: "none"; runId: string; message: string };
+  | { status: "ready"; runId: string; path: string; text: string }
+  | { status: "none"; runId: string; message: string }
+  | { status: "invalid"; runId: string; message: string };
 
 /**
  * The whole terminal output of one finished run, read from disk.
@@ -1142,13 +1262,21 @@ export type WorkflowRunResultText =
 export function readWorkflowRunResultText(projectRoot: string, runId: string): WorkflowRunResultText {
   const runDir = workflowRunDir(projectRoot, runId);
   const textPath = workflowResultTextFile(runDir);
+  const envelope = readWorkflowRunResult(projectRoot, runId);
+  const invalidity = workflowPersistedResultInvalidity(envelope);
+  if (invalidity !== undefined) {
+    return {
+      status: "invalid",
+      runId,
+      message: `Run ${runId} has malformed persisted workflow metadata (${invalidity}).`,
+    };
+  }
   try {
     const text = readWorkflowRunTextFile(runDir, textPath);
     if (text.trim() !== "") return { status: "ready", runId, path: textPath, text };
   } catch {
     // No verbatim copy: fall through to the JSON envelope.
   }
-  const envelope = readWorkflowRunResult(projectRoot, runId);
   const jsonPath = workflowResultFile(runDir);
   if (envelope === null) {
     return {
@@ -1182,25 +1310,268 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, workflowResultFile(runDir)));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
-    const target = parsePersistedWorkflowTarget(record.target);
-    const scriptIdentity = parsePersistedWorkflowScriptIdentity(record.scriptIdentity);
+    const hasPersistedRunId = Object.prototype.hasOwnProperty.call(record, "runId");
+    let persistedRunId: string | undefined;
+    let runIdInvalid: string | undefined;
+    let runUnbound: string | undefined;
+    if (!hasPersistedRunId) {
+      runUnbound = "persisted result envelope has no runId";
+    } else {
+      try {
+        persistedRunId = assertWorkflowRunId(record.runId);
+        if (persistedRunId !== runId) {
+          runIdInvalid = `persisted runId ${JSON.stringify(persistedRunId)} does not match selected run ${JSON.stringify(runId)}`;
+        }
+      } catch (error) {
+        runIdInvalid = errorMessage(error);
+      }
+    }
+    // A malformed/mismatched runId cannot authorize target, workspace, input,
+    // artifact, or script metadata. A missing runId remains readable as legacy
+    // evidence, but is marked run-unbound so exact consumers can refuse it.
+    const exposeBindingMetadata = runIdInvalid === undefined;
+    const binding = parseWorkflowPersistedBinding(record, projectRoot, runId);
+    const target = binding.target;
+    const targetInvalid = binding.targetInvalid;
+    const scriptIdentity = binding.scriptIdentity;
+    const scriptIdentityInvalid = binding.scriptIdentityInvalid;
+    const dispositionInvalid = binding.dispositionInvalid;
     const failureDiagnostic = parseWorkflowFailureDiagnostic(record.failureDiagnostic);
+    let okInvalid: string | undefined;
+    let errorInvalid: string | undefined;
+    let failureDiagnosticInvalid: string | undefined;
+    let artifactRefsInvalid: string | undefined;
+    let artifactRefsOmittedInvalid: string | undefined;
+    let resultPersistence: WorkflowResultPersistence | undefined;
+    let resultPersistenceInvalid: string | undefined;
+    if (Object.prototype.hasOwnProperty.call(record, "ok") && typeof record.ok !== "boolean") {
+      okInvalid = "ok must be a boolean when present";
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "error") && typeof record.error !== "string") {
+      errorInvalid = "error must be a string when present";
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "failureDiagnostic")) {
+      if (!isPersistedFailureDiagnostic(record.failureDiagnostic)) {
+        failureDiagnosticInvalid = "failureDiagnostic must be a complete known diagnostic object";
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "artifactRefs")) {
+      if (!isArtifactRefArray(record.artifactRefs)) {
+        artifactRefsInvalid = "artifactRefs must be an array of at most 20 valid artifact references";
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "artifactRefsOmitted")) {
+      if (
+        typeof record.artifactRefsOmitted !== "number" ||
+        !Number.isSafeInteger(record.artifactRefsOmitted) ||
+        record.artifactRefsOmitted < 1
+      ) {
+        artifactRefsOmittedInvalid = "artifactRefsOmitted must be a positive safe integer when present";
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "resultPersistence")) {
+      try {
+        resultPersistence = parsePersistedResultPersistence(record.resultPersistence, projectRoot, runId);
+        if (record.ok === true && resultPersistence.ok === false) {
+          throw new Error("resultPersistence.ok=false cannot accompany an outer ok=true result");
+        }
+      } catch (error) {
+        resultPersistenceInvalid = errorMessage(error);
+        resultPersistence = undefined;
+      }
+    }
+    let workspacePhysicalIdentity: string | undefined;
+    let workspacePhysicalIdentityInvalid: string | undefined;
+    let workspacePhysicalIdentitySchemaVersion: 1 | undefined;
+    let workspaceDirExplicit: boolean | undefined;
+    let workspaceDirExplicitInvalid: string | undefined;
+    let workspaceDir: string | undefined;
+    let workspaceDirRelative: string | undefined;
+    let workspaceDirInvalid: string | undefined;
+    let workspaceDirUnavailable: string | undefined;
+    let resolvedPhysicalWorkspaceRelative: string | undefined;
+    const hasWorkspaceDir = Object.prototype.hasOwnProperty.call(record, "workspaceDir");
+    const hasWorkspaceDirRelative = Object.prototype.hasOwnProperty.call(record, "workspaceDirRelative");
+    if (hasWorkspaceDir || hasWorkspaceDirRelative) {
+      if (typeof record.workspaceDir !== "string" || typeof record.workspaceDirRelative !== "string") {
+        workspaceDirInvalid = "workspaceDir and workspaceDirRelative must both be strings when present";
+      } else if (!path.isAbsolute(record.workspaceDir)) {
+        workspaceDirInvalid = "workspaceDir must be an absolute path when present";
+      } else {
+        try {
+          const lexicalRoot = path.resolve(projectRoot);
+          const lexicalWorkspace = path.resolve(record.workspaceDir);
+          const lexicalRelativePath = path.relative(lexicalRoot, lexicalWorkspace).split(path.sep).join("/");
+          if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalWorkspace)) {
+            workspaceDirInvalid = "workspaceDir escapes the project root";
+          } else {
+            const physicalRoot = realpathSync(lexicalRoot);
+            let physicalWorkspace: string | undefined;
+            try {
+              physicalWorkspace = realpathSync(lexicalWorkspace);
+            } catch (error) {
+              if (!isWorkspaceUnavailableError(error)) throw error;
+              workspaceDirUnavailable = `workspaceDir is unavailable: ${errorMessage(error)}`;
+            }
+            if (physicalWorkspace !== undefined && !isWorkflowPathWithinRoot(physicalRoot, physicalWorkspace)) {
+              workspaceDirInvalid = "workspaceDir escapes the project root through a symlink";
+            } else {
+              if (physicalWorkspace !== undefined) {
+                if (!statSync(physicalWorkspace).isDirectory()) {
+                  workspaceDirInvalid = "workspaceDir must identify a directory when present";
+                }
+                resolvedPhysicalWorkspaceRelative = path
+                  .relative(physicalRoot, physicalWorkspace)
+                  .split(path.sep)
+                  .join("/");
+              }
+              if (
+                workspaceDirInvalid === undefined &&
+                (lexicalRelativePath === "" ||
+                  lexicalRelativePath !== record.workspaceDirRelative ||
+                  (resolvedPhysicalWorkspaceRelative !== undefined &&
+                    (resolvedPhysicalWorkspaceRelative === "" ||
+                      resolvedPhysicalWorkspaceRelative !== record.workspaceDirRelative)))
+              ) {
+                workspaceDirInvalid =
+                  `workspaceDirRelative does not match workspaceDir canonical path or physical identity ` +
+                  `(recorded ${JSON.stringify(record.workspaceDirRelative)}, ` +
+                  `canonical ${JSON.stringify(lexicalRelativePath)}, ` +
+                  `physical ${JSON.stringify(resolvedPhysicalWorkspaceRelative)})`;
+              } else if (workspaceDirInvalid === undefined) {
+                workspaceDir = record.workspaceDir;
+                workspaceDirRelative = record.workspaceDirRelative;
+              }
+            }
+          }
+        } catch (error) {
+          workspaceDirInvalid = `workspaceDir identity is unavailable: ${errorMessage(error)}`;
+        }
+      }
+    }
+    const hasPhysicalIdentitySchema = Object.prototype.hasOwnProperty.call(
+      record,
+      "workspacePhysicalIdentitySchemaVersion",
+    );
+    const hasPhysicalIdentity = Object.prototype.hasOwnProperty.call(record, "workspacePhysicalIdentity");
+    if (hasPhysicalIdentitySchema || hasPhysicalIdentity) {
+      if (!hasWorkspaceDir || !hasWorkspaceDirRelative) {
+        if (workspaceDirInvalid === undefined) {
+          workspacePhysicalIdentityInvalid =
+            "workspaceDir and workspaceDirRelative are required when workspace physical identity is present";
+        }
+      } else if (!hasPhysicalIdentitySchema) {
+        workspacePhysicalIdentityInvalid =
+          "workspace physical identity schema version is required when physical identity is present";
+      } else if (record.workspacePhysicalIdentitySchemaVersion !== 1) {
+        workspacePhysicalIdentityInvalid = "unsupported workspace physical identity schema version";
+      } else if (!hasPhysicalIdentity) {
+        workspacePhysicalIdentityInvalid = "workspace physical identity is required when schema version is present";
+      } else {
+        try {
+          workspacePhysicalIdentity = assertWorkflowPhysicalWorkspaceIdentity(record.workspacePhysicalIdentity);
+          workspacePhysicalIdentitySchemaVersion = 1;
+          const expectedPhysicalRelative = resolvedPhysicalWorkspaceRelative ?? workspaceDirRelative;
+          if (expectedPhysicalRelative !== undefined && workspacePhysicalIdentity !== expectedPhysicalRelative) {
+            workspacePhysicalIdentityInvalid =
+              `workspace physical identity does not match workspaceDir ` +
+              `(recorded ${JSON.stringify(workspacePhysicalIdentity)}, ` +
+              `physical ${JSON.stringify(expectedPhysicalRelative)})`;
+            workspacePhysicalIdentity = undefined;
+            workspacePhysicalIdentitySchemaVersion = undefined;
+          }
+        } catch (error) {
+          workspacePhysicalIdentityInvalid = errorMessage(error);
+        }
+      }
+    }
+    const hasWorkspaceDirExplicit = Object.prototype.hasOwnProperty.call(record, "workspaceDirExplicit");
+    if (hasWorkspaceDirExplicit) {
+      if (!hasWorkspaceDir && !hasWorkspaceDirRelative) {
+        workspaceDirExplicitInvalid = "workspaceDirExplicit requires workspaceDir and workspaceDirRelative";
+      } else if (typeof record.workspaceDirExplicit === "boolean") {
+        workspaceDirExplicit = record.workspaceDirExplicit;
+      } else {
+        workspaceDirExplicitInvalid = "workspaceDirExplicit must be a boolean";
+      }
+    }
+    const hasSemanticPresent = Object.prototype.hasOwnProperty.call(record, "semanticInputPresent");
+    const hasSemanticHash = Object.prototype.hasOwnProperty.call(record, "semanticInputSha256");
+    let semanticInputPresent: boolean | undefined;
+    let semanticInputSha256: string | undefined;
+    let semanticInputInvalid: string | undefined;
+    if (hasSemanticPresent || hasSemanticHash) {
+      if (typeof record.semanticInputPresent !== "boolean") {
+        semanticInputInvalid = "semanticInputPresent must be a boolean when semantic input identity is present";
+      } else if (
+        typeof record.semanticInputSha256 !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(record.semanticInputSha256)
+      ) {
+        semanticInputInvalid =
+          "semanticInputSha256 must be a lowercase 64-hex SHA-256 when semantic input identity is present";
+      } else {
+        semanticInputPresent = record.semanticInputPresent;
+        semanticInputSha256 = record.semanticInputSha256;
+      }
+    }
     return {
+      ...(persistedRunId === undefined ? {} : { runId: persistedRunId }),
+      ...(runIdInvalid === undefined ? {} : { runIdInvalid }),
+      ...(runUnbound === undefined ? {} : { runUnbound }),
       ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
-      ...(typeof record.workspaceDir === "string" ? { workspaceDir: record.workspaceDir } : {}),
-      ...(typeof record.workspaceDirRelative === "string" ? { workspaceDirRelative: record.workspaceDirRelative } : {}),
+      ...(okInvalid === undefined ? {} : { okInvalid }),
+      ...(!exposeBindingMetadata ||
+      workspaceDir === undefined ||
+      workspaceDirInvalid !== undefined ||
+      workspacePhysicalIdentityInvalid !== undefined
+        ? {}
+        : { workspaceDir }),
+      ...(!exposeBindingMetadata ||
+      workspaceDirRelative === undefined ||
+      workspaceDirInvalid !== undefined ||
+      workspacePhysicalIdentityInvalid !== undefined
+        ? {}
+        : { workspaceDirRelative }),
+      ...(workspaceDirInvalid === undefined ? {} : { workspaceDirInvalid }),
+      ...(workspaceDirUnavailable === undefined ? {} : { workspaceDirUnavailable }),
+      ...(!exposeBindingMetadata || workspaceDirExplicit === undefined ? {} : { workspaceDirExplicit }),
+      ...(workspaceDirExplicitInvalid === undefined ? {} : { workspaceDirExplicitInvalid }),
+      ...(!exposeBindingMetadata || workspaceDirInvalid !== undefined || workspacePhysicalIdentity === undefined
+        ? {}
+        : { workspacePhysicalIdentity }),
+      ...(workspacePhysicalIdentityInvalid === undefined ? {} : { workspacePhysicalIdentityInvalid }),
+      ...(!exposeBindingMetadata ||
+      workspaceDirInvalid !== undefined ||
+      workspacePhysicalIdentitySchemaVersion === undefined
+        ? {}
+        : { workspacePhysicalIdentitySchemaVersion }),
+      ...(!exposeBindingMetadata || semanticInputPresent === undefined ? {} : { semanticInputPresent }),
+      ...(!exposeBindingMetadata || semanticInputSha256 === undefined ? {} : { semanticInputSha256 }),
+      ...(semanticInputInvalid === undefined ? {} : { semanticInputInvalid }),
       ...(Object.prototype.hasOwnProperty.call(record, "disposition") ? { disposition: record.disposition } : {}),
       ...(Object.prototype.hasOwnProperty.call(record, "result") ? { result: record.result } : {}),
       ...(typeof record.error === "string" ? { error: record.error } : {}),
+      ...(errorInvalid === undefined ? {} : { errorInvalid }),
       ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
-      ...(isArtifactRefArray(record.artifactRefs) ? { artifactRefs: record.artifactRefs } : {}),
-      ...(typeof record.artifactRefsOmitted === "number" &&
+      ...(failureDiagnosticInvalid === undefined ? {} : { failureDiagnosticInvalid }),
+      ...(exposeBindingMetadata && isArtifactRefArray(record.artifactRefs)
+        ? { artifactRefs: record.artifactRefs }
+        : {}),
+      ...(artifactRefsInvalid === undefined ? {} : { artifactRefsInvalid }),
+      ...(exposeBindingMetadata &&
+      typeof record.artifactRefsOmitted === "number" &&
       Number.isSafeInteger(record.artifactRefsOmitted) &&
       record.artifactRefsOmitted >= 0
         ? { artifactRefsOmitted: record.artifactRefsOmitted }
         : {}),
-      ...(target !== undefined ? { target } : {}),
-      ...(scriptIdentity !== undefined ? { scriptIdentity } : {}),
+      ...(artifactRefsOmittedInvalid === undefined ? {} : { artifactRefsOmittedInvalid }),
+      ...(exposeBindingMetadata && resultPersistence !== undefined ? { resultPersistence } : {}),
+      ...(resultPersistenceInvalid === undefined ? {} : { resultPersistenceInvalid }),
+      ...(exposeBindingMetadata && target !== undefined ? { target } : {}),
+      ...(targetInvalid === undefined ? {} : { targetInvalid }),
+      ...(scriptIdentityInvalid === undefined ? {} : { scriptIdentityInvalid }),
+      ...(dispositionInvalid === undefined ? {} : { dispositionInvalid }),
+      ...(exposeBindingMetadata && scriptIdentity !== undefined ? { scriptIdentity } : {}),
     };
   } catch {
     return null;
@@ -1211,18 +1582,102 @@ function isArtifactRefArray(value: unknown): value is WorkflowArtifactRef[] {
   return Array.isArray(value) && value.length <= 20 && value.every(isArtifactRef);
 }
 
+function isPersistedFailureDiagnostic(value: unknown): value is WorkflowFailureDiagnostic {
+  if (!isRecord(value)) return false;
+  const allowed = [
+    "origin",
+    "message",
+    "stage",
+    "workflow",
+    "scriptPath",
+    "evidencePath",
+    "journalPath",
+    "repairRequest",
+  ];
+  if (Object.keys(value).some((key) => !allowed.includes(key))) return false;
+  if (parseWorkflowFailureDiagnostic(value) === undefined) return false;
+  return ["stage", "workflow", "scriptPath", "evidencePath"].every(
+    (field) => !Object.prototype.hasOwnProperty.call(value, field) || typeof value[field] === "string",
+  );
+}
+
+function parsePersistedResultPersistence(
+  value: unknown,
+  projectRoot: string,
+  runId: string,
+): WorkflowResultPersistence {
+  if (!isRecord(value)) throw new Error("resultPersistence must be an object");
+  const expectedPath = workflowResultFile(workflowRunDir(projectRoot, runId));
+  if (value.path !== expectedPath) throw new Error("resultPersistence.path does not match the selected run result");
+  if (value.ok === true) {
+    if (!hasExactFields(value, ["ok", "path"])) throw new Error("resultPersistence success fields are invalid");
+    return { ok: true, path: expectedPath };
+  }
+  if (value.ok === false) {
+    if (!hasExactFields(value, ["code", "message", "ok", "path"])) {
+      throw new Error("resultPersistence failure fields are invalid");
+    }
+    if (value.code !== "WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE" && value.code !== "WORKFLOW_RESULT_WRITE_FAILED") {
+      throw new Error("resultPersistence failure code is invalid");
+    }
+    if (typeof value.message !== "string" || value.message.trim() === "") {
+      throw new Error("resultPersistence failure message is invalid");
+    }
+    return {
+      ok: false,
+      path: expectedPath,
+      code: value.code,
+      message: value.message,
+    };
+  }
+  throw new Error("resultPersistence.ok must be a boolean");
+}
+
 /**
  * Read only the immutable source snapshot recorded by one exact persisted run.
  * This boundary never consults the current workflow resolver or another file.
  */
 export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string): WorkflowRunScriptSnapshot {
-  if (!isSimpleWorkflowRunId(runId)) {
-    return snapshotUnavailable("invalid", runId, `Invalid workflow run id: ${JSON.stringify(runId)}.`);
+  try {
+    assertWorkflowRunId(runId);
+  } catch (error) {
+    return snapshotUnavailable("invalid", runId, `${errorMessage(error)}.`);
+  }
+
+  const runDir = workflowRunDir(projectRoot, runId);
+  try {
+    workflowRunFileExists(runDir, workflowResultFile(runDir));
+  } catch (error) {
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} evidence root is not a regular canonical path: ${errorMessage(error)}.`,
+    );
   }
 
   const result = readWorkflowRunResult(projectRoot, runId);
   if (result === null) {
     return snapshotUnavailable("legacy", runId, `Run ${runId} has no readable persisted result identity.`);
+  }
+  if (result.runIdInvalid !== undefined) {
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} has malformed persisted result binding (${result.runIdInvalid}).`,
+      result.target,
+    );
+  }
+  if (result.runUnbound !== undefined) {
+    return snapshotUnavailable("legacy", runId, `Run ${runId} predates persisted result run binding.`, result.target);
+  }
+  const invalidity = workflowPersistedResultInvalidity(result);
+  if (invalidity !== undefined) {
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} has malformed persisted workflow metadata (${invalidity}).`,
+      result.target,
+    );
   }
   const identity = result.scriptIdentity;
   if (identity === undefined) {
@@ -1279,58 +1734,26 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   }
 
   try {
-    assertNonSymlinkDirectoryChain(lexicalProjectRoot, lexicalRuntimeDir);
-  } catch (error) {
-    return snapshotUnavailable(
-      "invalid",
-      runId,
-      `Run ${runId} snapshot directory is not a regular non-symlink path: ${errorMessage(error)}.`,
-      result.target,
-      details,
-    );
-  }
-
-  let snapshotStat;
-  try {
-    snapshotStat = lstatSync(lexicalSnapshot);
-  } catch (error) {
-    const kind = isMissingFileError(error) ? "missing" : "unreadable";
-    return snapshotUnavailable(
-      kind,
-      runId,
-      `Run ${runId} snapshot is ${kind}: ${errorMessage(error)}.`,
-      result.target,
-      details,
-    );
-  }
-  if (snapshotStat.isSymbolicLink() || !snapshotStat.isFile()) {
-    return snapshotUnavailable(
-      "invalid",
-      runId,
-      `Run ${runId} snapshot is not a regular non-symlink file.`,
-      result.target,
-      details,
-    );
-  }
-
-  try {
-    const physicalProjectRoot = realpathSync(lexicalProjectRoot);
-    const physicalRunDir = realpathSync(lexicalRunDir);
-    const physicalRuntimeDir = realpathSync(lexicalRuntimeDir);
-    const physicalSnapshot = realpathSync(lexicalSnapshot);
-    if (
-      !isContainedPath(physicalProjectRoot, physicalRunDir) ||
-      path.dirname(physicalSnapshot) !== physicalRuntimeDir ||
-      path.basename(physicalSnapshot) !== expectedName
-    ) {
+    if (!workflowRunFileExists(lexicalRunDir, lexicalSnapshot)) {
       return snapshotUnavailable(
-        "invalid",
+        "missing",
         runId,
-        `Run ${runId} snapshot escapes its canonical run directory.`,
+        `Run ${runId} snapshot is missing: ${lexicalSnapshot}.`,
         result.target,
         details,
       );
     }
+  } catch (error) {
+    return snapshotUnavailable(
+      "invalid",
+      runId,
+      `Run ${runId} snapshot path is invalid: ${errorMessage(error)}.`,
+      result.target,
+      details,
+    );
+  }
+
+  try {
     const sourceBytes = readWorkflowRunFile(lexicalRunDir, lexicalSnapshot);
     const actualSha256 = createHash("sha256").update(sourceBytes).digest("hex");
     if (actualSha256 !== identity.scriptSha256) {
@@ -1404,130 +1827,20 @@ function snapshotUnavailable(
   };
 }
 
-function isSimpleWorkflowRunId(runId: string): boolean {
-  return runId !== "." && runId !== ".." && /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(runId);
-}
-
-function assertNonSymlinkDirectoryChain(projectRoot: string, runDir: string): void {
-  const relative = path.relative(projectRoot, runDir);
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("run directory escapes project root");
-  }
-  let current = projectRoot;
-  for (const component of relative.split(path.sep)) {
-    current = path.join(current, component);
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${current} is not a regular directory`);
-  }
-}
-
-function isContainedPath(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-}
-
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT";
 }
 
+function isWorkspaceUnavailableError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    ((error as { code?: unknown }).code === "ENOENT" || (error as { code?: unknown }).code === "ENOTDIR")
+  );
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim() !== "" ? error.message : String(error);
-}
-
-function parsePersistedWorkflowScriptIdentity(value: unknown): WorkflowRunResultEnvelope["scriptIdentity"] | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const identity = value as Record<string, unknown>;
-  if (typeof identity.sourcePath !== "string" || identity.sourcePath === "") return undefined;
-  if (typeof identity.snapshotPath !== "string" || identity.snapshotPath === "") return undefined;
-  if (typeof identity.scriptSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(identity.scriptSha256)) return undefined;
-  if (identity.schemaVersion === 2) {
-    if (identity.identityPolicy !== "static-node-only-v1") return undefined;
-    if (identity.identityCoverage !== "self-contained-static" && identity.identityCoverage !== "entry-only")
-      return undefined;
-    if (identity.executionSource !== "snapshot" && identity.executionSource !== "source") return undefined;
-    if (typeof identity.nodeVersion !== "string" || identity.nodeVersion === "") return undefined;
-    if (typeof identity.platform !== "string" || identity.platform === "") return undefined;
-    if (typeof identity.arch !== "string" || identity.arch === "") return undefined;
-    const builtinImports = parsePersistedStringArray(identity.builtinImports);
-    const unboundDependencies = parsePersistedStringArray(identity.unboundDependencies);
-    if (builtinImports === undefined || unboundDependencies === undefined) return undefined;
-    if (!isSortedUniqueStrings(builtinImports) || builtinImports.some((specifier) => !specifier.startsWith("node:"))) {
-      return undefined;
-    }
-    if (!isSortedUniqueStrings(unboundDependencies)) return undefined;
-    if (identity.identityCoverage === "self-contained-static") {
-      if (identity.executionSource !== "snapshot" || unboundDependencies.length !== 0) return undefined;
-    } else if (identity.executionSource !== "source") {
-      return undefined;
-    }
-    return {
-      schemaVersion: 2,
-      identityPolicy: identity.identityPolicy,
-      sourcePath: identity.sourcePath,
-      snapshotPath: identity.snapshotPath,
-      scriptSha256: identity.scriptSha256,
-      identityCoverage: identity.identityCoverage,
-      executionSource: identity.executionSource,
-      nodeVersion: identity.nodeVersion,
-      platform: identity.platform,
-      arch: identity.arch,
-      builtinImports,
-      unboundDependencies,
-    };
-  }
-  // The only legacy format ever written by the old runner was an unversioned
-  // three-field entry identity. Unknown/future versions and partial v2 records
-  // must not be silently promoted to trusted legacy evidence.
-  if (
-    identity.schemaVersion !== undefined ||
-    [
-      "identityPolicy",
-      "identityCoverage",
-      "executionSource",
-      "nodeVersion",
-      "platform",
-      "arch",
-      "builtinImports",
-      "unboundDependencies",
-    ].some((field) => Object.prototype.hasOwnProperty.call(identity, field))
-  ) {
-    return undefined;
-  }
-  return {
-    schemaVersion: 1,
-    identityPolicy: "legacy-unversioned",
-    sourcePath: identity.sourcePath,
-    snapshotPath: identity.snapshotPath,
-    scriptSha256: identity.scriptSha256,
-    identityCoverage: "entry-only-legacy",
-    executionSource: "source",
-    nodeVersion: "unknown",
-    platform: "unknown",
-    arch: "unknown",
-    builtinImports: [],
-    unboundDependencies: [],
-  };
-}
-
-function parsePersistedStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry === "")) return undefined;
-  return [...value] as string[];
-}
-
-function isSortedUniqueStrings(values: readonly string[]): boolean {
-  for (let index = 1; index < values.length; index += 1) {
-    if (values[index - 1]! >= values[index]!) return false;
-  }
-  return true;
-}
-
-function parsePersistedWorkflowTarget(value: unknown): WorkflowRunResultEnvelope["target"] | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const target = value as Record<string, unknown>;
-  if (target.kind !== "name" && target.kind !== "scriptPath") return undefined;
-  if (typeof target.ref !== "string") return undefined;
-  if (target.source !== "project" && target.source !== "personal" && target.source !== "package") return undefined;
-  return { kind: target.kind, ref: target.ref, source: target.source };
 }
 
 /**
@@ -1573,10 +1886,12 @@ export function readWorkflowRoundBody(
   return body;
 }
 
-/** Summarize one run from its journal + result.json. Best-effort; never throws. */
+/** Summarize one valid run id. Corrupt or missing persisted evidence never throws. */
 export function readWorkflowRunSummary(projectRoot: string, runId: string): WorkflowRunSummary {
-  const resultPath = workflowResultFile(workflowRunDir(projectRoot, runId));
-  const hasResult = existsSync(resultPath);
+  assertWorkflowRunId(runId);
+  const runDir = workflowRunDir(projectRoot, runId);
+  const resultPath = workflowResultFile(runDir);
+  const hasResult = workflowRunFileExists(runDir, resultPath);
   const lines = readWorkflowRunJournal(projectRoot, runId);
 
   let phase: string | null = null;
@@ -1629,12 +1944,14 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
     status =
       persisted === null
         ? "unknown"
-        : projectWorkflowDisposition({
-            ok: persisted.ok === true,
-            result: persisted.result,
-            ...(persisted.error !== undefined ? { error: persisted.error } : {}),
-            ...(persisted.disposition !== undefined ? { disposition: persisted.disposition } : {}),
-          }).status;
+        : workflowPersistedResultInvalidity(persisted) !== undefined
+          ? "unknown"
+          : projectWorkflowDisposition({
+              ok: persisted.ok === true,
+              result: persisted.result,
+              ...(persisted.error !== undefined ? { error: persisted.error } : {}),
+              ...(persisted.disposition !== undefined ? { disposition: persisted.disposition } : {}),
+            }).status;
   } else if (lines.length === 0) {
     status = "unknown";
   } else if (sawCancellation) {

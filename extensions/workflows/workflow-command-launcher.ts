@@ -1,5 +1,7 @@
+import { errorMessage } from "../_shared/host/error-text.js";
 import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
 import { getProjectRoot, getSessionId } from "../_shared/host/pi-api.js";
+import { notifyOperator } from "../_shared/operator/operator-notify.js";
 import type { WorkflowContinuation } from "./runtime/workflow-artifacts.js";
 import type { WorkflowHandoffClaimLease } from "./runtime/workflow-handoff.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
@@ -8,6 +10,7 @@ import {
   type ResolvedWorkflowTarget,
   type RunWorkflowScriptOptions,
   type RunWorkflowScriptResult,
+  type WorkflowHandoffWorkspaceReuseBinding,
 } from "./runtime/workflow-runner.js";
 import {
   workflowBackgroundRunRegistry,
@@ -24,10 +27,17 @@ export interface WorkflowCommandLaunchRequest {
   ctx: ExtensionContext;
   scriptRef: string;
   target?: ResolvedWorkflowTarget;
+  /** Preserves name/path intent when preflight failed and the runner must persist the canonical failure. */
+  targetKind?: ResolvedWorkflowTarget["kind"];
   input?: string;
+  outputDir?: string;
+  runName?: string;
   resumeFromRunId?: string;
+  /** Run-level no-operator mode (operator input fails closed). */
+  noOperator?: true;
   continuation?: WorkflowContinuation;
   operatorHandoffClaim?: WorkflowHandoffClaimLease;
+  operatorHandoffWorkspaceReuse?: WorkflowHandoffWorkspaceReuseBinding;
   waitForIdle?: () => Promise<void>;
 }
 
@@ -44,7 +54,7 @@ export interface WorkflowCommandLaunchObserver {
   onRunStart(run: { runId: string; runDir: string }): void;
   onEvent(line: WorkflowJournalLine): void;
   onResult(result: RunWorkflowScriptResult, isCurrent: () => boolean): void | Promise<void>;
-  onError(error: unknown): void;
+  onError(error: unknown, isCurrent: () => boolean): void | Promise<void>;
   onFinally(): void;
   onRejected(): void;
 }
@@ -89,6 +99,7 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
   let sessionLease: WorkflowSessionLease | undefined;
   let sessionRevoked = false;
   let activeTerminal: Promise<void> | undefined;
+  let callbackLease: WorkflowSessionLease | undefined;
 
   const startSession = (ctx: ExtensionContext): WorkflowSessionLease => {
     sessionRevoked = false;
@@ -108,10 +119,14 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
     hasActiveCommandRun: () =>
       sessionLease !== undefined &&
       backgroundRuns.isCurrent(sessionLease) &&
-      backgroundRuns.active(sessionLease) !== undefined,
+      ((callbackLease !== undefined && backgroundRuns.isCurrent(callbackLease)) ||
+        backgroundRuns.active(sessionLease) !== undefined),
     launch(request) {
       const lease = currentLease(request.ctx);
       if (lease === undefined) return { status: "stale" };
+      if (callbackLease !== undefined && backgroundRuns.isCurrent(callbackLease)) {
+        return { status: "busy", owner: "settling workflow callbacks" };
+      }
       const active = backgroundRuns.active(lease);
       if (active !== undefined) return { status: "busy", owner: active.runId ?? active.launchId };
 
@@ -121,34 +136,33 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
       });
       const launched = backgroundRuns.launch<RunWorkflowScriptResult>(lease, async (background) => {
         const isCurrent = (): boolean => background.isCurrent();
-        try {
-          const result = await (options.runScript ?? runWorkflowScript)({
-            pi: options.pi,
-            ctx: request.ctx,
-            signal: background.signal,
-            script: request.scriptRef,
-            ...(request.input === undefined ? {} : { input: request.input }),
-            ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
-            ...(request.continuation === undefined ? {} : { continuation: request.continuation }),
-            ...(request.operatorHandoffClaim === undefined
-              ? {}
-              : { operatorHandoffClaim: request.operatorHandoffClaim }),
-            onRunStart: ({ runId, runDir }) => {
-              background.setRunId(runId);
-              if (isCurrent()) observer.onRunStart({ runId, runDir });
-            },
-            onEvent: (line) => {
-              if (isCurrent()) observer.onEvent(line);
-            },
-          });
-          if (isCurrent()) await observer.onResult(result, isCurrent);
-          return result;
-        } catch (error) {
-          if (isCurrent()) observer.onError(error);
-          throw error;
-        } finally {
-          if (isCurrent()) observer.onFinally();
-        }
+        const targetKind = request.target?.kind ?? request.targetKind ?? "name";
+        const scriptInput =
+          targetKind === "scriptPath" ? { scriptPath: request.scriptRef } : { name: request.scriptRef };
+        return await (options.runScript ?? runWorkflowScript)({
+          pi: options.pi,
+          ctx: request.ctx,
+          signal: background.signal,
+          ...scriptInput,
+          ...(request.input === undefined ? {} : { input: request.input }),
+          ...(request.outputDir === undefined ? {} : { outputDir: request.outputDir }),
+          ...(request.runName === undefined ? {} : { runName: request.runName }),
+          ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
+          ...(request.noOperator === undefined ? {} : { noOperator: request.noOperator }),
+          ...(request.continuation === undefined ? {} : { continuation: request.continuation }),
+          ...(request.operatorHandoffClaim === undefined ? {} : { operatorHandoffClaim: request.operatorHandoffClaim }),
+          ...(request.operatorHandoffWorkspaceReuse === undefined
+            ? {}
+            : { operatorHandoffWorkspaceReuse: request.operatorHandoffWorkspaceReuse }),
+          ...(request.target === undefined ? {} : { targetBinding: request.target }),
+          onRunStart: ({ runId, runDir }) => {
+            background.setRunId(runId);
+            if (isCurrent()) observer.onRunStart({ runId, runDir });
+          },
+          onEvent: (line) => {
+            if (isCurrent()) observer.onEvent(line);
+          },
+        });
       });
       if (!launched.ok) {
         observer.onRejected();
@@ -156,16 +170,40 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
           ? { status: "stale" }
           : { status: "busy", owner: launched.active?.runId ?? launched.active?.launchId ?? "current run" };
       }
-      activeTerminal = launched.run.terminal.then(() => {
-        options.onTerminal(request, () => backgroundRuns.isCurrent(lease));
+      callbackLease = lease;
+      activeTerminal = launched.run.terminal.then(async (settlement) => {
+        const isCurrent = (): boolean => backgroundRuns.isCurrent(lease);
+        let terminalReceiptPublished = false;
+        try {
+          if (!isCurrent()) return;
+          if (settlement.status === "fulfilled") await observer.onResult(settlement.value, isCurrent);
+          else await observer.onError(settlement.error, isCurrent);
+          terminalReceiptPublished = true;
+        } finally {
+          try {
+            if (isCurrent()) observer.onFinally();
+          } finally {
+            try {
+              // A command handoff may pump only after its observer confirms
+              // that the authoritative terminal receipt was published.
+              if (terminalReceiptPublished && isCurrent()) options.onTerminal(request, isCurrent);
+            } finally {
+              if (callbackLease === lease) callbackLease = undefined;
+            }
+          }
+        }
       });
-      void activeTerminal;
+      void activeTerminal.catch((error) => {
+        if (backgroundRuns.isCurrent(lease)) {
+          notifyOperator(request.ctx, `Workflow terminal callback failed: ${errorMessage(error)}`, "error");
+        }
+      });
       return { status: "started" };
     },
     async awaitActive() {
-      // The settlement promise never rejects; `onTerminal` is host code, and a
-      // throw there must not turn an observed run into an unhandled rejection.
-      await activeTerminal?.catch(() => undefined);
+      // A detached handler above owns unhandled-rejection safety. Attached
+      // callers still observe callback failure through this original promise.
+      await activeTerminal;
     },
     attach<T>(
       ctx: ExtensionContext,

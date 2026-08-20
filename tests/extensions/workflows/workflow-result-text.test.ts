@@ -109,6 +109,24 @@ describe("workflow result text persistence", () => {
     expect(resolveWorkflowRunId(root, "#98cc")).toEqual({ status: "resolved", runId: "20260726-212752-98cc" });
     expect(resolveWorkflowRunId(root, "last")).toEqual({ status: "resolved", runId: "20260726-212752-98cc" });
     expect(resolveWorkflowRunId(root, "nope")).toEqual({ status: "not-found" });
+    for (const malformed of ["../98cc", "bad/98cc", String.raw`bad\\98cc`, "#98cc/", "☃98cc"]) {
+      expect(resolveWorkflowRunId(root, malformed)).toEqual({ status: "not-found" });
+    }
+  });
+
+  it("rejects malformed selectors before consulting the project path or retained evidence", () => {
+    let projectRootAccessed = false;
+    const unreadableProjectRoot = {
+      [Symbol.toPrimitive]() {
+        projectRootAccessed = true;
+        throw new Error("project root must not be consulted");
+      },
+    } as unknown as string;
+
+    for (const malformed of ["../outside", "bad/id", String.raw`bad\\id`, "#bad/id", "☃", "a".repeat(129)]) {
+      expect(resolveWorkflowRunId(unreadableProjectRoot, malformed)).toEqual({ status: "not-found" });
+    }
+    expect(projectRootAccessed).toBe(false);
   });
 
   it("refuses an ambiguous short id instead of opening the wrong run", () => {

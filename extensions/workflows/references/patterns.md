@@ -12,10 +12,10 @@ copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
 Node.js host access and is not sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
-currently `live-smoke`, `plan`, `plan-implement`, `requirements-grill`, `review`,
-and `review-fix`. A skeleton copied out of this catalog becomes one by being
-saved there, with the package-surface review that implies; saved anywhere else it
-stays yours.
+currently `implement`, `live-smoke`, `post-code-review` and its children,
+`task/plan`, `task/implement-plan-template`, and `task/substep`. A skeleton copied out of this
+catalog becomes one by being saved there, with the package-surface review that
+implies; saved anywhere else it stays yours.
 
 ## Choose a shape
 
@@ -48,10 +48,10 @@ enough that the barrier pays for itself. One session that gathers both sides
 keeps their vocabulary consistent; two sessions plus a merge stage cost three
 calls to save one.
 
-## Staged text pipeline (the review-family shape)
+## Staged text pipeline (retired review-family compatibility shape)
 
-This is the default shape for multi-step work on a single subject, and the one
-the curated `review` and `review-fix` workflows use. Every stage is one
+This was the compatibility shape used by the retired `review` and `review-fix`
+Package workflows. Every stage is one
 `agent()` with one coherent cognitive job; each handoff is the previous stage's
 exact text; the workflow never parses that text.
 
@@ -217,12 +217,10 @@ Rules that make the shape work:
   failure in the simpler shape, or a hard safety boundary where failure would
   mutate source, spend money, or be externally visible.
 
-Runnable examples to adapt: `extensions/workflows/examples/review/` and
-`extensions/workflows/examples/review-fix/`, with the reader algorithm in
-`examples/review/README.md`. For the same shape with loops inside it — an
+The old runnable examples are no longer shipped. For the same shape with loops inside it — an
 operator clarification round that pauses the run, and a draft/critique loop that
 exits on a shaped verdict — read the tracked pair
-`extensions/workflows/examples/plan/` and `examples/plan-implement/`.
+`extensions/workflows/examples/task/`.
 
 ## Writing one stage task
 
@@ -321,8 +319,7 @@ the runtime hands a violation back to the child with the validator's own message
 and lets it try again. The same rule written as a `throw` ends the run instead.
 What stays in script code is what no declared keyword can say.
 
-`review-fix` is the shipped worked example. Its selector schema
-([`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs)):
+The retired `review-fix` workflow was the worked example. Its selector schema was:
 
 ```js
 const FINDING_SELECTOR_SCHEMA = freezeSchema({
@@ -400,10 +397,9 @@ to pass is to name a real id. Splitting the old function in two is what makes it
 safe: `findingPlanErrors` decides, `orderFindingPlan` only merges and sorts, and
 neither one can quietly do the other's job.
 
-A **cross-field invariant** is the same idea inside one answer. `review`'s
-clarifier declares `decision` and `questions` separately, and no schema can say
-that one constrains the other
-([`review.workflow.mjs`](../examples/review/review.workflow.mjs)):
+A **cross-field invariant** is the same idea inside one answer. The retired
+`review` clarifier declared `decision` and `questions` separately, and no schema
+could say that one constrains the other:
 
 ```js
 // inside clarifierDecisionErrors, this call's `validate`
@@ -486,10 +482,14 @@ nothing downstream depends on it being right.
 
 ## Semantic text input
 
-Both `/workflows run <name> [input]` and the `workflow` tool pass one optional
-bounded string. It is the operator's semantic request, not a command language or
-serialized parameter object. Let an agent interpret meaning; keep only explicit
-deterministic invariants in JavaScript:
+Both `/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]`
+and the `workflow` tool pass one optional bounded semantic string.
+Command options precede that input. When semantic input begins with an
+option-looking token such as `--resume`, `--output-dir`, or `--`, place the
+conventional `--` end-of-options delimiter before it; every character after the
+delimiter is forwarded unchanged. Input is the operator's semantic request,
+not a command language or serialized parameter object. Let an agent interpret
+meaning; keep only explicit deterministic invariants in JavaScript:
 
 ```js
 export default async function run({ agent, phase }, input) {
@@ -602,17 +602,15 @@ stage fails closed. Everything narrative stays a plain `agent()` call.
 
 Add `minLength` / `maxLength` / `pattern` on strings and `minItems` / `maxItems`
 on arrays rather than re-checking them afterwards — see "Bounds belong in the
-schema, invariants belong in the script" above, and
-[`review-fix.workflow.mjs`](../examples/review-fix/review-fix.workflow.mjs) for
-the shipped version. An impossible declaration (`minItems` above `maxItems`, a
+schema, invariants belong in the script" above. An impossible declaration (`minItems` above `maxItems`, a
 bound on the wrong type, a `pattern` that does not compile) is refused before the
 first child call, so it cannot burn the retry budget and surface as an
 unexplained exhaustion.
 
 ## Bounded loop plus judge
 
-Two shipped loops use this shape: `review`'s interrogation rounds and `plan`'s
-drafting rounds. Both follow the same three rules —
+The retired `review` interrogation rounds and the current `task/plan` drafting
+rounds use this shape. Both follow the same three rules —
 
 1. the judge returns a **declared enum** plus the concrete gaps or defects that
    justify another round, never prose the script greps;
@@ -662,18 +660,14 @@ const review = await agent(`Review the implementation:\n${build}`, {
 return review;
 ```
 
-When the operator must inspect or reuse the plan, use the shipped `plan` →
-`plan-implement` pair instead. `plan` returns an accepted ordered `plan.md` whose
-`## Outcome` names the primary result, consumer, location, required behavior,
-usability proof, and supporting evidence before any steps. `plan-implement`
-consumes that verified artifact, publishes `implementation-tasks.md`, and
-advances one task only after an independent review accepts it. Declared
-dependencies are enforced for subset selection. Structured check evidence,
-run-attributable unexpected changes, and the primary-result grade are
-fail-closed; the terminal primary
-document is `workflow-summary.md`, while `implementation-report.md` remains
-supporting evidence. A repair verdict retries the same task once, and stable
-labels let `--resume` replay completed calls rather than applying them again.
+When the operator must inspect or reuse the plan, use the shipped task family.
+`task/plan` writes `plan.md` and a frozen `step-<n>.md` catalog, then stops.
+After explicit owner approval, `task/implement-plan-template` renders the
+unregistered `implement-plan.workflow.mjs` in the shared workspace without
+replanning. The owner reviews and runs that file by explicit path; its literal
+nodes write `history/S<n>.md` in order and a failed check stops later nodes.
+`task/substep` is the manual one-step recovery entry. The group-only `task` root
+is not runnable, and the Package children never invoke one another.
 
 ## Ordered pipeline
 
@@ -820,7 +814,7 @@ Two rules keep the gate honest:
   checks projection membership, digest and size before your module runs. Assert the
   SHAPE you require — how many artifacts, under which names — and read them.
 
-`review` → `review-fix` is the shipped example of this shape; the
+The retired `review` → `review-fix` pair was the Package example of this shape; the
 `excalidraw-pipeline` reference uses a plain file the operator edits instead, which is
 the cheaper variant when there is no question list to render.
 

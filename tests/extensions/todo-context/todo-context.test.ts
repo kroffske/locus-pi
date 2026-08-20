@@ -853,6 +853,22 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(widget).not.toContain("widget truncated");
   });
 
+  it("reads persisted todo state without appending or mutating entries", async () => {
+    const h = createHarness(tempRoot(), { sessionId: "todo-read" });
+    todoContext(h.pi);
+    await runTool(h, "todo_write", {
+      ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect current state"] }] }],
+    });
+    const entryCount = h.entries.length;
+
+    const result = await runTool(h, "todo_read", {});
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("Inspect current state");
+    expect(result.details?.activeTask).toBe("Inspect current state");
+    expect(h.entries).toHaveLength(entryCount);
+  });
+
   async function runCommand(harness: ReturnType<typeof createHarness>, name: string, text: string): Promise<void> {
     const command = harness.commands.get(name);
     if (!command) throw new Error(`${name} command not registered`);

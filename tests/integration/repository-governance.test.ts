@@ -1,13 +1,15 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { evaluatePullRequestPolicy } from "../../scripts/check-pull-request-policy.js";
-import { candidateFiles } from "../../scripts/check-public-repository.js";
+import { candidateFiles, publicRepositoryManifestProblems } from "../../scripts/check-public-repository.js";
 import { evaluateReleaseMetadata } from "../../scripts/check-release-metadata.js";
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +35,7 @@ describe("repository pull-request policy", () => {
       evaluatePullRequestPolicy({
         baseRef: "dev",
         headRef: "codex/example",
-        changedFiles: ["docs/README.md"],
+        changedFiles: ["docs/getting-started.md"],
         baseVersion: "0.2.0",
         headVersion: "0.2.0",
         headChangelog: releaseHeading,
@@ -150,3 +152,261 @@ describe("public repository candidates", () => {
     }
   });
 });
+
+// The manifest is the only description of the public surface, so a reference it
+// carries that resolves to nothing silently narrows or widens what gets
+// published. Each case below is a manifest a reviewer could plausibly write.
+describe("public repository manifest", () => {
+  const BASE_REPOSITORY_FILES = ["docs/guide.md", "public-repository.json"];
+  const fixtureRoots: string[] = [];
+
+  afterEach(async () => {
+    for (const root of fixtureRoots.splice(0)) await rm(root, { recursive: true, force: true });
+  });
+
+  it("accepts a manifest whose every reference resolves to a real file", async () => {
+    await expect(publicRepositoryManifestProblems(await manifestFixture())).resolves.toEqual([]);
+  });
+
+  it("accepts an exclude that actually removes a selected file", async () => {
+    const root = await manifestFixture({ excludeFiles: ["lib/kept.ts"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([]);
+  });
+
+  it("rejects an allowlist entry with no file behind it", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "docs/absent.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        value: "docs/absent.md",
+        reason: "names docs/absent.md, which does not exist in the working tree",
+      }),
+    ]);
+  });
+
+  it("rejects an exclude that removes nothing from the selection", async () => {
+    const root = await manifestFixture({ excludeFiles: ["docs/other.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "excludeFiles[0]",
+        value: "docs/other.md",
+        reason: 'removes nothing, because docs/other.md is not selected by package.json#files or "repositoryFiles"',
+      }),
+    ]);
+  });
+
+  it("rejects an exclude that names no file at all, on both counts", async () => {
+    const root = await manifestFixture({ excludeFiles: ["docs/absent.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "excludeFiles[0]",
+        reason: "names docs/absent.md, which does not exist in the working tree",
+      }),
+      expect.objectContaining({
+        field: "excludeFiles[0]",
+        reason: 'removes nothing, because docs/absent.md is not selected by package.json#files or "repositoryFiles"',
+      }),
+    ]);
+  });
+
+  it("rejects a repeated allowlist entry", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "docs/guide.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({ field: "repositoryFiles[2]", reason: "repeats repositoryFiles[0]" }),
+    ]);
+  });
+
+  it("rejects two entries that name one file on a case-insensitive filesystem", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "docs/GUIDE.md"] });
+
+    // Whether docs/GUIDE.md also resolves on disk depends on the filesystem, so
+    // only the case collision itself is asserted here.
+    await expect(publicRepositoryManifestProblems(root)).resolves.toContainEqual(
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        reason: "collides with repositoryFiles[0] (docs/guide.md) on a case-insensitive filesystem",
+      }),
+    );
+  });
+
+  it("rejects a spelling that aliases an entry already listed", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "./docs/guide.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        value: "./docs/guide.md",
+        remedy: 'write the entry as "docs/guide.md" in public-repository.json',
+      }),
+    ]);
+  });
+
+  it("rejects an empty path segment, which npm and git spell differently", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "docs//guide.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        remedy: 'write the entry as "docs/guide.md" in public-repository.json',
+      }),
+    ]);
+  });
+
+  it("rejects an entry that traverses outside the repository", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "../outside.md"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        value: "../outside.md",
+        reason: "traverses outside the repository with a .. segment",
+      }),
+    ]);
+  });
+
+  it("rejects a symlink used as an allowlist shortcut", async () => {
+    const root = await manifestFixture({
+      repositoryFiles: [...BASE_REPOSITORY_FILES, "docs/link.md"],
+      links: [{ at: "docs/link.md", target: "guide.md" }],
+    });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        value: "docs/link.md",
+        reason: "resolves through the symlink docs/link.md",
+      }),
+    ]);
+  });
+
+  it("rejects a file reached through a symlinked directory", async () => {
+    const root = await manifestFixture({
+      repositoryFiles: [...BASE_REPOSITORY_FILES, "linked/guide.md"],
+      links: [{ at: "linked", target: "docs" }],
+    });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "repositoryFiles[2]",
+        value: "linked/guide.md",
+        reason: "resolves through the symlink linked",
+      }),
+    ]);
+  });
+
+  it("rejects a directory, because the public surface is materialized file by file", async () => {
+    const root = await manifestFixture({ repositoryFiles: [...BASE_REPOSITORY_FILES, "docs"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({ field: "repositoryFiles[2]", value: "docs", reason: "is not a regular file" }),
+    ]);
+  });
+
+  it("rejects an inventory the manifest no longer produces", async () => {
+    const root = await manifestFixture({ inventory: ["docs/guide.md", "package.json", "public-repository-files.txt"] });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "generatedInventory",
+        value: "lib/kept.ts",
+        reason: "is selected by public-repository.json but absent from public-repository-files.txt",
+      }),
+      expect.objectContaining({
+        field: "generatedInventory",
+        value: "public-repository.json",
+        reason: "is selected by public-repository.json but absent from public-repository-files.txt",
+      }),
+    ]);
+  });
+
+  it("rejects an inventory destination that does not exist", async () => {
+    const root = await manifestFixture({ generatedInventory: "absent-inventory.txt", withoutInventory: true });
+
+    await expect(publicRepositoryManifestProblems(root)).resolves.toEqual([
+      expect.objectContaining({
+        field: "generatedInventory",
+        value: "absent-inventory.txt",
+        reason: "names absent-inventory.txt, which does not exist in the working tree",
+      }),
+    ]);
+  });
+
+  it("round-trips through the materializer into a checkout with no git state", async () => {
+    const source = await manifestFixture();
+    const destination = path.join(await mkdtemp(path.join(tmpdir(), "locus-public-materialized-")), "public");
+    fixtureRoots.push(path.dirname(destination));
+    const scripts = path.join(process.cwd(), "scripts");
+
+    const materialized = await runScript(path.join(scripts, "materialize-public-repository.ts"), source, [destination]);
+    expect(materialized).toContain("Materialized 5 files");
+
+    const verified = await runScript(path.join(scripts, "check-public-repository.ts"), destination, []);
+    expect(verified).toContain("Public repository inventory verified: 5 files");
+  }, 30_000);
+
+  interface FixtureOptions {
+    repositoryFiles?: string[];
+    excludeFiles?: string[];
+    generatedInventory?: string;
+    inventory?: string[];
+    withoutInventory?: boolean;
+    links?: { at: string; target: string }[];
+  }
+
+  async function manifestFixture(options: FixtureOptions = {}): Promise<string> {
+    const root = await mkdtemp(path.join(tmpdir(), "locus-public-manifest-"));
+    fixtureRoots.push(root);
+    await mkdir(path.join(root, "docs"));
+    await mkdir(path.join(root, "lib"));
+    await writeFile(path.join(root, "docs", "guide.md"), "# Guide\n", "utf8");
+    await writeFile(path.join(root, "docs", "other.md"), "# Other\n", "utf8");
+    await writeFile(path.join(root, "lib", "kept.ts"), "export const kept = true;\n", "utf8");
+
+    const packageFiles = ["lib/kept.ts"];
+    await writeFile(
+      path.join(root, "package.json"),
+      `${JSON.stringify({ name: "fixture", private: true, files: packageFiles }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const manifest = {
+      packageFiles: "package.json#files",
+      repositoryFiles: options.repositoryFiles ?? BASE_REPOSITORY_FILES,
+      excludeFiles: options.excludeFiles ?? [],
+      generatedInventory: options.generatedInventory ?? "public-repository-files.txt",
+    };
+    await writeFile(path.join(root, "public-repository.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    if (!options.withoutInventory) {
+      const inventory = options.inventory ?? materializedInventory(packageFiles, manifest);
+      await writeFile(path.join(root, manifest.generatedInventory), `${inventory.join("\n")}\n`, "utf8");
+    }
+    for (const link of options.links ?? []) await symlink(link.target, path.join(root, link.at));
+    return root;
+  }
+});
+
+/** The selection the materializer produces, restated so fixtures stay honest. */
+function materializedInventory(
+  packageFiles: string[],
+  manifest: { repositoryFiles: string[]; excludeFiles: string[]; generatedInventory: string },
+): string[] {
+  const selected = new Set([...packageFiles, "package.json", ...manifest.repositoryFiles]);
+  for (const excluded of manifest.excludeFiles) selected.delete(excluded);
+  selected.add(manifest.generatedInventory);
+  return [...selected].sort();
+}
+
+async function runScript(scriptPath: string, cwd: string, args: string[]): Promise<string> {
+  const tsx = createRequire(import.meta.url).resolve("tsx");
+  const { stdout } = await execFileAsync(process.execPath, ["--import", pathToFileURL(tsx).href, scriptPath, ...args], {
+    cwd,
+    encoding: "utf8",
+  });
+  return stdout;
+}

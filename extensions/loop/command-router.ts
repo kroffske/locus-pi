@@ -16,6 +16,7 @@ import { readLoopStatus, renderLoopStatus } from "./loop-continuation.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { parseLoopCommand, parseLoopInput } from "./command-parser.js";
 import { runLoopOnce } from "./continuation-launcher.js";
+import type { LoopController } from "./loop-controller.js";
 import {
   cancelledLoopBlock,
   loopHelpBlock,
@@ -25,7 +26,7 @@ import {
 } from "./operator-ui.js";
 import { clearLoopStatus, presentLoopBlock, presentLoopResult } from "./operator-surface.js";
 
-export function registerLoopCommand(pi: ExtensionAPI): void {
+export function registerLoopCommand(pi: ExtensionAPI, controller: LoopController): void {
   registerCommandWithUiLifecycle(
     pi,
     {
@@ -36,7 +37,7 @@ export function registerLoopCommand(pi: ExtensionAPI): void {
       transientStatuses: ["loop"],
     },
     {
-      description: "Prepare one bounded continuation, inspect status, or show help.",
+      description: "Start, stop, inspect, or run one bounded continuation loop.",
       handler: async (args, ctx) => {
         const raw = getCommandText(args).trim();
         const parsed = parseLoopCommand(raw);
@@ -50,9 +51,33 @@ export function registerLoopCommand(pi: ExtensionAPI): void {
           return;
         }
         if (parsed.action === "status") {
-          const report = await readLoopStatus(getProjectRoot(ctx));
+          const result = await controller.status(ctx);
+          const text = result.content.find((part) => part.type === "text")?.text ?? "Loop status unavailable.";
           clearLoopStatus(ctx);
-          presentLoopBlock(ctx, loopStatusBlock(renderLoopStatus(report)), SETTINGS_HELP_PLACEMENT);
+          presentLoopBlock(ctx, loopStatusBlock(text), SETTINGS_HELP_PLACEMENT);
+          return;
+        }
+        if (parsed.action === "stop") {
+          presentLoopResult(ctx, await controller.stop(ctx, parsed.reason));
+          return;
+        }
+        if (parsed.action === "start" || parsed.action === "until") {
+          const request =
+            parsed.action === "start"
+              ? {
+                  action: parsed.action,
+                  source: parsed.source,
+                  ...(parsed.runId ? { runId: parsed.runId } : {}),
+                  ...(parsed.prompt ? { prompt: parsed.prompt } : {}),
+                }
+              : {
+                  action: parsed.action,
+                  source: parsed.source,
+                  ...(parsed.runId ? { runId: parsed.runId } : {}),
+                  ...(parsed.condition ? { condition: parsed.condition } : {}),
+                };
+          const result = await controller.start(ctx, request, "command");
+          presentLoopResult(ctx, result);
           return;
         }
         if (parsed.action === "once") {

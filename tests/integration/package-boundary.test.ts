@@ -17,6 +17,7 @@ import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
 import { standardWorkflowSourceShapeErrors } from "../../extensions/workflows/workflow-source-shape.js";
+import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
   files: string[];
@@ -33,6 +34,7 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
+const publicReadme = readFileSync(path.join(root, "README.md"), "utf8");
 
 function recursiveTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -48,13 +50,31 @@ function recursiveTypeScriptFiles(directory: string): string[] {
  * is cheap, but it is still a public-surface change somebody has to look at.
  */
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
+  "implement",
   "live-smoke",
-  "plan",
-  "plan-implement",
-  "requirements-grill",
-  "review",
-  "review-fix",
+  "task/draft",
+  "task/implement-plan-template",
+  "task/plan",
+  "task/substep",
+  "post-code-review",
+  "post-code-review/boundaries",
+  "post-code-review/contracts",
+  "post-code-review/necessity",
+  "post-code-review/scope",
+  "post-code-review/simplicity",
+  "post-code-review/style",
+  "post-code-review/synthesis",
+  "workflow-creator",
+  "workflow-creator/build",
+  "workflow-creator/design",
+  "workflow-creator/svg",
 ] as const;
+
+function publicReadmeWorkflowNames(): string[] {
+  const section = publicReadme.split("## Curated Package workflows\n")[1]?.split("\n## ")[0];
+  if (section === undefined) throw new Error("README is missing the Curated Package workflows section");
+  return [...section.matchAll(/^\| `([^`]+)`/gmu)].map((match) => match[1]!).sort();
+}
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -62,12 +82,24 @@ const PI_PACKAGES = [
   "@earendil-works/pi-tui",
 ] as const;
 const PACKAGE_WORKFLOW_PATHS = {
-  "live-smoke": "extensions/workflows/examples/live-smoke.workflow.mjs",
-  plan: "extensions/workflows/examples/plan/plan.workflow.mjs",
-  "plan-implement": "extensions/workflows/examples/plan-implement/plan-implement.workflow.mjs",
-  "requirements-grill": "extensions/workflows/examples/requirements-grill.workflow.mjs",
-  review: "extensions/workflows/examples/review/review.workflow.mjs",
-  "review-fix": "extensions/workflows/examples/review-fix/review-fix.workflow.mjs",
+  implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
+  "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
+  "task/draft": "extensions/workflows/examples/task/draft.workflow.mjs",
+  "task/implement-plan-template": "extensions/workflows/examples/task/implement-plan-template.workflow.mjs",
+  "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
+  "task/substep": "extensions/workflows/examples/task/substep.workflow.mjs",
+  "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
+  "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
+  "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
+  "post-code-review/necessity": "extensions/workflows/examples/post-code-review/necessity.workflow.mjs",
+  "post-code-review/scope": "extensions/workflows/examples/post-code-review/scope.workflow.mjs",
+  "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
+  "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
+  "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
+  "workflow-creator": "extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs",
+  "workflow-creator/build": "extensions/workflows/examples/workflow-creator/build.workflow.mjs",
+  "workflow-creator/design": "extensions/workflows/examples/workflow-creator/design.workflow.mjs",
+  "workflow-creator/svg": "extensions/workflows/examples/workflow-creator/svg.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -288,17 +320,29 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
-  it("keeps the .pi/locus-pi storage prefix owned by workflow-run-layout", () => {
+  it("keeps the public README workflow roster equal to the Package registry", () => {
+    expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
+    // The roster and its counts live inside the generated region `npm run check:generated` owns, so
+    // this file no longer pins them as prose. What stays here is the human sentence that explains the
+    // namespace rule the roster is shaped by, which nothing generates.
+    const prose = publicReadme.replace(/\s+/gu, " ");
+    expect(prose).toContain(
+      "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
+    );
+  });
+
+  it("keeps the .locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
+    const presentation = path.join(root, "extensions", "workflows", "workflow-tool.ts");
     const violations: string[] = [];
     for (const file of recursiveTypeScriptFiles(path.join(root, "extensions"))) {
-      if (file === owner) continue;
+      if (file === owner || file === presentation) continue;
       const source = readFileSync(file, "utf8");
       const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const visit = (node: ts.Node): void => {
         const ownsPrefix =
-          (ts.isStringLiteralLike(node) && node.text.includes(".pi/locus-pi/")) ||
-          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".pi/locus-pi/"));
+          (ts.isStringLiteralLike(node) && node.text.includes(".locus-pi/")) ||
+          (ts.isTemplateExpression(node) && node.getText(sourceFile).includes(".locus-pi/"));
         if (ownsPrefix) {
           const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           violations.push(`${path.relative(root, file)}:${line}`);
@@ -321,12 +365,18 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("requires Pi 0.83.0 in both the published peer contract and exact development baseline", () => {
+  it("keeps an open Pi peer floor and one exact tested development baseline", () => {
+    const testedVersions = new Set(PI_PACKAGES.map((packageName) => pkg.devDependencies[packageName]));
+    expect(testedVersions.size).toBe(1);
+    const testedVersion = [...testedVersions][0]!;
+    expect(testedVersion).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u);
     for (const packageName of PI_PACKAGES) {
-      expect(pkg.peerDependencies[packageName], `${packageName} peer floor`).toBe("^0.83.0");
-      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe("0.83.0");
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.83.0")).toBe(true);
-      expect(supportsPiVersion(pkg.peerDependencies[packageName]!, "0.82.0")).toBe(false);
+      const peerRange = pkg.peerDependencies[packageName]!;
+      expect(peerRange, `${packageName} peer floor`).toBe(">=0.83.0");
+      expect(pkg.devDependencies[packageName], `${packageName} development pin`).toBe(testedVersion);
+      expect(supportsPiVersion(peerRange, testedVersion)).toBe(true);
+      expect(supportsPiVersion(peerRange, "999.0.0")).toBe(true);
+      expect(supportsPiVersion(peerRange, "0.82.999")).toBe(false);
     }
   });
 
@@ -377,7 +427,11 @@ describe("npm public package boundary", () => {
     const packedPaths = dryRun.files.map((file) => file.path);
     const packedWorkflowNames = packedPaths
       .filter((file) => file.startsWith("extensions/workflows/examples/") && file.endsWith(".workflow.mjs"))
-      .map((file) => path.basename(file, ".workflow.mjs"))
+      .map((file) => {
+        const stem = path.basename(file, ".workflow.mjs");
+        const rootName = path.basename(path.dirname(file));
+        return stem === rootName ? rootName : `${rootName}/${stem}`;
+      })
       .sort();
 
     // The load-bearing assertion of the scanned registry: what a checkout
@@ -422,7 +476,7 @@ describe("npm public package boundary", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `skills/${entry.name}/SKILL.md`)
       .sort();
-    expect(skillEntries).toEqual(["skills/locus-pi-workflows/SKILL.md", "skills/locus-task-workflow/SKILL.md"]);
+    expect(skillEntries).toHaveLength(3);
 
     for (const skillPath of skillEntries) {
       expect(existsSync(path.join(root, skillPath)), `declared skill is missing: ${skillPath}`).toBe(true);
@@ -454,44 +508,50 @@ describe("npm public package boundary", () => {
 
     expect(packedPaths.has(skillPath)).toBe(true);
     for (const contract of [
-      'name: "plan"',
-      'name: "plan-implement"',
-      "tmp/<select-name>",
+      'name: "task/draft"',
+      'name: "task/plan"',
+      'name: "task/implement-plan-template"',
+      'name: "task/substep"',
+      ".locus-pi/plans/<run-name>",
+      "<planning-workspace>",
       "resumeFromRunId",
-      "todo_write",
-      "autoContinue",
+      'runName: "<run-name>"',
+      'scriptPath: "<planning-workspace>/implement-plan.workflow.mjs"',
       "history/S<n>.md",
       "Status: blocked",
     ]) {
       expect(source, contract).toContain(contract);
     }
-    expect(source).toContain("The main Pi agent owns orchestration");
-    expect(source).toContain('"op": "append"');
-    expect(source).not.toContain('"op": "init"');
-    expect(source).toContain("do not put\nmultiline text into todo items");
-    expect(source).toContain("preserves unrelated session\ntodos");
-    expect(source).toContain("20-continuation safety limit");
-    expect(source).toContain("Do not call another workflow from inside either Package workflow");
-    expect(source).toContain("`plan.md` first defines coherent top-level work units");
-    expect(source).toMatch(/`steps\.md`\s+is the only executable task catalog/u);
-    expect(source).toMatch(/one complete flat\s+`## S<n> — <title>` block/u);
-    expect(source).toContain("the exact step catalog is frozen");
+    expect(source).toContain("The main Pi agent owns every review and launch boundary");
+    expect(source).not.toContain("todo_write");
+    expect(source).not.toContain('"op": "append"');
+    expect(source).toContain('input: "<step id, such as S1>"');
+    expect(source).toContain("one literal implementation node per approved step");
+    expect(source).toContain("The renderer does not invoke `task/plan`");
+    expect(source).toContain("Read `plan.md` and every `step-<n>.md`");
+    expect(source).toContain("Do not invent a combined\n   `tasks.md` catalog");
+    expect(source).toMatch(/complete flat\s+`## S<n> — <title>` heading/u);
+    expect(source).toContain("A material catalog change needs\n   fresh review before rendering");
     expect(source).toMatch(
-      /hand the approved `plan\.md`\s+and\s+`steps\.md`\s+to\s+`workflow-author`\s+for\s+Design only/u,
+      /hand the approved plan and complete step catalog to `workflow-author` as\s+a normal authoring request/u,
     );
-    expect(source).toContain("`Build approved design: <exact path>`");
-    expect(source).toMatch(/optional\s+reviewer\s+after\s+a\s+generated\s+step\s+belongs\s+to\s+that\s+Design/u);
+    expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
+    expect(source).toContain("Do not inject `Design only`; only the user may request");
+    expect(source).not.toContain("`Design only:`");
+    expect(source).not.toContain("`Build approved design: <exact path>`");
+    expect(source).toContain("For a graph that needs review between steps, concurrency, or a bounded revision");
 
     // Planning must not roll into execution. Without these, one confident
     // paraphrase turns "here is the plan" back into an unattended run.
-    expect(source).toContain("Planning and execution are two separate user turns");
+    expect(source).toContain("Planning, rendering, and execution are separate user turns");
     expect(source).toContain("## Stop and hand the plan to the user");
-    expect(source).toMatch(/Do not create todos\. Do not call\s+`plan-implement`/u);
-    expect(source).toMatch(/not an instruction to you/u);
-    expect(source).toMatch(/Approval is a new user turn/u);
-    expect(source).toContain("Only after the user approved the todo route");
-    expect(source).toContain("Resuming is still execution");
-    expect(source).toContain("execute.workflow.mjs");
+    expect(source).toContain("Do not render `implement-plan.workflow.mjs`, execute project changes, create");
+    expect(source).toContain("Approval must arrive in a later user turn");
+    expect(source).toContain("Only after the user approves the saved plan");
+    expect(source).toContain("Resuming is execution");
+    expect(source).toContain("implement-plan.workflow.mjs");
+    expect(source).not.toContain('name: "task/implement"');
+    expect(source).not.toContain("task-via-script");
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {
@@ -508,7 +568,11 @@ describe("npm public package boundary", () => {
     // packed, demote it to a backticked repository path that admits the target
     // is repository-only, or drop it. Adding the target to `package.json#files`
     // is an owner decision about public surface, not a way to quiet this test.
-    expect(deadPackagedMarkdownLinks(packedPaths)).toEqual([]);
+    //
+    // The parser is `scripts/markdown-links.ts`, shared with `npm run check:links`.
+    // That gate reads the same rule off `package.json#files`; this test reads it
+    // off a real pack, so the two disagree exactly when the allowlist lies.
+    expect(deadMarkdownLinks(root, { name: "the npm package", files: packedPaths })).toEqual([]);
   });
 
   it("loads every declared entrypoint from an unpacked real tarball", () => {
@@ -745,85 +809,20 @@ describe("npm public package boundary", () => {
 });
 
 function supportsPiVersion(range: string, version: string): boolean {
-  const match = /^\^(\d+)\.(\d+)\.(\d+)$/u.exec(range);
+  const match = /^>=\s*(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/u.exec(range);
   if (match === null) return false;
   const floor = match.slice(1).map((part) => Number(part));
-  const candidate = version.split(".").map((part) => Number(part));
+  const candidate = version
+    .split("-", 1)[0]!
+    .split(".")
+    .map((part) => Number(part));
   if (floor.length !== 3 || candidate.length !== 3 || candidate.some((part) => !Number.isSafeInteger(part)))
     return false;
-  if (candidate[0] !== floor[0]) return false;
-  if (floor[0] === 0 && candidate[1] !== floor[1]) return false;
   for (let index = 0; index < 3; index += 1) {
     if (candidate[index]! > floor[index]!) return true;
     if (candidate[index]! < floor[index]!) return false;
   }
   return true;
-}
-
-function deadPackagedMarkdownLinks(packedPaths: ReadonlySet<string>): string[] {
-  const dead: string[] = [];
-  const packedMarkdown = [...packedPaths].filter((packed) => packed.endsWith(".md")).sort();
-
-  for (const file of packedMarkdown) {
-    const directory = path.posix.dirname(file);
-    const lines = withoutFencedCode(readFileSync(path.join(root, file), "utf8")).split("\n");
-
-    lines.forEach((line, index) => {
-      for (const target of markdownLinkTargets(line)) {
-        // A same-document anchor and anything carrying a scheme or authority
-        // (`https:`, `mailto:`, `//host`) leaves the package, so the tarball
-        // cannot be wrong about it.
-        if (target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) continue;
-
-        const [linkPath] = target.split(/[#?]/u);
-        if (linkPath === undefined || linkPath === "") continue;
-        if (linkPath.startsWith("/")) {
-          dead.push(`${file}:${index + 1} -> ${target} (absolute path, resolvable nowhere)`);
-          continue;
-        }
-
-        const resolved = path.posix.normalize(path.posix.join(directory, linkPath)).replace(/\/$/u, "");
-        if (packedPaths.has(resolved)) continue;
-
-        const absolute = path.join(root, resolved);
-        const reason = !existsSync(absolute)
-          ? "missing from the repository too"
-          : statSync(absolute).isDirectory()
-            ? "a directory, not a packed file"
-            : "in the repository but not packed";
-        dead.push(`${file}:${index + 1} -> ${target} (${resolved} is ${reason})`);
-      }
-    });
-  }
-
-  return dead;
-}
-
-function markdownLinkTargets(line: string): string[] {
-  const targets: string[] = [];
-  // Inline links and image embeds share one syntax; an optional title may follow
-  // the destination, and the destination itself may be angle-bracketed.
-  for (const match of line.matchAll(/\]\(\s*(<[^>]*>|[^()\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/gu))
-    targets.push(match[1]!.replace(/^<|>$/gu, ""));
-  // Reference definitions carry a destination the inline form never shows.
-  const reference = /^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)/u.exec(line);
-  if (reference) targets.push(reference[1]!.replace(/^<|>$/gu, ""));
-  return targets;
-}
-
-/** Blanks fenced code without moving any line, so reported line numbers stay true. */
-function withoutFencedCode(source: string): string {
-  let inside = false;
-  return source
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(?:```|~~~)/u.test(line)) {
-        inside = !inside;
-        return "";
-      }
-      return inside ? "" : line;
-    })
-    .join("\n");
 }
 
 function localImportClosure(entrypoints: readonly string[]): string[] {

@@ -82,13 +82,13 @@ describe("workflow persisted evidence viewer", () => {
     createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "trusted answer" }]);
     const index = JSON.parse(
       readFileSync(
-        path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), "index.json"),
+        path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), "index.json"),
         "utf8",
       ),
     ) as { artifacts: Array<{ kind: string; relativePath: string }> };
     const answer = index.artifacts.find((record) => record.kind === "answer")!;
     writeFileSync(
-      path.join(workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)), answer.relativePath),
+      path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), answer.relativePath),
       "changed after indexing",
       "utf8",
     );
@@ -108,6 +108,39 @@ describe("workflow persisted evidence viewer", () => {
     expect(rendered).not.toContain("changed after indexing");
   });
 
+  it.each([
+    { label: "identity-only", metadata: { workspacePhysicalIdentity: "workspace" } },
+    { label: "schema-only", metadata: { workspacePhysicalIdentitySchemaVersion: 1 } },
+    { label: "unsupported-schema", metadata: { workspacePhysicalIdentitySchemaVersion: 2 } },
+    {
+      label: "unsafe-identity",
+      metadata: { workspacePhysicalIdentity: "../escape", workspacePhysicalIdentitySchemaVersion: 1 },
+    },
+  ])("surfaces malformed physical workspace metadata as unknown viewer evidence ($label)", ({ label, metadata }) => {
+    const root = makeRoot();
+    const runId = `20260722-010101-${label}`;
+    createEvidenceRun(root, runId, [{ callId: "call-0001", name: "answer.md", answer: "answer" }]);
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
+    const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
+    Object.assign(result, metadata);
+    writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
+
+    const viewer = new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 20, columns: 100 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+      runId,
+    );
+    const stages = viewer.render(100).join("\n");
+    expect(stages).toContain(`${runId} · unknown · stages`);
+    viewer.handleInput("enter");
+    const rendered = viewer.render(100).join("\n");
+    expect(rendered).toContain("Malformed persisted metadata");
+    expect(rendered).toContain("workspace physical identity is malformed");
+  });
+
   it("refuses evidence whose semantic artifact record changed after the run screen opened", () => {
     const root = makeRoot();
     const runId = "20260722-010107-ab12";
@@ -122,10 +155,7 @@ describe("workflow persisted evidence viewer", () => {
     );
     viewer.handleInput("enter");
 
-    const indexPath = path.join(
-      workflowRunArtifactsDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
-      "index.json",
-    );
+    const indexPath = path.join(workflowRunArtifactsDir(path.join(root, ".locus-pi", "runs", runId)), "index.json");
     const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
       artifacts: Array<{ kind: string; name: string }>;
     };
@@ -337,6 +367,43 @@ describe("workflow persisted evidence viewer", () => {
       expect(rendered).not.toContain("Recovery: /workflows status");
       expect(rendered.split(/\r?\n/u).length).toBeLessThanOrEqual(24);
     }
+  });
+
+  it("refuses malformed direct initial run ids through the shared run-id contract", () => {
+    for (const runId of ["../outside", "bad/id", "запуск", "a".repeat(129)]) {
+      const viewer = new WorkflowRunViewer(
+        { requestRender: vi.fn(), terminal: { rows: 20, columns: 160 } },
+        {},
+        {},
+        makeRoot(),
+        vi.fn(),
+        runId,
+      );
+
+      expect(viewer.screenKind, runId).toBe("stages");
+      expect(() => viewer.render(160), runId).not.toThrow();
+      viewer.handleInput("enter");
+      expect(viewer.render(160).join("\n"), runId).toContain("Run id refused before filesystem access.");
+    }
+  });
+
+  it("accepts canonical run ids containing adjacent dots", () => {
+    const root = makeRoot();
+    const runId = "run..valid";
+    writeJournal(root, runId, [journal(runId, "phase", { phase: "inspect" })]);
+    const viewer = new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 20, columns: 100 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+      runId,
+    );
+
+    viewer.handleInput("enter");
+    const rendered = viewer.render(100).join("\n");
+    expect(rendered).not.toContain("Invalid workflow run id");
+    expect(rendered).toContain("artifact index is missing");
   });
 });
 

@@ -1,15 +1,10 @@
 {
   "id": "loop",
-  "name": "loop",
   "agent": {
     "name": "extension-loop",
-    "description": "Continue bounded goals and workflows through /loop and loopControl with explicit state."
+    "description": "Continue bounded goals and workflows through the canonical loop tool and /loop command."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "compat-wrapper",
-  "sourceMode": "omp-compatible-wrapper",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "Bare /loop opens a typed editor for goal [focus] or workflow <runId> [focus]; invalid input is preserved and the editor reopens with a warning",
@@ -18,21 +13,23 @@
     "/loop once goal coordinates with the existing /goal continue bounded-artifact contract",
     "/loop once workflow <runId> uses persisted workflow run metadata when present; otherwise fails closed with a clear reason",
     "Command-visible continuation output shows metadata/path and omits full prompt bodies from the widget",
-    "Unsupported actions and sources fail closed with a clear reason",
-    "No background auto-run or hidden agent_end follow-up is registered"
+    "start and until schedule hidden follow-up turns through Pi sendMessage and agent_settled",
+    "each session has one persisted loop state with default hard stops of 20 iterations and 30 minutes",
+    "until uses a model-evaluated condition and instructs the model to call loop stop when satisfied",
+    "transport, missing-source, duration, and iteration failures stop the loop explicitly"
   ],
   "stateUsed": [
     ".locus/runtime/goal/state.json",
     ".locus/runtime/goal/continue.md",
-    ".pi/locus-pi/runs/<runId>/runtime/journal.ndjson",
-    ".pi/locus-pi/runs/<runId>/runtime/result.json",
-    ".locus/runtime/loop/workflow/*.json"
+    ".locus-pi/runs/<runId>/runtime/journal.ndjson",
+    ".locus-pi/runs/<runId>/runtime/result.json",
+    ".locus/runtime/loop/workflow/*.json",
+    ".locus/runtime/loop/sessions/*.json"
   ],
-  "tier": "core-owned",
   "provides": {
-    "tools": ["loopControl"],
+    "tools": ["loop"],
     "commands": ["loop"],
-    "hooks": []
+    "hooks": ["agent_settled", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -46,7 +43,7 @@
   },
   "permissions": {
     "filesystem": {
-      "read": [".locus/runtime/goal/state.json", ".pi/locus-pi/runs/**"],
+      "read": [".locus/runtime/goal/state.json", ".locus-pi/runs/**"],
       "write": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/**"]
     },
     "subprocess": [],
@@ -56,9 +53,9 @@
     "ui": ["editor", "setWidget", "setStatus"]
   },
   "risk": "medium",
-  "docsPath": "docs/extensions/active/loop.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/loop.md",
-  "tests": ["tests/extensions/loop/loop.test.ts", "tests/integration/public-registration.test.ts"],
+  "docsPath": "extensions/loop/README.md",
+  "sourceAuditPath": null,
+  "tests": ["tests/extensions/loop/loop.test.ts", "tests/contracts/extensions/runtime-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "copy-after-audit",

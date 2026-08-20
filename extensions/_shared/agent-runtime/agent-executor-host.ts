@@ -6,7 +6,6 @@ import type {
   NewSessionResultLike,
 } from "../host/pi-api.js";
 import type { SessionRecord } from "../runtime/session-core.js";
-import { getAgentWorkloadProof } from "./agent-workload-proof.js";
 import type { AgentExecutionPromptCapsule } from "./agent-execution-prompt.js";
 import {
   createAgentExecutionPromptCapsule,
@@ -17,9 +16,8 @@ import {
 /**
  * The superseded replacement-session executor, retained as provenance.
  *
- * NOT A LIVE PATH. `docs/source-audit/agents.md` records that this module "retains the former
- * replacement-session adapter and its parser/host tests, but it is not the current `/agent run`
- * executor"; command execution is `runAgentLiveTask` -> `createAgentSdkSessionExecutor` ->
+ * NOT A LIVE PATH. This module retains the former replacement-session adapter and its
+ * parser/host tests for compatibility review, but it is not the current `/agent run` executor; command execution is `runAgentLiveTask` -> `createAgentSdkSessionExecutor` ->
  * `executeAgentRunBoundary`. No registered entrypoint imports anything below, and no production
  * file outside this module does either — only `tests/shared/agents/agent-executor-host.test.ts`.
  *
@@ -27,10 +25,6 @@ import {
  * does use. Those moved to `agent-execution-prompt.js`, which this file now imports, so the one
  * remaining direction of travel is historical -> live. Read that file for the production surface.
  *
- * The `getAgentWorkloadProof` import below is the ONLY edge that keeps
- * `agent-workload-proof.ts` in the shared layer rather than inside `extensions/agents/`: it is
- * reached from `summarizeReplacementSessionEntries`, on this historical path. Retiring this
- * module would free that module to move to its only other consumer.
  */
 export interface AgentReplacementSessionRunInput {
   request: AgentRunRequest;
@@ -192,12 +186,7 @@ async function runReplacementSession(
   const entries = await readReplacementEntries(replacementCtx);
   const parsed = parseAgentTextFromEntries(entries);
   const childSessionId = childSessionIdOutput(replacementCtx).childSessionId;
-  const outputStats = summarizeReplacementSessionEntries(
-    entries,
-    childSessionId,
-    promptCapsule.allowedTools,
-    promptCapsule.projectRoot,
-  );
+  const outputStats = summarizeReplacementSessionEntries(entries, promptCapsule.allowedTools);
   if (!parsed.ok) {
     return finishReplacementSessionRun(input, replacementCtx, {
       status: "failed",
@@ -258,12 +247,7 @@ export function mapReplacementSessionOutputToRunResult(
     reason: output.reason,
     diagnostics: mergePromptDiagnostics(output.promptCapsule, output.diagnostics),
     lifecycleEntryIds: [],
-    childOutputStats: summarizeReplacementSessionEntries(
-      output.entries,
-      output.childSessionId,
-      output.promptCapsule.allowedTools,
-      request.projectRoot,
-    ),
+    childOutputStats: summarizeReplacementSessionEntries(output.entries, output.promptCapsule.allowedTools),
   };
   if (output.text !== undefined) result.text = output.text;
   if (output.childSessionId !== undefined)
@@ -273,9 +257,7 @@ export function mapReplacementSessionOutputToRunResult(
 
 function summarizeReplacementSessionEntries(
   entries: ReplacementSessionEntryLike[],
-  sessionId?: string,
   allowedTools: string[] = [],
-  projectRoot?: string,
 ): AgentChildOutputStats {
   let assistantMessageCount = 0;
   let assistantToolCallCount = 0;
@@ -289,22 +271,12 @@ function summarizeReplacementSessionEntries(
     assistantToolCallCount += countToolCalls(entry);
     toolResultCount += countToolResults(entry);
   }
-  const recorded = getAgentWorkloadProof(sessionId, projectRoot);
-  const recordedToolCallCount = recorded?.toolCallCount ?? 0;
-  const recordedToolResultCount = recorded?.toolResultCount ?? 0;
   const transcriptProof = countTranscriptToolBlocks(entries, allowedTools);
   return {
     entryCount: entries.length,
     assistantMessageCount,
     assistantToolCallCount,
     toolResultCount,
-    ...(recorded === undefined
-      ? {}
-      : {
-          recordedToolCallCount,
-          recordedToolResultCount,
-          recordedToolNames: recorded.toolNames,
-        }),
     ...(transcriptProof.count === 0
       ? {}
       : {

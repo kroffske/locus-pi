@@ -2,8 +2,8 @@
  * Stable workflow outputs and cross-run coordination.
  *
  * Run evidence remains under the run id. This module owns the separate
- * project-relative user-output namespace, its single-root lease, primary-file
- * references, and atomic completed-item checkpoints.
+ * project-relative user-output namespace, its workspace-local single-root
+ * lease, primary-file references, and atomic completed-item checkpoints.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -20,20 +20,32 @@ import {
   readSync,
   realpathSync,
   renameSync,
-  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { workflowExtensionRootDir } from "./workflow-run-layout.js";
+import {
+  assertWorkflowRunId,
+  workflowRootDir,
+  WORKFLOW_PLANS_DIRNAME,
+  WORKFLOW_ROOT_DIRNAME,
+} from "./workflow-run-layout.js";
 
 const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
+const WORKFLOW_PLANS_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
 /** TypeBox-compatible grammar for the same confined path accepted by the runtime. */
-export const WORKFLOW_OUTPUT_DIR_PATTERN = `^(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*$`;
+export const WORKFLOW_OUTPUT_DIR_PATTERN =
+  `^(?:(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*|` +
+  `\\${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/(?:${OUTPUT_COMPONENT_SOURCE}))$`;
+/** Shared aggregate bound for tool, command, and direct runtime callers. */
+export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
+export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
+export const WORKFLOW_RUN_NAME_PATTERN = `^${OUTPUT_COMPONENT_SOURCE}$`;
 const ITEM_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const CHECKPOINT_SCHEMA = "locus-pi.workflow-checkpoint.v1" as const;
 const LEASE_SCHEMA = "locus-pi.workflow-output-lease.v1" as const;
+export const WORKFLOW_OUTPUT_LOCK_FILE = ".locus-pi-workflow.lock";
 const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
@@ -50,6 +62,15 @@ export interface WorkflowOutputDirectory {
   physicalPath: string;
   /** Canonical project-relative physical identity used for leases and checkpoints. */
   identity: string;
+}
+
+/** Host-only source workspace proof used by operator-handoff continuation. */
+export interface WorkflowWorkspaceReuseBinding {
+  relativePath: string;
+  absolutePath: string;
+  physicalPath: string;
+  physicalIdentity: string;
+  explicit: boolean;
 }
 
 export interface WorkflowPrimaryFileReference {
@@ -87,11 +108,17 @@ interface WorkflowLeaseRecord {
 export interface WorkflowRootLease {
   readonly projectRoot: string;
   readonly stateDir: string;
-  readonly leaseDir: string;
+  readonly workspaceDir: string;
+  readonly lockFile: string;
   readonly record: WorkflowLeaseRecord;
 }
 
-function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string, workflowBaseName: string): string {
+function defaultWorkflowOutputDir(
+  projectRoot: string,
+  workingDirectory: string,
+  workflowName: string,
+  runId: string | undefined,
+): string {
   const lexicalRoot = path.resolve(projectRoot);
   const lexicalWorkingDirectory = path.resolve(workingDirectory);
   if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalWorkingDirectory)) {
@@ -108,11 +135,67 @@ function defaultWorkflowOutputDir(projectRoot: string, workingDirectory: string,
   if (!isWorkflowPathWithinRoot(physicalRoot, physicalWorkingDirectory)) {
     throw new Error("workflow working directory physical target escapes the project root");
   }
-  const relativeWorkingDirectory = path.relative(lexicalRoot, lexicalWorkingDirectory).split(path.sep).join("/");
-  const prefix = relativeWorkingDirectory === "" ? "tmp" : `${relativeWorkingDirectory}/tmp`;
-  if (OUTPUT_COMPONENT.test(workflowBaseName)) return `${prefix}/${workflowBaseName}`;
-  const identity = createHash("sha256").update(workflowBaseName).digest("hex");
-  return `${prefix}/by-workflow-name/${identity}`;
+  const workspaceRunId = assertWorkflowRunId(runId);
+  const workflowSlug = workflowName.replaceAll("/", "-");
+  const readableLeaf = `${workspaceRunId}-${workflowSlug}`;
+  const leaf = OUTPUT_COMPONENT.test(readableLeaf)
+    ? readableLeaf
+    : `${workspaceRunId}-workflow-${createHash("sha256").update(workflowName).digest("hex")}`;
+  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${leaf}`;
+}
+
+export interface WorkflowOutputDirectoryPath {
+  /** Project-relative path, with `/` separators. */
+  relativePath: string;
+  /** Absolute lexical path under the project root. */
+  absolutePath: string;
+}
+
+/** Resolve a confined project-relative output path without touching the filesystem. */
+export function resolveWorkflowOutputDirectoryPath(
+  projectRoot: string,
+  requested: string | undefined,
+  workflowName: string,
+  workingDirectory: string,
+  options: { runId?: string } = {},
+): WorkflowOutputDirectoryPath {
+  const relativePath =
+    requested === undefined
+      ? defaultWorkflowOutputDir(projectRoot, workingDirectory, workflowName, options.runId)
+      : assertWorkflowOutputDirPath(normalizeRequestedOutputDir(projectRoot, workingDirectory, requested));
+  const root = path.resolve(projectRoot);
+  const absolutePath = path.resolve(root, ...relativePath.split("/"));
+  if (!isWorkflowPathWithinRoot(root, absolutePath)) throw new Error("workflow outputDir escapes the project root");
+  return { relativePath, absolutePath };
+}
+
+/** Expand a short run name into its project-local workflow workspace. */
+export function workflowWorkspaceRelativePathForRunName(runName: unknown): string {
+  if (typeof runName !== "string" || !OUTPUT_COMPONENT.test(runName)) {
+    throw new Error("workflow runName must be one safe folder name");
+  }
+  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${runName}`;
+}
+
+function normalizeRequestedOutputDir(projectRoot: string, workingDirectory: string, requested: string): string {
+  if (typeof requested !== "string") {
+    throw new Error("workflow outputDir must be a non-empty trimmed path");
+  }
+  if (requested.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
+    throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
+  }
+  const project = path.resolve(projectRoot);
+  let absolute: string | undefined;
+  if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) {
+    absolute = path.resolve(requested);
+  } else if (requested === "." || requested.startsWith("./") || requested.startsWith("../")) {
+    absolute = path.resolve(workingDirectory, requested);
+  }
+  if (absolute === undefined) return requested;
+  if (!isWorkflowPathWithinRoot(project, absolute) || absolute === project) {
+    throw new Error("workflow outputDir escapes the project root");
+  }
+  return path.relative(project, absolute).split(path.sep).join("/");
 }
 
 /** Resolve and create a confined project-relative output directory. */
@@ -121,13 +204,18 @@ export function resolveWorkflowOutputDirectory(
   requested: string | undefined,
   workflowName: string,
   workingDirectory: string,
+  options: { create?: boolean; runId?: string } = {},
 ): WorkflowOutputDirectory {
-  const defaultPath = defaultWorkflowOutputDir(projectRoot, workingDirectory, workflowName);
-  const relativePath = requested === undefined ? defaultPath : assertRelativeOutputPath(requested);
+  const { relativePath, absolutePath } = resolveWorkflowOutputDirectoryPath(
+    projectRoot,
+    requested,
+    workflowName,
+    workingDirectory,
+    options.runId === undefined ? {} : { runId: options.runId },
+  );
   const root = path.resolve(projectRoot);
-  const absolutePath = path.resolve(root, ...relativePath.split("/"));
-  if (!isWorkflowPathWithinRoot(root, absolutePath)) throw new Error("workflow outputDir escapes the project root");
-  ensureDirectoryWithoutSymlinks(root, absolutePath);
+  if (options.create === false) assertExistingDirectoryWithoutSymlinks(root, absolutePath);
+  else ensureDirectoryWithoutSymlinks(root, absolutePath);
   let physicalRoot: string;
   let physicalPath: string;
   try {
@@ -142,6 +230,90 @@ export function resolveWorkflowOutputDirectory(
   const identity = path.relative(physicalRoot, physicalPath).split(path.sep).join("/");
   if (identity === "") throw new Error("workflow outputDir must not resolve to the project root");
   return { relativePath, absolutePath, physicalPath, identity };
+}
+
+/** Resolve a previously verified workspace without reclassifying it as public outputDir. */
+export function resolveWorkflowOutputDirectoryForReuse(
+  projectRoot: string,
+  binding: WorkflowWorkspaceReuseBinding,
+  options: { create?: boolean } = {},
+): WorkflowOutputDirectory {
+  const root = path.resolve(projectRoot);
+  const absolutePath = path.resolve(root, ...binding.relativePath.split("/"));
+  const relativePath = path.relative(root, absolutePath).split(path.sep).join("/");
+  if (relativePath === "" || relativePath !== binding.relativePath || !isWorkflowPathWithinRoot(root, absolutePath)) {
+    throw new Error("workflow reused workspace identity is not project-relative");
+  }
+  if (path.resolve(binding.absolutePath) !== absolutePath) {
+    throw new Error("workflow reused workspace lexical identity changed");
+  }
+  if (options.create === false) assertExistingDirectoryWithoutSymlinks(root, absolutePath);
+  else ensureDirectoryWithoutSymlinks(root, absolutePath);
+  let physicalRoot: string;
+  let physicalPath: string;
+  try {
+    physicalRoot = realpathSync(root);
+    physicalPath = realpathSync(absolutePath);
+  } catch (error) {
+    throw new Error(`workflow reused workspace physical identity is unavailable: ${String(error)}`);
+  }
+  const identity = path.relative(physicalRoot, physicalPath).split(path.sep).join("/");
+  if (!isWorkflowPathWithinRoot(physicalRoot, physicalPath) || identity !== binding.physicalIdentity) {
+    throw new Error("workflow reused workspace physical identity changed");
+  }
+  if (physicalPath !== binding.physicalPath) {
+    throw new Error("workflow reused workspace physical target changed");
+  }
+  return { relativePath, absolutePath, physicalPath, identity };
+}
+
+/** Preserve an existing regular workspace file or create it empty without following symlinks. */
+export function ensureWorkflowWorkspaceFile(output: WorkflowOutputDirectory, relativeFile: string): string {
+  const normalized = assertRelativeOutputPath(relativeFile, "workspace file");
+  const absolutePath = path.resolve(output.absolutePath, ...normalized.split("/"));
+  if (!isWorkflowPathWithinRoot(output.absolutePath, absolutePath)) {
+    throw new Error("workflow workspace file escapes outputDir");
+  }
+
+  let fd: number;
+  try {
+    fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (!isNodeError(error, "ENOENT")) throw error;
+    try {
+      fd = openSync(
+        absolutePath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o666,
+      );
+    } catch (createError) {
+      if (!isNodeError(createError, "EEXIST")) throw createError;
+      fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    }
+  }
+
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile()) throw new Error(`workflow workspace file is not a regular file: ${normalized}`);
+    const physicalWorkspace = realpathSync(output.absolutePath);
+    if (physicalWorkspace !== output.physicalPath) {
+      throw new Error("workflow workspace changed while its input file was being opened");
+    }
+    const selected = lstatSync(absolutePath);
+    const physicalFile = realpathSync(absolutePath);
+    if (
+      selected.isSymbolicLink() ||
+      !selected.isFile() ||
+      opened.dev !== selected.dev ||
+      opened.ino !== selected.ino ||
+      !isWorkflowPathWithinRoot(output.physicalPath, physicalFile)
+    ) {
+      throw new Error(`workflow workspace file changed while it was being opened: ${normalized}`);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return absolutePath;
 }
 
 export function assertWorkflowItemKey(key: string): string {
@@ -177,6 +349,7 @@ export function referenceWorkflowPrimaryFile(
   const fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
+    assertOpenedPrimaryFileIdentity(output, absolutePath, stat);
     if (!stat.isFile()) throw new Error(`workflow primary file is not a regular file: ${normalized}`);
     if (stat.size < 1) throw new Error(`workflow primary file is empty: ${normalized}`);
     const bytes = readFileSync(fd);
@@ -212,7 +385,9 @@ export function acquireWorkflowRootLease(input: {
   const projectRoot = path.resolve(input.projectRoot);
   const stateDir = workflowOutputStateDir(projectRoot, input.output.identity);
   ensureDirectoryWithoutSymlinks(projectRoot, stateDir);
-  const leaseDir = path.join(stateDir, "lease");
+  assertWorkflowStatePath(projectRoot, stateDir, stateDir, "directory", true);
+  const workspaceDir = input.output.absolutePath;
+  const lockFile = path.join(workspaceDir, WORKFLOW_OUTPUT_LOCK_FILE);
   const record: WorkflowLeaseRecord = {
     schema: LEASE_SCHEMA,
     rootRunId: input.rootRunId,
@@ -224,17 +399,19 @@ export function acquireWorkflowRootLease(input: {
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      mkdirSync(leaseDir);
+      assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false);
       try {
-        writeNewDurableJson(path.join(leaseDir, "owner.json"), record, { syncParentDirectory: true });
+        writeNewDurableJson(lockFile, record, { syncParentDirectory: true });
       } catch (error) {
-        removeLeaseDirectory(leaseDir);
+        // An owner may have won the create-to-write window. Leave its lock
+        // intact so the outer EEXIST path can inspect it.
+        if (!isNodeError(error, "EEXIST")) removeLeaseFile(projectRoot, workspaceDir, lockFile);
         throw error;
       }
-      return { projectRoot, stateDir, leaseDir, record };
+      return { projectRoot, stateDir, workspaceDir, lockFile, record };
     } catch (error) {
       if (!isNodeError(error, "EEXIST")) throw error;
-      const current = readLeaseRecordDuringAcquisition(leaseDir);
+      const current = readLeaseRecordDuringAcquisition(projectRoot, workspaceDir, lockFile);
       if (current === undefined) continue;
       const liveness = processLiveness(current.pid);
       if (liveness === "alive") {
@@ -244,17 +421,19 @@ export function acquireWorkflowRootLease(input: {
       }
       if (liveness === "unverifiable") {
         throw new Error(
-          `workflow outputDir ${JSON.stringify(input.output.relativePath)} has an unverifiable owner pid ${current.pid}; verify the process and remove ${leaseDir} only after proving it stopped`,
+          `workflow outputDir ${JSON.stringify(input.output.relativePath)} has an unverifiable owner pid ${current.pid}; verify the process and remove ${lockFile} only after proving it stopped`,
         );
       }
-      const staleDir = path.join(stateDir, `lease-stale-${randomUUID()}`);
+      const staleFile = `${lockFile}.stale-${randomUUID()}`;
+      assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", true);
+      assertWorkflowStatePath(projectRoot, workspaceDir, staleFile, "file", false);
       try {
-        renameSync(leaseDir, staleDir);
+        renameSync(lockFile, staleFile);
       } catch (renameError) {
         if (isNodeError(renameError, "ENOENT")) continue;
         throw renameError;
       }
-      removeLeaseDirectory(staleDir);
+      removeLeaseFile(projectRoot, workspaceDir, staleFile);
     }
   }
   throw new Error(
@@ -263,7 +442,7 @@ export function acquireWorkflowRootLease(input: {
 }
 
 export function assertWorkflowRootLease(lease: WorkflowRootLease): void {
-  const current = readLeaseRecord(lease.leaseDir);
+  const current = readLeaseRecord(lease.projectRoot, lease.workspaceDir, lease.lockFile);
   if (
     current.fencingToken !== lease.record.fencingToken ||
     current.rootRunId !== lease.record.rootRunId ||
@@ -275,8 +454,7 @@ export function assertWorkflowRootLease(lease: WorkflowRootLease): void {
 
 export function releaseWorkflowRootLease(lease: WorkflowRootLease): void {
   assertWorkflowRootLease(lease);
-  unlinkSync(path.join(lease.leaseDir, "owner.json"));
-  rmdirSync(lease.leaseDir);
+  removeLeaseFile(lease.projectRoot, lease.workspaceDir, lease.lockFile);
 }
 
 export function readWorkflowCompletedCheckpoint(
@@ -285,7 +463,7 @@ export function readWorkflowCompletedCheckpoint(
 ): WorkflowCompletedCheckpoint | undefined {
   assertWorkflowRootLease(lease);
   const file = checkpointFile(lease, identity);
-  if (!existsSync(file)) return undefined;
+  if (!assertCheckpointPath(lease, file, false)) return undefined;
   let value: unknown;
   try {
     value = readJson(file);
@@ -310,6 +488,7 @@ export function commitWorkflowCompletedCheckpoint(
   },
 ): WorkflowCompletedCheckpoint {
   assertWorkflowRootLease(lease);
+  const childRunId = assertWorkflowRunId(input.childRunId);
   const record: WorkflowCompletedCheckpoint = {
     schema: CHECKPOINT_SCHEMA,
     status: "completed",
@@ -317,15 +496,18 @@ export function commitWorkflowCompletedCheckpoint(
     childScriptSha256: input.childScriptSha256,
     outputDir: input.outputDir,
     itemKey: input.itemKey,
-    childRunId: input.childRunId,
+    childRunId,
     completedAt: new Date().toISOString(),
     ...(input.primaryFile === undefined ? {} : { primaryFile: input.primaryFile }),
   };
   const file = checkpointFile(lease, input);
   ensureDirectoryWithoutSymlinks(lease.projectRoot, path.dirname(file));
   const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  assertCheckpointPath(lease, temporary, false);
   writeNewDurableJson(temporary, record);
   assertWorkflowRootLease(lease);
+  assertCheckpointPath(lease, temporary, true);
+  assertCheckpointPath(lease, file, false);
   renameSync(temporary, file);
   fsyncDirectory(path.dirname(file));
   return record;
@@ -333,7 +515,98 @@ export function commitWorkflowCompletedCheckpoint(
 
 export function workflowOutputStateDir(projectRoot: string, canonicalOutputIdentity: string): string {
   const namespace = createHash("sha256").update(canonicalOutputIdentity).digest("hex");
-  return path.join(workflowExtensionRootDir(path.resolve(projectRoot)), "workflow-state", "v1", namespace);
+  return path.join(workflowRootDir(path.resolve(projectRoot)), "workflow-state", "v1", namespace);
+}
+
+/**
+ * Fresh semantic targets must not inherit any prior durable state in a named
+ * namespace. This is intentionally opt-in: ordinary workflows retain their
+ * historical default/retry behavior, while an owner can reject unsafe fresh
+ * reuse before acquiring a lease or reading checkpoints.
+ */
+export function assertFreshWorkflowOutputNamespace(input: {
+  projectRoot: string;
+  output: WorkflowOutputDirectory;
+}): void {
+  assertFreshWorkflowOutputNamespaceIdentity({
+    projectRoot: input.projectRoot,
+    relativePath: input.output.relativePath,
+    identity: input.output.identity,
+  });
+}
+
+/** Check fresh-owner durable state from a lexical candidate without creating it. */
+export function assertFreshWorkflowOutputNamespacePath(input: {
+  projectRoot: string;
+  output: WorkflowOutputDirectoryPath;
+}): void {
+  const projectRoot = path.resolve(input.projectRoot);
+  const physicalRoot = realpathSync(projectRoot);
+  const physicalPath = resolveWorkflowOutputPhysicalPathWithoutCreation(
+    projectRoot,
+    physicalRoot,
+    input.output.absolutePath,
+  );
+  const identity = path.relative(physicalRoot, physicalPath).split(path.sep).join("/");
+  if (identity === "" || identity.startsWith("../") || path.isAbsolute(identity)) {
+    throw new Error("workflow outputDir physical target escapes the project root");
+  }
+  assertFreshWorkflowOutputNamespaceIdentity({
+    projectRoot,
+    relativePath: input.output.relativePath,
+    identity,
+  });
+}
+
+function assertFreshWorkflowOutputNamespaceIdentity(input: {
+  projectRoot: string;
+  relativePath: string;
+  identity: string;
+}): void {
+  const projectRoot = path.resolve(input.projectRoot);
+  const stateDir = workflowOutputStateDir(projectRoot, input.identity);
+  const state = lstatSync(stateDir, { throwIfNoEntry: false });
+  if (state === undefined) return;
+  if (state.isSymbolicLink() || !state.isDirectory()) {
+    throw new Error(`workflow outputDir state namespace is not a regular directory: ${stateDir}`);
+  }
+  const physicalRoot = realpathSync(projectRoot);
+  const physicalState = realpathSync(stateDir);
+  if (!isWorkflowPathWithinRoot(physicalRoot, physicalState)) {
+    throw new Error(`workflow outputDir state namespace escapes the project root: ${stateDir}`);
+  }
+  throw new Error(
+    `workflow workspace ${JSON.stringify(input.relativePath)} already has durable post-code-review state; ` +
+      "choose a new --run-name or --output-dir, or resume the original run",
+  );
+}
+
+function resolveWorkflowOutputPhysicalPathWithoutCreation(
+  projectRoot: string,
+  physicalRoot: string,
+  absolutePath: string,
+): string {
+  const relative = path.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("workflow outputDir escapes the project root");
+  }
+  let lexicalCurrent = projectRoot;
+  let physicalCurrent = physicalRoot;
+  for (const part of relative.split(path.sep).filter(Boolean)) {
+    lexicalCurrent = path.join(lexicalCurrent, part);
+    const stat = lstatSync(lexicalCurrent, { throwIfNoEntry: false });
+    if (stat === undefined) {
+      return path.join(physicalCurrent, path.basename(lexicalCurrent), path.relative(lexicalCurrent, absolutePath));
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`workflow outputDir is not a regular directory: ${lexicalCurrent}`);
+    }
+    physicalCurrent = realpathSync(lexicalCurrent);
+    if (!isWorkflowPathWithinRoot(physicalRoot, physicalCurrent)) {
+      throw new Error("workflow outputDir physical target escapes the project root");
+    }
+  }
+  return physicalCurrent;
 }
 
 function checkpointFile(lease: WorkflowRootLease, identity: WorkflowCheckpointIdentity): string {
@@ -346,7 +619,77 @@ function checkpointFile(lease: WorkflowRootLease, identity: WorkflowCheckpointId
   return path.join(lease.stateDir, "checkpoints", `${digest}.json`);
 }
 
-function assertRelativeOutputPath(value: string, label = "outputDir"): string {
+type WorkflowStateLeafKind = "file" | "directory";
+
+/** Prove a state path's complete lexical and physical ancestor chain. */
+function assertWorkflowStatePath(
+  projectRoot: string,
+  stateDir: string,
+  target: string,
+  leafKind: WorkflowStateLeafKind,
+  mustExist: boolean,
+): boolean {
+  const lexicalRoot = path.resolve(projectRoot);
+  const lexicalStateDir = path.resolve(stateDir);
+  const lexicalFile = path.resolve(target);
+  if (!isWorkflowPathWithinRoot(lexicalRoot, lexicalStateDir)) {
+    throw new Error("workflow state directory escapes the project root");
+  }
+  if (!isWorkflowPathWithinRoot(lexicalStateDir, lexicalFile)) {
+    throw new Error("workflow state path escapes the leased state directory");
+  }
+
+  const rootStat = lstatSync(lexicalRoot, { throwIfNoEntry: false });
+  if (rootStat === undefined) {
+    throw new Error("workflow state project root is not a regular directory");
+  }
+  const physicalRoot = realpathSync(lexicalRoot);
+  const physicalRootStat = lstatSync(physicalRoot, { throwIfNoEntry: false });
+  if (physicalRootStat === undefined || physicalRootStat.isSymbolicLink() || !physicalRootStat.isDirectory()) {
+    throw new Error("workflow state project root is not a regular directory");
+  }
+  const relative = path.relative(lexicalRoot, lexicalFile);
+  const parts = relative.split(path.sep).filter(Boolean);
+  if (parts.length === 0) throw new Error("workflow state path must name a leaf");
+
+  let current = lexicalRoot;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    const isLeaf = index === parts.length - 1;
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat === undefined) {
+      if (mustExist) throw new Error(`workflow state path is missing: ${current}`);
+      return false;
+    }
+    if (stat.isSymbolicLink()) {
+      throw new Error(`workflow state path contains a symlink: ${current}`);
+    }
+    const leafIsWrongType = leafKind === "file" ? !stat.isFile() : !stat.isDirectory();
+    if (isLeaf ? leafIsWrongType : !stat.isDirectory()) {
+      throw new Error(
+        isLeaf
+          ? `workflow state path is not a regular ${leafKind}: ${current}`
+          : `workflow state path ancestor is not a directory: ${current}`,
+      );
+    }
+    const physicalCurrent = realpathSync(current);
+    if (!isWorkflowPathWithinRoot(physicalRoot, physicalCurrent)) {
+      throw new Error(`workflow state path escapes the physical project root: ${current}`);
+    }
+  }
+  return true;
+}
+
+/**
+ * Prove the checkpoint path remains inside the leased project/state namespace.
+ * `readJson()` protects the leaf descriptor; this proof protects every path
+ * component before any existence probe, open, or quarantine rename.
+ */
+function assertCheckpointPath(lease: WorkflowRootLease, file: string, mustExist: boolean): boolean {
+  return assertWorkflowStatePath(lease.projectRoot, lease.stateDir, file, "file", mustExist);
+}
+
+function assertRelativeOutputPath(value: unknown, label = "outputDir"): string {
   if (typeof value !== "string" || value === "" || value.trim() !== value) {
     throw new Error(`workflow ${label} must be a non-empty trimmed path`);
   }
@@ -357,6 +700,51 @@ function assertRelativeOutputPath(value: string, label = "outputDir"): string {
   const parts = value.split("/");
   if (parts.some((part) => !OUTPUT_COMPONENT.test(part))) {
     throw new Error(`workflow ${label} contains an unsafe path component: ${JSON.stringify(value)}`);
+  }
+  return parts.join("/");
+}
+
+/** Validate the complete public outputDir value contract before filesystem access. */
+export function assertWorkflowOutputDirPath(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("workflow outputDir must be a non-empty trimmed path");
+  }
+  if (value.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
+    throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
+  }
+  if (value.startsWith(`${WORKFLOW_PLANS_RELATIVE_ROOT}/`)) {
+    const planName = value.slice(WORKFLOW_PLANS_RELATIVE_ROOT.length + 1);
+    if (!OUTPUT_COMPONENT.test(planName)) {
+      throw new Error(`workflow outputDir contains an unsafe planning path component: ${JSON.stringify(value)}`);
+    }
+    return value;
+  }
+  return assertRelativeOutputPath(value);
+}
+
+/**
+ * Validate a physical workspace identity persisted by the runtime.
+ *
+ * This is deliberately separate from the public `outputDir` grammar: default
+ * workspaces inherit verified working-directory components, which may contain
+ * spaces or exceed the caller-facing 400-character bound. Physical
+ * containment is proved by the resolver before persistence and again by
+ * resume/continuation code; this parser only preserves the project-relative
+ * representation and rejects path syntax that could escape that proof.
+ */
+export function assertWorkflowPhysicalWorkspaceIdentity(value: unknown): string {
+  if (typeof value !== "string" || value === "") {
+    throw new Error("workflow workspace physical identity must be a non-empty project-relative path");
+  }
+  if (path.isAbsolute(value) || path.win32.isAbsolute(value)) {
+    throw new Error("workflow workspace physical identity must be project-relative");
+  }
+  if (value.includes("\\") || value.includes("\0")) {
+    throw new Error("workflow workspace physical identity contains an unsafe path component");
+  }
+  const parts = value.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`workflow workspace physical identity contains an unsafe path component: ${JSON.stringify(value)}`);
   }
   return parts.join("/");
 }
@@ -392,33 +780,67 @@ function assertExistingPathWithoutSymlinks(root: string, target: string): void {
   }
 }
 
-function readLeaseRecord(leaseDir: string): WorkflowLeaseRecord {
-  const file = path.join(leaseDir, "owner.json");
+function assertExistingDirectoryWithoutSymlinks(root: string, target: string): void {
+  let current = root;
+  for (const part of path.relative(root, target).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat === undefined) throw new Error(`workflow outputDir physical identity is unavailable: ${current}`);
+    if (stat.isSymbolicLink()) throw new Error(`workflow output path contains a symlink: ${current}`);
+    if (!stat.isDirectory()) throw new Error(`workflow output path component is not a directory: ${current}`);
+  }
+}
+
+function assertOpenedPrimaryFileIdentity(
+  output: WorkflowOutputDirectory,
+  absolutePath: string,
+  opened: ReturnType<typeof fstatSync>,
+): void {
+  const physicalWorkspace = realpathSync(output.absolutePath);
+  if (physicalWorkspace !== output.physicalPath) {
+    throw new Error("workflow primary file workspace changed while it was being opened");
+  }
+  const physicalFile = realpathSync(absolutePath);
+  if (!isWorkflowPathWithinRoot(output.physicalPath, physicalFile)) {
+    throw new Error("workflow primary file escapes the physical outputDir");
+  }
+  const selected = lstatSync(absolutePath);
+  if (selected.isSymbolicLink() || !selected.isFile() || opened.dev !== selected.dev || opened.ino !== selected.ino) {
+    throw new Error(`workflow primary file changed while it was being opened: ${absolutePath}`);
+  }
+}
+
+function readLeaseRecord(projectRoot: string, workspaceDir: string, lockFile: string): WorkflowLeaseRecord {
   let value: unknown;
   try {
-    value = readJson(file);
+    assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", true);
+    value = readJson(lockFile);
   } catch (error) {
     throw new Error(
-      `workflow output lease owner is unreadable at ${file}; verify no writer is active before manual removal: ${String(error)}`,
+      `workflow output lease owner is unreadable at ${lockFile}; verify no writer is active before manual removal: ${String(error)}`,
     );
   }
   if (!isLeaseRecord(value)) {
     throw new Error(
-      `workflow output lease owner is unverifiable at ${file}; verify no writer is active before removal`,
+      `workflow output lease owner is unverifiable at ${lockFile}; verify no writer is active before removal`,
     );
   }
   return value;
 }
 
-/** A new owner creates its directory before owner.json; tolerate only that bounded window. */
-function readLeaseRecordDuringAcquisition(leaseDir: string): WorkflowLeaseRecord | undefined {
+/** A new owner creates its lock before durable JSON is complete; tolerate only that bounded window. */
+function readLeaseRecordDuringAcquisition(
+  projectRoot: string,
+  workspaceDir: string,
+  lockFile: string,
+): WorkflowLeaseRecord | undefined {
   let lastError: unknown;
   for (let attempt = 0; attempt < LEASE_OWNER_READ_ATTEMPTS; attempt += 1) {
     try {
-      return readLeaseRecord(leaseDir);
+      return readLeaseRecord(projectRoot, workspaceDir, lockFile);
     } catch (error) {
       lastError = error;
-      if (!existsSync(leaseDir)) return undefined;
+      if (!assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false)) return undefined;
       if (attempt + 1 < LEASE_OWNER_READ_ATTEMPTS) {
         Atomics.wait(LEASE_OWNER_READ_WAIT, 0, 0, LEASE_OWNER_READ_RETRY_MS);
       }
@@ -429,7 +851,9 @@ function readLeaseRecordDuringAcquisition(leaseDir: string): WorkflowLeaseRecord
 
 function quarantineWorkflowCheckpoint(lease: WorkflowRootLease, file: string): void {
   assertWorkflowRootLease(lease);
+  assertCheckpointPath(lease, file, true);
   const stale = `${file}.stale-${randomUUID()}`;
+  assertCheckpointPath(lease, stale, false);
   try {
     renameSync(file, stale);
   } catch (error) {
@@ -449,10 +873,8 @@ function processLiveness(pid: number): "alive" | "dead" | "unverifiable" {
   }
 }
 
-function removeLeaseDirectory(directory: string): void {
-  const owner = path.join(directory, "owner.json");
-  if (existsSync(owner)) unlinkSync(owner);
-  rmdirSync(directory);
+function removeLeaseFile(projectRoot: string, workspaceDir: string, lockFile: string): void {
+  if (assertWorkflowStatePath(projectRoot, workspaceDir, lockFile, "file", false)) unlinkSync(lockFile);
 }
 
 function writeNewDurableJson(file: string, value: unknown, options: { syncParentDirectory?: boolean } = {}): void {
@@ -522,6 +944,12 @@ function isLeaseRecord(value: unknown): value is WorkflowLeaseRecord {
 function isCompletedCheckpoint(value: unknown): value is WorkflowCompletedCheckpoint {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Partial<WorkflowCompletedCheckpoint>;
+  let childRunId: string;
+  try {
+    childRunId = assertWorkflowRunId(record.childRunId);
+  } catch {
+    return false;
+  }
   return (
     record.schema === CHECKPOINT_SCHEMA &&
     record.status === "completed" &&
@@ -529,7 +957,7 @@ function isCompletedCheckpoint(value: unknown): value is WorkflowCompletedCheckp
     typeof record.childScriptSha256 === "string" &&
     typeof record.outputDir === "string" &&
     typeof record.itemKey === "string" &&
-    typeof record.childRunId === "string" &&
+    record.childRunId === childRunId &&
     typeof record.completedAt === "string" &&
     (record.primaryFile === undefined || isPrimaryFileReference(record.primaryFile))
   );

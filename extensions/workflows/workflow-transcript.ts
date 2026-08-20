@@ -1,19 +1,20 @@
 import path from "node:path";
-import { Box, Text } from "@earendil-works/pi-tui";
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-  ExtensionMessage,
-  ThemeLike,
-} from "../_shared/host/pi-api.js";
+import type { ExtensionContext } from "../_shared/host/pi-api.js";
 import { formatDuration } from "../_shared/agent-runtime/agent-live-panel.js";
 import type { RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
-import { projectWorkflowDisposition, type WorkflowDispositionProjection } from "./runtime/workflow-result.js";
+import {
+  projectWorkflowDisposition,
+  workflowResultFile,
+  type WorkflowDispositionProjection,
+} from "./runtime/workflow-result.js";
 import { workflowJournalFile } from "./runtime/workflow-run-layout.js";
 import { notifyOperator } from "../_shared/operator/operator-notify.js";
+import { type WorkflowTranscriptAnnouncement, type WorkflowTranscriptCompletion } from "./command/receipts.js";
+import { workflowCompletionPresentation } from "./command/completion-presentation.js";
+
+export { registerWorkflowTranscriptRenderers } from "./command/completion-presentation.js";
 
 /**
  * One custom message type carries both bounded run-boundary records. The name
@@ -22,30 +23,12 @@ import { notifyOperator } from "../_shared/operator/operator-notify.js";
  * Exact terminal prose uses a second type so it is visibly separate and may be
  * unbounded without weakening the digest contract.
  */
-export const WORKFLOW_RUN_CUSTOM_TYPE = "locus-workflow-run";
-export const WORKFLOW_RESULT_CUSTOM_TYPE = "locus-workflow-result";
 const TRANSCRIPT_AGENT_ROW_LIMIT = 20;
 const TRANSCRIPT_LINE_MAX_CHARS = 160;
 const TRANSCRIPT_RULE_WIDTH = 64;
 const TRANSCRIPT_ANSWER_MAX_CHARS = 96;
 
 export type WorkflowTranscriptSurfaceMode = "command" | "tool";
-
-export interface WorkflowTranscriptAnnouncement {
-  eventKind: "workflow_start";
-  runId: string;
-  text: string;
-}
-
-export interface WorkflowTranscriptCompletion {
-  eventKind: "workflow_end";
-  runId: string;
-  digest: string;
-  lineCount: number;
-  /** Exact terminal prose, published separately from the bounded lifecycle digest. */
-  resultText?: string;
-  resultTextPath?: string;
-}
 
 export interface WorkflowTranscriptOptions {
   /** Semantic run input. On a continuation run this is the operator's answer. */
@@ -54,29 +37,11 @@ export interface WorkflowTranscriptOptions {
 
 export interface WorkflowTranscript {
   /** Returns the run-boundary banner for surfaces that can publish one. */
-  start(runId: string, runDir?: string): WorkflowTranscriptAnnouncement | undefined;
+  start(runId: string, runDir: string): WorkflowTranscriptAnnouncement | undefined;
   event(line: WorkflowJournalLine): void;
   finish(res: RunWorkflowScriptResult): WorkflowTranscriptCompletion;
-}
-
-/** Replace Pi's raw `[custom-type]` fallback with distinct operator-facing cards. */
-export function registerWorkflowTranscriptRenderers(pi: ExtensionAPI): void {
-  if (pi.registerMessageRenderer === undefined) return;
-  pi.registerMessageRenderer(WORKFLOW_RUN_CUSTOM_TYPE, (message, { outputPad }, theme) => {
-    if (typeof message.content !== "string") return undefined;
-    const eventKind = message.details?.eventKind;
-    const title =
-      eventKind === "workflow_start"
-        ? "Workflow started"
-        : eventKind === "workflow_end"
-          ? "Workflow finished"
-          : "Workflow run";
-    return workflowTranscriptCard(title, message.content, outputPad, theme);
-  });
-  pi.registerMessageRenderer(WORKFLOW_RESULT_CUSTOM_TYPE, (message, { outputPad }, theme) => {
-    if (typeof message.content !== "string") return undefined;
-    return workflowTranscriptCard("Workflow result", message.content, outputPad, theme);
-  });
+  /** Terminal fallback when the runner rejects after publishing a run identity. */
+  fail(error: unknown, runId: string, runDir: string): WorkflowTranscriptCompletion;
 }
 
 interface PendingAgentRow {
@@ -125,10 +90,13 @@ export function createWorkflowTranscript(
       return {
         eventKind: "workflow_start",
         runId: id,
+        runDir,
+        journalPath: workflowJournalFile(runDir),
+        resultPath: workflowResultFile(runDir),
         text: [
           workflowRunRule(safeTarget, id, "started", startedAt),
           "● workflow started · live progress in the panel below · /ps opens the agent fleet",
-          ...(runDir === undefined ? [] : [`runDir: ${runDir}`]),
+          `runDir: ${runDir}`,
         ].join("\n"),
       };
     },
@@ -159,7 +127,7 @@ export function createWorkflowTranscript(
     },
     finish(res) {
       if (completion !== undefined) return completion;
-      if (!announced) this.start(res.runId);
+      if (!announced) this.start(res.runId, res.runDir);
       const elapsed = startedAt === undefined ? "" : formatDuration(Math.max(0, Date.now() - startedAt));
       const agentCount = res.journal.filter((line) => line.kind === "agent_end").length;
       // This digest is the one workflow surface that enters LLM context, so a
@@ -196,9 +164,10 @@ export function createWorkflowTranscript(
       const summary = disposition.summary.startsWith("awaiting operator · ")
         ? disposition.summary.slice("awaiting operator · ".length)
         : disposition.summary;
+      const hasExactResultText = typeof res.result === "string" && res.result.trim() !== "";
       const parts = [
         formatWorkflowTerminalLifecycle(safeTarget, disposition),
-        compactTranscriptText(summary),
+        ...(!hasExactResultText || disposition.status !== "completed" ? [compactTranscriptText(summary)] : []),
         ...((disposition.status === "completed" || disposition.status === "awaiting_operator") && agentCount > 0
           ? [`${agentCount} agent${agentCount === 1 ? "" : "s"}`]
           : []),
@@ -217,9 +186,17 @@ export function createWorkflowTranscript(
       // unabridged text is, and which command shows it — otherwise the operator
       // is left with a sentence fragment and no way forward. A failed run that
       // still produced text needs it just as much as a clean one.
+      const fileLines: string[] = [];
+      const commandLines: string[] = [];
+      if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
+        fileLines.push(firstTranscriptLine(`primary file: ${res.primaryFile.absolutePath}`));
+      }
+      if (res.workspaceDir !== undefined && res.workspaceDir !== "") {
+        fileLines.push(firstTranscriptLine(`workspace: ${res.workspaceDir}`));
+      }
       if (res.resultTextPath !== undefined && res.resultTextPath !== "") {
-        bodyLines.push(firstTranscriptLine(`result: ${res.resultTextPath}`));
-        bodyLines.push(firstTranscriptLine(`read the full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
+        fileLines.push(firstTranscriptLine(`full result: ${res.resultTextPath}`));
+        commandLines.push(firstTranscriptLine(`read full result: /workflows result ${shortWorkflowRunId(res.runId)}`));
       } else if (disposition.status !== "completed") {
         // A run that ended badly and produced NO prose result — a script that
         // returned a structured `{ok:false}` is the common case — used to leave
@@ -227,25 +204,25 @@ export function createWorkflowTranscript(
         // The reason it failed is in the structured result, so this names the one
         // command that prints it. `/workflows result` deliberately refuses a
         // non-prose result, so pointing there would send them to a dead end.
-        bodyLines.push(firstTranscriptLine(`read the full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
+        commandLines.push(firstTranscriptLine(`read full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
       }
-      if (res.workspaceDir !== undefined && res.workspaceDir !== "") {
-        bodyLines.push(firstTranscriptLine(`workspace: ${res.workspaceDir}`));
-        if (res.workspaceDirRelative !== undefined && res.workspaceDirRelative !== "") {
-          bodyLines.push(
-            firstTranscriptLine(`workspace reuse: reused when outputDir remains ${res.workspaceDirRelative}`),
-          );
-        }
+      const presentation = workflowCompletionPresentation(res, safeTarget);
+      if (presentation.generatedRunCommand !== undefined) {
+        commandLines.push(`run generated script: ${presentation.generatedRunCommand}`);
       }
-      if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
-        bodyLines.push(firstTranscriptLine(`primary file: ${res.primaryFile.absolutePath}`));
+      if (res.runDir !== undefined && res.runDir !== "") {
+        fileLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
       }
+      appendTranscriptGroup(bodyLines, "Files", fileLines);
+      appendTranscriptGroup(bodyLines, "Commands", commandLines);
       if (res.failureDiagnostic !== undefined) {
+        bodyLines.push("Failure");
         for (const line of formatWorkflowFailureDiagnosticLines(res.failureDiagnostic, { repairRequest: true })) {
           bodyLines.push(firstTranscriptLine(line));
         }
-      } else if (res.runDir !== undefined && res.runDir !== "") {
-        bodyLines.push(firstTranscriptLine(`journal: ${workflowJournalFile(res.runDir)}`));
+      }
+      if (presentation.nextAction !== undefined) {
+        bodyLines.push("Next action", presentation.nextAction);
       }
       const headerLines = [
         workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),
@@ -254,10 +231,39 @@ export function createWorkflowTranscript(
       completion = {
         eventKind: "workflow_end",
         runId: res.runId,
+        workflowStatus: disposition.status,
+        runDir: res.runDir,
+        journalPath: workflowJournalFile(res.runDir),
+        resultPath: workflowResultFile(res.runDir),
+        resultPersisted: res.resultPersistence.ok,
         digest: [...headerLines, ...bodyLines].join("\n"),
         lineCount: bodyLines.length,
         ...(typeof res.result === "string" && res.result.trim() !== "" ? { resultText: res.result } : {}),
         ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
+        ...(res.primaryFile?.absolutePath !== undefined ? { primaryFilePath: res.primaryFile.absolutePath } : {}),
+        ...(presentation.nextAction === undefined ? {} : { nextAction: presentation.nextAction }),
+      };
+      return completion;
+    },
+    fail(error, runId, runDir) {
+      if (completion !== undefined) return completion;
+      if (!announced) this.start(runId, runDir);
+      const message = compactTranscriptText(error instanceof Error ? error.message : String(error));
+      const lines = [
+        workflowRunRule(safeTarget, runId, "failed", Date.now()),
+        `✗ workflow ${safeTarget} failed · ${message}`,
+        `journal: ${workflowJournalFile(runDir)}`,
+      ];
+      completion = {
+        eventKind: "workflow_end",
+        runId,
+        workflowStatus: "failed",
+        runDir,
+        journalPath: workflowJournalFile(runDir),
+        resultPath: workflowResultFile(runDir),
+        resultPersisted: false,
+        digest: lines.join("\n"),
+        lineCount: lines.length - 1,
       };
       return completion;
     },
@@ -289,10 +295,9 @@ export function createWorkflowTranscript(
   }
 }
 
-function workflowTranscriptCard(title: string, content: string, outputPad: number, theme: ThemeLike): Box {
-  const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
-  box.addChild(new Text(`${theme.fg("accent", theme.bold(title))}\n${content}`, 0, 0));
-  return box;
+function appendTranscriptGroup(lines: string[], title: string, entries: readonly string[]): void {
+  if (entries.length === 0) return;
+  lines.push(title, ...entries);
 }
 
 /**
@@ -448,111 +453,6 @@ function formatWorkflowAgentLifecycle(line: WorkflowJournalLine, replaySourceRun
           ? { marker: "✗", verb: status === "blocked" ? "blocked" : "failed" }
           : { marker: "■", verb: `ended (${compactTranscriptText(status)})` };
   return `${lifecycle.marker} agent ${agent} ${lifecycle.verb}${elapsedPart}${labelPart}`;
-}
-
-/**
- * Publish the run-boundary banner at launch. The command path has just proven
- * `ctx.isIdle()`, but the operator can submit a prompt between that check and
- * the first journal event, so the check is repeated synchronously immediately
- * before the send: Pi routes `sendMessage` to `agent.steer()` while streaming,
- * despite `triggerTurn:false`. A busy session simply gets no banner — the live
- * widget still shows the run — and never a steered parent agent.
- */
-export function announceCommandWorkflowStart(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  announcement: WorkflowTranscriptAnnouncement,
-  isCurrent: () => boolean = () => true,
-): boolean {
-  if (!isCurrent()) return false;
-  if (typeof ctx.isIdle !== "function" || !ctx.isIdle()) return false;
-  if (typeof pi.sendMessage !== "function") return false;
-  const message: ExtensionMessage = {
-    customType: WORKFLOW_RUN_CUSTOM_TYPE,
-    content: announcement.text,
-    display: true,
-    details: { eventKind: announcement.eventKind, runId: announcement.runId },
-  };
-  try {
-    // No await between the idle check above and this call.
-    void pi.sendMessage(message, { triggerTurn: false });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Persist one command digest and, when present, the exact prose result only
- * after Pi reports the parent session idle.
- * `waitForIdle()` followed immediately by `isIdle()` and `sendMessage()` has no
- * intervening await, so the host's synchronous sendCustomMessage branch sees
- * the same settled state and appends instead of steering.
- */
-export async function persistCommandWorkflowTranscript(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  completion: WorkflowTranscriptCompletion,
-  isCurrent: () => boolean = () => true,
-): Promise<boolean> {
-  if (!isCurrent()) return false;
-  if (typeof ctx.waitForIdle !== "function") {
-    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: ctx.waitForIdle is unavailable.");
-    return false;
-  }
-  try {
-    await ctx.waitForIdle();
-  } catch {
-    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: waiting for Pi idle state failed.");
-    return false;
-  }
-  if (!isCurrent()) return false;
-  if (typeof ctx.isIdle !== "function" || !ctx.isIdle()) {
-    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: Pi did not settle to idle.");
-    return false;
-  }
-  if (typeof pi.sendMessage !== "function") {
-    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage is unavailable.");
-    return false;
-  }
-  const message: ExtensionMessage = {
-    customType: WORKFLOW_RUN_CUSTOM_TYPE,
-    content: completion.digest,
-    display: true,
-    details: { eventKind: completion.eventKind, runId: completion.runId, lineCount: completion.lineCount },
-  };
-  try {
-    if (!isCurrent()) return false;
-    // No await between the final idle check and this call. Pi 0.83.0 chooses
-    // append-vs-steer synchronously inside sendCustomMessage.
-    const pendingMessages = [pi.sendMessage(message, { triggerTurn: false })];
-    if (completion.resultText !== undefined) {
-      pendingMessages.push(
-        pi.sendMessage(
-          {
-            customType: WORKFLOW_RESULT_CUSTOM_TYPE,
-            content: completion.resultText,
-            display: true,
-            details: {
-              eventKind: "workflow_result",
-              runId: completion.runId,
-              ...(completion.resultTextPath !== undefined ? { resultTextPath: completion.resultTextPath } : {}),
-            },
-          },
-          { triggerTurn: false },
-        ),
-      );
-    }
-    await Promise.all(pendingMessages);
-    return true;
-  } catch {
-    notifyWhenCurrent(ctx, isCurrent, "Workflow transcript was not persisted: pi.sendMessage failed.");
-    return false;
-  }
-}
-
-function notifyWhenCurrent(ctx: ExtensionContext, isCurrent: () => boolean, message: string): void {
-  if (isCurrent()) notifyOperator(ctx, message, "warning");
 }
 
 /** Main status omits agent transport markers already represented by the fleet. */

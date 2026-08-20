@@ -25,7 +25,10 @@ import {
   workflowScriptExecutionPath,
 } from "../../../extensions/workflows/runtime/workflow-script-identity.js";
 import { readWorkflowRunResult, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
-import { workflowRunRuntimeDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowRunRuntimeDir,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -315,7 +318,8 @@ describe("workflow script identity coverage", () => {
         'export const meta = { identityCoverage: "entry-only" }; export default () => true;\n',
         "utf8",
       );
-      const identity = createWorkflowScriptSnapshot(scriptPath, path.join(root, "run"));
+      const runDir = ensureWorkflowRunDir(root, "20260812-010101-a001");
+      const identity = createWorkflowScriptSnapshot(scriptPath, workflowRunRuntimeDir(runDir));
       expect(identity).toMatchObject({ identityCoverage: "entry-only", executionSource: "source" });
       expect(readFileSync(identity.snapshotPath, "utf8")).toContain('identityCoverage: "entry-only"');
     } finally {
@@ -328,7 +332,8 @@ describe("workflow script identity coverage", () => {
     const scriptPath = path.join(root, "entry.workflow.mjs");
     try {
       writeFileSync(scriptPath, "export default () => 'captured';\n", "utf8");
-      const identity = createWorkflowScriptSnapshot(scriptPath, path.join(root, "run"));
+      const runDir = ensureWorkflowRunDir(root, "20260812-010101-a002");
+      const identity = createWorkflowScriptSnapshot(scriptPath, workflowRunRuntimeDir(runDir));
       writeFileSync(scriptPath, "export default () => 'mutated-source';\n", "utf8");
       const mod = await loadWorkflowScript(
         workflowScriptExecutionPath(identity),
@@ -412,7 +417,7 @@ describe("workflow script identity coverage", () => {
 
   it("fails when script-owned toJSON mutates the retained snapshot", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-identity-tojson-tamper-"));
-    const workflowsRoot = path.join(root, ".pi", "locus-pi", "runs");
+    const workflowsRoot = path.join(root, ".locus-pi", "runs");
     try {
       writeFileSync(
         path.join(root, "entry.workflow.mjs"),

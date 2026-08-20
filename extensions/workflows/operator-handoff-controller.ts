@@ -19,12 +19,14 @@ export interface WorkflowHandoffSelectQuestion {
   options: Array<{ label: string }>;
   recommended?: string;
   allowCustom?: boolean;
+  detailText?: string;
 }
 
 export interface WorkflowHandoffTextQuestion {
   kind: "text";
   id: string;
   prompt: string;
+  detailText?: string;
 }
 
 export type WorkflowHandoffQuestion = WorkflowHandoffSelectQuestion | WorkflowHandoffTextQuestion;
@@ -160,7 +162,7 @@ export class WorkflowOperatorHandoffController {
     // Unprompted pumps open only never-answered handoffs. A retryable one — its
     // continuation consumed an answer and then failed — must not re-take the
     // editor with questions the operator already answered; it stays reachable
-    // through an explicit /workflows or /workflow-continue. An unprompted pump
+    // through an explicit /workflows continue. An unprompted pump
     // is recognized by the session scope it carries (`originRunIds`); explicit
     // operator commands pass none and keep project-wide reach.
     const unprompted = options.originRunIds !== undefined && options.runId === undefined;
@@ -328,6 +330,7 @@ function operatorQuestionSpec(
       allowCustom: true,
       progressText: `Question 1 of ${queueLength}${questionProgress}`,
       contextText: workflowHandoffContext(handoff),
+      ...(question.detailText === undefined ? {} : { detailText: question.detailText }),
     };
   }
   return {
@@ -340,6 +343,8 @@ function operatorQuestionSpec(
     })),
     allowCustom: question.allowCustom === true,
     progressText: `Question 1 of ${queueLength}${questionProgress}`,
+    contextText: workflowHandoffContext(handoff),
+    ...(question.detailText === undefined ? {} : { detailText: question.detailText }),
   };
 }
 

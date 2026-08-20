@@ -2,7 +2,7 @@
  * extensions/agents/run-launcher.ts — the single start-a-run pipeline behind both
  * agent triggers: `runAgentLiveTask` (the live row + SDK child + terminal patch)
  * plus the `/agent run` slash wrapper that installs the progress panel around it.
- * The `task`/`spawn_agent` tool is the other client (see task-tool.ts).
+ * The `spawn_agent` tool is the other client (see task-tool.ts).
  */
 import {
   createAgentRunRequest,

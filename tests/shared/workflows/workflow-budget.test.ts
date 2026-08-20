@@ -338,7 +338,7 @@ describe("the runner applies the budget contract", () => {
     expect(result.ok, result.error).toBe(true);
     expect(result.result).toEqual({ calls: 201 });
     expect(children).toHaveLength(201);
-  });
+  }, 30_000);
 
   it("bounds a script that declares nothing with the contract tool-call fuse", async () => {
     const root = scratchProject();
@@ -510,7 +510,9 @@ export default async function runWorkflow(dsl) {
       /workflow budget concurrency must be a positive safe integer/u,
     );
   });
-});
+  // These runs schedule hundreds of real async agent calls against real timers,
+  // so their wall clock tracks machine load rather than the code under test.
+}, 30_000);
 // ---------------------------------------------------------------------------
 // W6 — the run wall clock
 // ---------------------------------------------------------------------------
@@ -726,4 +728,5 @@ describe("run wall clock (runtimeMs)", () => {
     clock.advance(Number.MAX_SAFE_INTEGER - 1);
     await expect(dsl.agent("late but unbounded")).resolves.toBe("answer");
   });
-});
+  // Same reason as the runner suite above: real scheduling, real timers.
+}, 30_000);

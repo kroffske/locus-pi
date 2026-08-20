@@ -1,15 +1,10 @@
 {
   "id": "security-gate",
-  "name": "security-gate",
   "agent": {
     "name": "extension-security-gate",
     "description": "Observe dangerous tool calls in audit-only mode and inspect them with /security-audit."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "Pi tool_call lifecycle hook",
@@ -19,11 +14,10 @@
     "security-audit shows newest bounded audit-only observations (default TUI selection 20, RPC projection 3) with literal decision facts, derived INFO/WARN severity, redacted width-bounded targets, and hidden count without claiming Locus enforcement"
   ],
   "stateUsed": ["security audit events"],
-  "tier": "core-owned",
   "provides": {
     "tools": [],
     "commands": ["security-audit"],
-    "hooks": ["tool_call"]
+    "hooks": ["tool_call", "input"]
   },
   "uiLifecycle": {
     "commands": [
@@ -47,9 +41,9 @@
     "ui": ["setWidget"]
   },
   "risk": "critical",
-  "docsPath": "docs/extensions/active/security-gate.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/security-gate.md",
-  "tests": ["tests/shared/security/security.test.ts", "tests/integration/public-registration.test.ts"],
+  "docsPath": "extensions/security-gate/README.md",
+  "sourceAuditPath": null,
+  "tests": ["tests/shared/security/security.test.ts", "tests/contracts/extensions/runtime-registration.test.ts"],
   "review": {
     "status": "reviewed",
     "source": "write-from-scratch",

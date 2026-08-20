@@ -1,75 +1,63 @@
 ---
 name: locus-pi-workflows
-description: Find, run, inspect, design, and build locus-pi workflows. Use for saved `.workflow.mjs` agent graphs, workflow run artifacts, or any request to create a workflow.
+description: Design, review, and build new locus-pi `.workflow.mjs` agent graphs. Use when the user asks to create, design, write, author, or revise a workflow. Do not use merely to run an existing workflow.
 ---
 
-# locus-pi workflows
+# locus-pi workflow authoring
 
 A workflow is reviewed trusted JavaScript that makes a visible graph of child
 `agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,
 and publication. Agents own interpretation and complete reader-facing text.
 
-This skill has two jobs: operate existing workflows and author new ones.
+This skill owns authoring only. For running, starting, resuming, or monitoring
+the current run of an existing workflow, use the shipped
+`locus-pi-run-workflow` skill.
 
-## Operate an existing workflow
+## Authoring is continuous by default
 
-```text
-/workflows list
-/workflows info <name>
-/workflows run <name|path> [semantic text input]
-/workflows status <runId>
-/workflows result <runId|last>
-/workflows continue <runId>
-/workflows stop [runId|last]
-```
+A plain request to create, design, write, or author a workflow runs one visible
+sequence in the same turn:
 
-Project workflows resolve first from `.pi/workflows/<name>.workflow.mjs`, then
-`.claude/workflows/`, `.agents/workflows/`, `~/.pi/workflows/`, and finally the
-Package examples. Run evidence lives under
-`.pi/locus-pi/runs/<runId>/`; `outputs/` contains the human projection and
-`runtime/result.json` contains the terminal envelope. Agent-authored files are
-separate, under the workflow workspace described below.
+1. Send the requirement to the bundled `workflow-author` agent.
+2. Create `.pi/workflows/<name>/` and write
+   `.pi/workflows/<name>/<name>.design.md` before any source.
+3. Review the design against the request, selected pattern, graph contract, and
+   standard source profile. Revise the design until the review finds no material
+   mismatch.
+4. Build exactly the direct `.workflow.mjs` entries declared by the reviewed
+   design. A `runnable root` design includes
+   `.pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
+   and builds only its direct children. Never invent a root.
+5. Validate source identity, module load, graph correspondence, and standard
+   source shape. Do not run the workflow unless the user separately asks to run it.
 
-When a run ends with `awaiting_operator`, inspect its question and artifacts,
-then use `/workflows continue <runId>` to answer the named handoff. Use
-`/workflows stop [runId|last]` for cancellation; stopping is not a continuation
-answer and terminal cancellation follows runtime settlement.
+The design remains the readable source of truth and must exist before JavaScript;
+continuous authoring removes only the mandatory human pause between them. Stop
+after the design only when the user explicitly asks for `design only`, `pause
+after design`, `do not build`, or equivalent wording. A user may also request the
+build-only compatibility route with `Build approved design: <exact design path>`
+or `Build design: <exact design path>`.
 
-## Authoring is two explicit turns
+Use `/agent run workflow-author` or the `task` tool. If design review or Build
+discovers a material algorithm mismatch, update and re-review the design before
+building; never hide the change in source. Ask the user only when resolving the
+mismatch would change the requested result, not for routine authoring choices.
 
-Never turn a raw request directly into `.workflow.mjs`.
-
-1. Send the requirement to the bundled `workflow-author` agent as a Design
-   request. It writes only `.pi/workflows/<name>.design.md`.
-2. Show that Markdown design to the user. Stop for explicit approval or revision.
-3. Only the exact request `Build approved design: <exact design path>` authorizes
-   the agent to create the matching `.workflow.mjs`. Build validates identity and
-   module load, but does not run the workflow.
-
-That command approves the design bytes present at the exact path when Build
-reads it. This protocol has no separate approval token or stored digest; review
-the current file immediately before issuing Build.
-
-Use `/agent run workflow-author` or the `task` tool. A plain authoring request is
-always interpreted as Design, never Build. Approval cannot be inferred from
-“create a workflow”, previous conversation, or the existence of a design file.
-
-If the user revises the graph, update the design and ask again. If Build discovers
-a material algorithm change, return to Design instead of hiding the change in
-source.
-
-An owner-approved `plan.md` plus its canonical `steps.md` may be Design input for an
-optional sequential project-local workflow. Read
+An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
+authoring input for an optional sequential project-local workflow. Read
 [`references/plan-to-sequential-workflow.md`](./references/plan-to-sequential-workflow.md).
 Preserve every complete task block: Build renders those blocks as literal
 author-known prompts in generated source, or uses caller `items` only when a
-programmatic embedder owns the frozen list. Plan approval never implies workflow
-Build approval.
+programmatic embedder owns the frozen list. Plan approval alone does not start
+workflow authoring; once the user requests that workflow, the ordinary continuous
+design -> review -> build sequence applies unless they explicitly request design only.
 
-The Package `plan` workflow already renders `execute.workflow.mjs` into its own
-workflow workspace from a fixed template — one literal implementation node per
-`## S<n>` block, then a summary node. That file is an unregistered draft that
-resolves only by explicit path, and the owner reviews it before running it. Use
+The Package child `task/implement-plan-template` owns the fixed sequential
+renderer. After the owner approves `task/plan`, it reads that same workspace and
+renders `implement-plan.workflow.mjs` — one literal implementation node per
+`step-<n>.md` file, then a summary node. It never plans or replans. That file is
+an unregistered draft that resolves only by explicit path, and the owner reviews
+it before running it. `task/substep` is the separate manual one-step worker. Use
 Design and Build for a graph the fixed template cannot express, such as a
 reviewer between steps, a bounded revision loop, or concurrency.
 
@@ -86,6 +74,19 @@ Primary output: `<name>.md`
 Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
 Pattern: <catalog pattern, or why none fits>
 
+Namespace: `runnable root` (include the `<name>` entry below) or `group-only`
+(omit the root entry; children remain directly runnable)
+
+## Entries
+
+| Ref              | Entry kind    | Responsibility         | Invoked by |
+| ---------------- | ------------- | ---------------------- | ---------- |
+| `<name>`         | runnable root | <standard entry point> | operator   |
+| `<name>/<child>` | direct child  | <one bounded subtask>  | `<node>`   |
+
+For `group-only`, omit the `<name>` row entirely. Declare every direct child
+that Build must create; do not declare grandchildren or an implicit root.
+
 1. <numbered algorithm>
 
 | Node     | Responsibility         | Receives      | Returns                              | Next       |
@@ -100,7 +101,7 @@ Project source: <live-read drift policy>
 Worst-case calls: <exact formula including saved children>
 Failure exits: <fail-closed exits>
 Mechanisms: <parallel barriers, choices, loops, human gates; no agent-count penalty>
-Status: DRAFT — waiting for operator approval.
+Status: REVIEWED — ready for build.
 ```
 
 Count orchestration machinery, not agents. More agents are fine when the task
@@ -149,7 +150,9 @@ Standard agent answers have three forms:
   returns the complete replacement document; publish that exact text.
 - `choice`. Use `agent(prompt, { choice: ["accept", "revise"] })` only when
   JavaScript must select a branch. Runtime owns format instructions, one repair,
-  parsing, validation, journal evidence, replay, and fail-closed exhaustion.
+  parsing, validation, journal evidence, and replay. Exhaustion fails closed unless
+  the approved Design names `choiceFallback` as one of those choices; runtime uses
+  that degraded route only after both invalid answers and journals why.
 - `handoffs`. Use `agent(prompt, { handoffs: { maxItems: MAX_DAGS_IN_SCOPE } })`
   when one discovery call must return a small bounded runtime list of complete
   text work units. The approved Design derives and names the bound from the
@@ -169,11 +172,14 @@ prompt/model identity. `write`, `edit`, `bash`, and every other available tool
 work by default.
 
 The runtime injects one exact absolute workflow workspace into every child
-prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
-session working directory inside the project. Name the assigned relative file
-and tell writers to replace it idempotently. Use `projectRoot()` only when an
-agent needs source context. Do not add JavaScript path parsers, directory
-collectors, permission fields, or alternate writable roots.
+prompt. Fresh runs receive a unique
+`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
+directly launched qualified child keeps both components in its generated leaf;
+an invoked child shares its parent's selected workspace. `runName` selects
+`.locus-pi/plans/<runName>` for any workflow. Name the assigned
+relative file and tell writers to replace it idempotently. Use `projectRoot()`
+only when an agent needs source context. Do not add JavaScript path parsers,
+directory collectors, permission fields, or alternate writable roots.
 
 Workflow `input` remains semantic text. A main agent that already knows exact
 work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow
@@ -187,9 +193,9 @@ Standard source does not encode a hidden line/CSV/JSON protocol. It does not
 the same visible `pipeline(items, ...)`; model handoffs alone retain runtime
 repair, blank/duplicate rejection, and declared bounds.
 
-For durable work, use a real saved mini workflow for each caller-frozen item.
-Pass the complete key list so the runtime validates every key before the first
-child starts:
+For durable work inside one composed workflow, declare a short child entry in
+the same folder and invoke it with `child`. Pass the complete key list so the
+runtime validates every key before the first child starts:
 
 ```js
 const items = dsl.items();
@@ -197,7 +203,7 @@ const keys = items.map((_, keyIndex) => `item-${keyIndex + 1}`);
 for (let index = 0; index < items.length; index += 1) {
   const item = items[index];
   await dsl.invokeWorkflow({
-    name: "saved-worker",
+    child: "worker",
     key: keys[index],
     keys,
     input: item,
@@ -225,10 +231,16 @@ the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
 work on retry; parent or child source changes invalidate them. Saved children
 cannot nest, and source cycles fail before model work.
 
-Run evidence remains under `.pi/locus-pi/runs/<runId>/` and contains only
+Use `child` for a declared sibling: the runtime binds it to the exact source and
+folder namespace of the running root. `name` remains the explicit cross-tree
+selector and accepts `<root>` or `<root>/<child>` with normal Project → User →
+Package precedence. `scriptPath` remains an exact project-relative selector;
+`packageName` remains legacy compatibility for an exact Package entry.
+
+Run evidence remains under `.locus-pi/runs/<runId>/` and contains only
 `outputs/` plus `runtime/`. Durable user files belong under the project-local
 workspace returned by `dsl.outputDir()`, defaulting to
-`<pwd>/tmp/<workflow-name>/`. Tell writers to replace their assigned relative
+`.locus-pi/plans/<generated-run-name>/`. Tell writers to replace their assigned relative
 file idempotently and never create workflow artifacts in the project root.
 `publishPrimaryFile()` returns a host-validated path, byte count, and digest for
 one regular non-empty file. Workspace files survive failed runs. Project source is
@@ -310,18 +322,28 @@ a large structured plan.
 
 ## Build checks
 
-Build writes exactly one `.pi/workflows/<name>.workflow.mjs` matching the approved
-design, then checks:
+Build writes one canonical folder matching the reviewed design: an optional
+`.pi/workflows/<name>/<name>.workflow.mjs` only when the namespace is declared
+`runnable root`, plus only its declared direct child entries. A `group-only`
+namespace has no root source and never receives a fake one. It then checks:
 
-- `meta.name` matches both design and filename;
+- the design `Entries` table and source set match exactly;
+- when present, root `meta.name` equals `<name>`; each child `meta.name` equals
+  `<name>/<child>` and its filename is `<child>.workflow.mjs`;
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
 - the module loads and exports `meta` plus a default function;
-- source exposes the approved nodes, edges, handoffs, bounds, and failure exits;
-- no unapproved node or standard-profile bad smell appeared.
-- `npx @kroffske/locus-pi check-workflow-source
-.pi/workflows/<name>.workflow.mjs` reports no standard source-shape violations
-  from the project containing the built file.
+- source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
+- no design-absent node or standard-profile bad smell appeared.
+- the exact built file passes the source checker: in a locus-pi source checkout
+  prefer `./bin/locus-pi check-workflow-source` on every built
+  `.pi/workflows/<name>/*.workflow.mjs`; otherwise use
+  `npx @kroffske/locus-pi check-workflow-source` on those same files from the
+  project containing the built folder.
+
+A missing checker command, non-zero checker exit, failed module import, or
+design/source mismatch means Build failed. Repair and rerun; never return a
+successful Build claim after a skipped or failed check.
 
 Build does not run. The caller runs it separately and evaluates the primary
 artifact against live repository evidence.
@@ -331,5 +353,5 @@ artifact against live repository evidence.
 Workflow JavaScript runs in Pi’s main Node.js process with host filesystem,
 subprocess, and network authority. Worktrees and approval are evidence and
 consent, not a sandbox. Run only reviewed files. Full DSL, trust, replay, and
-artifact details: [`../../docs/extensions/active/workflows.md`](../../docs/extensions/active/workflows.md)
+artifact details: [`../../extensions/workflows/REFERENCE.md`](../../extensions/workflows/REFERENCE.md)
 and [`../../extensions/workflows/AUTHORING.md`](../../extensions/workflows/AUTHORING.md).

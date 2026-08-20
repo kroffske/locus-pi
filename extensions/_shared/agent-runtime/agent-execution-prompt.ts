@@ -14,9 +14,8 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
  * product actually runs. `agent-sdk-host.ts` — the only production importer — takes exactly
  * three symbols from that module (`createAgentExecutionPromptCapsule`,
  * `formatAgentKickoffPrompt`, `parseAgentText`), and they are all here. Everything left in
- * `agent-executor-host.ts` is the superseded replacement-session path that
- * `docs/source-audit/agents.md` records as retained provenance: no registered entrypoint
- * reaches it.
+ * `agent-executor-host.ts` is the superseded replacement-session path retained as reviewed
+ * provenance; no registered entrypoint reaches it.
  *
  * Keeping them in one file meant a reader could not tell the live capsule builder from dead
  * provenance without tracing imports, and any edit to the live path sat next to code nobody
@@ -27,6 +26,7 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
 export interface AgentExecutionPromptCapsule {
   version: "locus.agent.prompt.v1";
   agentName: string;
+  capabilityMode?: "tool-free" | "agent";
   agentDefinitionPath?: string;
   task: string;
   projectRoot: string;
@@ -50,6 +50,7 @@ export function createAgentExecutionPromptCapsule(
   const capsule: AgentExecutionPromptCapsule = {
     version: "locus.agent.prompt.v1",
     agentName: request.agent.name,
+    ...(request.capabilityMode === undefined ? {} : { capabilityMode: request.capabilityMode }),
     task: request.task,
     projectRoot: request.projectRoot ?? "",
     workingDirectory: request.workingDirectory ?? request.projectRoot ?? "",
@@ -61,7 +62,11 @@ export function createAgentExecutionPromptCapsule(
   if (request.agent.filePath !== undefined) capsule.agentDefinitionPath = request.agent.filePath;
   if (request.modelRoleResolution !== undefined)
     capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
-  const agentSystemPrompt = buildAgentSystemPrompt(request, { diagnostics, env: effectivePromptEnv });
+  const agentSystemPrompt = buildAgentSystemPrompt(request, {
+    diagnostics,
+    env: effectivePromptEnv,
+    suppressContextExtras: request.capabilityMode === "tool-free",
+  });
   if (agentSystemPrompt !== undefined) capsule.agentSystemPrompt = agentSystemPrompt;
   if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
   const parentContextText = assembleParentContext(request.parentContext);

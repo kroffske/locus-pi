@@ -48,9 +48,34 @@ const TodoWriteParams = Type.Object({
   ),
 });
 
+const TodoReadParams = Type.Object({});
+
 const PROGRESS_OPS = new Set(["init", "start", "done", "drop", "rm", "append"]);
 
 export function registerTodoWriteTool(pi: ExtensionAPI, queue: TodoQueueController): void {
+  pi.registerTool({
+    name: "todo_read",
+    description: "Read the current session todo state without changing it.",
+    parameters: TodoReadParams,
+    approval: "read",
+    async execute(_toolCallId, params, _signal, _update, ctx) {
+      const valid = validateParams(TodoReadParams, params);
+      if (!valid.ok) return valid.result;
+      const snapshot = await loadTodoPhases(pi, ctx);
+      return textResult(renderTodos(snapshot.phases, []), {
+        phases: snapshot.phases,
+        storage: "session",
+        storageBackend: snapshot.backend,
+        todoStateSource: snapshot.backend,
+        queueContext: snapshot.context,
+        autoContinue: snapshot.autoContinue,
+        continuationArmed: queue.continuationArmed,
+        activeTask: findActiveTask(snapshot.phases),
+        ...(snapshot.diagnostics.length > 0 ? { storageDiagnostics: snapshot.diagnostics } : {}),
+      });
+    },
+  });
+
   pi.registerTool({
     name: "todo_write",
     description: "Apply ordered OMP-compatible todo operations to visible session todo state.",

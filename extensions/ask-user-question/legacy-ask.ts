@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/legacy-ask.ts — The `askUserQuestion` alias.
+ * extensions/ask-user-question/legacy-ask.ts — The rich single-question ask flow.
  *
  * Serves the free-text kinds itself through Pi's input/editor dialogs, and
  * converts a select/multi-select question into the OMP flow before projecting
@@ -14,14 +14,14 @@ import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/host
 import { errorResult, textResult } from "../_shared/host/pi-api.js";
 import { redactForSensitivity } from "../_shared/host/redaction.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import type { LegacyAskParams, OmpAskParams } from "./ask-tool.js";
+import type { RichAskParams, OmpAskParams } from "./ask-tool.js";
 import { inputTitle } from "./prompt-text.js";
 import type { OmpQuestion } from "./question-prompt.js";
 import { askOmpCompatible } from "./question-runner.js";
 
-export async function askLegacy(
+export async function askRichQuestion(
   pi: ExtensionAPI,
-  params: LegacyAskParams,
+  params: RichAskParams,
   ctx: ExtensionContext,
   signal: AbortSignal,
 ): Promise<ToolResult> {
@@ -29,10 +29,16 @@ export async function askLegacy(
     return errorResult("Ask is unavailable because this host mode cannot prompt the user.", {
       status: "unavailable",
       reason: "no-ui",
-      source: "askUserQuestion",
+      source: "ask",
     });
   }
   try {
+    if ((params.kind === "text" || params.kind === "editor") && params.timeoutMs !== undefined) {
+      return errorResult("timeoutMs is unsupported for text/editor host dialogs; omit it or use a select question.", {
+        status: "unsupported",
+        source: "ask",
+      });
+    }
     if (params.kind === "text") {
       const defaultValue = asString(params.default);
       const input = await requestOperatorInput(
@@ -81,7 +87,7 @@ export async function askLegacy(
     const reason = errorMessage(error);
     return errorResult(`Ask UI failed: ${reason}`, {
       status: "error",
-      source: "askUserQuestion",
+      source: "ask",
       question: stableQuestionId(params.question),
     });
   }
@@ -92,24 +98,25 @@ export async function askLegacy(
     question: promptWithReason(params),
     options: (params.options ?? []).map((label) => ({ label })),
     multi: params.kind === "multi-select",
+    ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
   };
   if (recommended !== undefined) question.recommended = recommended;
   const converted: OmpAskParams = { questions: [question] };
-  const result = await askOmpCompatible(pi, converted, ctx, signal, "askUserQuestion");
+  const result = await askOmpCompatible(pi, converted, ctx, signal, "ask");
   if (result.isError) return result;
   const details = result.details ?? {};
   const value = params.kind === "multi-select" ? (details.selectedOptions as string[]) : firstLegacyValue(details);
   return legacyResult(pi, ctx, params, value, false, false, details.decision);
 }
 
-function promptWithReason(params: LegacyAskParams): string {
+function promptWithReason(params: RichAskParams): string {
   return params.reason ? `${params.question}\n\nReason: ${params.reason}` : params.question;
 }
 
 async function legacyResult(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  params: LegacyAskParams,
+  params: RichAskParams,
   value: string | string[],
   cancelled: boolean,
   timedOut: boolean,
@@ -122,11 +129,11 @@ async function legacyResult(
   const decision =
     existingDecision ??
     (await recordDecision(pi, ctx, {
-      decisionId: stableDecisionId("askUserQuestion", stableQuestionId(params.question)),
+      decisionId: stableDecisionId("ask", stableQuestionId(params.question)),
       question: params.question,
       answer: params.sensitivity === "secret" ? "[REDACTED:secret-answer]" : value,
       status: cancelled ? "cancelled" : "answered",
-      source: "askUserQuestion",
+      source: "ask",
       metadata: { kind: params.kind, sensitivity: params.sensitivity ?? "internal", timedOut },
     }));
   return textResult(
@@ -146,7 +153,7 @@ async function legacyResult(
   );
 }
 
-function recommendedIndex(params: LegacyAskParams): number | undefined {
+function recommendedIndex(params: RichAskParams): number | undefined {
   const defaultValue = Array.isArray(params.default) ? params.default[0] : params.default;
   if (!defaultValue) return undefined;
   const index = (params.options ?? []).indexOf(defaultValue);

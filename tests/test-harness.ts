@@ -68,7 +68,7 @@ let harnessRootParent: string | undefined;
  * repository checkout.
  *
  * `process.cwd()` used to be the default, which let repository-local state —
- * an interrupted `.pi/locus-pi/runs/<runId>/` left behind by a real
+ * an interrupted `.locus-pi/runs/<runId>/` left behind by a real
  * local run, a developer's `.pi/workflows/` scripts — leak into assertions and
  * fail tests that never wrote that state. A test that wants the repository
  * root must now ask for it explicitly by passing `process.cwd()`.
@@ -93,7 +93,7 @@ export interface Harness {
   notificationEvents: Array<{ message: string; level?: "info" | "warning" | "error" }>;
   sentMessages: Array<{ message: ExtensionMessage; options?: SendMessageOptions }>;
   messageRenderers: Map<string, MessageRenderer>;
-  /** Pi 0.83.0 sendCustomMessage routing: streaming defaults to steer; idle/no-trigger appends. */
+  /** Pi sendCustomMessage routing: streaming defaults to steer; idle/no-trigger appends. */
   customMessageDeliveries: Array<"steer" | "followUp" | "nextTurn" | "turn" | "append">;
   isStreaming: boolean;
   waitForIdleCalls: number;

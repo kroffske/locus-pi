@@ -1,43 +1,35 @@
 # locus-pi
 
-`locus-pi` is a Pi extension package for Locus agentic-development workflows.
-Installing it gives a Pi session eleven extensions, a bundled agent catalog, six
-curated Package workflows, and two skills that teach an agent how to find, run,
-and author them — through a deliberately narrow npm artifact.
+`locus-pi` is a Pi extension package for agentic software-development workflows. It installs the default extensions and the curated workflow registry enumerated below, a bundled agent catalog, and three agent skills.
 
-The package is built on deterministic decomposition, bounded capabilities, and
-inspectable run evidence: the structure of a workflow carries the work, so a run
-stays readable and reviewable instead of depending on model strength alone.
+The package favors explicit orchestration, bounded execution, and inspectable run evidence. It does not turn workflow code into a sandbox: extensions and workflow scripts execute inside the trusted Pi/Node.js host.
 
 ## Requirements
 
-- Node.js `>=22.19.0`.
-- Pi `0.83.x`; the package peer floor is `0.83.0`.
-- A trusted project, and reviewed sources for every workflow you run.
+- Node.js `>=22.19.0`
+- Pi `>=0.83.0`; development and CI test the exact version pinned in `devDependencies` and `package-lock.json`
+- A trusted project and reviewed workflow sources
 
 ## Install
 
-Install the published package into Pi:
-
 ```bash
 pi install npm:@kroffske/locus-pi
+pi list
+npx @kroffske/locus-pi doctor
 ```
 
-Confirm the registration and the shipped inventory:
+Start a fresh Pi session in a trusted project, then inspect the package:
 
-```bash
-pi list                        # what Pi actually loads, per scope
-npx @kroffske/locus-pi doctor  # package root and the eleven entrypoints
+```text
+/devext doctor
+/workflows list
 ```
 
-Then start Pi in a trusted project and run `/workflows list`: the six curated
-workflows resolve out of the installed package, so nothing has to be copied
-anywhere. Inside a session, `/devext doctor` gives the same kind of compact
-inventory view.
+Run the smallest live child-session check:
 
-Inventory output only reports what is registered. The smallest real check that
-child agents work on this host is `/workflows run live-smoke`, which starts two
-small child-agent jobs that list the current project directory.
+```text
+/workflows run live-smoke
+```
 
 Remove the package with the same source identity:
 
@@ -45,323 +37,101 @@ Remove the package with the same source identity:
 pi remove npm:@kroffske/locus-pi
 ```
 
-npm is the supported operator path. Use
-[a Git clone](#install-from-a-git-clone) only when you want Pi to load the
-repository source itself.
+Source-checkout installation, selective loading, mixed-provider guidance, and uninstall details are in [Getting started](docs/getting-started.md).
 
-## What the package includes
+## Included extensions
 
-The machine-owned default list is `package.json#pi.extensions`. The package
-contains exactly these eleven entrypoints:
+The authoritative default list is `package.json#pi.extensions`; each extension also declares its public surface in `extensions/<name>/manifest.json`.
 
-| Extension             | Purpose and public surface                                                                                                                                                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `agents`              | Loads the agent catalog and provides `/agent`, `/ps`, `spawn_agent`, and the legacy `task` alias. Child runs use Pi's `createAgentSession` host and fail closed when that host is unavailable. A completed run requires a real non-empty child answer. |
-| `ask-user-question`   | Provides the primary `ask` human-decision tool. `askUserQuestion` remains a legacy compatibility alias.                                                                                                                                                |
-| `ast-structural-edit` | Provides `ast_grep`, `ast_edit`, `resolve`, and the legacy `ast_apply` alias. `ast_edit` creates a preview; `resolve` writes only after Pi approval and a stale-file check.                                                                            |
-| `devext-doctor`       | Provides `/devext doctor`, reload guidance, and read-only task-lifecycle diagnostics. Doctor output is an inventory/status view, not proof that disabled modules work.                                                                                 |
-| `loop`                | Provides `/loop` and `loopControl` for bounded continuation state around an active goal.                                                                                                                                                               |
-| `model`               | Provides `/model-roles` and `/effort` for role routing. Pi's operator-owned `/model` and `/models` selection surfaces are not model-callable tools from this package.                                                                                  |
-| `plan`                | Provides plan, mode, goal, review, and prompt-shelf operator surfaces plus the `goal` tool.                                                                                                                                                            |
-| `security-gate`       | Provides `/security-audit` and audit telemetry around tool calls. It is audit-only; it does not replace Pi approvals or enforce a blocking security policy.                                                                                            |
-| `status-line`         | Replaces Pi's interactive footer with one violet row for model, working directory/worktree, branch, context, cumulative tokens, compaction state, and existing extension statuses.                                                                     |
-| `todo-context`        | Provides model-callable `todo_write`, opt-in bounded queue continuation, and the operator `/todo` view with atomic batch append plus run/pause controls.                                                                                               |
-| `workflows`           | Provides the canonical `/workflows` menu, direct `/workflows <subcommand>` forms, flat `/workflow-*` compatibility aliases, and the `workflow` tool for trusted JavaScript orchestration.                                                              |
+<!-- locus:extensions:start -->
+<!-- Generated by `npm run build:catalogs`. Edits between these markers are overwritten. -->
 
-Each extension ships its `manifest.json` and a manual under
-[`docs/extensions/active/`](docs/extensions/active/README.md). Every default
-extension also has one dedicated bundled agent profile, listed in the
-[extension-agent map](docs/extension-agent-map.md); the generic bundled agents
-remain available as well. The public [extension source and dependency
-map](docs/extension-index.md) links every entrypoint, manifest, and manual and
-separates direct feature imports from shared-layer and external-package
-dependencies. Maintainer source-audit evidence stays in the public GitHub
-repository rather than in the npm artifact.
+That list currently activates eleven extensions.
+<!-- locus:extensions:end -->
+
+| Extension             | Main public surface                                | Manual                                             |
+| --------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `agents`              | `spawn_agent`, `/agent`, `/ps`                     | [README](extensions/agents/README.md)              |
+| `ask-user-question`   | `ask`                                              | [README](extensions/ask-user-question/README.md)   |
+| `ast-structural-edit` | `ast_grep`, `ast_edit`, `resolve`                  | [README](extensions/ast-structural-edit/README.md) |
+| `devext-doctor`       | `/devext doctor`, task-lifecycle diagnostics       | [README](extensions/devext-doctor/README.md)       |
+| `loop`                | `loop`, `/loop`                                    | [README](extensions/loop/README.md)                |
+| `model`               | `/model-roles`, `/effort`                          | [README](extensions/model/README.md)               |
+| `plan`                | `/plan`, `/mode`, `/goal`, prompt shelves, `goal`  | [README](extensions/plan/README.md)                |
+| `security-gate`       | `/security-audit`, audit-only `tool_call` observer | [README](extensions/security-gate/README.md)       |
+| `status-line`         | Interactive Pi footer                              | [README](extensions/status-line/README.md)         |
+| `todo-context`        | `todo_read`, `todo_write`, `/todo`                 | [README](extensions/todo-context/README.md)        |
+| `workflows`           | `/workflows`, `workflow`, optional Fusion          | [README](extensions/workflows/README.md)           |
+
+The consolidated catalog, including commands, hooks, risk level, and direct feature dependencies, is in [Extension reference](docs/extensions.md).
 
 ## Curated Package workflows
 
-The installed package registers exactly these six Package workflows:
+The package scans `extensions/workflows/examples/`; each `<name>/` owns one namespace with an optional same-named root plus any direct child entries (`task` itself is group-only).
 
-| Workflow             | Intended use                                                                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `live-smoke`         | Runs two child-agent jobs that list the current project directory to prove the installed Pi host can create real child sessions. |
-| `requirements-grill` | Reads the repository, challenges a rough request against it, and returns a structured requirements handoff.                      |
-| `review`             | Reviews a free-form target through review units and falsifiable questions, publishing `review.md`.                               |
-| `review-fix`         | Scopes, revalidates, and applies the findings a human kept in `review.md`, then verifies and reports.                            |
-| `plan`               | Uses one reconnaissance agent and one planning agent to write `context.md`, `plan.md`, and dynamic `steps.md`.                   |
-| `plan-implement`     | Gives one exact step to one implementation agent, which changes, verifies, and records only that step.                           |
+<!-- locus:workflows:start -->
+<!-- Generated by `npm run build:catalogs`. Edits between these markers are overwritten. -->
 
-The Package registry is the shipped `extensions/workflows/examples/` directory
-itself: a workflow is registered by the existence of its `<name>.workflow.mjs`
-file there, and the npm allowlist ships exactly the six files above.
+The registry ships five curated Package workflow namespaces with eighteen runnable names.
 
-Inspect and run them from the canonical command menu:
+| Workflow                       | Namespace          | Purpose                                                                                        |
+| ------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------- |
+| `implement`                    | `implement`        | Apply authorized work from a prepared plan or review, then independently verify it once.       |
+| `live-smoke`                   | `live-smoke`       | Checks that the Pi host can spawn full-tool workflow agents and collect their reports.         |
+| `post-code-review`             | `post-code-review` | Run modular post-code review lanes and publish the synthesis report.                           |
+| `post-code-review/boundaries`  | `post-code-review` | Audit ownership and architecture boundaries, then publish review-boundaries.md.                |
+| `post-code-review/contracts`   | `post-code-review` | Audit API and internal contracts for one post-code review scope.                               |
+| `post-code-review/necessity`   | `post-code-review` | Challenge proposed review fixes for necessity, ownership, and complexity.                      |
+| `post-code-review/scope`       | `post-code-review` | Resolve a review target into an exact evidence boundary and write review-scope.md.             |
+| `post-code-review/simplicity`  | `post-code-review` | Audit a frozen review scope for avoidable complexity and publish simplicity findings.          |
+| `post-code-review/style`       | `post-code-review` | Audit comments and project-specific code style for one post-code review scope.                 |
+| `post-code-review/synthesis`   | `post-code-review` | Verify review evidence and publish the final post-code review.                                 |
+| `task/draft`                   | `task`             | Translate a raw request into a saved task draft, with bounded live clarification when needed.  |
+| `task/implement-plan-template` | `task`             | Renders implement-plan.workflow.mjs from an approved plan and its ordered step files.          |
+| `task/plan`                    | `task`             | Decomposed planning: freeze scope, collect facts, analyze, plan, review, correct, verify.      |
+| `task/substep`                 | `task`             | Executes one caller-named step file through one implementation agent and records its history.  |
+| `workflow-creator`             | `workflow-creator` | Create an accepted workflow Design and SVG, then build and verify its source package.          |
+| `workflow-creator/build`       | `workflow-creator` | Build, check, and independently accept the exact source package declared by a workflow Design. |
+| `workflow-creator/design`      | `workflow-creator` | Author and independently accept the canonical Design for a requested Locus Pi workflow.        |
+| `workflow-creator/svg`         | `workflow-creator` | Create and independently accept a self-contained SVG of an accepted workflow Design.           |
 
-```text
-/workflows
-/workflows list
-/workflows info live-smoke
-/workflows run live-smoke
-/workflows status
-/workflows result last
-/workflows stop last
-/ps
-```
+<!-- locus:workflows:end -->
 
-Bare `/workflows` opens the interactive command menu when TUI selection is
-available; other hosts receive the typed help fallback. Its exact verbs are
-`dashboard`, `list`, `info`, `status`, `result`, `run`, `continue`, and `stop`,
-each shown with a short description, and direct typed forms such as
-`/workflows run live-smoke` always work. Flat `/workflow-*` commands remain
-compatibility aliases while their behavior reaches parity with the unified
-command; they are not removed yet. In the catalog, each row leads with the
-workflow name and a compact `[P]`, `[U]`, or `[PKG]` badge for its Project,
-User, or Package source; history rows insert the run id after the name.
+Use `/workflows list` for the live first-wins catalog, and [Workflow guide](docs/workflows.md) for commands, storage, trust, and authoring entry points.
 
-### Watching a run
+## Trust boundary
 
-`/workflows run` starts one interactive run in the background and returns the
-editor immediately. The compact widget below the editor shows the current
-workflow stage and one active child; `/ps` expands the same shared agent fleet
-for leaf selection and readable drill-down. A second interactive run in the same
-session and project is rejected until the first run settles.
-`/workflows stop [runId|last]` requests cancellation and remains honest about the
-run being `stopping` until its terminal result is persisted. The programmatic
-`workflow` tool remains awaited and headless.
+- Extension and workflow code runs with the capabilities of the Pi host process.
+- Project and user workflow files are trusted JavaScript, not declarative configuration and not sandboxed.
+- Pi approvals remain the enforcement owner for approved tool actions.
+- `security-gate` records audit observations; it does not block calls or replace Pi approvals.
+- Persisted workflow evidence helps inspection and replay, but it is not an isolation boundary.
 
-`/ps` drill-down renders the retained agent transcript with Pi's native
-assistant and tool components in a terminal-height viewport that follows live
-output without clearing terminal scrollback. Use `PgUp`/`PgDn` or `Home`/`End`
-to inspect older output and `Ctrl+O` to toggle tool detail. While the child is
-actively processing, the view mounts Pi's native editor and Enter sends it a
-steering message; after settlement the view becomes read-only. `Esc` closes the
-view without aborting the child. Transcript retention applies its documented
-content, byte, and node bounds.
+Review local workflow sources before running them, especially when they can write files, invoke subprocesses, use the network, or call models.
 
-When a workflow declares an actionable operator handoff, a run launched by the
-current Pi session (or one of its continuations) opens its oldest pending
-question directly in the primary editor after Pi is idle. Escape submits an
-explicit declined answer; it does not snooze or cancel. Otherwise open the
-`/workflows` menu and choose `continue` to select an eligible handoff
-oldest-first, or type `/workflows continue <runId>` to name one directly.
+## Documentation
 
-### Where a name resolves from
+- [Getting started](docs/getting-started.md)
+- [Extension reference](docs/extensions.md)
+- [Workflow guide](docs/workflows.md)
+- [Architecture and repository boundaries](docs/architecture.md)
+- [Contributing](https://github.com/kroffske/locus-pi/blob/main/CONTRIBUTING.md)
+- [Support](https://github.com/kroffske/locus-pi/blob/main/SUPPORT.md)
+- [Security policy](https://github.com/kroffske/locus-pi/blob/main/SECURITY.md)
 
-Every directory is scanned on each call, and the first match wins: project
-`.pi/workflows/`, `.claude/workflows/`, and `.agents/workflows/`, ascending from
-the working directory to the project root, then user `~/.pi/workflows/`, then
-the packaged examples. A pi-native `<name>.workflow.mjs` in one of those
-directories therefore shadows a Package workflow of the same name without
-changing the package. That exact filename is the only one these directories
-accept, and a workflow written for another host's DSL is not portable here.
-
-## Skills and workflow authoring
-
-The package declares its skills through `package.json#pi.skills`, and Pi loads
-package skills automatically and enabled: their descriptions are in the system
-prompt from the first session, and the full text loads on demand.
-
-[`skills/locus-pi-workflows/SKILL.md`](skills/locus-pi-workflows/SKILL.md) is
-the operation and authoring skill, also reachable through
-`/skill:locus-pi-workflows`. It covers finding a workflow, running one, reading
-the result envelope, the name resolution order, and approval-first authoring: a
-raw request produces a readable `.design.md` agent graph, while only the exact
-request `Build approved design: <exact path>` creates the matching source. Its
-compact Markdown pattern cards load only after the author selects a topology.
-
-[`skills/locus-task-workflow/SKILL.md`](skills/locus-task-workflow/SKILL.md) is
-the thin execution protocol for the shipped planning pair. The main Pi agent
-uses one shared `tmp/<select-name>` workspace, appends single-line step
-references to session todos, and starts one top-level `plan-implement` run with
-the exact matching block from `steps.md`. A failed step stops the queue; a later
-session reconstructs it by reading `steps.md` and `history/*.md`.
-
-The full authoring contract — the Design/Build boundary, what a design must
-expose, and the standard primitive profile — is
-[`extensions/workflows/AUTHORING.md`](extensions/workflows/AUTHORING.md), and
-the complete runtime, trust, replay, and artifact reference is
-[`docs/extensions/active/workflows.md`](docs/extensions/active/workflows.md).
-
-Check a newly authored standard workflow from its project directory with the
-installed package command; no project-local script or `tsx` is required:
+## Development
 
 ```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>.workflow.mjs
-```
-
-Both skills are plain [Agent Skills](https://agentskills.io/specification)
-directories, so other hosts can read them too. Claude Code and Codex discover
-skills only under their own roots, so link the installed directory into the root
-that host uses instead of copying it — a copy stops matching the package on the
-next update. Pi writes user installs under `~/.pi/agent/npm/` and project
-installs under `.pi/npm/`; `pi list` prints the source of every registration,
-and the skills are under `skills/` inside whichever one applies.
-
-## Trust and safety boundary
-
-Workflow files are trusted JavaScript. They run in Pi's main Node.js process
-with full module access and may use the host filesystem, subprocesses, network,
-or other capabilities. Path checks, identity hashes, and Pi's `exec` approval
-are evidence and consent boundaries; they are not a sandbox. Review every
-project or user workflow before running it.
-
-`security-gate` is audit-only telemetry: it classifies dangerous tool calls and
-records them for `/security-audit` review. It never blocks a call and never
-replaces Pi's own approval prompts.
-
-The npm package excludes beta modules, uncurated workflow fixtures, archives,
-reports, galleries, transcripts, benchmarks, evaluations, and local runtime or
-planning state. Their presence in a source checkout does not make them supported
-package behavior.
-
-## Install from a Git clone
-
-Most operators do not need this. Use a source checkout only when you want Pi to
-load the repository directly instead of the published npm package — to develop
-the package itself, or to test accepted work before it is released. A normal
-clone checks out the stable `main` branch:
-
-```bash
-git clone https://github.com/kroffske/locus-pi.git
-cd locus-pi
 npm ci --ignore-scripts
-```
-
-To test accepted integration work before it is released from `main`, clone the
-`dev` branch instead:
-
-```bash
-git clone --branch dev https://github.com/kroffske/locus-pi.git
-cd locus-pi
-npm ci --ignore-scripts
-```
-
-Review the checkout before registering it: Pi loads extension source directly
-from the cloned directory, under the same trust boundary described above.
-
-### 1. Remove any earlier registration
-
-Two registrations of the same package both load, so clear the old one before
-adding the checkout. The package can already be registered from npm or from
-another checkout, and each source identity is removed separately:
-
-```bash
-pi list                              # what Pi actually loads, per scope
-pi remove npm:@kroffske/locus-pi     # user scope  (~/.pi/agent/settings.json)
-pi remove npm:@kroffske/locus-pi -l  # project scope (.pi/settings.json)
-pi remove /absolute/path/to/old/locus-pi
-pi remove /absolute/path/to/old/locus-pi -l
-```
-
-```bash
-which locus-pi                       # a globally installed CLI, if any
-npm rm -g @kroffske/locus-pi
-```
-
-`pi remove` is the one that matters: it unregisters the extensions. A global npm
-install only puts the `locus-pi` CLI on `PATH` and never registers anything with
-Pi, so removing it changes no session behavior — remove it anyway if you want a
-single source of truth for `locus-pi doctor`.
-
-`pi list` is the authority. It prints user-scope and project-scope packages
-separately, and the same checkout registered in both scopes appears twice; drop
-it from one of them.
-
-A source is matched by its resolved path, not by the string in the settings
-file. Run `pi remove .` from the registered checkout root, or pass that
-checkout's absolute path. Do this before deleting or moving the directory.
-
-Runtime state Pi wrote under `~/.pi/<project>/` is not an installation. Leave it
-alone unless you mean to discard that history.
-
-### 2. Register the checkout for this user
-
-```bash
-pi install .
-pi list
-npm run check
-./bin/locus-pi doctor  # expects: 11 extensions, all ok
-```
-
-`pi install .` registers the checkout at user scope, so Pi loads these
-extensions when started from this repository or any other directory. `pi list`
-must show the checkout once.
-
-Do not also run `pi install . -l` for the same checkout. That adds a second,
-project-scoped registration; Pi then loads both copies when started in this
-repository and reports duplicate tool names. If Pi works elsewhere but fails
-inside `locus-pi`, remove the project-scoped copy:
-
-```bash
-cd /absolute/path/to/locus-pi
-pi remove . -l
-pi list
-```
-
-Maintainers who intentionally want a checkout active only for this project may
-use `pi install . -l` instead of `pi install .`, but never both.
-
-### 3. Update the checkout
-
-The registration points to the checkout path, so updating in place does not
-require another `pi install`:
-
-```bash
-cd /absolute/path/to/locus-pi
-git pull --ff-only
-npm ci --ignore-scripts
-./bin/locus-pi doctor
-```
-
-Start a fresh Pi session after updating so it reloads the extension source.
-
-### 4. Uninstall the checkout
-
-Unregister the source before deleting its directory:
-
-```bash
-cd /absolute/path/to/locus-pi
-pi remove .
-pi list
-```
-
-If the checkout was registered with `pi install . -l`, remove it with
-`pi remove . -l` from that project instead. Removing the registration does not
-delete the checkout or Pi's runtime history.
-
-To go back to the published package:
-
-```bash
-pi install npm:@kroffske/locus-pi
-pi list
-```
-
-Maintainers validate a checkout with the release-quality package checks:
-
-```bash
 npm run check
 npm audit --omit=dev
 npm pack --dry-run --json --ignore-scripts
 ```
 
-## Documentation and support
+`npm run check` is the canonical gate — deterministic and read-only, and exactly what CI runs. `npm run check:fast` is the shorter inner loop for editing.
 
-- [`docs/README.md`](docs/README.md) maps the package source of truth and public manuals.
-- Repository-only `CONTRIBUTING.md` defines the current contribution gate and validation expectations.
-- Repository-only `SUPPORT.md` separates usage questions, reproducible defects, and unsupported surfaces.
-- Repository-only `SECURITY.md` defines the vulnerability-reporting gate.
-- Repository-only `CODE_OF_CONDUCT.md` defines expected project conduct.
-- Repository-only `CHANGELOG.md` records the release history.
-
-Security reports go through GitHub private vulnerability reporting, so they do
-not need to enter public issues or workflow transcripts.
-
-The repository policy files and `.github/**` are intentionally not included in
-the npm artifact. The shipped README carries the essential install, trust,
-support-boundary, security-route, license, and attribution notices.
+See [CONTRIBUTING.md](https://github.com/kroffske/locus-pi/blob/main/CONTRIBUTING.md) before changing package surfaces, manifests, workflows, or the npm allowlist.
 
 ## License
 
-`locus-pi` is available under the [MIT License](LICENSE). Retained upstream
-copyright and license notices are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+`locus-pi` is available under the [MIT License](LICENSE). Retained upstream notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

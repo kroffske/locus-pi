@@ -1,15 +1,10 @@
 {
   "id": "plan",
-  "name": "plan",
   "agent": {
     "name": "extension-plan",
     "description": "Compose plans, goals, prompt shelves, planning commands, and the goal tool."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "Prompt commands write explicit markdown prompts to visible local paths",
@@ -52,11 +47,10 @@
     "typed operator widgets for goal state and prompt shelves",
     "locus-goal-state custom entry"
   ],
-  "tier": "core-owned",
   "provides": {
     "tools": ["goal"],
     "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],
-    "hooks": ["session_start", "before_agent_start"],
+    "hooks": ["session_start", "before_agent_start", "input"],
     "shortcuts": []
   },
   "uiLifecycle": {
@@ -130,8 +124,8 @@
     "ui": ["setWidget", "setStatus", "setEditorComponent", "theme", "select", "input", "editor", "confirm"]
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/plan.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/plan.md",
+  "docsPath": "extensions/plan/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/plan/plan-prompt-commands.test.ts",
     "tests/shared/operator-ui/goal-operator-ui.test.ts",
@@ -139,7 +133,7 @@
     "tests/extensions/plan/plan-behavioral-mode.test.ts",
     "tests/shared/mode-state/mode-state.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
-    "tests/integration/public-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts"
   ],
   "review": {
     "status": "reviewed",

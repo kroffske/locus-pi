@@ -2,7 +2,7 @@
  * extensions/loop/continuation-launcher.ts — The one bounded-continuation
  * pipeline both loop triggers share.
  *
- * `/loop once …` and `loopControl {action:"once"}` both land here: it resolves
+ * `/loop once …` and `loop {action:"once"}` both land here: it resolves
  * the source, writes the goal or workflow continuation artifact, and projects
  * the saved artifact into the tool result. Nothing is auto-dispatched; every
  * refusal fails closed through `unsupportedOnce`.

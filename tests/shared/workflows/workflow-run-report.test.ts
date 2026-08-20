@@ -22,7 +22,10 @@ import {
   type WorkflowRunReportInput,
 } from "../../../extensions/workflows/runtime/workflow-run-report.js";
 import { readWorkflowRunJournalState, workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
-import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowJournalFile,
+} from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile, writeWorkflowResultText } from "../../../extensions/workflows/runtime/workflow-result.js";
 import { runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
@@ -93,6 +96,7 @@ function evidenceFrom(
 describe("workflow run report", () => {
   it("projects each artifact name as ONE document holding its newest revision, with the chain in the README", () => {
     const root = project();
+    ensureWorkflowRunDir(root, RUN_ID);
     const records = [
       record({ artifactId: "published-0001", name: "task.md", kind: "published" }),
       record({
@@ -879,6 +883,136 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /\| `toolCalls` \| 1000 \|/u);
     assert.match(readme, /\| `turns` \| 20 \|/u);
     assert.match(readme, /\| `answerChars` \| 500000 \|/u);
+  });
+
+  it("renders declared Fusion mode separately from live host tool readback", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            label: "member",
+            callId: "call-0001",
+            status: "completed",
+            capabilityMode: "tool-free",
+            activeToolNames: [],
+            replayed: false,
+          },
+          {
+            ts: "2026-07-28T19:00:01.000Z",
+            runId: RUN_ID,
+            kind: "error",
+            source: "script",
+            message: "validator exploded after replay",
+            agent: "default",
+            label: "judge",
+            callId: "call-0002",
+            capabilityMode: "agent",
+            replayed: true,
+          },
+          {
+            ts: "2026-07-28T19:00:02.000Z",
+            runId: RUN_ID,
+            kind: "error",
+            source: "runtime",
+            message: "legacy terminal origin missing",
+            agent: "default",
+            label: "unknown-origin",
+            callId: "call-0003",
+            capabilityMode: "agent",
+          },
+        ],
+      }),
+    );
+
+    assert.match(readme, /## Fusion capability evidence/u);
+    assert.match(
+      readme,
+      /\| <code>call-0001<\/code> \| member \| <code>tool-free<\/code> \| none \(`\[\]`\) \| fresh \|/u,
+    );
+    assert.match(
+      readme,
+      /\| <code>call-0002<\/code> \| judge \| <code>agent<\/code> \| not recorded \| replayed; no child ran \|/u,
+    );
+    assert.match(
+      readme,
+      /\| <code>call-0003<\/code> \| unknown-origin \| <code>agent<\/code> \| not recorded \| not recorded \|/u,
+    );
+  });
+
+  it("rejects persisted replay evidence with a live tool readback before report rendering", () => {
+    const root = project();
+    const runDir = ensureWorkflowRunDir(root, RUN_ID);
+    const fresh = {
+      ts: "2026-07-28T19:00:00.000Z",
+      runId: RUN_ID,
+      kind: "agent_end",
+      agent: "default",
+      label: "fresh-member",
+      callId: "call-0001",
+      status: "completed",
+      capabilityMode: "tool-free",
+      activeToolNames: [],
+      replayed: false,
+    };
+    const contradictory = {
+      ts: "2026-07-28T19:00:01.000Z",
+      runId: RUN_ID,
+      kind: "agent_end",
+      agent: "default",
+      label: "impossible-replay",
+      callId: "call-0002",
+      status: "completed",
+      capabilityMode: "agent",
+      activeToolNames: ["read"],
+      replayed: true,
+    };
+    writeFileSync(workflowJournalFile(runDir), `${JSON.stringify(fresh)}\n${JSON.stringify(contradictory)}\n`, "utf8");
+
+    const persisted = readWorkflowRunJournalState(root, RUN_ID);
+    assert.equal(persisted.lines.length, 1);
+    assert.deepEqual(persisted.diagnostics, [
+      {
+        kind: "structure",
+        lineNumber: 2,
+        message: "Field activeToolNames cannot be present when replayed is true.",
+      },
+    ]);
+
+    const readme = readmeOf(budgetInput({ projectRoot: root, journal: persisted.lines }));
+    assert.match(readme, /fresh-member/u);
+    assert.doesNotMatch(readme, /impossible-replay|replayed; no child ran.*<code>read<\/code>/u);
+  });
+
+  it("escapes every dynamic Fusion capability table cell", () => {
+    const readme = readmeOf(
+      budgetInput({
+        journal: [
+          {
+            ts: "2026-07-28T19:00:00.000Z",
+            runId: RUN_ID,
+            kind: "agent_end",
+            agent: "default",
+            label: "leg|`<unsafe>",
+            callId: "call|`<id>",
+            status: "completed",
+            capabilityMode: "agent",
+            activeToolNames: ["read|pipe", "tick`<tool>"],
+            replayed: false,
+          },
+        ],
+      }),
+    );
+
+    const row = readme.split("\n").find((line) => line.includes("call&#124;&#96;&lt;id&gt;"));
+    assert.ok(row !== undefined);
+    assert.equal(row.split("|").length, 7);
+    assert.match(row, /<code>call&#124;&#96;&lt;id&gt;<\/code>/u);
+    assert.match(row, /leg&#124;&#96;&lt;unsafe&gt;/u);
+    assert.match(row, /<code>read&#124;pipe<\/code>, <code>tick&#96;&lt;tool&gt;<\/code>/u);
   });
 
   it("prints the axes nobody counts as not recorded, never as zero", () => {

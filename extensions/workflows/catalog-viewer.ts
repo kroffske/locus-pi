@@ -1,5 +1,7 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { homedir } from "node:os";
+import path from "node:path";
 import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
 import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
 import { clamp, viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
@@ -14,6 +16,9 @@ import {
   type WorkflowCatalogModel,
   type WorkflowSourceReadState,
 } from "./workflow-catalog.js";
+import { workflowCopyDestinations, type WorkflowCopyDestination } from "./workflow-copy.js";
+import { packagedExamplesDir } from "./runtime/workflow-discovery.js";
+import { workflowRunsRootDir } from "./runtime/workflow-run-layout.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 // Keep two rows of breathing room above the one-row Locus footer so focused
@@ -24,6 +29,7 @@ const SOURCE_FRAME_ROWS = 2;
 
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
+  bold?(text: string): string;
 }
 
 interface WorkflowCatalogKeybindings {
@@ -34,6 +40,7 @@ interface WorkflowCatalogKeybindings {
 }
 
 type SelectableWorkflowRow = WorkflowCatalogCurrentRow | WorkflowCatalogHistoryRow;
+type CatalogTabId = "project" | "personal" | "package" | "history";
 type SourceAction = "back" | WorkflowBrowserAction;
 type CatalogScreen =
   | { kind: "catalog" }
@@ -43,6 +50,7 @@ type CatalogScreen =
 /** Focused read-only browser. It can only resolve a typed editor intent or cancellation. */
 export class WorkflowCatalogViewer implements CustomUiComponent {
   #screen: CatalogScreen = { kind: "catalog" };
+  #tabIndex = 0;
   #selectedIndex = 0;
   #sourceScroll = 0;
   #identityScroll = 0;
@@ -63,6 +71,7 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
   ) {
     this.#theme = asTheme(theme);
     this.#done = done;
+    this.#tabIndex = initialCatalogTabIndex(model);
   }
 
   render(width: number): string[] {
@@ -99,7 +108,19 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
       this.#finish();
       return;
     }
-    const rows = selectableRows(this.model);
+    if (["tab", "\t", "right", "\x1b[C", "\x1bOC"].includes(data)) {
+      this.#tabIndex = cycleIndex(this.#tabIndex, 1, CATALOG_TABS.length);
+      this.#selectedIndex = 0;
+      this.tui.requestRender();
+      return;
+    }
+    if (["left", "\x1b[D", "\x1bOD"].includes(data)) {
+      this.#tabIndex = cycleIndex(this.#tabIndex, -1, CATALOG_TABS.length);
+      this.#selectedIndex = 0;
+      this.tui.requestRender();
+      return;
+    }
+    const rows = selectableRows(this.model, activeCatalogTab(this.#tabIndex).id);
     if (rows.length === 0) return;
     if (matchesInput(this.keybindings, data, "tui.select.up", ["up", "k", "\x1b[A", "\x1bOA"])) {
       this.#selectedIndex = cycleIndex(this.#selectedIndex, -1, rows.length);
@@ -223,15 +244,26 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
 
   #renderCatalog(width: number): string[] {
     const height = viewerRows(this.tui);
-    if (height <= 6) return compactCatalogProjection(this.model, this.#selectedIndex, height, width, this.#theme);
-    const footer = catalogFooter(this.model);
+    const tab = activeCatalogTab(this.#tabIndex);
+    if (height <= 6)
+      return compactCatalogProjection(this.model, tab.id, this.#selectedIndex, height, width, this.#theme);
+    const footer = catalogFooter(this.model, tab.id, width, this.#theme);
     const footerHeight = Math.min(COMPACT_FOOTER_ROWS, Math.max(0, height - 1));
-    const bodyHeight = Math.max(0, height - 1 - footerHeight);
+    const location = catalogLocationLines(this.model, tab.id, this.projectRoot, width, this.#theme).slice(
+      0,
+      Math.max(0, height - 1 - footerHeight),
+    );
+    const bodyHeight = Math.max(0, height - 1 - location.length - footerHeight);
     const query = this.model.query === undefined ? "" : ` · query ${JSON.stringify(this.model.query)}`;
-    const header = fitLine(style(this.#theme, "accent", `[SELECT] Workflow catalog${query}`), width);
-    const body = catalogBody(this.model, this.#selectedIndex, bodyHeight, width, this.#theme);
+    const rows = selectableRows(this.model, tab.id);
+    const header = fitLine(
+      style(this.#theme, "accent", `[SELECT] Workflow catalog · ${tab.label} (${rows.length})${query}`),
+      width,
+    );
+    const body = catalogBody(this.model, tab.id, this.#selectedIndex, bodyHeight, width, this.#theme);
     return [
       header,
+      ...location,
       ...padLines(body, bodyHeight, width),
       ...footer.slice(0, footerHeight).map((line) => fitLine(line, width)),
     ];
@@ -369,8 +401,25 @@ export class WorkflowInfoViewer implements CustomUiComponent {
   }
 }
 
-function selectableRows(model: WorkflowCatalogModel): SelectableWorkflowRow[] {
-  return [...model.current, ...model.history];
+const CATALOG_TABS: ReadonlyArray<{ id: CatalogTabId; label: string; compactLabel: string }> = [
+  { id: "project", label: "Project", compactLabel: "P" },
+  { id: "personal", label: "User", compactLabel: "U" },
+  { id: "package", label: "Package", compactLabel: "PKG" },
+  { id: "history", label: "History", compactLabel: "H" },
+];
+
+function activeCatalogTab(index: number): (typeof CATALOG_TABS)[number] {
+  return CATALOG_TABS[clamp(index, 0, CATALOG_TABS.length - 1)]!;
+}
+
+function initialCatalogTabIndex(model: WorkflowCatalogModel): number {
+  const first = CATALOG_TABS.findIndex((tab) => selectableRows(model, tab.id).length > 0);
+  return first < 0 ? 0 : first;
+}
+
+function selectableRows(model: WorkflowCatalogModel, tab: CatalogTabId): SelectableWorkflowRow[] {
+  if (tab === "history") return model.history;
+  return model.current.filter((row) => row.source === tab);
 }
 
 function sourceActions(
@@ -379,42 +428,67 @@ function sourceActions(
 ): SourceAction[] {
   if (height <= 1) return ["back"];
   if (screen.selected.kind === "history") return ["back", "review"];
-  return screen.state.kind === "ready" ? ["back", "start", "edit", "review"] : ["back"];
+  if (screen.state.kind !== "ready") return ["back"];
+  return ["back", "start", "edit", "review", ...workflowCopyDestinations(screen.selected).map(copyDestinationAction)];
 }
 
-function catalogFooter(model: WorkflowCatalogModel): string[] {
-  return selectableRows(model).length === 0
-    ? ["Esc close · no selectable rows", "Help: /workflows info"]
-    : ["↑/↓ select · Enter inspect · Esc close", "Help: /workflows info · history review-only"];
+function copyDestinationAction(destination: WorkflowCopyDestination): "copy-project" | "copy-personal" {
+  return destination === "project" ? "copy-project" : "copy-personal";
+}
+
+function catalogFooter(
+  model: WorkflowCatalogModel,
+  active: CatalogTabId,
+  width: number,
+  theme: WorkflowCatalogTheme,
+): string[] {
+  const rows = selectableRows(model, active);
+  return [
+    catalogTabBar(model, active, width, theme),
+    rows.length === 0
+      ? "Tab/←/→ source · Esc close · no rows in this source"
+      : `Tab/←/→ source · ↑/↓ select · Enter inspect · Esc close${active === "history" ? " · review-only" : ""}`,
+  ];
+}
+
+function catalogTabBar(
+  model: WorkflowCatalogModel,
+  active: CatalogTabId,
+  width: number,
+  theme: WorkflowCatalogTheme,
+): string {
+  const compact = width < 64;
+  return CATALOG_TABS.map((tab) => {
+    const label = `${compact ? tab.compactLabel : tab.label} ${selectableRows(model, tab.id).length}`;
+    return tab.id === active ? style(theme, "accent", `[${label}]`) : label;
+  }).join("  ");
 }
 
 function compactCatalogProjection(
   model: WorkflowCatalogModel,
+  tab: CatalogTabId,
   selectedIndex: number,
   height: number,
   width: number,
   theme: WorkflowCatalogTheme,
 ): string[] {
-  const rows = selectableRows(model);
+  const rows = selectableRows(model, tab);
   const selected = rows[selectedIndex];
-  const row = fitLine(selected === undefined ? "No workflow rows." : compactSelectedRowLine(selected), width);
+  const row = fitLine(
+    selected === undefined ? "No workflow rows in this source." : compactSelectedRowLine(selected),
+    width,
+  );
   if (height === 1) return [row];
-  const controls = fitLine(selected === undefined ? "Esc close" : "↑/↓ Enter · Esc", width);
-  if (height === 2) return [row, controls];
+  const tabs = fitLine(catalogTabBar(model, tab, width, theme), width);
+  if (height === 2) return [row, tabs];
   const query = model.query === undefined ? "" : ` · query ${JSON.stringify(model.query)}`;
+  const active = CATALOG_TABS.find((candidate) => candidate.id === tab)!;
+  const header = fitLine(style(theme, "accent", `[SELECT] Workflow catalog · ${active.label}${query}`), width);
   if (height === 3) {
-    return [fitLine(style(theme, "accent", `[SELECT] Workflow catalog${query}`), width), row, controls];
+    return [header, row, tabs];
   }
   return padLines(
-    [
-      fitLine(style(theme, "accent", `[SELECT] Workflow catalog${query}`), width),
-      row,
-      fitLine(
-        selected === undefined ? "Esc close · no selectable rows" : "↑/↓ select · Enter inspect · Esc close",
-        width,
-      ),
-      fitLine("Help: /workflows info", width),
-    ],
+    [header, row, tabs, fitLine(selected === undefined ? "Tab/←/→ · Esc" : "Tab/←/→ · ↑/↓ Enter · Esc", width)],
     height,
     width,
   );
@@ -463,8 +537,9 @@ function styleIdentityLine(line: string, theme: WorkflowCatalogTheme): string {
 function identityTextLines(row: SelectableWorkflowRow): string[] {
   return [
     `[VIEW] ${row.kind === "history" ? "[R] " : ""}${workflowSourceBadge(row.source)} ${row.name}`,
-    `Source: ${row.sourceLabel}`,
-    ...(row.kind === "history" ? [`Run: ${row.runId}`, `Snapshot: ${row.originPath}`] : [`Path: ${row.target.path}`]),
+    ...(row.kind === "history"
+      ? [`Run: ${row.runId}`, `Snapshot: ${row.originPath}`]
+      : [`Source: ${row.sourceLabel}`, `Catalog: ${catalogDirectoryForRow(row)}`, `Path: ${row.originPath}`]),
     ...(row.kind === "history" && row.snapshot.sha256 !== undefined ? [`SHA-256: ${row.snapshot.sha256}`] : []),
   ];
 }
@@ -484,85 +559,88 @@ function actionBar(
 }
 
 function title(action: SourceAction): string {
+  if (action === "copy-project") return "Copy to Project";
+  if (action === "copy-personal") return "Copy to User";
   return action[0]!.toUpperCase() + action.slice(1);
 }
 
 function catalogBody(
   model: WorkflowCatalogModel,
+  tab: CatalogTabId,
   selectedIndex: number,
   height: number,
   width: number,
   theme: WorkflowCatalogTheme,
 ): string[] {
-  const rows = selectableRows(model);
+  const rows = selectableRows(model, tab);
   if (height === 1) {
     const selected = rows[selectedIndex];
     return [
-      fitLine(selected === undefined ? "No workflow rows." : rowLines(selected, true, width, theme, false)[0]!, width),
+      fitLine(
+        selected === undefined ? "No workflow rows in this source." : rowLines(selected, true, width, theme, false)[0]!,
+        width,
+      ),
     ];
   }
-  const desiredCurrentHeight = sectionDesiredHeight(model.current.length);
-  const desiredHistoryHeight = sectionDesiredHeight(model.history.length);
-  const contentFits = desiredCurrentHeight + desiredHistoryHeight <= height;
-  const currentHeight = contentFits ? desiredCurrentHeight : Math.max(1, Math.ceil(height * 0.6));
-  const historyHeight = contentFits ? desiredHistoryHeight : Math.max(1, height - currentHeight);
-  const lines = [style(theme, "muted", `Current (${model.current.length}/${model.totalCurrent}):`)];
-  const currentBody = Math.max(0, currentHeight - 1);
-  lines.push(
-    ...catalogSection(
-      model.current,
-      Math.min(selectedIndex, model.current.length - 1),
-      0,
-      selectedIndex,
-      currentBody,
-      width,
-      theme,
-      model.query === undefined ? "  (none found)" : "  (no current matches)",
-    ),
+  const entries = catalogRenderEntries(model, tab, selectedIndex, width, theme);
+  if (entries.length === 0) {
+    const empty = model.query === undefined ? "No workflows in this source." : "No matches in this source.";
+    return padLines([style(theme, "muted", empty)], height, width);
+  }
+  const selectedEntry = Math.max(
+    0,
+    entries.findIndex((entry) => entry.rowIndex === selectedIndex),
   );
-  lines.push(style(theme, "muted", `History [R] review-only (${model.history.length}):`));
-  const historyBody = Math.max(0, historyHeight - 1);
-  lines.push(
-    ...catalogSection(
-      model.history,
-      clamp(selectedIndex - model.current.length, 0, model.history.length - 1),
-      model.current.length,
-      selectedIndex,
-      historyBody,
-      width,
-      theme,
-      model.query === undefined ? "  (none yet)" : "  (no history matches)",
-    ),
-  );
-  return lines.slice(0, height).map((line) => fitLine(line, width));
-}
-
-function sectionDesiredHeight(rowCount: number): number {
-  return 1 + Math.max(1, rowCount * 2);
-}
-
-function catalogSection(
-  rows: readonly SelectableWorkflowRow[],
-  localSelection: number,
-  globalOffset: number,
-  selectedIndex: number,
-  height: number,
-  width: number,
-  theme: WorkflowCatalogTheme,
-  emptyMessage: string,
-): string[] {
-  if (height <= 0) return [];
-  if (rows.length === 0) return padLines([emptyMessage], height, width);
-  const expanded = height >= 2;
-  const rowHeight = expanded ? 2 : 1;
-  const capacity = Math.max(1, Math.floor(height / rowHeight));
-  const start = windowStart(localSelection, rows.length, capacity);
+  let start = selectedEntry;
+  let used = entries[start]!.lines.length;
+  while (start > 0 && used + entries[start - 1]!.lines.length <= height) {
+    start -= 1;
+    used += entries[start]!.lines.length;
+  }
   const lines: string[] = [];
-  for (const [offset, row] of rows.slice(start, start + capacity).entries()) {
-    const rowIndex = start + offset;
-    lines.push(...rowLines(row, globalOffset + rowIndex === selectedIndex, width, theme, expanded));
+  for (let index = start; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (lines.length > 0 && lines.length + entry.lines.length > height) break;
+    lines.push(...entry.lines.slice(0, height - lines.length));
+    if (lines.length >= height) break;
   }
   return padLines(lines, height, width);
+}
+
+function groupOnlyHeaderLine(header: WorkflowCatalogModel["groups"][number], theme: WorkflowCatalogTheme): string {
+  return style(theme, "muted", `  ${header.name} · ${workflowSourceBadge(header.source)} · group-only (not runnable)`);
+}
+
+function catalogRenderEntries(
+  model: WorkflowCatalogModel,
+  tab: CatalogTabId,
+  selectedIndex: number,
+  width: number,
+  theme: WorkflowCatalogTheme,
+): Array<{ rowIndex?: number; lines: string[] }> {
+  const rows = selectableRows(model, tab);
+  if (tab === "history") {
+    return rows.map((row, rowIndex) => ({
+      rowIndex,
+      lines: rowLines(row, rowIndex === selectedIndex, width, theme, true),
+    }));
+  }
+  const groups = model.groups.filter((group) => group.source === tab);
+  const groupByName = new Map(groups.map((group) => [group.name, group]));
+  const emittedGroups = new Set<string>();
+  const entries: Array<{ rowIndex?: number; lines: string[] }> = [];
+  for (const [rowIndex, row] of rows.entries()) {
+    const header = row.kind === "current" && row.role === "child" ? groupByName.get(row.rootName) : undefined;
+    if (header !== undefined && !emittedGroups.has(header.name)) {
+      entries.push({ lines: [groupOnlyHeaderLine(header, theme)] });
+      emittedGroups.add(header.name);
+    }
+    entries.push({ rowIndex, lines: rowLines(row, rowIndex === selectedIndex, width, theme, true) });
+  }
+  for (const group of groups) {
+    if (!emittedGroups.has(group.name)) entries.push({ lines: [groupOnlyHeaderLine(group, theme)] });
+  }
+  return entries;
 }
 
 function rowLines(
@@ -572,37 +650,93 @@ function rowLines(
   theme: WorkflowCatalogTheme,
   expanded: boolean,
 ): string[] {
-  const first = `${selected ? ">" : " "} ${expanded ? catalogRowIdentity(row) : catalogRowSummary(row)}`;
-  if (!expanded) return [style(theme, selected ? "accent" : "text", fitLine(first, width))];
-  const pathPrefix = "    └ ";
+  if (!expanded) {
+    const summary = fitLine(`${selected ? ">" : " "} ${catalogRowSummary(row)}`, width);
+    return [selected ? bold(theme, style(theme, "accent", summary)) : style(theme, "text", summary)];
+  }
+  const isChild = row.kind === "current" && row.role === "child";
+  const pathPrefix = isChild ? "      · " : "    · ";
+  const continuationPrefix = isChild ? "        " : "      ";
   const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
-  const detail = catalogDetailLine(row, detailWidth);
+  const details = wrapPlain(row.description, Math.max(1, detailWidth));
   return [
-    style(theme, selected ? "accent" : "text", fitLine(first, width)),
-    style(theme, selected ? "accent" : "muted", fitLine(`${pathPrefix}${detail}`, width)),
+    fitLine(styledCatalogRowIdentity(row, selected, theme), width),
+    ...details.map((detail, index) => {
+      const prefix = index === 0 ? pathPrefix : continuationPrefix;
+      return fitLine(
+        `${selected ? bold(theme, style(theme, "accent", prefix)) : style(theme, "muted", prefix)}${style(
+          theme,
+          selected ? "text" : "muted",
+          detail,
+        )}`,
+        width,
+      );
+    }),
   ];
+}
+
+function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean, theme: WorkflowCatalogTheme): string {
+  const marker = selected ? bold(theme, style(theme, "accent", ">")) : " ";
+  const run = row.kind === "history" ? ` · run ${row.runId}` : "";
+  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const composition =
+    row.kind !== "current" || row.role === "child" || row.children.length === 0
+      ? ""
+      : ` · ${row.children.length} children`;
+  const identity = selected
+    ? bold(theme, style(theme, "accent", `${treeName}${run}`))
+    : style(theme, "text", `${treeName}${run}`);
+  const metadata = style(theme, "muted", ` · ${workflowSourceBadge(row.source)}${composition}`);
+  return `${marker} ${identity}${metadata}`;
 }
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  return `${row.name}${run} · ${workflowSourceBadge(row.source)}`;
+  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const composition =
+    row.kind !== "current" || row.role === "child" || row.children.length === 0
+      ? ""
+      : ` · ${row.children.length} children`;
+  return `${treeName}${run} · ${workflowSourceBadge(row.source)}${composition}`;
 }
 
 function catalogRowSummary(row: SelectableWorkflowRow): string {
   return `${catalogRowIdentity(row)} · ${row.description}`;
 }
 
-function catalogDetailLine(row: SelectableWorkflowRow, width: number): string {
-  const separator = " · ";
-  const separatorWidth = visibleWidth(separator);
-  if (width <= separatorWidth + 2) return middleTruncate(row.originPath, width);
-  const descriptionWidth = Math.min(
-    visibleWidth(row.description),
-    Math.max(1, Math.floor((width - separatorWidth) * 0.4)),
-  );
-  const description = truncateToWidth(row.description, descriptionWidth, "…");
-  const pathWidth = Math.max(1, width - visibleWidth(description) - separatorWidth);
-  return `${description}${separator}${middleTruncate(row.originPath, pathWidth)}`;
+function catalogLocationLines(
+  model: WorkflowCatalogModel,
+  tab: CatalogTabId,
+  projectRoot: string,
+  width: number,
+  theme: WorkflowCatalogTheme,
+): string[] {
+  const directories = catalogDirectories(model, tab, projectRoot);
+  const label = directories.length === 1 ? "Catalog" : "Catalogs";
+  return directories.flatMap((directory, index) => {
+    const prefix = index === 0 ? `${label}: ` : "          ";
+    return wrapTextWithAnsi(`${style(theme, "dim", prefix)}${style(theme, "muted", directory)}`, width);
+  });
+}
+
+function catalogDirectories(model: WorkflowCatalogModel, tab: CatalogTabId, projectRoot: string): string[] {
+  if (tab === "history") return [workflowRunsRootDir(projectRoot)];
+  const directories = [
+    ...new Set(
+      selectableRows(model, tab)
+        .filter((row): row is WorkflowCatalogCurrentRow => row.kind === "current")
+        .map(catalogDirectoryForRow),
+    ),
+  ];
+  if (directories.length > 0) return directories;
+  if (tab === "personal") return [path.join(homedir(), ".pi", "workflows")];
+  if (tab === "package") return [packagedExamplesDir()];
+  return [path.join(projectRoot, ".pi", "workflows")];
+}
+
+function catalogDirectoryForRow(row: WorkflowCatalogCurrentRow): string {
+  const namespaceDirectory = path.dirname(row.originPath);
+  return path.basename(namespaceDirectory) === row.rootName ? path.dirname(namespaceDirectory) : namespaceDirectory;
 }
 
 function middleTruncate(value: string, width: number): string {
@@ -647,6 +781,10 @@ function asOperatorTheme(value: unknown): OperatorThemeLike | undefined {
 
 function style(theme: WorkflowCatalogTheme, color: string, text: string): string {
   return typeof theme.fg === "function" ? theme.fg(color, text) : text;
+}
+
+function bold(theme: WorkflowCatalogTheme, text: string): string {
+  return typeof theme.bold === "function" ? theme.bold(text) : text;
 }
 
 function terminalRows(tui: CustomUiTui): number {
@@ -709,11 +847,6 @@ function padLines(lines: readonly string[], height: number, width: number): stri
   const out = lines.slice(0, height).map((line) => fitLine(line, width));
   while (out.length < height) out.push(" ".repeat(width));
   return out;
-}
-
-function windowStart(selected: number, total: number, limit: number): number {
-  if (limit <= 0 || total <= limit) return 0;
-  return clamp(selected - Math.floor(limit / 2), 0, total - limit);
 }
 
 function cycleIndex(index: number, delta: number, total: number): number {

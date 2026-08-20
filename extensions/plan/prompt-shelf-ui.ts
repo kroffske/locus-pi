@@ -9,7 +9,7 @@
 
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import type { PromptShelfKind, PromptShelfTarget } from "./command-parser.js";
+import type { PromptShelfKind, PromptShelfTarget, PromptShelfWriteSource } from "./command-parser.js";
 
 export function promptShelfSummaryBlock(
   kind: PromptShelfKind,
@@ -78,12 +78,20 @@ export function promptShelfBodyBlock(
   };
 }
 
-export function promptShelfChangeBlock(kind: PromptShelfKind, target: PromptShelfTarget): OperatorBlock {
+export function promptShelfChangeBlock(
+  kind: PromptShelfKind,
+  target: PromptShelfTarget,
+  source: PromptShelfWriteSource = "explicit",
+): OperatorBlock {
   const command = promptShelfScopedCommand(kind, target.target);
+  const primary =
+    source === "legacy"
+      ? `${promptShelfNoun(kind)} prompt saved. Deprecated: ${command} set <prompt>.`
+      : `${promptShelfNoun(kind)} prompt saved.`;
   return {
     type: "CHANGE",
     subject: promptShelfLabel(kind),
-    primary: `${promptShelfNoun(kind)} prompt saved.`,
+    primary,
     badges: [{ text: "ARTIFACT", tone: "success" }],
     metadata: promptShelfMetadata(target),
     controls: [`Inspect: ${command}`, `Open body: ${command} show`],

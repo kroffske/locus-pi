@@ -65,8 +65,13 @@ export interface PromptShelfTarget {
   displayPath: string;
 }
 
+export type PromptShelfWriteSource = "explicit" | "legacy";
+
 export type PromptShelfAction =
-  { kind: "summary" } | { kind: "show" } | { kind: "write"; prompt: string } | { kind: "invalid"; message: string };
+  | { kind: "summary" }
+  | { kind: "show" }
+  | { kind: "write"; prompt: string; source: PromptShelfWriteSource }
+  | { kind: "invalid"; message: string };
 
 export interface ParsedPromptShelfCommand {
   target: PromptCommandTargetSelector;
@@ -79,7 +84,8 @@ export interface ParsedPromptShelfCommand {
  *
  * `show` and `read` are exact body-view verbs. `set <prompt>` is the escape
  * that keeps those words storable as literal prompts. Every other non-empty
- * value retains the old free-form write contract.
+ * value retains the old free-form write contract and is marked as legacy so
+ * the result can guide callers to the canonical spelling.
  */
 export function parsePromptShelfCommand(text: string): ParsedPromptShelfCommand {
   const selected = parseTargetPrefix(text.trim());
@@ -111,13 +117,15 @@ export function parsePromptShelfCommand(text: string): ParsedPromptShelfCommand 
       target: selected.target,
       targetLabel: selected.targetLabel,
       action:
-        prompt === "" ? { kind: "invalid", message: "set requires a non-empty prompt" } : { kind: "write", prompt },
+        prompt === ""
+          ? { kind: "invalid", message: "set requires a non-empty prompt" }
+          : { kind: "write", prompt, source: "explicit" },
     };
   }
   return {
     target: selected.target,
     targetLabel: selected.targetLabel,
-    action: { kind: "write", prompt: remaining },
+    action: { kind: "write", prompt: remaining, source: "legacy" },
   };
 }
 

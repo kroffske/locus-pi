@@ -1,7 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { workflowRunDir, workflowRunRuntimeDir } from "./workflow-run-layout.js";
+import {
+  assertWorkflowRunDirectoryPath,
+  ensureWorkflowDirectoryNoSymlink,
+  ensureWorkflowRunDir,
+  workflowRunRuntimeDir,
+} from "./workflow-run-layout.js";
 
 export interface WorkflowWorktreeInfo {
   id: string;
@@ -18,12 +23,13 @@ export interface WorkflowWorktreeOptions {
 
 export function createWorkflowWorktree(options: WorkflowWorktreeOptions): WorkflowWorktreeInfo {
   const repoRoot = resolveGitRepoRoot(options.projectRoot);
-  const baseDir =
-    options.baseDir ??
-    path.join(workflowRunRuntimeDir(workflowRunDir(options.projectRoot, options.runId)), "worktrees");
-  mkdirSync(baseDir, { recursive: true });
+  const runDir = ensureWorkflowRunDir(options.projectRoot, options.runId);
+  const baseDir = options.baseDir ?? path.join(workflowRunRuntimeDir(runDir), "worktrees");
+  ensureWorkflowDirectoryNoSymlink(runDir, baseDir);
+  assertWorkflowRunDirectoryPath(runDir, baseDir, true);
   const id = safePathSegment(options.safeCallId);
   const target = path.join(baseDir, id);
+  assertWorkflowRunDirectoryPath(runDir, target, false);
   try {
     execFileSync("git", ["-C", repoRoot, "worktree", "add", "--detach", target, options.ref ?? "HEAD"], {
       encoding: "utf8",
@@ -33,8 +39,11 @@ export function createWorkflowWorktree(options: WorkflowWorktreeOptions): Workfl
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create git worktree at ${target}: ${message}`);
   }
-  if (!existsSync(target)) {
-    throw new Error(`Failed to create git worktree at ${target}: target directory was not created.`);
+  assertWorkflowRunDirectoryPath(runDir, target, true);
+  const physicalRunDir = realpathSync(runDir);
+  const physicalTarget = realpathSync(target);
+  if (!physicalTarget.startsWith(`${physicalRunDir}${path.sep}`)) {
+    throw new Error(`Failed to create git worktree at ${target}: target escapes the workflow run root.`);
   }
   return { id, path: target };
 }

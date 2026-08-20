@@ -93,6 +93,9 @@ interface FakeSessionConfig {
   events?: SdkAgentSessionEventLike[];
   /** What the host says this session runs on. Absent = an older peer or a structural mock. */
   model?: unknown;
+  activeToolNames?: string[];
+  exposesActiveToolNames?: boolean;
+  onPrompt?: (text: string) => void;
 }
 
 interface FakeSession {
@@ -116,7 +119,8 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
         listener = undefined;
       };
     },
-    async prompt() {
+    async prompt(text) {
+      config.onPrompt?.(text);
       if (config.promptError !== undefined) throw new Error(config.promptError);
       for (const event of config.events ?? []) listener?.(event);
       // Drive the terminal event synchronously so `await ended` resolves, unless
@@ -133,6 +137,9 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
     getLastAssistantText() {
       return config.lastAssistantText;
     },
+    ...(config.exposesActiveToolNames === false
+      ? {}
+      : { getActiveToolNames: () => [...(config.activeToolNames ?? ["read"])] }),
     exportToJsonl(outputPath) {
       const target = outputPath ?? path.join(exportDir, "session.jsonl");
       writeFileSync(target, "{}\n", "utf8");
@@ -149,6 +156,14 @@ function tmpReportsDir(): string {
 }
 
 describe("agent SDK session executor (insurance, not proof)", () => {
+  it("keeps the package-owned generic child identity in the tool-free system prompt without a catalog persona", () => {
+    const prompt = buildAgentSystemPrompt(request(), { suppressContextExtras: true });
+
+    expect(prompt).toContain('<active_agent name="reviewer"/>');
+    expect(prompt).toContain("You are a pi coding agent sub-agent.");
+    expect(prompt).toContain("Working directory: /repo");
+  });
+
   it("omits context extras when the opt-in flag is unset", () => {
     const prompt = buildAgentSystemPrompt(requestWithSystemPrompt(), {
       env: {
@@ -1319,16 +1334,211 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.status).toBe("completed");
     expect(capturedOptions).toMatchObject({
       cwd: "/repo",
-      excludeTools: ["spawn_agent", "task"],
+      excludeTools: ["spawn_agent"],
       appendSystemPrompt: expect.stringContaining("Review for correctness first."),
     });
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
       '<active_agent name="reviewer"/>',
     );
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain(
-      "Do not call `spawn_agent` or `task` directly",
+      "Do not call `spawn_agent` directly",
     );
     expect((capturedOptions as { appendSystemPrompt?: string }).appendSystemPrompt).toContain("`workflow`");
+    expect((capturedOptions as SdkCreateSessionOptionsLike | undefined)?.noTools).toBeUndefined();
+    expect((capturedOptions as SdkCreateSessionOptionsLike | undefined)?.resourceLoaderOptions).toBeUndefined();
+  });
+
+  it("materializes tool-free Fusion with no tools, no discovered resources, and no package context extras", async () => {
+    const order: string[] = [];
+    let kickoff = "";
+    const fake = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "Tool-free answer.",
+      activeToolNames: [],
+      onPrompt(text) {
+        order.push("prompt");
+        kickoff = text;
+      },
+    });
+    fake.session.getActiveToolNames = () => {
+      order.push("readback");
+      return [];
+    };
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session: fake.session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      promptEnv: {
+        LOCUS_AGENT_CONTEXT_EXTRAS: "1",
+        LOCUS_AGENT_MEMORY_FILE: "/canary/MEMORY_SENTINEL.md",
+        LOCUS_AGENT_PRELOAD_SKILLS: "SKILL_SENTINEL",
+      },
+    });
+
+    const result = await executor.run(
+      {
+        ...requestWithSystemPrompt(),
+        capabilityMode: "tool-free",
+        agent: {
+          ...requestWithSystemPrompt().agent,
+          readOnly: true,
+          allowedTools: [],
+          tools: [],
+          systemPrompt: "CATALOG_PERSONA_SENTINEL",
+        },
+        allowedTools: [],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      activeToolNames: [],
+    });
+    expect(order).toEqual(["readback", "prompt"]);
+    expect(capturedOptions).toMatchObject({
+      noTools: "all",
+      tools: [],
+      customTools: [],
+      resourceLoaderOptions: {
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        appendSystemPrompt: [],
+        systemPrompt: expect.stringContaining("CATALOG_PERSONA_SENTINEL"),
+      },
+    });
+    expect(capturedOptions?.appendSystemPrompt).toBeUndefined();
+    expect(JSON.stringify(capturedOptions)).not.toContain("MEMORY_SENTINEL");
+    expect(JSON.stringify(capturedOptions)).not.toContain("SKILL_SENTINEL");
+    expect(kickoff).toContain("CATALOG_PERSONA_SENTINEL");
+    expect(kickoff).not.toContain("MEMORY_SENTINEL");
+    expect(kickoff).not.toContain("SKILL_SENTINEL");
+  });
+
+  it("constructs the real SDK resource-loader seam with closed discovery overrides", async () => {
+    const fake = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "Tool-free answer.",
+      activeToolNames: [],
+    });
+    let loaderOptions: Record<string, unknown> | undefined;
+    let createdOptions: Record<string, unknown> | undefined;
+    class CapturedResourceLoader {
+      constructor(options: Record<string, unknown>) {
+        loaderOptions = options;
+      }
+      reload(): void {}
+    }
+    vi.doMock("@earendil-works/pi-coding-agent", () => ({
+      DefaultResourceLoader: CapturedResourceLoader,
+      getAgentDir: () => "/agent-dir",
+      createAgentSession: async (options: Record<string, unknown>) => {
+        createdOptions = options;
+        return { session: fake.session };
+      },
+    }));
+    try {
+      const executor = createAgentSdkSessionExecutor({ reportsDir: tmpReportsDir(), now: () => "fixed" });
+      const result = await executor.run(
+        {
+          ...requestWithSystemPrompt(),
+          capabilityMode: "tool-free",
+          agent: {
+            ...requestWithSystemPrompt().agent,
+            readOnly: true,
+            allowedTools: [],
+            tools: [],
+            systemPrompt: "CATALOG_PERSONA_SENTINEL",
+          },
+          allowedTools: [],
+        },
+        new AbortController().signal,
+      );
+
+      expect(result.status).toBe("completed");
+      expect(loaderOptions).toMatchObject({
+        cwd: "/repo",
+        agentDir: "/agent-dir",
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+      });
+      expect((loaderOptions?.systemPromptOverride as (() => string) | undefined)?.()).toContain(
+        "CATALOG_PERSONA_SENTINEL",
+      );
+      expect((loaderOptions?.appendSystemPromptOverride as (() => string[]) | undefined)?.()).toEqual([]);
+      expect(createdOptions).toMatchObject({ noTools: "all", tools: [], customTools: [] });
+      expect(createdOptions?.resourceLoader).toBeInstanceOf(CapturedResourceLoader);
+      expect(createdOptions).not.toHaveProperty("resourceLoaderOptions");
+      expect(createdOptions).not.toHaveProperty("appendSystemPrompt");
+    } finally {
+      vi.doUnmock("@earendil-works/pi-coding-agent");
+    }
+  });
+
+  it.each([
+    ["missing readback", { exposesActiveToolNames: false }, /requires AgentSession\.getActiveToolNames/u],
+    ["non-empty readback", { activeToolNames: ["read"] }, /exposed active tools before prompt: read/u],
+  ])("fails tool-free Fusion before prompt on %s", async (_name, sessionConfig, expected) => {
+    const promptSpy = vi.fn();
+    const fake = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "must not run",
+      onPrompt: promptSpy,
+      ...sessionConfig,
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session: fake.session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(
+      {
+        ...request(),
+        capabilityMode: "tool-free",
+        agent: { ...reviewer, readOnly: true, allowedTools: [], tools: [] },
+        allowedTools: [],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(expected);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(fake.disposeSpy).toHaveBeenCalledOnce();
+  });
+
+  it("records agent-mode active tools without imposing an empty registry", async () => {
+    const fake = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "Agent answer.",
+      activeToolNames: ["read", "bash"],
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session: fake.session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+    const result = await executor.run(
+      { ...requestWithSystemPrompt(), capabilityMode: "agent" },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({ activeToolNames: ["read", "bash"] });
+    expect(result).not.toHaveProperty("capabilityMode");
   });
 
   it("blocks direct nested agent tools even when the child profile allows every tool", async () => {
@@ -1354,7 +1564,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
 
     expect(result.status).toBe("completed");
     expect(capturedOptions?.tools).toBeUndefined();
-    expect(capturedOptions?.excludeTools).toEqual(["spawn_agent", "task"]);
+    expect(capturedOptions?.excludeTools).toEqual(["spawn_agent"]);
     expect(capturedOptions?.excludeTools).not.toContain("workflow");
   });
 
@@ -1386,7 +1596,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.status).toBe("completed");
     expect(capturedOptions?.tools).toEqual(["read", "git_read", "grep", "find"]);
     expect(capturedOptions?.excludeTools).toEqual(
-      expect.arrayContaining(["spawn_agent", "task", "workflow", "bash", "edit", "write", "unknown"]),
+      expect.arrayContaining(["spawn_agent", "workflow", "bash", "edit", "write", "unknown"]),
     );
     expect(capturedOptions?.tools).not.toEqual(expect.arrayContaining(["bash", "write", "edit", "workflow"]));
 

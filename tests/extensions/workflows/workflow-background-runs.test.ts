@@ -453,7 +453,7 @@ describe("workflow slash background lifecycle", () => {
 
       await harness.commands.get("workflows")!.handler("run live-smoke again", harness.ctx);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(harness.widgets.get("workflows")).toContain("is still running");
+      expect(harness.widgets.get("workflows")).toContain("settling workflow callbacks");
 
       const widgetSpy = vi.spyOn(harness.ctx.ui, "setWidget");
       const statusSpy = vi.spyOn(harness.ctx.ui, "setStatus");

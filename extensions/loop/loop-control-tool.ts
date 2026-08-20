@@ -1,5 +1,5 @@
 /**
- * extensions/loop/loop-control-tool.ts — The `loopControl` tool.
+ * extensions/loop/loop-control-tool.ts — The canonical `loop` tool.
  *
  * Carries its own TypeBox params, the status projection it is the only caller
  * of, and the fail-closed refusal for the legacy auto-run actions. The `once`
@@ -8,12 +8,10 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionCommandContext, ToolResult } from "../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
-import { readLoopStatus, renderLoopStatus } from "./loop-continuation.js";
 import { runLoopOnce } from "./continuation-launcher.js";
-import { unsupportedLoopText } from "./operator-ui.js";
+import type { LoopController, LoopSource } from "./loop-controller.js";
 
 const LoopControlParams = Type.Object({
   action: Type.Union(
@@ -21,50 +19,45 @@ const LoopControlParams = Type.Object({
     { description: "Loop action" },
   ),
   source: Type.Optional(
-    Type.Union([Type.Literal("goal"), Type.Literal("workflow"), Type.Literal("review")], {
-      description: "Continuation source for once",
+    Type.Union([Type.Literal("goal"), Type.Literal("workflow")], {
+      description: "Continuation source",
     }),
   ),
   runId: Type.Optional(Type.String({ description: "Workflow run id for source=workflow", maxLength: 200 })),
   prompt: Type.Optional(Type.String({ description: "Optional bounded continuation focus", maxLength: 4000 })),
+  condition: Type.Optional(Type.String({ description: "Model-evaluated stop condition for until", maxLength: 4000 })),
+  maxIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  maxDurationMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1440 })),
+  reason: Type.Optional(Type.String({ description: "Stop reason", maxLength: 500 })),
 });
 
-export function registerLoopControlTool(pi: ExtensionAPI): void {
+export function registerLoopControlTool(pi: ExtensionAPI, controller: LoopController): void {
   pi.registerTool({
-    name: "loopControl",
+    name: "loop",
     description:
-      "Bounded loop continuation controller. Supports status and one manual once path; unsupported legacy actions fail closed.",
+      "Start, stop, inspect, or run one bounded goal/workflow continuation loop with hard iteration and duration limits.",
     parameters: LoopControlParams,
     async execute(_toolCallId, params, _signal, _update, ctx) {
       const valid = validateParams(LoopControlParams, params);
       if (!valid.ok) return valid.result;
-      if (valid.value.action === "status") {
-        return await runLoopStatus(ctx);
-      }
+      if (valid.value.action === "status") return controller.status(ctx);
+      if (valid.value.action === "stop") return controller.stop(ctx, valid.value.reason);
       if (valid.value.action === "once") {
         return await runLoopOnce(pi, ctx, valid.value.source, valid.value.runId, valid.value.prompt);
       }
-      return unsupportedAction(valid.value.action);
+      return controller.start(
+        ctx,
+        {
+          action: valid.value.action,
+          source: (valid.value.source ?? "goal") as LoopSource,
+          ...(valid.value.runId ? { runId: valid.value.runId } : {}),
+          ...(valid.value.prompt ? { prompt: valid.value.prompt } : {}),
+          ...(valid.value.condition ? { condition: valid.value.condition } : {}),
+          ...(valid.value.maxIterations ? { maxIterations: valid.value.maxIterations } : {}),
+          ...(valid.value.maxDurationMinutes ? { maxDurationMinutes: valid.value.maxDurationMinutes } : {}),
+        },
+        "tool",
+      );
     },
-  });
-}
-
-async function runLoopStatus(ctx: ExtensionCommandContext): Promise<ToolResult> {
-  const report = await readLoopStatus(getProjectRoot(ctx));
-  return textResult(renderLoopStatus(report), {
-    owner: "loop",
-    mode: report.mode,
-    sources: report.sources,
-    ...(report.recommendedSource !== undefined ? { recommendedSource: report.recommendedSource } : {}),
-    ...(report.recommendedSourceId !== undefined ? { recommendedSourceId: report.recommendedSourceId } : {}),
-  });
-}
-
-function unsupportedAction(action: string): ToolResult {
-  return errorResult(unsupportedLoopText(action), {
-    owner: "loop",
-    requestedAction: action,
-    supportedActions: ["status", "once"],
-    supportedSources: ["goal", "workflow"],
   });
 }

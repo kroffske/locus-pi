@@ -13,7 +13,7 @@ import { packagedExamplesDir, packagedWorkflowPath } from "../../../extensions/w
 const RETIRED_DIAGRAM_SUFFIXES = [".diagram.mjs", ".excalidraw", ".png"];
 
 /** Every example that still has a hand-authored diagram. */
-const DRAWN = ["requirements-grill"] as const;
+const DRAWN = ["post-code-review"] as const;
 
 function diagramPath(name: string): string {
   const workflowPath = packagedWorkflowPath(name);
@@ -53,8 +53,8 @@ describe("curated workflow diagrams", () => {
     expect(svg.trimStart().startsWith("<svg"), svgPath).toBe(true);
     expect(svg, svgPath).toContain("viewBox=");
     // A diagram a screen reader cannot describe is a picture, not documentation.
-    expect(svg, svgPath).toMatch(/<title>/u);
-    expect(svg, svgPath).toMatch(/<desc>/u);
+    expect(svg, svgPath).toMatch(/<title(?:\s[^>]*)?>/u);
+    expect(svg, svgPath).toMatch(/<desc(?:\s[^>]*)?>/u);
 
     // Self-contained: an SVG that pulls a font, an image, or a script is not a
     // file a reviewer can read, and in a published package it is a request the
@@ -73,38 +73,78 @@ describe("curated workflow diagrams", () => {
     expect(svg, svgPath).not.toMatch(/llm\(/iu);
   });
 
-  it.each(DRAWN)("names every phase, artifact and agent the %s workflow actually declares", (name) => {
-    const source = readFileSync(packagedWorkflowPath(name), "utf8");
-    const svg = readFileSync(diagramPath(name), "utf8");
-
-    const phases = declaredNames(source, /\bphase\("([^"]+)"\)/gu);
-    const artifacts = declaredNames(source, /\bartifact:\s*"([^"]+)"/gu).concat(
-      declaredNames(source, /\bpublishArtifact\("([^"]+)"/gu),
-    );
-
-    // The point of pinning both lists: a stage renamed or an artifact added in
-    // the workflow leaves the picture quietly wrong, and a wrong picture is
-    // read as truth longer than missing prose would be.
-    expect(phases.length, `${name} should declare phases`).toBeGreaterThan(0);
-    for (const phase of phases) expect(svg, `${name} diagram omits phase ${phase}`).toContain(phase);
-    for (const artifact of new Set(artifacts)) {
-      expect(svg, `${name} diagram omits artifact ${artifact}`).toContain(artifact);
-    }
-
-    // The agents are the point of these diagrams, so each one is named on it.
-    const agents = declaredNames(source, /\bid:\s*"([^"]+)"/gu);
-    expect(agents.length, `${name} should declare an agent roster`).toBeGreaterThan(0);
-    for (const agent of agents) expect(svg, `${name} diagram omits agent ${agent}`).toContain(agent);
-  });
-
   it("does not retain the removed critic-loop diagram for the minimal plan graph", () => {
     expect(() => readFileSync(diagramPath("plan"), "utf8")).toThrow();
   });
 
-  it("shows that requirements-grill refuses an empty request before it spends an agent", () => {
-    const svg = readFileSync(diagramPath("requirements-grill"), "utf8");
+  it("shows every post-code-review workflow boundary, phase, model role, and Markdown handoff", () => {
+    const parentPath = packagedWorkflowPath("post-code-review");
+    const parent = readFileSync(parentPath, "utf8");
+    const svg = readFileSync(diagramPath("post-code-review"), "utf8");
+    const packageChildren = declaredNames(parent, /\bchild:\s*"([^"]+)"/gu);
 
-    expect(svg).toMatch(/Empty request/u);
-    expect(svg).toMatch(/before the first agent is spawned|before any agent runs/u);
+    expect(packageChildren).toEqual([
+      "scope",
+      "boundaries",
+      "simplicity",
+      "contracts",
+      "style",
+      "necessity",
+      "synthesis",
+    ]);
+    for (const phase of declaredNames(parent, /\bphase\("([^"]+)"\)/gu)) {
+      expect(svg, `post-code-review diagram omits phase ${phase}`).toContain(phase);
+    }
+    for (const child of packageChildren) {
+      expect(svg, `post-code-review diagram omits child ${child}`).toContain(child);
+      const childSource = readFileSync(packagedWorkflowPath(`post-code-review/${child}`), "utf8");
+      for (const artifact of declaredNames(childSource, /\bpublishPrimaryFile\("([^"]+)"\)/gu)) {
+        expect(svg, `post-code-review diagram omits artifact ${artifact}`).toContain(artifact);
+      }
+    }
+    expect(svg).toContain('modelRole "smol:high"');
+    expect(svg).toContain('modelRole "smol:xhigh"');
+    expect(svg).toContain("Operator:");
+    expect(svg).toContain("Workflow:");
+    expect(svg).toContain("Agent:");
+    expect(svg).toContain("Artifact:");
+  });
+
+  it("challenges proposed fixes before synthesis and respects trusted external ownership", () => {
+    const contracts = readFileSync(packagedWorkflowPath("post-code-review/contracts"), "utf8");
+    const style = readFileSync(packagedWorkflowPath("post-code-review/style"), "utf8");
+    const necessity = readFileSync(packagedWorkflowPath("post-code-review/necessity"), "utf8");
+    const synthesis = readFileSync(packagedWorkflowPath("post-code-review/synthesis"), "utf8");
+
+    expect(contracts).toContain("Do not require duplicate local leaf validation merely because data is external");
+    expect(contracts).toContain("accepted responsibility boundary rather than a defect");
+
+    expect(style).toContain("Read review-scope.md there first, then read style.md");
+    expect(style).toContain("an empty file means that the operator supplied no additional style criteria");
+    expect(style).toContain("misleading, stale, redundant, or missing comments");
+    expect(style).toContain("turn personal taste into a defect");
+
+    expect(necessity).toContain("What real failure or violated contract is proven?");
+    expect(necessity).toContain("Which component owns that guarantee?");
+    expect(necessity).toContain("duplicate validation or responsibility");
+    expect(necessity).toContain("the simplest way to close the proven risk");
+    expect(necessity).toContain("documentation and tests prove that a dependency exists and is exercised");
+    expect(necessity).toContain("is not duplicate validation when the old check is removed");
+    expect(necessity).toContain("RETAIN");
+    expect(necessity).toContain("REFRAME");
+    expect(necessity).toContain("REJECT");
+    expect(necessity).toContain("BLOCKED");
+
+    expect(synthesis).toContain("The necessity challenge is an admission gate, not another vote");
+    expect(synthesis).toContain("must not restore a proposal that the necessity challenge rejected");
+    expect(synthesis).toContain("absence of repeat local validation is an accepted responsibility boundary");
+    expect(synthesis).toContain("Do not treat current documentation or tests as proof");
+    expect(synthesis).toContain("READY_WITH_RECOMMENDATIONS");
+    expect(synthesis).toContain("CHANGES_REQUIRED");
+    expect(synthesis).toContain("Action: REQUIRED, RECOMMENDED, or NO_ACTION");
+    expect(synthesis).toContain("Impact: high, medium, or low");
+    expect(synthesis).toContain("illustrative fix snippet");
+    expect(synthesis).toContain("Do not include a snippet");
+    expect(synthesis).toContain("/workflows run implement");
   });
 });

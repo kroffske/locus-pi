@@ -1,34 +1,27 @@
 {
   "id": "agents",
-  "name": "agents",
   "agent": {
     "name": "extension-agents",
-    "description": "Manage the agent catalog, child sessions, /agent and /ps, and spawn_agent/task tools."
+    "description": "Manage the agent catalog, child sessions, /agent and /ps, and the spawn_agent tool."
   },
-  "version": "0.1.0",
-  "defaultEnabled": true,
-  "behaviorStatus": "active",
   "ownershipStatus": "locus-specific",
-  "sourceMode": "locus-owned",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
     "agent definition catalog and validation",
     "M10 runner contract exists before execution",
-    "createAgentSession SDK host required before /agent run or task executes",
+    "createAgentSession SDK host required before /agent run or spawn_agent executes",
     "completed agent runs return the exact real non-empty child text; JSON-looking text is not parsed and model-written markers or result envelopes are unsupported",
     "named-tool evidence is collected only from exact SDK tool_execution lifecycle events and passed through AgentChildOutputStats.recordedToolNames; aggregate toolCalls/toolResults never fabricate a tool name",
     "agent observe / agent summary render an on-demand bounded snapshot of current and recent live rows from agentLiveStore.rows; done/cancelled/error rows stay terminal, not running, with currentTools/currentToolArgs/currentToolStartMs cleared and elapsedMs frozen at terminal transition",
     "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
     "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
-    "no first-class createAgentSession JSON schema/response_format mode is present in the declared Pi SDK 0.83.0 peer; agent output is text-only",
-    "locus_workload_proof records diagnostic persisted child-workload evidence but does not control success by itself",
+    "the current adapter does not use a first-class createAgentSession JSON schema/response_format mode; agent output remains text-only even when a newer Pi host exposes additional structured-output capabilities",
     "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
-    "spawn_agent is the model-friendly primary subagent-spawn tool; task is a back-compat alias; both accept one required task string, stream the generated live agent name into the tool card at kickoff, create one child, return exact text in content, and keep runtime metadata in details",
-    "SDK children always receive excludeTools=[spawn_agent, task] after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow when the profile allows it",
+    "spawn_agent is the canonical subagent-spawn tool; it accepts one required task string, streams the generated live agent name into the tool card at kickoff, creates one child, returns exact text in content, and keeps runtime metadata in details",
+    "SDK children always exclude spawn_agent after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow when the profile allows it",
     "readOnly=true is host-enforced: the child allowlist is narrowed to read, grep, find, ls, yield, and explicitly requested git_read; bash, write, edit, workflow, and unknown tools are removed; git_read invokes only allowlisted local Git query subcommands without a shell and rejects mutating or process-spawning options",
-    "task spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
-    "task resolves missing agent and default to task; general resolves to task only when no project/user general agent exists",
-    "the agent parameter of spawn_agent/task advertises the resolved first-match-wins catalog as bounded name - description lines (at most 12 entries, each description clamped to 96 characters, overflow stated as +N more); it is republished on every agent discovery pass including one before_agent_start refresh per turn, and it never replaces the unknown-agent check",
+    "spawn_agent spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
+    "the agent parameter of spawn_agent advertises the resolved first-match-wins catalog as bounded name - description lines (at most 12 entries, each description clamped to 96 characters, overflow stated as +N more); it is republished on every agent discovery pass including one before_agent_start refresh per turn, and it never replaces the unknown-agent check",
     "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
     "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs use the shared inline editor-replacement surface while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
     "unknown-target and headless settled-run chrome use typed ERROR/RESULT blocks without replacing the domain-owned live fleet, focus, drill, stop, resolver, or runtime store",
@@ -60,11 +53,10 @@
     "runtime result artifacts",
     "optional child prompt memory from <projectRoot>/MEMORY.md",
     "optional child prompt skills from .agents/skills/<name>/SKILL.md and .pi/skills/<name>/SKILL.md",
-    ".locus/runtime/agent-workload-proof/*.json"
+    "runtime result artifacts"
   ],
-  "tier": "core-owned",
   "provides": {
-    "tools": ["spawn_agent", "task", "locus_workload_proof"],
+    "tools": ["spawn_agent"],
     "commands": [
       "agent list",
       "agent inspect",
@@ -75,7 +67,7 @@
       "agent ps",
       "ps"
     ],
-    "hooks": ["session_start", "before_agent_start", "tool_call", "tool_result"],
+    "hooks": ["session_start", "session_shutdown", "before_agent_start", "input"],
     "shortcuts": ["shift+down"]
   },
   "uiLifecycle": {
@@ -100,16 +92,11 @@
         ".agents/agents/*.md",
         "~/.agents/agents/*.md",
         "bundled .agents/agents/*.md",
-        ".locus/runtime/agent-workload-proof/*.json",
         "MEMORY.md",
         ".agents/skills/*/SKILL.md",
         ".pi/skills/*/SKILL.md"
       ],
-      "write": [
-        ".locus/runtime/artifacts/*.json",
-        ".locus/runtime/agent-workload-proof/*.json",
-        ".locus/runtime/reports/*.jsonl"
-      ]
+      "write": [".locus/runtime/artifacts/*.json", ".locus/runtime/reports/*.jsonl"]
     },
     "subprocess": ["git (allowlisted local read-only queries through git_read)"],
     "network": [],
@@ -127,8 +114,8 @@
     ]
   },
   "risk": "high",
-  "docsPath": "docs/extensions/active/agents.md",
-  "sourceAuditPath": "https://github.com/kroffske/locus-pi/blob/main/docs/source-audit/agents.md",
+  "docsPath": "extensions/agents/README.md",
+  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/agents/agents-discovery.test.ts",
     "tests/extensions/agents/agent-catalog-hint.test.ts",
@@ -140,7 +127,7 @@
     "tests/extensions/agents/agent-drill.test.ts",
     "tests/extensions/agents/agent-fleet-menu.test.ts",
     "tests/extensions/agents/agent-live-store-entrypoints.test.ts",
-    "tests/integration/public-registration.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/shared/operator-interaction.test.ts"
   ],
   "review": {

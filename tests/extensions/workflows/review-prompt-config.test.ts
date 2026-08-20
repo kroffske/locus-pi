@@ -2,13 +2,14 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { createWorkflowResourceLoader } from "../../../extensions/workflows/runtime/workflow-resources.js";
 
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-resources-"));
   const workflowDirectory = path.join(root, "nested", "review");
   const resourceDirectory = path.join(workflowDirectory, "resources");
-  const runDir = path.join(root, "run");
+  const runDir = ensureWorkflowRunDir(root, "resource-test-run");
   mkdirSync(resourceDirectory, { recursive: true });
   const workflowPath = path.join(workflowDirectory, "review.workflow.mjs");
   writeFileSync(workflowPath, "export default async () => {};\n", "utf8");

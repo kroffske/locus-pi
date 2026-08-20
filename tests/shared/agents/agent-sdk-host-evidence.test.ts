@@ -242,6 +242,25 @@ describe("agent SDK evidence surfacing", () => {
     assert.equal(Object.hasOwn(body, "evidence"), false);
   });
 
+  it("uses the request as the sole declared Fusion mode authority in the run-result artifact", () => {
+    const req = { ...request(), capabilityMode: "tool-free" as const };
+    const result: AgentRunResult & { capabilityMode: "agent" } = {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "ok",
+      capabilityMode: "agent",
+      activeToolNames: [],
+      diagnostics: [],
+      lifecycleEntryIds: [],
+    };
+
+    const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
+    assert.ok(withArtifact.resultArtifact !== undefined);
+    const body = JSON.parse(withArtifact.resultArtifact.content) as Record<string, unknown>;
+    assert.equal(body.capabilityMode, "tool-free");
+    assert.deepEqual(body.activeToolNames, []);
+  });
+
   it("carries the host-read executed model into the run-result artifact on disk", async () => {
     // The data-flow contract, asserted where it actually matters. The artifact is
     // written INSIDE `executeAgentRunBoundary`, before the workflow bridge ever sees

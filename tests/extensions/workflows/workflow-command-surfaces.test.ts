@@ -13,20 +13,23 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import * as workflowJournal from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { workflowBackgroundRunRegistry } from "../../../extensions/workflows/background-run-registry.js";
 import { workflowRunDir } from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
-import { parseRunCommand } from "../../../extensions/workflows/command-parser.js";
+import { parseRunCommand, workflowRunUsage } from "../../../extensions/workflows/command-parser.js";
 import workflows from "../../../extensions/workflows/index.js";
+import { buildRunDetailBlock } from "../../../extensions/workflows/run-evidence.js";
 import {
   WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
-} from "../../../extensions/workflows/workflow-transcript.js";
+} from "../../../extensions/workflows/command/receipts.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
 
 const roots: string[] = [];
+const MALFORMED_RUN_SELECTORS = ["../outside", "bad/id", "запуск", "a".repeat(129)] as const;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -174,6 +177,24 @@ describe("/workflows help and unknown commands", () => {
     expect(run.selectCalls.flatMap((call) => call.options).every((option) => typeof option === "string")).toBe(true);
   });
 
+  it("prefills post-code-review without a manual workspace", async () => {
+    const root = makeRoot();
+    const workflowDir = path.join(root, ".pi", "workflows");
+    mkdirSync(workflowDir, { recursive: true });
+    writeFileSync(
+      path.join(workflowDir, "post-code-review.workflow.mjs"),
+      'export const meta={name:"post-code-review",description:"Review workflow"}; export default async()=>null;\n',
+      "utf8",
+    );
+
+    const run = createHarness(root);
+    run.selectQueue.push("run", "post-code-review");
+    workflows(run.pi);
+    await run.commands.get("workflows")!.handler("", run.ctx);
+
+    expect(run.editorText).toBe("/workflows run post-code-review");
+  });
+
   it("waits for the native selector teardown before filling the editor", async () => {
     const root = makeRoot();
     const workflowDir = path.join(root, ".pi", "workflows");
@@ -238,7 +259,6 @@ describe("/workflows help and unknown commands", () => {
       { expanded: true, outputPad: 0 },
       theme,
     );
-
     expect(start?.render(100).join("\n")).toContain("Workflow started");
     expect(end?.render(100).join("\n")).toContain("Workflow finished");
   });
@@ -287,9 +307,9 @@ describe("/workflows help and unknown commands", () => {
     expect(continuation.widgets.get("workflows") ?? "").toContain("No workflow handoff currently needs an answer.");
   });
 
-  it("quotes whitespace/control workflow refs and parses them without an input tail", async () => {
+  it("quotes an interior-whitespace workflow ref and parses it without an input tail", async () => {
     const root = makeRoot();
-    const targetRef = "alpha workflow\t";
+    const targetRef = "alpha workflow";
     const workflowDir = path.join(root, ".pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
@@ -306,6 +326,165 @@ describe("/workflows help and unknown commands", () => {
     const command = `/workflows run ${JSON.stringify(targetRef)}`;
     expect(h.editorText).toBe(command);
     expect(parseRunCommand(command.slice("/workflows ".length))).toEqual({ scriptRef: targetRef });
+  });
+
+  it("parses a fresh output namespace and resume id before semantic input", () => {
+    expect(parseRunCommand("run task/plan --run-name airflow-builder")).toEqual({
+      scriptRef: "task/plan",
+      runName: "airflow-builder",
+    });
+    expect(
+      parseRunCommand(
+        'run post-code-review --output-dir "tmp/post-code-review/review 1" --resume prior-run review commit HEAD',
+      ),
+    ).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/post-code-review/review 1",
+      resumeFromRunId: "prior-run",
+      input: "review commit HEAD",
+    });
+    expect(parseRunCommand("run post-code-review --resume prior-run --output-dir tmp/review-1")).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/review-1",
+      resumeFromRunId: "prior-run",
+    });
+    expect(
+      parseRunCommand(
+        "run post-code-review --output-dir tmp/first --resume run-first --output-dir tmp/last --resume run-last",
+      ),
+    ).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/last",
+      resumeFromRunId: "run-last",
+    });
+    expect(parseRunCommand("run post-code-review --output-dir tmp/fresh --resume")).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/fresh",
+      missingResumeId: true,
+    });
+    expect(parseRunCommand("run task/draft --run-name")).toEqual({
+      scriptRef: "task/draft",
+      missingRunName: true,
+    });
+    // Run-level no-operator mode: value-less flag, composable with the value
+    // options in any order, and never swallowed into semantic input.
+    expect(parseRunCommand("run plan --no-operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: true,
+    });
+    expect(parseRunCommand("run plan --no-operator --output-dir tmp/auto ship the fix")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: true,
+      input: "ship the fix",
+    });
+    expect(parseRunCommand("run plan --output-dir tmp/auto --no-operator -- --no-operator stays input")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: true,
+      input: "--no-operator stays input",
+    });
+    // The headless opt-out is the same kind of value-less flag, and the last
+    // mode flag wins exactly like a repeated value option.
+    expect(parseRunCommand("run plan --operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: false,
+    });
+    expect(parseRunCommand("run plan --operator --output-dir tmp/auto ship the fix")).toEqual({
+      scriptRef: "plan",
+      outputDir: "tmp/auto",
+      noOperator: false,
+      input: "ship the fix",
+    });
+    expect(parseRunCommand("run plan --no-operator --operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: false,
+    });
+    expect(parseRunCommand("run plan --operator --no-operator")).toEqual({
+      scriptRef: "plan",
+      noOperator: true,
+    });
+    expect(parseRunCommand("run plan -- --operator stays input")).toEqual({
+      scriptRef: "plan",
+      input: "--operator stays input",
+    });
+    // A value option cannot eat the flag as its value.
+    expect(parseRunCommand("run plan --output-dir --no-operator")).toEqual({
+      scriptRef: "plan",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand("run plan --output-dir --operator")).toEqual({
+      scriptRef: "plan",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand("run post-code-review --resume run-old --output-dir")).toEqual({
+      scriptRef: "post-code-review",
+      resumeFromRunId: "run-old",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand('run post-code-review --resume ""')).toEqual({
+      scriptRef: "post-code-review",
+      missingResumeId: true,
+    });
+    expect(parseRunCommand('run post-code-review --resume " "')).toEqual({
+      scriptRef: "post-code-review",
+      resumeFromRunId: " ",
+    });
+    expect(parseRunCommand("run post-code-review --output-dir tmp/first --output-dir")).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/first",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand('run post-code-review --output-dir "tmp/first review" --output-dir')).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/first review",
+      missingOutputDir: true,
+    });
+    expect(parseRunCommand("run post-code-review --resume run-first --resume")).toEqual({
+      scriptRef: "post-code-review",
+      resumeFromRunId: "run-first",
+      missingResumeId: true,
+    });
+  });
+
+  it.each(["\t", "\n", "\u00a0"])("recognizes run options separated by %j", (separator) => {
+    expect(
+      parseRunCommand(`run post-code-review --output-dir${separator}tmp/review --resume${separator}prior-run`),
+    ).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/review",
+      resumeFromRunId: "prior-run",
+    });
+  });
+
+  it("forwards the exact remainder after the end-of-options delimiter", () => {
+    expect(parseRunCommand("run post-code-review -- --resume --output-dir --")).toEqual({
+      scriptRef: "post-code-review",
+      input: "--resume --output-dir --",
+    });
+    expect(
+      parseRunCommand("run post-code-review --output-dir tmp/review --resume run-old --   --resume  --output-dir"),
+    ).toEqual({
+      scriptRef: "post-code-review",
+      outputDir: "tmp/review",
+      resumeFromRunId: "run-old",
+      input: "  --resume  --output-dir",
+    });
+    expect(parseRunCommand("run post-code-review -- --")).toEqual({ scriptRef: "post-code-review", input: "--" });
+  });
+
+  it("registers the complete run grammar only on the canonical command", () => {
+    const h = createHarness(makeRoot());
+    workflows(h.pi);
+
+    expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
+    expect(workflowRunUsage()).toBe(
+      "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]",
+    );
+    expect(h.commands.has("workflow-run")).toBe(false);
+    expect(h.commands.get("workflow-stop")?.description).toBe(
+      "Compatibility alias for /workflows stop [runId|last]: /workflow-stop",
+    );
   });
 
   it("limits stop-menu choices to unsettled runs owned by the current session lease", async () => {
@@ -397,58 +576,36 @@ describe("/workflows help and unknown commands", () => {
 
     expect(widget).toContain("Unknown workflow command: run");
     expect(widget).toContain("Available curated Package workflows:");
-    expect(widget).toContain("review");
+    expect(widget).toContain("post-code-review");
   });
 });
 
-describe("flat /workflow-* aliases", () => {
-  it("keep every flat alias on the same parser and operator surface", async () => {
+describe("flat workflow command compatibility", () => {
+  it("keeps only the emergency stop alias", async () => {
     const h = wideHarness(makeRoot());
-    const cases = [
-      ["workflow-list", ""],
-      ["workflow-info", "missing"],
-      ["workflow-status", "missing"],
-      ["workflow-result", "missing"],
-      ["workflow-run", "missing"],
-      ["workflow-continue", "missing"],
-      ["workflow-stop", "missing"],
-    ] as const;
-
-    // dashboard has no flat alias by contract; this assertion documents that
-    // the root command vocabulary and flat compatibility surface differ.
-    expect(h.commands.has("workflow-dashboard")).toBe(false);
-    for (const [name, args] of cases) {
-      const command = h.commands.get(name);
-      expect(command, `${name} must be registered`).toBeDefined();
-      await command!.handler(args, h.ctx);
-      expect(h.widgets.get("workflows") ?? "").not.toContain("Unknown workflow command");
-    }
+    expect(h.commands.get("workflow-stop")).toBeDefined();
+    for (const name of [
+      "workflow-dashboard",
+      "workflow-list",
+      "workflow-info",
+      "workflow-status",
+      "workflow-result",
+      "workflow-run",
+      "workflow-continue",
+    ])
+      expect(h.commands.has(name), name).toBe(false);
   });
 
-  it("matches canonical command output and side effects in fresh harnesses", async () => {
-    const cases = [
-      ["list", "workflow-list", ""],
-      ["info missing", "workflow-info", "missing"],
-      ["status missing", "workflow-status", "missing"],
-      ["result missing", "workflow-result", "missing"],
-      ["continue missing", "workflow-continue", "missing"],
-      ["stop missing", "workflow-stop", "missing"],
-      ["run missing", "workflow-run", "missing"],
-    ] as const;
+  it("matches canonical stop output and side effects", async () => {
+    const root = makeRoot();
+    const canonical = wideHarness(root);
+    await canonical.commands.get("workflows")!.handler("stop missing", canonical.ctx);
 
-    for (const [canonicalText, aliasName, aliasArgs] of cases) {
-      const root = makeRoot();
-      const canonical = wideHarness(root);
-      await canonical.commands.get("workflows")!.handler(canonicalText, canonical.ctx);
+    const alias = wideHarness(root);
+    await alias.commands.get("workflow-stop")!.handler("missing", alias.ctx);
 
-      const alias = wideHarness(root);
-      await alias.commands.get(aliasName)!.handler(aliasArgs, alias.ctx);
-
-      expect(widgetOf(alias), aliasName).toBe(widgetOf(canonical));
-      expect(alias.editorText, aliasName).toBe(canonical.editorText);
-      expect(alias.notifications, aliasName).toEqual(canonical.notifications);
-      expect(alias.sentMessages, aliasName).toEqual(canonical.sentMessages);
-    }
+    expect(widgetOf(alias)).toBe(widgetOf(canonical));
+    expect(alias.notifications).toEqual(canonical.notifications);
   });
 });
 
@@ -458,7 +615,7 @@ describe("/workflows status run list", () => {
 
     expect(widget).toContain("No workflow runs yet.");
     expect(widget).toContain("status: ok; total=0 shown=0 older=0");
-    expect(widget).toContain('Run one: /workflows run requirements-grill "<your request>"');
+    expect(widget).toContain('Draft one: /workflows run task/draft "<your request>"');
   });
 
   it("renders one wide row per run with the agent and status columns", async () => {
@@ -503,8 +660,60 @@ describe("/workflows status run list", () => {
   it("reports a run id that has no evidence on disk as not found", async () => {
     const widget = await runCommand(wideHarness(makeRoot()), "status 20260726-000000-zzzz");
 
+    expect(widget).toContain("[WARN] Workflow run");
     expect(widget).toContain("Workflow run not found: 20260726-000000-zzzz");
     expect(widget).toContain("Recovery: /workflows status");
+  });
+
+  it("keeps passive detail total for malformed run ids without reading run evidence", () => {
+    const root = makeRoot();
+    const readJournal = vi.spyOn(workflowJournal, "readWorkflowRunJournalState");
+    const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
+
+    for (const selector of MALFORMED_RUN_SELECTORS) {
+      const detail = buildRunDetailBlock(root, selector, true);
+      expect(detail.type, selector).toBe("WARN");
+    }
+    expect(readJournal).not.toHaveBeenCalled();
+    expect(readSummary).not.toHaveBeenCalled();
+  });
+
+  it("warns for malformed selectors on canonical passive commands before evidence reads", async () => {
+    const readJournal = vi.spyOn(workflowJournal, "readWorkflowRunJournalState");
+    const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
+
+    for (const selector of MALFORMED_RUN_SELECTORS) {
+      const harness = compactHarness(makeRoot());
+      await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
+      const widget = widgetOf(harness);
+      expect(widget, selector).toContain("[WARN] Workflow run");
+      expect(widget, selector).toContain("Workflow run not found:");
+      expect(widget, selector).toContain("Recovery: /workflows status");
+    }
+    expect(readJournal).not.toHaveBeenCalled();
+    expect(readSummary).not.toHaveBeenCalled();
+  });
+
+  it("warns before malformed selectors can enter a custom viewer or its static fallback", async () => {
+    const readJournal = vi.spyOn(workflowJournal, "readWorkflowRunJournalState");
+    const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
+
+    for (const selector of MALFORMED_RUN_SELECTORS) {
+      const harness = createHarness(makeRoot());
+      harness.ctx.hasUI = true;
+      const custom = vi.fn(async () => {
+        throw new Error("custom renderer failed");
+      }) as NonNullable<typeof harness.ctx.ui.custom>;
+      harness.ctx.ui.custom = custom;
+      workflows(harness.pi);
+      await harness.commands.get("workflows")!.handler(`status ${selector}`, harness.ctx);
+      const widget = widgetOf(harness);
+      expect(widget, selector).toContain("[WARN] Workflow run");
+      expect(widget, selector).toContain("Workflow run not found:");
+      expect(custom, selector).not.toHaveBeenCalled();
+    }
+    expect(readJournal).not.toHaveBeenCalled();
+    expect(readSummary).not.toHaveBeenCalled();
   });
 });
 
@@ -519,12 +728,63 @@ describe("/workflows stop", () => {
 });
 
 describe("/workflows argument rejections", () => {
+  it("rejects --run-name with no folder name after it", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --run-name");
+    expect(widget).toContain("Missing folder name after --run-name.");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
+  it("rejects --run-name together with --output-dir", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --run-name one --output-dir tmp/two");
+    expect(widget).toContain("--run-name and --output-dir are mutually exclusive.");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
+  it("rejects --output-dir with no project-relative path after it", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --output-dir");
+    const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
+
+    expect(widget).toContain("Missing project-relative path after --output-dir.");
+    expect(unwrapped).toContain("Retry: /workflows run alpha --output-dir <path> [--resume <runId>] [--] [input]");
+    expect(widget).toContain("No workflow execution was started.");
+  });
+
   it("rejects --resume with no run id after it", async () => {
     const widget = await runCommand(wideHarness(makeRoot()), "run alpha --resume");
+    const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
 
     expect(widget).toContain("Missing run id after --resume.");
-    expect(widget).toContain("Retry: /workflows run <name|path> --resume <runId> [input]");
+    expect(unwrapped).toContain(
+      "Retry: /workflows run alpha [--run-name <name> | --output-dir <path>] --resume <runId> [--] [input]",
+    );
     expect(widget).toContain("No workflow execution was started.");
+  });
+
+  it("preserves an accepted output workspace when the following resume id is missing", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --output-dir tmp/reviews/review-1 --resume");
+    const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
+
+    expect(unwrapped).toContain(
+      "Retry: /workflows run alpha --output-dir tmp/reviews/review-1 --resume <runId> [--] [input]",
+    );
+  });
+
+  it("preserves an accepted resume id when the following output workspace is missing", async () => {
+    const widget = await runCommand(wideHarness(makeRoot()), "run alpha --resume run-old --output-dir");
+    const unwrapped = widget.replace(/[│╭╮╰╯─]/gu, "").replace(/\s+/gu, " ");
+
+    expect(unwrapped).toContain("Retry: /workflows run alpha --output-dir <path> --resume run-old [--] [input]");
+  });
+
+  it("preserves an accepted duplicate outputDir on canonical recovery", async () => {
+    const h = wideHarness(makeRoot());
+    await h.commands.get("workflows")!.handler("run alpha --output-dir tmp/first --output-dir", h.ctx);
+    const unwrapped = widgetOf(h)
+      .replace(/[│╭╮╰╯─]/gu, "")
+      .replace(/\s+/gu, " ");
+    expect(unwrapped).toContain(
+      "Retry: /workflows run alpha --output-dir tmp/first --output-dir <path> [--resume <runId>] [--] [input]",
+    );
   });
 
   it("requires a source run id for a continuation", async () => {

@@ -2,7 +2,7 @@
  * extensions/workflows/index.ts — Extension entrypoint.
  *
  * Registers the `workflow` tool (./workflow-tool.js) and the `/workflows`
- * command plus its flat `/workflow-*` aliases (./command-router.js). Owns only
+ * command plus the emergency `/workflow-stop` alias (./command-router.js). Owns only
  * the per-session wiring those two need: the live progress panels, the
  * completed-run bookkeeping, the command launcher, and the operator handoff
  * controller. Every surface it renders lives in a submodule.
@@ -39,10 +39,10 @@ import { registerWorkflowTool } from "./workflow-tool.js";
 import { registerFusionSurface } from "./fusion-surface.js";
 import {
   announceCommandWorkflowStart,
-  createWorkflowTranscript,
+  persistCommandWorkflowRejection,
   persistCommandWorkflowTranscript,
-  registerWorkflowTranscriptRenderers,
-} from "./workflow-transcript.js";
+} from "./command/receipts.js";
+import { createWorkflowTranscript, registerWorkflowTranscriptRenderers } from "./workflow-transcript.js";
 
 export default function workflows(pi: ExtensionAPI): void {
   registerWorkflowTranscriptRenderers(pi);
@@ -100,8 +100,10 @@ export default function workflows(pi: ExtensionAPI): void {
       const transcript = createWorkflowTranscript(request.ctx, request.scriptRef, "command", {
         ...(request.input === undefined ? {} : { input: request.input }),
       });
+      let startedRun: { runId: string; runDir: string } | undefined;
       return {
         onRunStart({ runId, runDir }) {
+          startedRun = { runId, runDir };
           sessionRunIds.add(runId);
           const announcement = transcript.start(runId, runDir);
           // The run boundary is published while the session is still idle from
@@ -112,6 +114,9 @@ export default function workflows(pi: ExtensionAPI): void {
             panel = installWorkflowProgress(request.ctx, WORKFLOW_LIVE_WIDGET_KEY, request.scriptRef, runId, {
               scope: "workflow",
               declaredStages: preparation.declaredStages,
+              ...(request.continuation === undefined
+                ? {}
+                : { continuationSourceRunId: request.continuation.originRunId }),
             });
             sessionPanels.add(panel);
           }
@@ -132,11 +137,34 @@ export default function workflows(pi: ExtensionAPI): void {
           } else {
             setOperatorWidget(request.ctx, "workflows", buildWorkflowResultBlock(result, request.ctx.mode !== "tui"));
           }
-          await persistCommandWorkflowTranscript(pi, request.ctx, transcriptCompletion, isCurrent);
+          const published = await persistCommandWorkflowTranscript(pi, request.ctx, transcriptCompletion, isCurrent);
+          if (!published && isCurrent()) throw new Error("Workflow terminal receipt was not published.");
         },
-        onError(error) {
+        async onError(error, isCurrent) {
           cleanupPanel();
           setOperatorWidget(request.ctx, "workflows", workflowBackgroundFailureBlock(error));
+          if (startedRun === undefined) {
+            const published = await persistCommandWorkflowRejection(
+              pi,
+              request.ctx,
+              {
+                code: "runner_prestart_failed",
+                target: request.scriptRef,
+                text: `Workflow not started: ${errorMessage(error)}`,
+              },
+              isCurrent,
+            );
+            if (!published && isCurrent()) throw new Error("Workflow rejection receipt was not published.");
+            return;
+          }
+          completedRunIds.add(startedRun.runId);
+          const published = await persistCommandWorkflowTranscript(
+            pi,
+            request.ctx,
+            transcript.fail(error, startedRun.runId, startedRun.runDir),
+            isCurrent,
+          );
+          if (!published && isCurrent()) throw new Error("Workflow terminal receipt was not published.");
         },
         onFinally() {
           cleanupPanel();
@@ -211,7 +239,7 @@ export default function workflows(pi: ExtensionAPI): void {
   // No handoff pump here on purpose, and the run scope resets to empty: a session
   // opens on the operator's terms. An unanswered question from an earlier session
   // stays readable in its run's evidence and is reopened only when the operator
-  // asks (bare `/workflows`, then `continue`, or `/workflow-continue <runId>`) —
+  // asks (bare `/workflows`, then `continue`, or `/workflows continue <runId>`) —
   // never as a modal the new session starts with, and never on its first settled
   // turn either.
   pi.on("session_start", (_event, ctx) => {

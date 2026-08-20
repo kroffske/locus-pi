@@ -36,13 +36,13 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
   );
   const target = resolveWorkflowTarget({ script: "alpha" }, root, root);
   const currentIdentity = readCurrentWorkflowScriptIdentity(target.path);
+  const runDir = ensureWorkflowRunDir(root, runId);
+  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${currentIdentity.scriptSha256}.workflow.mjs`);
+  writeFileSync(snapshotPath, readFileSync(target.path));
   const scriptIdentity = {
     ...currentIdentity,
     sourcePath: target.path,
-    snapshotPath: path.join(
-      workflowRunRuntimeDir(path.join(root, ".pi", "locus-pi", "runs", runId)),
-      "script.workflow.mjs",
-    ),
+    snapshotPath,
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
@@ -75,7 +75,8 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
     scriptIdentity,
     terminalArtifactRefs: [artifactRef],
   });
-  const runDir = ensureWorkflowRunDir(root, runId);
+  const workspaceDir = path.join(root, "handoff-workspace");
+  mkdirSync(workspaceDir, { recursive: true });
   writeFileSync(
     workflowResultFile(runDir),
     `${JSON.stringify({
@@ -85,6 +86,9 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
       disposition: { status: "awaiting_operator", detail: "review clarification required" },
       journal: [],
       resultPersistence: { ok: true, path: workflowResultFile(runDir) },
+      workspaceDir,
+      workspaceDirRelative: "handoff-workspace",
+      workspaceDirExplicit: true,
       target,
       scriptIdentity,
       artifactRefs: [artifactRef],
@@ -96,7 +100,7 @@ function projectWithHandoff(runId: string, existingRoot?: string): string {
 }
 
 function corruptPersistedHandoff(root: string, runId: string): void {
-  const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", runId));
+  const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", runId));
   const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
   result.operatorHandoff = { ...(result.operatorHandoff as Record<string, unknown>), title: 42 };
   writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
@@ -187,7 +191,7 @@ describe("workflow actionable handoff integration", () => {
     await waitFor(() => continuations(requests).length === 1);
 
     expect(continuations(requests)[0]).toMatchObject({
-      script: "alpha",
+      name: "alpha",
       input: "Current changes",
       continuation: {
         originRunId: sourceRunId,
@@ -277,7 +281,7 @@ describe("workflow actionable handoff integration", () => {
   it("does not mount a tool-origin question on turn_end and uses the fresh agent_settled context", async () => {
     const sourceRunId = "20260725-122000-source";
     const root = projectWithHandoff(sourceRunId);
-    const resultPath = workflowResultFile(path.join(root, ".pi", "locus-pi", "runs", sourceRunId));
+    const resultPath = workflowResultFile(path.join(root, ".locus-pi", "runs", sourceRunId));
     const deferredPath = `${resultPath}.deferred`;
     // Hidden while the run settles, so the terminal pump finds nothing and the
     // question can only arrive through the lifecycle event under test.
@@ -301,7 +305,7 @@ describe("workflow actionable handoff integration", () => {
     expect(harness.customComponents).toHaveLength(1);
   });
 
-  it("continues one explicit answer in JSON mode through the flat command without interactive UI", async () => {
+  it("continues one explicit answer in JSON mode through the canonical command without interactive UI", async () => {
     const sourceRunId = "20260725-123000-source";
     const root = projectWithHandoff(sourceRunId);
     const harness = createHarness(root, {
@@ -314,10 +318,10 @@ describe("workflow actionable handoff integration", () => {
     await emit(harness, "session_start");
     await flushBackground();
 
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.(`${sourceRunId} `)).toEqual([
-      expect.objectContaining({ value: `${sourceRunId} --answer `, label: "--answer" }),
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.(`continue ${sourceRunId} `)).toEqual([
+      expect.objectContaining({ value: `continue ${sourceRunId} --answer `, label: "--answer" }),
     ]);
-    await harness.commands.get("workflow-continue")!.handler(`${sourceRunId} --answer Last commit`, harness.ctx);
+    await harness.commands.get("workflows")!.handler(`continue ${sourceRunId} --answer Last commit`, harness.ctx);
     await waitFor(() => requests.length === 1);
 
     expect(requests[0]).toMatchObject({
@@ -422,7 +426,7 @@ describe("workflow actionable handoff integration", () => {
 
     expect(harness.widgets.get("workflows")).toContain("operatorHandoff title");
     expect(harness.widgets.get("workflows")).not.toContain("No workflow needs an answer");
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260725")).toEqual([]);
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.("continue 20260725")).toEqual([]);
   });
 
   it("lets a valid actionable handoff win over malformed historical evidence", async () => {
@@ -437,8 +441,8 @@ describe("workflow actionable handoff integration", () => {
     mockRuns(requests, ["20260725-135100-child"]);
     workflows(harness.pi);
     await harness.commands.get("workflows")!.handler("unexpected", harness.ctx);
-    expect(harness.commands.get("workflow-continue")?.getArgumentCompletions?.("20260725")).toEqual([
-      expect.objectContaining({ value: actionableRunId }),
+    expect(harness.commands.get("workflows")?.getArgumentCompletions?.("continue 20260725")).toEqual([
+      expect.objectContaining({ value: `continue ${actionableRunId}` }),
     ]);
 
     await harness.commands.get("workflows")!.handler(`continue ${actionableRunId}`, harness.ctx);

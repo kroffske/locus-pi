@@ -25,7 +25,12 @@ import {
   workflowRunRuntimeDir,
 } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
-import { resolveWorkflowTarget, runWorkflowScript } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  readWorkflowResumeWorkspaceIdentity,
+  resolveWorkflowTarget,
+  runWorkflowScript,
+  type WorkflowHandoffWorkspaceReuseBinding,
+} from "../../../extensions/workflows/runtime/workflow-runner.js";
 import { createWorkflowRuntime } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../test-harness.js";
 
@@ -139,6 +144,59 @@ describe("workflow operator handoff", () => {
     });
   });
 
+  it("claims a raw project scriptPath handoff and accepts a confined symlink alias", async () => {
+    const root = project();
+    symlinkSync("source.workflow.mjs", path.join(root, ".pi", "workflows", "alias.workflow.mjs"));
+    const sourceHarness = createHarness(root);
+    const source = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      scriptPath: "./.pi/workflows/alias.workflow.mjs",
+    });
+    const read = readWorkflowOperatorHandoff(source);
+    expect(read.status).toBe("ready");
+    if (read.status !== "ready") throw new Error("expected ready handoff");
+    expect(read.handoff.target).toEqual({
+      kind: "scriptPath",
+      ref: "./.pi/workflows/alias.workflow.mjs",
+      source: "project",
+    });
+    const claim = claimWorkflowOperatorHandoff(root, read.handoff);
+    expect(claim).toMatchObject({ status: "claimed" });
+    if (claim.status !== "claimed") throw new Error("expected claim");
+
+    const continued = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      scriptPath: "./.pi/workflows/alias.workflow.mjs",
+      input: "operator answer",
+      continuation: workflowContinuationForHandoff(read.handoff),
+      operatorHandoffClaim: claim.claim,
+    });
+    expect(continued.ok).toBe(true);
+    expect(continued.result).toEqual({
+      ok: true,
+      input: "operator answer",
+      consumed: ["review current changes"],
+    });
+
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "other.workflow.mjs"),
+      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      "utf8",
+    );
+    const changedTarget = {
+      ...read.handoff,
+      target: { ...read.handoff.target, ref: "./.pi/workflows/other.workflow.mjs" },
+    };
+    expect(claimWorkflowOperatorHandoff(root, changedTarget)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("does not match"),
+    });
+  });
+
   it("reads a run with no result.json as absent, and a symlinked one as invalid", () => {
     const root = project();
     const incompleteDir = workflowRunDir(root, "20260725-135526-6710");
@@ -181,6 +239,40 @@ describe("workflow operator handoff", () => {
         message: expect.stringContaining("exact awaiting_operator disposition"),
       });
     }
+  });
+
+  it.each([
+    { kind: "name", ref: " source", source: "project" },
+    { kind: "name", ref: "source.workflow.mjs", source: "project" },
+    { kind: "scriptPath", ref: "source.workflow.mjs", source: "personal" },
+    { kind: "scriptPath", ref: "source.workflow.mjs", source: "package" },
+    { kind: "name", ref: "source", source: "project", unexpected: true },
+  ] as const)("rejects forged persisted handoff target identity %j", async (target) => {
+    const root = project();
+    const source = await sourceRun(root);
+    const persisted = JSON.parse(source.resultBytes) as Record<string, unknown>;
+    const forged = {
+      ...persisted,
+      target,
+      operatorHandoff: {
+        ...(persisted.operatorHandoff as Record<string, unknown>),
+        target,
+      },
+    };
+
+    expect(readWorkflowOperatorHandoff(forged)).toMatchObject({ status: "invalid" });
+  });
+
+  it("rejects a copied handoff envelope whose persisted runId names another run", async () => {
+    const root = project();
+    const source = await sourceRun(root);
+    const persisted = JSON.parse(source.resultBytes) as Record<string, unknown>;
+    persisted.runId = "20260713-010103-copied-handoff";
+
+    expect(readWorkflowOperatorHandoff(persisted)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("originRunId does not match"),
+    });
   });
 
   it("rejects malformed declarations before publication and distinguishes absent from present malformed", () => {
@@ -287,6 +379,45 @@ describe("workflow operator handoff", () => {
     expect(result.disposition).toEqual({ status: "failed" });
     expect(result.result).toMatchObject({ mode: "prepared" });
     expect(result.error).toContain("not present in the terminal artifact projection");
+    expect(result).not.toHaveProperty("operatorHandoff");
+  });
+
+  it("requires question detail to be one of the verified continuation artifacts", async () => {
+    const root = project();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "detached-detail.workflow.mjs"),
+      `export default async function run(dsl) {
+  const intent = dsl.publishArtifact("intent.md", "intent");
+  const detail = dsl.publishArtifact("planning-blocker.md", "question detail");
+  dsl.awaitOperator({
+    reason: "needs input",
+    operatorHandoff: {
+      title: "Question",
+      questions: [{
+        kind: "select",
+        id: "answer",
+        prompt: "Answer?",
+        detailArtifactRef: detail,
+        options: [{ label: "Continue" }]
+      }],
+      continuationArtifactRefs: [intent],
+    },
+  });
+  return "prepared";
+}
+`,
+      "utf8",
+    );
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "detached-detail",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("detail artifact must be a continuation artifact");
     expect(result).not.toHaveProperty("operatorHandoff");
   });
 
@@ -482,6 +613,125 @@ describe("workflow operator handoff", () => {
     expect(retry.claim.claimId).not.toBe(secondClaim.claim.claimId);
   });
 
+  it("reuses the claimed post-code-review workspace without the fresh namespace gate", async () => {
+    const root = project();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"),
+      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      "utf8",
+    );
+    const sourceHarness = createHarness(root);
+    const source = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      input: "review alpha",
+      outputDir: "tmp/post-code-review/continuation",
+    });
+    expect(source.disposition).toEqual({
+      status: "awaiting_operator",
+      detail: "review clarification required",
+    });
+    const read = readWorkflowOperatorHandoff(source);
+    expect(read.status).toBe("ready");
+    if (read.status !== "ready") throw new Error("expected ready handoff");
+    const claim = claimWorkflowOperatorHandoff(root, read.handoff);
+    expect(claim.status).toBe("claimed");
+    if (claim.status !== "claimed") throw new Error("expected claim");
+    const workspace = readWorkflowResumeWorkspaceIdentity(root, source.runId);
+    const reuse: WorkflowHandoffWorkspaceReuseBinding = {
+      sourceRunId: source.runId,
+      ...workspace,
+    };
+
+    const child = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      input: "operator answer",
+      continuation: workflowContinuationForHandoff(read.handoff),
+      operatorHandoffClaim: claim.claim,
+      operatorHandoffWorkspaceReuse: reuse,
+    });
+    expect(child.ok).toBe(true);
+    expect(child.result).toEqual({
+      ok: true,
+      input: "operator answer",
+      consumed: ["review current changes"],
+    });
+    expect(child.workspaceDirRelative).toBe(source.workspaceDirRelative);
+    expect(child.workspaceDirExplicit).toBe(true);
+    expect(JSON.parse(readFileSync(workflowResultFile(child.runDir), "utf8"))).toMatchObject({
+      workspaceDirRelative: source.workspaceDirRelative,
+      workspaceDirExplicit: true,
+    });
+    expect(projectWorkflowHandoffState(root, read.handoff)).toEqual({
+      status: "resolved",
+      childRunId: child.runId,
+    });
+
+    const omittedResume = await runWorkflowScript({
+      pi: sourceHarness.pi,
+      ctx: sourceHarness.ctx,
+      signal: new AbortController().signal,
+      name: "post-code-review",
+      resumeFromRunId: child.runId,
+    });
+    expect(omittedResume.ok).toBe(false);
+    expect(omittedResume.error).toContain("source workspace was selected explicitly");
+  });
+
+  it("reuses a generated default workspace when the working-directory path contains spaces", async () => {
+    const root = project();
+    const workingDirectory = path.join(root, "packages", "docs site");
+    const workflows = path.join(workingDirectory, ".pi", "workflows");
+    mkdirSync(workflows, { recursive: true });
+    writeFileSync(
+      path.join(workflows, "whitespace-handoff.workflow.mjs"),
+      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      "utf8",
+    );
+    const harness = createHarness(root);
+    harness.ctx.session = { ...harness.ctx.session!, workingDirectory };
+    const source = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "whitespace-handoff",
+    });
+    const read = readWorkflowOperatorHandoff(source);
+    expect(read.status).toBe("ready");
+    if (read.status !== "ready") throw new Error("expected ready handoff");
+    const claim = claimWorkflowOperatorHandoff(root, read.handoff);
+    expect(claim.status).toBe("claimed");
+    if (claim.status !== "claimed") throw new Error("expected claim");
+    const workspace = readWorkflowResumeWorkspaceIdentity(root, source.runId);
+    expect(workspace.relativePath).toBe(`.locus-pi/plans/${source.runId}-whitespace-handoff`);
+
+    const child = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "whitespace-handoff",
+      input: "operator answer",
+      continuation: workflowContinuationForHandoff(read.handoff),
+      operatorHandoffClaim: claim.claim,
+      operatorHandoffWorkspaceReuse: {
+        sourceRunId: source.runId,
+        ...workspace,
+      },
+    });
+    expect(child.ok).toBe(true);
+    expect(child.result).toEqual({
+      ok: true,
+      input: "operator answer",
+      consumed: ["review current changes"],
+    });
+    expect(child.workspaceDirRelative).toBe(workspace.relativePath);
+  });
+
   it("fails closed on malformed or symlinked claim state", async () => {
     const root = project();
     const source = await sourceRun(root);
@@ -501,6 +751,22 @@ describe("workflow operator handoff", () => {
       status: "invalid",
       message: expect.stringContaining("non-symlink"),
     });
+  });
+
+  it("fails closed when the claim lock sidecar is replaced by a symlink", async () => {
+    const root = project();
+    const source = await sourceRun(root);
+    const runDirectory = workflowRunDir(root, source.handoff.originRunId);
+    const lockPath = path.join(workflowRunRuntimeDir(runDirectory), "operator-handoff-claim.lock");
+    const outside = path.join(root, "outside-lock.json");
+    writeFileSync(outside, "outside\n", "utf8");
+    symlinkSync(outside, lockPath);
+
+    expect(claimWorkflowOperatorHandoff(root, source.handoff)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("non-symlink"),
+    });
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
   });
 
   it("rejects a claim whose source does not match continuation before child binding", async () => {

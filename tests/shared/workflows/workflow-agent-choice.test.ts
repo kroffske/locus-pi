@@ -55,6 +55,48 @@ describe("agent({ choice }) exact routing output", () => {
     expect(failed.requests).toHaveLength(2);
   });
 
+  it("uses an explicit fallback after the model echoes the choice schema twice", async () => {
+    const schemaEcho = JSON.stringify({ type: "string", enum: ["compose", "ask_operator"] });
+    const fallback = scriptedRuntime("agent-choice-fallback", [schemaEcho, schemaEcho]);
+
+    await expect(
+      fallback.dsl.agent("Route.", {
+        choice: ["compose", "ask_operator"] as const,
+        choiceFallback: "compose",
+      }),
+    ).resolves.toBe("compose");
+    expect(fallback.requests).toHaveLength(2);
+    expect(fallback.getJournal().at(-1)).toMatchObject({
+      kind: "log",
+      source: "runtime",
+      message: expect.stringContaining('choice fallback "compose" selected after 2 schema mismatch attempts'),
+    });
+  });
+
+  it("does not use the fallback for valid answers or child execution failures", async () => {
+    const valid = scriptedRuntime("agent-choice-fallback-unused", ['"ask_operator"']);
+    await expect(
+      valid.dsl.agent("Route.", {
+        choice: ["compose", "ask_operator"] as const,
+        choiceFallback: "compose",
+      }),
+    ).resolves.toBe("ask_operator");
+    expect(valid.getJournal().filter((line) => line.kind === "log" && line.source === "runtime")).toEqual([]);
+
+    const failed = createWorkflowRuntime({
+      runId: "agent-choice-fallback-execution-failure",
+      agentRunner: async () => {
+        throw new Error("transport unavailable");
+      },
+    });
+    await expect(
+      failed.dsl.agent("Route.", {
+        choice: ["compose", "ask_operator"] as const,
+        choiceFallback: "compose",
+      }),
+    ).rejects.toThrow("transport unavailable");
+  });
+
   it("desugars to the byte-identical request used by an equivalent string-enum schema", async () => {
     const choice = scriptedRuntime("agent-choice-equivalence", ['"accept"']);
     const schema = scriptedRuntime("agent-schema-equivalence", ['"accept"']);
@@ -75,6 +117,12 @@ describe("agent({ choice }) exact routing output", () => {
     [{ choice: ["accept", "accept"] }, /duplicate value "accept"/u],
     [{ choice: ["accept", "revise"], schema: { type: "string" } }, /cannot be combined with schema/u],
     [{ choice: ["accept", "revise"], validate: () => [] }, /cannot be combined with validate/u],
+    [{ choiceFallback: "accept" }, /agent choiceFallback requires choice/u],
+    [
+      { choice: ["accept", "revise"], choiceFallback: "blocked" },
+      /agent choiceFallback must be one of the declared choices/u,
+    ],
+    [{ choice: ["accept", "revise"], choiceFallback: 1 }, /agent choiceFallback must be a string/u],
   ])("rejects malformed declaration %# before any child runs", async (opts, error) => {
     let calls = 0;
     const { dsl } = createWorkflowRuntime({
@@ -92,8 +140,18 @@ describe("agent({ choice }) exact routing output", () => {
   });
 
   it("keeps choice out of exact-text and shaped option types", () => {
-    const choiceOptions: WorkflowAgentChoiceOptions<["accept", "revise"]> = { choice: ["accept", "revise"] };
+    const choiceOptions: WorkflowAgentChoiceOptions<["accept", "revise"]> = {
+      choice: ["accept", "revise"],
+      choiceFallback: "revise",
+    };
     expect(choiceOptions.choice).toEqual(["accept", "revise"]);
+
+    const invalidChoiceFallback: WorkflowAgentChoiceOptions<["accept", "revise"]> = {
+      choice: ["accept", "revise"],
+      // @ts-expect-error choiceFallback must be one of the declared choices
+      choiceFallback: "blocked",
+    };
+    expect(invalidChoiceFallback).toBeDefined();
 
     // @ts-expect-error choice selects WorkflowAgentChoiceOptions, never WorkflowAgentOptions
     const invalidTextOptions: WorkflowAgentOptions = { choice: ["accept", "revise"] };

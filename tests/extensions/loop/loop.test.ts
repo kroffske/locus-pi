@@ -8,7 +8,7 @@ import plan from "../../../extensions/plan/index.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
-import { createHarness, runTool } from "../../test-harness.js";
+import { createHarness, emit, runTool } from "../../test-harness.js";
 
 function expectBoundedLoopText(text: string): void {
   const lines = text.split(/\r?\n/);
@@ -23,13 +23,13 @@ function expectCompactLoopStatusText(text: string, projectRoot: string): void {
 }
 
 describe("loop bounded continuation runtime", () => {
-  it("reports idle status and fails closed for unsupported legacy actions", async () => {
+  it("registers canonical loop, reports idle status, and fails closed without a source", async () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-status-"));
     try {
       const h = createHarness(projectRoot);
       loop(h.pi);
 
-      const status = await runTool(h, "loopControl", { action: "status" });
+      const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
       expect(status.content[0]).toMatchObject({ type: "text" });
       const statusText = status.content[0]?.type === "text" ? status.content[0].text : "";
@@ -50,29 +50,19 @@ describe("loop bounded continuation runtime", () => {
       expect(widget.split(/\r?\n/u).every((line) => line.length <= 80)).toBe(true);
       expect(h.statuses.has("loop")).toBe(false);
 
-      const legacy = await runTool(h, "loopControl", { action: "start" });
-      expect(legacy.isError).toBe(true);
-      expect(legacy.details).toMatchObject({
-        owner: "loop",
-        requestedAction: "start",
-        supportedActions: ["status", "once"],
-        supportedSources: ["goal", "workflow"],
-      });
+      expect(h.tools.has("loopControl")).toBe(false);
+      const missingSource = await runTool(h, "loop", { action: "start" });
+      expect(missingSource.isError).toBe(true);
+      expect(missingSource.content[0]?.type === "text" ? missingSource.content[0].text : "").toContain("no goal state");
 
       h.ctx.ui.setStatus("loop", "blocked");
-      await h.commands.get("loop")!.handler("start", h.ctx);
-      const legacyWidget = h.widgets.get("loop") ?? "";
-      expect(legacyWidget).toContain("Unsupported loop action: start");
-      expect(legacyWidget).toContain("Use /loop status or /loop once goal | /loop once workflow <runId>.");
-      expect(legacyWidget).toContain("Legacy auto-run actions remain disabled.");
-      expectBoundedLoopText(legacyWidget);
+      await h.commands.get("loop")!.handler("start goal", h.ctx);
+      const blockedWidget = h.widgets.get("loop") ?? "";
+      expect(blockedWidget).toContain("Loop stopped:");
       expect(h.statuses.get("loop")).not.toBe("blocked");
       expect(h.statuses.has("loop")).toBe(false);
 
-      const review = await runTool(h, "loopControl", { action: "once", source: "review" });
-      expect(review.isError).toBe(true);
-      expect(review.details).toMatchObject({ owner: "loop", source: "blocked" });
-      expect([...h.handlers.keys()]).toEqual(["input"]);
+      expect([...h.handlers.keys()].sort()).toEqual(["agent_settled", "input"]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -102,7 +92,7 @@ describe("loop bounded continuation runtime", () => {
       );
       await writeFile(workflowResultFile(runDir), JSON.stringify({ ok: true }, null, 2), "utf8");
 
-      const status = await runTool(h, "loopControl", { action: "status" });
+      const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
       const statusText = status.content[0]?.type === "text" ? status.content[0].text : "";
       expect(statusText).toContain("status: manual");
@@ -123,6 +113,42 @@ describe("loop bounded continuation runtime", () => {
       expect(widget).not.toContain(projectRoot);
       expect(widget.split(/\r?\n/u).every((line) => line.length <= 80)).toBe(true);
       expect(h.statuses.has("loop")).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-dispatches bounded follow-ups and stops at the hard iteration limit", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-active-"));
+    try {
+      const h = createHarness(projectRoot, { sessionId: "loop-session" });
+      plan(h.pi);
+      loop(h.pi);
+      await runTool(h, "goal", { op: "create", objective: "Complete two bounded steps" });
+
+      const started = await runTool(h, "loop", {
+        action: "until",
+        source: "goal",
+        condition: "two bounded steps are complete",
+        maxIterations: 2,
+        maxDurationMinutes: 5,
+      });
+      expect(started.isError).not.toBe(true);
+      expect(h.sentMessages).toHaveLength(1);
+      expect(JSON.stringify(h.sentMessages[0])).toContain("iteration 1/2");
+      expect(JSON.stringify(h.sentMessages[0])).toContain("two bounded steps are complete");
+
+      await emit(h, "agent_settled");
+      expect(h.sentMessages).toHaveLength(1);
+      await emit(h, "agent_settled");
+      expect(h.sentMessages).toHaveLength(2);
+      await emit(h, "agent_settled");
+
+      const status = await runTool(h, "loop", { action: "status" });
+      expect(status.details).toMatchObject({ status: "stopped", iteration: 2, maxIterations: 2 });
+      expect(status.content[0]?.type === "text" ? status.content[0].text : "").toContain(
+        "stopReason: maximum iteration limit reached",
+      );
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -157,7 +183,7 @@ describe("loop bounded continuation runtime", () => {
       const created = await runTool(h, "goal", { op: "create", objective: "Ship the loop wrapper" });
       expect(created.isError).not.toBe(true);
 
-      const status = await runTool(h, "loopControl", { action: "status" });
+      const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
       expect(status.details).toMatchObject({ mode: "manual", recommendedSource: "goal" });
       const continuePath = path.join(projectRoot, ".locus", "runtime", "goal", "continue.md");
@@ -205,7 +231,7 @@ describe("loop bounded continuation runtime", () => {
       const created = await runTool(h, "goal", { op: "create", objective: "Ship the loop wrapper" });
       expect(created.isError).not.toBe(true);
 
-      const result = await runTool(h, "loopControl", { action: "once", source: "goal" });
+      const result = await runTool(h, "loop", { action: "once", source: "goal" });
       const details = result.details as
         | {
             owner?: string;
@@ -267,7 +293,7 @@ describe("loop bounded continuation runtime", () => {
       await runTool(h, "goal", { op: "create", objective: "Retire the goal source" });
       await runTool(h, "goal", { op: "complete" });
 
-      const status = await runTool(h, "loopControl", { action: "status" });
+      const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
       const statusText = status.content[0]?.type === "text" ? status.content[0].text : "";
       expect(statusText).toContain("status: blocked");
@@ -308,7 +334,7 @@ describe("loop bounded continuation runtime", () => {
       );
       await writeFile(workflowResultFile(runDir), JSON.stringify({ ok: true }, null, 2), "utf8");
 
-      const result = await runTool(h, "loopControl", { action: "once", source: "workflow", runId });
+      const result = await runTool(h, "loop", { action: "once", source: "workflow", runId });
       expect(result.isError).not.toBe(true);
       expect(result.content[0]).toMatchObject({ type: "text" });
       expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("source: workflow");
@@ -325,7 +351,7 @@ describe("loop bounded continuation runtime", () => {
         sourceMetadata: {
           runId,
           runStatus: "completed",
-          sourcePath: path.join(projectRoot, ".pi", "locus-pi", "runs", runId),
+          sourcePath: path.join(projectRoot, ".locus-pi", "runs", runId),
         },
       });
       expect(String(result.details?.sourceSummary ?? "")).toContain("status: completed");
@@ -360,7 +386,7 @@ describe("loop bounded continuation runtime", () => {
       const artifactPath = path.join(projectRoot, ".locus", "runtime", "loop", "workflow", "missing-run.json");
       expect(existsSync(artifactPath)).toBe(false);
 
-      const result = await runTool(h, "loopControl", { action: "once", source: "workflow", runId: "missing-run" });
+      const result = await runTool(h, "loop", { action: "once", source: "workflow", runId: "missing-run" });
       expect(result.isError).toBe(true);
       expect(result.details).toMatchObject({ owner: "loop", source: "blocked" });
       expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain(

@@ -22,7 +22,7 @@ extensions/workflows/references/excalidraw-pipeline/
 A workflow run cannot stop and ask a human: `ask` refuses when there is no UI, and
 child agent sessions are headless. So the pipeline is cut into two runs, and the
 human gate is a file the operator edits in between — the same shape as
-`review` → `review-fix`.
+`post-code-review` → `implement`.
 
 ```
 run 1  draft            run 2  build

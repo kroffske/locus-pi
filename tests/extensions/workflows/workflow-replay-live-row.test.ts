@@ -49,7 +49,7 @@ describe("workflow replay live-row answer hydration", () => {
       };
     });
     try {
-      await harness.commands.get("workflows")!.handler("run review", harness.ctx);
+      await harness.commands.get("workflows")!.handler("run task/plan", harness.ctx);
       for (
         let attempt = 0;
         attempt < 50 && agentLiveStore.rows.get(workflowAgentLiveRowId(fixture.end))?.finalAnswer === undefined;
@@ -294,7 +294,7 @@ function replayFixture(answer: string): {
 } {
   const root = temporaryProject();
   const runId = `replay-${roots.length}`;
-  const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
+  const runDir = path.join(root, ".locus-pi", "runs", runId);
   mkdirSync(runDir, { recursive: true });
   const store = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
   const ref = store.recordAgentEvidence({

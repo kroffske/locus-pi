@@ -11,15 +11,27 @@ import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import type { ThemeLike, ToolRenderContext, ToolRenderResultOptions, ToolResult } from "../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import {
+  errorResult,
+  getProjectRoot,
+  getWorkingDirectory,
+  isOneShotHostMode,
+  textResult,
+} from "../_shared/host/pi-api.js";
 import { prepareValidatedParams, validateParams } from "../_shared/host/validation.js";
 import { formatWorkflowFailureDiagnosticLines } from "./runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-journal.js";
-import { runWorkflowScript } from "./runtime/workflow-runner.js";
+import { resolveWorkflowTarget, runWorkflowScript } from "./runtime/workflow-runner.js";
+import { WORKFLOW_SAVED_NAME_MAX_CHARS, WORKFLOW_SAVED_NAME_PATTERN } from "./runtime/workflow-saved-name.js";
 import type { ResolvedWorkflowTarget, RunWorkflowScriptResult } from "./runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "./runtime/workflow-runtime.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "./runtime/workflow-runtime.js";
-import { WORKFLOW_OUTPUT_DIR_PATTERN } from "./runtime/workflow-output.js";
+import {
+  WORKFLOW_OUTPUT_DIR_MAX_CHARS,
+  WORKFLOW_RUN_NAME_MAX_CHARS,
+  WORKFLOW_RUN_NAME_PATTERN,
+  resolveWorkflowOutputDirectoryPath,
+} from "./runtime/workflow-output.js";
 import {
   formatOperatorScriptIdentity,
   safeOperatorSourceRef,
@@ -38,6 +50,7 @@ import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { createWorkflowTranscript } from "./workflow-transcript.js";
 import {
   readWorkflowRunTextFile,
+  WORKFLOW_PLANS_STORAGE_PREFIX,
   WORKFLOW_RUN_STORAGE_PATTERN,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowRunOutputsDir,
@@ -65,8 +78,10 @@ const WorkflowParams = Type.Object(
   {
     name: Type.Optional(
       Type.String({
-        description: "Saved workflow name with no path separators",
-        maxLength: 200,
+        description:
+          "Exact saved workflow ref: <workflow> or <workflow>/<child>, 1-200 characters total, interior whitespace allowed, with no edge whitespace, backslash, control characters, or .mjs suffix",
+        maxLength: WORKFLOW_SAVED_NAME_MAX_CHARS,
+        pattern: WORKFLOW_SAVED_NAME_PATTERN,
       }),
     ),
     scriptPath: Type.Optional(
@@ -95,17 +110,33 @@ const WorkflowParams = Type.Object(
     ),
     outputDir: Type.Optional(
       Type.String({
-        maxLength: 400,
-        pattern: WORKFLOW_OUTPUT_DIR_PATTERN,
+        maxLength: WORKFLOW_OUTPUT_DIR_MAX_CHARS,
         description:
-          "Optional safe project-relative workflow workspace; defaults to tmp/<workflow-name> beneath the Pi working directory.",
+          "Optional workflow workspace path. Fresh workflows default to unique .locus-pi/plans/<generated-run-name> workspaces; resume repeats the source workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
+      }),
+    ),
+    runName: Type.Optional(
+      Type.String({
+        maxLength: WORKFLOW_RUN_NAME_MAX_CHARS,
+        pattern: WORKFLOW_RUN_NAME_PATTERN,
+        description: `Optional short workflow run name. The runtime expands it to ${WORKFLOW_PLANS_STORAGE_PREFIX}<runName>. Mutually exclusive with outputDir.`,
       }),
     ),
     continuation: Type.Optional(WorkflowContinuationParams),
     resumeFromRunId: Type.Optional(
       Type.String({
         description: "Optional prior workflow run id used as persisted retry metadata",
-        maxLength: 200,
+        pattern: WORKFLOW_SAFE_COMPONENT_PATTERN,
+      }),
+    ),
+    noOperator: Type.Optional(
+      Type.Boolean({
+        description:
+          "Run-level no-operator mode for unattended launches: any request for operator input " +
+          "(dsl.awaitOperator or an agent({ ask: true }) stage) fails closed with a named reason " +
+          "instead of pausing the run. Saved children inherit the mode and cannot unset it. " +
+          "Defaults to true in a headless (print/json) host, where no operator can be reached; " +
+          "pass false there to keep the designed awaitOperator split-run pause.",
       }),
     ),
   },
@@ -115,10 +146,16 @@ const WorkflowParams = Type.Object(
 function workflowApprovalDetails(args: unknown): string[] {
   const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const target = String(record.name ?? record.scriptPath ?? record.script ?? "unspecified");
+  const workspace =
+    typeof record.runName === "string"
+      ? `${WORKFLOW_PLANS_STORAGE_PREFIX}${record.runName}`
+      : typeof record.outputDir === "string"
+        ? record.outputDir
+        : `${WORKFLOW_PLANS_STORAGE_PREFIX}<generated-run-name>`;
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
-    `Workflow workspace: ${typeof record.outputDir === "string" ? record.outputDir : "default <pwd>/tmp/<workflow-name>"}`,
+    `Workflow workspace: ${workspace}`,
     "Surface: trusted-file workflow runner",
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
@@ -138,7 +175,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     label: "workflow",
-    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional project-relative workflow workspace, and optional host-verified continuation artifacts. The workspace defaults to <pwd>/tmp/<workflow-name>; automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. Saved names resolve from the canonical .pi/workflows/ first (then the additional project directories .claude/workflows/ and .agents/workflows/, then ~/.pi/workflows/, then the curated Package registry); every project directory accepts only a pi-native <name>.workflow.mjs, so a workflow written for another host is neither found nor runnable here. The DSL orchestrates catalog sub-agents; agent() returns exact text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. Saved workflows may invoke one saved child level through invokeWorkflow(); child work shares the root cancellation, concurrency, physical-call budget, workflow workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes only .pi/workflows/<name>.design.md, and only \`Build approved design: <exact path>\` writes the matching source without running it. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → docs/extensions/active/workflows.md.`,
+    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. Fresh workflows default to unique .locus-pi/plans/<generated-run-name> workspaces; runName selects .locus-pi/plans/<runName> for any workflow; resume repeats the original workspace. Automatic run evidence is separate under ${WORKFLOW_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates catalog sub-agents; agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, delegate to \`workflow-author\`: a raw request writes and reviews .pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflows/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
@@ -159,6 +196,23 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           owner: "workflows",
         });
       }
+      if (valid.value.outputDir !== undefined && valid.value.runName !== undefined) {
+        return errorResult("workflow: runName and outputDir are mutually exclusive", { owner: "workflows" });
+      }
+      if (valid.value.outputDir !== undefined) {
+        try {
+          resolveWorkflowOutputDirectoryPath(
+            getProjectRoot(ctx),
+            valid.value.outputDir,
+            workflowTargetLabel(valid.value),
+            getWorkingDirectory(ctx),
+          );
+        } catch (error) {
+          return errorResult(`workflow: ${error instanceof Error ? error.message : String(error)}`, {
+            owner: "workflows",
+          });
+        }
+      }
       if (commandLauncher.currentLease(ctx) === undefined) {
         return errorResult("workflow: this extension session has already shut down", { owner: "workflows" });
       }
@@ -167,6 +221,20 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       });
       const workflowName = workflowTargetLabel(valid.value);
       const taskTitle = workflowTaskTitle(valid.value.input);
+      let targetBinding: ResolvedWorkflowTarget | undefined;
+      try {
+        targetBinding = resolveWorkflowTarget(
+          valid.value.name !== undefined
+            ? { name: valid.value.name }
+            : valid.value.scriptPath !== undefined
+              ? { scriptPath: valid.value.scriptPath }
+              : { script: valid.value.script! },
+          getProjectRoot(ctx),
+          getWorkingDirectory(ctx),
+        );
+      } catch {
+        // Preserve the runner's durable failed-run evidence for resolution errors.
+      }
       const launched = commandLauncher.attach<RunWorkflowScriptResult>(ctx, signal, async (background) =>
         runWorkflowScript({
           pi,
@@ -175,11 +243,17 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.name !== undefined ? { name: valid.value.name } : {}),
           ...(valid.value.scriptPath !== undefined ? { scriptPath: valid.value.scriptPath } : {}),
           ...(valid.value.script !== undefined ? { script: valid.value.script } : {}),
+          ...(targetBinding === undefined ? {} : { targetBinding }),
           ...(valid.value.input !== undefined ? { input: valid.value.input } : {}),
           ...(valid.value.items !== undefined ? { items: valid.value.items } : {}),
           ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
+          ...(valid.value.runName !== undefined ? { runName: valid.value.runName } : {}),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
+          // Same default as the command surface: in a headless (`print`/`json`)
+          // host there is no operator to reach, so the mode is on unless the
+          // caller explicitly passes `noOperator: false`.
+          ...((valid.value.noOperator ?? isOneShotHostMode(ctx)) ? { noOperator: true as const } : {}),
           onRunStart: ({ runId, runDir }) => {
             background.setRunId(runId);
             deps.onRunStarted(runId);
@@ -249,52 +323,19 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         agentRows: cardAgents,
         ...(taskTitle === undefined ? {} : { taskTitle }),
       };
-      if (disposition.status === "completed" || disposition.status === "awaiting_operator") {
-        return textResult(summary, {
-          owner: "workflows",
-          ...workflowCardDetails,
-          disposition: res.disposition,
-          transcript: transcriptDetails,
-          runId: res.runId,
-          runDir: res.runDir,
-          ...(res.workspaceDir !== undefined ? { workspaceDir: res.workspaceDir } : {}),
-          outputDir: workflowRunOutputsDir(res.runDir),
-          ...(res.stableOutputDir !== undefined ? { stableOutputDir: res.stableOutputDir } : {}),
-          ...(res.stableOutputDirRelative !== undefined
-            ? { stableOutputDirRelative: res.stableOutputDirRelative }
-            : {}),
-          ...(res.primaryFile !== undefined ? { primaryFile: res.primaryFile } : {}),
-          ...(res.lineage !== undefined ? { lineage: res.lineage } : {}),
-          ...(res.childRuns !== undefined ? { childRuns: res.childRuns } : {}),
-          ...(res.resultTextPath !== undefined ? { resultTextPath: res.resultTextPath } : {}),
-          ...(res.primaryOutputPath !== undefined ? { primaryOutputPath: res.primaryOutputPath } : {}),
-          resultPath: res.resultPersistence.path,
-          resultPersistence: res.resultPersistence,
-          ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
-          ...(res.artifactRefsOmitted !== undefined ? { artifactRefsOmitted: res.artifactRefsOmitted } : {}),
-          ...(res.resultDiagnostic !== undefined ? { resultDiagnostic: res.resultDiagnostic } : {}),
-          journal: res.journal,
-          target: operatorWorkflowTarget(res.target),
-          ...(res.scriptIdentity !== undefined
-            ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) }
-            : {}),
-          ...(res.resumeFromRunId !== undefined
-            ? {
-                resumeFromRunId: res.resumeFromRunId,
-                resumeSourceRunSummary: res.resumeSourceRunSummary ?? null,
-              }
-            : {}),
-          ...(res.continuation !== undefined ? { continuation: res.continuation } : {}),
-        });
-      }
-      return errorResult(summary, {
-        owner: "workflows",
+      const terminalDetails = {
         ...workflowCardDetails,
         disposition: res.disposition,
         transcript: transcriptDetails,
         runId: res.runId,
         runDir: res.runDir,
         ...(res.workspaceDir !== undefined ? { workspaceDir: res.workspaceDir } : {}),
+        ...(res.workspacePhysicalIdentity !== undefined
+          ? { workspacePhysicalIdentity: res.workspacePhysicalIdentity }
+          : {}),
+        ...(res.workspacePhysicalIdentitySchemaVersion !== undefined
+          ? { workspacePhysicalIdentitySchemaVersion: res.workspacePhysicalIdentitySchemaVersion }
+          : {}),
         outputDir: workflowRunOutputsDir(res.runDir),
         ...(res.stableOutputDir !== undefined ? { stableOutputDir: res.stableOutputDir } : {}),
         ...(res.stableOutputDirRelative !== undefined ? { stableOutputDirRelative: res.stableOutputDirRelative } : {}),
@@ -307,10 +348,8 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
         resultPersistence: res.resultPersistence,
         ...(res.artifactRefs !== undefined ? { artifactRefs: res.artifactRefs } : {}),
         ...(res.artifactRefsOmitted !== undefined ? { artifactRefsOmitted: res.artifactRefsOmitted } : {}),
-        result: res.result,
         ...(res.resultDiagnostic !== undefined ? { resultDiagnostic: res.resultDiagnostic } : {}),
         journal: res.journal,
-        error: res.error,
         target: operatorWorkflowTarget(res.target),
         ...(res.scriptIdentity !== undefined
           ? { scriptIdentity: operatorScriptIdentity(res.scriptIdentity, res.target?.ref) }
@@ -322,6 +361,18 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
             }
           : {}),
         ...(res.continuation !== undefined ? { continuation: res.continuation } : {}),
+      };
+      if (disposition.status === "completed" || disposition.status === "awaiting_operator") {
+        return textResult(summary, {
+          owner: "workflows",
+          ...terminalDetails,
+        });
+      }
+      return errorResult(summary, {
+        owner: "workflows",
+        ...terminalDetails,
+        result: res.result,
+        error: res.error,
       });
     },
   });

@@ -150,7 +150,7 @@ export async function executeAgentDrillCommand(
   let viewer: AgentSessionViewer | undefined;
   try {
     try {
-      await requestInlineOperatorInteraction<void>(ctx, (tui, _theme, keybindings, done) => {
+      await requestInlineOperatorInteraction<void>(ctx, (tui, theme, keybindings, done) => {
         viewer = new AgentSessionViewer(
           executionAuthority,
           tui,
@@ -158,6 +158,7 @@ export async function executeAgentDrillCommand(
           capability.capability,
           rounds,
           keybindings as { matches(data: string, keybinding: string): boolean },
+          theme,
         );
         return viewer;
       });

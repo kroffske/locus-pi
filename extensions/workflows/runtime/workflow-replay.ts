@@ -54,6 +54,7 @@ export type WorkflowReplayValueKind = "clock" | "random";
 /** Why a requested replay did not happen. Every value is operator-facing text. */
 export type WorkflowReplayRefusalReason =
   | "source-run-unusable"
+  | "target-changed"
   | "script-changed"
   | "identity-coverage-unproven"
   | "replay-unsafe-script"

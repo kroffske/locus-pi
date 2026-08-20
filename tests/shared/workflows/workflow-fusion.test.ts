@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowArtifactStore } from "../../../extensions/workflows/runtime/workflow-artifacts.js";
 import {
+  createWorkflowJournalSink,
+  readWorkflowRunJournalState,
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
   createWorkflowReplayController,
   workflowReplayFile,
 } from "../../../extensions/workflows/runtime/workflow-replay.js";
@@ -29,6 +34,10 @@ function temporaryRoot(prefix = "workflow-fusion-"): string {
   return root;
 }
 
+function temporaryRunDir(prefix: string, runId: string): string {
+  return ensureWorkflowRunDir(temporaryRoot(prefix), runId);
+}
+
 function success(request: WorkflowAgentRequest, text: string): WorkflowAgentResult {
   return {
     ok: true,
@@ -37,12 +46,16 @@ function success(request: WorkflowAgentRequest, text: string): WorkflowAgentResu
     text,
     diagnostics: [],
     agent: request.agent,
+    ...(request.capabilityMode === undefined
+      ? {}
+      : { activeToolNames: request.capabilityMode === "tool-free" ? [] : ["read"] }),
     ...(request.model !== undefined ? { model: request.model, executedModel: request.model } : {}),
     ...(request.modelRole !== undefined ? { executedModel: `resolved/${request.modelRole}` } : {}),
   };
 }
 
 const BASE = {
+  mode: "agent",
   members: [
     { label: "alpha", model: "test/alpha" },
     { label: "beta", model: "test/beta" },
@@ -55,7 +68,7 @@ describe("dsl.fusion", () => {
     const requests: WorkflowAgentRequest[] = [];
     const root = temporaryRoot();
     const runId = "fusion-basic";
-    const runDir = path.join(root, ".pi", "locus-pi", "runs", runId);
+    const runDir = path.join(root, ".locus-pi", "runs", runId);
     mkdirSync(runDir, { recursive: true });
     const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
     const { dsl, getJournal } = createWorkflowRuntime({
@@ -81,7 +94,11 @@ describe("dsl.fusion", () => {
         .sort(),
     ).toEqual(["test/alpha", "test/beta"]);
     for (const request of requests) {
-      expect(request).toMatchObject({ permissionMode: "inherit-parent", maxToolCalls: 1_000 });
+      expect(request).toMatchObject({
+        permissionMode: "inherit-parent",
+        maxToolCalls: 1_000,
+        capabilityMode: "agent",
+      });
       expect(request.readOnly).toBeUndefined();
       expect(request.tools).toEqual(["*"]);
     }
@@ -108,6 +125,54 @@ describe("dsl.fusion", () => {
         .read({ runId: packet!.runId, artifactId: packet!.artifactId, name: packet!.name, sha256: packet!.sha256 })
         .toString("utf8"),
     ).toContain("- Context: prompt-only");
+    expect(
+      artifactStore
+        .read({ runId: packet!.runId, artifactId: packet!.artifactId, name: packet!.name, sha256: packet!.sha256 })
+        .toString("utf8"),
+    ).toContain("- Mode: agent");
+  });
+
+  it("requires one homogeneous mode and carries catalog agents to every leg", async () => {
+    const requests: WorkflowAgentRequest[] = [];
+    const preflight: unknown[] = [];
+    const { dsl } = createWorkflowRuntime({
+      runId: "fusion-mode-agent",
+      preflightAgentRequests: async (entries) => {
+        preflight.push(...entries);
+      },
+      agentRunner: async (request) => {
+        requests.push(request);
+        return success(request, request.model === "test/judge" ? "final" : "candidate");
+      },
+    });
+
+    await expect(dsl.fusion("question", { ...BASE, mode: undefined } as never)).rejects.toThrow(
+      /fusion mode must be "tool-free" or "agent"/u,
+    );
+    expect(requests).toHaveLength(0);
+
+    await expect(
+      dsl.fusion("question", {
+        mode: "tool-free",
+        members: [
+          { label: "alpha", agent: "reviewer", model: "test/alpha" },
+          { label: "beta", agent: "explorer", model: "test/beta" },
+        ],
+        judge: { label: "judge", agent: "critic", model: "test/judge" },
+      }),
+    ).resolves.toBe("final");
+    expect(preflight).toEqual([
+      { agent: "reviewer", model: "test/alpha" },
+      { agent: "explorer", model: "test/beta" },
+      { agent: "critic", model: "test/judge" },
+    ]);
+    expect(requests.map(({ agent, capabilityMode }) => ({ agent, capabilityMode }))).toEqual(
+      expect.arrayContaining([
+        { agent: "reviewer", capabilityMode: "tool-free" },
+        { agent: "explorer", capabilityMode: "tool-free" },
+        { agent: "critic", capabilityMode: "tool-free" },
+      ]),
+    );
   });
 
   it("supports explicit context and role lenses without sending output instructions to members", async () => {
@@ -199,6 +264,7 @@ describe("dsl.fusion", () => {
     const oversized = createWorkflowRuntime({ runId: "fusion-input", agentRunner: runner });
     await expect(
       oversized.dsl.fusion("q".repeat(16_000), {
+        mode: "agent",
         members: Array.from({ length: 10 }, (_, index) => ({ label: `m${index}`, model: `test/m${index}` })),
         judge: { model: "test/judge" },
         context: { mode: "provided", text: "c".repeat(16_000) },
@@ -232,6 +298,7 @@ describe("dsl.fusion", () => {
 
     const first = dsl.fusion("first", BASE);
     const second = dsl.fusion("second", {
+      mode: "agent",
       members: [
         { label: "gamma", model: "test/gamma" },
         { label: "delta", model: "test/delta" },
@@ -353,6 +420,7 @@ describe("dsl.fusion", () => {
     });
 
     await dsl.fusion("question", {
+      mode: "agent",
       members: Array.from({ length: 10 }, (_, index) => ({ label: `m${index}`, model: `test/m${index}` })),
       judge: { model: "test/judge" },
       memberLimits: { maxAnswerChars: 200 },
@@ -361,7 +429,7 @@ describe("dsl.fusion", () => {
   });
 
   it("replays the complete fan-out and judge without spawning fresh children", async () => {
-    const sourceDir = temporaryRoot("workflow-fusion-replay-source-");
+    const sourceDir = temporaryRunDir("workflow-fusion-replay-source-", "fusion-replay-source");
     const sourceController = createWorkflowReplayController({ runDir: sourceDir });
     let sourceCalls = 0;
     const source = createWorkflowRuntime({
@@ -383,7 +451,7 @@ describe("dsl.fusion", () => {
     let resumedCalls = 0;
     let resumedPreflights = 0;
     const resumedController = createWorkflowReplayController({
-      runDir: temporaryRoot("workflow-fusion-replay-resumed-"),
+      runDir: temporaryRunDir("workflow-fusion-replay-resumed-", "fusion-replay-resumed"),
       recorded: sourceEntries,
     });
     const resumed = createWorkflowRuntime({
@@ -403,6 +471,34 @@ describe("dsl.fusion", () => {
     expect(resumedCalls).toBe(0);
     expect(resumedPreflights).toBe(0);
     expect(resumedController.counts()).toEqual({ replayedCalls: 3, freshCalls: 0 });
+    expect(
+      resumed
+        .getJournal()
+        .filter((line) => line.kind === "agent_end")
+        .map((line) => ({
+          mode: line.capabilityMode,
+          activeToolNames: line.activeToolNames,
+          replayed: line.replayed,
+        })),
+    ).toEqual([
+      { mode: "agent", activeToolNames: undefined, replayed: true },
+      { mode: "agent", activeToolNames: undefined, replayed: true },
+      { mode: "agent", activeToolNames: undefined, replayed: true },
+    ]);
+
+    const modeChanged = createWorkflowRuntime({
+      runId: "fusion-replay-mode-changed",
+      replay: createWorkflowReplayController({
+        runDir: temporaryRoot("workflow-fusion-replay-mode-changed-"),
+        recorded: sourceEntries,
+      }),
+      replaySourceRunId: "fusion-replay-source",
+      agentRunner: async (request) => success(request, "unexpected fresh answer"),
+    });
+    await expect(modeChanged.dsl.fusion("question", { ...BASE, mode: "tool-free" })).rejects.toThrow(
+      /cannot mix recorded and fresh agent calls/u,
+    );
+    expect(modeChanged.getJournal().filter((line) => line.kind === "agent_end")).toHaveLength(0);
 
     let divergentCalls = 0;
     const divergent = createWorkflowRuntime({
@@ -434,6 +530,123 @@ describe("dsl.fusion", () => {
     expect(divergentCalls).toBe(0);
   });
 
+  it("marks a replayed judge validator throw as replayed terminal evidence", async () => {
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["answer"],
+      properties: { answer: { type: "string", minLength: 1 } },
+    };
+    const sourceDir = temporaryRunDir("workflow-fusion-validator-source-", "fusion-validator-source");
+    const source = createWorkflowRuntime({
+      runId: "fusion-validator-source",
+      replay: createWorkflowReplayController({ runDir: sourceDir }),
+      agentRunner: async (request) =>
+        success(request, request.model === "test/judge" ? '{"answer":"safe"}' : `candidate ${request.model}`),
+    });
+    await source.dsl.fusion("question", { ...BASE, schema, validate: () => [] });
+    const recorded = readFileSync(workflowReplayFile(sourceDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    let freshCalls = 0;
+    const resumedRoot = temporaryRoot("workflow-fusion-validator-resumed-");
+    const resumedRunId = "fusion-validator-resumed";
+    const resumed = createWorkflowRuntime({
+      runId: resumedRunId,
+      projectRoot: resumedRoot,
+      journal: createWorkflowJournalSink(resumedRoot, resumedRunId),
+      replay: createWorkflowReplayController({
+        runDir: ensureWorkflowRunDir(resumedRoot, resumedRunId),
+        recorded,
+      }),
+      replaySourceRunId: "fusion-validator-source",
+      agentRunner: async (request) => {
+        freshCalls += 1;
+        return success(request, "unexpected fresh answer");
+      },
+    });
+
+    await expect(
+      resumed.dsl.fusion("question", {
+        ...BASE,
+        schema,
+        validate: () => {
+          throw new Error("validator exploded after replay");
+        },
+      }),
+    ).rejects.toThrow("validator exploded after replay");
+    expect(freshCalls).toBe(0);
+    const [terminal] = resumed.getJournal().filter((line) => line.kind === "error");
+    expect(terminal).toMatchObject({
+      source: "script",
+      replayed: true,
+      capabilityMode: "agent",
+      message: "validator exploded after replay",
+    });
+    expect(terminal?.activeToolNames).toBeUndefined();
+    const persisted = readWorkflowRunJournalState(resumedRoot, resumedRunId);
+    expect(persisted.diagnostics).toEqual([]);
+    expect(persisted.lines.find((line) => line.kind === "error")).toMatchObject({ replayed: true });
+  });
+
+  it("marks replayed answer adoption failures as replayed terminal evidence", async () => {
+    const sourceDir = temporaryRunDir("workflow-fusion-adoption-source-", "fusion-adoption-source");
+    const source = createWorkflowRuntime({
+      runId: "fusion-adoption-source",
+      replay: createWorkflowReplayController({ runDir: sourceDir }),
+      agentRunner: async (request) =>
+        success(request, request.model === "test/judge" ? "final" : `candidate ${request.model}`),
+    });
+    await source.dsl.fusion("question", BASE);
+    const recorded = readFileSync(workflowReplayFile(sourceDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const resumedRoot = temporaryRoot("workflow-fusion-adoption-resumed-");
+    const resumedRunId = "fusion-adoption-resumed";
+    const artifactStore = createWorkflowArtifactStore({
+      projectRoot: resumedRoot,
+      runId: resumedRunId,
+      runDir: ensureWorkflowRunDir(resumedRoot, resumedRunId),
+    });
+    let freshCalls = 0;
+    const resumed = createWorkflowRuntime({
+      runId: resumedRunId,
+      replay: createWorkflowReplayController({
+        runDir: temporaryRunDir("workflow-fusion-adoption-record-", resumedRunId),
+        recorded,
+      }),
+      replaySourceRunId: "fusion-adoption-source",
+      artifactPorts: {
+        recordAgentEvidence() {
+          throw new Error("replayed answer adoption failed");
+        },
+        publishText: artifactStore.publishText,
+        consumeText: artifactStore.consumeText,
+      },
+      agentRunner: async (request) => {
+        freshCalls += 1;
+        return success(request, "unexpected fresh answer");
+      },
+    });
+
+    await expect(resumed.dsl.fusion("question", BASE)).rejects.toThrow();
+    expect(freshCalls).toBe(0);
+    const adoptionErrors = resumed
+      .getJournal()
+      .filter(
+        (line) =>
+          line.kind === "error" && line.callId !== undefined && line.message === "replayed answer adoption failed",
+      );
+    expect(adoptionErrors).toHaveLength(2);
+    for (const line of adoptionErrors) {
+      expect(line).toMatchObject({ source: "runtime", replayed: true, capabilityMode: "agent" });
+      expect(line.activeToolNames).toBeUndefined();
+    }
+  });
+
   it("is callable from a real workflow script through the public runner", async () => {
     const root = temporaryRoot("workflow-fusion-script-");
     const agentsDir = path.join(root, ".agents", "agents");
@@ -451,6 +664,7 @@ describe("dsl.fusion", () => {
       `export const meta = { name: "fusion-proof", description: "Exercise the public Fusion primitive." };
 export default async function runWorkflow(dsl, input) {
   return await dsl.fusion(String(input ?? ""), {
+    mode: "agent",
     members: [
       { label: "evidence", model: "test/evidence" },
       { label: "risk", model: "test/risk" },
@@ -507,12 +721,60 @@ export default async function runWorkflow(dsl, input) {
       ]),
     );
 
+    const toolFreeScriptPath = path.join(workflowsDir, "fusion-tool-free.workflow.mjs");
+    writeFileSync(
+      toolFreeScriptPath,
+      `export const meta = { name: "fusion-tool-free", description: "Exercise tool-free Fusion through the public runner." };
+export default async function runWorkflow(dsl) {
+  return await dsl.fusion("question", {
+    mode: "tool-free",
+    members: [
+      { label: "evidence", model: "test/evidence" },
+      { label: "risk", model: "test/risk" },
+    ],
+    judge: { model: "test/judge" },
+  });
+}
+`,
+      "utf8",
+    );
+    let toolFreeExecutions = 0;
+    const toolFreeResult = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      scriptPath: toolFreeScriptPath,
+      resolveModel: (selector) => {
+        const [provider, id] = selector.split("/");
+        return { ok: true, selector, provider: provider!, id: id!, model: { provider, id } as never };
+      },
+      createExecutor: ({ model }): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          expect(request).toMatchObject({ capabilityMode: "tool-free", allowedTools: [] });
+          toolFreeExecutions += 1;
+          const id = (model as { id?: string } | undefined)?.id ?? "unknown";
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "answered",
+            text: id === "judge" ? "Tool-free judge answer." : `${id} evidence`,
+            activeToolNames: [],
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    expect(toolFreeResult).toMatchObject({ ok: true, result: "Tool-free judge answer." });
+    expect(toolFreeExecutions).toBe(3);
+
     const invalidScriptPath = path.join(workflowsDir, "fusion-invalid-model.workflow.mjs");
     writeFileSync(
       invalidScriptPath,
       `export const meta = { name: "fusion-invalid-model", description: "Reject an unavailable judge before spend." };
 export default async function runWorkflow(dsl) {
   return await dsl.fusion("question", {
+    mode: "agent",
     members: [
       { label: "evidence", model: "test/evidence" },
       { label: "risk", model: "test/risk" },
@@ -558,5 +820,95 @@ export default async function runWorkflow(dsl) {
     expect(invalidResult.ok).toBe(false);
     expect(invalidResult.error).toContain("the model is not configured on this host");
     expect(invalidExecutions).toBe(0);
+
+    const invalidAgentScriptPath = path.join(workflowsDir, "fusion-invalid-agent.workflow.mjs");
+    writeFileSync(
+      invalidAgentScriptPath,
+      `export const meta = { name: "fusion-invalid-agent", description: "Reject an unavailable catalog agent before spend." };
+export default async function runWorkflow(dsl) {
+  return await dsl.fusion("question", {
+    mode: "tool-free",
+    members: [
+      { agent: "missing-agent", label: "evidence", model: "test/evidence" },
+      { label: "risk", model: "test/risk" },
+    ],
+    judge: { model: "test/judge" },
+  });
+}
+`,
+      "utf8",
+    );
+    let invalidAgentExecutions = 0;
+    const invalidAgentResult = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      scriptPath: invalidAgentScriptPath,
+      resolveModel: (selector) => {
+        const [provider, id] = selector.split("/");
+        return { ok: true, selector, provider: provider!, id: id!, model: { provider, id } as never };
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          invalidAgentExecutions += 1;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "unexpected",
+            text: "unexpected",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    expect(invalidAgentResult.ok).toBe(false);
+    expect(invalidAgentResult.error).toContain("Unknown agent: missing-agent");
+    expect(invalidAgentExecutions).toBe(0);
+
+    const invalidModeScriptPath = path.join(workflowsDir, "fusion-invalid-mode.workflow.mjs");
+    writeFileSync(
+      invalidModeScriptPath,
+      `export const meta = { name: "fusion-invalid-mode", description: "Reject an invalid Fusion mode before spend." };
+export default async function runWorkflow(dsl) {
+  return await dsl.fusion("question", {
+    mode: "mixed",
+    members: [
+      { label: "evidence", model: "test/evidence" },
+      { label: "risk", model: "test/risk" },
+    ],
+    judge: { model: "test/judge" },
+  });
+}
+`,
+      "utf8",
+    );
+    let invalidModeExecutions = 0;
+    const invalidModeResult = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      scriptPath: invalidModeScriptPath,
+      resolveModel: (selector) => {
+        const [provider, id] = selector.split("/");
+        return { ok: true, selector, provider: provider!, id: id!, model: { provider, id } as never };
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          invalidModeExecutions += 1;
+          return {
+            status: "completed",
+            agentName: request.agent.name,
+            reason: "unexpected",
+            text: "unexpected",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    expect(invalidModeResult.ok).toBe(false);
+    expect(invalidModeResult.error).toContain('fusion mode must be "tool-free" or "agent"');
+    expect(invalidModeExecutions).toBe(0);
   });
 });

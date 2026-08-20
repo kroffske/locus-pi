@@ -14,11 +14,10 @@ import { RenderScheduler } from "../_shared/host/render-scheduler.js";
 import { agentLiveDisplayName, agentLiveTitle } from "../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
+import { acquireFleetViewedRow } from "../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
-interface ViewerTui extends CustomUiTui {
-  terminal?: { rows: number; columns: number; write?(data: string): void };
-}
+type ViewerTui = CustomUiTui & { terminal?: { rows: number; columns: number; write?(data: string): void } };
 
 interface NativeComponentModule {
   AssistantMessageComponent: new (
@@ -57,14 +56,13 @@ interface NativeComponentModule {
 }
 
 interface NativeInputComponent extends Component {
+  children?: Component[];
   focused: boolean;
   handleInput(data: string): void;
   dispose?(): void;
 }
 
-interface ViewerKeybindings {
-  matches(data: string, keybinding: string): boolean;
-}
+type ViewerKeybindings = { matches(data: string, keybinding: string): boolean };
 
 type NativeToolComponent = Component & {
   updateArgs(args: unknown): void;
@@ -116,12 +114,16 @@ export class AgentViewerCapability {
     keybindings: ViewerKeybindings | undefined,
     onSubmit: (value: string) => void,
     onCancel: () => void,
+    theme: unknown,
   ): NativeInputComponent | undefined {
     const Input = this.module.ExtensionEditorComponent;
     if (typeof Input !== "function" || keybindings === undefined) return undefined;
-    const input = new Input(tui as TUI, keybindings, "Message this agent", undefined, onSubmit, onCancel, {
-      autocompleteMaxVisible: 4,
-    });
+    const input = new Input(tui as TUI, keybindings, "", undefined, onSubmit, onCancel, { autocompleteMaxVisible: 4 });
+    const chrome = input.children;
+    if (chrome?.length === 9) {
+      chrome[6]!.render = (width) => [fitLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
+      input.children = [chrome[0]!, chrome[4]!, chrome[6]!, chrome[8]!];
+    }
     input.focused = true;
     return input;
   }
@@ -204,6 +206,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   readonly #scheduler = new RenderScheduler(() => this.tui.requestRender());
   #storeAttached = true;
   #releaseMouseScroll = () => {};
+  #releaseFleetViewedRow = () => {};
   #unregisterGlobal = () => {};
 
   constructor(
@@ -213,9 +216,11 @@ export class AgentSessionViewer implements CustomUiComponent {
     private readonly capability: AgentViewerCapability,
     private readonly rounds?: DrillRoundsConfig,
     private readonly keybindings?: ViewerKeybindings,
+    private readonly theme?: unknown,
   ) {
     const row = agentLiveStore.rowForExecution(execution);
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
+    if (row !== undefined) this.#releaseFleetViewedRow = acquireFleetViewedRow(row.id);
     this.#selection = rounds?.active ?? 1;
     this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
     // Row-lifecycle handling stays synchronous and unthrottled — a vanished row
@@ -245,7 +250,7 @@ export class AgentSessionViewer implements CustomUiComponent {
       return [];
     }
     const rounds = this.roundsLabel();
-    const header = dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth, "top");
+    const header = this.#dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth, "top");
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
@@ -260,13 +265,12 @@ export class AgentSessionViewer implements CustomUiComponent {
       input = undefined;
       inputLines = [];
     }
-    const inputDivider = input === undefined ? [] : [dividerLine("MESSAGE TO AGENT", safeWidth, "strong")];
-    const footer = dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
+    const footer = this.#dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
     if (terminalRows === undefined) {
-      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputDivider, ...inputLines, footer];
+      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputLines, footer];
     }
     if (terminalRows === 1) return [header];
-    const bodyHeight = Math.max(0, terminalRows - inputDivider.length - inputLines.length - 2);
+    const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
     if (this.#historyOffset > 0 && this.#lastHistoryLineCount > 0) {
       this.#historyOffset +=
         content.length - this.#lastHistoryLineCount + (this.#lastBodyHeight - Math.max(1, bodyHeight));
@@ -275,7 +279,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
     const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => fitLine(line, safeWidth));
-    return [header, ...visible, ...inputDivider, ...inputLines, footer];
+    return [header, ...visible, ...inputLines, footer];
   }
 
   handleInput(data: string): void {
@@ -344,6 +348,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#disposed = true;
     this.#releaseMouseScroll();
     this.#releaseMouseScroll = () => {};
+    this.#releaseFleetViewedRow();
+    this.#releaseFleetViewedRow = () => {};
     this.#input?.dispose?.();
     this.#input = undefined;
     this.#detachStore();
@@ -382,11 +388,15 @@ export class AgentSessionViewer implements CustomUiComponent {
             ...this.capability.render(snapshot.blocks, this.tui, width, this.#expandedTools),
           ];
     return [
-      dividerLine("REQUEST", width),
+      this.#dividerLine("REQUEST", width),
       ...requestLines(row?.request, width),
-      dividerLine("RUNTIME", width),
+      this.#dividerLine("RUNTIME", width),
       ...transcript,
     ];
+  }
+
+  #dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
+    return themeText(this.theme, "borderMuted", dividerLine(label, width, style));
   }
 
   #isHistoricalRound(): boolean {
@@ -430,6 +440,7 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.keybindings,
       (value) => this.#submitInput(value),
       () => this.#close(),
+      this.theme,
     );
     return this.#input;
   }
@@ -525,9 +536,7 @@ function noTranscriptLines(row: AgentLiveRow | undefined): string[] {
 const ACTIVE_SESSION_VIEWERS_KEY = Symbol.for("locus-pi.active-agent-session-viewers.v1");
 const MOUSE_SCROLL_LEASES_PROPERTY = "__locusPiMouseScrollLeases";
 
-interface MouseScrollLease {
-  owners: number;
-}
+type MouseScrollLease = { owners: number };
 
 interface ActiveSessionViewerRegistry extends Set<() => void> {
   [MOUSE_SCROLL_LEASES_PROPERTY]?: Map<object, MouseScrollLease>;
@@ -631,6 +640,11 @@ function dividerLine(label: string, width: number, style: DividerStyle = "sectio
   const labelWidth = width - visibleWidth(left) - 1;
   const fitted = truncateToWidth(label, labelWidth, "…");
   return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
+}
+
+function themeText(theme: unknown, tone: "borderMuted" | "muted", text: string): string {
+  if (!isRecord(theme) || typeof theme.fg !== "function") return text;
+  return String(theme.fg.call(theme, tone, text));
 }
 
 function formatAgentSessionStart(row: AgentLiveRow): string {

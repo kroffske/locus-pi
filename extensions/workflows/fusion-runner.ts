@@ -29,6 +29,7 @@ import {
   type WorkflowFusionContext,
   type WorkflowFusionJudge,
   type WorkflowFusionMember,
+  type WorkflowFusionMode,
   type WorkflowJournalLine,
 } from "./runtime/workflow-runtime.js";
 
@@ -37,6 +38,7 @@ export interface DirectFusionRunOptions {
   ctx: ExtensionContext;
   signal: AbortSignal;
   question: string;
+  mode: WorkflowFusionMode;
   members: readonly WorkflowFusionMember[];
   judge: WorkflowFusionJudge;
   context?: WorkflowFusionContext;
@@ -76,7 +78,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
   journalSink.initialize(prelude);
   options.onEvent?.(prelude);
 
-  const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory);
+  const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory, { runId });
   const artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
   const bridgeOptions: WorkflowAgentBridgeOptions = {
     pi: options.pi,
@@ -111,6 +113,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
   const failureLines: WorkflowJournalLine[] = [];
   try {
     answer = await runtime.dsl.fusion(options.question, {
+      mode: options.mode,
       members: options.members,
       judge: options.judge,
       ...(options.context === undefined ? {} : { context: options.context }),

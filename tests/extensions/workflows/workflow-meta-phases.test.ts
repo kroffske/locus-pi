@@ -201,7 +201,15 @@ describe("/workflows status <runId> declared-versus-observed", () => {
 
 describe("curated workflow declarations", () => {
   it("declares exactly the phase() titles each curated workflow actually emits, in order", () => {
-    const declaring = ["plan", "plan-implement", "requirements-grill", "review", "review-fix"] as const;
+    const declaring = [
+      "task/implement-plan-template",
+      "task/plan",
+      "task/substep",
+      "workflow-creator",
+      "workflow-creator/build",
+      "workflow-creator/design",
+      "workflow-creator/svg",
+    ] as const;
 
     for (const name of declaring) {
       const file = packagedWorkflowPath(name);
@@ -218,8 +226,17 @@ describe("curated workflow declarations", () => {
       (name) => readWorkflowMeta(packagedWorkflowPath(name)).phases.length === 0,
     );
 
-    // live-smoke has a single stage; declaring it would be ceremony, and it must
-    // stay valid without a declaration.
-    expect(undeclared).toEqual(["live-smoke"]);
+    // These entries each have one implicit stage; declaring it would be ceremony.
+    // The post-code-review parent owns and declares their orchestration phases.
+    expect(undeclared).toEqual([
+      "live-smoke",
+      "post-code-review/boundaries",
+      "post-code-review/contracts",
+      "post-code-review/necessity",
+      "post-code-review/scope",
+      "post-code-review/simplicity",
+      "post-code-review/style",
+      "post-code-review/synthesis",
+    ]);
   });
 });

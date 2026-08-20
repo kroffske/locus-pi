@@ -15,9 +15,11 @@ import { applyWorkflowJournalLineToAgentLiveStore } from "./runtime/workflow-jou
 import { installWorkflowProgress } from "./progress-widget.js";
 import {
   FUSION_CONFIG_VERSION,
+  FUSION_CONFIG_UPGRADED_MESSAGE,
   FUSION_TOOL_NAME,
   availableFusionModels,
   loadFusionConfig,
+  loadFusionConfigForConfigure,
   parseFusionSetArgs,
   saveFusionConfig,
   validateFusionConfig,
@@ -99,7 +101,7 @@ export function registerFusionSurface(pi: ExtensionAPI, dependencies: FusionSurf
     },
     {
       description:
-        "Usage: /fusion [status|configure|set --members provider/id,provider/id --judge provider/id|enable|disable|run <question>]",
+        "Usage: /fusion [status|configure|set --mode tool-free|agent --members provider/id,provider/id --judge provider/id|enable|disable|run <question>]",
       getArgumentCompletions: fusionCommandCompletions,
       handler: (args, ctx) => handleFusionCommand(pi, ctx, getCommandText(args), runFusion),
     },
@@ -130,10 +132,10 @@ async function handleFusionCommand(
 ): Promise<void> {
   const text = raw.trim();
   const [command = "", ...rest] = text.split(/\s+/u);
-  const action = command === "" ? await selectFusionAction(ctx) : command.toLowerCase();
-  if (action === undefined) return;
 
   try {
+    const action = command === "" ? await selectFusionAction(ctx) : command.toLowerCase();
+    if (action === undefined) return;
     switch (action) {
       case "status":
         await presentFusionStatus(pi, ctx);
@@ -155,7 +157,7 @@ async function handleFusionCommand(
         return;
       default:
         throw new Error(
-          "Usage: /fusion [status|configure|set --members provider/id,provider/id --judge provider/id|enable|disable|run <question>]",
+          "Usage: /fusion [status|configure|set --mode tool-free|agent --members provider/id,provider/id --judge provider/id|enable|disable|run <question>]",
         );
     }
   } catch (error) {
@@ -165,9 +167,10 @@ async function handleFusionCommand(
 
 async function selectFusionAction(ctx: ExtensionCommandContext): Promise<string | undefined> {
   if (ctx.mode !== "tui" || ctx.hasUI === false) return "status";
-  const config = await loadFusionConfig(ctx);
+  const current = await loadFusionConfigForConfigure(ctx);
+  const state = current.upgraded ? "configuration review required" : current.config.enabled ? "enabled" : "disabled";
   return selectValue(
-    await ctx.ui.select(`Fusion · ${config.enabled ? "enabled" : "disabled"}`, [
+    await ctx.ui.select(`Fusion · ${state}`, [
       { label: "Status", value: "status" },
       { label: "Configure models", value: "configure" },
       { label: "Enable tool", value: "enable" },
@@ -180,12 +183,19 @@ async function selectFusionAction(ctx: ExtensionCommandContext): Promise<string 
 async function configureFusionInteractively(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
   if (ctx.mode !== "tui" || ctx.hasUI === false) {
     throw new Error(
-      "Interactive Fusion configuration requires TUI mode. Use /fusion set --members provider/id,provider/id --judge provider/id.",
+      "Interactive Fusion configuration requires TUI mode. Use /fusion set --mode tool-free|agent --members provider/id,provider/id --judge provider/id.",
     );
   }
   const available = await availableFusionModels(ctx);
   if (available.length < 3) throw new Error("Fusion needs at least three available models: two members and one judge.");
   const maximumMembers = Math.min(10, available.length - 1);
+  const mode = selectValue(
+    await ctx.ui.select("Fusion mode", [
+      { label: "Tool-free", value: "tool-free" },
+      { label: "Agent", value: "agent" },
+    ]),
+  );
+  if (mode !== "tool-free" && mode !== "agent") return;
   const countValue = selectValue(
     await ctx.ui.select(
       "Fusion member count",
@@ -202,23 +212,39 @@ async function configureFusionInteractively(pi: ExtensionAPI, ctx: ExtensionComm
   }
   const judge = await chooseModel(ctx, "Fusion judge", available, selected);
   if (judge === undefined) return;
-  const current = await loadFusionConfig(ctx);
-  const next: FusionConfig = { version: FUSION_CONFIG_VERSION, enabled: current.enabled, members: selected, judge };
+  const current = await loadFusionConfigForConfigure(ctx);
+  const next: FusionConfig = {
+    version: FUSION_CONFIG_VERSION,
+    enabled: current.upgraded ? false : current.config.enabled,
+    mode,
+    members: selected,
+    judge,
+  };
   validateFusionConfig(next, available);
   await saveFusionConfig(ctx, next);
   setFusionToolActive(pi, next.enabled);
-  presentFusionBlock(ctx, fusionStatusText(next, true));
+  presentFusionBlock(
+    ctx,
+    `${fusionStatusText(next, next.enabled)}${current.upgraded ? `\n${FUSION_CONFIG_UPGRADED_MESSAGE}` : ""}`,
+  );
 }
 
 async function configureFusionFromArgs(pi: ExtensionAPI, ctx: ExtensionCommandContext, raw: string): Promise<void> {
   const selection = parseFusionSetArgs(raw);
   const available = await availableFusionModels(ctx);
-  const current = await loadFusionConfig(ctx);
-  const next: FusionConfig = { version: FUSION_CONFIG_VERSION, enabled: current.enabled, ...selection };
+  const current = await loadFusionConfigForConfigure(ctx);
+  const next: FusionConfig = {
+    version: FUSION_CONFIG_VERSION,
+    enabled: current.upgraded ? false : current.config.enabled,
+    ...selection,
+  };
   validateFusionConfig(next, available);
   await saveFusionConfig(ctx, next);
   setFusionToolActive(pi, next.enabled);
-  presentFusionBlock(ctx, fusionStatusText(next, true));
+  presentFusionBlock(
+    ctx,
+    `${fusionStatusText(next, next.enabled)}${current.upgraded ? `\n${FUSION_CONFIG_UPGRADED_MESSAGE}` : ""}`,
+  );
 }
 
 async function enableFusion(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
@@ -302,6 +328,7 @@ async function executeFusion(
       ctx,
       signal,
       question: input.question,
+      mode: config.mode,
       members: config.members,
       judge: config.judge,
       ...(input.context === undefined ? {} : { context: { mode: "provided", text: input.context } }),
@@ -356,6 +383,7 @@ function fusionCommandCompletions(prefix: string): CommandArgumentCompletion[] {
 function fusionStatusText(config: FusionConfig, active: boolean): string {
   return [
     `Fusion: ${config.enabled ? "enabled" : "disabled"}`,
+    `Mode: ${config.mode}`,
     `Tool active: ${active ? "yes" : "no"}`,
     `Members (${config.members.length}): ${config.members.length === 0 ? "not configured" : config.members.join(", ")}`,
     `Judge: ${config.judge ?? "not configured"}`,
@@ -369,6 +397,7 @@ function presentFusionBlock(ctx: ExtensionContext, text: string): void {
 function fusionResultDetails(result: DirectFusionRunResult, config: ValidatedFusionConfig): Record<string, unknown> {
   return {
     owner: "fusion",
+    mode: config.mode,
     runId: result.runId,
     runDir: result.runDir,
     members: config.members.map((member) => member.model),

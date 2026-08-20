@@ -2,6 +2,507 @@
 
 This file records user-visible changes to the public package.
 
+## [Unreleased]
+
+## [0.4.0] - 2026-08-20
+
+### Changed
+
+- **Fresh workflow workspaces now stay under `.locus-pi/plans/` by default.**
+  Every workflow, including `post-code-review`, receives a unique
+  `.locus-pi/plans/<generated-run-name>` workspace. Operators no longer need a
+  top-level `tmp/` directory or a manual `--output-dir` for a fresh review.
+  `--run-name <name>` selects `.locus-pi/plans/<name>` for any workflow.
+  Explicit confined output directories remain supported. Resume continues to
+  reuse the recorded source workspace.
+
+### Added
+
+- **Manual `task/draft` intent capture and unique task planning workspaces.**
+  The group-only `task` namespace now exposes `task/draft` before the existing
+  `task/plan`, `task/implement-plan-template`, and `task/substep` stages. One reconnaissance agent records only
+  request-relevant project facts and decides whether clarification is material.
+  The drafting agent receives live questions only on that branch, is instructed
+  to group no more than three questions, writes `draft.md`, and stops
+  before planning. `task/plan` reads that saved draft when the operator starts
+  it on the same workspace. Fresh `task/draft`, `task/plan`,
+  `task/implement-plan-template`, and `task/substep` runs now receive distinct
+  `.locus-pi/plans/<generated-run-name>` directories. `--run-name <name>` reuses
+  `.locus-pi/plans/<name>` across the manual stages, and each completed stage
+  prints the next command with that name. Confined absolute `--output-dir`
+  paths and `./` paths are also accepted. Task resume reuses its recorded
+  workspace and refuses a conflicting path. New run evidence, workflow state,
+  and Fusion configuration now live directly under `.locus-pi/`; new writes no
+  longer use `.pi/locus-pi/`, and old local artifacts are not migrated.
+
+- **One machine-owned source for the two public catalogs — `npm run
+build:catalogs`, verified by `npm run check:generated`.** The extensions
+  `package.json#pi.extensions` activates and the workflow names
+  `extensions/workflows/examples/` resolves were transcribed by hand into
+  `README.md`, `docs/extensions.md`, `docs/workflows.md` and two contract
+  tests; every copy could drift alone, and a published namespace count that
+  disagreed with the directory was exactly that. Both catalogs are now resolved
+  once — from the manifest set the manifest gate validates, and from the same
+  static workflow discovery the registry itself uses — and written to the
+  checked-in `dist/public-catalogs.json` and into fenced
+  `<!-- locus:extensions:… -->` / `<!-- locus:workflows:… -->` regions of the
+  published pages, counts included. `check:generated` sits between
+  `check:links` and `check:fast` in `npm run check`, so adding or removing an
+  entrypoint or a packaged workflow without regenerating fails the gate with
+  the command that fixes it. The generator never imports a workflow module.
+
+- **A deterministic internal-link gate over published documentation — `npm run
+check:links`.** Every relative link and heading anchor in published Markdown is
+  resolved against the file set that actually publishes it: `package.json#files`
+  for the npm tarball, `public-repository-files.txt` for the public repository.
+  Documentation is read from inside one of those, where the rest of the
+  repository does not exist, so a link that resolves in a checkout and not in an
+  install was previously dead with nothing to catch it. `http(s)` links stay out
+  of scope on purpose — reaching them needs the network, which no offline gate
+  can own. The parser is `scripts/markdown-links.ts`, shared with the
+  package-boundary test that applies the same rule to a real `npm pack`.
+
+- **Run-level no-operator mode — `/workflows run <name> --no-operator`, tool
+  field `noOperator`.** One launch option turns the "shipped workflows do not
+  ask" convention into a runtime guarantee for unattended callers: under the
+  mode, ANY request for operator input fails closed with a named reason
+  instead of parking the run. `dsl.awaitOperator(...)` fails the run at the
+  call site (`Operator input requested but forbidden for this run
+(no-operator mode): <reason>`) with no pause envelope, while artifacts
+  published before the refusal stay on disk; an `agent({ ask: true })` stage
+  is refused before any child is spawned with the closed
+  `failureCause: "ask-unavailable"`. The journal opens with
+  `[workflow:no-operator] operator input is forbidden for this run`; saved
+  children inherit the mode through run coordination and cannot unset it.
+  No auto-answer exists under the mode.
+
+- **Headless launches (`print`/`json`) turn the no-operator mode on by
+  default, with `--operator` as the opt-out.** A one-shot host has no operator
+  to reach, so a request for human input there could only park the run until
+  the turn was disposed: what looked like a safe convention ("shipped
+  workflows do not ask") was all that kept an unattended pipeline from
+  hanging on someone else's workflow. Both launch surfaces now default
+  `noOperator` to on in those modes, and the run journal says why —
+  `[workflow:no-operator] operator input is forbidden for this run (headless
+launch: no operator can be reached)` — so a refusal is explicable to a caller
+  who typed no flag. The designed `awaitOperator` split-run pause is not
+  removed: `--operator` (tool field `noOperator: false`) restores it inside a
+  headless launch, including for a `--resume` continuation that gates again.
+  Interactive hosts (`tui`, `rpc`) are unchanged and stay opt-in, explicit
+  flags beat the default in both directions, and the runner itself never
+  infers the mode — an embedder opts in for its own run.
+
+- **Live operator questions — `agent({ ask: true })`.** A stage may let its
+  child ask the operator clarifying questions through the injected
+  `workflow_ask` tool: the question renders in the parent session, the answer
+  returns as the tool result, and the same child continues. Esc returns an
+  "operator declined" text answer; concurrent asking children queue FIFO; the
+  per-call `timeoutMs` fuse pauses while the operator is thinking; each
+  answered call writes an `operator-ask-<n>.json` evidence artifact and a
+  diagnostics line; the replay key records the declaration. With no operator
+  UI (`print`/`json`, unattended) the call fails closed with the new
+  `failureCause: "ask-unavailable"` — never a model-visible refusal sentence,
+  never an auto-selected option. Curated Package workflows remain no-ask by
+  construction. (Owner decision, direction log 2026-08-19.)
+
+### Changed
+
+- **The security gate no longer ships a permission grader that graded
+  nothing.** `requirePermission` and its `PermissionManifest` shape had no
+  caller anywhere in the package: the gate classifies tool calls and audits
+  them, but never checked a capability against a manifest, so the function
+  read as an enforcement path while enforcing nothing — the most expensive
+  kind of dead code, because it invites trust. An extension manifest's
+  `permissions` field keeps exactly the meaning the schema and
+  `docs/extensions.md` already give it: a review declaration that grants no
+  capability and sandboxes nothing. `isPathAllowed` and its `isWithin` helper
+  existed only for the grader and leave with it; `SECRET_PATH_PATTERNS` and
+  `isCommandAllowed` stay, because tool-call classification reads them.
+
+- **Both doctors now describe the installed package instead of the project's
+  migration history.** `/devext doctor` read a hand-maintained table of
+  thirty-one rows that had drifted away from what ships: it never listed
+  `status-line`, one of the eleven entrypoints `package.json#pi.extensions`
+  activates, and it still published deleted demos, disabled experiments and
+  backlog counters (`omp`, `redesign`, `split`, `fixtures`, `deleted`) as if they
+  were evidence about an installation. `npx @kroffske/locus-pi doctor` answered
+  the same question from a different source — the declared entrypoints and the
+  files on disk — so the two disagreed. Both now read one published module,
+  `extensions/devext-doctor/package-inventory.mjs`, which resolves the declared
+  entrypoints at command time and reports, per entrypoint, whether it and its
+  manifest are present plus the `risk` and `ownership` that manifest declares.
+  Activating a twelfth extension changes both diagnostics with no edit to either
+  of them. A missing file or an unreadable manifest is now a stated problem and a
+  non-zero exit rather than a silent omission or a stack trace; the manifest
+  contract itself stays owned by `npm run check:manifests`.
+
+- **`npm run check` is now the one canonical gate, and `npm run check:fast` is the
+  inner loop.** `check` runs `check:fast` — manifests, layers, workflow source
+  shape, types, Pi host coherence, tests, source audit — and then the
+  repository-wide checks that used to be reachable only through `check:push` or a
+  separate CI step: `format:check` (`prettier --check`, never `--write`),
+  `check:links`, `check:repository`, and `check:release`. It is deterministic,
+  offline, and read-only, so a green `check` locally and a green CI now mean the
+  same thing. `check:push` is `check` plus the dry-run pack contract, and CI runs
+  one `npm run check` step instead of repeating the repository and release gates
+  after it. Only what needs the network or the runner environment stays outside:
+  the dependency audit, the extension doctor, the Pi peer version, and the pack
+  candidate.
+
+- **The stock `ask` tool is excluded from every workflow child.** A headless
+  child received its no-UI refusal as model-visible text — the recorded
+  fabrication path — and its option timeout auto-selected an answer on the
+  operator's behalf. Workflow children now never see the stock tool; live
+  questions travel only through `workflow_ask` on stages that declared
+  `ask: true`.
+
+- **Pi compatibility is now an open-ended minimum contract instead of a `0.83.x` ceiling.** The four Pi peer dependencies accept `>=0.83.0`, while development and CI continue to pin one exact, jointly updated Pi version. `npm run sync:pi-host` updates all four exact development packages from the selected CLI, `npm run check:pi-host` verifies the installed CLI and SDK packages before the suite, and selective-loading coverage runs through that installed host contract without hard-coding its version.
+
+- **Package contract tests now follow their owners.** The former mixed `public-registration` integration file is split across package metadata, runtime registration, extension-agent catalog, workflow catalog, and documentation-reference contracts. A new host contract verifies full and selective package loading through Pi's package/resource loader.
+
+- **The redundant documentation index was removed.** The root README now links directly to the four cross-cutting guides, while getting-started documents selective loading and mixed-provider configuration.
+
+- **Extension manifests are now a validated contract, and six inert fields were removed from
+  them.** `npm run check` runs the new `npm run check:manifests`, which loads exactly the
+  manifests `package.json#pi.extensions` names, validates them against
+  `extension-manifest.schema.json` with `additionalProperties: false`, and enforces unique ids,
+  resolvable `docsPath` and `tests` paths, and a bundled agent profile behind every
+  `agent.name`. Published manifests therefore no longer carry `name`, `version`,
+  `defaultEnabled`, `behaviorStatus`, `tier`, or `sourceMode`: nothing read them, the npm
+  package version owns versioning and `package.json#pi.extensions` owns activation. Enum values
+  no shipped extension used — `omp-owned-to-import`, `redesign-later`, `split-required`,
+  `no-current-owner`, `rewrite-first`, `fork-after-audit`, `wrapper-first`, and the unreviewed
+  and blocked review states — were dropped, and `status-line` was normalized onto the same
+  values as the other ten instead of remaining an unvalidated exception.
+
+- **Extension manifests now declare the hooks the runtime actually registers.** Six extensions under-declared their `input` hook, and `agents` additionally omitted `session_shutdown`, so a reader of the published manifest or of the `docs/extensions.md` reference table saw fewer hooks than the extension installs. Both surfaces now match live registration.
+
+- **The task namespace hands work between stages through files, and planning is
+  decomposed for a weak model.** `task/plan` is now a no-ask pipeline: one
+  scope agent freezes `request.md`/`scope.md`, one context agent writes
+  `context.md`, three parallel analysts write `analysis/*.md`, one compose
+  agent writes `plan.md` plus one `step-<n>.md` file per step (no `steps.md`),
+  three parallel reviewers write `reviews/*.md`, one bounded correction
+  replaces the plan once, and a final verifier plus runtime choice publish
+  `plan.md` — or fail closed publishing `planning-blocker.md`. The run never
+  waits for an operator: unknowns become explicit assumptions and
+  pre-implementation prerequisites, so automated callers always reach a
+  terminal artifact. `task/substep` now takes one selector and executes only
+  the matching saved step. The owner may edit `plan.md` and `step-<n>.md` after
+  planning, and both rendering and one-step recovery deliberately read the
+  files on disk as the contract.
+
+- **Approved-plan rendering and step execution now have distinct names.**
+  `task/implement-plan-template` replaces the overlapping `task-via-script`
+  route. It no longer replans: one scripting agent reads the already approved
+  `plan.md` and `step-<n>.md` files and renders
+  `implement-plan.workflow.mjs` from the fixed template, one literal node per
+  step plus a summary node. Each step returns a declared completed/blocked
+  choice, so a blocked history fails the workflow before the next node starts.
+  `task/substep` replaces the ambiguous
+  `task/implement` name and executes exactly one selected step. The generated
+  file remains unregistered, resolves only by explicit path, and is never run
+  by the renderer. The Package registry count stays unchanged.
+
+- **Public documentation is now organized for external readers.** Cross-cutting guides are limited to `docs/`, extension manuals live beside their source as `extensions/<name>/README.md`, and historical ADR, PRD, milestone, and source-audit working notes are excluded from the public repository and npm documentation surface.
+
+- **Workflow Creator is now installed with the Package.** The new
+  `workflow-creator` namespace runs three source-bound children in order:
+  `design` writes and independently reviews the target workflow architecture,
+  `svg` draws and reviews its self-contained graph, and `build` creates and
+  rechecks only the declared source files. Each child permits at most one
+  complete correction and fails closed on a second rejection; generated files
+  stay in the selected workflow workspace and are never executed by Creator.
+
+- **Folder-qualified workflows now keep their own workspace and visible run
+  history.** A direct run such as `airflow-dag-builder/plan` defaults to
+  `tmp/airflow-dag-builder/plan`, so sibling entries no longer contend for the
+  namespace root. When an operator answer starts a continuation, its live panel
+  names the source run and retains that run's available settled agents above the
+  new work instead of appearing to reset. Current-run counters stay independent;
+  if process-local history has already expired, the panel says so and points to
+  the durable run status.
+
+- **Wide agent summaries no longer crash the workflow TUI at the terminal
+  edge.** Shared live rows now measure terminal columns with `visibleWidth()`
+  and truncate by columns, including emoji and other double-width graphemes. A
+  210-column workflow panel therefore cannot emit the 211-column summary line
+  that Pi rejects as an uncaught render exception.
+
+- **Answers now continue folder-qualified workflows by saved name.** The
+  operator handoff service preserves a persisted `target.kind: "name"` when it
+  resolves the continuation. Names such as `airflow-dag-builder/plan` no longer
+  pass through the legacy `script` alias and become mistaken filesystem paths.
+
+- **Workflow questions can show their source evidence beside the choices.** A
+  select or text question may bind one published continuation artifact as
+  `detailArtifactRef`. The runtime verifies its identity and digest, redacts and
+  bounds the text, then renders it above the options together with the workflow
+  and run identity. This lets planning workflows show the concrete blocker,
+  three suggested answers, and the custom-answer row in one TUI block.
+
+- **A workflow workspace now owns its active-run lock.** The runtime writes
+  `.locus-pi-workflow.lock` inside `outputDir` instead of retaining the lock in
+  a separate hashed state directory. Removing the workspace therefore clears
+  its ownership and allows an ordinary workflow to recreate and reuse that
+  path, while concurrent live runs still conflict and durable child checkpoints
+  remain separate.
+
+- **The workflow catalog makes the active choice easier to scan.** The selected
+  workflow name now carries the strongest emphasis, its description reads as
+  supporting text, and source badges and catalog paths stay visually secondary.
+
+- **The workflow catalog now has Project, User, Package, and History tabs.**
+  Tab or Right moves forward, Left moves back, and Up/Down selects only inside
+  the active source. Descriptions wrap at word boundaries, rows no longer expose
+  authoring-profile jargon, and source inspection shows the exact catalog and
+  entry paths. Folder-owned namespaces can be copied intact to Project or User;
+  group-only namespaces remain group-only, and existing destinations are never
+  merged or overwritten.
+
+- **The Package workflow and command portfolios are smaller.** The overlapping
+  `requirements-grill`, `review`, and `review-fix` namespaces are retired;
+  `implement`, `live-smoke`, the group-only `task` pair, and modular
+  `post-code-review` remain. `/workflows <subcommand>` is the sole command family
+  for list, info, status, result, run, and continue; only `/workflow-stop`
+  remains as an emergency compatibility alias.
+
+- **Typing `/workflows` no longer scans persisted handoffs on every input
+  change.** Command completion defers that synchronous disk work until the
+  operator actually types `continue `, preventing slow mounted filesystems such
+  as WSL project volumes from freezing ordinary command entry.
+
+- **Planning, approved-plan rendering, and one-step recovery form the visible
+  `task` workflow family.** The Package names are `task/plan`,
+  `task/implement-plan-template`, and `task/substep`; the shared
+  group-only `task` namespace makes their relationship clear while remaining
+  non-runnable, so planning still stops for owner review and explicit approval.
+  The old `plan` and `plan-implement` names are removed instead of retained as
+  duplicate aliases. The separate `implement` workflow keeps its distinct
+  post-code-review remediation contract.
+
+- **Workflow folders may now be group-only.** A namespace can contain direct
+  `<group>/<child>` workflow files without a runnable root. `/workflows list`
+  renders an unselectable group header, children remain directly runnable, and
+  `/workflows run`/`info` explain that the group itself is not runnable. Adding
+  `<group>/<group>.workflow.mjs` later enables the root without renaming or
+  mixing its children.
+
+- **Package diagnostics now fail when the declared extension inventory is
+  incomplete.** `locus-pi doctor` still prints every `ok` and `missing`
+  entrypoint, but now exits with status 1 when any path from
+  `package.json#pi.extensions` is absent instead of reporting process success.
+
+- **Prompt-shelf writes now guide callers to the explicit `set` syntax.**
+  `/review`, `/todos`, and `/goal prompt` continue to accept compatible
+  free-form writes with their existing stored-content behavior and now mark
+  that spelling as deprecated with the equivalent scoped `set <prompt>` command. Empty,
+  `show`, and `read` forms remain read-only.
+
+- **The public tool API now has one supported name per capability.** Agent
+  delegation uses `spawn_agent`; AST previews finish through `resolve`; human
+  questions use `ask`; and bounded continuation uses `loop`. The duplicate
+  `task`, `ast_apply`, `askUserQuestion`, `loopControl`, `devext_reload`, and
+  `locus_workload_proof` tools were removed. `/devext reload` and
+  `/devext hot-reload` were also removed in favor of Pi's built-in `/reload`.
+  `ask` retains both option-list and rich single-question schemas, and the todo
+  extension adds read-only `todo_read` beside `todo_write`.
+
+- **`loop` now performs real bounded automatic continuation.** `start` and
+  `until` persist one state machine per Pi session, dispatch follow-up turns
+  through the host, and stop on explicit completion, transport/source failure,
+  a default 20-iteration limit, or a default 30-minute deadline. `once` remains
+  available for manual one-step continuation.
+
+- **Agents now get one shipped skill for running existing workflows without a
+  package-specific executor.** Inside Pi, `locus-pi-run-workflow` calls the
+  native `workflow` tool. Outside Pi, it starts the registered slash command
+  directly with `pi --mode json -p`; typed start, rejection, and terminal
+  receipts expose the canonical run, journal, and result paths. The skill treats
+  Pi's process exit as transport status rather than workflow success, leaves an
+  awaiting-operator handoff unanswered, and documents `--approve` as broad Pi
+  project trust with no sandbox. `locus-pi-workflows` now owns authoring only,
+  so run and create requests have distinct routing descriptions.
+
+- **Fusion now requires one explicit capability mode for every member and its
+  judge.** `tool-free` keeps catalog personas while disabling package discovery
+  and requiring an empty Pi active-tool readback before the first prompt;
+  `agent` keeps the existing catalog-agent capability path. Workflow and direct
+  Fusion persist the declared mode and fresh host readback in evidence, journals,
+  and reports, while replay records the mode without claiming a live readback.
+  Direct Fusion configuration is now version 2: operational commands reject
+  version 1, and explicit configure/set replacement is atomic and remains
+  disabled until reviewed and enabled.
+
+- **The `/ps` agent viewer now gives the transcript more room and clearer
+  boundaries.** While one agent's transcript is open, the lower fleet panel
+  shows only that agent instead of the full roster. The viewer frame uses the
+  theme's muted border color so native tool calls remain visually distinct.
+  The interactive input drops its redundant heading and extra vertical gaps,
+  leaving one compact send/newline hint beneath the editor.
+
+- **Finished workflow transcripts now end on the useful result.** Interactive
+  runs render `Workflow started`, then the bounded `Workflow finished` receipt,
+  then the exact `Workflow result`; non-interactive JSON keeps its existing
+  terminal-receipt ordering. The completion receipt no longer repeats a clipped
+  prose result and groups primary/workspace/result/journal files separately from
+  copyable commands. A Package `task/plan` result names `plan.md` in its card and
+  shows a review-and-approval-gated continuation through
+  `task/implement-plan-template`; that renderer's card prints the explicit-path
+  command for `implement-plan.workflow.mjs`.
+
+- **Post-code review now states whether work is mandatory and hands it to a
+  separate verified implementation workflow.** Final reports use `READY`,
+  `READY_WITH_RECOMMENDATIONS`, `CHANGES_REQUIRED`, or `BLOCKED`; each item has
+  an independent `REQUIRED`, `RECOMMENDED`, or `NO_ACTION` level plus impact.
+  Actionable items may include small illustrative snippets, never literal
+  patches. The new Package `implement` workflow defaults to REQUIRED work,
+  intentionally no-ops when nothing is selected, pauses for unresolved owner or
+  product decisions, independently verifies live changes, and permits at most
+  one corrective pass. It never commits, pushes, opens a pull request, merges,
+  or deploys.
+
+- **Post-code review now audits comments and project-specific style from one
+  request-local file.** Every fresh review preserves an existing
+  `tmp/post-code-review/<review-id>/style.md` or safely creates it empty before
+  child work starts. A fourth parallel lane checks misleading, stale, redundant,
+  or missing comments and evidence-backed project style; its proposals still
+  pass through the sequential necessity challenge before synthesis.
+
+- **Saved workflows now form folder-owned trees.** A canonical
+  `<name>/<name>.workflow.mjs` root owns its direct child files, which resolve as
+  `<name>/<child>`. Namespace precedence is atomic, `/workflows list` renders
+  roots before indented short-name children without absolute paths, and every
+  entry remains directly runnable. Existing flat Project/User workflows remain
+  compatible; Package workflows now require folders.
+
+- **Standard workflows can attach their own published evidence to an operator
+  continuation.** Unchanged references returned by the three publication APIs
+  may now flow only as direct elements of
+  `awaitOperator.operatorHandoff.continuationArtifactRefs`; derived, nested,
+  foreign, or differently routed runtime values remain rejected, and the host
+  still verifies origin-run membership and artifact integrity.
+
+- **Modular post-code review now ships as an installable Package workflow.**
+  `post-code-review` coordinates one scope child, four parallel audit children,
+  one sequential necessity challenge, and one synthesis child from one shipped
+  folder, publishes the final Markdown report, and includes a self-contained
+  SVG interaction diagram. The necessity challenge requires a proven failure,
+  a guarantee owner, a non-duplicated responsibility, and the simplest net
+  improvement before synthesis may retain a finding. Explicitly trusted external
+  provider guarantees are accepted boundaries rather than automatic demands for
+  duplicate local validation. `invokeWorkflow({ child })` binds every short
+  sibling name to the exact folder namespace and source selected for the root.
+
+- **Workflow authoring now defines the complete tree before source.**
+  `workflow-author` writes `.pi/workflows/<name>/<name>.design.md` with an
+  explicit `runnable root` or `group-only` namespace and exact `Entries` table,
+  reviews it, then builds only the declared direct children plus the root when
+  declared. It never fabricates a root, pauses only for explicit design-only
+  work, and cannot report success until every source passes identity, import,
+  graph, and source-shape checks.
+
+- **Interactive workflow launches can select a fresh durable workspace.**
+  `/workflows run <name> --output-dir <project-relative-path> [input]` passes the
+  same safe `outputDir` contract already available to the programmatic workflow
+  tool, so repeated semantic targets do not need to share stale checkpoints.
+
+- **Fresh `post-code-review` launches now require an explicit new namespace.**
+  Catalog Start, canonical/flat commands, the workflow tool, headless launches,
+  and direct runner calls reject omitted or previously used `outputDir` values;
+  resume remains bound to the original run and workspace. Other workflows keep
+  their existing default workspace behavior.
+
+### Fixed
+
+- **The plan verifier's answer stays the evidence the routing choice reads.**
+  Six planning stages now return a short readback instead of retyping the file
+  they wrote; the verification stage is the one that must repeat its text,
+  because the choice between "ready" and "blocked" and the blocker writer see
+  nothing but that answer — they open no files. In a hosted-model series the
+  verifier generalised the surrounding rule and replied with 95 bytes
+  ("Wrote and verified: … Conclusion: ready.") for a 3,374-byte file, so the
+  decision was made from the verifier's own conclusion line instead of its
+  evidence: the verdict happened to match, but the independent gate had
+  degraded into an echo. The instruction is now contrastive — it says the
+  answer _is_ the evidence, names who reads it and that they open no files,
+  and calls a summary or a bare conclusion line unusable.
+
+- **The plan verifier no longer blocks a plan for describing something that
+  does not exist yet.** The stage that checks the finished plan reopens the live
+  project, but its prompt never said that planning implements nothing: on the
+  first hosted-model series a verifier confirmed the outcome, the fields, the
+  dependency order and the clean reviews, then ran `test -f …/index.html`, got
+  status 1, and concluded "blocked" — a blocker no plan could ever avoid,
+  since this workflow publishes a plan and stops. A weaker local model in the
+  earlier series simply never inspected the project and so never hit it. The
+  stage now states that the deliverable's absence is the expected state, that
+  it verifies the document rather than the result, and that each step's
+  verification is checked for existing and being runnable after that step has
+  been performed — never for passing today.
+
+- **The packaged `task/plan` workflow stops planning work its own executor
+  cannot do, and stops retyping the files it just wrote.** Every step in the
+  plan it produces is executed later by one unattended CLI agent with this
+  run's toolset, but nothing said so: an audited plan-then-implement series
+  put browser play, screenshots and a stronger-model judgement into its last
+  step and lost hours to a blocked run. Composition now states the executor's
+  reality and routes browser checks, screenshots, a stronger-model judge, and
+  anything a person must sign into a final `Operator acceptance` section of
+  `plan.md`; the step-usability review checks the same rule. The three
+  reviews must write `## Checks performed` and `## Findings`, because a
+  permitted `None.` produced six-byte review files indistinguishable from a
+  review nobody ran. Stages that write a file now return a short readback
+  instead of repeating its contents — the repetition was ~80% of the final
+  answers and injected a phantom "duplicate sections" claim into `plan.md` —
+  while verification still returns its complete text, since routing and the
+  blocker decide from that text alone. Routing takes no tools and returns one
+  quoted JSON string, after an audited run's first routing answer was rejected
+  as invalid JSON. Correction short-circuits with `No correction needed.` when
+  no review lists an actionable finding, instead of spending tool calls to
+  apply two wording fixes. Prompt text only: stage count, JavaScript
+  structure, and the standard profile are unchanged.
+
+- **`npm run check:repository` now verifies a checkout that never ran the tests.** The public
+  inventory lists `dist/workflow-source-shape.mjs`, but no gate built it: the comparison
+  passed only where a committed copy or an earlier test or pack run had left the file behind,
+  and reported it missing otherwise. The npm script now rebuilds the artifact before comparing
+  the inventory, the same way `prepack` and `pack:json` already do, so the check stands on its
+  own and the hygiene scan reads the artifact as actually built.
+
+- **Durable workflow evidence now stays bound to its recorded run and
+  workspace.** Resume rejects a missing or different output workspace before
+  any child executes; persisted workflow targets, run identifiers, artifact
+  indexes, handoff claim/lock sidecars, and published primary files now pass
+  the same physical-containment and descriptor-identity checks. Unsafe or
+  dangling symlinks fail closed, and claim/lock writes retain their prior
+  `fsync` durability.
+
+- **Exact post-code-review resume now proves the source workspace identity.**
+  Result envelopes persist a versioned canonical project-relative physical
+  identity; malformed, missing, or changed identities fail before lease and
+  checkpoint access, without adding another workstation-absolute public field.
+
+- **Post-code-review resume and handoff admission no longer trust mutable result projections.**
+  A write-once host-owned launch binding records the validated source target,
+  script identity, workspace identity, explicit selection, and semantic input
+  digest. Owner resume and handoff paths fail closed when that binding is
+  missing or disagrees with `runtime/result.json`; generic and legacy workflows
+  remain readable.
+
+- **Workflow discovery, parsing, and completion now share one executable
+  command contract.** Invalid directory-shaped project workflows block
+  lower-precedence fallbacks, quoted `--output-dir` values complete correctly,
+  repeatable options remain discoverable, and the standalone `--` delimiter
+  preserves opaque input for both canonical and compatibility commands.
+
+- **Workflow choice routers can opt into a safe degraded route.**
+  `agent({ choice, choiceFallback })` keeps the normal two schema-validated
+  attempts, then returns the explicitly declared fallback and records the
+  validation failure in the runtime journal. The fallback must be one of the
+  declared choices and does not mask child execution or transport failures;
+  choice calls without it retain fail-closed behavior.
+
 ## [0.3.0] - 2026-08-10
 
 ### Fixed
@@ -1339,9 +1840,8 @@ this workflow's questions.` — through the same continuation a typed reply
   That directory is also the only route to a workflow that is both tracked in the
   repository and resolvable by name: every other directory the resolver scans —
   `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/` — is git-ignored,
-  so a copy placed there works on one machine and exists in no clone. The
-  portfolio decision and its criteria are recorded in
-  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  so a copy placed there works on one machine and exists in no clone. The current public portfolio is listed in
+  [`docs/workflows.md`](docs/workflows.md).
   Every `plan` stage is read-only; `plan-implement` writes to the launch checkout,
   which is why it is a separate workflow the operator starts deliberately.
   One name collision is deliberate and documented: the `plan` **workflow** is not
@@ -1578,9 +2078,8 @@ this workflow's questions.` — through the same continuation a typed reply
   still fails until a human looks at it.
   `excalidraw-pipeline` moved to `extensions/workflows/references/` as part of
   this: it was documented as "reference only, do not run it by name", and under a
-  scanned registry that is a location, not a note. The trade-off this accepts is
-  recorded in
-  [`docs/adr/curated-workflow-portfolio.md`](docs/adr/curated-workflow-portfolio.md).
+  scanned registry that is a location, not a note. The current public portfolio is listed in
+  [`docs/workflows.md`](docs/workflows.md).
 - **`review` asks its questions in assessed rounds, and every question id now
   carries its question.** Interrogation was one call: whatever the first reader
   thought of was the whole question set, and nothing ever checked whether a risk
@@ -1923,8 +2422,8 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
   Git commands are blocked before execution.
 - Added runtime-owned `workspace()` handles for sharing one exact linked
   worktree safely across workflow agents.
-- Recorded the strict curated-workflow selection criteria and candidate boundary
-  in `docs/adr/curated-workflow-portfolio.md`.
+- Recorded the strict curated-workflow selection criteria and candidate boundary;
+  the current public portfolio is listed in `docs/workflows.md`.
 - Added editable Excalidraw.js pipeline maps and PNG previews for every curated
   Package workflow, with explicit operator, workflow, agent, decision, and
   persisted-artifact ownership.
@@ -1950,8 +2449,7 @@ awaitOperator` — as a body line rather than a badge, because a narrow terminal
 - **Breaking:** retired the `llm-smoke` curated Package workflow. The curated
   registry is now four names: `live-smoke`, `requirements-grill`, `review`, and
   `review-fix`. Its only job was proving `llm()` routing, and nothing was folded
-  into `live-smoke`; see the 2026-07-21 amendment in
-  `docs/adr/curated-workflow-portfolio.md`.
+  into `live-smoke`; see the current public portfolio in `docs/workflows.md`.
 
 ### Changed
 

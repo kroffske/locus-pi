@@ -56,6 +56,11 @@ const STANDARD_DSL_METHOD_NAMES = [
 ] as const;
 type StandardDslMethod = (typeof STANDARD_DSL_METHOD_NAMES)[number];
 const STANDARD_DSL_METHODS: ReadonlySet<string> = new Set(STANDARD_DSL_METHOD_NAMES);
+const STANDARD_PUBLISHED_ARTIFACT_METHODS: ReadonlySet<StandardDslMethod> = new Set([
+  "publishArtifact",
+  "publishPrimaryArtifact",
+  "publishPrimaryFile",
+]);
 const STANDARD_COLLECTION_DSL_METHODS = new Set(["agent", "continuationArtifacts", "items", "parallel", "pipeline"]);
 const STANDARD_STATEMENTS = new Set([
   "break_statement",
@@ -754,6 +759,8 @@ function validateStandardValueUses(
     if (value.kind === "opaque-list" && isOpaqueListStructuralUse(identifier)) continue;
     if (value.kind === "runtime-status" && isRuntimeStatusIdentityUse(identifier)) continue;
     if (isWholeValueReturnUse(identifier)) continue;
+    if (isPublishedArtifactContinuationUse(identifier, value, dslBindings)) continue;
+    if (isPublishedArtifactHandoffDetailUse(identifier, value, dslBindings)) continue;
     if (isUnchangedScheduledValueUse(identifier, value, dslBindings)) continue;
     errors.add("standard profile forwards opaque semantic, model, file, host, and runtime values only as whole values");
   }
@@ -1259,6 +1266,100 @@ function isWholeValueReturnUse(identifier: SgNode): boolean {
     }
   }
   return false;
+}
+
+function isPublishedArtifactContinuationUse(
+  identifier: SgNode,
+  provenance: StandardValueProvenance,
+  dslBindings: ReadonlySet<string>,
+): boolean {
+  if (
+    provenance.kind !== "runtime-value" ||
+    provenance.sourceMethod === undefined ||
+    !STANDARD_PUBLISHED_ARTIFACT_METHODS.has(provenance.sourceMethod)
+  ) {
+    return false;
+  }
+
+  let element = identifier;
+  while (element.parent()?.kind() === "parenthesized_expression") element = element.parent()!;
+  const refs = element.parent();
+  if (refs?.kind() !== "array") return false;
+
+  const refsPair = refs.parent();
+  if (
+    refsPair?.kind() !== "pair" ||
+    staticObjectKey(refsPair.field("key")) !== "continuationArtifactRefs" ||
+    refsPair.field("value")?.id() !== refs.id()
+  ) {
+    return false;
+  }
+
+  const handoff = refsPair.parent();
+  const handoffPair = handoff?.parent();
+  if (
+    handoff?.kind() !== "object" ||
+    handoffPair?.kind() !== "pair" ||
+    staticObjectKey(handoffPair.field("key")) !== "operatorHandoff" ||
+    handoffPair.field("value")?.id() !== handoff.id()
+  ) {
+    return false;
+  }
+
+  const declaration = handoffPair.parent();
+  if (declaration?.kind() !== "object") return false;
+  const call = declaration.ancestors().find((ancestor) => ancestor.kind() === "call_expression");
+  if (call === undefined || standardCallArguments(call)[0]?.id() !== declaration.id()) return false;
+  const callee = unwrapStandardParentheses(callCallee(call));
+  return callee !== undefined && directStandardDslCall(callee, dslBindings) === "awaitOperator";
+}
+
+function isPublishedArtifactHandoffDetailUse(
+  identifier: SgNode,
+  provenance: StandardValueProvenance,
+  dslBindings: ReadonlySet<string>,
+): boolean {
+  if (
+    provenance.kind !== "runtime-value" ||
+    provenance.sourceMethod === undefined ||
+    !STANDARD_PUBLISHED_ARTIFACT_METHODS.has(provenance.sourceMethod)
+  ) {
+    return false;
+  }
+  const detailPair = identifier.ancestors().find((ancestor) => ancestor.kind() === "pair");
+  if (
+    detailPair === undefined ||
+    staticObjectKey(detailPair.field("key")) !== "detailArtifactRef" ||
+    !nodeWithinStandardNode(identifier, detailPair.field("value") ?? undefined)
+  ) {
+    return false;
+  }
+  const question = detailPair.parent();
+  const questions = question?.parent();
+  const questionsPair = questions?.parent();
+  if (
+    question?.kind() !== "object" ||
+    questions?.kind() !== "array" ||
+    questionsPair?.kind() !== "pair" ||
+    staticObjectKey(questionsPair.field("key")) !== "questions"
+  ) {
+    return false;
+  }
+  const handoff = questionsPair.parent();
+  const handoffPair = handoff?.parent();
+  if (
+    handoff?.kind() !== "object" ||
+    handoffPair?.kind() !== "pair" ||
+    staticObjectKey(handoffPair.field("key")) !== "operatorHandoff"
+  ) {
+    return false;
+  }
+  const declaration = handoffPair.parent();
+  if (declaration?.kind() !== "object") return false;
+  const call = declaration.ancestors().find((ancestor) => ancestor.kind() === "call_expression");
+  if (call === undefined || standardCallArguments(call)[0]?.id() !== declaration.id()) return false;
+  const callee = unwrapStandardParentheses(callCallee(call));
+  return callee !== undefined && directStandardDslCall(callee, dslBindings) === "awaitOperator";
 }
 
 function isUnchangedScheduledValueUse(

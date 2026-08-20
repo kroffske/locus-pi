@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHarness } from "../../test-harness.js";
 import workflows from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
 import type { ThemeLike } from "../../../extensions/_shared/host/pi-api.js";
 
@@ -31,6 +32,71 @@ async function waitForBackground(predicate: () => boolean): Promise<void> {
 }
 
 describe("/workflows run launch gate", () => {
+  it("launches the installed Package post-code-review entry without an explicit workspace", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-package-post-review-launch-"));
+    const h = registerCommandHarness(root);
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-package-review",
+      runDir: "/tmp/run-package-review",
+      ok: true,
+      result: "ok",
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-package-review/result.json" },
+    });
+    try {
+      await h.commands.get("workflows")!.handler("run post-code-review", h.ctx);
+      await waitForBackground(() => spy.mock.calls.length === 1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "post-code-review" });
+      expect(spy.mock.calls[0]?.[0].outputDir).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("launches a project post-code-review command without an explicit output namespace", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-launch-"));
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
+    const h = registerCommandHarness(root);
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-project-review",
+      runDir: "/tmp/run-project-review",
+      ok: true,
+      result: "ok",
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-project-review/result.json" },
+    });
+    try {
+      await h.commands.get("workflows")!.handler("run post-code-review", h.ctx);
+      await waitForBackground(() => spy.mock.calls.length === 1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "post-code-review" });
+      expect(spy.mock.calls[0]?.[0].outputDir).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a fresh post-code-review tool call in a generated planning workspace", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-tool-"));
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
+    const h = registerCommandHarness(root);
+    try {
+      const result = await h.tools
+        .get("workflow")!
+        .execute("tool-post-review", { name: "post-code-review" }, new AbortController().signal, () => void 0, h.ctx);
+      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+      expect(result.isError).not.toBe(true);
+      expect(text).not.toContain("fresh launch requires");
+      const workspaces = path.join(root, ".locus-pi", "plans");
+      expect(existsSync(workspaces)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("warns that native exec approval does not sandbox trusted workflow JavaScript", () => {
     const h = registerHarness();
     const tool = h.tools.get("workflow")!;
@@ -41,11 +107,74 @@ describe("/workflows run launch gate", () => {
     expect(tool.formatApprovalDetails?.({ name: "reviewed-workflow", items: ["alpha", "beta"] })).toEqual([
       "Workflow: reviewed-workflow",
       "Items: 2",
-      "Workflow workspace: default <pwd>/tmp/<workflow-name>",
+      "Workflow workspace: .locus-pi/plans/<generated-run-name>",
       "Surface: trusted-file workflow runner",
       "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
       "Isolation: none — exec approval is consent, not a sandbox",
     ]);
+  });
+
+  it("shows the generated planning workspace for a bare name", () => {
+    const h = registerHarness();
+    const details = h.tools.get("workflow")!.formatApprovalDetails?.({ name: "post-code-review" }) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
+  });
+
+  it("shows the generated planning workspace for an absolute owner-looking path", () => {
+    const h = registerHarness();
+    const details =
+      h.tools.get("workflow")!.formatApprovalDetails?.({
+        scriptPath: path.join(process.cwd(), ".agents", "workflows", "post-code-review.workflow.mjs"),
+      }) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
+  });
+
+  it.each([
+    "/outside/.pi/workflows/post-code-review.workflow.mjs",
+    path.join(process.cwd(), ".pi", "workflows", "post-code-review.workflow.mjs"),
+  ])("shows the generated planning workspace for an absolute legacy script: %s", (script) => {
+    const h = registerHarness();
+    const details = h.tools.get("workflow")!.formatApprovalDetails?.({ script }) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
+  });
+
+  it.each([
+    { scriptPath: ".pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "./.pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "nested/../.pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: ".claude/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "./.claude/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: ".agents/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "nested/../.agents/workflows/post-code-review.workflow.mjs" },
+    { script: ".pi/workflows/post-code-review.workflow.mjs" },
+  ])("shows the generated planning workspace for resolved owner path %j", (args) => {
+    const h = registerHarness();
+    const details = h.tools.get("workflow")!.formatApprovalDetails?.(args) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
+  });
+
+  it("does not classify escaping owner-looking paths in approval details", () => {
+    const h = registerHarness();
+    const details =
+      h.tools.get("workflow")!.formatApprovalDetails?.({
+        scriptPath: "../.pi/workflows/post-code-review.workflow.mjs",
+      }) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
+  });
+
+  it("does not overmatch a nested non-owner suffix in approval details", () => {
+    const h = registerHarness();
+    const details =
+      h.tools.get("workflow")!.formatApprovalDetails?.({
+        scriptPath: "nested/post-code-review.workflow.mjs",
+      }) ?? [];
+
+    expect(details[2]).toBe("Workflow workspace: .locus-pi/plans/<generated-run-name>");
   });
 
   it("runs an explicit operator command without a second approval prompt", async () => {
@@ -60,10 +189,10 @@ describe("/workflows run launch gate", () => {
       resultPersistence: { ok: true, path: "/tmp/run-1/result.json" },
     });
     try {
-      await h.commands.get("workflows")!.handler("run live-smoke hello", h.ctx);
+      await h.commands.get("workflows")!.handler("run live-smoke --run-name named hello", h.ctx);
       expect(approval).not.toHaveBeenCalled();
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "live-smoke", input: "hello" });
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", runName: "named", input: "hello" });
       expect(h.statuses.get("locus")).toContain("WF launch · operator cmd");
       expect(h.statuses.has("workflows")).toBe(false);
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
@@ -81,7 +210,7 @@ describe("/workflows run launch gate", () => {
 
       expect(spy).not.toHaveBeenCalled();
       const widget = h.widgets.get("workflows") ?? "";
-      expect(widget).toContain("exceeds the 16000-character limit after command trimming");
+      expect(widget).toContain("exceeds the 16000-character limit");
       expect(widget).toContain("No workflow execution was started");
     } finally {
       spy.mockRestore();
@@ -126,16 +255,16 @@ describe("/workflows run launch gate", () => {
     });
     try {
       await h.commands.get("workflows")!.handler("run live-smoke", h.ctx);
-      await waitForBackground(() => h.sentMessages.length === 1);
+      await waitForBackground(() => h.sentMessages.length === 2);
 
       expect(h.ctx.isIdle()).toBe(true);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(h.sentMessages).toHaveLength(1);
+      expect(h.sentMessages).toHaveLength(2);
       expect(
         h.sentMessages.every((entry) => entry.options?.triggerTurn === false && entry.options.deliverAs === undefined),
       ).toBe(true);
-      expect(h.customMessageDeliveries).toEqual(["append"]);
-      expect(h.waitForIdleCalls).toBe(1);
+      expect(h.customMessageDeliveries).toEqual(["append", "append"]);
+      expect(h.waitForIdleCalls).toBe(0);
     } finally {
       spy.mockRestore();
     }
@@ -284,17 +413,17 @@ describe("/workflows run launch gate", () => {
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
       expect(text).toContain("── workflow live-smoke · run #run2 · failed ");
       expect(text.match(/same failure/g)).toHaveLength(1);
-      // Three lines, not two: a failed run also names the command that prints
-      // the reason, which its clipped verdict line cannot carry.
-      expect(text).toContain("read the full reason: /workflows status");
-      expect(result.details?.transcript).toEqual({ surface: "tool", eventKind: "workflow_end", lineCount: 3 });
+      // Grouped file and command sections retain the command that prints the
+      // reason, which its clipped verdict line cannot carry.
+      expect(text).toContain("read full reason: /workflows status");
+      expect(result.details?.transcript).toEqual({ surface: "tool", eventKind: "workflow_end", lineCount: 5 });
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("passes resume metadata to the workflow run call without a Locus approval request", async () => {
+  it("passes output workspace, resume metadata, and semantic input from the command handler to the runner", async () => {
     const h = registerHarness();
     const approval = vi.spyOn(h.ctx.ui, "select");
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
@@ -306,14 +435,75 @@ describe("/workflows run launch gate", () => {
       resultPersistence: { ok: true, path: "/tmp/run-3/result.json" },
     });
     try {
-      await h.commands.get("workflows")!.handler("run live-smoke --resume run-old input", h.ctx);
+      await h.commands
+        .get("workflows")!
+        .handler("run live-smoke --output-dir tmp/reviews/review-1 --resume run-old review commit HEAD", h.ctx);
       expect(approval).not.toHaveBeenCalled();
-      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ resumeFromRunId: "run-old", input: "input" }));
-      expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "live-smoke" });
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "live-smoke",
+          outputDir: "tmp/reviews/review-1",
+          resumeFromRunId: "run-old",
+          input: "review commit HEAD",
+        }),
+      );
       expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
     } finally {
       approval.mockRestore();
       spy.mockRestore();
+    }
+  });
+
+  it.each(["\t", "\n", "\u00a0"])(
+    "forwards option values after %j separators on the canonical command",
+    async (separator) => {
+      const canonicalRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-options-canonical-"));
+      const canonical = registerCommandHarness(canonicalRoot);
+      const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+        runId: "run-options",
+        runDir: "/tmp/run-options",
+        ok: true,
+        result: { ok: true },
+        journal: [],
+        resultPersistence: { ok: true, path: "/tmp/run-options/result.json" },
+      });
+      try {
+        const tail = `live-smoke --output-dir${separator}tmp/reviews/review-1 --resume${separator}run-old request`;
+        await canonical.commands.get("workflows")!.handler(`run ${tail}`, canonical.ctx);
+
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0]?.[0]).toMatchObject({
+          name: "live-smoke",
+          outputDir: "tmp/reviews/review-1",
+          resumeFromRunId: "run-old",
+          input: "request",
+        });
+      } finally {
+        spy.mockRestore();
+        rmSync(canonicalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("preserves delimiter input including trailing whitespace on the canonical command", async () => {
+    const canonicalRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-delimiter-canonical-"));
+    const canonical = registerCommandHarness(canonicalRoot);
+    const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
+      runId: "run-delimiter",
+      runDir: "/tmp/run-delimiter",
+      ok: true,
+      result: { ok: true },
+      journal: [],
+      resultPersistence: { ok: true, path: "/tmp/run-delimiter/result.json" },
+    });
+    try {
+      await canonical.commands.get("workflows")!.handler("run live-smoke -- exact  input  ", canonical.ctx);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "live-smoke", input: "exact  input  " });
+    } finally {
+      spy.mockRestore();
+      rmSync(canonicalRoot, { recursive: true, force: true });
     }
   });
 
@@ -377,11 +567,11 @@ describe("/workflows run launch gate", () => {
   });
 
   it("renders the exact terminal text for the operator while keeping model tool content bounded", async () => {
-    const h = registerHarness();
+    const projectRoot = mkdtempSync(path.join(os.tmpdir(), "workflow-tool-full-result-project-"));
+    const h = registerCommandHarness(projectRoot);
     const terminalText = `${"Complete plan line. ".repeat(600)}\nUNTRUNCATED_TERMINAL_SENTINEL`;
-    const runDir = mkdtempSync(path.join(os.tmpdir(), "workflow-tool-full-result-"));
+    const runDir = ensureWorkflowRunDir(projectRoot, "run-full-result");
     const outputDir = path.join(runDir, "outputs");
-    mkdirSync(outputDir);
     writeFileSync(path.join(outputDir, "workflow-result.md"), `${terminalText}\n`, "utf8");
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
       runId: "run-full-result",
@@ -432,7 +622,7 @@ describe("/workflows run launch gate", () => {
       expect(operatorText).not.toContain("[RESULT] Workflow");
     } finally {
       spy.mockRestore();
-      rmSync(runDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
@@ -565,7 +755,7 @@ describe("/workflows run launch gate", () => {
         await h.commands.get("workflows")!.handler("run same", h.ctx);
         expect(approval).not.toHaveBeenCalled();
         expect(spy).toHaveBeenCalledTimes(1);
-        expect(spy.mock.calls[0]?.[0]).toMatchObject({ script: "same" });
+        expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "same" });
         expect(h.statuses.get("locus")).toContain("WF launch");
         expect(h.statuses.has("workflows")).toBe(false);
         expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
@@ -611,8 +801,7 @@ describe("/workflows run launch gate", () => {
       expect(widget).toContain("[ERROR]");
       expect(widget).toContain("Available curated Package workflows:");
       expect(widget).toContain("live-smoke");
-      expect(widget).toContain("requirements-grill");
-      expect(widget).toContain("review");
+      expect(widget).toContain("post-code-review");
       expect(widget).not.toContain("plan-build-review");
       expect(widget).toContain("/workflows list");
       expect(widget).not.toContain("Cannot find module");

@@ -4,8 +4,8 @@
  *
  * Registers two deliberately different surfaces plus the queue hook that binds
  * them:
- * - `todo_write` (./todo-write-tool.js) is the model/runtime-facing tool that
- *   applies structured todo operations to the current session state.
+ * - `todo_read` and `todo_write` (./todo-write-tool.js) inspect and update the
+ *   current session state.
  * - `/todo` (./command-router.js) is the operator-facing compatibility command
  *   for inspection, Markdown export, manual edits, and explicit task bridge
  *   commands.

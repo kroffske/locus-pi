@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import workflowsExt from "../../../extensions/workflows/index.js";
 import * as runner from "../../../extensions/workflows/runtime/workflow-runner.js";
 import {
@@ -14,7 +15,7 @@ import {
 } from "../../../extensions/workflows/progress-widget.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
-import { fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { acquireFleetViewedRow, fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
@@ -67,6 +68,138 @@ function renderHarnessWidget(harness: ReturnType<typeof createHarness>, key = "w
 }
 
 describe("workflow progress widget", () => {
+  it("keeps the source run agents visible when an operator answer starts a continuation", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 160 } };
+    const sourceRunId = "20260817-150519-076c";
+    const currentRunId = "20260817-151356-e575";
+
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_start",
+        agent: "inspector",
+        label: "inspect live Airflow planning evidence",
+        ts: 1,
+        runId: sourceRunId,
+      }),
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_start",
+        agent: "router",
+        label: "route planning readiness",
+        ts: 2.1,
+        runId: sourceRunId,
+      }),
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_end",
+        agent: "router",
+        label: "route planning readiness",
+        status: "completed",
+        durationMs: 8_000,
+        ts: 2.2,
+        runId: sourceRunId,
+      }),
+    );
+    agentLiveStore.patch(
+      workflowAgentLiveRowId(
+        line({
+          kind: "agent_start",
+          agent: "inspector",
+          label: "inspect live Airflow planning evidence",
+          ts: 1,
+          runId: sourceRunId,
+        }),
+      ),
+      { tokenCount: { input: 5_000, output: 100 } },
+    );
+    applyWorkflowJournalLineToAgentLiveStore(
+      line({
+        kind: "agent_end",
+        agent: "inspector",
+        label: "inspect live Airflow planning evidence",
+        status: "completed",
+        durationMs: 77_000,
+        ts: 2,
+        runId: sourceRunId,
+      }),
+    );
+
+    const component = new WorkflowProgressComponent(tui, {}, "airflow-dag-builder/plan", currentRunId, {
+      scope: "workflow",
+      continuationSourceRunId: sourceRunId,
+      declaredStages: [{ title: "inspect" }, { title: "operator-gate" }, { title: "continue" }],
+    });
+    pushProgress(component, line({ kind: "phase", phase: "continue", ts: 3, runId: currentRunId }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_start",
+        agent: "scope-writer",
+        label: "apply the operator answer",
+        ts: 4,
+        runId: currentRunId,
+      }),
+    );
+
+    const rendered = component.render(160).join("\n");
+    expect(rendered).toContain("continues #076c");
+    expect(rendered).toContain("previous run #076c");
+    expect(rendered).toContain("inspect live Airflow planning evidence");
+    expect(rendered).toContain("route planning readiness");
+    expect(rendered).toContain("apply the operator answer");
+    expect(rendered).toContain("stage 3/3 · continue");
+    expect(rendered).toContain("0/1 done");
+    expect(rendered).toContain("tok —");
+    expect(rendered).toContain("○ inspect");
+    expect(rendered).toContain("○ operator-gate");
+
+    tui.terminal.rows = 12;
+    const constrained = component.render(160).join("\n");
+    expect(constrained).toContain("(+2 earlier agents)");
+    expect(constrained).not.toContain("previous run #076c");
+    expect(constrained).not.toContain("inspect live Airflow planning evidence");
+    expect(constrained).not.toContain("route planning readiness");
+    expect(constrained).toContain("apply the operator answer");
+
+    component.dispose();
+    agentLiveStore.reset();
+  });
+
+  it("shows an explicit source-history fallback when retained continuation rows are unavailable", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 140 } };
+    const component = new WorkflowProgressComponent(tui, {}, "airflow-dag-builder/plan", "current-run", {
+      scope: "workflow",
+      continuationSourceRunId: "20260817-150519-076c",
+      declaredStages: [{ title: "continue" }],
+    });
+    pushProgress(component, line({ kind: "phase", phase: "continue", ts: 1, runId: "current-run" }));
+    pushProgress(
+      component,
+      line({
+        kind: "agent_start",
+        agent: "writer",
+        label: "continue current work",
+        ts: 2,
+        runId: "current-run",
+      }),
+    );
+
+    const rendered = component.render(140).join("\n");
+    expect(rendered).toContain("continues #076c");
+    expect(rendered).toContain("previous run #076c · history unavailable");
+    expect(rendered).toContain("/workflows status 076c");
+    expect(rendered).toContain("0/1 done");
+    expect(rendered).toContain("continue current work");
+
+    component.dispose();
+    agentLiveStore.reset();
+  });
+
   it("renders phase, agent transitions, durations, and stays inside the terminal budget", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
     const component = new WorkflowProgressComponent(tui, {}, "live-smoke", "r1", {
@@ -142,6 +275,28 @@ describe("workflow progress widget", () => {
     fleetMenuState.setFocused(false);
     component.dispose();
     expect(viewerExternalRows()).toBe(0);
+  });
+
+  it("shows only the agent whose transcript viewer is open, then restores the roster", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 100 } };
+    const component = new WorkflowProgressComponent(tui, {}, "task reviewer", "ordinary-r1");
+    agentLiveStore.begin({ id: "viewer-filter-first", agentName: "reviewer", label: "first task" });
+    const second = agentLiveStore.begin({ id: "viewer-filter-second", agentName: "scout", label: "selected task" });
+
+    const release = acquireFleetViewedRow(second.id);
+    const focused = component.render(100).join("\n");
+    expect(focused).toContain("selected task");
+    expect(focused).not.toContain("first task");
+
+    release();
+    const restored = component.render(100).join("\n");
+    expect(restored).toContain("selected task");
+    expect(restored).toContain("first task");
+    expect(tui.requestRender).toHaveBeenCalled();
+
+    component.dispose();
+    agentLiveStore.reset();
   });
 
   it("rosters finished, running, and still-planned work, and keeps one row per re-entered slot", () => {
@@ -1079,6 +1234,48 @@ describe("workflow progress widget", () => {
     }
   });
 
+  it("keeps a wide-character agent message inside the exact terminal width", () => {
+    agentLiveStore.reset();
+    try {
+      const width = 210;
+      const runId = "wide-message-r1";
+      const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: width } };
+      const component = new WorkflowProgressComponent(tui, {}, "handoff-smoke/answer", runId, {
+        scope: "workflow",
+      });
+      const parentLine = line({
+        kind: "agent_start",
+        agent: "default",
+        label: "route planning readiness",
+        phase: "readiness-route",
+        ts: 1,
+        runId,
+      });
+      const parentRowId = workflowAgentLiveRowId(parentLine);
+      pushProgress(component, parentLine);
+      const child = agentLiveStore.begin({
+        parentRowId,
+        agentName: "default",
+        label: "route planning readiness",
+        isolated: false,
+        noMcp: false,
+      });
+      agentLiveStore.patch(child.id, {
+        status: "working",
+        latestMessage:
+          "Based on my analysis, I can now determine whether we have enough verified evidence. Requirements: 1. ✅ Target behavior " +
+          "x".repeat(240),
+      });
+
+      const rendered = component.render(width);
+      expect(rendered.some((renderedLine) => renderedLine.includes("✅ Target behavior"))).toBe(true);
+      expect(rendered.every((renderedLine) => visibleWidth(renderedLine) <= width)).toBe(true);
+      component.dispose();
+    } finally {
+      agentLiveStore.reset();
+    }
+  });
+
   it("installs the fleet widget below the editor as a factory instead of a constructed component", () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;
@@ -1415,6 +1612,68 @@ describe("workflow progress widget", () => {
     }
   });
 
+  it("keeps terminal metadata identical between success and error tool results", async () => {
+    const success = {
+      runId: "terminal-parity-success",
+      runDir: "/tmp/terminal-parity-success",
+      ok: true,
+      result: { summary: "done" },
+      disposition: { status: "completed" as const },
+      journal: [],
+      resultPersistence: { ok: true as const, path: "/tmp/terminal-parity-success/result.json" },
+    };
+    const failure = {
+      runId: "terminal-parity-failure",
+      runDir: "/tmp/terminal-parity-failure",
+      ok: false,
+      result: { summary: "failed" },
+      error: "failed",
+      disposition: { status: "failed" as const },
+      journal: [],
+      resultPersistence: { ok: true as const, path: "/tmp/terminal-parity-failure/result.json" },
+    };
+    const harness = createHarness();
+    workflowsExt(harness.pi);
+    const runSpy = vi.spyOn(runner, "runWorkflowScript");
+    runSpy.mockResolvedValueOnce(success).mockResolvedValueOnce(failure);
+    try {
+      const successResult = await runTool(harness, "workflow", { name: "terminal-parity" });
+      const failureResult = await runTool(harness, "workflow", { name: "terminal-parity" });
+      const successDetails = successResult.details as Record<string, unknown>;
+      const failureDetails = failureResult.details as Record<string, unknown>;
+      const intentionalDifferences = new Set([
+        "status",
+        "summary",
+        "disposition",
+        "transcript",
+        "runId",
+        "runDir",
+        "outputDir",
+        "resultPath",
+        "resultPersistence",
+        "result",
+        "error",
+      ]);
+      const successSharedKeys = Object.keys(successDetails)
+        .filter((key) => !intentionalDifferences.has(key))
+        .sort();
+      const failureSharedKeys = Object.keys(failureDetails)
+        .filter((key) => !intentionalDifferences.has(key))
+        .sort();
+      expect(failureSharedKeys).toEqual(successSharedKeys);
+      for (const key of successSharedKeys) {
+        expect(failureDetails[key], `shared terminal metadata: ${key}`).toEqual(successDetails[key]);
+      }
+      expect(successDetails.status).toBe("completed");
+      expect(failureDetails.status).toBe("failed");
+      expect(failureDetails.transcript).toMatchObject({ surface: "tool", eventKind: "workflow_end" });
+      expect(successDetails).not.toHaveProperty("result");
+      expect(failureDetails).toMatchObject({ result: failure.result, error: failure.error });
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
   it("pins an active run, then retires its widget while retaining terminal rows on next input", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-live-input-"));
     try {
@@ -1505,9 +1764,9 @@ describe("workflow progress widget", () => {
       expect(persisted).toHaveLength(3);
       expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
       expect(persisted[0]).toContain("● workflow started");
-      expect(persisted[0]).toContain(`runDir: ${path.join(root, ".pi", "locus-pi", "runs")}`);
-      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished · Complete implementation plan line.");
-      expect(persisted[1]).not.toContain("UNTRUNCATED_COMMAND_RESULT");
+      expect(persisted[0]).toContain(`runDir: ${path.join(root, ".locus-pi", "runs")}`);
+      expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished");
+      expect(persisted[1]).not.toContain("Complete implementation plan line.");
       expect(persisted[2]).toBe(exactResult);
       expect(harness.sentMessages.map((entry) => entry.message.customType)).toEqual([
         "locus-workflow-run",
@@ -1636,7 +1895,7 @@ describe("workflow progress widget", () => {
           journal,
           target: { kind: "name", ref: "detail", source: "project" },
           scriptIdentity: {
-            sourcePath: "/private/source/detail.workflow.mjs",
+            sourcePath: path.join(root, ".pi", "workflows", "detail.workflow.mjs"),
             snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
             scriptSha256: "a".repeat(64),
           },
@@ -1820,7 +2079,7 @@ describe("workflow progress widget", () => {
       await handler("list definitely-no-match", harness.ctx);
       const noMatch = renderHarnessWidget(harness);
       expect(noMatch).toContain('No workflows match "definitely-no-match".');
-      expect(noMatch).toMatch(/Catalog contains \d+ runnable workflow\(s\)/u);
+      expect(noMatch).toMatch(/Catalog contains \d+ top-level workflow\(s\) · \d+ child workflow\(s\)/u);
       expect(noMatch).not.toContain("Workflow catalog:\n  (none)");
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
@@ -1916,7 +2175,7 @@ describe("workflow progress widget", () => {
         );
         writeWorkflowRun(root, `20260101-00000${index}-rpc`);
       }
-      const longRunDir = path.join(root, ".pi", "locus-pi", "runs", "20260101-000005-rpc");
+      const longRunDir = path.join(root, ".locus-pi", "runs", "20260101-000005-rpc");
       writeFileSync(
         workflowJournalFile(longRunDir),
         `${JSON.stringify({

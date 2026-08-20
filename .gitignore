@@ -1,64 +1,103 @@
 # Dependencies and build output
 node_modules/
-dist/
+dist/*
+!dist/public-catalogs.json
+!dist/workflow-source-shape.mjs
 coverage/
 test-results/
+build/
+.next/
+target/
+vendor/
 
-# Local runtime and generated scratch
+# Local runtime, task, and planning state
 .runs/
 .cache/
 .tasks/
 .locus/
-# Retired: workflow run reports moved into .pi/locus-pi/runs/<runId>/outputs/.
-# Kept so a checkout that predates the move stays clean.
 .locus-pi/
-.locus/_archive/.hermes/
+.pi/
 .omp/
 .test_pi/
 .planning/
 artifacts/
+benchmarks/
+eval/
+evaluation/
+evaluations/
+reports/
+transcripts/
+output/
+tmp/
 
-# Editor and OS state
-.DS_Store
-.idea/
-*.log
-*.tmp
+# Internal documentation and publication handoff
+# These paths are intentionally outside the public repository surface.
+docs/adr/
+docs/decisions/
+docs/prd/
+docs/source-audit/
+docs/internal/
+docs/archive/
+docs/_archive/
+docs/drafts/
+docs/notes/
+docs/research/
+docs/proposals/
+docs/specs/
+docs/system-design/
+docs/extension-gallery/
+docs/reports/
+docs/milestones*.md
+docs/roadmap*.md
+.publication/
+PUBLICATION_PLAN.md
+PUBLICATION_REMOVALS.txt
+VALIDATION_REPORT.md
+EXPORT_MANIFEST.md
+EXPORT_MANIFEST.json
 
-# Local environment
-.env
-.env.*
-!.env.example
-.npmrc
-
-# Local Pi state
-.pi/
-.pi/settings.json
-
-# Local/spec drafting state (root-level only; docs/specs/ is curated and tracked)
+# Local/spec drafting state
 /specs/
 .claude/
 .agents/skills/
 .agents/workflows/
 
-# Generated/export scratch outside curated docs
+# Generated/export scratch
 pi-session-*.html
 task-index.json
 ROADMAP.md
 
-# Documentation policy
-# docs/_archive/ is tracked when a retired document still has decision value.
-# docs/reports/ is tracked only for curated manual reports.
-# Generated reports belong under ignored .locus/runtime/reports/**.
-docs/reports/**/evidence-scratch/
-!docs/reports/**/raw/*.log
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+.npmrc
+.mcp.json
 
-# ── GSD baseline (auto-generated) ──
+# Editor, OS, and language state
+.DS_Store
+.idea/
+.vscode/
+*.code-workspace
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+Thumbs.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Tool-specific local state
 .gsd
 .gsd-worktrees/
 .gsd-id
-.mcp.json
 .bg-shell/
-Thumbs.db
+.gstack/
+
+# Windows reserved-name artifacts
 nul
 nul.*
 con
@@ -71,22 +110,7 @@ com[1-9]
 com[1-9].*
 lpt[1-9]
 lpt[1-9].*
-*.swp
-*.swo
-*~
-.vscode/
-*.code-workspace
-.next/
-build/
-__pycache__/
-*.pyc
-.venv/
-venv/
-target/
-vendor/
-tmp/
 
-# stray demo output from .pi/workflows/test-two-files-with-agents.workflow.mjs
+# Stray demo output
 /test1.md
 /test2.md
-.gstack/

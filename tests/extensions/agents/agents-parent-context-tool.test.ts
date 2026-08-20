@@ -91,7 +91,7 @@ describe("agents task parent context", () => {
     const h = createHarness(tempRootWithReviewer());
     agents(h.pi);
 
-    const result = await runTool(h, "task", {
+    const result = await runTool(h, "spawn_agent", {
       agent: "reviewer",
       task: "One child task",
     });
@@ -110,7 +110,7 @@ describe("agents task parent context", () => {
     const artifactPath = path.join(root, "parent-context.md");
     writeFileSync(artifactPath, "PARENT_ARTIFACT_SENTINEL\n", "utf8");
 
-    const result = await runTool(h, "task", {
+    const result = await runTool(h, "spawn_agent", {
       agent: "reviewer",
       task: "Child assignment without sentinel",
       parentContext: {
@@ -145,7 +145,7 @@ describe("agents task parent context", () => {
     const h = createHarness(root);
     agents(h.pi);
 
-    const result = await runTool(h, "task", {
+    const result = await runTool(h, "spawn_agent", {
       agent: "parent-default",
       task: "No payload",
     });

@@ -155,7 +155,7 @@ export function refreshAgents(projectRoot: string) {
 
 /**
  * T-111: publish the resolved catalog on the `agent` parameter of
- * `spawn_agent`/`task`, which is where the calling model chooses the name. Both
+ * `spawn_agent`, which is where the calling model chooses the name. The
  * tools are registered with the same `TaskParams` object and Pi hands
  * `ToolDefinition.parameters` to the provider by reference on every request
  * (unlike `description`, which it snapshots when the tool is wrapped), so
