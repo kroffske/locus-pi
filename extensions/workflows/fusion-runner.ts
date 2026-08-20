@@ -78,7 +78,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
   journalSink.initialize(prelude);
   options.onEvent?.(prelude);
 
-  const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory);
+  const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory, { runId });
   const artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
   const bridgeOptions: WorkflowAgentBridgeOptions = {
     pi: options.pi,

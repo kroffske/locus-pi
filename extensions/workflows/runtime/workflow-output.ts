@@ -26,8 +26,6 @@ import {
 import path from "node:path";
 import {
   assertWorkflowRunId,
-  defaultTaskWorkspaceRelativePath,
-  isTaskWorkspaceName,
   workflowRootDir,
   WORKFLOW_PLANS_DIRNAME,
   WORKFLOW_ROOT_DIRNAME,
@@ -137,16 +135,13 @@ function defaultWorkflowOutputDir(
   if (!isWorkflowPathWithinRoot(physicalRoot, physicalWorkingDirectory)) {
     throw new Error("workflow working directory physical target escapes the project root");
   }
-  const taskWorkspace = defaultTaskWorkspaceRelativePath(workflowName, runId);
-  if (taskWorkspace !== undefined) return taskWorkspace;
-  const relativeWorkingDirectory = path.relative(lexicalRoot, lexicalWorkingDirectory).split(path.sep).join("/");
-  const prefix = relativeWorkingDirectory === "" ? "tmp" : `${relativeWorkingDirectory}/tmp`;
-  const workflowNameParts = workflowName.split("/");
-  if (workflowNameParts.every((part) => OUTPUT_COMPONENT.test(part))) {
-    return `${prefix}/${workflowNameParts.join("/")}`;
-  }
-  const identity = createHash("sha256").update(workflowName).digest("hex");
-  return `${prefix}/by-workflow-name/${identity}`;
+  const workspaceRunId = assertWorkflowRunId(runId);
+  const workflowSlug = workflowName.replaceAll("/", "-");
+  const readableLeaf = `${workspaceRunId}-${workflowSlug}`;
+  const leaf = OUTPUT_COMPONENT.test(readableLeaf)
+    ? readableLeaf
+    : `${workspaceRunId}-workflow-${createHash("sha256").update(workflowName).digest("hex")}`;
+  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${leaf}`;
 }
 
 export interface WorkflowOutputDirectoryPath {
@@ -174,11 +169,8 @@ export function resolveWorkflowOutputDirectoryPath(
   return { relativePath, absolutePath };
 }
 
-/** Expand a short task run name into its project-local planning workspace. */
-export function taskWorkspaceRelativePathForRunName(workflowName: string, runName: unknown): string {
-  if (!isTaskWorkspaceName(workflowName)) {
-    throw new Error("runName is supported only by Package task workflows");
-  }
+/** Expand a short run name into its project-local workflow workspace. */
+export function workflowWorkspaceRelativePathForRunName(runName: unknown): string {
   if (typeof runName !== "string" || !OUTPUT_COMPONENT.test(runName)) {
     throw new Error("workflow runName must be one safe folder name");
   }
@@ -584,8 +576,8 @@ function assertFreshWorkflowOutputNamespaceIdentity(input: {
     throw new Error(`workflow outputDir state namespace escapes the project root: ${stateDir}`);
   }
   throw new Error(
-    `workflow outputDir ${JSON.stringify(input.relativePath)} already has durable state; ` +
-      "choose a new project-relative review namespace or resume the original run",
+    `workflow workspace ${JSON.stringify(input.relativePath)} already has durable post-code-review state; ` +
+      "choose a new --run-name or --output-dir, or resume the original run",
   );
 }
 

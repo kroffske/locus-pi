@@ -765,7 +765,7 @@ describe("workflow operator catalog", () => {
     }
   });
 
-  it("prefills post-code-review Start with an explicit editable review namespace", () => {
+  it("prefills post-code-review Start with its generated workspace default", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-post-review-start-"));
     const previousHome = process.env.HOME;
     try {
@@ -782,10 +782,9 @@ describe("workflow operator catalog", () => {
         sourceState: { kind: "ready", row, path: row.target.path, source: "source" },
       });
 
-      expect(start).toBe("/workflows run post-code-review --output-dir tmp/post-code-review/<review-id>");
+      expect(start).toBe("/workflows run post-code-review");
       expect(parseRunCommand(start.slice("/workflows ".length))).toEqual({
         scriptRef: "post-code-review",
-        outputDir: "tmp/post-code-review/<review-id>",
       });
     } finally {
       if (previousHome === undefined) delete process.env.HOME;

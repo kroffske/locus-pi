@@ -458,7 +458,7 @@ async function openWorkflowCommandMenu(
       const selected = await selectWorkflowTarget(ctx, projectRoot, workingDirectory, "run");
       if (selected !== undefined) {
         await waitForNativeSelectorTeardown();
-        fillWorkflowEditor(ctx, buildWorkflowRunCommand(selected.target, projectRoot));
+        fillWorkflowEditor(ctx, buildWorkflowRunCommand(selected.target));
       }
       return;
     }

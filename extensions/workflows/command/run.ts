@@ -2,15 +2,9 @@ import type { ExtensionAPI, ExtensionCommandContext } from "../../_shared/host/p
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import { parseRunCommand, workflowRunRecoveryUsage } from "../command-parser.js";
-import {
-  preflightWorkflowCommandTarget,
-  isOneShotCommandMode,
-  workflowCommandIdleBlock,
-  workflowFreshLaunchPolicyError,
-} from "../launch-guard.js";
+import { preflightWorkflowCommandTarget, isOneShotCommandMode, workflowCommandIdleBlock } from "../launch-guard.js";
 import { workflowNotFoundBlock, workflowRunConflictBlock, workflowWarningBlock } from "../operator-ui.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "../runtime/workflow-runtime.js";
-import { isTaskWorkspaceName } from "../runtime/workflow-run-layout.js";
 import type { WorkflowCommandLauncher } from "../workflow-command-launcher.js";
 import { persistCommandWorkflowRejection, type WorkflowTranscriptRejectionCode } from "./receipts.js";
 
@@ -99,24 +93,6 @@ export async function handleWorkflowRunCommand(
     return reject("workflow_group_only", `Workflow not started: ${message}`);
   }
   const target = targetPreflight.status === "resolved" ? targetPreflight.target : undefined;
-  if (target !== undefined) {
-    if (parsed.runName !== undefined && !(target.kind === "name" && isTaskWorkspaceName(target.ref))) {
-      const message = "--run-name is supported only by Package task workflows.";
-      setOperatorWidget(ctx, "workflows", workflowWarningBlock(message, workflowRunRecoveryUsage(parsed)));
-      return reject("launch_policy_refused", `Workflow not started: ${message}`);
-    }
-    const launchPolicyError = workflowFreshLaunchPolicyError({
-      target,
-      projectRoot,
-      ...(parsed.outputDir === undefined ? {} : { outputDir: parsed.outputDir }),
-      ...(parsed.resumeFromRunId === undefined ? {} : { resumeFromRunId: parsed.resumeFromRunId }),
-    });
-    if (launchPolicyError !== undefined) {
-      setOperatorWidget(ctx, "workflows", workflowWarningBlock(launchPolicyError, workflowRunRecoveryUsage(parsed)));
-      return reject("launch_policy_refused", `Workflow not started: ${launchPolicyError}`);
-    }
-  }
-
   const launched = commandLauncher.launch({
     ctx,
     scriptRef,

@@ -206,7 +206,7 @@ describe("design-first readable workflow authoring", () => {
       "docs/workflows.md",
     ]) {
       const text = source(relativePath);
-      expect(text).toContain("<pwd>/tmp/<workflow-name>");
+      expect(text).toContain(".locus-pi/plans/<generated-run-name>");
       expect(text).not.toContain("outputs/<workflow-name>");
     }
     const storage = source("docs/workflows.md");

@@ -23,7 +23,7 @@ Workers receive that string unchanged and return complete text to the composer.
 Location: use `projectRoot()` only as source context; require discovered paths
 to remain project-relative and preserve leading dots. Every child already gets
 the one absolute workflow workspace, defaulting to
-`<pwd>/tmp/<workflow-name>/`. Give write workers the exact relative output name
+`.locus-pi/plans/<generated-run-name>/`. Give write workers the exact relative output name
 and require idempotent replacement. Do not let a weak model substitute the
 user's home directory, the project root, or the system temporary directory.
 

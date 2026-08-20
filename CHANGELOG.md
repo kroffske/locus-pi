@@ -4,6 +4,16 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- **Fresh workflow workspaces now stay under `.locus-pi/plans/` by default.**
+  Every workflow, including `post-code-review`, receives a unique
+  `.locus-pi/plans/<generated-run-name>` workspace. Operators no longer need a
+  top-level `tmp/` directory or a manual `--output-dir` for a fresh review.
+  `--run-name <name>` selects `.locus-pi/plans/<name>` for any workflow.
+  Explicit confined output directories remain supported. Resume continues to
+  reuse the recorded source workspace.
+
 ### Added
 
 - **Manual `task/draft` intent capture and unique task planning workspaces.**
@@ -15,8 +25,7 @@ This file records user-visible changes to the public package.
   before planning. `task/plan` reads that saved draft when the operator starts
   it on the same workspace. Fresh `task/draft`, `task/plan`,
   `task/implement-plan-template`, and `task/substep` runs now receive distinct
-  `.locus-pi/plans/<generated-run-name>` directories instead of shared
-  `tmp/<workflow-name>` defaults. `--run-name <name>` reuses
+  `.locus-pi/plans/<generated-run-name>` directories. `--run-name <name>` reuses
   `.locus-pi/plans/<name>` across the manual stages, and each completed stage
   prints the next command with that name. Confined absolute `--output-dir`
   paths and `./` paths are also accepted. Task resume reuses its recorded

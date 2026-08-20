@@ -177,7 +177,7 @@ describe("/workflows help and unknown commands", () => {
     expect(run.selectCalls.flatMap((call) => call.options).every((option) => typeof option === "string")).toBe(true);
   });
 
-  it("prefills the owner review namespace from the workflow target chooser", async () => {
+  it("prefills post-code-review without a manual workspace", async () => {
     const root = makeRoot();
     const workflowDir = path.join(root, ".pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
@@ -192,7 +192,7 @@ describe("/workflows help and unknown commands", () => {
     workflows(run.pi);
     await run.commands.get("workflows")!.handler("", run.ctx);
 
-    expect(run.editorText).toBe("/workflows run post-code-review --output-dir tmp/post-code-review/<review-id>");
+    expect(run.editorText).toBe("/workflows run post-code-review");
   });
 
   it("waits for the native selector teardown before filling the editor", async () => {
@@ -737,12 +737,6 @@ describe("/workflows argument rejections", () => {
   it("rejects --run-name together with --output-dir", async () => {
     const widget = await runCommand(wideHarness(makeRoot()), "run alpha --run-name one --output-dir tmp/two");
     expect(widget).toContain("--run-name and --output-dir are mutually exclusive.");
-    expect(widget).toContain("No workflow execution was started.");
-  });
-
-  it("rejects --run-name for an ordinary workflow", async () => {
-    const widget = await runCommand(wideHarness(makeRoot()), "run live-smoke --run-name one");
-    expect(widget).toContain("--run-name is supported only by Package task workflows.");
     expect(widget).toContain("No workflow execution was started.");
   });
 

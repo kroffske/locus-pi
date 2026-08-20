@@ -208,9 +208,7 @@ describe("string-only workflow input", () => {
     const schema = tool.parameters;
     const outputDirDescription = (schema as { properties?: Record<string, { description?: string }> }).properties
       ?.outputDir?.description;
-    expect(outputDirDescription).toContain("Ordinary workflows default");
-    expect(outputDirDescription).toContain("fresh Package task workflows use unique project-local plan workspaces");
-    expect(outputDirDescription).toContain("fresh post-code-review launches require an explicit new outputDir");
+    expect(outputDirDescription).toContain("Fresh workflows default to unique .locus-pi/plans/<generated-run-name>");
     expect(outputDirDescription).toContain("resume repeats the source workspace");
     expect(outputDirDescription).not.toMatch(/defaults to tmp\/<workflow-name> beneath the Pi working directory\.$/u);
 

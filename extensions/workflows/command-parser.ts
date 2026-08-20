@@ -8,7 +8,7 @@
  * surfaces, so parsing and operator syntax cannot drift apart.
  */
 
-import { isPostCodeReviewTargetIdentity, type WorkflowTargetIdentity } from "./runtime/workflow-saved-name.js";
+import type { WorkflowTargetIdentity } from "./runtime/workflow-saved-name.js";
 
 export interface ParsedRunCommand {
   scriptRef: string;
@@ -130,11 +130,8 @@ export function formatWorkflowCommandToken(value: string): string {
 }
 
 /** Build the canonical editable run command for a resolved workflow target. */
-export function buildWorkflowRunCommand(target: WorkflowTargetIdentity, projectRoot?: string): string {
-  const outputNamespace = isPostCodeReviewTargetIdentity(target, projectRoot)
-    ? " --output-dir tmp/post-code-review/<review-id>"
-    : "";
-  return `/workflows run ${formatWorkflowCommandToken(target.ref)}${outputNamespace}`;
+export function buildWorkflowRunCommand(target: WorkflowTargetIdentity): string {
+  return `/workflows run ${formatWorkflowCommandToken(target.ref)}`;
 }
 
 export function parseRunCommand(text: string): ParsedRunCommand | null {

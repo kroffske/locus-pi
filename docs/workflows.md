@@ -65,7 +65,7 @@ The registry ships five curated Package workflow namespaces with eighteen runnab
 
 Bare `/workflows` opens the command menu when interactive UI is available and otherwise prints typed help.
 
-Use `--` when semantic input begins with an option-looking token. Ordinary workflow workspaces default to `tmp/<workflow-name>`. Fresh Package task runs receive unique `.locus-pi/plans/<generated-run-name>` directories. Pass `--run-name <name>` to use `.locus-pi/plans/<name>` across `task/draft`, `task/plan`, `task/implement-plan-template`, and `task/substep`; each completion card prints the next command with that name. `/workflows run <name|path> --output-dir <path>` selects another confined workspace. An absolute path must stay inside the project, `./path` resolves from the agent working directory, and other relative paths resolve from the project root. `post-code-review` still requires a fresh explicit `--output-dir`.
+Use `--` when semantic input begins with an option-looking token. Every fresh workflow run receives a unique `.locus-pi/plans/<generated-run-name>` workspace. Pass `--run-name <name>` with any workflow to select the stable `.locus-pi/plans/<name>` workspace. The `task/draft`, `task/plan`, `task/implement-plan-template`, and `task/substep` completion cards print the next command with that name. `/workflows run <name|path> --output-dir <path>` selects another confined workspace. An absolute path must stay inside the project, `./path` resolves from the agent working directory, and other relative paths resolve from the project root.
 
 The model-callable `workflow` tool accepts a package name or trusted script path and supports structured fields such as `items`, `outputDir`, `resumeFromRunId`, and an approved continuation. Fields that have no slash-command representation must fail closed rather than be silently dropped.
 
@@ -84,7 +84,7 @@ Each accepted run receives a stable directory:
     artifacts/             answers, transcripts, result envelopes, inputs, and publications
 ```
 
-Workflow-owned working files live separately under `<pwd>/tmp/<workflow-name>/` by default or in an explicit confined output directory. The Package task workflows use `.locus-pi/plans/<generated-run-name>/` by default so independent attempts never overwrite one another. The workflow workspace and run-evidence directory must never resolve to the same directory.
+Workflow-owned working files live separately under a unique `.locus-pi/plans/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent attempts therefore never overwrite one another. The workflow workspace and run-evidence directory must never resolve to the same directory.
 
 `.locus-pi/workflow-state/v1/<hash>/` is active runtime state. It holds the workspace lease namespace and saved-child checkpoints. A workflow with no saved children can leave this directory empty after its temporary lock is released; that empty directory is not legacy run evidence.
 
@@ -92,7 +92,7 @@ Use `/workflows result` for complete prose output and `/workflows status` for st
 
 ## Resume and replay
 
-`--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Task planning resumes reuse the source workspace automatically, including an explicitly selected `.locus-pi/plans/<run-name>` directory. Supplying a different directory fails closed.
+`--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
 
 A run awaiting operator input must be continued explicitly. Automation must not synthesize an operator answer.
 

@@ -113,7 +113,6 @@ function workflowRunOptionCompletions(
   const tokens = scanned.tokens;
   const completed: string[] = [];
   const commandPrefix = `run ${target}`;
-  const runNameAllowed = ["task/draft", "task/plan", "task/implement-plan-template", "task/substep"].includes(target);
 
   const optionCompletions = (partial = ""): CommandArgumentCompletion[] => {
     const stem = `${commandPrefix}${completed.length === 0 ? "" : ` ${completed.join(" ")}`} `;
@@ -122,8 +121,7 @@ function workflowRunOptionCompletions(
     return [
       ...WORKFLOW_RUN_OPTION_DESCRIPTORS.filter(
         (descriptor) =>
-          !(descriptor.field === "runName" && (!runNameAllowed || hasOutputDir)) &&
-          !(descriptor.field === "outputDir" && hasRunName),
+          !(descriptor.field === "runName" && hasOutputDir) && !(descriptor.field === "outputDir" && hasRunName),
       ).map((descriptor) => ({
         value: `${stem}${descriptor.name} `,
         label: descriptor.name,
@@ -131,7 +129,7 @@ function workflowRunOptionCompletions(
           descriptor.field === "outputDir"
             ? "Select a workflow workspace path"
             : descriptor.field === "runName"
-              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for a Package task`
+              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for this workflow`
               : "Resume from a prior run",
       })),
       {

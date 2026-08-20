@@ -172,13 +172,11 @@ prompt/model identity. `write`, `edit`, `bash`, and every other available tool
 work by default.
 
 The runtime injects one exact absolute workflow workspace into every child
-prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
-session working directory inside the project. A directly launched qualified
-child keeps both components (`group/child` -> `<pwd>/tmp/group/child/`); an
-invoked child shares its parent's selected workspace. Fresh Package task
-workflows use the runtime-owned
-`.locus-pi/plans/<generated-run-name>` exception. `runName` selects
-`.locus-pi/plans/<runName>`. Name the assigned
+prompt. Fresh runs receive a unique
+`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
+directly launched qualified child keeps both components in its generated leaf;
+an invoked child shares its parent's selected workspace. `runName` selects
+`.locus-pi/plans/<runName>` for any workflow. Name the assigned
 relative file and tell writers to replace it idempotently. Use `projectRoot()`
 only when an agent needs source context. Do not add JavaScript path parsers,
 directory collectors, permission fields, or alternate writable roots.
@@ -242,8 +240,7 @@ Package precedence. `scriptPath` remains an exact project-relative selector;
 Run evidence remains under `.locus-pi/runs/<runId>/` and contains only
 `outputs/` plus `runtime/`. Durable user files belong under the project-local
 workspace returned by `dsl.outputDir()`, defaulting to
-`<pwd>/tmp/<workflow-name>/`; fresh Package task workflows instead
-use `.locus-pi/plans/<generated-run-name>/`. Tell writers to replace their assigned relative
+`.locus-pi/plans/<generated-run-name>/`. Tell writers to replace their assigned relative
 file idempotently and never create workflow artifacts in the project root.
 `publishPrimaryFile()` returns a host-validated path, byte count, and digest for
 one regular non-empty file. Workspace files survive failed runs. Project source is

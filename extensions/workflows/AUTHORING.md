@@ -221,15 +221,14 @@ prompt/model identity. `write`, `edit`, `bash`, and every other available tool
 work by default.
 
 The runtime prepends one exact absolute workflow workspace to every child
-prompt. It defaults to `<pwd>/tmp/<workflow-name>/`, where `pwd` is Pi's verified
-session working directory inside the project; a qualified child keeps both name
-components, so `group/child` uses `<pwd>/tmp/group/child/`. Source may call
+prompt. Fresh runs default to a unique
+`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
+qualified child keeps both name components in its generated leaf. Source may call
 `outputDir()` when it needs the project-relative identity, but authors should
 only need to name the assigned relative file and the idempotent replacement
-rule. The Package task drafting and planning entries are a runtime-owned
-exception: fresh runs use a unique `.locus-pi/plans/<generated-run-name>`
-workspace, while saved children and later manual stages share the selected
-path. Use `projectRoot()` for source context. Do not add permission/tool fields,
+rule. Package task drafting and planning use the same workspace contract;
+saved children and later manual stages share the selected named path. Use
+`projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
@@ -299,10 +298,11 @@ list and its stable identities to the durable parent. Never derive resumable
 positional keys from fresh model output, and never parse a discovery document as
 transport.
 
-The workflow workspace is distinct from run evidence. Its default is
-`<pwd>/tmp/<workflow-name>/`; callers may select another safe project-relative
-`outputDir`. Fresh Package task workflows use the runtime-owned
-`.locus-pi/plans/<generated-run-name>` exception. `--run-name <name>` selects `.locus-pi/plans/<name>`. Every child receives the resolved absolute path once. Writers
+The workflow workspace is distinct from run evidence. Fresh runs default to a
+unique `.locus-pi/plans/<generated-run-name>/` directory; callers may select
+another safe project-relative `outputDir`. `--run-name <name>` selects
+`.locus-pi/plans/<name>` for any workflow. Every child receives the
+resolved absolute path once. Writers
 replace their assigned file atomically or otherwise idempotently—never append blindly.
 `publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty
 file under that root and returns its path, byte count, and SHA-256 digest without

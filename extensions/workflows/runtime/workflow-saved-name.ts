@@ -160,26 +160,6 @@ function normalizeProjectWorkflowRef(ref: string, projectRoot?: string): string 
   return parts.join("/");
 }
 
-/** Classify a public workflow input without constructing a partial resolved target. */
-export function isPostCodeReviewTargetInput(input: {
-  name?: unknown;
-  scriptPath?: unknown;
-  script?: unknown;
-}): boolean {
-  if (typeof input.name === "string") {
-    return isPostCodeReviewTargetIdentity({ kind: "name", ref: input.name, source: "project" });
-  }
-  const raw = input.scriptPath ?? input.script;
-  if (typeof raw !== "string") return false;
-  const isLegacyName =
-    input.scriptPath === undefined && !raw.includes("/") && !raw.includes("\\") && !/\.mjs$/iu.test(raw);
-  if (!isLegacyName && path.isAbsolute(raw)) {
-    const normalized = raw.replaceAll("\\", "/");
-    return [...POST_CODE_REVIEW_PROJECT_REFS].some((suffix) => normalized.endsWith(`/${suffix}`));
-  }
-  return isPostCodeReviewTargetIdentity({ kind: isLegacyName ? "name" : "scriptPath", ref: raw, source: "project" });
-}
-
 /**
  * Parse the persisted target identity shared by result, artifact, and handoff
  * readers. `path` is a runner-only enrichment and is deliberately discarded;

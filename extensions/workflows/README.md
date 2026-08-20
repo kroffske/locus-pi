@@ -23,8 +23,8 @@ The `workflow` tool is the structured execution surface for agents. It supports 
 ## Evidence and workspaces
 
 - Run evidence: `.locus-pi/runs/<runId>/outputs/` and `runtime/`.
-- Default workflow workspace: `<pwd>/tmp/<workflow-name>/`.
-- Fresh Package task workflows: `.locus-pi/plans/<generated-run-name>/`; `--run-name <name>` selects `.locus-pi/plans/<name>/`.
+- Default workflow workspace: a unique `.locus-pi/plans/<generated-run-name>/` directory.
+- Any workflow supports `--run-name <name>` to select `.locus-pi/plans/<name>/`.
 - Explicit output directories must remain safe, project-relative paths.
 - Run evidence and the workflow workspace are separate ownership zones.
 - `.locus-pi/workflow-state/v1/<hash>/` is active lease and saved-child checkpoint state. A normal run can leave an empty state directory after releasing its temporary workspace lock.
