@@ -47,19 +47,6 @@
       "ownership": "compat-wrapper"
     },
     {
-      "id": "devext-doctor",
-      "tools": [],
-      "commands": [
-        "devext doctor",
-        "devext task-lifecycle <task-id> <target-status>"
-      ],
-      "hooks": [
-        "input"
-      ],
-      "risk": "low",
-      "ownership": "locus-specific"
-    },
-    {
       "id": "loop",
       "tools": [
         "loop"
@@ -155,6 +142,7 @@
       "id": "workflows",
       "tools": [
         "workflow",
+        "workflow_check_source",
         "fusion"
       ],
       "commands": [

@@ -1,7 +1,7 @@
 ---
 name: workflow-author
 description: Designs, reviews, and builds a readable pi-workflow in order without running it; pauses after design only when explicitly requested
-tools: read, search, find, write, edit, bash
+tools: read, search, find, write, edit, bash, workflow_check_source
 model: slow
 thinking-level: high
 ---
@@ -261,14 +261,12 @@ After writing the declared root, when present, and declared child source files:
 4. Import the module and require `meta` plus a default function.
 5. Reconstruct nodes, edges, handoffs, concurrency, loop caps, and failure exits
    from source; compare them to the design.
-6. Run the source checker against every exact built file. In a locus-pi source
-   checkout, prefer `./bin/locus-pi check-workflow-source` for each
-   `.pi/workflows/<name>/*.workflow.mjs`; otherwise use
-   `npx @kroffske/locus-pi check-workflow-source` for those same files. Then search for every forbidden smell,
+6. Call `workflow_check_source` with the project-relative path of every exact
+   built `.pi/workflows/<name>/*.workflow.mjs` file. Then search for every forbidden smell,
    including new wrappers or helpers not named above.
 
 Build is not complete until source identity, module load, design/source review,
-and the source checker all pass. A missing command or non-zero checker exit is a
+and the source checker all pass. An unavailable tool or failed checker result is a
 Build failure: repair the design/source and rerun the checks. Never report a
 workflow as a successful Build after a failed or skipped check.
 

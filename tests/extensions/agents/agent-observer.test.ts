@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import devextDoctor from "../../../extensions/devext-doctor/index.js";
+import loop from "../../../extensions/loop/index.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
@@ -157,7 +157,7 @@ describe("agent observer command", () => {
       expect(h.widgets.get("agents")).not.toBe("");
       h.ctx.ui.setStatus("agents", "stale agent status");
 
-      await emit(h, "input", { text: "/devext doctor" });
+      await emit(h, "input", { text: "/loop status" });
 
       expect(h.widgetPayloads.get("agents")).toBeUndefined();
       expect(h.widgets.get("agents")).toBe("");
@@ -165,17 +165,17 @@ describe("agent observer command", () => {
     }
   });
 
-  it("lets /devext doctor clear stale agent widgets when slash command input cleanup is skipped", async () => {
+  it("lets another command clear stale agent widgets when slash input cleanup is skipped", async () => {
     const h = createHarness();
     agents(h.pi);
-    devextDoctor(h.pi);
+    loop(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");
 
-    await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
 
-    expect(h.widgets.get("devext-doctor")).toContain("[VIEW] Extension doctor");
+    expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
     expect(h.widgetPayloads.get("agents")).toBeUndefined();
     expect(h.widgets.get("agents")).toBe("");
     expect(h.statuses.has("agents")).toBe(false);

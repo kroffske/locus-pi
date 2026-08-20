@@ -1109,22 +1109,16 @@ export default async function runWorkflow(dsl, input) {
 This example passes the machine-enforced `standard` grammar. The complete rule
 list is in
 [`extensions/workflows/AUTHORING.md`](AUTHORING.md#machine-enforced-standard-source-shape).
-In a locus-pi source checkout, Build checks an authored file with:
+Inside Pi, Build checks an authored file by calling `workflow_check_source`
+with:
 
-```bash
-./bin/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
+```json
+{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
 ```
 
-In an installed/consumer project, use:
-
-```bash
-npx @kroffske/locus-pi check-workflow-source .pi/workflows/<name>/<name>.workflow.mjs
-```
-
-Run the same check for every declared direct child. The command comes from the installed package, resolves the workflow path from
-the current project, and requires no project-local npm script or `tsx`. Its
-checker is prebuilt ESM, including when the package lives under `node_modules`.
-Build is not successful until the checker exits zero, the module imports, and
+Run the same check for every declared direct child. The tool comes from the
+installed workflows extension and resolves the workflow path inside the
+current project. Build is not successful until the checker passes, the module imports, and
 the source still matches its reviewed design.
 Standard source treats semantic input, plain model text, and items as opaque whole values:
 only exact prompt/publication/return forwarding and unchanged item scheduling

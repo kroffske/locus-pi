@@ -6,11 +6,9 @@ import type { RuntimeArtifact } from "../../../extensions/_shared/runtime/artifa
 import {
   createTaskFromApprovedPrompt,
   exportTodosToProjectTask,
-  formatTaskLifecyclePlan,
   formatCurrentProjectTaskResolution,
   importTodosFromProjectTasks,
   loadTaskBridgeSnapshot,
-  planTaskLifecycleTransition,
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
 } from "../../../extensions/_shared/project/task-bridge.js";
@@ -66,61 +64,6 @@ function tempProject(): string {
   return root;
 }
 
-function lifecycleProject(): string {
-  const root = path.join(tmpdir(), `locus-pi-task-lifecycle-${Math.random().toString(16).slice(2)}`);
-  mkdirSync(path.join(root, ".tasks"), { recursive: true });
-  tempRoots.push(root);
-  writeFileSync(
-    path.join(root, ".tasks", "index.json"),
-    JSON.stringify(
-      {
-        schema: "index.v1",
-        generated_at: "2026-06-17T00:00:00.000Z",
-        tasks: [
-          {
-            id: "T-1",
-            title: "Draft task",
-            status: "draft",
-            type: "feature",
-            path: "T-1-draft-task",
-          },
-          {
-            id: "T-2",
-            title: "Doing task",
-            status: "doing",
-            type: "feature",
-            path: "T-2-doing-task",
-          },
-          {
-            id: "T-3",
-            title: "Review task",
-            status: "review",
-            type: "feature",
-            path: "T-3-review-task",
-          },
-          {
-            id: "T-4",
-            title: "Ready to close",
-            status: "review",
-            type: "feature",
-            path: "T-4-ready-to-close",
-          },
-        ],
-      },
-      null,
-      2,
-    ),
-  );
-  writeLifecycleTaskWorkspace(root, "T-3-review-task", "## Closure\n\nTODO\n", "Reviewed without acceptance.\n");
-  writeLifecycleTaskWorkspace(
-    root,
-    "T-4-ready-to-close",
-    "## Closure\n\nShipped the lifecycle planner.\n",
-    "ACCEPTED\n",
-  );
-  return root;
-}
-
 function currentTaskProject(tasks: unknown[]): string {
   const root = path.join(tmpdir(), `locus-pi-current-task-${Math.random().toString(16).slice(2)}`);
   mkdirSync(path.join(root, ".tasks"), { recursive: true });
@@ -138,13 +81,6 @@ function currentTaskProject(tasks: unknown[]): string {
     ),
   );
   return root;
-}
-
-function writeLifecycleTaskWorkspace(root: string, taskPath: string, taskMarkdown: string, qaMarkdown?: string): void {
-  const taskDir = path.join(root, ".tasks", taskPath);
-  mkdirSync(taskDir, { recursive: true });
-  writeFileSync(path.join(taskDir, "task.md"), taskMarkdown);
-  if (qaMarkdown !== undefined) writeFileSync(path.join(taskDir, "qa.md"), qaMarkdown);
 }
 
 function approvedArtifact(root: string): RuntimeArtifact {
@@ -385,154 +321,5 @@ describe("task bridge", () => {
     expect(markdown).toContain("- [x] Inspect task contract");
     expect(markdown).toContain("- [ ] Run focused checks");
     expect(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")).toBe(before);
-  });
-
-  it("does not auto-sync or write todo or runtime state while planning lifecycle transitions", () => {
-    const root = tempProject();
-    const indexPath = path.join(root, ".tasks", "index.json");
-    const runtimeFile = path.join(root, ".locus", "runtime", "task-lifecycle", "sentinel.txt");
-    mkdirSync(path.dirname(runtimeFile), { recursive: true });
-    writeFileSync(runtimeFile, "before\n");
-    const beforeIndex = readFileSync(indexPath, "utf8");
-    const beforeRuntime = readFileSync(runtimeFile, "utf8");
-    todoStateCache.phases = [
-      {
-        name: "Execution",
-        tasks: [{ content: "Existing todo", status: "pending" }],
-      },
-    ];
-    const beforeTodos = JSON.parse(JSON.stringify(todoStateCache.phases));
-
-    const plan = planTaskLifecycleTransition(root, "T-1", "review");
-
-    expect(plan).toMatchObject({ ok: true, taskId: "T-1", targetStatus: "review" });
-    expect(readFileSync(indexPath, "utf8")).toBe(beforeIndex);
-    expect(readFileSync(runtimeFile, "utf8")).toBe(beforeRuntime);
-    expect(todoStateCache.phases).toEqual(beforeTodos);
-  });
-
-  it("plans allowed lifecycle transitions and keeps task files unchanged", () => {
-    const root = lifecycleProject();
-    const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
-    const beforeTask = readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "task.md"), "utf8");
-    const beforeQa = readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "qa.md"), "utf8");
-
-    const plan = planTaskLifecycleTransition(root, "T-1", "planned");
-
-    expect(plan).toMatchObject({
-      ok: true,
-      dryRun: true,
-      taskId: "T-1",
-      taskTitle: "Draft task",
-      taskPath: "T-1-draft-task",
-      currentStatus: "draft",
-      targetStatus: "planned",
-      message: "Dry-run only. `locus task update` remains the mutation path.",
-    });
-    expect(formatTaskLifecyclePlan(plan)).toContain("Task lifecycle dry-run");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskId: T-1");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskTitle: Draft task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-1-draft-task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("currentStatus: draft");
-    expect(formatTaskLifecyclePlan(plan)).toContain("targetStatus: planned");
-    expect(formatTaskLifecyclePlan(plan)).toContain(
-      "message: Dry-run only. `locus task update` remains the mutation path.",
-    );
-    expect(readFileSync(path.join(root, ".tasks", "index.json"), "utf8")).toBe(beforeIndex);
-    expect(readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "task.md"), "utf8")).toBe(beforeTask);
-    expect(readFileSync(path.join(root, ".tasks", "T-4-ready-to-close", "qa.md"), "utf8")).toBe(beforeQa);
-  });
-
-  it("rejects unsupported lifecycle transitions", () => {
-    const root = lifecycleProject();
-
-    const plan = planTaskLifecycleTransition(root, "T-2", "planned");
-
-    expect(plan).toMatchObject({
-      ok: false,
-      dryRun: true,
-      code: "unsupported-transition",
-      taskId: "T-2",
-      taskTitle: "Doing task",
-      taskPath: "T-2-doing-task",
-      currentStatus: "doing",
-      targetStatus: "planned",
-      allowedTargets: ["review", "blocked", "wontdo"],
-      message: "Transition from doing to planned is unsupported.",
-    });
-    expect(formatTaskLifecyclePlan(plan)).toContain("code: unsupported-transition");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskId: T-2");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskTitle: Doing task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-2-doing-task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("currentStatus: doing");
-    expect(formatTaskLifecyclePlan(plan)).toContain("targetStatus: planned");
-    expect(formatTaskLifecyclePlan(plan)).toContain("allowedTargets: review, blocked, wontdo");
-  });
-
-  it("returns missing-task for unknown task ids", () => {
-    const root = lifecycleProject();
-
-    const plan = planTaskLifecycleTransition(root, "T-404", "doing");
-
-    expect(plan).toMatchObject({
-      ok: false,
-      dryRun: true,
-      code: "missing-task",
-      taskId: "T-404",
-      targetStatus: "doing",
-    });
-    expect(formatTaskLifecyclePlan(plan)).toContain("code: missing-task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskId: T-404");
-  });
-
-  it("fails done transitions when QA and Closure preconditions are missing", () => {
-    const root = lifecycleProject();
-
-    const plan = planTaskLifecycleTransition(root, "T-3", "done");
-
-    expect(plan).toMatchObject({
-      ok: false,
-      dryRun: true,
-      code: "done-precondition-failed",
-      taskId: "T-3",
-      taskTitle: "Review task",
-      taskPath: "T-3-review-task",
-      currentStatus: "review",
-      targetStatus: "done",
-      missingPreconditions: ["qa.md missing ACCEPTED", "task.md missing non-placeholder Closure text"],
-      message: "Transition to done is blocked until all preconditions pass.",
-    });
-    expect(formatTaskLifecyclePlan(plan)).toContain("code: done-precondition-failed");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskId: T-3");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskTitle: Review task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-3-review-task");
-    expect(formatTaskLifecyclePlan(plan)).toContain("missingPreconditions:");
-    expect(formatTaskLifecyclePlan(plan)).toContain("- qa.md missing ACCEPTED");
-    expect(formatTaskLifecyclePlan(plan)).toContain("- task.md missing non-placeholder Closure text");
-  });
-
-  it("allows done transitions only when QA and Closure preconditions are satisfied", () => {
-    const root = lifecycleProject();
-
-    const plan = planTaskLifecycleTransition(root, "T-4", "done");
-
-    expect(plan).toMatchObject({
-      ok: true,
-      dryRun: true,
-      taskId: "T-4",
-      taskTitle: "Ready to close",
-      taskPath: "T-4-ready-to-close",
-      currentStatus: "review",
-      targetStatus: "done",
-      message: "Dry-run only. `locus task update` remains the mutation path.",
-    });
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskId: T-4");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskTitle: Ready to close");
-    expect(formatTaskLifecyclePlan(plan)).toContain("taskPath: T-4-ready-to-close");
-    expect(formatTaskLifecyclePlan(plan)).toContain("currentStatus: review");
-    expect(formatTaskLifecyclePlan(plan)).toContain("targetStatus: done");
-    expect(formatTaskLifecyclePlan(plan)).toContain(
-      "message: Dry-run only. `locus task update` remains the mutation path.",
-    );
   });
 });

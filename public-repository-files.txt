@@ -4,7 +4,6 @@
 .agents/agents/extension-agents.md
 .agents/agents/extension-ask-user-question.md
 .agents/agents/extension-ast-structural-edit.md
-.agents/agents/extension-devext-doctor.md
 .agents/agents/extension-loop.md
 .agents/agents/extension-model.md
 .agents/agents/extension-plan.md
@@ -37,9 +36,7 @@ README.md
 SECURITY.md
 SUPPORT.md
 THIRD_PARTY_NOTICES.md
-bin/locus-pi
 dist/public-catalogs.json
-dist/workflow-source-shape.mjs
 docs/architecture.md
 docs/extensions.md
 docs/getting-started.md
@@ -127,10 +124,6 @@ extensions/ast-structural-edit/ast-grep.ts
 extensions/ast-structural-edit/index.ts
 extensions/ast-structural-edit/manifest.json
 extensions/ast-structural-edit/resolve.ts
-extensions/devext-doctor/README.md
-extensions/devext-doctor/index.ts
-extensions/devext-doctor/manifest.json
-extensions/devext-doctor/package-inventory.mjs
 extensions/loop/README.md
 extensions/loop/command-parser.ts
 extensions/loop/command-router.ts
@@ -278,6 +271,7 @@ extensions/workflows/runtime/workflow-worktree.ts
 extensions/workflows/workflow-catalog.ts
 extensions/workflows/workflow-command-launcher.ts
 extensions/workflows/workflow-copy.ts
+extensions/workflows/workflow-source-check-tool.ts
 extensions/workflows/workflow-source-shape.ts
 extensions/workflows/workflow-tool-card.ts
 extensions/workflows/workflow-tool.ts
@@ -289,7 +283,6 @@ public-repository.json
 scripts/README.md
 scripts/audit-sources.ts
 scripts/build-public-catalogs.ts
-scripts/build-workflow-source-shape.ts
 scripts/check-extension-layers.ts
 scripts/check-extension-manifests.ts
 scripts/check-markdown-links.ts
@@ -318,7 +311,6 @@ tests/contracts/docs/extension-reference.test.ts
 tests/contracts/docs/generated-catalogs.test.ts
 tests/contracts/extensions/manifest-schema.test.ts
 tests/contracts/extensions/runtime-registration.test.ts
-tests/contracts/doctor/package-inventory.test.ts
 tests/contracts/helpers/package-contract.ts
 tests/contracts/host/selective-package-loading.test.ts
 tests/contracts/package/package-metadata.test.ts
@@ -327,7 +319,6 @@ tests/docs/public-docs.test.ts
 tests/extensions/agents/agent-catalog-hint.test.ts
 tests/extensions/agents/agent-drill.test.ts
 tests/extensions/agents/agent-entrypoint-surfaces.test.ts
-tests/extensions/devext-doctor/doctor-rendering.test.ts
 tests/extensions/agents/agent-fleet-menu.test.ts
 tests/extensions/agents/agent-live-store-entrypoints.test.ts
 tests/extensions/agents/agent-observer.test.ts
@@ -385,6 +376,7 @@ tests/extensions/workflows/workflow-operator-handoff-service.test.ts
 tests/extensions/workflows/workflow-replay-live-row.test.ts
 tests/extensions/workflows/workflow-result-text.test.ts
 tests/extensions/workflows/workflow-run-viewer.test.ts
+tests/extensions/workflows/workflow-source-check-tool.test.ts
 tests/extensions/workflows/workflow-tool-card.test.ts
 tests/extensions/workflows/workflow-transcript.test.ts
 tests/extensions/workflows/workflows-launch-gate.test.ts
@@ -405,7 +397,6 @@ tests/integration/command-ui-lifecycle.test.ts
 tests/integration/markdown-links.test.ts
 tests/integration/operator-status.test.ts
 tests/integration/package-boundary.test.ts
-tests/integration/package-cli.test.ts
 tests/integration/repository-governance.test.ts
 tests/integration/workflow-run-skill.test.ts
 tests/shared/agents/agent-command-run.test.ts

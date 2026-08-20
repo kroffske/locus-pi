@@ -213,7 +213,6 @@ const FEATURE_DESTINATIONS: Record<string, string> = {
   ),
   "loop-continuation": "extensions/loop/loop-continuation.ts",
   "ast-engine": "extensions/ast-structural-edit/ast-engine.ts",
-  "extension-inventory": "extensions/devext-doctor/package-inventory.mjs",
   "human-control": "extensions/ask-user-question/human-control.ts",
   permissions: "extensions/security-gate/permissions.ts",
   "goal-ai-draft": "extensions/plan/goal-ai-draft.ts",
