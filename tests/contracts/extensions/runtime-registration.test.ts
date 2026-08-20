@@ -15,6 +15,9 @@ describe("extension runtime registration contract", () => {
       expect([...harness.commands.keys()].sort(), `runtime commands differ from ${manifestPath}`).toEqual(
         topLevelCommands(manifest.provides.commands),
       );
+      expect([...harness.tools.keys()].sort(), `runtime tools differ from ${manifestPath}`).toEqual(
+        [...manifest.provides.tools].sort(),
+      );
     }
   });
 });

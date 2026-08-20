@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import devextDoctor from "../../../extensions/devext-doctor/index.js";
 import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
 import {
   createSessionStore,
@@ -14,7 +13,6 @@ import {
   MemorySessionStore,
   createDeterministicSessionIdFactory,
 } from "../../../extensions/_shared/runtime/session-core.js";
-import { createHarness } from "../../test-harness.js";
 
 const now = () => "2026-06-02T00:00:00.000Z";
 const tempRoots: string[] = [];
@@ -108,21 +106,5 @@ describe("JsonlSessionStore", () => {
       diagnostics: [],
     });
     expect(formatRuntimeCapabilityReport(report)).toContain("sessionStore: jsonl");
-  });
-
-  it("keeps runtime capability lines out of compact devext doctor", async () => {
-    const root = tempRoot();
-    const h = createHarness(root, { sessionId: "doctor-session" });
-    devextDoctor(h.pi);
-
-    await h.commands.get("devext")!.handler("doctor", h.ctx);
-
-    const report = h.widgets.get("devext-doctor") ?? "";
-    expect(report).toContain("[VIEW]");
-    expect(report.split(/\r?\n/).length).toBeLessThanOrEqual(18);
-    expect(report).not.toContain("sessionStore: memory");
-    expect(report).not.toContain("durableSessionStore: false");
-    expect(report).not.toContain(`sessionStorePath: ${sessionJsonlPath(root)}`);
-    expect(report).not.toContain("sessionStoreWritable: true");
   });
 });

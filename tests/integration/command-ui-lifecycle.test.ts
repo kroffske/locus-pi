@@ -4,7 +4,6 @@ import path from "node:path";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import agents from "../../extensions/agents/index.js";
-import devextDoctor from "../../extensions/devext-doctor/index.js";
 import loop from "../../extensions/loop/index.js";
 import model from "../../extensions/model/index.js";
 import plan from "../../extensions/plan/index.js";
@@ -108,7 +107,7 @@ describe("command UI lifecycle", () => {
     const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-plan-project-"));
     const h = createHarness(projectRoot);
     plan(h.pi);
-    devextDoctor(h.pi);
+    loop(h.pi);
     const tmpHome = mkdtempSync(path.join(tmpdir(), "command-ui-plan-home-"));
     const savedHome = process.env["LOCUS_PI_HOME"];
     const commandCtx = stubPlanSession(h, projectRoot);
@@ -127,18 +126,18 @@ describe("command UI lifecycle", () => {
       rmSync(projectRoot, { recursive: true, force: true });
     }
 
-    await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
 
     expect(h.widgets.get("plan") ?? "").toBe("");
     expect(h.statuses.get("locus")).toContain("MODE");
-    expect(h.widgets.get("devext-doctor")).toContain("[VIEW] Extension doctor");
+    expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
   });
 
   it("clears a prompt-shelf summary on an unrelated command without mutating its artifact", async () => {
     const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-shelf-project-"));
     const h = createHarness(projectRoot);
     plan(h.pi);
-    devextDoctor(h.pi);
+    loop(h.pi);
 
     try {
       await h.commands.get("review")!.handler("Keep this review prompt durable", h.ctx);
@@ -147,11 +146,11 @@ describe("command UI lifecycle", () => {
       await h.commands.get("review")!.handler("", h.ctx);
       expect(h.widgets.get("review")).toContain("[VIEW] Review prompt shelf");
 
-      await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+      await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
 
       expect(h.widgets.get("review") ?? "").toBe("");
       expect(readFileSync(artifactPath, "utf8")).toBe(saved);
-      expect(h.widgets.get("devext-doctor")).toContain("[VIEW] Extension doctor");
+      expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -184,11 +183,11 @@ describe("command UI lifecycle", () => {
   it("does not clear explicitly persistent command status surfaces", async () => {
     const h = createHarness();
     model(h.pi);
-    devextDoctor(h.pi);
+    loop(h.pi);
 
     h.ctx.ui.setStatus("model-roles", "Model roles: DEFAULT=test/fast");
 
-    await h.commands.get("devext")!.handler("doctor", h.ctx as ExtensionCommandContext);
+    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
 
     expect(h.statuses.get("model-roles")).toBe("Model roles: DEFAULT=test/fast");
   });

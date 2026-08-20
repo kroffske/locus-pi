@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
 import type { RuntimeArtifact } from "../runtime/artifacts.js";
 import type { TodoPhase } from "./todo-state.js";
@@ -15,17 +13,6 @@ import {
   type ProjectTaskWorkspace,
 } from "./tasks-store.js";
 
-export const TASK_LIFECYCLE_TARGET_STATUSES = [
-  "planned",
-  "planning",
-  "doing",
-  "review",
-  "blocked",
-  "wontdo",
-  "done",
-] as const;
-export type TaskLifecycleTargetStatus = (typeof TASK_LIFECYCLE_TARGET_STATUSES)[number];
-
 export const CURRENT_PROJECT_TASK_STATUS_ORDER = [
   "doing",
   "review",
@@ -33,17 +20,6 @@ export const CURRENT_PROJECT_TASK_STATUS_ORDER = [
   "planned",
 ] as const satisfies readonly ProjectTaskStatus[];
 export type CurrentProjectTaskStatus = (typeof CURRENT_PROJECT_TASK_STATUS_ORDER)[number];
-
-const TASK_LIFECYCLE_TRANSITIONS: Record<ProjectTaskStatus, readonly TaskLifecycleTargetStatus[]> = {
-  draft: ["planned", "planning", "blocked", "wontdo"],
-  planned: ["planning", "doing", "blocked", "wontdo"],
-  planning: ["doing", "blocked", "wontdo"],
-  doing: ["review", "blocked", "wontdo"],
-  review: ["done", "doing", "blocked", "wontdo"],
-  blocked: ["doing", "wontdo"],
-  done: [],
-  wontdo: [],
-};
 
 export interface TaskBridgeSnapshot {
   tasks: ProjectTaskIndexEntry[];
@@ -79,58 +55,6 @@ export interface CurrentProjectTaskUnresolved {
 }
 
 export type CurrentProjectTaskResolution = CurrentProjectTaskResolved | CurrentProjectTaskUnresolved;
-
-export interface TaskLifecycleSuccessPlan {
-  ok: true;
-  dryRun: true;
-  taskId: string;
-  taskTitle: string;
-  taskPath: string;
-  currentStatus: ProjectTaskStatus;
-  targetStatus: TaskLifecycleTargetStatus;
-  message: string;
-}
-
-export interface TaskLifecycleMissingTaskPlan {
-  ok: false;
-  dryRun: true;
-  code: "missing-task";
-  taskId: string;
-  targetStatus: TaskLifecycleTargetStatus;
-  message: string;
-}
-
-export interface TaskLifecycleUnsupportedTransitionPlan {
-  ok: false;
-  dryRun: true;
-  code: "unsupported-transition";
-  taskId: string;
-  taskTitle: string;
-  taskPath: string;
-  currentStatus: ProjectTaskStatus;
-  targetStatus: TaskLifecycleTargetStatus;
-  allowedTargets: TaskLifecycleTargetStatus[];
-  message: string;
-}
-
-export interface TaskLifecycleDonePreconditionFailedPlan {
-  ok: false;
-  dryRun: true;
-  code: "done-precondition-failed";
-  taskId: string;
-  taskTitle: string;
-  taskPath: string;
-  currentStatus: ProjectTaskStatus;
-  targetStatus: "done";
-  missingPreconditions: string[];
-  message: string;
-}
-
-export type TaskLifecyclePlan =
-  | TaskLifecycleSuccessPlan
-  | TaskLifecycleMissingTaskPlan
-  | TaskLifecycleUnsupportedTransitionPlan
-  | TaskLifecycleDonePreconditionFailedPlan;
 
 export interface CreateTaskFromPromptInput {
   projectRoot: string;
@@ -221,111 +145,6 @@ export function formatCurrentProjectTaskResolution(resolution: CurrentProjectTas
   return lines.join("\n");
 }
 
-export function planTaskLifecycleTransition(
-  projectRoot: string,
-  taskId: string,
-  targetStatus: TaskLifecycleTargetStatus,
-): TaskLifecyclePlan {
-  let snapshot: TaskBridgeSnapshot;
-  try {
-    snapshot = loadTaskBridgeSnapshot(projectRoot);
-  } catch {
-    return {
-      ok: false,
-      dryRun: true,
-      code: "missing-task",
-      taskId,
-      targetStatus,
-      message: `Task ${taskId} was not found in .tasks/index.json.`,
-    };
-  }
-
-  const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
-  if (task === undefined) {
-    return {
-      ok: false,
-      dryRun: true,
-      code: "missing-task",
-      taskId,
-      targetStatus,
-      message: `Task ${taskId} was not found in .tasks/index.json.`,
-    };
-  }
-
-  const allowedTargets = TASK_LIFECYCLE_TRANSITIONS[task.status] ?? [];
-  if (!allowedTargets.includes(targetStatus)) {
-    return {
-      ok: false,
-      dryRun: true,
-      code: "unsupported-transition",
-      taskId: task.id,
-      taskTitle: task.title,
-      taskPath: task.path,
-      currentStatus: task.status,
-      targetStatus,
-      allowedTargets: [...allowedTargets],
-      message: `Transition from ${task.status} to ${targetStatus} is unsupported.`,
-    };
-  }
-
-  if (targetStatus === "done") {
-    const missingPreconditions = collectDonePreconditionFailures(projectRoot, task);
-    if (missingPreconditions.length > 0) {
-      return {
-        ok: false,
-        dryRun: true,
-        code: "done-precondition-failed",
-        taskId: task.id,
-        taskTitle: task.title,
-        taskPath: task.path,
-        currentStatus: task.status,
-        targetStatus,
-        missingPreconditions,
-        message: "Transition to done is blocked until all preconditions pass.",
-      };
-    }
-  }
-
-  return {
-    ok: true,
-    dryRun: true,
-    taskId: task.id,
-    taskTitle: task.title,
-    taskPath: task.path,
-    currentStatus: task.status,
-    targetStatus,
-    message: "Dry-run only. `locus task update` remains the mutation path.",
-  };
-}
-
-export function formatTaskLifecyclePlan(plan: TaskLifecyclePlan): string {
-  const lines = ["Task lifecycle dry-run", `ok: ${plan.ok}`, `dryRun: true`];
-  if (plan.ok) {
-    lines.push(
-      `taskId: ${plan.taskId}`,
-      `taskTitle: ${plan.taskTitle}`,
-      `taskPath: ${plan.taskPath}`,
-      `currentStatus: ${plan.currentStatus}`,
-      `targetStatus: ${plan.targetStatus}`,
-      `message: ${plan.message}`,
-    );
-    return lines.join("\n");
-  }
-
-  lines.push(`code: ${plan.code}`, `taskId: ${plan.taskId}`, `targetStatus: ${plan.targetStatus}`);
-  if (plan.code !== "missing-task") {
-    lines.push(`taskTitle: ${plan.taskTitle}`, `taskPath: ${plan.taskPath}`, `currentStatus: ${plan.currentStatus}`);
-  }
-  if (plan.code === "unsupported-transition") {
-    lines.push(`allowedTargets: ${formatAllowedTargets(plan.allowedTargets)}`);
-  }
-  if (plan.code === "done-precondition-failed") {
-    lines.push("missingPreconditions:", ...plan.missingPreconditions.map((precondition) => `- ${precondition}`));
-  }
-  lines.push(`message: ${plan.message}`);
-  return lines.join("\n");
-}
-
 export function createTaskFromApprovedPrompt(input: CreateTaskFromPromptInput): ProjectTaskWorkspace {
   if (input.artifact.kind !== "prepared-task-draft")
     throw new Error("Task bridge requires a prepared-task-draft artifact.");
@@ -378,72 +197,6 @@ export function importTodosFromProjectTasks(tasks: ProjectTaskIndexEntry[]): Tod
       })),
     },
   ];
-}
-
-function collectDonePreconditionFailures(projectRoot: string, task: ProjectTaskIndexEntry): string[] {
-  const workspaceRoot = path.join(tasksRoot(projectRoot), task.path);
-  const missing: string[] = [];
-  const qaText = readTextIfExists(path.join(workspaceRoot, "qa.md"));
-  if (qaText === undefined || !/\bACCEPTED\b/.test(qaText)) missing.push("qa.md missing ACCEPTED");
-  const taskText = readTextIfExists(path.join(workspaceRoot, "task.md"));
-  if (taskText === undefined || !hasNonPlaceholderClosureText(taskText))
-    missing.push("task.md missing non-placeholder Closure text");
-  return missing;
-}
-
-function readTextIfExists(filePath: string): string | undefined {
-  return existsSync(filePath) ? readFileSync(filePath, "utf8") : undefined;
-}
-
-function hasNonPlaceholderClosureText(markdown: string): boolean {
-  const closureSection = extractSection(markdown, "Closure");
-  if (closureSection === undefined) return false;
-  const lines = closureSection
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length === 0) return false;
-  return lines.some((line) => {
-    const normalized = line
-      .replace(/^[-*>#\d.\s]+/, "")
-      .trim()
-      .toLowerCase();
-    if (normalized.length === 0) return false;
-    return !isPlaceholderClosureLine(normalized);
-  });
-}
-
-function extractSection(markdown: string, heading: string): string | undefined {
-  const lines = markdown.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => line.trim().toLowerCase() === `## ${heading.toLowerCase()}`);
-  if (headingIndex < 0) return undefined;
-  const sectionLines: string[] = [];
-  for (let index = headingIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line === undefined) continue;
-    if (/^##\s+\S/.test(line.trim())) break;
-    sectionLines.push(line);
-  }
-  return sectionLines.join("\n").trim();
-}
-
-function isPlaceholderClosureLine(value: string): boolean {
-  return [
-    /^tbd[.!?]*$/,
-    /^todo[.!?]*$/,
-    /^placeholder[.!?]*$/,
-    /^coming soon[.!?]*$/,
-    /^to be (?:written|filled|done)[.!?]*$/,
-    /^fill(?: in)?(?: later)?[.!?]*$/,
-    /^pending[.!?]*$/,
-    /^n\/a[.!?]*$/,
-    /^none[.!?]*$/,
-    /^\.\.\.[.!?]*$/,
-  ].some((pattern) => pattern.test(value));
-}
-
-function formatAllowedTargets(allowedTargets: readonly TaskLifecycleTargetStatus[]): string {
-  return allowedTargets.length === 0 ? "none" : allowedTargets.join(", ");
 }
 
 function isCurrentProjectTaskStatus(status: ProjectTaskStatus): status is CurrentProjectTaskStatus {

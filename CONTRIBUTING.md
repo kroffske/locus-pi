@@ -62,11 +62,10 @@ Do not widen the default extension list, Package workflow registry, runtime depe
 
 On an Apple-silicon laptop `check:fast` takes about 17 seconds warm — 27 on the first run after `npm ci` — and `check` about 21. The four extra gates cost a few seconds, not a longer test suite, so reach for `check:fast` only inside a tight edit loop.
 
-Three steps stay outside `check` because none of them checks this source tree deterministically: the dependency audit needs the registry, and the doctor and the pack candidate exercise the installed host and npm itself. CI runs them after `check`, and so should you before a release:
+Two steps stay outside `check` because neither checks this source tree deterministically: the dependency audit needs the registry, and the pack candidate exercises npm itself. CI runs them after `check`, and so should you before a release:
 
 ```bash
 npm audit --omit=dev
-./bin/locus-pi doctor
 npm pack --dry-run --json --ignore-scripts
 ```
 

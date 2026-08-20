@@ -335,13 +335,10 @@ namespace has no root source and never receives a fake one. It then checks:
 - the module loads and exports `meta` plus a default function;
 - source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
 - no design-absent node or standard-profile bad smell appeared.
-- the exact built file passes the source checker: in a locus-pi source checkout
-  prefer `./bin/locus-pi check-workflow-source` on every built
-  `.pi/workflows/<name>/*.workflow.mjs`; otherwise use
-  `npx @kroffske/locus-pi check-workflow-source` on those same files from the
-  project containing the built folder.
+- the exact built file passes the Pi-native `workflow_check_source` tool for
+  every built `.pi/workflows/<name>/*.workflow.mjs` path.
 
-A missing checker command, non-zero checker exit, failed module import, or
+An unavailable tool, failed checker result, failed module import, or
 design/source mismatch means Build failed. Repair and rerun; never return a
 successful Build claim after a skipped or failed check.
 

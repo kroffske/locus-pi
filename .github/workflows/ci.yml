@@ -82,9 +82,6 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
-      - name: Inspect the default extension inventory
-        run: ./bin/locus-pi doctor
-
       - name: Confirm the installed Pi peer
         run: ./node_modules/.bin/pi --version
 
