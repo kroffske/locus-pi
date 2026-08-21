@@ -25,9 +25,8 @@ afterEach(async () => {
  * is that a broken link would actually be caught, so that is proved here on
  * temporary files, where a link is allowed to be wrong.
  *
- * Formatting drift, manifest shape, and inventory drift are not re-proved here:
- * `format:check` rides prettier's own exit code, and `check:manifests` and
- * `check:repository` carry their own negative suites.
+ * Formatting and repository hygiene are not re-proved here. Their own gates
+ * carry the negative suites.
  */
 describe("published Markdown link gate", () => {
   it("accepts relative links, resolving anchors, external URLs, and fenced examples", async () => {
@@ -78,29 +77,27 @@ describe("published Markdown link gate", () => {
     const failure = await runCheckLinks(broken);
 
     expect(failure.code).toBe(1);
-    expect(failure.stderr).toContain("Dead links in the npm package:");
+    expect(failure.stderr).toContain("Dead links in the repository:");
     expect(failure.stderr).toContain("docs/guide.md:9 -> missing.md");
     expect(failure.stderr).toContain("docs/guide.md:10 -> reference.md#no-such-heading");
 
     const repaired = await runCheckLinks(await linkFixture());
     expect(repaired.code).toBe(0);
-    expect(repaired.stdout).toContain("Published Markdown links verified:");
+    expect(repaired.stdout).toContain("Repository Markdown links verified:");
   });
 });
 
 const PACKAGE_FILES = ["docs/guide.md", "docs/reference.md"];
 const REPOSITORY_FILES = ["NOTES.md"];
-const INVENTORY = "public-repository-files.txt";
-
 const packageSurface = { name: "the npm package", files: new Set([...PACKAGE_FILES, "package.json"]) };
 const repositorySurface = {
   name: "the public repository",
-  files: new Set([...PACKAGE_FILES, ...REPOSITORY_FILES, "package.json", INVENTORY]),
+  files: new Set([...PACKAGE_FILES, ...REPOSITORY_FILES, "package.json"]),
 };
 
 /**
  * A miniature published repository: two packed documents, one repository-only
- * document, and the manifest pair `check:links` reads its surfaces from.
+ * document. The direct parser tests still exercise a narrower package surface.
  * `guideExtras` appends link lines to `docs/guide.md` starting at line 9.
  */
 async function linkFixture({ guideExtras = [] }: { guideExtras?: string[] } = {}): Promise<string> {
@@ -130,21 +127,6 @@ async function linkFixture({ guideExtras = [] }: { guideExtras?: string[] } = {}
     `${JSON.stringify({ name: "fixture", private: true, files: PACKAGE_FILES }, null, 2)}\n`,
     "utf8",
   );
-  await writeFile(
-    path.join(root, "public-repository.json"),
-    `${JSON.stringify(
-      {
-        packageFiles: "package.json#files",
-        repositoryFiles: REPOSITORY_FILES,
-        excludeFiles: [],
-        generatedInventory: INVENTORY,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-  await writeFile(path.join(root, INVENTORY), `${[...repositorySurface.files].sort().join("\n")}\n`, "utf8");
   return root;
 }
 

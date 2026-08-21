@@ -1,3 +1,16 @@
+---
+title: Third-party notices
+type: overview
+status: active
+updated: "2026-08-21T21:48:43Z"
+source_commit: "60f84801e2a9"
+update_event: "cleanup"
+context: "changes=XL files=41"
+description: "Document licenses and source notices for third-party software used by locus-pi."
+owner: locus-pi maintainers
+tags: [licensing, third-party]
+---
+
 # Third-party notices
 
 `locus-pi` uses the public Pi extension and SDK contracts and adapts selected compatibility behavior from Oh My Pi. Extension manifests record local ownership and review metadata; the licenses and upstream sources are listed below.

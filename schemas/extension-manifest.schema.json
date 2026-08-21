@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/locus-pi/extension-manifest.schema.json",
+  "$id": "https://example.invalid/locus-pi/schemas/extension-manifest.schema.json",
   "title": "locus-pi extension manifest",
   "description": "The declared public contract of one default extension. scripts/check-extension-manifests.ts validates every manifest referenced by package.json#pi.extensions against this file, so a field added here without a consumer, or an enum value no shipped manifest uses, is a defect. Each property description names the consumer that reads it.",
   "type": "object",

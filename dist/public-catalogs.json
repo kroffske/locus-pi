@@ -2,9 +2,7 @@
   "extensions": [
     {
       "id": "agents",
-      "tools": [
-        "spawn_agent"
-      ],
+      "tools": ["spawn_agent"],
       "commands": [
         "agent list",
         "agent inspect",
@@ -15,20 +13,13 @@
         "agent ps",
         "ps"
       ],
-      "hooks": [
-        "session_start",
-        "session_shutdown",
-        "before_agent_start",
-        "input"
-      ],
+      "hooks": ["session_start", "session_shutdown", "before_agent_start", "input"],
       "risk": "high",
       "ownership": "locus-specific"
     },
     {
       "id": "ask-user-question",
-      "tools": [
-        "ask"
-      ],
+      "tools": ["ask"],
       "commands": [],
       "hooks": [],
       "risk": "medium",
@@ -36,11 +27,7 @@
     },
     {
       "id": "ast-structural-edit",
-      "tools": [
-        "ast_grep",
-        "ast_edit",
-        "resolve"
-      ],
+      "tools": ["ast_grep", "ast_edit", "resolve"],
       "commands": [],
       "hooks": [],
       "risk": "high",
@@ -48,64 +35,33 @@
     },
     {
       "id": "loop",
-      "tools": [
-        "loop"
-      ],
-      "commands": [
-        "loop"
-      ],
-      "hooks": [
-        "agent_settled",
-        "input"
-      ],
+      "tools": ["loop"],
+      "commands": ["loop"],
+      "hooks": ["agent_settled", "input"],
       "risk": "medium",
       "ownership": "compat-wrapper"
     },
     {
       "id": "model",
       "tools": [],
-      "commands": [
-        "model-roles",
-        "effort"
-      ],
-      "hooks": [
-        "session_start",
-        "input"
-      ],
+      "commands": ["model-roles", "effort"],
+      "hooks": ["session_start", "input"],
       "risk": "medium",
       "ownership": "compat-wrapper"
     },
     {
       "id": "plan",
-      "tools": [
-        "goal"
-      ],
-      "commands": [
-        "plan",
-        "mode",
-        "goal",
-        "goal-ai",
-        "review",
-        "todos"
-      ],
-      "hooks": [
-        "session_start",
-        "before_agent_start",
-        "input"
-      ],
+      "tools": ["goal"],
+      "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],
+      "hooks": ["session_start", "before_agent_start", "input"],
       "risk": "high",
       "ownership": "locus-specific"
     },
     {
       "id": "security-gate",
       "tools": [],
-      "commands": [
-        "security-audit"
-      ],
-      "hooks": [
-        "tool_call",
-        "input"
-      ],
+      "commands": ["security-audit"],
+      "hooks": ["tool_call", "input"],
       "risk": "critical",
       "ownership": "locus-specific"
     },
@@ -113,126 +69,45 @@
       "id": "status-line",
       "tools": [],
       "commands": [],
-      "hooks": [
-        "session_start",
-        "session_before_compact",
-        "session_compact",
-        "session_shutdown"
-      ],
+      "hooks": ["session_start", "session_before_compact", "session_compact", "session_shutdown"],
       "risk": "low",
       "ownership": "locus-specific"
     },
     {
       "id": "todo-context",
-      "tools": [
-        "todo_read",
-        "todo_write"
-      ],
-      "commands": [
-        "todo"
-      ],
-      "hooks": [
-        "agent_settled",
-        "input"
-      ],
+      "tools": ["todo_read", "todo_write"],
+      "commands": ["todo"],
+      "hooks": ["agent_settled", "input"],
       "risk": "high",
       "ownership": "compat-wrapper"
     },
     {
       "id": "workflows",
-      "tools": [
-        "workflow",
-        "workflow_check_source",
-        "fusion"
-      ],
-      "commands": [
-        "workflows",
-        "workflow-stop",
-        "fusion"
-      ],
-      "hooks": [
-        "session_start",
-        "session_shutdown",
-        "input",
-        "turn_end",
-        "agent_settled"
-      ],
+      "tools": ["workflow", "workflow_check_source", "fusion"],
+      "commands": ["workflows", "workflow-stop", "fusion"],
+      "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled"],
       "risk": "critical",
       "ownership": "locus-specific"
     }
   ],
   "workflows": [
-    {
-      "name": "implement",
-      "namespace": "implement"
-    },
-    {
-      "name": "live-smoke",
-      "namespace": "live-smoke"
-    },
-    {
-      "name": "post-code-review",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/boundaries",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/contracts",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/necessity",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/scope",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/simplicity",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/style",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "post-code-review/synthesis",
-      "namespace": "post-code-review"
-    },
-    {
-      "name": "task/draft",
-      "namespace": "task"
-    },
-    {
-      "name": "task/implement-plan-template",
-      "namespace": "task"
-    },
-    {
-      "name": "task/plan",
-      "namespace": "task"
-    },
-    {
-      "name": "task/substep",
-      "namespace": "task"
-    },
-    {
-      "name": "workflow-creator",
-      "namespace": "workflow-creator"
-    },
-    {
-      "name": "workflow-creator/build",
-      "namespace": "workflow-creator"
-    },
-    {
-      "name": "workflow-creator/design",
-      "namespace": "workflow-creator"
-    },
-    {
-      "name": "workflow-creator/svg",
-      "namespace": "workflow-creator"
-    }
+    { "name": "implement", "namespace": "implement" },
+    { "name": "live-smoke", "namespace": "live-smoke" },
+    { "name": "post-code-review", "namespace": "post-code-review" },
+    { "name": "post-code-review/boundaries", "namespace": "post-code-review" },
+    { "name": "post-code-review/contracts", "namespace": "post-code-review" },
+    { "name": "post-code-review/necessity", "namespace": "post-code-review" },
+    { "name": "post-code-review/scope", "namespace": "post-code-review" },
+    { "name": "post-code-review/simplicity", "namespace": "post-code-review" },
+    { "name": "post-code-review/style", "namespace": "post-code-review" },
+    { "name": "post-code-review/synthesis", "namespace": "post-code-review" },
+    { "name": "task/draft", "namespace": "task" },
+    { "name": "task/implement-plan-template", "namespace": "task" },
+    { "name": "task/plan", "namespace": "task" },
+    { "name": "task/substep", "namespace": "task" },
+    { "name": "workflow-creator", "namespace": "workflow-creator" },
+    { "name": "workflow-creator/build", "namespace": "workflow-creator" },
+    { "name": "workflow-creator/design", "namespace": "workflow-creator" },
+    { "name": "workflow-creator/svg", "namespace": "workflow-creator" }
   ]
 }

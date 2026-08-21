@@ -13,10 +13,10 @@ interface Manifest {
 
 const root = process.cwd();
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as PackageJson;
-const notices = await readFile(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+const notices = await readFile(path.join(root, "docs/third-party-notices.md"), "utf8");
 const manifests = await readActiveManifests(packageJson.pi.extensions);
 
-// The one review.source in extension-manifest.schema.json that describes adapted third-party
+// The one review.source in schemas/extension-manifest.schema.json that describes adapted third-party
 // code; write-from-scratch is the other, and it carries no attribution obligation.
 const ADAPTED_REVIEW_SOURCE = "copy-after-audit";
 
@@ -35,7 +35,9 @@ for (const required of [
   "https://github.com/can1357/oh-my-pi",
   "MIT",
 ]) {
-  if (!notices.includes(required)) throw new Error(`THIRD_PARTY_NOTICES.md lacks required attribution: ${required}`);
+  if (!notices.includes(required)) {
+    throw new Error(`docs/third-party-notices.md lacks required attribution: ${required}`);
+  }
 }
 
 for (const manifest of manifests) {

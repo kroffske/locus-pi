@@ -44,7 +44,7 @@ The other default extensions do not directly import another feature directory.
 
 ## Reading a manifest
 
-`extension-manifest.schema.json` is the whole field list, and `npm run check` validates every manifest against it, so a field the schema does not declare is rejected rather than ignored. The fields are:
+`schemas/extension-manifest.schema.json` is the whole field list, and `npm run check` validates every manifest against it, so a field the schema does not declare is rejected rather than ignored. The fields are:
 
 - `id` and `agent` — extension identity and the bundled agent profile it owns;
 - `provides` — public tools, commands, hooks, and shortcuts;

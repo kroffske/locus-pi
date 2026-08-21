@@ -19,7 +19,7 @@ The `tool_call` hook classifies calls and stores a bounded in-memory audit ring.
 - not a replacement for Pi approvals;
 - not a vulnerability-reporting channel.
 
-Report vulnerabilities through the private process in [`SECURITY.md`](https://github.com/kroffske/locus-pi/blob/main/SECURITY.md).
+Report suspected vulnerabilities through GitHub private vulnerability reporting, never through a public issue.
 
 ## Implementation
 

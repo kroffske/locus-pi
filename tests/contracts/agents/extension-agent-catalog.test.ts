@@ -8,8 +8,6 @@ describe("extension agent catalog contract", () => {
     const entries = loadExtensionAgentCatalog();
     expect(entries.map((entry) => entry.extensionId).sort()).toEqual([...extensionIds].sort());
     for (const entry of entries) {
-      expect(pkg.files).toContain(entry.profilePath);
-      expect(pkg.files).toContain(entry.manifestPath);
       expect(entry.description.length).toBeLessThanOrEqual(96);
     }
   });

@@ -3,7 +3,7 @@
  *
  * The package publishes two enumerable sets: the extensions `package.json#pi.extensions` activates,
  * and the workflow names `extensions/workflows/examples/` resolves. Both were transcribed by hand into
- * README.md, docs/extensions.md, docs/workflows.md and two contract tests, and every copy could drift
+ * docs/extensions.md, docs/workflows.md and two contract tests, and every copy could drift
  * independently — the published "five namespaces" against six on disk was exactly that failure. This
  * script resolves both catalogs from the same readers the runtime uses and writes them once:
  *
@@ -111,17 +111,9 @@ interface DocumentTarget {
 }
 
 /**
- * Where each fragment lands. A marker names the catalog, not one fixed rendering: README.md carries the
- * counted summary a reader meets first, while the reference pages carry the full enumeration.
+ * Where each full catalog lands.
  */
 const DOCUMENT_TARGETS: DocumentTarget[] = [
-  {
-    file: "README.md",
-    regions: [
-      { kind: "extensions", render: extensionSummaryFragment },
-      { kind: "workflows", render: workflowCatalogFragment },
-    ],
-  },
   { file: "docs/extensions.md", regions: [{ kind: "extensions", render: extensionTableFragment }] },
   { file: "docs/workflows.md", regions: [{ kind: "workflows", render: workflowCatalogFragment }] },
 ];
@@ -190,14 +182,16 @@ export async function generatedPublicCatalogFiles(root: string): Promise<Generat
     purposes: await workflowPurposes(packaged),
   };
 
-  const files: GeneratedFile[] = [{ path: CATALOG_FILE, content: `${JSON.stringify(catalogs, null, 2)}\n` }];
+  const files: GeneratedFile[] = [
+    { path: CATALOG_FILE, content: await formatGenerated(root, CATALOG_FILE, JSON.stringify(catalogs)) },
+  ];
   for (const target of DOCUMENT_TARGETS) {
     const original = await readFile(path.join(root, target.file), "utf8");
     const rewritten = target.regions.reduce(
       (text, region) => replaceRegion(target.file, text, region.kind, region.render(sources, target.file)),
       original,
     );
-    files.push({ path: target.file, content: await formatMarkdown(root, target.file, rewritten) });
+    files.push({ path: target.file, content: await formatGenerated(root, target.file, rewritten) });
   }
   return files;
 }
@@ -266,11 +260,6 @@ async function workflowPurposes(packaged: PackagedWorkflowEntry[]): Promise<Map<
   return purposes;
 }
 
-function extensionSummaryFragment({ catalogs }: CatalogSources): string {
-  const count = catalogs.extensions.length;
-  return `${GENERATED_NOTICE}\n\nThat list currently activates ${numberWord(count)} extensions.`;
-}
-
 function extensionTableFragment({ catalogs, manuals }: CatalogSources, docFile: string): string {
   const rows = catalogs.extensions.map((entry) => {
     const manual = manuals.get(entry.id);
@@ -333,11 +322,10 @@ function markerIndex(file: string, text: string, marker: string): number {
 }
 
 /**
- * Run the repository formatter over the rewritten file. `format:check` guards every published Markdown
- * file, so the generator emits minimal rows and lets Prettier own column padding; without this a
- * regenerated table would be correct and still fail the gate.
+ * Run the repository formatter over generated output. The generator emits minimal data and lets
+ * Prettier own JSON layout and Markdown table padding.
  */
-async function formatMarkdown(root: string, file: string, text: string): Promise<string> {
+async function formatGenerated(root: string, file: string, text: string): Promise<string> {
   const absolute = path.join(root, file);
   const options = await resolveConfig(absolute);
   return format(text, { ...options, filepath: absolute });

@@ -18,10 +18,7 @@ const releaseRelevantPatterns = [
   /^docs\//,
   /^extensions\//,
   /^README\.md$/,
-  /^SECURITY\.md$/,
-  /^SUPPORT\.md$/,
-  /^THIRD_PARTY_NOTICES\.md$/,
-  /^extension-manifest\.schema\.json$/,
+  /^schemas\/extension-manifest\.schema\.json$/,
   /^package(?:-lock)?\.json$/,
 ];
 
