@@ -1,9 +1,5 @@
 {
   "id": "security-gate",
-  "agent": {
-    "name": "extension-security-gate",
-    "description": "Observe dangerous tool calls in audit-only mode and inspect them with /security-audit."
-  },
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",

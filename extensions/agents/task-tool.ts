@@ -12,13 +12,7 @@ import { validateParams } from "../_shared/host/validation.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../workflows/progress-widget.js";
 import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-tool-card.js";
-import {
-  DEFAULT_TASK_AGENT_NAME,
-  refreshAgents,
-  resolveAgentSelection,
-  TaskParams,
-  type AgentResolution,
-} from "./catalog.js";
+import { refreshAgents, resolveAgentSelection, TaskParams } from "./catalog.js";
 import { AGENTS_WIDGET_KEY } from "./operator-surface.js";
 import { nextAgentRunSequence, resolveAgentTitle, runAgentLiveTask } from "./run-launcher.js";
 import { createUnknownAgentReport } from "./unknown-agent-report.js";
@@ -52,7 +46,7 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "spawn_agent",
     description:
-      "Spawn one subagent to run one self-contained task in a headless child agent session. Pick a .agents catalog agent or omit for the default. Successful content is the child's exact final text.",
+      "Spawn one subagent to run one self-contained task in a headless child session. Omit agent for a clean session, or name a project/user catalog agent. Successful content is the child's exact final text.",
     parameters: TaskParams,
     approval: "exec",
     formatApprovalDetails: taskApprovalDetails,
@@ -68,7 +62,7 @@ export function registerAgentSpawnTools(pi: ExtensionAPI): void {
 
 function taskApprovalDetails(args: unknown): string[] {
   const record = args !== null && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const agent = String(record.agent ?? DEFAULT_TASK_AGENT_NAME);
+  const agent = record.agent === undefined ? "bare" : String(record.agent);
   return [`Agent: ${agent}`, "Tasks: 1"];
 }
 
@@ -89,21 +83,24 @@ async function runTaskTool(
   title: string | undefined,
   parentContext?: { inline?: string; artifactPath?: string },
 ) {
-  const resolution = resolveAgentSelection(agentName);
-  if (resolution === undefined) {
+  const bare = agentName === undefined;
+  const resolution = bare ? undefined : resolveAgentSelection(agentName);
+  if (!bare && resolution === undefined) {
     const report = createUnknownAgentReport(ctx, "spawn_agent", agentName);
     return errorResult(report.text, report.details);
   }
-  const { agent, requestedAgent, resolvedAgent, aliasApplied } = resolution;
-  const agentDefault = agent.parentContextDefault === true;
-  const modelRoles = await loadModelRolesState(ctx);
-  const modelRoleResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
-  const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution.assignment });
+  const agentDefault = resolution?.agent.parentContextDefault === true;
+  const modelRoleResolution =
+    resolution === undefined
+      ? undefined
+      : resolveAgentModelPreference(await loadModelRolesState(ctx), resolution.agent.model ?? []);
+  const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution?.assignment });
+  const executionLabel = resolution?.resolvedAgent ?? "sub-agent";
   const hasUI = ctx.hasUI === true;
   const panel = hasUI
-    ? installWorkflowProgress(ctx, "agents", `spawn_agent ${resolvedAgent}`, "spawn_agent")
+    ? installWorkflowProgress(ctx, "agents", `spawn_agent ${executionLabel}`, "spawn_agent")
     : undefined;
-  const rowId = `spawn_agent:${resolvedAgent}:${nextAgentRunSequence()}`;
+  const rowId = `spawn_agent:${resolution?.resolvedAgent ?? "bare"}:${nextAgentRunSequence()}`;
   const resolvedTitle = resolveAgentTitle(title, "", task);
   let boundary: Awaited<ReturnType<typeof runAgentLiveTask>>;
   // Pin the "agents" progress key for the duration of the live run so a chat
@@ -114,29 +111,42 @@ async function runTaskTool(
     // Pi native tool approval happens before this handler runs, so the child runs
     // under the already-approved bounds (approvalTier "allow").
     const parentContextBroker = summarizeParentContextBroker(parentContext, agentDefault);
-    boundary = await runAgentLiveTask({
+    const common = {
       pi,
       ctx,
       signal,
-      agent,
-      resolvedAgent,
       rowId,
       label: resolvedTitle,
       title: resolvedTitle,
       task,
       approvalTier: "allow",
       liveModel,
-      modelRoleResolution,
       maxTurns: 5,
-      onStarted: (line) =>
+      onStarted: (line: string) =>
         update({
           content: [{ type: "text", text: line }],
           // The card resolves the live row by id while the run is in flight, so
           // the partial update only needs the row identity + static labels.
-          details: { rowId, agent: resolvedAgent, title: resolvedTitle, status: "running" },
+          details: {
+            rowId,
+            executionMode: resolution === undefined ? "bare" : "named",
+            ...(resolution === undefined ? {} : { agent: resolution.resolvedAgent }),
+            title: resolvedTitle,
+            status: "running",
+          },
         }),
       ...(parentContextBroker.forwarded && parentContext !== undefined ? { parentContext } : {}),
-    });
+    } as const;
+    boundary =
+      resolution === undefined
+        ? await runAgentLiveTask({ ...common, executionMode: "bare" })
+        : await runAgentLiveTask({
+            ...common,
+            executionMode: "named",
+            agent: resolution.agent,
+            resolvedAgent: resolution.resolvedAgent,
+            modelRoleResolution: modelRoleResolution!,
+          });
     if (hasUI) panel?.render(80);
     panel?.finish({ ok: boundary.status === "completed", result: boundary });
   } catch (err) {
@@ -150,11 +160,13 @@ async function runTaskTool(
   }
   if (boundary.status === "blocked" && diagnosticsInclude(boundary.diagnostics, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC)) {
     return sdkUnavailableResult(
-      {
-        requestedAgent,
-        resolvedAgent,
-        ...(aliasApplied === undefined ? {} : { aliasApplied }),
-      },
+      resolution === undefined
+        ? { executionMode: "bare" }
+        : {
+            executionMode: "named",
+            requestedAgent: resolution.requestedAgent,
+            resolvedAgent: resolution.resolvedAgent,
+          },
       boundary,
     );
   }
@@ -162,11 +174,10 @@ async function runTaskTool(
   // Terminal row facts for the transcript card once the live row is pruned.
   const finishedRow = agentLiveStore.rows.get(rowId);
   const details = {
-    owner: "agents-catalog",
+    owner: "agents-runtime",
     requestedSurface: "spawn_agent",
-    requestedAgent,
-    agent: resolvedAgent,
-    ...(aliasApplied === undefined ? {} : { aliasApplied }),
+    executionMode: resolution === undefined ? "bare" : "named",
+    ...(resolution === undefined ? {} : { requestedAgent: resolution.requestedAgent, agent: resolution.resolvedAgent }),
     taskCount: 1,
     executor: "agent-sdk-session-host",
     parentContextBroker,
@@ -211,21 +222,21 @@ function diagnosticsInclude(diagnostics: unknown, token: string): boolean {
  * it never claims a replacement session was attempted.
  */
 function sdkUnavailableResult(
-  resolution: Pick<AgentResolution, "requestedAgent" | "resolvedAgent" | "aliasApplied">,
+  resolution:
+    | { executionMode: "bare"; requestedAgent?: never; resolvedAgent?: never }
+    | { executionMode: "named"; requestedAgent: string; resolvedAgent: string },
   result: Awaited<ReturnType<typeof runAgentLiveTask>>,
 ) {
   const reason = result.reason || "createAgentSession is unavailable on this host.";
   return errorResult(
-    [
-      `Agent task execution is unavailable: this Pi host cannot spawn a child agent session for "${resolution.resolvedAgent}".`,
-      reason,
-    ].join("\n"),
+    [`Sub-agent execution is unavailable: this Pi host cannot spawn the requested child session.`, reason].join("\n"),
     {
-      owner: "agents-catalog",
+      owner: "agents-runtime",
       requestedSurface: "spawn_agent",
-      requestedAgent: resolution.requestedAgent,
-      agent: resolution.resolvedAgent,
-      ...(resolution.aliasApplied === undefined ? {} : { aliasApplied: resolution.aliasApplied }),
+      executionMode: resolution.executionMode,
+      ...(resolution.executionMode === "named"
+        ? { requestedAgent: resolution.requestedAgent, agent: resolution.resolvedAgent }
+        : {}),
       taskCount: 1,
       executor: "agent-sdk-session-host",
       status: "blocked",
@@ -237,7 +248,7 @@ function sdkUnavailableResult(
         diagnostics: result.diagnostics,
         resultArtifact: result.resultArtifact?.path,
       },
-      sources: [".agents/agents"],
+      sources: resolution.executionMode === "named" ? ["project/user .agents/agents"] : [],
     },
   );
 }

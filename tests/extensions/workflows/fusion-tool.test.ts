@@ -334,12 +334,13 @@ describe("direct Fusion runner", () => {
       createExecutor: ({ model }): AgentExecutor => ({
         async run(request: AgentRunRequest) {
           expect(request).toMatchObject({ capabilityMode: "tool-free", allowedTools: [] });
-          expect(request.agent).toMatchObject({ readOnly: true, allowedTools: [], tools: [] });
+          expect(request.executionMode).toBe("bare");
+          expect(request.agent).toBeUndefined();
           const id = (model as { id?: string } | undefined)?.id ?? "unknown";
           executed.push(id);
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: id === "judge" ? "Use the reversible migration." : `${id} evidence`,
             executedModel: `test/${id}`,
@@ -404,7 +405,7 @@ describe("direct Fusion runner", () => {
         if (id === "alpha") throw new Error("member failed");
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "answered",
           text: id === "judge" ? "Recovered answer." : `${id} evidence`,
           executedModel: `test/${id}`,

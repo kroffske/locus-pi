@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agent-runtime/agents.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
@@ -13,7 +13,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({}));
 
 const tempRoots: string[] = [];
 
+beforeEach(() => {
+  vi.stubEnv("HOME", tempRoot("locus-pi-agents-home"));
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -114,10 +119,9 @@ describe("agents discovery", () => {
     expect(missingName.definition).toBeUndefined();
   });
 
-  it("discovers project definitions before user and bundled definitions", () => {
+  it("discovers project definitions before user definitions", () => {
     const project = tempRoot("locus-pi-agents-project");
     const userHome = tempRoot("locus-pi-agents-user");
-    const bundled = tempRoot("locus-pi-agents-bundled");
     writeAgent(
       project,
       ".agents/agents",
@@ -130,13 +134,10 @@ describe("agents discovery", () => {
       "reviewer.md",
       "---\nname: reviewer\ndescription: User reviewer\ntools: bash\n---\nUser.",
     );
-    writeAgent(bundled, "", "worker.md", "---\nname: worker\ndescription: Bundled worker\n---\nBundled.");
-
-    const discovered = discoverAgentDefinitions(project, { userHome, bundledDir: bundled });
+    const discovered = discoverAgentDefinitions(project, { userHome });
 
     expect(discovered.definitions.map((agent) => `${agent.name}:${agent.description}:${agent.source}`)).toEqual([
       "reviewer:Project reviewer:project",
-      "worker:Bundled worker:bundled",
     ]);
   });
 
@@ -164,7 +165,7 @@ describe("agents discovery", () => {
     expect(list).toContain("loaded definition(s)");
     expect(list).toContain("reviewer [project] · Project reviewer");
     expect(list).toContain("Project reviewer");
-    expect(list).toMatch(/\+\d+ definition\(s\) hidden/u);
+    expect(list).not.toContain("definition(s) hidden");
     expect(list.split(/\r?\n/).length).toBeLessThanOrEqual(18);
     expect(list.split(/\r?\n/).every((line) => line.length <= 80)).toBe(true);
     expect(list).not.toContain("widget truncated");
@@ -174,7 +175,7 @@ describe("agents discovery", () => {
     expect(inspect).toContain("risk: medium");
     expect(runResult.isError).toBe(true);
     expect(runResult.details).toMatchObject({
-      owner: "agents-catalog",
+      owner: "agents-runtime",
       requestedSurface: "spawn_agent",
       hostCapability: "agent-sdk-session-unavailable",
       toolExecutorAvailable: false,
@@ -184,11 +185,11 @@ describe("agents discovery", () => {
     expect(JSON.stringify(runResult.details)).not.toContain("M11");
     expect(JSON.stringify(runResult.details)).not.toContain("replacement-session");
     const runText = runResult.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-    expect(runText).toContain("cannot spawn a child agent session");
+    expect(runText).toContain("cannot spawn the requested child session");
     expect(runText).not.toContain("replacement session");
   });
 
-  it("uses task as the default task-tool agent and keeps general as an overrideable alias", async () => {
+  it("uses bare execution when omitted and treats default/general as exact names", async () => {
     const project = tempRoot("locus-pi-agents-default-resolution");
     const h = createHarness(project);
     agents(h.pi);
@@ -197,9 +198,9 @@ describe("agents discovery", () => {
     const defaultAlias = await runTool(h, "spawn_agent", { agent: "default", task: "Run default" });
     const generalAlias = await runTool(h, "spawn_agent", { agent: "general", task: "Run general" });
 
-    expect(omitted.details).toMatchObject({ requestedAgent: "task", agent: "task" });
-    expect(defaultAlias.details).toMatchObject({ requestedAgent: "default", agent: "task", aliasApplied: "default" });
-    expect(generalAlias.details).toMatchObject({ requestedAgent: "general", agent: "task", aliasApplied: "general" });
+    expect(omitted.details).toMatchObject({ executionMode: "bare" });
+    expect(defaultAlias.details).toMatchObject({ requestedAgent: "default", errorCode: "unknown-agent" });
+    expect(generalAlias.details).toMatchObject({ requestedAgent: "general", errorCode: "unknown-agent" });
   });
 
   it("does not apply the general alias when a project/user general agent exists", async () => {
@@ -216,7 +217,7 @@ describe("agents discovery", () => {
     const result = await runTool(h, "spawn_agent", { agent: "general", task: "Run general" });
 
     expect(result.details).toMatchObject({ requestedAgent: "general", agent: "general" });
-    expect(result.details).not.toMatchObject({ aliasApplied: "general" });
+    expect(result.details).not.toHaveProperty("aliasApplied");
   });
 
   it("returns human unknown-agent ToolResult details and writes a durable artifact", async () => {
@@ -237,9 +238,7 @@ describe("agents discovery", () => {
     expect(text).toContain('Unknown agent: "missing".');
     expect(text).toContain("Available agents:");
     expect(text).toContain("reviewer [project]");
-    expect(text).toContain("Built-in aliases:");
-    expect(text).toContain("default -> task");
-    expect(text).toContain("general -> task");
+    expect(text).toContain("Named agents come only from the project and user catalogs.");
     expect(text).toContain("Run /agent list");
     expect(result.details).toMatchObject({
       owner: "agents-catalog",
@@ -264,7 +263,7 @@ describe("agents discovery", () => {
       requestedAgent: "missing",
     });
     expect(content).toMatchObject({
-      version: "locus.agent.unknown-agent.v1",
+      version: "locus.agent.unknown-agent.v2",
       status: "blocked",
       requestedSurface: "spawn_agent",
       requestedAgent: "missing",
@@ -382,10 +381,10 @@ describe("agent list/inspect rendering surface", () => {
     // The inline surface receives the FULL formatted catalog (no maxLines clip / "more:" stub).
     expect(frame).not.toContain("not shown");
     // Footer denominator is the full body length (>> the bounded 10-line cap),
-    // proving the untruncated catalog reached the overlay (14 project + 2 user + 11 bundled).
+    // proving the untruncated project catalog reached the overlay.
     const footer = h.customRenderFrames[0]?.find((line) => line.includes("q/esc close")) ?? "";
     const total = Number(/\/(\d+)/.exec(footer)?.[1] ?? "0");
-    expect(total).toBeGreaterThanOrEqual(25);
+    expect(total).toBeGreaterThanOrEqual(14);
     // A late project agent that the bounded passive path would hide is reachable by scrolling.
     const surface = h.customComponents.at(-1)!;
     let foundLateProjectAgent = false;

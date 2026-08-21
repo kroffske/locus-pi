@@ -253,7 +253,7 @@ async function runSaved(
       options.onExit?.();
       return {
         status: "completed" as const,
-        agentName: request.agent.name,
+        agentName: request.agent?.name ?? "sub-agent",
         reason: "answered",
         text: options.answer?.(request) ?? `answer(${request.task})`,
         diagnostics: [],

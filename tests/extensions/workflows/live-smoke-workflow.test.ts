@@ -6,7 +6,7 @@ const workflowPath = path.join(process.cwd(), "extensions/workflows/examples/liv
 interface AgentCall {
   prompt: string;
   options: {
-    agent: string;
+    agent?: string;
     label: string;
     permissionMode: string;
     workspaceMode: string;
@@ -34,16 +34,15 @@ describe("workflow example: live-smoke.workflow.mjs", () => {
         log: () => undefined,
         async agent(prompt: string, options: AgentCall["options"]) {
           calls.push({ prompt, options });
-          return `${options.agent} inspected the directory`;
+          return `${options.label} inspected the directory`;
         },
       },
       "external install",
     );
 
-    expect(calls.map((call) => call.options.agent)).toEqual(["explore", "quick_task"]);
+    expect(calls.map((call) => call.options.agent)).toEqual([undefined, undefined]);
     for (const call of calls) {
       expect(call.options).toMatchObject({
-        label: "list cwd entries",
         workspaceMode: "project",
       });
       expect(call.options).not.toHaveProperty("tools");
@@ -56,8 +55,8 @@ describe("workflow example: live-smoke.workflow.mjs", () => {
       topic: "external install",
       ok: true,
       notes: {
-        explore: "explore inspected the directory",
-        quick_task: "quick_task inspected the directory",
+        first: "list cwd entries 1 inspected the directory",
+        second: "list cwd entries 2 inspected the directory",
       },
     });
   });
@@ -73,7 +72,7 @@ describe("workflow example: live-smoke.workflow.mjs", () => {
         log: (message: string) => logs.push(message),
         async agent(prompt: string, options: AgentCall["options"]) {
           prompts.push(prompt);
-          return `${options.agent} inspected the directory`;
+          return `${options.label} inspected the directory`;
         },
       },
       input,

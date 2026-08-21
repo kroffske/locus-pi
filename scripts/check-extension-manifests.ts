@@ -19,9 +19,7 @@
  *
  * Every manifest field and the consumer that reads it:
  *
- *   id                  extensions/agents/catalog.ts, scripts/audit-sources.ts, this checker
- *   agent               extensions/agents/catalog.ts (profile resolution and description drift),
- *                       this checker (uniqueness and profile existence)
+ *   id                  scripts/audit-sources.ts, this checker
  *   ownershipStatus     scripts/audit-sources.ts (adapted extensions need review metadata)
  *   runtimeRequirements tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
  *   stateUsed           tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
@@ -44,7 +42,6 @@ import { fileURLToPath } from "node:url";
 import { extensionManifestSources } from "./extension-manifest-sources.js";
 
 const SCHEMA_FILE = "schemas/extension-manifest.schema.json";
-const BUNDLED_AGENTS_DIR = path.join(".agents", "agents");
 
 /** One rejected manifest. `field` is the path inside the manifest, so each finding names one edit. */
 export interface ManifestProblem {
@@ -100,7 +97,6 @@ export function extensionManifestProblems(root: string): ManifestProblem[] {
 
   const problems: ManifestProblem[] = [];
   const seenIds = new Map<string, string>();
-  const seenAgents = new Map<string, string>();
 
   for (const source of sources) {
     if (source.state === "invalid-entrypoint") {
@@ -127,14 +123,9 @@ export function extensionManifestProblems(root: string): ManifestProblem[] {
 
     // The manifest matched the schema, so every field below has its declared shape.
     problems.push(
-      ...crossFileProblems(
-        root,
-        directory,
-        manifest as unknown as ManifestShape,
-        packageFiles,
-        seenIds,
-        seenAgents,
-      ).map((problem) => ({ file, ...problem })),
+      ...crossFileProblems(root, directory, manifest as unknown as ManifestShape, packageFiles, seenIds).map(
+        (problem) => ({ file, ...problem }),
+      ),
     );
   }
   return problems;
@@ -149,7 +140,6 @@ export function formatManifestProblems(problems: readonly ManifestProblem[]): st
 
 interface ManifestShape {
   id: string;
-  agent: { name: string; description: string };
   provides: { tools: string[]; commands: string[]; hooks: string[] };
   uiLifecycle?: { commands?: Array<{ name: string }>; tools?: Array<{ name: string }> };
   docsPath: string;
@@ -157,8 +147,8 @@ interface ManifestShape {
 }
 
 /**
- * The invariants that need a second file: the directory, package.json, the bundled agent
- * profiles, and the paths a manifest points at.
+ * The invariants that need a second file: the directory, package.json, and the
+ * paths a manifest points at.
  */
 function crossFileProblems(
   root: string,
@@ -166,7 +156,6 @@ function crossFileProblems(
   manifest: ManifestShape,
   packageFiles: readonly string[],
   seenIds: Map<string, string>,
-  seenAgents: Map<string, string>,
 ): Array<Omit<ManifestProblem, "file">> {
   const problems: Array<Omit<ManifestProblem, "file">> = [];
 
@@ -176,16 +165,6 @@ function crossFileProblems(
   const duplicateId = seenIds.get(manifest.id);
   if (duplicateId) problems.push({ field: "id", message: `repeats the id already declared by ${duplicateId}` });
   else seenIds.set(manifest.id, `extensions/${directory}/manifest.json`);
-
-  const duplicateAgent = seenAgents.get(manifest.agent.name);
-  if (duplicateAgent) {
-    problems.push({ field: "agent.name", message: `repeats the agent already assigned by ${duplicateAgent}` });
-  } else seenAgents.set(manifest.agent.name, `extensions/${directory}/manifest.json`);
-
-  const profile = path.join(BUNDLED_AGENTS_DIR, `${manifest.agent.name}.md`);
-  if (!existsSync(path.join(root, profile))) {
-    problems.push({ field: "agent.name", message: `names no bundled agent profile at ${profile}` });
-  }
 
   if (!existsSync(path.join(root, manifest.docsPath))) {
     problems.push({ field: "docsPath", message: `points at a missing file: ${manifest.docsPath}` });

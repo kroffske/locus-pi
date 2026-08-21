@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 /**
  * The agent-definition contract lives here because this module is where every instance is
@@ -9,7 +8,7 @@ import { fileURLToPath } from "node:url";
  * Its consumers — the agent envelope, the `agents` extension, and the workflows bridge — all
  * take it type-only, so nothing pays for this module's `node:fs` at runtime.
  */
-export type AgentSource = "bundled" | "project" | "user" | "workflow";
+export type AgentSource = "project" | "user" | "workflow";
 export type PermissionMode = "inherit-parent" | "agent-defined" | "restricted";
 
 /** Fields of `AgentEvidencePolicy`; not named anywhere else, so they stay module-private. */
@@ -55,23 +54,12 @@ export interface AgentDiscoveryResult {
 
 export interface AgentDiscoveryOptions {
   userHome?: string;
-  bundledDir?: string;
 }
 
 export interface AgentParseResult {
   definition?: AgentDefinition;
   diagnostics: AgentDiagnostic[];
 }
-
-/**
- * Resolved from this module's own location, so it must be re-counted whenever the module
- * moves: `extensions/_shared/agent-runtime/` is three levels below the package root that
- * owns the bundled `.agents/agents` catalog. Getting the count wrong points the bundled
- * source at a directory that does not exist, and agent discovery then silently returns
- * only the project and user catalogs.
- */
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const BUNDLED_AGENTS_DIR = path.resolve(MODULE_DIR, "..", "..", "..", ".agents", "agents");
 
 export function discoverAgentDefinitions(
   projectRoot: string,
@@ -98,13 +86,9 @@ export function agentDiscoveryDirs(
 ): Array<{ dir: string; source: AgentSource }> {
   const dirs: Array<{ dir: string; source: AgentSource }> = [];
   const projectDir = nearestProjectAgentDir(projectRoot, [".agents", "agents"]);
-  const bundledDir = options.bundledDir ?? BUNDLED_AGENTS_DIR;
-  if (projectDir && path.resolve(projectDir) !== path.resolve(bundledDir)) {
-    dirs.push({ dir: projectDir, source: "project" });
-  }
+  if (projectDir) dirs.push({ dir: projectDir, source: "project" });
   const userHome = options.userHome ?? process.env.HOME;
   if (userHome) dirs.push({ dir: path.join(userHome, ".agents", "agents"), source: "user" });
-  dirs.push({ dir: bundledDir, source: "bundled" });
   return dirs;
 }
 
@@ -178,7 +162,7 @@ export interface AgentCatalogHintOptions {
  * One bounded `name — description` line per resolved agent, for injection where
  * the calling model picks an agent name (T-111). The input is expected to be the
  * already-resolved first-match-wins set from `discoverAgentDefinitions`, so a
- * project definition shadowing a bundled name contributes exactly one line.
+ * project definition shadowing a user name contributes exactly one line.
  *
  * Bounded twice on purpose — the package's default surface stays narrow: at most
  * `maxEntries` lines, each description clamped to `maxDescriptionChars`. Overflow
@@ -191,7 +175,7 @@ export function formatAgentCatalogHint(
 ): string {
   const maxEntries = Math.max(0, options.maxEntries ?? AGENT_CATALOG_HINT_MAX_ENTRIES);
   const maxDescriptionChars = Math.max(1, options.maxDescriptionChars ?? AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS);
-  // Project first, then user, then bundled: a locally authored agent must never
+  // Project first, then user: a locally authored agent must never
   // be the entry that falls off the end of the cap.
   const ordered = [...definitions].sort(
     (left, right) => agentSourceRank(left) - agentSourceRank(right) || left.name.localeCompare(right.name),
@@ -403,7 +387,7 @@ function asSpawns(value: unknown): AgentDefinition["spawns"] {
 }
 
 function agentSourceRank(agent: AgentDefinition): number {
-  return agent.source === "project" ? 0 : agent.source === "user" ? 1 : 2;
+  return agent.source === "project" ? 0 : 1;
 }
 
 /** Collapses a multi-line frontmatter description into one catalog line. */

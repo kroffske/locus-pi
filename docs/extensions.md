@@ -46,7 +46,7 @@ The other default extensions do not directly import another feature directory.
 
 `schemas/extension-manifest.schema.json` is the whole field list, and `npm run check` validates every manifest against it, so a field the schema does not declare is rejected rather than ignored. The fields are:
 
-- `id` and `agent` — extension identity and the bundled agent profile it owns;
+- `id` — extension identity;
 - `provides` — public tools, commands, hooks, and shortcuts;
 - `permissions` — declared filesystem, subprocess, network, browser, model, and UI capabilities. This is a review declaration; the package grants no capability from it and the host is not sandboxed by it;
 - `risk` — review severity, not a sandbox guarantee;

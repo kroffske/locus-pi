@@ -13,6 +13,7 @@ export function buildAgentSystemPrompt(
   request: AgentRunRequest,
   options: AgentSystemPromptOptions = {},
 ): string | undefined {
+  if (request.executionMode === "bare") return undefined;
   const instructions = request.agent.systemPrompt?.trim();
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
   const extras =

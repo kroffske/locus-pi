@@ -1,9 +1,5 @@
 {
   "id": "model",
-  "agent": {
-    "name": "extension-model",
-    "description": "Route model roles and /effort while preserving Pi's active model selection."
-  },
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi setModel/getThinkingLevel/setThinkingLevel APIs",

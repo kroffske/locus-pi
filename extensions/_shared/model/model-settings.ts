@@ -282,7 +282,7 @@ export function resolveDeclaredModelRole(state: ModelRolesState, role: string): 
 /**
  * The pre-tier role namespace, `pi/<role>`.
  *
- * Before tiers were executed, every bundled agent wrote its tier as `pi/<role>` and
+ * Before tiers were executed, the former package profiles wrote their tier as `pi/<role>` and
  * nothing read it — `pi` was never a provider. Now that a slash means a real
  * provider, that spelling parses as a concrete selector no registry can resolve, so
  * an install still carrying a copy of the old catalog (a user-level
@@ -292,8 +292,8 @@ export function resolveDeclaredModelRole(state: ModelRolesState, role: string): 
  *
  * That is the one case the fail-closed rule gets wrong, and it gets it wrong against
  * the package's own promise: the operator did not write `pi/task`, this package did,
- * and "a bundled agent must not fail closed just because nobody has configured a tier
- * yet" is exactly what D3b already guarantees for an unassigned role. So a tier in
+ * and "a copied legacy profile must not fail closed just because nobody has configured
+ * a tier yet" is exactly what D3b already guarantees for an unassigned role. So a tier in
  * this namespace is read as the role it always meant, and the degradation note says
  * where to fix the spelling.
  *

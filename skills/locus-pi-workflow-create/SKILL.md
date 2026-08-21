@@ -1,6 +1,6 @@
 ---
 name: locus-pi-workflow-create
-description: Create or revise a locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Never run the workflow. Inside Pi delegate to `workflow-author`; from another agent invoke that agent through the Pi CLI.
+description: Create or revise a locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Never run the workflow. This packaged workflow-extension skill owns the authoring protocol directly.
 ---
 
 # Create a locus-pi workflow
@@ -14,45 +14,28 @@ the current run of an existing workflow, use the shipped
 `locus-pi-workflow-run` skill.
 Do not use merely to run an existing workflow.
 
-## Host route
+## Ownership
 
-Inside Pi, delegate the complete request to the bundled `workflow-author` agent.
-From Codex, Claude Code, or another shell-capable agent, invoke that same Pi
-agent directly; do not ask an intermediate model to decide whether to author:
-
-```text
-prompt = "/agent run --yes workflow-author <complete authoring request>"
-["pi", "--mode", "json", "-p", "--no-session", "--approve",
- "--model", "<provider/model>", "--thinking", "high", prompt]
-```
-
-Use a process API and pass the slash command as one argv value; never
-interpolate the request as shell syntax. Select the main Pi model with
-`--model` and its reasoning level with `--thinking`. Workflow child models are
-separate: configure model roles with `/model-roles` or
-`.pi/model-roles/config.json`; an unassigned role inherits the main model.
-
-`--approve` trusts the project and all of its Pi resources. Use it only after
-the operator has authorized that project. A successful create operation ends
-after Design review, Build, and `workflow_check_source`; it does not run the new
-workflow.
+Follow this skill directly in the current agent session. The workflow extension
+owns this protocol; no package-provided catalog agent is required. A successful
+create operation ends after Design review, Build, and `workflow_check_source`;
+it does not run the new workflow.
 
 ## Authoring is continuous by default
 
 A plain request to create, design, write, or author a workflow runs one visible
 sequence in the same turn:
 
-1. Send the requirement to the bundled `workflow-author` agent.
-2. Create `.pi/workflows/<name>/` and write
+1. Create `.pi/workflows/<name>/` and write
    `.pi/workflows/<name>/<name>.design.md` before any source.
-3. Review the design against the request, selected pattern, graph contract, and
+2. Review the design against the request, selected pattern, graph contract, and
    standard source profile. Revise the design until the review finds no material
    mismatch.
-4. Build exactly the direct `.workflow.mjs` entries declared by the reviewed
+3. Build exactly the direct `.workflow.mjs` entries declared by the reviewed
    design. A `runnable root` design includes
    `.pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
    and builds only its direct children. Never invent a root.
-5. Validate source identity, module load, graph correspondence, and standard
+4. Validate source identity, module load, graph correspondence, and standard
    source shape. Do not run the workflow unless the user separately asks to run it.
 
 The design remains the readable source of truth and must exist before JavaScript;
@@ -62,8 +45,8 @@ after design`, `do not build`, or equivalent wording. A user may also request th
 build-only compatibility route with `Build approved design: <exact design path>`
 or `Build design: <exact design path>`.
 
-Use `/agent run --yes workflow-author` or the `task` tool. If design review or Build
-discovers a material algorithm mismatch, update and re-review the design before
+If design review or Build discovers a material algorithm mismatch, update and
+re-review the design before
 building; never hide the change in source. Ask the user only when resolving the
 mismatch would change the requested result, not for routine authoring choices.
 
@@ -137,8 +120,9 @@ copy blindly.
 
 ## Standard source profile
 
-Declare stable agent identities together near the top. Keep
-every prompt, call, branch, and exact handoff visible where it executes.
+Declare stable stage option groups together near the top. Keep every prompt,
+call, branch, and exact handoff visible where it executes. Stage prompts own
+their roles; do not depend on package-provided agent names.
 Declare `meta.profile: "standard"` in every newly generated workflow.
 
 Omit `maxToolCalls` and `timeoutMs` from standard generated `agent()` options.
@@ -148,8 +132,8 @@ raised fuse and the approved Design records why. Do not sweep legacy workflows.
 
 ```js
 const AGENTS = {
-  reviewer: { agent: "reviewer" },
-  composer: { agent: "default" },
+  reviewer: {},
+  composer: {},
 };
 
 export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {
@@ -367,7 +351,8 @@ design/source mismatch means Build failed. Repair and rerun; never return a
 successful Build claim after a skipped or failed check.
 
 Build does not run. The caller runs it separately and evaluates the primary
-artifact against live repository evidence.
+artifact against live repository evidence. A successful Build returns the exact
+copyable launch command `/workflows run <name>` (or the qualified child ref).
 
 ## Trust boundary
 

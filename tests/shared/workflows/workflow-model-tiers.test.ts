@@ -152,7 +152,7 @@ function fakeSession(model: unknown, answer = "tier answer"): SdkAgentSessionLik
   };
 }
 
-/** Every `locus.agent.run-result.v1` body written under a project root, read off disk. */
+/** Every `locus.agent.run-result.v2` body written under a project root, read off disk. */
 function runResultArtifacts(projectRoot: string): Array<Record<string, unknown>> {
   const found: Array<Record<string, unknown>> = [];
   const walk = (current: string): void => {
@@ -684,7 +684,7 @@ describe("an unassigned role degrades and records the degradation", () => {
   });
 
   it("carries the degradation into the run-result artifact, not just the result object", async () => {
-    // W7's actual claim is about `locus.agent.run-result.v1`. The result object had
+    // W7's actual claim is about `locus.agent.run-result.v2`. The result object had
     // it all along; the ARTIFACT did not, because `createAgentRunRequest` is an
     // allowlist that dropped the field on the way in. The existing artifact test
     // could not catch that: it built its request literal by hand.

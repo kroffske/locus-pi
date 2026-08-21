@@ -1,9 +1,5 @@
 {
   "id": "todo-context",
-  "agent": {
-    "name": "extension-todo-context",
-    "description": "Read and manage session todos with todo_read, todo_write, bounded continuation, and /todo."
-  },
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi tool and command registration",

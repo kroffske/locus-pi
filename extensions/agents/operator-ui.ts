@@ -21,8 +21,10 @@ export function agentCatalogBlock(
   diagnostics: readonly AgentDiagnostic[],
   previewLimit?: number,
 ): OperatorBlock {
-  const sourceCounts = { project: 0, user: 0, bundled: 0, workflow: 0 };
-  for (const agent of catalog) sourceCounts[agent.source ?? "bundled"] += 1;
+  const sourceCounts = { project: 0, user: 0, workflow: 0 };
+  for (const agent of catalog) {
+    if (agent.source !== undefined) sourceCounts[agent.source] += 1;
+  }
   const shown = previewLimit === undefined ? catalog : catalog.slice(0, previewLimit);
   const hidden = catalog.length - shown.length;
   return {
@@ -41,7 +43,7 @@ export function agentCatalogBlock(
             ...(hidden > 0 ? [`+${hidden} definition(s) hidden`] : []),
           ],
     metadata: [
-      `Sources: project=${sourceCounts.project} user=${sourceCounts.user} bundled=${sourceCounts.bundled}`,
+      `Sources: project=${sourceCounts.project} user=${sourceCounts.user}`,
       ...(diagnostics.length === 0
         ? []
         : [
@@ -106,10 +108,9 @@ export function compactAgentCatalogLine(value: string): string {
 }
 
 export function agentRunBoundaryBlock(boundary: Awaited<ReturnType<typeof executeAgentRunBoundary>>): OperatorBlock {
+  const name = boundary.agentName ?? "sub-agent";
   const identity =
-    boundary.childSession?.id !== undefined
-      ? `${boundary.agentName}#${agentShortIdFromSource(boundary.childSession.id)}`
-      : boundary.agentName;
+    boundary.childSession?.id !== undefined ? `${name}#${agentShortIdFromSource(boundary.childSession.id)}` : name;
   const metadata: string[] = [];
   if (boundary.childSession !== undefined) {
     metadata.push(`childSessionId: ${boundary.childSession.id}`);

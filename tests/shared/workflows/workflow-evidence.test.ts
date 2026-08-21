@@ -122,7 +122,7 @@ describe("workflow evidence threading", () => {
       async run(request: AgentRunRequest) {
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "reviewed",
           text: "reviewed",
           diagnostics: [],
@@ -157,7 +157,7 @@ describe("workflow evidence threading", () => {
           observed = request;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "read",
             text: "read",
             diagnostics: [],
@@ -169,8 +169,8 @@ describe("workflow evidence threading", () => {
 
     const inherited = await runner({ prompt: "inspect", agent: "reviewer" });
 
-    assert.equal(observed?.agent.readOnly, false);
-    assert.deepEqual(observed?.agent.allowedTools, ["*"]);
+    assert.equal(observed?.agent?.readOnly, false);
+    assert.deepEqual(observed?.agent?.allowedTools, ["*"]);
     assert.deepEqual(observed?.allowedTools, ["*"]);
     assert.equal(inherited.readOnly, false);
     assert.equal(inherited.permissionMode, "inherit-parent");
@@ -202,7 +202,7 @@ describe("workflow evidence threading", () => {
           observed = request;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "read",
             text: "read",
             diagnostics: [],

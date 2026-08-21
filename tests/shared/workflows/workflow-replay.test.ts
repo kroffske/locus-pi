@@ -124,7 +124,7 @@ async function runWorkflow(
       executedPrompts.push(prompt);
       return {
         status: "completed" as const,
-        agentName: request.agent.name,
+        agentName: request.agent?.name ?? "sub-agent",
         reason: "answered",
         text: `answer(${prompt})`,
         diagnostics: [],
@@ -422,7 +422,7 @@ describe("workflow --resume replays recorded agent calls", () => {
         async run(request: AgentRunRequest) {
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: `answer(${workflowPrompt(request.task)})`,
             diagnostics: [],
@@ -479,7 +479,7 @@ describe("workflow --resume replays recorded agent calls", () => {
             executedPrompts.push(workflowPrompt(request.task));
             return {
               status: "completed" as const,
-              agentName: request.agent.name,
+              agentName: request.agent?.name ?? "sub-agent",
               reason: "must not run",
               text: "unexpected child execution",
               diagnostics: [],
@@ -805,7 +805,7 @@ export default async function runWorkflow(dsl) {
     const resumedDigest = digestFor(root, resumed);
     // Every replayed row names the run it came from, so recorded evidence is
     // never read as work this run performed.
-    expect(resumedDigest).toContain(`↻ agent default replayed from run #${first.runId.slice(-4)}`);
+    expect(resumedDigest).toContain(`↻ agent sub-agent replayed from run #${first.runId.slice(-4)}`);
     expect(resumedDigest).toContain(`3 replayed from run #${first.runId.slice(-4)}`);
   });
 

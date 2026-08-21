@@ -1,9 +1,5 @@
 {
   "id": "plan",
-  "agent": {
-    "name": "extension-plan",
-    "description": "Compose plans, goals, prompt shelves, planning commands, and the goal tool."
-  },
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",

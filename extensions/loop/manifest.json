@@ -1,9 +1,5 @@
 {
   "id": "loop",
-  "agent": {
-    "name": "extension-loop",
-    "description": "Continue bounded goals and workflows through the canonical loop tool and /loop command."
-  },
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",

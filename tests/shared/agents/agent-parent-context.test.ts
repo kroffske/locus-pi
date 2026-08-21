@@ -90,7 +90,7 @@ describe("T-119 explicit parent-context", () => {
       async run(request) {
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "completed without parent branch inheritance",
           diagnostics: [],
           lifecycleEntryIds: [],

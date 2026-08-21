@@ -18,23 +18,23 @@ export default async function runWorkflow(dsl, input) {
   phase("smoke");
   log(`Live smoke for: ${topic}`);
 
-  const explore = await agent(
+  const first = await agent(
     `Use your find tool to list the files in the current working directory, ` +
-      `then reply in ONE short sentence: name yourself ("explore") and say how many entries you found. Topic: ${topic}.`,
-    { agent: "explore", label: "list cwd entries", workspaceMode: "project" },
+      `then reply in ONE short sentence with how many entries you found. Topic: ${topic}.`,
+    { label: "list cwd entries 1", workspaceMode: "project" },
   );
-  const quick = await agent(
+  const second = await agent(
     `Use your find tool to list the files in the current working directory, ` +
-      `then reply in ONE short sentence: name yourself ("quick_task") and say how many entries you found. Topic: ${topic}.`,
-    { agent: "quick_task", label: "list cwd entries", workspaceMode: "project" },
+      `then reply in ONE short sentence with how many entries you found. Topic: ${topic}.`,
+    { label: "list cwd entries 2", workspaceMode: "project" },
   );
 
   return {
     topic,
     ok: true,
     notes: {
-      explore,
-      quick_task: quick,
+      first,
+      second,
     },
   };
 }

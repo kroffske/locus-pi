@@ -143,17 +143,18 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
     applyGroupLineToAgentLiveStore(line);
     return;
   }
-  if (line.agent === undefined) return;
+  if (line.executionMode === undefined && line.agent === undefined) return;
   if (line.kind === "error" && !hasTerminalCallId(line.callId)) return;
   const id = workflowAgentLiveRowId(line);
   const executionKey = workflowJournalExecutionKey(line);
   if (line.kind === "agent_start") {
+    const displayName = line.agent ?? "sub-agent";
     const execution = agentLiveStore.beginExecution({
       id,
       ...(line.groupId !== undefined ? { parentRowId: workflowGroupLiveRowId(line) } : {}),
       workflowRunId: line.runId,
-      agentName: line.agent,
-      label: line.label !== undefined ? `${line.agent} (${line.label})` : line.agent,
+      ...(line.agent === undefined ? {} : { agentName: line.agent }),
+      label: line.label !== undefined ? `${displayName} (${line.label})` : displayName,
       ...(line.model !== undefined ? { model: line.model } : {}),
       ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
       ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
@@ -318,7 +319,7 @@ function patchWorkflowArtifactError(
 }
 
 function workflowJournalExecutionKey(
-  line: Pick<WorkflowJournalLine, "runId" | "callId" | "agent" | "label" | "phase">,
+  line: Pick<WorkflowJournalLine, "runId" | "callId" | "executionMode" | "agent" | "label" | "phase">,
 ): string {
   return `${line.runId}\u0000agent:${line.callId ?? workflowAgentLiveRowId(line)}`;
 }
@@ -327,8 +328,10 @@ function workflowGroupExecutionKey(line: Pick<WorkflowJournalLine, "runId" | "gr
   return `${line.runId}\u0000group:${line.groupId ?? ""}`;
 }
 
-export function workflowAgentLiveRowId(line: Pick<WorkflowJournalLine, "runId" | "agent" | "label" | "phase">): string {
-  return `workflow:${line.runId}:${line.agent ?? ""}:${line.label ?? ""}:${line.phase ?? ""}`;
+export function workflowAgentLiveRowId(
+  line: Pick<WorkflowJournalLine, "runId" | "executionMode" | "agent" | "label" | "phase">,
+): string {
+  return `workflow:${line.runId}:${line.executionMode ?? "legacy"}:${line.agent ?? ""}:${line.label ?? ""}:${line.phase ?? ""}`;
 }
 
 /**
@@ -338,9 +341,9 @@ export function workflowAgentLiveRowId(line: Pick<WorkflowJournalLine, "runId" |
  * `workflow-agent:` prefix keeps it a leaf (not a `workflow:` parent) so it renders directly.
  */
 export function workflowAgentLiveChildRowId(
-  line: Pick<WorkflowJournalLine, "runId" | "agent" | "label" | "phase">,
+  line: Pick<WorkflowJournalLine, "runId" | "executionMode" | "agent" | "label" | "phase">,
 ): string {
-  return `workflow-agent:${line.runId}:${line.agent ?? ""}:${line.label ?? ""}:${line.phase ?? ""}`;
+  return `workflow-agent:${line.runId}:${line.executionMode ?? "legacy"}:${line.agent ?? ""}:${line.label ?? ""}:${line.phase ?? ""}`;
 }
 
 /** Extract the runId from a `workflow:` / `workflow-agent:` live-row id (drill journal lookup); undefined otherwise. */
@@ -756,6 +759,7 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
       "message",
       "groupId",
       "groupLabel",
+      "executionMode",
       "agent",
       "label",
       "callId",
@@ -778,6 +782,22 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
     "string",
   );
   if (stringProblem !== undefined) return stringProblem;
+  if (value.executionMode !== undefined && !isOneOf(value.executionMode, ["bare", "named"])) {
+    return "Field executionMode must be bare or named.";
+  }
+  if (value.executionMode === "bare" && value.agent !== undefined) {
+    return "Field agent must be absent when executionMode is bare.";
+  }
+  if (value.executionMode === "named" && (typeof value.agent !== "string" || value.agent.trim() === "")) {
+    return "Field agent must be a non-empty string when executionMode is named.";
+  }
+  if (
+    (eventKind === "agent_start" || eventKind === "agent_end") &&
+    value.executionMode === undefined &&
+    (typeof value.agent !== "string" || value.agent.trim() === "")
+  ) {
+    return `Field agent is required for legacy ${eventKind} events.`;
+  }
   if (value.resumeFromRunId !== undefined && !isCanonicalWorkflowRunId(value.resumeFromRunId)) {
     return "Field resumeFromRunId must be a canonical workflow run id.";
   }
@@ -928,6 +948,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "groupId",
     "groupKind",
     "groupLabel",
+    "executionMode",
     "agent",
     "readOnly",
     "label",
@@ -951,6 +972,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "groupId",
     "groupKind",
     "groupLabel",
+    "executionMode",
     "agent",
     "readOnly",
     "label",
@@ -992,6 +1014,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "groupId",
     "groupKind",
     "groupLabel",
+    "executionMode",
     "agent",
     "label",
     "callId",
@@ -1026,8 +1049,8 @@ const WORKFLOW_JOURNAL_REQUIRED_FIELDS_BY_KIND = {
   group_end: ["groupId", "groupKind", "groupTotal", "groupCompleted", "groupFailed", "status"],
   // callId was added after the first persisted journals. Keep those explicit
   // legacy rows readable, while still requiring an agent identity.
-  agent_start: ["agent"],
-  agent_end: ["agent", "status"],
+  agent_start: [],
+  agent_end: ["status"],
   error: ["message"],
 } as const satisfies Record<WorkflowJournalLine["kind"], readonly string[]>;
 

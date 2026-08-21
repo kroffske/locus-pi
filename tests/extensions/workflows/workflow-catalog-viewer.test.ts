@@ -576,10 +576,10 @@ describe("focused workflow catalog", () => {
     expect(intent).toMatchObject({ action: "review", sourceState: { kind: "missing" } });
     expect(buildPromptFromIntent(intent)).toContain('snapshot state "missing"');
     expect(buildPromptFromIntent(intent)).toContain("diagnose why the immutable snapshot is unavailable");
-    expect(buildPromptFromIntent(intent)).toContain("Agent: workflow-author");
+    expect(buildPromptFromIntent(intent)).toContain("Skill: locus-pi-workflow-create");
     expect(buildPromptFromIntent(intent)).not.toContain("Snapshot unavailable:");
     expect(buildPromptFromIntent(intent)).toMatch(
-      /^Request: .+\nAgent: workflow-author\n\nAdditional instructions:\n$/u,
+      /^Request: .+\nSkill: locus-pi-workflow-create\n\nAdditional instructions:\n$/u,
     );
   });
 
@@ -707,7 +707,7 @@ describe("focused workflow catalog", () => {
 
     expect(editor).toHaveBeenCalledOnce();
     expect(editor.mock.calls[0]?.[0]).toContain("Request: Review the exact current workflow at");
-    expect(editor.mock.calls[0]?.[0]).toContain("Agent: workflow-author");
+    expect(editor.mock.calls[0]?.[0]).toContain("Skill: locus-pi-workflow-create");
   });
 
   it("keeps cancel, custom rejection, and missing editor support fail-closed", async () => {
