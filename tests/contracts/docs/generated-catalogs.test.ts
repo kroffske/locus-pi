@@ -21,7 +21,7 @@ afterAll(() => {
 
 /**
  * The smallest tree `--check` reads under a given root: package.json, the manifests it declares, the
- * three published documents, and the committed catalog. Packaged workflows are deliberately absent —
+ * two published documents, and the committed catalog. Packaged workflows are deliberately absent —
  * the registry is the installed `extensions/workflows/examples/` directory the generator resolves from
  * its own module URL, not from the working directory, so a fixture cannot fake it.
  */
@@ -30,7 +30,6 @@ function fixtureRoot(): string {
   temporaryRoots.push(directory);
   for (const relativePath of [
     "package.json",
-    ".prettierrc.json",
     CATALOG_FILE,
     ...GENERATED_DOCUMENTS.map((document) => document.file),
     ...defaultExtensionManifests().map(({ id }) => `extensions/${id}/manifest.json`),
@@ -138,7 +137,7 @@ describe("generated public catalogs", () => {
 
   it("reports a deleted marker as a finding instead of crashing", () => {
     const fixture = fixtureRoot();
-    const document = path.join(fixture, "README.md");
+    const document = path.join(fixture, "docs/workflows.md");
     writeFileSync(document, readFileSync(document, "utf8").replace("<!-- locus:workflows:end -->", ""));
 
     const broken = runCheck(fixture);

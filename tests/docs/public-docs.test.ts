@@ -3,7 +3,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultExtensionManifests, root } from "../contracts/helpers/package-contract.js";
 
-const expectedDocs = ["architecture.md", "extensions.md", "getting-started.md", "workflows.md"];
+const expectedDocs = [
+  "architecture.md",
+  "extensions.md",
+  "getting-started.md",
+  "third-party-notices.md",
+  "workflows.md",
+];
 
 describe("public documentation topology", () => {
   it("keeps docs small and free of internal history surfaces", () => {
@@ -35,16 +41,14 @@ describe("public documentation topology", () => {
     }
   });
 
-  it("links the public entry pages", () => {
+  it("links the public guides from the short root README", () => {
     const readme = readFileSync(path.join(root, "README.md"), "utf8");
     for (const relativePath of [
       "docs/getting-started.md",
       "docs/extensions.md",
       "docs/workflows.md",
       "docs/architecture.md",
-      "CONTRIBUTING.md",
-      "SUPPORT.md",
-      "SECURITY.md",
+      "docs/third-party-notices.md",
     ]) {
       expect(readme).toContain(relativePath);
       expect(existsSync(path.join(root, relativePath)), relativePath).toBe(true);

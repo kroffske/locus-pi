@@ -10,7 +10,7 @@ export interface PackageJson {
 }
 
 /**
- * The manifest shape extension-manifest.schema.json declares. Tests read manifests through
+ * The manifest shape schemas/extension-manifest.schema.json declares. Tests read manifests through
  * `readExtensionManifest` below rather than re-typing this per file, so a schema change lands
  * in one place; scripts/check-extension-manifests.ts owns the validation itself.
  */

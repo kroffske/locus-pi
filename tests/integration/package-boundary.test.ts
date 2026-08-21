@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -33,7 +32,6 @@ interface PackResult {
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as PackageJson;
-const publicReadme = readFileSync(path.join(root, "README.md"), "utf8");
 
 function recursiveTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -69,11 +67,6 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "workflow-creator/svg",
 ] as const;
 
-function publicReadmeWorkflowNames(): string[] {
-  const section = publicReadme.split("## Curated Package workflows\n")[1]?.split("\n## ")[0];
-  if (section === undefined) throw new Error("README is missing the Curated Package workflows section");
-  return [...section.matchAll(/^\| `([^`]+)`/gmu)].map((match) => match[1]!).sort();
-}
 const PI_PACKAGES = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -318,17 +311,6 @@ beforeAll(() => {
 });
 
 describe("npm public package boundary", () => {
-  it("keeps the public README workflow roster equal to the Package registry", () => {
-    expect(publicReadmeWorkflowNames()).toEqual([...EXPECTED_PACKAGE_WORKFLOW_NAMES].sort());
-    // The roster and its counts live inside the generated region `npm run check:generated` owns, so
-    // this file no longer pins them as prose. What stays here is the human sentence that explains the
-    // namespace rule the roster is shaped by, which nothing generates.
-    const prose = publicReadme.replace(/\s+/gu, " ");
-    expect(prose).toContain(
-      "each `<name>/` owns one namespace with an optional same-named root plus any direct child entries",
-    );
-  });
-
   it("keeps the .locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
     const presentation = path.join(root, "extensions", "workflows", "workflow-tool.ts");
@@ -367,17 +349,18 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("matches the file-granular package.json allowlist exactly", () => {
-    expect(new Set(pkg.files).size).toBe(pkg.files.length);
-    for (const relativePath of pkg.files) {
-      const absolutePath = path.join(root, relativePath);
-      expect(existsSync(absolutePath), `allowlisted file must exist: ${relativePath}`).toBe(true);
-      expect(statSync(absolutePath).isFile(), `allowlist entry must name a file: ${relativePath}`).toBe(true);
-    }
-
-    const expected = [...pkg.files, "package.json"].sort();
-    const actual = dryRun.files.map((file) => file.path).sort();
-    expect(actual).toEqual(expected);
+  it("keeps the package allowlist directory-owned and compact", () => {
+    expect(pkg.files).toEqual([
+      ".agents/agents/",
+      "dist/public-catalogs.json",
+      "docs/",
+      "extensions/",
+      "!extensions/workflows/references/consilium/",
+      "!extensions/workflows/references/excalidraw-pipeline/",
+      "schemas/extension-manifest.schema.json",
+      "skills/",
+    ]);
+    expect(dryRun.files).toHaveLength(269);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -548,16 +531,15 @@ describe("npm public package boundary", () => {
     // repository around it does not exist. A relative link that resolves in this
     // checkout and not in the tarball is dead for everyone who installed the
     // package, and they cannot tell a broken link from a document we forgot to
-    // ship. A link to a directory counts as dead too: `package.json#files` is
-    // file-granular, and a folder is not a document a reader can open.
+    // ship. A link to a directory counts as dead too: the packed result contains
+    // files, and a folder is not a document a reader can open.
     //
     // Three fixes are legitimate: retarget the link at a file that is already
     // packed, demote it to a backticked repository path that admits the target
     // is repository-only, or drop it. Adding the target to `package.json#files`
     // is an owner decision about public surface, not a way to quiet this test.
     //
-    // The parser is `scripts/markdown-links.ts`, shared with `npm run check:links`.
-    // That gate reads the same rule off `package.json#files`; this test reads it
+    // The parser is `scripts/markdown-links.ts`. This test reads the npm surface
     // off a real pack, so the two disagree exactly when the allowlist lies.
     expect(deadMarkdownLinks(root, { name: "the npm package", files: packedPaths })).toEqual([]);
   });
