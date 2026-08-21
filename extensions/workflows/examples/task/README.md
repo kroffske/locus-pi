@@ -208,7 +208,7 @@ context, the analyses, and compose. Workspace files survive a failed run, so
 the agents can replace incomplete outputs.
 
 For the complete `task/plan → owner approval → render → generated-source review
-→ run` protocol, use the installed `locus-task-workflow` skill. Every command
+→ run` protocol, use the installed `locus-pi-workflow-implement-task` skill. Every command
 uses the same `.locus-pi/plans/<run-name>` workspace.
 
 ## `task/implement-plan-template`

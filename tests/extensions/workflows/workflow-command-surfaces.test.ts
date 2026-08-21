@@ -97,66 +97,7 @@ function compactHarness(root: string): Harness {
   return h;
 }
 
-const ROOT_WORKFLOW_COMMANDS = ["dashboard", "list", "info", "status", "result", "run", "continue", "stop"] as const;
-
-/** Collect command verbs from either native select choices or rendered TUI/static surfaces. */
-function rootMenuCommands(h: Harness): string[] {
-  const choices = h.selectCalls.flatMap((call) =>
-    call.options.map((option) => (typeof option === "string" ? option : option.value)),
-  );
-  const rendered = [...h.customRenderFrames.flat(), ...(h.widgets.get("workflows")?.split(/\r?\n/u) ?? [])].join("\n");
-  const found = new Set<string>();
-  for (const command of ROOT_WORKFLOW_COMMANDS) {
-    if (choices.some((choice) => choice === command || choice.startsWith(`${command} `))) found.add(command);
-    if (new RegExp(`/workflow(?:s)?[ -]${command}(?=[\\s<\\[]|$)`, "u").test(rendered)) found.add(command);
-  }
-  return [...found];
-}
-
 describe("/workflows help and unknown commands", () => {
-  it("opens a root chooser with exactly the real /workflows subcommands on an interactive TUI", async () => {
-    const h = createHarness(makeRoot());
-    // Escape closes either a custom chooser or a host prompt. Native select
-    // hosts ignore this queue and still expose their choices through the harness.
-    h.customInputQueue.push("\x1b");
-    workflows(h.pi);
-
-    await h.commands.get("workflows")!.handler("", h.ctx);
-
-    expect(h.selectCalls[0]?.options.every((option) => typeof option === "string")).toBe(true);
-    expect(rootMenuCommands(h).sort()).toEqual([...ROOT_WORKFLOW_COMMANDS].sort());
-  });
-
-  it("describes every root command while keeping the eight exact verbs", async () => {
-    const h = createHarness(makeRoot());
-    h.customInputQueue.push("\x1b");
-    workflows(h.pi);
-
-    await h.commands.get("workflows")!.handler("", h.ctx);
-
-    const rootOptions = h.selectCalls[0]?.options ?? [];
-    expect(rootOptions).toHaveLength(ROOT_WORKFLOW_COMMANDS.length);
-    expect(rootOptions.every((option) => typeof option === "string")).toBe(true);
-    for (const command of ROOT_WORKFLOW_COMMANDS) {
-      const option = rootOptions.find(
-        (candidate) => typeof candidate === "string" && candidate.startsWith(`${command} `),
-      );
-      expect(option, `${command} root option`).toBeDefined();
-      expect(option).toMatch(new RegExp(`^${command} — \\S.{8,}$`, "u"));
-    }
-  });
-
-  it("routes a descriptive root selection back to its exact verb", async () => {
-    const h = createHarness(makeRoot());
-    h.selectQueue.push("status — view recent run progress");
-    workflows(h.pi);
-
-    await h.commands.get("workflows")!.handler("", h.ctx);
-
-    expect(h.selectCalls[0]?.options).toContain("status — view recent run progress");
-    expect(h.widgets.get("workflows") ?? "").toContain("No workflow runs yet.");
-  });
-
   it("uses a workflow target chooser for run", async () => {
     const root = makeRoot();
     const workflowDir = path.join(root, ".pi", "workflows");

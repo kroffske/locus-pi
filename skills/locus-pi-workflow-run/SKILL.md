@@ -1,5 +1,5 @@
 ---
-name: locus-pi-run-workflow
+name: locus-pi-workflow-run
 description: Run, start, execute, launch, or resume an existing locus-pi workflow and monitor that current run. Use the native `workflow` tool inside Pi; outside Pi invoke `/workflows run` through `pi --mode json -p` and follow typed receipts and journal paths. Not for creating workflows or browsing historical runs.
 ---
 
@@ -26,7 +26,7 @@ one workflow file.
 
 Tool availability wins; do not guess from the host product name. Require one
 exact saved workflow name or project-relative `.workflow.mjs` path. A request to
-create or redesign a workflow belongs to `locus-pi-workflows` instead.
+create or redesign a workflow belongs to `locus-pi-workflow-create` instead.
 
 ## Native Pi path
 
@@ -63,6 +63,12 @@ Prefer a process API with an argv array:
 ```text
 ["pi", "--mode", "json", "-p", "--no-session", "--approve", prompt]
 ```
+
+When model selection is part of the request, place `--model
+<provider/model>` and `--thinking <level>` before `prompt`. These flags select
+the main Pi model and its reasoning level. They do not override assigned
+workflow child roles; configure those with `/model-roles` or
+`.pi/model-roles/config.json`. An unassigned child role inherits the main model.
 
 Build `prompt` as `/workflows run <target> [options] [--] [input]`. Format every
 command value token—`target`, `runName`, `outputDir`, and `resumeFromRunId`—the same way:

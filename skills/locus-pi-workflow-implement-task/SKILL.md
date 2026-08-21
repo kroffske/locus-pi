@@ -1,13 +1,36 @@
 ---
-name: locus-task-workflow
-description: Plan one accepted task into a unique workspace, stop for review, render a plan-specific sequential workflow, then run that reviewed file.
+name: locus-pi-workflow-implement-task
+description: Implement one accepted task through the locus-pi plan, owner review, render, owner approval, execution, and explicit recovery lifecycle. Owns stage boundaries, not generic workflow-run transport.
 ---
 
-# Locus task workflow
+# Implement a task through locus-pi workflows
 
 Use this skill when the user wants a task planned and carried out through the
 shipped `task/plan`, `task/implement-plan-template`, and optional
 `task/substep` Package workflows.
+
+This skill owns the task lifecycle and its approval boundaries. For the mechanics
+of one workflow launch, typed receipts, monitoring, or resume, use
+`locus-pi-workflow-run`; do not duplicate or weaken that transport contract here.
+
+Inside Pi, launch each named stage with the native `workflow` tool. From Codex,
+Claude Code, or another shell-capable agent, launch the same stage through Pi:
+
+```text
+prompt = "/workflows run task/plan -- <accepted task>"
+["pi", "--mode", "json", "-p", "--no-session", "--approve",
+ "--model", "<provider/model>", "--thinking", "high", prompt]
+```
+
+Use a process API and never interpolate the task as shell syntax. This first
+planning run deliberately omits `--run-name`; reuse an accepted draft by adding
+its existing `--run-name <name>`. Use the run skill to construct the exact
+command and interpret typed receipts.
+Select the main Pi model with `--model` and `--thinking`; configure child model
+roles separately with `/model-roles` or `.pi/model-roles/config.json`.
+Whenever the steps below say to call the `workflow` tool, that is the native Pi
+route. Outside Pi, express the same target and fields through the run skill's
+external command route; stop if a required field is native-only.
 
 `task/draft` is the optional manual stage before planning. Use it only when the
 operator asks to translate or clarify a raw request. Call the `workflow` tool

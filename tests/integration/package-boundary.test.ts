@@ -489,7 +489,7 @@ describe("npm public package boundary", () => {
   });
 
   it("ships the thin task workflow protocol without moving orchestration into workflow JavaScript", () => {
-    const skillPath = "skills/locus-task-workflow/SKILL.md";
+    const skillPath = "skills/locus-pi-workflow-implement-task/SKILL.md";
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
     const source = readFileSync(path.join(root, skillPath), "utf8");
 

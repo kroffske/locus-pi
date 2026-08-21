@@ -6,8 +6,8 @@ const root = process.cwd();
 
 describe("shipped workflow run skill", () => {
   it("routes by host capability and treats typed receipts as workflow truth", () => {
-    const runSkill = readFileSync(path.join(root, "skills/locus-pi-run-workflow/SKILL.md"), "utf8");
-    const authoringSkill = readFileSync(path.join(root, "skills/locus-pi-workflows/SKILL.md"), "utf8");
+    const runSkill = readFileSync(path.join(root, "skills/locus-pi-workflow-run/SKILL.md"), "utf8");
+    const authoringSkill = readFileSync(path.join(root, "skills/locus-pi-workflow-create/SKILL.md"), "utf8");
 
     for (const contract of [
       "If a structured tool named `workflow` is available",
@@ -31,6 +31,6 @@ describe("shipped workflow run skill", () => {
     expect(runSkill).not.toContain("locus-pi workflow run");
     expect(runSkill).not.toContain("monitor, or inspect");
     expect(authoringSkill).toContain("Do not use merely to run an existing workflow");
-    expect(authoringSkill).toContain("`locus-pi-run-workflow` skill");
+    expect(authoringSkill).toContain("`locus-pi-workflow-run` skill");
   });
 });
