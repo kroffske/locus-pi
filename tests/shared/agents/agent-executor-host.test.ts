@@ -30,8 +30,9 @@ const reviewer: AgentDefinition = {
   filePath: "/repo/.agents/agents/reviewer.md",
 };
 
-function request(): AgentRunRequest {
+function request(): Extract<AgentRunRequest, { executionMode: "named" }> {
   return {
+    executionMode: "named",
     agent: reviewer,
     task: "Review this change",
     parentSessionId: "parent-session",
@@ -65,7 +66,8 @@ describe("agent replacement-session host", () => {
     const prompt = formatAgentKickoffPrompt(capsule);
 
     expect(capsule).toMatchObject({
-      version: "locus.agent.prompt.v1",
+      version: "locus.agent.prompt.v2",
+      executionMode: "named",
       agentName: "reviewer",
       task: "Review this change",
       projectRoot: "/repo",

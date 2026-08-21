@@ -531,7 +531,7 @@ describe("workflow run report", () => {
       async run(request: AgentRunRequest) {
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "exact answer",
           text: "exact answer",
           diagnostics: [],
@@ -602,7 +602,7 @@ describe("workflow run report", () => {
         if (child === 1) {
           return {
             status: "failed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
             failureCause: "host-turn-timeout",
             diagnostics: [],
@@ -611,7 +611,7 @@ describe("workflow run report", () => {
         }
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "exact answer",
           text: "exact answer",
           diagnostics: [],
@@ -694,7 +694,7 @@ describe("workflow run report", () => {
         if (child === 1) {
           return {
             status: "failed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "Child agent turn exceeded the 5000ms budget and was aborted.",
             failureCause: "host-turn-timeout",
             diagnostics: [],
@@ -1269,7 +1269,7 @@ describe("workflow run report budget section", () => {
         async run(request: AgentRunRequest) {
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: "answer",
             diagnostics: [],
@@ -1326,7 +1326,7 @@ describe("workflow run report budget section", () => {
         async run(request: AgentRunRequest) {
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: "answer",
             diagnostics: [],

@@ -15,7 +15,6 @@ afterEach(() => {
 function validManifest(): Record<string, unknown> {
   return {
     id: "one",
-    agent: { name: "extension-one", description: "Own the one extension." },
     ownershipStatus: "locus-specific",
     runtimeRequirements: ["Pi command registration"],
     stateUsed: ["nothing persistent"],
@@ -51,7 +50,6 @@ function fixtureRoot(manifest: unknown, options: { schema?: unknown } = {}): str
   const fixture = mkdtempSync(path.join(tmpdir(), "locus-extension-manifest-"));
   temporaryRoots.push(fixture);
   mkdirSync(path.join(fixture, "extensions", "one"), { recursive: true });
-  mkdirSync(path.join(fixture, ".agents", "agents"), { recursive: true });
   mkdirSync(path.join(fixture, "schemas"), { recursive: true });
   mkdirSync(path.join(fixture, "tests"), { recursive: true });
   writeFileSync(
@@ -68,7 +66,6 @@ function fixtureRoot(manifest: unknown, options: { schema?: unknown } = {}): str
   }
   writeFileSync(path.join(fixture, "extensions", "one", "manifest.json"), JSON.stringify(manifest));
   writeFileSync(path.join(fixture, "extensions", "one", "README.md"), "# one\n");
-  writeFileSync(path.join(fixture, ".agents", "agents", "extension-one.md"), "---\nname: extension-one\n---\n");
   writeFileSync(path.join(fixture, "tests", "one.test.ts"), "");
   return fixture;
 }
@@ -127,13 +124,6 @@ describe("extension manifest contract", () => {
     ).toEqual([
       "extensions/one/manifest.json: docsPath: points at a missing file: extensions/one/MANUAL.md",
       "extensions/one/manifest.json: tests[0]: points at a missing file: tests/absent.test.ts",
-    ]);
-  });
-
-  it("rejects an agent assignment with no bundled profile", () => {
-    const manifest = validManifest();
-    expect(messages({ ...manifest, agent: { name: "extension-two", description: "Own nothing." } })).toEqual([
-      "extensions/one/manifest.json: agent.name: names no bundled agent profile at .agents/agents/extension-two.md",
     ]);
   });
 

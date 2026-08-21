@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { BUNDLED_AGENTS_DIR, loadAgentsFromDir } from "../../../extensions/_shared/agent-runtime/agents.js";
 import { renderOperatorBlock, renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
 import { parseRunCommand, workflowRunUsage } from "../../../extensions/workflows/command-parser.js";
 import { workflowArgumentCompletions } from "../../../extensions/workflows/command-completions.js";
@@ -814,7 +813,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "edit", row: current, sourceState: currentState })).toBe(
         [
           `Request: Edit the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Agent: workflow-author",
+          "Skill: locus-pi-workflow-create",
           "",
           "Additional instructions:",
           "",
@@ -823,7 +822,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: current, sourceState: currentState })).toBe(
         [
           `Request: Review the exact current workflow at ${JSON.stringify(current.target.path)}.`,
-          "Agent: workflow-author",
+          "Skill: locus-pi-workflow-create",
           "",
           "Additional instructions:",
           "",
@@ -832,7 +831,7 @@ describe("workflow operator catalog", () => {
       expect(buildWorkflowActionPrompt({ action: "review", row: history, sourceState: historyState })).toBe(
         [
           `Request: Review the immutable workflow snapshot for run ${JSON.stringify(history.runId)}, target "name:alpha", at ${JSON.stringify(history.originPath)}, SHA-256 ${JSON.stringify(history.snapshot.sha256)}.`,
-          "Agent: workflow-author",
+          "Skill: locus-pi-workflow-create",
           "",
           "Additional instructions:",
           "",
@@ -852,7 +851,7 @@ describe("workflow operator catalog", () => {
     }
   });
 
-  it("hands off to an authoring agent that ships with the installed package", () => {
+  it("hands off to the authoring skill that ships with the installed package", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-handoff-"));
     const previousHome = process.env.HOME;
     try {
@@ -868,12 +867,7 @@ describe("workflow operator catalog", () => {
         row: current,
         sourceState: { kind: "ready", row: current, path: current.target.path, source: "source" },
       });
-      const handoff = prompt.split("\n").find((line) => line.startsWith("Agent: "));
-      expect(handoff).toBeDefined();
-
-      // The handoff must name a real bundled catalog agent, not a phantom surface.
-      const bundled = loadAgentsFromDir(BUNDLED_AGENTS_DIR, "bundled");
-      expect(bundled.definitions.map((definition) => definition.name)).toContain(handoff!.slice("Agent: ".length));
+      expect(prompt.split("\n")).toContain("Skill: locus-pi-workflow-create");
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;

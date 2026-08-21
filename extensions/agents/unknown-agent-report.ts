@@ -10,7 +10,7 @@ import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
 import type { ExtensionContext } from "../_shared/host/pi-api.js";
 import { getProjectRoot, getSessionId } from "../_shared/host/pi-api.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import { listAvailableAgents, listBuiltInAliases, normalizeRequestedAgentName } from "./catalog.js";
+import { listAvailableAgents, normalizeRequestedAgentName } from "./catalog.js";
 import { compactAgentCatalogLine } from "./operator-ui.js";
 
 export interface UnknownAgentReport {
@@ -25,10 +25,9 @@ export function createUnknownAgentReport(
   requestedSurface: string,
   agentName: string | undefined,
 ): UnknownAgentReport {
-  const requestedAgent = normalizeRequestedAgentName(agentName);
+  const requestedAgent = normalizeRequestedAgentName(agentName) ?? "(empty)";
   const availableAgents = listAvailableAgents();
-  const builtInAliases = listBuiltInAliases();
-  const artifact = writeUnknownAgentArtifact(ctx, requestedSurface, requestedAgent, availableAgents, builtInAliases);
+  const artifact = writeUnknownAgentArtifact(ctx, requestedSurface, requestedAgent, availableAgents);
   const details: Record<string, unknown> = {
     owner: "agents-catalog",
     requestedSurface,
@@ -36,17 +35,15 @@ export function createUnknownAgentReport(
     errorCode: "unknown-agent",
     requestedAgent,
     availableAgents,
-    builtInAliases,
     hint: "/agent list",
   };
   if (artifact.ok) details.artifactPath = artifact.path;
   else details.artifactError = artifact.reason;
   return {
-    text: formatUnknownAgentMessage(requestedAgent, availableAgents, builtInAliases, artifact, getProjectRoot(ctx)),
+    text: formatUnknownAgentMessage(requestedAgent, availableAgents, artifact, getProjectRoot(ctx)),
     block: unknownAgentBlock(
       requestedAgent,
       availableAgents,
-      builtInAliases,
       artifact,
       getProjectRoot(ctx),
       ctx.mode === "tui" ? 5 : 2,
@@ -59,7 +56,6 @@ export function createUnknownAgentReport(
 function unknownAgentBlock(
   requestedAgent: string,
   availableAgents: Array<{ name: string; source: string; description: string }>,
-  builtInAliases: Array<{ alias: string; target: string; condition?: string }>,
   artifact: { ok: true; path: string } | { ok: false; reason: string },
   projectRoot: string,
   previewLimit: number,
@@ -80,11 +76,7 @@ function unknownAgentBlock(
         : preview.map((agent) => compactAgentCatalogLine(`- ${agent.name} [${agent.source}] - ${agent.description}`))),
       ...(hidden > 0 ? [`+${hidden} agent(s) not shown`] : []),
     ],
-    metadata: [
-      compactAgentCatalogLine(
-        `Built-in aliases: ${builtInAliases.map((alias) => `${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : " (conditional)"}`).join("; ")}`,
-      ),
-    ],
+    metadata: ["Named agents come only from the project and user catalogs."],
     hint: [
       compactAgentCatalogLine(
         artifact.ok ? `Artifact: ${relative(projectRoot, artifact.path)}` : `Artifact write failed: ${artifact.reason}`,
@@ -98,7 +90,6 @@ function unknownAgentBlock(
 function formatUnknownAgentMessage(
   requestedAgent: string,
   availableAgents: Array<{ name: string; source: string; description: string }>,
-  builtInAliases: Array<{ alias: string; target: string; condition?: string }>,
   artifact: { ok: true; path: string } | { ok: false; reason: string },
   projectRoot: string,
 ): string {
@@ -106,17 +97,13 @@ function formatUnknownAgentMessage(
     availableAgents.length === 0
       ? ["- (none)"]
       : availableAgents.map((agent) => `- ${agent.name} [${agent.source}] - ${agent.description}`);
-  const aliasLines = builtInAliases.map(
-    (alias) => `- ${alias.alias} -> ${alias.target}${alias.condition === undefined ? "" : ` (${alias.condition})`}`,
-  );
   return [
     `Unknown agent: "${requestedAgent}".`,
     "",
     "Available agents:",
     ...availableLines,
     "",
-    "Built-in aliases:",
-    ...aliasLines,
+    "Named agents come only from the project and user catalogs.",
     "",
     "Run /agent list to inspect the current catalog.",
     artifact.ok ? `Artifact: ${relative(projectRoot, artifact.path)}` : `Artifact write failed: ${artifact.reason}`,
@@ -128,17 +115,15 @@ function writeUnknownAgentArtifact(
   requestedSurface: string,
   requestedAgent: string,
   availableAgents: Array<{ name: string; source: string; description: string }>,
-  builtInAliases: Array<{ alias: string; target: string; condition?: string }>,
 ): { ok: true; path: string } | { ok: false; reason: string } {
   const projectRoot = getProjectRoot(ctx);
   const body = {
-    version: "locus.agent.unknown-agent.v1",
+    version: "locus.agent.unknown-agent.v2",
     status: "blocked",
     errorCode: "unknown-agent",
     requestedSurface,
     requestedAgent,
     availableAgents,
-    builtInAliases,
     hint: "/agent list",
   };
   try {

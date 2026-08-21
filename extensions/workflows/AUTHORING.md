@@ -44,10 +44,9 @@ revision and review before source is created or replaced. Routine corrections do
 not introduce another human stop; ask only when the correction changes the
 requested result.
 
-Use `/agent run workflow-author` or delegate to the bundled `workflow-author`
-catalog agent. A raw request is Author: Design first, review, then Build. The
-agent’s exact design template and standard source profile live in its prompt and
-the skill above.
+Use the packaged `locus-pi-workflow-create` skill. A raw request is Author:
+Design first, review, then Build. The exact design template and standard source
+profile live in that skill and this extension documentation.
 
 An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
 supplied as Design input for an optional sequential project-local workflow. Each
@@ -177,8 +176,9 @@ into explicit assumptions inside its result.
 
 ## Target source shape
 
-Keep stable identities together near the top. Keep prompts,
-calls, branches, and handoffs visible at their execution edges.
+Keep stable stage option groups together near the top. Keep prompts, calls,
+branches, and handoffs visible at their execution edges. Stage prompts own their
+roles; package agent names are never required.
 
 ```js
 export const meta = {
@@ -188,8 +188,8 @@ export const meta = {
 };
 
 const AGENTS = {
-  reviewer: { agent: "reviewer" },
-  composer: { agent: "default" },
+  reviewer: {},
+  composer: {},
 };
 
 export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {

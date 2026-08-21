@@ -24,8 +24,9 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
  * historical module imports this one, never the reverse.
  */
 export interface AgentExecutionPromptCapsule {
-  version: "locus.agent.prompt.v1";
-  agentName: string;
+  version: "locus.agent.prompt.v2";
+  executionMode: "bare" | "named";
+  agentName?: string;
   capabilityMode?: "tool-free" | "agent";
   agentDefinitionPath?: string;
   task: string;
@@ -48,8 +49,9 @@ export function createAgentExecutionPromptCapsule(
 ): AgentExecutionPromptCapsule {
   const effectivePromptEnv = promptEnv ?? process.env;
   const capsule: AgentExecutionPromptCapsule = {
-    version: "locus.agent.prompt.v1",
-    agentName: request.agent.name,
+    version: "locus.agent.prompt.v2",
+    executionMode: request.executionMode,
+    ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
     ...(request.capabilityMode === undefined ? {} : { capabilityMode: request.capabilityMode }),
     task: request.task,
     projectRoot: request.projectRoot ?? "",
@@ -59,7 +61,8 @@ export function createAgentExecutionPromptCapsule(
     depth: request.depth,
     maxDepth: request.maxDepth,
   };
-  if (request.agent.filePath !== undefined) capsule.agentDefinitionPath = request.agent.filePath;
+  if (request.executionMode === "named" && request.agent.filePath !== undefined)
+    capsule.agentDefinitionPath = request.agent.filePath;
   if (request.modelRoleResolution !== undefined)
     capsule.modelRole = modelRoleResolutionRecord(request.modelRoleResolution);
   const agentSystemPrompt = buildAgentSystemPrompt(request, {
@@ -106,7 +109,7 @@ function clampParentContext(text: string): string {
 
 export function formatAgentKickoffPrompt(capsule: AgentExecutionPromptCapsule): string {
   const lines = [
-    "Run the requested Locus agent task in this replacement session.",
+    "Run the requested sub-agent task in this child session.",
     "",
     "Prompt capsule:",
     JSON.stringify(capsule, null, 2),

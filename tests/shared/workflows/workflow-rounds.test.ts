@@ -165,7 +165,7 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     const childRows = [...agentLiveStore.rows.values()].filter((r) => r.id.startsWith("workflow-agent:"));
     expect(childRows).toHaveLength(1);
     const slotRow = childRows[0]!;
-    expect(slotRow.id).toBe("workflow-agent:rounds-run:reviewer:verify fix:verify");
+    expect(slotRow.id).toBe("workflow-agent:rounds-run:named:reviewer:verify fix:verify");
     expect(slotRow.round).toBe(2);
     expect(slotRow.slotKey).toBe(workflowSlotKey({ phase: "verify", label: "verify fix" }));
 
@@ -191,8 +191,8 @@ describe("REQ-009 W1 — store slot dedupe", () => {
           if (live?.rowId === undefined) throw new Error("Expected stable workflow slot row.");
           const execution = agentLiveStore.beginExecution({
             id: live.rowId,
-            agentName: request.agent.name,
-            label: live.label ?? request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
+            label: live.label ?? request.agent?.name ?? "sub-agent",
             ...(live.slotKey !== undefined ? { slotKey: live.slotKey } : {}),
             ...(live.round !== undefined ? { round: live.round } : {}),
           });
@@ -205,7 +205,7 @@ describe("REQ-009 W1 — store slot dedupe", () => {
           });
           const replacement = agentLiveStore.beginExecution({
             id: live.rowId,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             label: "replacement B",
             ...(live.slotKey !== undefined ? { slotKey: live.slotKey } : {}),
             round: (live.round ?? 1) + 1,
@@ -218,7 +218,7 @@ describe("REQ-009 W1 — store slot dedupe", () => {
           });
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "A completed after replacement",
             text: "A completed after replacement",
             diagnostics: [],

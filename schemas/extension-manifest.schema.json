@@ -7,7 +7,6 @@
   "additionalProperties": false,
   "required": [
     "id",
-    "agent",
     "ownershipStatus",
     "runtimeRequirements",
     "stateUsed",
@@ -24,24 +23,6 @@
       "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog.ts, scripts/audit-sources.ts and scripts/check-extension-manifests.ts.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
-    },
-    "agent": {
-      "description": "The bundled agent profile this extension owns. Read by extensions/agents/catalog.ts, which resolves the profile and rejects description drift against its frontmatter.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "description"],
-      "properties": {
-        "name": {
-          "description": "Bundled profile name; a file of this name must exist under .agents/agents/.",
-          "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]*$"
-        },
-        "description": {
-          "description": "Published catalog line; must equal the profile frontmatter description.",
-          "type": "string",
-          "maxLength": 96
-        }
-      }
     },
     "ownershipStatus": {
       "description": "Who owns the implementation. Read by scripts/audit-sources.ts, which demands completed review metadata from adapted extensions.",

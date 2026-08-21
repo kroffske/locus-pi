@@ -191,7 +191,7 @@ describe("workflow persisted evidence viewer", () => {
       { kind: "json", lineNumber: 2, message: "Invalid JSON." },
       { kind: "structure", lineNumber: 3, message: "Field phase must be string." },
       { kind: "structure", lineNumber: 4, message: "Field kind is not a supported workflow journal event." },
-      { kind: "structure", lineNumber: 5, message: "Field agent is required for agent_end events." },
+      { kind: "structure", lineNumber: 5, message: "Field status is required for agent_end events." },
       { kind: "structure", lineNumber: 6, message: "Field agent is not allowed for log events." },
     ]);
 

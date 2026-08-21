@@ -1,9 +1,5 @@
 {
   "id": "ask-user-question",
-  "agent": {
-    "name": "extension-ask-user-question",
-    "description": "Handle human-in-the-loop prompts through one canonical ask tool."
-  },
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi interactive UI for select/input/editor/custom prompts",

@@ -1,4 +1,5 @@
 import type { AgentChildOutputStats, AgentExecutor, AgentRunRequest, AgentRunResult } from "./agent-runner.js";
+import { agentRunResultIdentity } from "./agent-runner.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
@@ -243,7 +244,7 @@ export function mapReplacementSessionOutputToRunResult(
 ): AgentRunResult {
   const result: AgentRunResult = {
     status: output.status,
-    agentName: request.agent.name,
+    ...agentRunResultIdentity(request),
     reason: output.reason,
     diagnostics: mergePromptDiagnostics(output.promptCapsule, output.diagnostics),
     lifecycleEntryIds: [],
@@ -361,7 +362,8 @@ function createReplacementSessionRecord(request: AgentRunRequest, childSessionId
     parentSessionId: request.parentSessionId,
     metadata: {
       source: "replacement-session-host",
-      agentName: request.agent.name,
+      executionMode: request.executionMode,
+      ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
       maxTurns: request.maxTurns,
       depth: request.depth,
       maxDepth: request.maxDepth,

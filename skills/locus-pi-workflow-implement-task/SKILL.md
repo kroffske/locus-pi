@@ -138,8 +138,8 @@ If the user changes `plan.md` or any step after rendering, rerun
 history as evidence unless the user asks to remove it.
 
 For a graph that needs review between steps, concurrency, or a bounded revision
-loop, hand the approved plan and complete step catalog to `workflow-author` as
-a normal authoring request. It writes Design, reviews it, and Builds matching
+loop, hand the approved plan and complete step catalog to the
+`locus-pi-workflow-create` skill as a normal authoring request. It writes Design, reviews it, and Builds matching
 source in the same turn. Do not inject `Design only`; only the user may request
 that pause. Do not turn that bespoke route into another Package alias.
 

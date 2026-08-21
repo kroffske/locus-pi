@@ -351,7 +351,6 @@ describe("npm public package boundary", () => {
 
   it("keeps the package allowlist directory-owned and compact", () => {
     expect(pkg.files).toEqual([
-      ".agents/agents/",
       "dist/public-catalogs.json",
       "docs/",
       "extensions/",
@@ -360,7 +359,7 @@ describe("npm public package boundary", () => {
       "schemas/extension-manifest.schema.json",
       "skills/",
     ]);
-    expect(dryRun.files).toHaveLength(269);
+    expect(dryRun.files).toHaveLength(249);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -503,7 +502,7 @@ describe("npm public package boundary", () => {
     expect(source).toMatch(/complete flat\s+`## S<n> — <title>` heading/u);
     expect(source).toContain("A material catalog change needs\n   fresh review before rendering");
     expect(source).toMatch(
-      /hand the approved plan and complete step catalog to `workflow-author` as\s+a normal authoring request/u,
+      /hand the approved plan and complete step catalog to the\s+`locus-pi-workflow-create` skill as a normal authoring request/u,
     );
     expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
     expect(source).toContain("Do not inject `Design only`; only the user may request");

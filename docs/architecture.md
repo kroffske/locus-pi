@@ -28,7 +28,6 @@ A file merely existing in the repository does not make it a default extension, s
 ## Repository layout
 
 ```text
-.agents/agents/          bundled agent profiles
 extensions/              default extension implementations
 extensions/_shared/      shared host, operator, runtime, model, project, and agent-runtime layers
 extensions/workflows/    workflow runtime, authoring guide, and packaged examples

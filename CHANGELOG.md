@@ -6,6 +6,7 @@ User-visible changes to the public package.
 
 ### Changed
 
+- The package no longer ships a global agent-profile catalog. Bare `spawn_agent` and workflow `agent()` calls now start clean children, while explicit names resolve only from project or user profiles; workflow authoring is owned directly by the packaged workflow skill.
 - Workflow skills now use the action-first names `locus-pi-workflow-create`, `locus-pi-workflow-run`, and `locus-pi-workflow-implement-task`.
 - The public repository now uses Git as its file inventory. The duplicate `public-repository.json` and generated TXT inventory were removed.
 - The npm package allowlist now names owned directories instead of hundreds of individual files.

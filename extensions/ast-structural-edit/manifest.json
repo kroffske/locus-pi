@@ -1,9 +1,5 @@
 {
   "id": "ast-structural-edit",
-  "agent": {
-    "name": "extension-ast-structural-edit",
-    "description": "Search, preview, approve, stale-check, apply, and resolve AST edits."
-  },
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "filesystem read/write for selected project files",

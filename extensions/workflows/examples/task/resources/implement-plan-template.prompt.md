@@ -13,8 +13,8 @@ any step, and do not execute the file you write.
 Write only inside the workflow workspace named in the filesystem note above.
 Never write to `.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`.
 The generated file is a reviewable draft that resolves only by explicit path.
-For a registered bespoke project workflow, send `workflow-author` a normal
-authoring request. It writes Design, reviews it, and Builds matching source in
+For a registered bespoke project workflow, use the `locus-pi-workflow-create`
+skill with a normal authoring request. It writes Design, reviews it, and Builds matching source in
 the same turn. Do not inject `Design only` or a later Build-only request; only
 the user may separately request a pause after design.
 

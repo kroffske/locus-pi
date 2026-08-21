@@ -76,7 +76,7 @@ function executor(
         const text = await run(authoredPrompt(request), request, signal);
         return {
           status: "completed" as const,
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "answered",
           text,
           diagnostics: [],
@@ -85,7 +85,7 @@ function executor(
       } catch (error) {
         return {
           status: "failed" as const,
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: error instanceof Error ? error.message : String(error),
           diagnostics: [],
           lifecycleEntryIds: [],
@@ -2418,7 +2418,7 @@ export default (dsl) => dsl.outputDir();
           await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
           return {
             status: "cancelled" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "root cancelled",
             diagnostics: [],
             lifecycleEntryIds: [],

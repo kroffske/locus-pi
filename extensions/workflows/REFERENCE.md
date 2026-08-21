@@ -798,12 +798,10 @@ editor, and only then calls `setEditorText()` once. `Start` prefills the direct
 `/workflows run <resolved-name>` command; submitting it reaches the runtime
 without a model planning or authoring turn, and optional semantic input can be
 appended on the same command line. `Edit` and `Review` still prefill the compact
-`Request: ...`, `Agent: workflow-author`, and
+`Request: ...`, `Skill: locus-pi-workflow-create`, and
 `Additional instructions:` handoff because those actions require source work.
-The named agent is the bundled `.agents/agents/workflow-author.md` catalog agent
-shipped with this package, so the handoff points at a surface that exists after
-`pi install`; it is reachable as `/agent run workflow-author` or
-`task { agent: "workflow-author" }`.
+The packaged skill owns workflow-authoring instructions. No global catalog
+persona is required.
 Historical review keeps the exact run/snapshot identity. The browser itself does
 does not submit editor text, import a module, mutate history, send a message, or
 claim success if the editor setter is missing or fails. Copy actions are the one
@@ -959,12 +957,12 @@ requests may use `Build design: <exact design path>` or the compatibility form
 `Build approved design: <exact design path>`. Both forms read the current design
 bytes; there is no separate token or persisted design digest. If the algorithm
 changes materially, revise and re-review the design before source is created or
-replaced. The bundled `workflow-author` agent and
-`skills/locus-pi-workflow-create/SKILL.md` own the exact protocol.
+replaced. The packaged `skills/locus-pi-workflow-create/SKILL.md` skill owns the
+exact protocol.
 
 An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be the
-Design input for an optional project-local sequential workflow. `workflow-author`
-preserves every complete `## S<n>` block as one task: Build preferably renders
+Design input for an optional project-local sequential workflow. The authoring
+skill preserves every complete `## S<n>` block as one task: Build preferably renders
 those blocks as literal author-known prompts in generated source, while a
 programmatic embedder may pass the same frozen blocks through caller `items`.
 One implementer receives one complete block per iteration; an optional reviewer
@@ -1097,10 +1095,12 @@ export default async function runWorkflow(dsl, input) {
   const task = typeof input === "string" && input.trim() ? input.trim() : "list the cwd";
 
   phase("work");
-  const workerText = await agent(`Task: ${task}. Use a tool once, then return a concise Markdown answer.`, {
-    agent: "quick_task",
-    label: "work",
-  });
+  const workerText = await agent(
+    `You are the workflow worker. Task: ${task}. Use a tool once, then return a concise Markdown answer.`,
+    {
+      label: "work",
+    },
+  );
   log("worker returned non-empty text");
   return workerText;
 }
@@ -1308,16 +1308,16 @@ replay-only `resumeFromRunId`.
   behavior, declare literal `meta.identityCoverage: "entry-only"` and treat its
   hash as entry-only evidence.
 
-### Delegate authoring to the `workflow-author` agent
+### Delegate authoring through the packaged skill
 
-Delegate a plain requirement to `workflow-author` with `/agent run
-workflow-author` or `task { agent: "workflow-author", task: "<requirement>" }`.
-The agent writes the design first, reviews it, then writes source in the same
+Ask a clean child to read and follow `locus-pi-workflow-create`, or invoke that
+skill directly in the active session. The child writes the design first, reviews
+it, then writes source in the same
 turn unless the user explicitly asks to pause after design. `Build design:
 .pi/workflows/<name>/<name>.design.md` and `Build approved design:
 .pi/workflows/<name>/<name>.design.md` remain build-only compatibility requests. The
 agent confirms identity and module load and never runs the workflow. The helper
-is a catalog agent only; the package surface remains
+is a packaged skill; the package surface remains
 `./extensions/workflows/index.ts`.
 
 ---
@@ -1557,7 +1557,7 @@ contract, not an enforcement or security boundary.
 
 | Field             | Type                                   | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------- | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`           | string                                 | `"default"`                           | Catalog name from `.agents/agents/`; pass `"quick_task"` explicitly for the mechanical worker path                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `agent`           | string                                 | — (clean child)                       | Optional project/user catalog name. Omit it to run without a role profile.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `ask`             | `true`                                 | — (off)                               | Lets THIS child ask the operator live clarifying questions through the injected `workflow_ask` tool: the question renders in the parent session, the answer returns as the tool result, and the same child continues. Interactive parents only — with no UI the call **fails closed** with `failureCause: "ask-unavailable"`. See "Live operator questions" below.                                                                                                                                                  |
 | `maxToolCalls`    | positive safe integer                  | 1,000 tool calls per attempt          | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                             |
 | `timeoutMs`       | integer 1..2147383628                  | 24 hours per attempt                  | Emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                        |
@@ -1685,7 +1685,7 @@ would show a stage that ran twice and was billed twice as if it had never retrie
 blind to its own retries is a gate that does not count what it gates.
 
 The per-call result envelope carries `failureCause` as well, so a reader who has only the
-persisted `locus.agent.run-result.v1` body still gets the machine-readable cause rather than
+persisted `locus.agent.run-result.v2` body still gets the machine-readable cause rather than
 the reason sentence. Where the workflow's own `timeoutMs` fuse ended the call, that is the
 cause written into the envelope: the host reports the cancellation it observed, which is
 true and is not the whole truth, and the caller that fired the fuse hands its classification
@@ -1826,7 +1826,6 @@ larger machine value:
 
 ```js
 const gate = await agent(await promptFile("resources/gate.prompt.md", { diff }), {
-  agent: "reviewer",
   label: "gate",
   schema: {
     type: "object",
@@ -2374,25 +2373,21 @@ interrupt/resume, or append-step semantics.
 
 ## Agent catalog
 
-Workflow scripts declare an agent role at the call site:
+Workflow stage prompts own their role. A catalog profile is optional:
 
 ```js
-await agent("Inspect the repository and report evidence."); // catalog agent "default"
-await agent("Apply the bounded edit.", { agent: "quick_task" });
+await agent("Inspect the repository and report evidence.");
+await agent("Apply the bounded edit.", { agent: "my-project-worker" });
 ```
 
-`opts.agent` is a catalog name, not a model name or an inline role definition.
-Bare `agent(prompt)` and `agent(prompt, { agent: "default" })` both select the
-catalog slot named `default`; neither pins the bundled default prompt or model.
-The bridge discovers definitions first-wins by agent name from the nearest project `.agents/agents/`, then
-`~/.agents/agents/`, then the package's bundled `.agents/agents/`. Unknown names
-return an explicit `ok:false` agent result; they do not silently use `default`.
+`opts.agent` is a project/user catalog name, not a model name or an inline role
+definition. Bare `agent(prompt)` starts a clean child and performs no catalog
+lookup. Explicit names resolve first-wins from the nearest project
+`.agents/agents/`, then `~/.agents/agents/`. Unknown names return an explicit
+`ok:false` result; they never fall back to another profile.
 For workflow calls, each definition's frontmatter supplies the system prompt and
 optional `model` preference; catalog capability metadata does not narrow the
-inherited workflow-child surface. The current bundled catalog
-includes `default`, `designer`, `explore`, `librarian`, `local_file_worker`,
-`oracle`, `plan`, `quick_task`, `reviewer`, `task`, and `workflow-author`; project
-or user definitions may shadow these names.
+inherited workflow-child surface. The package ships no agent profiles.
 
 ### Model selection: execution versus metadata
 
@@ -2412,10 +2407,10 @@ the point:
   that is not configured, a model this host does not have — ends the call with a
   named failed result and zero child sessions. It never silently inherits.
 - A **role** that no model-roles layer assigns degrades to `ctx.model` and records
-  `modelRoleFallback` on `agent_end`, in the `locus.agent.run-result.v1` body and
+  `modelRoleFallback` on `agent_end`, in the `locus.agent.run-result.v2` body and
   in the run report. The package deliberately ships no role assignments, so this
-  is what a stranger sees until they write their own — a bundled agent must not
-  fail closed just because nobody has configured a tier yet.
+  is what a user sees until they assign that named project/user profile's role;
+  an unassigned role must not fail closed merely because no tier is configured.
 - A role whose assignment EXISTS but does not parse as `provider/id[:level]` is a
   configuration error and fails the call by name, quoting the value as written and
   the layer holding it. It is deliberately not treated as unassigned: degrading a
@@ -2439,15 +2434,11 @@ role is an ordinary concrete selector and still fails by name, and a per-call
 `model` / `modelRole` — code written today against the current grammar — still
 refuses with the migration hint rather than being rewritten.
 
-**Running a workflow on your own local model.** The package assigns no role, so
-the shortest path is to change nothing: every bundled agent names a role,
-nothing assigns it, and the child therefore inherits the parent session's model —
-whatever `/model` currently points at, local provider included. Each such child
-records the degradation, which is a statement of fact rather than a fault. To
-make the choice explicit instead of inherited, assign the roles the catalog
-names — `task` and `agent` cover the bundled agents — to your own
-`provider/id` with `/model-roles`, and the resolved model is what `createSession`
-receives.
+**Running a workflow on your own local model.** Bare children inherit the parent
+session's model — whatever `/model` currently points at, local provider included.
+A named project/user profile may instead declare a role or concrete model. To
+make a role explicit, assign it to your own `provider/id` with `/model-roles`;
+the resolved model is what `createSession` receives.
 
 **Selector grammar.** A token containing `/` is a concrete `provider/id`; a
 slash-free token is a role name looked up in the roles table. A trailing

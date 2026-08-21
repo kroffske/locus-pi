@@ -26,7 +26,7 @@ import { createHarness } from "../../test-harness.js";
 function completedResult(text: string): AgentRunResult {
   return {
     status: "completed",
-    agentName: "reviewer",
+    agentName: "sub-agent",
     reason: "done",
     text,
     diagnostics: [],
@@ -49,8 +49,8 @@ describe("workflow agent bridge — live ask wiring", () => {
         },
       }),
     });
-    await runner({ prompt: "plain stage", agent: "reviewer", tools: ["*"] });
-    await runner({ prompt: "asking stage", agent: "reviewer", tools: ["*"], operatorAsk: true });
+    await runner({ prompt: "plain stage", tools: ["*"] });
+    await runner({ prompt: "asking stage", tools: ["*"], operatorAsk: true });
     expect(captured[0]?.additionalExcludeTools).toEqual(["ask"]);
     expect(captured[0]?.customTools).toBeUndefined();
     expect(captured[1]?.additionalExcludeTools).toEqual(["ask"]);
@@ -90,7 +90,6 @@ describe("workflow agent bridge — live ask wiring", () => {
     });
     const result = await runner({
       prompt: "decide storage",
-      agent: "reviewer",
       tools: ["*"],
       operatorAsk: true,
       timeoutMs: 50,
@@ -139,8 +138,8 @@ describe("workflow agent bridge — live ask wiring", () => {
       }),
     });
     const { dsl } = createWorkflowRuntime({ runId: "ask-key-run", agentRunner: runner, replay });
-    await dsl.agent("same prompt", { agent: "reviewer" });
-    await dsl.agent("same prompt", { agent: "reviewer", ask: true });
+    await dsl.agent("same prompt");
+    await dsl.agent("same prompt", { ask: true });
     expect(keys).toHaveLength(2);
     expect(keys[0]).not.toEqual(keys[1]);
     expect(keys[0]).toContain('"operatorAsk":null');
@@ -162,13 +161,13 @@ describe("workflow agent bridge — live ask wiring", () => {
         },
       }),
     });
-    const refused = await runner({ prompt: "asking stage", agent: "reviewer", tools: ["*"], operatorAsk: true });
+    const refused = await runner({ prompt: "asking stage", tools: ["*"], operatorAsk: true });
     expect(refused.ok).toBe(false);
     expect(refused.failureCause).toBe("ask-unavailable");
     expect(refused.summary).toBe(WORKFLOW_NO_OPERATOR_ASK_MESSAGE);
     expect(spawned).toBe(0);
     // A stage that does not ask is untouched by the mode.
-    const plain = await runner({ prompt: "plain stage", agent: "reviewer", tools: ["*"] });
+    const plain = await runner({ prompt: "plain stage", tools: ["*"] });
     expect(plain.ok).toBe(true);
     expect(spawned).toBe(1);
   });

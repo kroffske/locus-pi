@@ -14,7 +14,7 @@
 /ps [row-id|agent|last]
 ```
 
-`spawn_agent` accepts one required `task` plus optional `agent`, `title`, and explicit parent context. One call starts one real headless child through Pi's `createAgentSession` API and returns the exact non-empty final child text.
+`spawn_agent` accepts one required `task` plus optional `agent`, `title`, and explicit parent context. Omitting `agent` starts a clean child without a role profile. An explicit name resolves only from the project or user catalog.
 
 ## Contract and limits
 
@@ -24,7 +24,7 @@
 - Parallel or multi-stage orchestration belongs to the workflow runtime, not one `spawn_agent` call.
 - `/ps` and `/agent drill` inspect live and retained child rows; closing the view does not stop a child.
 
-The catalog follows project -> user -> package precedence: project `.agents/agents/`, user `~/.agents/agents/`, then the bundled package catalog. First name wins.
+The catalog follows project -> user precedence: project `.agents/agents/`, then user `~/.agents/agents/`. The package ships no profiles.
 
 ## Implementation
 

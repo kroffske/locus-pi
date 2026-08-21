@@ -94,7 +94,7 @@ describe("workflow workspace and run evidence", () => {
         writeFileSync(path.join(workflowWorkspaceFromChildTask(request.task), "plan.md"), "the plan body", "utf8");
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "wrote plan.md",
           text: "wrote plan.md",
           diagnostics: [],

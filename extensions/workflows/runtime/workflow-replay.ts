@@ -38,7 +38,8 @@ import {
 
 export const WORKFLOW_REPLAY_FILE = "replay.ndjson";
 /**
- * v2 (T-129): `modelRole` entered the canonical request, so every key changed.
+ * v3: explicit `bare | named` execution identity entered the canonical request,
+ * so old package-role records are readable but never resumed as clean children.
  *
  * The bump is what makes the migration honest rather than merely safe. Leaving the
  * version at 1 is equally fail-closed — a changed key diverges and the call
@@ -46,7 +47,7 @@ export const WORKFLOW_REPLAY_FILE = "replay.ndjson";
  * means "your script changed". Dropping v1 lines instead makes the log read as empty
  * and the refusal reason becomes `no-recorded-calls`, which is true.
  */
-export const WORKFLOW_REPLAY_SCHEMA_VERSION = 2 as const;
+export const WORKFLOW_REPLAY_SCHEMA_VERSION = 3 as const;
 
 /** Recorded nondeterministic value kinds, one cursor each. */
 export type WorkflowReplayValueKind = "clock" | "random";

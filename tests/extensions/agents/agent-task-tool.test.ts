@@ -116,7 +116,7 @@ describe("agent task tool execution", () => {
       // Partial identity for the transcript card: it resolves the live row by id.
       details: {
         rowId: row!.id,
-        agent: "task",
+        executionMode: "bare",
         title: "Compute expression",
         status: "running",
       },
@@ -140,8 +140,7 @@ describe("agent task tool execution", () => {
     expect(result.content).toEqual([{ type: "text", text: "  done\nwith details\n" }]);
     expect(result.details).toMatchObject({
       requestedSurface: "spawn_agent",
-      requestedAgent: "task",
-      agent: "task",
+      executionMode: "bare",
       taskCount: 1,
       status: "completed",
       childSessionId: "sdk-child",

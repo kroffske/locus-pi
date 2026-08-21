@@ -696,7 +696,7 @@ export default async function runWorkflow(dsl, input) {
           executed.push(id);
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: id === "judge" ? "Use the reversible migration." : `${id} evidence`,
             executedModel: `test/${id}`,
@@ -755,7 +755,7 @@ export default async function runWorkflow(dsl) {
           const id = (model as { id?: string } | undefined)?.id ?? "unknown";
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: id === "judge" ? "Tool-free judge answer." : `${id} evidence`,
             activeToolNames: [],
@@ -808,7 +808,7 @@ export default async function runWorkflow(dsl) {
           invalidExecutions += 1;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "unexpected",
             text: "unexpected",
             diagnostics: [],
@@ -853,7 +853,7 @@ export default async function runWorkflow(dsl) {
           invalidAgentExecutions += 1;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "unexpected",
             text: "unexpected",
             diagnostics: [],
@@ -898,7 +898,7 @@ export default async function runWorkflow(dsl) {
           invalidModeExecutions += 1;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "unexpected",
             text: "unexpected",
             diagnostics: [],

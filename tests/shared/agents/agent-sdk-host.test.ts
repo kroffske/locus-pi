@@ -40,8 +40,9 @@ const reviewer: AgentDefinition = {
   filePath: "/repo/.agents/agents/reviewer.md",
 };
 
-function request(): AgentRunRequest {
+function request(): Extract<AgentRunRequest, { executionMode: "named" }> {
   return {
+    executionMode: "named",
     agent: reviewer,
     task: "Review this change",
     parentSessionId: "parent-session",
@@ -55,7 +56,7 @@ function request(): AgentRunRequest {
   };
 }
 
-function requestWithSystemPrompt(): AgentRunRequest {
+function requestWithSystemPrompt(): Extract<AgentRunRequest, { executionMode: "named" }> {
   return {
     ...request(),
     agent: {

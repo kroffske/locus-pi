@@ -6,7 +6,7 @@ symlinks; they do not receive copied skill text that can drift from the package.
 
 | Skill                              | Owns                                                                    | Native Pi/API route                                                     | External agent route                                                            |
 | ---------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `locus-pi-workflow-create`         | Design, review, Build, source validation; never run                     | Delegate to `workflow-author`                                           | Invoke `/agent run --yes workflow-author ...` through `pi`                      |
+| `locus-pi-workflow-create`         | Design, review, Build, source validation; never run                     | Follow the packaged skill directly                                      | Follow the managed packaged skill directly                                      |
 | `locus-pi-workflow-run`            | One existing reviewed workflow run, receipts, evidence, resume          | Call the structured `workflow` tool; the skill is only routing guidance | Invoke literal `/workflows run ...` through `pi --mode json -p`                 |
 | `locus-pi-workflow-implement-task` | Task plan → owner review → render → owner approval → execution/recovery | Call each task workflow stage with the structured `workflow` tool       | Invoke each stage through `/workflows run ...`; use the run skill for transport |
 

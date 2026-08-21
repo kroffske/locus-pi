@@ -25,9 +25,10 @@ const baseAgent: AgentDefinition = {
   evidence: { mode: "none" },
 };
 
-function request(agent: AgentDefinition = baseAgent): AgentRunRequest {
+function request(agent: AgentDefinition = baseAgent): Extract<AgentRunRequest, { executionMode: "named" }> {
   const root = mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-"));
   return {
+    executionMode: "named",
     agent,
     task: "Review this change",
     parentSessionId: "parent-session",
@@ -229,7 +230,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = request();
     const result: AgentRunResult = {
       status: "completed",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "ok",
       diagnostics: [],
       lifecycleEntryIds: [],
@@ -238,7 +239,7 @@ describe("agent SDK evidence surfacing", () => {
     const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
     assert.ok(withArtifact.resultArtifact !== undefined);
     const body = JSON.parse(withArtifact.resultArtifact.content) as Record<string, unknown>;
-    assert.equal(body.version, "locus.agent.run-result.v1");
+    assert.equal(body.version, "locus.agent.run-result.v2");
     assert.equal(Object.hasOwn(body, "evidence"), false);
   });
 
@@ -246,7 +247,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = { ...request(), capabilityMode: "tool-free" as const };
     const result: AgentRunResult & { capabilityMode: "agent" } = {
       status: "completed",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "ok",
       capabilityMode: "agent",
       activeToolNames: [],
@@ -355,7 +356,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
     const result: AgentRunResult = {
       status: "completed",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "ok",
       diagnostics: [],
       lifecycleEntryIds: [],
@@ -378,7 +379,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
     const result: AgentRunResult = {
       status: "cancelled",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "Agent run was cancelled before child session kickoff.",
       diagnostics: [],
       lifecycleEntryIds: [],
@@ -401,7 +402,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = { ...request(), modelRoleFallback: 'modelRole "smol" is not assigned in any model-roles layer' };
     const result: AgentRunResult = {
       status: "blocked",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "agent SDK unavailable",
       diagnostics: ["agent SDK unavailable"],
       lifecycleEntryIds: [],
@@ -420,7 +421,7 @@ describe("agent SDK evidence surfacing", () => {
     const req = { ...request(), projectRoot: root };
     const first = writeAgentRunResultArtifact(root, req, {
       status: "completed",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "first",
       diagnostics: [],
       lifecycleEntryIds: [],
@@ -429,7 +430,7 @@ describe("agent SDK evidence surfacing", () => {
     });
     const second = writeAgentRunResultArtifact(root, req, {
       status: "completed",
-      agentName: req.agent.name,
+      agentName: req.agent?.name ?? "sub-agent",
       reason: "second",
       diagnostics: [],
       lifecycleEntryIds: [],
