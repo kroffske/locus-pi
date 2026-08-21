@@ -1,7 +1,7 @@
 # Authoring a readable pi-workflow
 
 The bundled entry point is
-[`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md).
+[`skills/locus-pi-workflow-create/SKILL.md`](../../skills/locus-pi-workflow-create/SKILL.md).
 The complete runtime, trust, replay, and artifact reference is
 [`REFERENCE.md`](REFERENCE.md).
 
@@ -58,7 +58,7 @@ list through caller `items`.
 Neither path parses Plan prose at runtime, adds a Package example, or skips the
 ordinary Design -> review -> Build sequence. Plan approval alone does not start
 workflow authoring. The selected card
-is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
 
 ## What the design must expose
 
@@ -85,7 +85,7 @@ validator, parser, custom retry/recovery, execution wrapper, renderer, hidden
 state, loop, judge, and concurrency barrier.
 
 Pattern cards are progressive-disclosure references under
-[`skills/locus-pi-workflows/references/`](../../skills/locus-pi-workflows/references/INDEX.md).
+[`skills/locus-pi-workflow-create/references/`](../../skills/locus-pi-workflow-create/references/INDEX.md).
 They describe algorithms and truthful small snippets, not full scripts to copy.
 
 ## Standard primitive profile

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DefaultResourceLoader, type PackageSource, SettingsManager, VERSION } from "@earendil-works/pi-coding-agent";
+import { operateWorkflowSkillHosts } from "../../../extensions/workflows/command/skills.js";
 import { readExtensionManifest } from "../helpers/package-contract.js";
 
 const packageRoot = process.cwd();
@@ -49,18 +50,34 @@ describe(`selective package loading through installed Pi ${VERSION}`, () => {
     expect(result.extensionIds).toEqual(["workflows"]);
     expect(result.packageSkills).toEqual(bundledSkillNames);
   });
+
+  it("deduplicates Codex project links to the exact packaged skill trees without a collision", async () => {
+    const result = await loadProfile(["workflows"], true, true);
+    expect(result.workflowSkillNames).toEqual(bundledSkillNames);
+    expect(result.workflowSkillDiagnostics).toEqual([]);
+  });
   // Every case reloads the real Pi host off disk. That is fast in isolation and
   // slow whenever the machine is already busy, so the suite states its own
   // budget instead of inheriting the 5s default.
 }, 30_000);
 
-async function loadProfile(selectedIds: string[], includeSkills: boolean) {
+async function loadProfile(selectedIds: string[], includeSkills: boolean, syncProjectSkills = false) {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-host-contract-"));
   temporaryRoots.push(temporaryRoot);
   const agentDir = path.join(temporaryRoot, "agent");
   const cwd = path.join(temporaryRoot, "project");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(cwd, { recursive: true });
+  if (syncProjectSkills) {
+    operateWorkflowSkillHosts({
+      action: "sync",
+      host: "codex",
+      scope: "project",
+      projectRoot: cwd,
+      packageRoot,
+      userHome: temporaryRoot,
+    });
+  }
 
   const source: PackageSource = {
     source: packageRoot,
@@ -69,8 +86,9 @@ async function loadProfile(selectedIds: string[], includeSkills: boolean) {
   };
   const settingsManager = SettingsManager.inMemory({ packages: [source] });
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
-  await loader.reload();
+  await loader.reload(syncProjectSkills ? { resolveProjectTrust: async () => true } : undefined);
   const loaded = loader.getExtensions();
+  const loadedSkills = loader.getSkills();
   expect(loaded.errors, `Pi ${VERSION} extension load errors`).toEqual([]);
 
   return {
@@ -79,10 +97,16 @@ async function loadProfile(selectedIds: string[], includeSkills: boolean) {
     commands: uniqueSorted(loaded.extensions.flatMap((extension) => [...extension.commands.keys()])),
     hooks: uniqueSorted(loaded.extensions.flatMap((extension) => [...extension.handlers.keys()])),
     packageSkills: uniqueSorted(
-      loader
-        .getSkills()
-        .skills.filter((skill) => skill.sourceInfo.origin === "package" && skill.sourceInfo.source === packageRoot)
+      loadedSkills.skills
+        .filter((skill) => skill.sourceInfo.origin === "package" && skill.sourceInfo.source === packageRoot)
         .map((skill) => skill.name),
+    ),
+    workflowSkillNames: loadedSkills.skills
+      .map((skill) => skill.name)
+      .filter((name) => bundledSkillNames.includes(name))
+      .sort(),
+    workflowSkillDiagnostics: loadedSkills.diagnostics.filter((diagnostic) =>
+      bundledSkillNames.some((name) => JSON.stringify(diagnostic).includes(name)),
     ),
   };
 }

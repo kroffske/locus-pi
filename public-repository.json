@@ -61,6 +61,8 @@
     "tests/extensions/workflows/workflow-command-surfaces.test.ts",
     "tests/extensions/workflows/workflow-headless-no-operator.test.ts",
     "tests/extensions/workflows/workflow-result-text.test.ts",
+    "tests/extensions/workflows/command/skills.test.ts",
+    "tests/extensions/workflows/command/menu.test.ts",
     "tests/extensions/workflows/workflow-source-check-tool.test.ts",
     "tests/shared/operator-interaction.test.ts",
     "tests/shared/render-profile.test.ts",

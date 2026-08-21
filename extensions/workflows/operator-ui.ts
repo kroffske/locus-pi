@@ -44,6 +44,7 @@ export function workflowHelpBlock(): OperatorBlock {
       `Run: ${workflowRunUsage()}`,
       "Continue: /workflows continue <runId> [--answer <text>]",
       "Stop: /workflows stop [runId|last]",
+      "External agent skills: /workflows skills <sync|status|remove> [--host codex|claude|all] [--scope user|project]",
     ],
     metadata: [
       "Emergency compatibility alias: /workflow-stop. Use /workflows <subcommand> for every other operation.",
@@ -59,7 +60,7 @@ export function workflowUnknownCommandBlock(text: string, available: string[]): 
     primary: `Unknown workflow command: ${text}`,
     body: available.length === 0 ? [] : [`Available curated Package workflows: ${available.join(", ")}`],
     controls: [
-      `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last]`,
+      `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last] | skills <sync|status|remove> [--host codex|claude|all] [--scope user|project]`,
     ],
   };
 }

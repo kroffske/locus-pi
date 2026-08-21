@@ -111,7 +111,10 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 - [Readable workflow authoring contract](../extensions/workflows/AUTHORING.md)
 - [Advanced runtime and DSL reference](../extensions/workflows/REFERENCE.md)
 - [Packaged examples](../extensions/workflows/examples/README.md)
-- [Workflow-author skill](../skills/locus-pi-workflows/SKILL.md)
+- [Workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md)
+- [Workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md)
+- [Task implementation skill](../skills/locus-pi-workflow-implement-task/SKILL.md)
+- [Skill host matrix and installation](../skills/README.md)
 
 Inside Pi, validate a standard-profile workflow source with the
 `workflow_check_source` tool:

@@ -81,7 +81,7 @@ choice; catalog rows omit the internal label.
 ## Authoring patterns
 
 New workflows use the progressive-disclosure cards under
-`skills/locus-pi-workflows/references/`. The index maps requirements and common
+`skills/locus-pi-workflow-create/references/`. The index maps requirements and common
 names to small standard topologies; the author reads only the selected card.
 Cards are algorithms and snippets, not Package workflows. Saving a local workflow
 does not add it to the Package registry.
@@ -172,13 +172,12 @@ JavaScript is not supported.
 ### `/workflows` command
 
 `/workflows` is the canonical visible workflow command. Bare `/workflows`
-opens its command menu with all eight exact verbs — `dashboard`, `list`, `info`,
-`status`, `result`, `run`, `continue`, and `stop` — and a description beside
+opens its command menu with all nine exact verbs — `dashboard`, `list`, `info`,
+`status`, `result`, `run`, `continue`, `stop`, and `skills` — and a description beside
 each verb when interactive select is available in TUI; RPC, headless hosts, and
 TUI without select receive the same help as a typed command fallback. Direct typed forms such as
-`/workflows run <name>` remain available. Flat `/workflow-*` commands route to
-the same owners as compatibility aliases; they remain in place until parity
-with the unified command is proven, and are not removed as part of this menu.
+`/workflows run <name>` remain available. `/workflow-stop` remains the one
+emergency compatibility alias; every other operation uses `/workflows`.
 
 ```
 /workflows                        open the canonical command menu (or typed help fallback)
@@ -192,6 +191,7 @@ with the unified command is proven, and are not removed as part of this menu.
 /workflows run live-smoke -- --resume literal request  pass option-looking input unchanged
 /workflows continue <runId>       answer and continue an actionable handoff
 /workflows stop [runId|last]      request cancellation; terminal state follows settlement
+/workflows skills status         inspect external-agent skill links
 /workflows run live-smoke --resume <runId>  replay that run's recorded agent calls (see "Resume and replay")
 /workflows run plan --no-operator <input>   unattended launch: any operator-input request fails closed
 ```
@@ -271,7 +271,7 @@ the host: an embedder calling `runWorkflowScript` directly opts in itself.
 
 ### Run from an agent without a wrapper
 
-The installed `locus-pi-run-workflow` skill chooses the execution surface by
+The installed `locus-pi-workflow-run` skill chooses the execution surface by
 capability. When the structured `workflow` tool is available, the agent calls it
 directly with `name` or `scriptPath` plus optional `input`, `items`,
 `outputDir`, `resumeFromRunId`, or an approved `continuation`. It does not spawn
@@ -960,7 +960,7 @@ requests may use `Build design: <exact design path>` or the compatibility form
 bytes; there is no separate token or persisted design digest. If the algorithm
 changes materially, revise and re-review the design before source is created or
 replaced. The bundled `workflow-author` agent and
-`skills/locus-pi-workflows/SKILL.md` own the exact protocol.
+`skills/locus-pi-workflow-create/SKILL.md` own the exact protocol.
 
 An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be the
 Design input for an optional project-local sequential workflow. `workflow-author`
@@ -972,7 +972,7 @@ is a visibly separate child after that implementer. The reviewed Design states
 whether review is advisory or blocking and whether any finite retry exists.
 Plan approval alone does not start workflow authoring, no runtime parser reads
 the `step-<n>.md` catalog, and this path adds no Package workflow. See the
-[Plan-to-sequential pattern card](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+[Plan-to-sequential pattern card](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
 
 Design and Build are for a graph the fixed template cannot express — a reviewer
 between steps, a bounded revision loop, concurrency, a different publication. The

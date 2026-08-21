@@ -4,6 +4,15 @@ This file records user-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- **Workflow skills now use one action-first naming scheme.** The package ships
+  `locus-pi-workflow-create`, `locus-pi-workflow-run`, and
+  `locus-pi-workflow-implement-task` with separate create, single-run, and task
+  lifecycle boundaries. `/workflows skills sync|status|remove` exposes those
+  canonical package skills to Codex and Claude Code through managed symlinks
+  without overwriting host-owned skill directories.
+
 ## [0.5.0] - 2026-08-20
 
 ### Changed

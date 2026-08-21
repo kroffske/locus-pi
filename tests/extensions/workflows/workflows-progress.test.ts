@@ -2107,30 +2107,6 @@ describe("workflow progress widget", () => {
     expect(rendered.some((renderedLine) => renderedLine.includes("widget truncated"))).toBe(false);
   });
 
-  it("bare /workflows opens the root chooser after a stale status view", async () => {
-    const harness = createHarness();
-    harness.ctx.hasUI = true;
-    workflowsExt(harness.pi);
-    const handler = harness.commands.get("workflows")!.handler;
-
-    await handler("status", harness.ctx);
-    expect(typeof harness.widgetPayloads.get("workflows")).toBe("function");
-
-    await handler("", harness.ctx);
-
-    expect(harness.selectCalls.at(-1)?.options).toEqual([
-      "dashboard — inspect persisted runs and evidence",
-      "list — browse available workflows",
-      "info — inspect one workflow's details",
-      "status — view recent run progress",
-      "result — read a finished run's output",
-      "run — start a workflow",
-      "continue — answer a pending handoff",
-      "stop — stop an active run",
-    ]);
-    expect(harness.notifications).toEqual([]);
-  });
-
   it("places an unknown workflow warning above the editor", async () => {
     const harness = createHarness();
     harness.ctx.hasUI = true;

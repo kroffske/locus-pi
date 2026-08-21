@@ -1,9 +1,9 @@
 ---
-name: locus-pi-workflows
-description: Design, review, and build new locus-pi `.workflow.mjs` agent graphs. Use when the user asks to create, design, write, author, or revise a workflow. Do not use merely to run an existing workflow.
+name: locus-pi-workflow-create
+description: Create or revise a locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Never run the workflow. Inside Pi delegate to `workflow-author`; from another agent invoke that agent through the Pi CLI.
 ---
 
-# locus-pi workflow authoring
+# Create a locus-pi workflow
 
 A workflow is reviewed trusted JavaScript that makes a visible graph of child
 `agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,
@@ -11,7 +11,31 @@ and publication. Agents own interpretation and complete reader-facing text.
 
 This skill owns authoring only. For running, starting, resuming, or monitoring
 the current run of an existing workflow, use the shipped
-`locus-pi-run-workflow` skill.
+`locus-pi-workflow-run` skill.
+Do not use merely to run an existing workflow.
+
+## Host route
+
+Inside Pi, delegate the complete request to the bundled `workflow-author` agent.
+From Codex, Claude Code, or another shell-capable agent, invoke that same Pi
+agent directly; do not ask an intermediate model to decide whether to author:
+
+```text
+prompt = "/agent run --yes workflow-author <complete authoring request>"
+["pi", "--mode", "json", "-p", "--no-session", "--approve",
+ "--model", "<provider/model>", "--thinking", "high", prompt]
+```
+
+Use a process API and pass the slash command as one argv value; never
+interpolate the request as shell syntax. Select the main Pi model with
+`--model` and its reasoning level with `--thinking`. Workflow child models are
+separate: configure model roles with `/model-roles` or
+`.pi/model-roles/config.json`; an unassigned role inherits the main model.
+
+`--approve` trusts the project and all of its Pi resources. Use it only after
+the operator has authorized that project. A successful create operation ends
+after Design review, Build, and `workflow_check_source`; it does not run the new
+workflow.
 
 ## Authoring is continuous by default
 
@@ -38,7 +62,7 @@ after design`, `do not build`, or equivalent wording. A user may also request th
 build-only compatibility route with `Build approved design: <exact design path>`
 or `Build design: <exact design path>`.
 
-Use `/agent run workflow-author` or the `task` tool. If design review or Build
+Use `/agent run --yes workflow-author` or the `task` tool. If design review or Build
 discovers a material algorithm mismatch, update and re-review the design before
 building; never hide the change in source. Ask the user only when resolving the
 mismatch would change the requested result, not for routine authoring choices.
