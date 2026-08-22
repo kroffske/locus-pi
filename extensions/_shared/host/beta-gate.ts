@@ -60,7 +60,11 @@ const WILDCARDS = new Set(["all", "*"]);
 const WARNED_CONFIGS = Symbol.for("locus-pi.beta-config-warnings.v1");
 
 interface WarningRegistryHost {
-  [WARNED_CONFIGS]?: Set<string>;
+  /**
+   * `unknown`, not `Set<string>`: the slot lives on `globalThis`, so what it holds at the
+   * moment of use is a runtime question and no declaration here can answer it.
+   */
+  [WARNED_CONFIGS]?: unknown;
 }
 
 export interface BetaGateOptions {
@@ -118,7 +122,10 @@ function configuredBeta(cwd: string): string[] {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    // A leading UTF-8 BOM is an encoding marker rather than content, and `readFileSync`
+    // hands it over as a character `JSON.parse` rejects. Without this, a config that reads
+    // as correct in every editor fails on a byte the operator cannot see.
+    parsed = JSON.parse(text.replace(/^\uFEFF/u, ""));
   } catch (error) {
     warnOnce(configPath, `is not valid JSON: ${messageOf(error)}`);
     return [];
@@ -141,7 +148,12 @@ function configuredBeta(cwd: string): string[] {
 
 function warnOnce(configPath: string, reason: string): void {
   const host = globalThis as WarningRegistryHost;
-  const warned = (host[WARNED_CONFIGS] ??= new Set<string>());
+  // Not `??=`: that keeps whatever already occupies the slot, and calling `.has` on a value
+  // that is not a Set throws — inside Pi's extension loader, which is the one outcome this
+  // file promises never to produce. Claiming the slot instead costs at most a repeated
+  // warning line, and the reporting of a broken config is worth less than the session.
+  const existing = host[WARNED_CONFIGS];
+  const warned: Set<string> = existing instanceof Set ? existing : (host[WARNED_CONFIGS] = new Set<string>());
   if (warned.has(configPath)) return;
   warned.add(configPath);
   process.stderr.write(`locus-pi: ${configPath} ignored: ${reason}\n`);

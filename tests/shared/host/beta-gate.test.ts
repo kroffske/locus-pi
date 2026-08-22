@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BETA_CONFIG_DIRNAME,
   BETA_CONFIG_FILENAME,
@@ -9,6 +9,9 @@ import {
   betaConfigPath,
   betaEnabled,
 } from "../../../extensions/_shared/host/beta-gate.js";
+
+/** The registry the gate dedupes its warnings in, named here exactly as the gate names it. */
+const WARNED_CONFIGS = Symbol.for("locus-pi.beta-config-warnings.v1");
 
 const temporaryRoots: string[] = [];
 
@@ -60,6 +63,23 @@ function enabled(id: string, options: { env?: string; cwd?: string } = {}): bool
   });
 }
 
+type BetaGateModule = typeof import("../../../extensions/_shared/host/beta-gate.js");
+
+/**
+ * `count` separately evaluated instances of the gate module, standing in for the copies Pi
+ * hands the beta entrypoints when it loads them with the module cache disabled. Clearing
+ * Vitest's module registry before each import is what forces a fresh evaluation; the caller
+ * asserts on the identity of what comes back rather than taking that on trust.
+ */
+async function loadIndependentGateCopies(count: number): Promise<BetaGateModule[]> {
+  const copies: BetaGateModule[] = [];
+  for (let index = 0; index < count; index += 1) {
+    vi.resetModules();
+    copies.push(await import("../../../extensions/_shared/host/beta-gate.js"));
+  }
+  return copies;
+}
+
 describe("beta gate", () => {
   it("enables exactly the ids the environment variable lists", () => {
     expect(enabled("loop", { env: "loop,plan" })).toBe(true);
@@ -88,6 +108,19 @@ describe("beta gate", () => {
     const cwd = projectRoot(JSON.stringify({ beta: ["loop"] }));
     expect(enabled("loop", { cwd })).toBe(true);
     expect(enabled("plan", { cwd })).toBe(false);
+  });
+
+  /**
+   * Editors on Windows routinely save JSON with a byte order mark. The file below is the
+   * config the operator wrote and sees; only an invisible encoding marker separates it from
+   * the case above, and that must not read as a syntax error.
+   */
+  it("reads a config saved with a UTF-8 byte order mark", () => {
+    const cwd = projectRoot(`\uFEFF${JSON.stringify({ beta: ["loop"] })}`);
+    const written = capturedStderr(() => {
+      expect(enabled("loop", { cwd })).toBe(true);
+    });
+    expect(written).toEqual([]);
   });
 
   it("honours the wildcard and whitespace rules in the project config too", () => {
@@ -160,6 +193,55 @@ describe("beta gate", () => {
       expect(enabled("todo-context", { cwd })).toBe(false);
     });
     expect(written).toHaveLength(1);
+  });
+
+  /**
+   * The cross-copy proof the case above cannot give.
+   *
+   * That case calls ONE instance of the gate three times, and a plain module-level `Set`
+   * would pass it just as well — the dedup it demonstrates is per-instance. Pi loads every
+   * registered entrypoint with the module cache disabled, so the three beta entrypoints each
+   * hold their own copy of `beta-gate.ts`, and the versioned `globalThis` slot the gate
+   * actually uses exists for exactly that case. `check:layers` rule 7 does not see the
+   * difference either: it asserts STATICALLY that one module names the symbol, and stays
+   * green for an edit that keeps the `Symbol.for` line and dedupes in a module binding.
+   *
+   * So this case drives one malformed config path across three independently evaluated
+   * copies. With the registry the operator gets one line; with per-copy state, three.
+   */
+  it("warns once across independently loaded copies of the gate module", async () => {
+    const copies = await loadIndependentGateCopies(3);
+    // Without this the case would pass on a single shared instance, proving nothing.
+    expect(new Set(copies.map((copy) => copy.betaEnabled)).size).toBe(3);
+
+    const cwd = projectRoot("{ not json");
+    const written = capturedStderr(() => {
+      for (const [index, copy] of copies.entries()) {
+        expect(copy.betaEnabled(`beta-${index}`, { env: {}, cwd })).toBe(false);
+      }
+    });
+    expect(written).toHaveLength(1);
+  });
+
+  /**
+   * `warnOnce` reads a process-global slot that today has one declared owner, so nothing
+   * puts a foreign value there — but a throw from the gate leaves through `betaEnabled` and
+   * lands inside Pi's extension loader, failing the whole session over a typo in a config
+   * file. The gate has to claim an occupied slot rather than trust what it finds.
+   */
+  it("survives a warning registry slot occupied by something that is not a Set", () => {
+    const host = globalThis as unknown as Record<symbol, unknown>;
+    const occupant = host[WARNED_CONFIGS];
+    try {
+      host[WARNED_CONFIGS] = { hijacked: true };
+      const cwd = projectRoot("{ not json");
+      const written = capturedStderr(() => {
+        expect(enabled("loop", { cwd })).toBe(false);
+      });
+      expect(written).toHaveLength(1);
+    } finally {
+      host[WARNED_CONFIGS] = occupant;
+    }
   });
 
   /** An environment opt-in must not be lost to a broken file, and the file is still reported. */
