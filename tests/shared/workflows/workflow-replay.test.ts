@@ -4,7 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR } from "../../../extensions/workflows/runtime/workflow-agent-bridge.js";
-import { readWorkflowRunSummary } from "../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  readWorkflowRunJournal,
+  readWorkflowRunSummary,
+} from "../../../extensions/workflows/runtime/workflow-journal.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
@@ -110,7 +113,14 @@ function workflowPrompt(task: string): string {
 async function runWorkflow(
   root: string,
   name: string,
-  options: { input?: string; resumeFromRunId?: string; outputDir?: string; roles?: Record<string, string> } = {},
+  options: {
+    input?: string;
+    resumeFromRunId?: string;
+    outputDir?: string;
+    roles?: Record<string, string>;
+    /** Override the scripted child's answer for a prompt; may throw to fail that child. */
+    answer?: (prompt: string) => string;
+  } = {},
 ): Promise<RunOutcome> {
   const harness = createHarness(root, { sessionId: `replay-${name}` });
   if (options.roles !== undefined) await harness.ctx.settings?.set("modelRoles", options.roles);
@@ -122,11 +132,12 @@ async function runWorkflow(
       // recorded answer stays comparable across runs.
       const prompt = workflowPrompt(request.task);
       executedPrompts.push(prompt);
+      const text = options.answer === undefined ? `answer(${prompt})` : options.answer(prompt);
       return {
         status: "completed" as const,
         agentName: request.agent?.name ?? "sub-agent",
         reason: "answered",
-        text: `answer(${prompt})`,
+        text,
         diagnostics: [],
         lifecycleEntryIds: [],
       };
@@ -217,6 +228,20 @@ export default async function runWorkflow(dsl, input) {
 }
 `;
 
+/**
+ * One exact-choice step followed by a summary — the shape of a generated
+ * implement-plan.workflow.mjs. The scripted child answers the step with the bare
+ * word `completed`, the answer gpt-5.6-luna gave in run 20260822-194520-6c07.
+ */
+const ROUTED_WORKFLOW = `export const meta = { name: "routed", description: "one exact-choice step then a summary" };
+export default async function runWorkflow(dsl) {
+  const status = await dsl.agent("step: return exactly completed", { choice: ["completed", "blocked"] });
+  if (status === "blocked") throw new Error("step is blocked");
+  const summary = await dsl.agent("summary");
+  return { status, summary };
+}
+`;
+
 const UNSUPPORTED_SCHEMA_WORKFLOW = `export const meta = { name: "unsupported", description: "declares an ignored keyword" };
 export default async function runWorkflow(dsl) {
   return await dsl.agent("shape me", { schema: { type: "number", minimum: 3 } });
@@ -295,6 +320,51 @@ describe("workflow --resume replays recorded agent calls", () => {
     expect(rejected.error).toMatch(/unsupported keyword "minimum"/u);
     expect(rejected.executedPrompts).toEqual([]);
     expect(readWorkflowReplayLog(root, rejected.runId).filter((entry) => entry.kind === "agent")).toHaveLength(0);
+  });
+
+  it("resumes a run that failed after an exact-choice step answered with the bare word, re-running only the rest", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "routed", ROUTED_WORKFLOW);
+    const stepAnswer = (prompt: string) => (prompt.startsWith("step:") ? "completed" : undefined);
+
+    // The step completes and answers with the bare word; the summary child then fails, so
+    // the run ends failed with the step's answer on record — the run an operator wants to
+    // resume rather than redo.
+    const first = await runWorkflow(root, "routed", {
+      answer: (prompt) => {
+        const step = stepAnswer(prompt);
+        if (step !== undefined) return step;
+        throw new Error("summary child lost its session");
+      },
+    });
+    expect(first.ok).toBe(false);
+    expect(first.executedPrompts.map((prompt) => prompt.split("\n")[0])).toEqual([
+      "step: return exactly completed",
+      "summary",
+    ]);
+    const stepEnd = first.journal.find((line) => line.kind === "agent_end" && line.schemaValidation !== undefined);
+    expect(stepEnd?.schemaValidation).toEqual({ status: "valid", attempts: 1, errors: [], coercion: "bare-text" });
+    // The persisted line round-trips through the file reader that feeds /workflows status.
+    const persistedStepEnd = readWorkflowRunJournal(root, first.runId).find(
+      (line) => line.kind === "agent_end" && line.schemaValidation !== undefined,
+    );
+    expect(persistedStepEnd?.schemaValidation).toEqual(stepEnd?.schemaValidation);
+
+    const resumed = await runWorkflow(root, "routed", {
+      resumeFromRunId: first.runId,
+      answer: (prompt) => stepAnswer(prompt) ?? `answer(${prompt})`,
+    });
+
+    // The step is served from the record and read the same way; only the summary runs.
+    expect(resumed.ok).toBe(true);
+    expect(resumed.executedPrompts).toEqual(["summary"]);
+    expect(resumed.result).toEqual({ status: "completed", summary: "answer(summary)" });
+    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 1, freshCalls: 1 });
+    const replayedStep = resumed.journal.find(
+      (line) => line.kind === "agent_end" && line.schemaValidation !== undefined,
+    );
+    expect(replayedStep?.replayed).toBe(true);
+    expect(replayedStep?.schemaValidation).toEqual({ status: "valid", attempts: 1, errors: [], coercion: "bare-text" });
   });
 
   it("re-applies the current script validator to a replayed answer", async () => {

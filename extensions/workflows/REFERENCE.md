@@ -1780,6 +1780,16 @@ runtime-owned journal line with the validation errors, and never masks child
 execution or transport failures. Standard generated workflows use this form for
 machine routing and exact text for every narrative result.
 
+The runtime reads an exact-choice answer strictly but not pedantically. The
+quoted JSON string `"accept"`, the bare word `accept` (fence-stripped, optionally
+in one pair of backticks), and the schema-echo object
+`{"type":"string","value":"accept"}` all select `accept`; the two unquoted
+readings stamp `coercion: "bare-text" | "wrapper-object"` on that attempt's
+`schemaValidation` instead of spending a repair attempt. Prose around a member, a
+near-miss, an unlisted value, and any other object key remain a mismatch. The
+same readings apply to a hand-written root `{ type: "string", enum }` schema and
+to no other shape.
+
 ### Standard dynamic decomposition — `agent({ handoffs })`
 
 Use `handoffs` when a discovery agent must define bounded runtime work units for
@@ -1931,9 +1941,11 @@ type.
 
 **Evidence.** Every attempt stamps `schemaValidation`
 (`{status: "valid"|"mismatch", attempts, errors}`, plus `source: "schema" |
-"script"` on a mismatch when the call declared `validate`) on its own `agent_end`
-journal line, so a run's evidence shows whether a stage was shape-checked, which
-authority rejected it, and how many tries it took. `attempts` is the 1-based loop
+"script"` on a mismatch when the call declared `validate`, plus `coercion:
+"bare-text" | "wrapper-object"` on a valid exact-choice attempt read from the bare
+member text or a schema-echo object) on its own `agent_end` journal line, so a
+run's evidence shows whether a stage was shape-checked, which authority rejected
+it, how the answer was read, and how many tries it took. `attempts` is the 1-based loop
 position of the attempt, not a count of live child runs: a replayed attempt
 occupies an ordinal and increments it while contributing no `usage`. Each attempt
 counts against `maxTotalAgentInvocations`; a call without `schema` counts exactly
@@ -2360,7 +2372,8 @@ selected project-local workflow workspace. Fresh workflows default to
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared
-`validate`), plus full answer/transcript/result artifact references when
+`validate`, and `coercion` on an exact-choice answer read from unquoted text or a schema
+echo), plus full answer/transcript/result artifact references when
 those records exist. `/workflows status` shows `agents=…` and sums the run budget from those
 `usage` values. Journals written before 0.2.x may still contain `llm_start` / `llm_end` /
 `llm_delta` lines; they parse but are no longer counted or specially rendered.

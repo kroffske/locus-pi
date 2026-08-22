@@ -12,6 +12,10 @@ User-visible changes to the public package.
 - The npm package allowlist now names owned directories instead of hundreds of individual files.
 - The root documentation was reduced to this changelog, the README, the license, and the agent development contract. Third-party notices moved to `docs/third-party-notices.md`.
 
+### Fixed
+
+- Workflow `agent({ choice })` now reads the bare member text (`completed`) and the schema-echo object (`{"type":"string","value":"completed"}`) as that member instead of failing the whole run after two attempts; the attempt's `schemaValidation` records the reading as `coercion`. Observed on `openai-codex/gpt-5.6-luna` running a generated `implement-plan.workflow.mjs`, where the completed step's run was discarded over quoting. The generated step prompt no longer forbids the JSON answer the runtime contract then asks for.
+
 ## [0.5.0] - 2026-08-20
 
 ### Changed
