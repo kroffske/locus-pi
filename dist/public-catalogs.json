@@ -58,14 +58,6 @@
       "ownership": "locus-specific"
     },
     {
-      "id": "security-gate",
-      "tools": [],
-      "commands": ["security-audit"],
-      "hooks": ["tool_call", "input"],
-      "risk": "critical",
-      "ownership": "locus-specific"
-    },
-    {
       "id": "status-line",
       "tools": [],
       "commands": [],

@@ -12,6 +12,10 @@ User-visible changes to the public package.
 - The npm package allowlist now names owned directories instead of hundreds of individual files.
 - The root documentation was reduced to this changelog, the README, the license, and the agent development contract. Third-party notices moved to `docs/third-party-notices.md`.
 
+### Removed
+
+- The `security-gate` extension and its `/security-audit` command were removed. It was an audit-only observer that never blocked a tool call; approvals remain owned by Pi.
+
 ## [0.5.0] - 2026-08-20
 
 ### Changed
