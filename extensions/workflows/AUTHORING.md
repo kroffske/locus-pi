@@ -101,7 +101,10 @@ const route = await agent("Choose the next step.", {
 
 The runtime desugars `choice` to its existing string-enum shape path. It owns
 format instructions, parsing, validation, corrective re-ask, journal evidence,
-replay, and budgets. By default exhaustion fails closed. A design may declare
+replay, and budgets. A child that answers with the bare member text or echoes the
+schema as `{"type":"string","value":"…"}` is read as that member and the journal
+records the reading; anything else is re-asked once. By default exhaustion fails
+closed. A design may declare
 `choiceFallback` as one of the listed choices when a deterministic degraded route
 is safer; the runtime uses it only after both invalid answers and records the
 fallback in the journal. Workflow code does none of that recovery itself.
