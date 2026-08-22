@@ -6,9 +6,7 @@ import astGrep from "../../../extensions/ast-structural-edit/ast-grep.js";
 import astEdit from "../../../extensions/ast-structural-edit/ast-edit.js";
 import astApply from "../../../extensions/ast-structural-edit/resolve.js";
 import astStructuralEdit from "../../../extensions/ast-structural-edit/index.js";
-import securityGate from "../../../extensions/security-gate/index.js";
-import { createHarness, emit, runTool } from "../../test-harness.js";
-import { clearAuditEvents, getAuditEvents } from "../../../extensions/security-gate/permissions.js";
+import { createHarness, runTool } from "../../test-harness.js";
 
 async function fixtureRoot() {
   const dir = path.join(tmpdir(), `pi-dev-ext-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -33,7 +31,6 @@ async function fixtureRoot() {
 
 describe("AST/LSP/dev tools", () => {
   it("finds, previews, applies, and rejects stale AST edits", async () => {
-    clearAuditEvents();
     const root = await fixtureRoot();
     const h = createHarness(root);
     astStructuralEdit(h.pi);
@@ -50,7 +47,6 @@ describe("AST/LSP/dev tools", () => {
     expect(applied.details).toMatchObject({ extra: { previewId }, filesApplied: 1 });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("hello('x')");
     expect(h.entries.some((entry) => entry.type === "decision")).toBe(false);
-    expect(getAuditEvents()).toEqual([]);
 
     const stale = await runTool(h, "ast_edit", { ops: [{ pat: "hello($A)", out: "greet($A)" }], paths: ["sample.ts"] });
     const staleId = String(stale.details?.previewId);
@@ -65,62 +61,9 @@ describe("AST/LSP/dev tools", () => {
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toBe("changed()\n");
   });
 
-  it("allows AST preview and apply through security-gate while delegating approval to Pi", async () => {
-    clearAuditEvents();
+  it("discards the latest pending AST preview without writing files", async () => {
     const root = await fixtureRoot();
     const h = createHarness(root);
-    securityGate(h.pi);
-    astStructuralEdit(h.pi);
-    const previewParams = { ops: [{ pat: "greet($A)", out: "hello($A)" }], paths: ["sample.ts"] };
-
-    const previewGate = (await emit(h, "tool_call", { toolName: "ast_edit", toolArgs: previewParams })).filter(
-      (entry) => entry !== undefined,
-    );
-    expect(previewGate).toEqual([]);
-    const preview = await runTool(h, "ast_edit", previewParams);
-    const previewId = String(preview.details?.previewId);
-
-    const applyGate = (
-      await emit(h, "tool_call", {
-        toolName: "resolve",
-        toolArgs: { action: "apply", reason: "test denied apply", extra: { previewId } },
-      })
-    ).filter((entry) => entry !== undefined);
-    expect(applyGate).toEqual([]);
-    const applied = await runTool(h, "resolve", {
-      action: "apply",
-      reason: "test delegated apply",
-      extra: { previewId },
-    });
-
-    expect(applied.isError).not.toBe(true);
-    expect(applied.details).toMatchObject({ extra: { previewId }, filesApplied: 1 });
-    expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("hello('x')");
-    expect(getAuditEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          extensionId: "security-gate",
-          decision: "allow",
-          actionType: "preview",
-          toolOrCommand: "ast_edit",
-          target: "sample.ts",
-        }),
-        expect.objectContaining({
-          extensionId: "security-gate",
-          decision: "allow",
-          actionType: "filesystem-write",
-          toolOrCommand: "resolve",
-          target: previewId,
-        }),
-      ]),
-    );
-  });
-
-  it("discards the latest pending AST preview through security-gate without writing files", async () => {
-    clearAuditEvents();
-    const root = await fixtureRoot();
-    const h = createHarness(root);
-    securityGate(h.pi);
     astEdit(h.pi);
     astApply(h.pi);
     const preview = await runTool(h, "ast_edit", {
@@ -129,27 +72,12 @@ describe("AST/LSP/dev tools", () => {
     });
     const previewId = String(preview.details?.previewId);
 
-    const discardGate = (
-      await emit(h, "tool_call", { toolName: "resolve", toolArgs: { action: "discard", reason: "not needed" } })
-    ).filter((entry) => entry !== undefined);
-    expect(discardGate).toEqual([]);
     const discarded = await runTool(h, "resolve", { action: "discard", reason: "not needed" });
 
     expect(discarded.isError).not.toBe(true);
     expect(discarded.details).toMatchObject({ action: "discard", extra: { previewId } });
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).toContain("greet('x')");
     expect(await readFile(path.join(root, "sample.ts"), "utf8")).not.toContain("hello('x')");
-    expect(getAuditEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          extensionId: "security-gate",
-          decision: "allow",
-          actionType: "preview",
-          toolOrCommand: "resolve",
-          target: "resolve",
-        }),
-      ]),
-    );
     const retry = await runTool(h, "resolve", { action: "apply", reason: "should be gone" });
     expect(retry.isError).toBe(true);
     expect(retry.content[0]?.type === "text" ? retry.content[0].text : "").toContain("No pending action to resolve");

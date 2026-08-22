@@ -51,6 +51,45 @@ For example, this profile loads only the workflow extension and disables the bun
 
 Filtering is a loading boundary, not an installation boundary: the npm tarball and production dependencies are still installed, and an enabled extension may import helper modules owned by another feature directory without registering that feature's entrypoint.
 
+## Beta extensions
+
+Three extensions ship at a beta tier. They are installed and loaded like every other entrypoint, and they register nothing — no tool, no command, no hook — until the project turns them on:
+
+| Extension      | Commands                                                   | Tools                     |
+| -------------- | ---------------------------------------------------------- | ------------------------- |
+| `loop`         | `/loop`                                                    | `loop`                    |
+| `plan`         | `/plan`, `/mode`, `/goal`, `/goal-ai`, `/review`, `/todos` | `goal`                    |
+| `todo-context` | `/todo`                                                    | `todo_read`, `todo_write` |
+
+The `Tier` column of the [extension reference](extensions.md) is the authoritative list; each manifest declares its own `tier`.
+
+Turn one on for the project by naming it in `.locus-pi/config.json`, next to the project's other locus-pi state:
+
+```json
+{
+  "beta": ["loop", "todo-context"]
+}
+```
+
+Or for a single session, without writing a file:
+
+```bash
+LOCUS_PI_BETA=loop,plan pi
+```
+
+Either source is enough, and `all` (or `*`) in either one enables every beta extension. **Restart Pi after changing either**: extensions register their surfaces once, when Pi loads them.
+
+Two things to expect while a beta extension is off:
+
+- Pi still reports the entrypoint as loaded — the package cannot ask the host to skip it — so a loaded beta extension with no `/loop` command is working as designed. `/help` and the tool list are what tell you whether a beta extension is on.
+- The config file is read from the directory Pi was started in. Start Pi from the project root, or use the environment variable.
+
+A malformed `.locus-pi/config.json` — invalid JSON, or a `beta` that is not a list of extension ids — is ignored rather than fatal. Pi starts normally with every beta extension off and prints one line naming the file:
+
+```text
+locus-pi: /path/to/project/.locus-pi/config.json ignored: is not valid JSON: ...
+```
+
 ## Mix with another Pi package
 
 Pi can load several package sources in one process. Before enabling another implementation of the same capability, explicitly exclude the overlapping Locus entrypoint. Do not rely on package order to override a tool: duplicate tool names are order-sensitive, duplicate commands are disambiguated by the host, and hooks compose according to each event's rules.

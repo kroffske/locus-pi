@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import todoContext from "../../../extensions/todo-context/index.js";
+import { registerTodoContext } from "../../../extensions/todo-context/index.js";
 import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
@@ -74,7 +74,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("prints Markdown with a copy notice for /todo copy", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
 
     await runCommand(h, "copy");
@@ -87,7 +87,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("starts a fuzzy-matched task and refuses an unmatched one", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
     await runCommand(h, "append Execution patch wrapper");
 
@@ -100,7 +100,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("drops a fuzzy-matched phase and every task when no target is given", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
     await runCommand(h, "append Verification confirm output");
 
@@ -116,7 +116,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("completes every task when /todo done has no target", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
 
     await runCommand(h, "done");
@@ -126,7 +126,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("removes a single fuzzy-matched task through /todo rm", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
     await runCommand(h, "append Execution patch wrapper");
 
@@ -139,7 +139,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("refuses no-match, duplicate, oversized, and empty append input", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
     const entriesBefore = h.entries.length;
 
@@ -164,7 +164,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("refuses /todo run when no todo is active", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "run some context");
 
@@ -174,7 +174,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("reports an unavailable continuation transport and pauses the queue", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     delete (h.pi as { sendMessage?: unknown }).sendMessage;
 
     await runTool(h, "todo_write", {
@@ -192,7 +192,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("reports each malformed todo_write operation without dropping state", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     expect(toolText(await runTool(h, "todo_write", { ops: [{ op: "init" }] }))).toContain(
       "Missing list for init operation",
@@ -227,7 +227,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("abandons a whole phase through the drop operation", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
@@ -248,7 +248,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("requires an exact task id for /todo from-task", async () => {
     const h = createHarness(explicitTaskProject());
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "from-task");
 
@@ -260,7 +260,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("reports a missing task index for /todo from-task", async () => {
     const h = createHarness(tempRoot());
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "from-task T-136");
 
@@ -274,7 +274,7 @@ describe("todo-context command surfaces and op errors", () => {
   it("rejects completion-note input that is not exactly one task id", async () => {
     const root = explicitTaskProject();
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "completion-note");
     expect(h.widgets.get("todo")).toContain("Completion note requires one exact task id.");
@@ -290,7 +290,7 @@ describe("todo-context command surfaces and op errors", () => {
   it("writes the completion note for the prompt tier because Pi owns the approval", async () => {
     const root = explicitTaskProject();
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "append Execution inspect contract");
 
     await runCommand(h, "completion-note T-136");
@@ -308,7 +308,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("reports the offending line when editor Markdown has an unknown status marker", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     h.ctx.ui.editor = (async () => "# Review\n- [?] Inspect OMP todo command\n") as unknown as typeof h.ctx.ui.editor;
 
     await runCommand(h, "edit");
@@ -321,7 +321,7 @@ describe("todo-context command surfaces and op errors", () => {
 
   it("keeps every documented verb in the /todo help body", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "help");
 

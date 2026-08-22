@@ -2,6 +2,8 @@
 
 `plan` owns behavioral planning mode, local goal state, and project/task prompt shelves.
 
+Beta: disabled by default. Nothing below is registered until the project enables `plan` — see [beta extensions](../../docs/getting-started.md#beta-extensions).
+
 ## Commands and tool
 
 ```text

@@ -73,14 +73,14 @@ describe("generated public catalogs", () => {
     expect(await staleGeneratedFiles(root, await generatedPublicCatalogFiles(root))).toEqual([]);
   });
 
-  it("publishes the ten active extensions exactly once each", async () => {
+  it("publishes the nine active extensions exactly once each", async () => {
     const [catalogFile] = await generatedPublicCatalogFiles(root);
     const catalogs = JSON.parse(catalogFile?.content ?? "") as {
       extensions: Array<{ id: string }>;
       workflows: Array<{ name: string; namespace: string }>;
     };
     expect(catalogFile?.path).toBe(CATALOG_FILE);
-    expect(catalogs.extensions).toHaveLength(10);
+    expect(catalogs.extensions).toHaveLength(9);
     expect(catalogs.extensions.map(({ id }) => id)).toEqual(defaultExtensionManifests().map(({ id }) => id));
   });
 

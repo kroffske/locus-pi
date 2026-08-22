@@ -1,5 +1,6 @@
 {
   "id": "model",
+  "tier": "default",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi setModel/getThinkingLevel/setThinkingLevel APIs",

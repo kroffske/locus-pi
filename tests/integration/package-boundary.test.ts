@@ -359,7 +359,7 @@ describe("npm public package boundary", () => {
       "schemas/extension-manifest.schema.json",
       "skills/",
     ]);
-    expect(dryRun.files).toHaveLength(249);
+    expect(dryRun.files).toHaveLength(246);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -376,9 +376,9 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships ten active entrypoints, their manifests, and complete local imports", () => {
+  it("ships nine active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    expect(pkg.pi.extensions).toHaveLength(10);
+    expect(pkg.pi.extensions).toHaveLength(9);
 
     for (const entrypoint of pkg.pi.extensions) {
       const normalizedEntrypoint = entrypoint.replace(/^\.\//, "");

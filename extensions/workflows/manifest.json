@@ -1,5 +1,6 @@
 {
   "id": "workflows",
+  "tier": "default",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Default-loaded through package.json#pi.extensions",

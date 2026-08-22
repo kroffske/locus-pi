@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import plan from "../../../extensions/plan/index.js";
+import { registerPlan } from "../../../extensions/plan/index.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
@@ -112,7 +112,7 @@ describe("default prompt commands", () => {
   it("/plan list shows only saved plans, no usage text", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-list-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("plan")!.handler("list", h.ctx);
 
@@ -126,7 +126,7 @@ describe("default prompt commands", () => {
   it.each([["help"], ["?"]])("/plan %s shows full untruncated usage incl. saved plans", async (verb) => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: `plan-help-session-${verb}` });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("plan")!.handler(verb, h.ctx);
 
@@ -146,7 +146,7 @@ describe("default prompt commands", () => {
   it("/plan open uses typed warnings for missing and unknown slugs", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-open-warning-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("plan")!.handler("open", h.ctx);
     expect(h.widgets.get("plan")).toContain("[WARN] Plan open");
@@ -163,7 +163,7 @@ describe("default prompt commands", () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-bare-headless-session" });
     h.ctx.hasUI = false;
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("plan")!.handler("", h.ctx);
 
@@ -182,7 +182,7 @@ describe("default prompt commands", () => {
       const input = vi.fn(async () => "typed");
       commandCtx.ui.input = input as never;
 
-      plan(h.pi);
+      registerPlan(h.pi);
       await h.commands.get("plan")!.handler("", commandCtx);
 
       const state = loadModeState(root);
@@ -200,7 +200,7 @@ describe("default prompt commands", () => {
   it("bare /plan on a UI host falls back to a nudge when the prompt is cancelled", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-bare-cancel-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
     h.ctx.hasUI = true;
     h.ctx.ui.input = async () => ({ value: "", cancelled: true });
 
@@ -215,7 +215,7 @@ describe("default prompt commands", () => {
   it("bare /plan tolerates ctx.ui.input resolving to undefined (live host quirk on Escape)", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-bare-undefined-input-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
     h.ctx.hasUI = true;
     h.ctx.ui.input = async () => undefined as never;
 
@@ -229,7 +229,7 @@ describe("default prompt commands", () => {
   it("bare /plan fails closed when the host returns an unsupported dialog result", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "plan-bare-dialog-error-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
     h.ctx.hasUI = true;
     h.ctx.ui.input = async () => ({ label: "not-a-dialog-result" }) as never;
 
@@ -244,7 +244,7 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-open-b5", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-open-b5" });
-      plan(h.pi);
+      registerPlan(h.pi);
 
       const slug = "long-plan-20260630-aaaa";
       const body = Array.from({ length: 40 }, (_, i) => `step ${i + 1}: do the thing number ${i + 1}`).join("\n");
@@ -280,7 +280,7 @@ describe("default prompt commands", () => {
   ])("saves /%s prompt to the project-local fallback path", async (command, prompt, message) => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: `${command}-session` });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get(command)!.handler(prompt, h.ctx);
 
@@ -302,7 +302,7 @@ describe("default prompt commands", () => {
       const { commandCtx } = stubPlanSession(h, root, [
         { type: "message", role: "assistant", content: "## Goal\nShip it." },
       ]);
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get("plan")!.handler("Add a feature", commandCtx);
 
@@ -324,7 +324,7 @@ describe("default prompt commands", () => {
       const { commandCtx } = stubPlanSession(h, root, [
         { type: "message", role: "assistant", content: "## Goal\nShip it." },
       ]);
-      plan(h.pi);
+      registerPlan(h.pi);
 
       // Enter first
       await h.commands.get("plan")!.handler("Add a feature", commandCtx);
@@ -351,7 +351,7 @@ describe("default prompt commands", () => {
         },
       ];
       const { commandCtx, kickoff } = stubPlanSession(h, root, entries);
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get("plan")!.handler("Add read-only mode", commandCtx);
 
@@ -379,7 +379,7 @@ describe("default prompt commands", () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-failure-parent" });
       const { commandCtx } = stubPlanSession(h, root, []);
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get("plan")!.handler("Add read-only mode", commandCtx);
 
@@ -398,7 +398,7 @@ describe("default prompt commands", () => {
     await withTempPiHome("plan-blocked-home", async () => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: "plan-blocked-parent" });
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get("plan")!.handler("Add read-only mode", h.ctx);
 
@@ -412,7 +412,7 @@ describe("default prompt commands", () => {
   it("sets /goal objective and replaces active goal state", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-set-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("ship stable local goal flow", h.ctx);
     const first = JSON.parse(readFileSync(goalStatePath(root), "utf8")) as {
@@ -435,7 +435,7 @@ describe("default prompt commands", () => {
   it("supports /goal show, pause, resume, drop, complete, and budget", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-lifecycle-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("ship a tiny local goal", h.ctx);
     expect(h.widgets.get("goal") ?? "").toContain("status: active");
@@ -472,7 +472,7 @@ describe("default prompt commands", () => {
   it("sets budget-limited when new budget is below current token usage", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-budget-limit-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("ship a tracked goal", h.ctx);
     const statePath = goalStatePath(root);
@@ -515,7 +515,7 @@ describe("default prompt commands", () => {
     const root = tempRoot();
     writeTaskIndex(root);
     const h = createHarness(root, { sessionId: "goal-prompt-task-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("prompt --task T-1 Explicit goal prompt path", h.ctx);
 
@@ -544,7 +544,7 @@ describe("default prompt commands", () => {
   it("supports explicit shelf body view and literal reserved verbs without inspection writes", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "review-shelf-contract" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("review")!.handler("Legacy review body", h.ctx);
     const artifactPath = promptPath(root, "review");
@@ -578,7 +578,7 @@ describe("default prompt commands", () => {
   it("places dynamic empty goal and shelf warnings above the editor", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "empty-state-placement" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     for (const [command, args, label] of [
       ["goal", "", "[WARN] Goal state"],
@@ -596,7 +596,7 @@ describe("default prompt commands", () => {
     const root = tempRoot();
     const h = createHarness(root, { mode: "rpc", sessionId: "plan-rpc-compact" });
     h.ctx.hasUI = true;
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("Keep RPC goal state legible", h.ctx);
     await h.commands.get("goal")!.handler("show", h.ctx);
@@ -649,7 +649,7 @@ describe("default prompt commands", () => {
       const longTaskDir = "T-145-2026-06-18-tui-standard-and-tmux-proof-repair-loop-";
       writeTaskIndex(root, { id: "T-145", title: "TUI proof repair", taskPath: longTaskDir });
       const h = createHarness(root, { sessionId: `${command}-task-path-widget-session` });
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get(command)!.handler(saveArgs, h.ctx);
 
@@ -675,7 +675,7 @@ describe("default prompt commands", () => {
     const root = tempRoot();
     writeTaskIndex(root);
     const h = createHarness(root, { sessionId: "missing-task-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("prompt --task T-404 Review the new contract", h.ctx);
 
@@ -690,7 +690,7 @@ describe("default prompt commands", () => {
   it("shows the stored goal state when /goal is invoked without arguments", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-show-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler("Build operator-friendly local goal mode", h.ctx);
     writeFileSync(
@@ -743,7 +743,7 @@ describe("default prompt commands", () => {
   it("keeps /goal continue as artifact metadata instead of showing the full prompt body", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-continue-screen-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands
       .get("goal")!
@@ -771,7 +771,7 @@ describe("default prompt commands", () => {
   it("blocks /goal-ai without a replacement-session host", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-ai-blocked-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("make this request sharper", h.ctx);
 
@@ -819,7 +819,7 @@ describe("default prompt commands", () => {
       await opts?.withSession?.(replacementCtx);
       return { cancelled: false };
     };
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("make goal commands useful", commandCtx);
 
@@ -872,7 +872,7 @@ describe("default prompt commands", () => {
       });
       return { cancelled: false };
     };
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("", commandCtx);
 
@@ -891,7 +891,7 @@ describe("default prompt commands", () => {
     cancelled.ctx.ui.editor = async () => undefined as never;
     const cancelledChild = vi.fn();
     cancelled.ctx.newSession = cancelledChild as never;
-    plan(cancelled.pi);
+    registerPlan(cancelled.pi);
 
     await cancelled.commands.get("goal-ai")!.handler("", cancelled.ctx);
 
@@ -906,7 +906,7 @@ describe("default prompt commands", () => {
     const headlessChild = vi.fn();
     headless.ctx.ui.editor = headlessEditor as never;
     headless.ctx.newSession = headlessChild as never;
-    plan(headless.pi);
+    registerPlan(headless.pi);
 
     await headless.commands.get("goal-ai")!.handler("", headless.ctx);
 
@@ -923,7 +923,7 @@ describe("default prompt commands", () => {
     h.ctx.ui.editor = async () => ({ label: "not-a-dialog-result" }) as never;
     const child = vi.fn();
     h.ctx.newSession = child as never;
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await expect(h.commands.get("goal-ai")!.handler("", h.ctx)).resolves.toBeUndefined();
 
@@ -952,7 +952,7 @@ describe("default prompt commands", () => {
       await opts?.withSession?.(replacementCtx);
       return { cancelled: false };
     };
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("make goal commands useful", commandCtx);
 
@@ -965,7 +965,7 @@ describe("default prompt commands", () => {
   it("registers a model-callable goal tool and supports create/get transitions", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-session" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const create = await runTool(h, "goal", { op: "create", objective: "Tool objective" });
     expect(create.isError ?? false).toBe(false);

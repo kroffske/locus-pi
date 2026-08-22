@@ -1,5 +1,6 @@
 {
   "id": "agents",
+  "tier": "default",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",

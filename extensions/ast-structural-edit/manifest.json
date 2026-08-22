@@ -1,5 +1,6 @@
 {
   "id": "ast-structural-edit",
+  "tier": "default",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "filesystem read/write for selected project files",
@@ -43,7 +44,6 @@
   "sourceAuditPath": null,
   "tests": [
     "tests/extensions/ast-structural-edit/tools.test.ts",
-    "tests/shared/security/security.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts"
   ],
   "review": {
