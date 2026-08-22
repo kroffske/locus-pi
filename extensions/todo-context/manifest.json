@@ -1,5 +1,6 @@
 {
   "id": "todo-context",
+  "tier": "beta",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi tool and command registration",
@@ -57,7 +58,8 @@
     "tests/extensions/todo-context/todo-context.test.ts",
     "tests/shared/task/tasks-bridge.test.ts",
     "tests/shared/session/session-core-jsonl.test.ts",
-    "tests/contracts/extensions/runtime-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts",
+    "tests/contracts/extensions/beta-gate.test.ts"
   ],
   "review": {
     "status": "reviewed",

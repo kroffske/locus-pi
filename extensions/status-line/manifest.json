@@ -1,5 +1,6 @@
 {
   "id": "status-line",
+  "tier": "default",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Pi custom footer API (minimum host floor 0.83.0)",

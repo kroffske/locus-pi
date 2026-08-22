@@ -129,6 +129,14 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "render-profile",
     "render-scheduler",
     "safe-output",
+    /**
+     * `beta-gate` belongs to the lowest layer on purpose: a beta entrypoint calls it as
+     * its first statement, before it constructs anything, so it may depend on nothing
+     * but `node:` builtins. It duplicates the `.locus-pi` directory name rather than
+     * importing `workflows/runtime/workflow-run-layout.ts`, because rule 1 forbids a
+     * shared module from reaching into a feature directory.
+     */
+    "beta-gate",
   ],
   operator: [
     "command-ui",
@@ -314,6 +322,7 @@ const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/background-run-registry.ts" },
   { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/session-viewer.ts" },
   { symbol: "locus-pi.viewer-external-rows.v1", owner: "extensions/_shared/operator/viewer-geometry.ts" },
+  { symbol: "locus-pi.beta-config-warnings.v1", owner: "extensions/_shared/host/beta-gate.ts" },
 ];
 
 /**

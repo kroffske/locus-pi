@@ -15,6 +15,7 @@ afterEach(() => {
 function validManifest(): Record<string, unknown> {
   return {
     id: "one",
+    tier: "default",
     ownershipStatus: "locus-specific",
     runtimeRequirements: ["Pi command registration"],
     stateUsed: ["nothing persistent"],
@@ -111,6 +112,21 @@ describe("extension manifest contract", () => {
     ).toEqual([
       'extensions/one/manifest.json: review.source: must be one of "write-from-scratch", "copy-after-audit", received "local-implementation"',
     ]);
+  });
+
+  it("rejects a tier outside the enum", () => {
+    expect(messages({ ...validManifest(), tier: "experimental" })).toEqual([
+      'extensions/one/manifest.json: tier: must be one of "default", "beta", received "experimental"',
+    ]);
+  });
+
+  /**
+   * `tier` is required rather than defaulted, so a new extension cannot inherit a loading
+   * decision by omission — every manifest states whether it registers on load.
+   */
+  it("rejects a manifest that declares no tier", () => {
+    const { tier: _tier, ...withoutTier } = validManifest();
+    expect(messages(withoutTier)).toEqual(["extensions/one/manifest.json: tier: is required and missing"]);
   });
 
   it("rejects a missing required field", () => {

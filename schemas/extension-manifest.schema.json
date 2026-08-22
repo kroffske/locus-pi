@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": [
     "id",
+    "tier",
     "ownershipStatus",
     "runtimeRequirements",
     "stateUsed",
@@ -23,6 +24,10 @@
       "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog.ts, scripts/audit-sources.ts and scripts/check-extension-manifests.ts.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "tier": {
+      "description": "Whether the extension registers its surfaces on load. `default` registers on load. `beta` keeps the entrypoint in package.json#pi.extensions and lets Pi load it, but the entrypoint registers no tool, command or hook until the project enables the id through `.locus-pi/config.json` -> {\"beta\": [...]} or the LOCUS_PI_BETA environment variable. Read by extensions/_shared/host/beta-gate.ts (the switch itself), tests/contracts/extensions/beta-gate.test.ts, tests/contracts/host/selective-package-loading.test.ts and the Tier column of docs/extensions.md.",
+      "enum": ["default", "beta"]
     },
     "ownershipStatus": {
       "description": "Who owns the implementation. Read by scripts/audit-sources.ts, which demands completed review metadata from adapted extensions.",

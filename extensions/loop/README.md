@@ -2,6 +2,8 @@
 
 `loop` is the bounded continuation controller for active goals and eligible persisted workflow runs.
 
+Beta: disabled by default. Nothing below is registered until the project enables `loop` — see [beta extensions](../../docs/getting-started.md#beta-extensions).
+
 ## Actions
 
 The `loop` tool and `/loop` command support:

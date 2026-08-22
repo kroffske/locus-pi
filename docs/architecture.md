@@ -17,8 +17,8 @@ tags: [architecture, repository]
 
 Public behavior is defined by the intersection of:
 
-1. `package.json#pi.extensions` — default-loaded extension entrypoints;
-2. `extensions/<name>/manifest.json` — declared tools, commands, hooks, permissions, risk, tests, and manual;
+1. `package.json#pi.extensions` — the extension entrypoints Pi loads;
+2. `extensions/<name>/manifest.json` — declared tier, tools, commands, hooks, permissions, risk, tests, and manual. A `beta` tier means the entrypoint loads like any other and registers nothing until the project enables it, so the loaded set and the registered set are not the same list;
 3. extension source and focused tests;
 4. the shipped workflow registry under `extensions/workflows/examples/`;
 5. the npm allowlist in `package.json#files`.
@@ -58,7 +58,8 @@ Local runtime state is intentionally outside the public source surface and ignor
 - `.locus-pi/plans/<generated-run-name>/` — workflow-authored working files, including task drafts, plans, review files, and implementation history;
 - `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
 - `.locus-pi/fusion/config.json` — project-local Fusion configuration;
-- `.locus/runtime/` — goal, loop, and diagnostic state used by Locus extensions;
+- `.locus-pi/config.json` — project-local settings the package reads at load time; currently only the `beta` opt-in list described in [getting started](getting-started.md#beta-extensions). It is the one file here a project may want to commit;
+- `.locus/runtime/` — session, artifact, and diagnostic state used by Locus extensions; its `goal/` and `loop/` trees exist only while the beta `plan` and `loop` extensions are enabled;
 - `.tasks/` — optional local task state and explicit bridges;
 - an explicit project-relative output directory — an optional operator override for workflow-owned working files.
 

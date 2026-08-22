@@ -1,5 +1,6 @@
 {
   "id": "loop",
+  "tier": "beta",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
@@ -51,7 +52,11 @@
   "risk": "medium",
   "docsPath": "extensions/loop/README.md",
   "sourceAuditPath": null,
-  "tests": ["tests/extensions/loop/loop.test.ts", "tests/contracts/extensions/runtime-registration.test.ts"],
+  "tests": [
+    "tests/extensions/loop/loop.test.ts",
+    "tests/contracts/extensions/runtime-registration.test.ts",
+    "tests/contracts/extensions/beta-gate.test.ts"
+  ],
   "review": {
     "status": "reviewed",
     "source": "copy-after-audit",

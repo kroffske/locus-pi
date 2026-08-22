@@ -1,5 +1,6 @@
 {
   "id": "ask-user-question",
+  "tier": "default",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi interactive UI for select/input/editor/custom prompts",

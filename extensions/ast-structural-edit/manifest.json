@@ -1,5 +1,6 @@
 {
   "id": "ast-structural-edit",
+  "tier": "default",
   "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "filesystem read/write for selected project files",

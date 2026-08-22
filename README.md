@@ -1,6 +1,6 @@
 # locus-pi
 
-`locus-pi` is a Pi extension package for agentic software-development workflows. It installs default extensions, curated workflows, and workflow skills. Named agent profiles remain owned by the user's project or home catalog.
+`locus-pi` is a Pi extension package for agentic software-development workflows. It installs default extensions, curated workflows, and workflow skills. Three extensions — `loop`, `plan`, and `todo-context` — ship in the same package at a beta tier and register nothing until a project turns them on; see [beta extensions](docs/getting-started.md#beta-extensions). Named agent profiles remain owned by the user's project or home catalog.
 
 Requires Node.js `>=22.19.0`, Pi `>=0.83.0`, and trusted project and workflow sources.
 

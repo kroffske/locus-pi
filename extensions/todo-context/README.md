@@ -2,6 +2,8 @@
 
 `todo-context` owns session-backed todo state, explicit task bridges, and bounded opt-in queue continuation.
 
+Beta: disabled by default. Nothing below is registered until the project enables `todo-context` — see [beta extensions](../../docs/getting-started.md#beta-extensions).
+
 ## Surface
 
 - `todo_read` returns phases, active item, queue context, storage backend, and autonomous-mode state without mutating the queue.

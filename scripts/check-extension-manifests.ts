@@ -20,6 +20,10 @@
  * Every manifest field and the consumer that reads it:
  *
  *   id                  scripts/audit-sources.ts, this checker
+ *   tier                extensions/_shared/host/beta-gate.ts is the switch a beta entrypoint asks;
+ *                       tests/contracts/extensions/beta-gate.test.ts,
+ *                       tests/contracts/host/selective-package-loading.test.ts,
+ *                       scripts/build-public-catalogs.ts (the Tier column)
  *   ownershipStatus     scripts/audit-sources.ts (adapted extensions need review metadata)
  *   runtimeRequirements tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
  *   stateUsed           tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md

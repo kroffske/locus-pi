@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GoalOperationResult } from "../../../extensions/_shared/project/goal-mode.js";
 import { isInPlanMode, loadModeState, writeModeState } from "../../../extensions/plan/mode-state.js";
 import { goalOperationBlock } from "../../../extensions/plan/goal-operator-ui.js";
-import plan from "../../../extensions/plan/index.js";
+import { registerPlan } from "../../../extensions/plan/index.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
 
 /**
@@ -96,7 +96,7 @@ describe("/plan replace confirmation", () => {
     const root = tempRoot();
     armPlanMode(root, "first-plan");
     const h = createHarness(root, { sessionId: "plan-replace-declined" });
-    plan(h.pi);
+    registerPlan(h.pi);
     h.confirmQueue.push(false);
 
     await h.commands.get("plan")!.handler("Another request entirely", h.ctx);
@@ -117,7 +117,7 @@ describe("/plan replace confirmation", () => {
     const root = tempRoot();
     armPlanMode(root, "first-plan");
     const h = createHarness(root, { sessionId: "plan-replace-accepted" });
-    plan(h.pi);
+    registerPlan(h.pi);
     h.confirmQueue.push(true);
 
     await h.commands.get("plan")!.handler("Another request entirely", h.ctx);
@@ -136,7 +136,7 @@ describe("/mode unknown verb", () => {
   it("warns without changing the mode", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "mode-unknown" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("mode")!.handler("Turbo", h.ctx);
 
@@ -154,7 +154,7 @@ describe("/goal help and budget parsing", () => {
   it.each([["help"], ["?"]])("/goal %s renders the goal usage block below the editor", async (verb) => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: `goal-help-${verb}` });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal")!.handler(verb, h.ctx);
 
@@ -175,7 +175,7 @@ describe("/goal help and budget parsing", () => {
     async (value) => {
       const root = tempRoot();
       const h = createHarness(root, { sessionId: `goal-budget-${value}` });
-      plan(h.pi);
+      registerPlan(h.pi);
 
       await h.commands.get("goal")!.handler("ship a tracked goal", h.ctx);
       const before = readFileSync(goalStatePath(root), "utf8");
@@ -204,7 +204,7 @@ describe("/goal command error boundary", () => {
     mkdirSync(path.join(root, ".locus", "runtime"), { recursive: true });
     writeFileSync(path.join(root, ".locus", "runtime", "goal"), "not a directory", "utf8");
     const h = createHarness(root, { sessionId: "goal-error-boundary" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await expect(h.commands.get("goal")!.handler("Ship a goal that cannot be written", h.ctx)).resolves.toBeUndefined();
 
@@ -223,7 +223,7 @@ describe("goal tool transitions", () => {
   it("declares read approval only for op=get", () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-approval" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const approval = h.tools.get("goal")!.approval as (args: unknown) => string;
     expect(typeof approval).toBe("function");
@@ -236,7 +236,7 @@ describe("goal tool transitions", () => {
   it("errors on op=get with no state and on op=create with no objective", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-errors" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const missing = await runTool(h, "goal", { op: "get" });
     expect(missing.isError).toBe(true);
@@ -255,7 +255,7 @@ describe("goal tool transitions", () => {
   it("rejects params that fail schema validation", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-invalid" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const invalid = await runTool(h, "goal", { op: "nope" });
     expect(invalid.isError).toBe(true);
@@ -264,7 +264,7 @@ describe("goal tool transitions", () => {
   it("reports complete, resume and drop transitions with the state path in details", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-transitions" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await runTool(h, "goal", { op: "create", objective: "Tool transition objective", token_budget: 500 });
 
@@ -296,7 +296,7 @@ describe("goal tool transitions", () => {
   it("surfaces a transition error with the current goal still in details", async () => {
     const root = tempRoot();
     const h = createHarness(root, { sessionId: "goal-tool-transition-error" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const noState = await runTool(h, "goal", { op: "complete" });
     expect(noState.isError).toBe(true);
@@ -312,7 +312,7 @@ describe("before_agent_start context injection", () => {
     const root = tempRoot();
     writeGoalStateFile(root);
     const h = createHarness(root, { sessionId: "goal-injection" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const [result] = await emit(h, "before_agent_start", { systemPrompt: "BASE PROMPT" });
 
@@ -326,7 +326,7 @@ describe("before_agent_start context injection", () => {
     const root = tempRoot();
     writeGoalStateFile(root, { status });
     const h = createHarness(root, { sessionId: `goal-injection-${status}` });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const results = await emit(h, "before_agent_start", { systemPrompt: "BASE PROMPT" });
 
@@ -337,7 +337,7 @@ describe("before_agent_start context injection", () => {
     const root = tempRoot();
     writeGoalStateFile(root);
     const h = createHarness(root, { sessionId: "goal-injection-empty-base" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const [result] = await emit(h, "before_agent_start", { systemPrompt: "" });
 
@@ -349,7 +349,7 @@ describe("before_agent_start context injection", () => {
     writeGoalStateFile(root);
     armPlanMode(root);
     const h = createHarness(root, { sessionId: "goal-and-plan-injection" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     const [result] = await emit(h, "before_agent_start", { systemPrompt: "BASE PROMPT" });
 
@@ -364,7 +364,7 @@ describe("/goal-ai target resolution", () => {
     const root = tempRoot();
     writeTaskIndex(root);
     const h = createHarness(root, { sessionId: "goal-ai-unknown-task" });
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("--task T-404 sharpen this request", h.ctx);
 
@@ -404,7 +404,7 @@ describe("/goal-ai target resolution", () => {
       });
       return { cancelled: false };
     }) as never;
-    plan(h.pi);
+    registerPlan(h.pi);
 
     await h.commands.get("goal-ai")!.handler("--task=T-1 sharpen this request", h.ctx);
 

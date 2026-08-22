@@ -24,6 +24,7 @@ describe("extension reference contract", () => {
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
         risk: manifest.risk,
+        tier: manifest.tier,
         ownership: manifest.ownershipStatus,
       })),
     );

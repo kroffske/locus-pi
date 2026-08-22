@@ -16,13 +16,24 @@
  * It stores the latest todo phases through the Locus session backend when that
  * backend is enabled, keeps Pi `todo_write` custom entries for compatibility,
  * and falls back to shared in-process state only when no session entry exists.
+ *
+ * Beta tier (manifest.json#tier): the default export registers nothing until the
+ * project enables `todo-context` — see ../_shared/host/beta-gate.js.
+ * `registerTodoContext` is the whole extension and is what tests drive, so no test
+ * asserts through the switch.
  */
+import { betaEnabled } from "../_shared/host/beta-gate.js";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { registerTodoCommand } from "./command-router.js";
 import { createTodoQueueController } from "./queue-controller.js";
 import { registerTodoWriteTool } from "./todo-write-tool.js";
 
 export default function todoContext(pi: ExtensionAPI): void {
+  if (!betaEnabled("todo-context")) return;
+  registerTodoContext(pi);
+}
+
+export function registerTodoContext(pi: ExtensionAPI): void {
   const queue = createTodoQueueController(pi);
 
   registerTodoCommand(pi, queue);

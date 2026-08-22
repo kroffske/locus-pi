@@ -1,5 +1,6 @@
 {
   "id": "plan",
+  "tier": "beta",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
@@ -129,7 +130,8 @@
     "tests/extensions/plan/plan-behavioral-mode.test.ts",
     "tests/shared/mode-state/mode-state.test.ts",
     "tests/shared/agents/agent-executor-host.test.ts",
-    "tests/contracts/extensions/runtime-registration.test.ts"
+    "tests/contracts/extensions/runtime-registration.test.ts",
+    "tests/contracts/extensions/beta-gate.test.ts"
   ],
   "review": {
     "status": "reviewed",
