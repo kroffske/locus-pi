@@ -365,7 +365,15 @@ export interface WorkflowSchemaValidation {
    *  call that declared `validate` — a schema-only call has one possible authority,
    *  so naming it would change every existing journal line for no added information. */
   source?: "schema" | "script";
+  /** How an exact-choice answer was read when it was not the quoted JSON string the contract
+   *  asked for. Present only on a valid verdict that needed the reading: `bare-text` means the
+   *  child answered with the member itself, `wrapper-object` means it echoed the schema as
+   *  `{"type":"string","value":"<member>"}`. Absent on every answer that validated as written
+   *  and on every line written before the field existed. */
+  coercion?: WorkflowChoiceCoercion;
 }
+
+export type WorkflowChoiceCoercion = "bare-text" | "wrapper-object";
 
 /** Token + cost projection for one model-backed child run, summed per run for the budget view. */
 export interface WorkflowUsage {
@@ -2007,27 +2015,77 @@ function checkAgentSchema(
 ): AgentSchemaCheck {
   const authority = validate === undefined ? {} : { source: "schema" as const };
   const parsed = parseJsonFromText(text);
-  if (!parsed.ok) {
+  const choiceMembers = exactChoiceMembers(schema);
+  const coerced = choiceMembers === undefined ? undefined : coerceExactChoiceAnswer(text, parsed, choiceMembers);
+  const read = coerced === undefined ? parsed : { ok: true as const, value: coerced.value };
+  if (!read.ok) {
     return {
       validation: {
         status: "mismatch",
         attempts: attempt,
-        errors: [`response is not valid JSON: ${parsed.error}`],
+        errors: [`response is not valid JSON: ${read.error}`],
         ...authority,
       },
     };
   }
-  const validation = validateAgainstSchema(parsed.value, schema);
+  const validation = validateAgainstSchema(read.value, schema);
   if (!validation.ok) {
     return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors], ...authority } };
   }
   if (validate !== undefined) {
-    const scriptErrors = assertScriptValidationErrors(validate(parsed.value));
+    const scriptErrors = assertScriptValidationErrors(validate(read.value));
     if (scriptErrors.length > 0) {
       return { validation: { status: "mismatch", attempts: attempt, errors: [...scriptErrors], source: "script" } };
     }
   }
-  return { validation: { status: "valid", attempts: attempt, errors: [] }, value: parsed.value };
+  const coercion = coerced === undefined ? {} : { coercion: coerced.coercion };
+  return { validation: { status: "valid", attempts: attempt, errors: [], ...coercion }, value: read.value };
+}
+
+/**
+ * The members of a root exact-choice schema — `{ type: "string", enum: [...] }` with only
+ * string members, the shape `agent({ choice })` desugars to — or undefined for any other
+ * shape. The lenient readings below are scoped to exactly this shape: a string enum is a
+ * routing word, and a routing word has no quoting to get wrong.
+ */
+function exactChoiceMembers(schema: Record<string, unknown>): readonly string[] | undefined {
+  if (schema.type !== "string" || !Array.isArray(schema.enum)) return undefined;
+  if (!schema.enum.every((member) => typeof member === "string")) return undefined;
+  return schema.enum as readonly string[];
+}
+
+/**
+ * Read an exact-choice answer the child did not quote as a JSON string.
+ *
+ * Observed on `openai-codex/gpt-5.6-luna` (run 20260822-194520-6c07): told by a step prompt
+ * to "return exactly `completed`", the child answered `completed` — not valid JSON — and,
+ * once the repair prompt quoted that parser error back, answered
+ * `{"type":"string","value":"completed"}`, echoing the schema itself. Both name one declared
+ * member and nothing else, and the step had genuinely completed; refusing them failed the
+ * whole run over quoting.
+ *
+ * Exactly two readings are accepted, and each must land on a declared member: the trimmed
+ * (fence-stripped, optionally single-backticked) text equal to a member, or an object whose
+ * keys are drawn from `type`/`enum`/`value` — a schema echo — whose `value` is a member and
+ * whose `type`, when present, is `"string"`. Prose around a member, a near-miss, an unlisted
+ * value and any other key stay a mismatch, so `choice` remains a routing contract and not a
+ * guess. The bare reading runs first: a member such as `"1"` or `"true"` is also valid JSON
+ * of the wrong type, and the declared word wins over the parser there.
+ */
+function coerceExactChoiceAnswer(
+  text: string,
+  parsed: ReturnType<typeof parseJsonFromText>,
+  members: readonly string[],
+): { value: string; coercion: WorkflowChoiceCoercion } | undefined {
+  const bare = stripJsonFences(text).trim();
+  const word = /^`([^`]*)`$/u.exec(bare)?.[1] ?? bare;
+  if (members.includes(word)) return { value: word, coercion: "bare-text" };
+  if (!parsed.ok || !isRecord(parsed.value)) return undefined;
+  const wrapper = parsed.value;
+  const echoesSchema = Object.keys(wrapper).every((key) => key === "type" || key === "enum" || key === "value");
+  if (!echoesSchema || typeof wrapper.value !== "string" || !members.includes(wrapper.value)) return undefined;
+  if (wrapper.type !== undefined && wrapper.type !== "string") return undefined;
+  return { value: wrapper.value, coercion: "wrapper-object" };
 }
 
 /**
@@ -3104,7 +3162,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    *
    * `choice` is syntax over `{ type: "string", enum: [...] }`; it reaches this same path
    * before any request is canonicalized. Without `choiceFallback`, a hand-written equivalent
-   * schema therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * schema therefore has the same prompt, replay key, journal evidence and failure behavior —
+   * including the two lenient readings of an exact-choice answer (`coerceExactChoiceAnswer`),
+   * which stamp `coercion` on that attempt's `schemaValidation` instead of re-asking.
    * An explicit fallback changes only exhaustion: the runtime journals the degraded route and
    * returns that declared choice after both schema attempts fail.
    *

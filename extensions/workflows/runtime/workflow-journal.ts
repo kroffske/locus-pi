@@ -1161,7 +1161,10 @@ function isSchemaValidation(value: unknown): boolean {
     isStringArray(value.errors) &&
     // Which authority rejected the answer. Absent on every line written before the
     // script-validation callback existed, and on every schema-only call since.
-    (value.source === undefined || isOneOf(value.source, ["schema", "script"]))
+    (value.source === undefined || isOneOf(value.source, ["schema", "script"])) &&
+    // How an exact-choice answer was read. Absent on every answer that validated as
+    // written, and on every line written before the lenient readings existed.
+    (value.coercion === undefined || isOneOf(value.coercion, ["bare-text", "wrapper-object"]))
   );
 }
 
