@@ -239,7 +239,7 @@ describe("contract-defaulted per-child bounds", () => {
         async run(request) {
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: "fine",
             diagnostics: [],
@@ -286,7 +286,7 @@ describe("contract-defaulted per-child bounds", () => {
         async run(request) {
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: "fine",
             diagnostics: [],
@@ -388,7 +388,7 @@ describe("maxTurns as a budget axis", () => {
         async run(request) {
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: "fine",
             diagnostics: [],

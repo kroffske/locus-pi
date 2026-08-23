@@ -7,8 +7,13 @@
  * system-prompt injection. Command registration and dispatch live in
  * `command-router.js`; every command body, block builder and parser lives in a
  * submodule.
+ *
+ * Beta tier (manifest.json#tier): the default export registers nothing until the
+ * project enables `plan` — see ../_shared/host/beta-gate.js. `registerPlan` is the
+ * whole extension and is what tests drive, so no test asserts through the switch.
  */
 
+import { betaEnabled } from "../_shared/host/beta-gate.js";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { getProjectRoot } from "../_shared/host/pi-api.js";
 import { clearModeState } from "./mode-state.js";
@@ -18,6 +23,11 @@ import { ensureModeAwareEditor, setModeStatus } from "./operator-surface.js";
 import { injectPlanContext } from "./system-prompt.js";
 
 export default function plan(pi: ExtensionAPI): void {
+  if (!betaEnabled("plan")) return;
+  registerPlan(pi);
+}
+
+export function registerPlan(pi: ExtensionAPI): void {
   registerPlanCommands(pi);
   registerGoalTool(pi);
 

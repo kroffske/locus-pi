@@ -15,7 +15,7 @@ afterEach(() => {
 function validManifest(): Record<string, unknown> {
   return {
     id: "one",
-    agent: { name: "extension-one", description: "Own the one extension." },
+    tier: "default",
     ownershipStatus: "locus-specific",
     runtimeRequirements: ["Pi command registration"],
     stateUsed: ["nothing persistent"],
@@ -44,14 +44,14 @@ function validManifest(): Record<string, unknown> {
 
 /**
  * Materialize a one-extension package around `manifest`, validated against the real
- * extension-manifest.schema.json rather than a copy, so a fixture cannot pass a rule the
+ * schemas/extension-manifest.schema.json rather than a copy, so a fixture cannot pass a rule the
  * repository no longer has.
  */
 function fixtureRoot(manifest: unknown, options: { schema?: unknown } = {}): string {
   const fixture = mkdtempSync(path.join(tmpdir(), "locus-extension-manifest-"));
   temporaryRoots.push(fixture);
   mkdirSync(path.join(fixture, "extensions", "one"), { recursive: true });
-  mkdirSync(path.join(fixture, ".agents", "agents"), { recursive: true });
+  mkdirSync(path.join(fixture, "schemas"), { recursive: true });
   mkdirSync(path.join(fixture, "tests"), { recursive: true });
   writeFileSync(
     path.join(fixture, "package.json"),
@@ -59,15 +59,14 @@ function fixtureRoot(manifest: unknown, options: { schema?: unknown } = {}): str
   );
   if (options.schema === undefined) {
     copyFileSync(
-      path.join(root, "extension-manifest.schema.json"),
-      path.join(fixture, "extension-manifest.schema.json"),
+      path.join(root, "schemas/extension-manifest.schema.json"),
+      path.join(fixture, "schemas/extension-manifest.schema.json"),
     );
   } else {
-    writeFileSync(path.join(fixture, "extension-manifest.schema.json"), JSON.stringify(options.schema));
+    writeFileSync(path.join(fixture, "schemas/extension-manifest.schema.json"), JSON.stringify(options.schema));
   }
   writeFileSync(path.join(fixture, "extensions", "one", "manifest.json"), JSON.stringify(manifest));
   writeFileSync(path.join(fixture, "extensions", "one", "README.md"), "# one\n");
-  writeFileSync(path.join(fixture, ".agents", "agents", "extension-one.md"), "---\nname: extension-one\n---\n");
   writeFileSync(path.join(fixture, "tests", "one.test.ts"), "");
   return fixture;
 }
@@ -89,14 +88,14 @@ describe("extension manifest contract", () => {
 
   it("rejects a field the schema does not declare", () => {
     expect(messages({ ...validManifest(), defaultEnabled: true })).toEqual([
-      "extensions/one/manifest.json: defaultEnabled: is not declared by extension-manifest.schema.json",
+      "extensions/one/manifest.json: defaultEnabled: is not declared by schemas/extension-manifest.schema.json",
     ]);
   });
 
   it("rejects a field the schema does not declare inside a governed object", () => {
     const manifest = validManifest();
     expect(messages({ ...manifest, review: { ...(manifest.review as object), tier: "core-owned" } })).toEqual([
-      "extensions/one/manifest.json: review.tier: is not declared by extension-manifest.schema.json",
+      "extensions/one/manifest.json: review.tier: is not declared by schemas/extension-manifest.schema.json",
     ]);
   });
 
@@ -115,6 +114,21 @@ describe("extension manifest contract", () => {
     ]);
   });
 
+  it("rejects a tier outside the enum", () => {
+    expect(messages({ ...validManifest(), tier: "experimental" })).toEqual([
+      'extensions/one/manifest.json: tier: must be one of "default", "beta", received "experimental"',
+    ]);
+  });
+
+  /**
+   * `tier` is required rather than defaulted, so a new extension cannot inherit a loading
+   * decision by omission — every manifest states whether it registers on load.
+   */
+  it("rejects a manifest that declares no tier", () => {
+    const { tier: _tier, ...withoutTier } = validManifest();
+    expect(messages(withoutTier)).toEqual(["extensions/one/manifest.json: tier: is required and missing"]);
+  });
+
   it("rejects a missing required field", () => {
     const { risk: _risk, ...withoutRisk } = validManifest();
     expect(messages(withoutRisk)).toEqual(["extensions/one/manifest.json: risk: is required and missing"]);
@@ -126,13 +140,6 @@ describe("extension manifest contract", () => {
     ).toEqual([
       "extensions/one/manifest.json: docsPath: points at a missing file: extensions/one/MANUAL.md",
       "extensions/one/manifest.json: tests[0]: points at a missing file: tests/absent.test.ts",
-    ]);
-  });
-
-  it("rejects an agent assignment with no bundled profile", () => {
-    const manifest = validManifest();
-    expect(messages({ ...manifest, agent: { name: "extension-two", description: "Own nothing." } })).toEqual([
-      "extensions/one/manifest.json: agent.name: names no bundled agent profile at .agents/agents/extension-two.md",
     ]);
   });
 

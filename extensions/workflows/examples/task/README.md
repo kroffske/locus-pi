@@ -173,8 +173,9 @@ publishes `result.md`.
 as `S1` and executes only the matching step. Use it for explicit recovery,
 diagnosis, or an intentionally isolated step.
 
-For a graph the fixed template does not express, send `workflow-author` a
-normal authoring request: `Author a sequential project-local workflow from the
+For a graph the fixed template does not express, use the
+`locus-pi-workflow-create` skill with a normal authoring request:
+`Author a sequential project-local workflow from the
 approved plan.md and step-<n>.md catalog in this workflow workspace.`
 The author writes Design,
 reviews it, and Builds matching source in the same turn. Do not inject
@@ -208,7 +209,7 @@ context, the analyses, and compose. Workspace files survive a failed run, so
 the agents can replace incomplete outputs.
 
 For the complete `task/plan → owner approval → render → generated-source review
-→ run` protocol, use the installed `locus-task-workflow` skill. Every command
+→ run` protocol, use the installed `locus-pi-workflow-implement-task` skill. Every command
 uses the same `.locus-pi/plans/<run-name>` workspace.
 
 ## `task/implement-plan-template`

@@ -69,7 +69,7 @@ async function runEcho(root: string, input?: string, items?: readonly string[]):
       metadata.push(request.metadata as Record<string, unknown> | undefined);
       return {
         status: "completed" as const,
-        agentName: request.agent.name,
+        agentName: request.agent?.name ?? "sub-agent",
         reason: "answered",
         text: "ok",
         diagnostics: [],
@@ -566,7 +566,7 @@ export default function runWorkflow(dsl) {
           const item = prompt.split(":")[1] ?? "missing";
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: prompt.startsWith("inspect:") ? `finding:${item}` : `written:${item}`,
             diagnostics: [],
@@ -612,7 +612,7 @@ export default function runWorkflow(dsl) {
           if (prompt === "inspect:bad") {
             return {
               status: "failed" as const,
-              agentName: request.agent.name,
+              agentName: request.agent?.name ?? "sub-agent",
               reason: "scripted failure",
               diagnostics: ["bad item"],
               lifecycleEntryIds: [],
@@ -621,7 +621,7 @@ export default function runWorkflow(dsl) {
           const item = prompt.split(":")[1] ?? "missing";
           return {
             status: "completed" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "answered",
             text: prompt.startsWith("inspect:") ? `finding:${item}` : `written:${item}`,
             diagnostics: [],
@@ -661,7 +661,7 @@ export default function runWorkflow(dsl) {
             calls.push(prompt);
             return {
               status: "completed" as const,
-              agentName: request.agent.name,
+              agentName: request.agent?.name ?? "sub-agent",
               reason: "answered",
               text: `answer:${prompt}`,
               diagnostics: [],

@@ -5,7 +5,6 @@ import {
   defaultExtensionManifests,
   extensionDocs,
   featureDependencyGraph,
-  pkg,
   publicCatalogs,
   root,
 } from "../helpers/package-contract.js";
@@ -25,13 +24,13 @@ describe("extension reference contract", () => {
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
         risk: manifest.risk,
+        tier: manifest.tier,
         ownership: manifest.ownershipStatus,
       })),
     );
 
     for (const { manifestPath, manifest } of manifests) {
       expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);
-      expect(pkg.files).toContain(manifest.docsPath);
       expect(manifest.sourceAuditPath).toBeNull();
       for (const testPath of manifest.tests)
         expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);

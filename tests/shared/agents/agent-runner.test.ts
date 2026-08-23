@@ -61,7 +61,7 @@ describe("agent runner contract", () => {
       },
     });
     expect(store.latestEntry(result.childSession!.id, "message")?.payload.content).toContain(
-      "Agent run requested for reviewer.",
+      "Sub-agent run requested for reviewer.",
     );
   });
 

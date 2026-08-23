@@ -74,6 +74,7 @@ const reviewer: AgentDefinition = {
 
 function hostRequest(): AgentRunRequest {
   return {
+    executionMode: "named",
     agent: reviewer,
     task: "Review this change",
     parentSessionId: "parent-session",
@@ -461,7 +462,7 @@ describe("agent failure cause — bridge", () => {
           return {
             status: "cancelled" as const,
             failureCause: "cancelled" as const,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "run cancelled by operator",
             diagnostics: [],
             lifecycleEntryIds: [],
@@ -569,7 +570,7 @@ describe("agent failure cause — bridge", () => {
         async run(request: AgentRunRequest) {
           return {
             status: "blocked",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "no substrate here",
             failureCause: "sdk-unavailable",
             diagnostics: [],
@@ -600,7 +601,7 @@ describe("agent failure cause — bridge", () => {
         async run(request: AgentRunRequest) {
           return {
             status: "blocked",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "no substrate here",
             diagnostics: [AGENT_SDK_UNAVAILABLE_DIAGNOSTIC],
             lifecycleEntryIds: [],
@@ -753,7 +754,7 @@ describe("agent failure cause — runtime", () => {
           });
           return {
             status: "cancelled",
-            agentName: "reviewer",
+            agentName: "sub-agent",
             reason: "aborted",
             diagnostics: [],
             lifecycleEntryIds: [],
@@ -761,7 +762,7 @@ describe("agent failure cause — runtime", () => {
         },
       }),
     });
-    const result = record(await runner({ prompt: "decide", agent: "reviewer", tools: ["*"], operatorAsk: true }));
+    const result = record(await runner({ prompt: "decide", tools: ["*"], operatorAsk: true }));
     expect(result.ok).toBe(false);
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("ask-unavailable");
@@ -1327,7 +1328,7 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
           });
           return {
             ...firstResult,
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             diagnostics: [],
             lifecycleEntryIds: [],
             ...childEvidence,
@@ -1335,7 +1336,7 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
         }
         return {
           status: "completed" as const,
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "exact answer",
           text: "exact answer",
           diagnostics: [],
@@ -1378,7 +1379,7 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
       return JSON.parse(wrapper.content) as { version: string; status: string; failureCause?: string };
     };
     const persisted = readEnvelope("call-0001");
-    expect(persisted.version).toBe("locus.agent.run-result.v1");
+    expect(persisted.version).toBe("locus.agent.run-result.v2");
     expect(persisted.status).toBe("failed");
     expect(persisted.failureCause).toBe("call-timeout");
     // A completed attempt has no cause to persist, and must not invent one.

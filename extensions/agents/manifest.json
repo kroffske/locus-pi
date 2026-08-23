@@ -1,9 +1,6 @@
 {
   "id": "agents",
-  "agent": {
-    "name": "extension-agents",
-    "description": "Manage the agent catalog, child sessions, /agent and /ps, and the spawn_agent tool."
-  },
+  "tier": "default",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Loaded by default through package.json#pi.extensions",
@@ -16,13 +13,13 @@
     "agent observe / agent summary / agent drill use the shared AgentLivePanel row contract and show source-backed optional metadata only when present",
     "Shared command UI lifecycle clears transient agent list/inspect/observe/summary widgets and status on the next unrelated user input or slash command, EXCEPT a live task/spawn_agent progress widget whose key is pinned for the duration of its run and is not cleared until the run finishes",
     "the current adapter does not use a first-class createAgentSession JSON schema/response_format mode; agent output remains text-only even when a newer Pi host exposes additional structured-output capabilities",
-    "agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride",
-    "spawn_agent is the canonical subagent-spawn tool; it accepts one required task string, streams the generated live agent name into the tool card at kickoff, creates one child, returns exact text in content, and keeps runtime metadata in details",
-    "SDK children always exclude spawn_agent after their profile allowlist, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow when the profile allows it",
+    "named agent.systemPrompt is layered onto current child sessions through SDK appendSystemPromptOverride; bare children receive no package role prompt",
+    "spawn_agent is the canonical subagent-spawn tool; it accepts one required task string, starts a bare child when agent is omitted, resolves explicit names only from project/user catalogs, creates one child, returns exact text in content, and keeps runtime metadata in details",
+    "SDK children always exclude spawn_agent, so direct agent-to-agent nesting is blocked even for tools=[*]; write-capable children may retain workflow",
     "readOnly=true is host-enforced: the child allowlist is narrowed to read, grep, find, ls, yield, and explicitly requested git_read; bash, write, edit, workflow, and unknown tools are removed; git_read invokes only allowlisted local Git query subcommands without a shell and rejects mutating or process-spawning options",
     "spawn_agent spawns a headless child agent session via the createAgentSession SDK host; it fails closed with an honest reason when that host is unavailable",
     "the agent parameter of spawn_agent advertises the resolved first-match-wins catalog as bounded name - description lines (at most 12 entries, each description clamped to 96 characters, overflow stated as +N more); it is republished on every agent discovery pass including one before_agent_start refresh per turn, and it never replaces the unknown-agent check",
-    "unknown-agent errors include available agents, built-in aliases, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
+    "unknown-agent errors include available project/user agents, /agent list hint, and a diagnostic .locus/runtime/artifacts/*.json artifact",
     "/agent list and /agent inspect project existing catalog facts into typed VIEW blocks; full TUI catalogs use the shared inline editor-replacement surface while RPC/passive fallback stays compact with source counts, hidden count, and recovery controls",
     "unknown-target and headless settled-run chrome use typed ERROR/RESULT blocks without replacing the domain-owned live fleet, focus, drill, stop, resolver, or runtime store",
     "unknown or incomplete agent command syntax renders a typed WARN with no-action evidence and exact usage recovery",
@@ -91,7 +88,6 @@
       "read": [
         ".agents/agents/*.md",
         "~/.agents/agents/*.md",
-        "bundled .agents/agents/*.md",
         "MEMORY.md",
         ".agents/skills/*/SKILL.md",
         ".pi/skills/*/SKILL.md"

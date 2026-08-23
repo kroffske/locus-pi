@@ -91,7 +91,7 @@ function executor(onRun?: () => void): () => AgentExecutor {
       onRun?.();
       return {
         status: "completed" as const,
-        agentName: request.agent.name,
+        agentName: request.agent?.name ?? "sub-agent",
         reason: "done",
         text: "ok",
         diagnostics: [],

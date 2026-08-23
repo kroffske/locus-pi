@@ -5,6 +5,7 @@
  * The `spawn_agent` tool is the other client (see task-tool.ts).
  */
 import {
+  createBareAgentRunRequest,
   createAgentRunRequest,
   executeAgentRunBoundary,
   type ApprovalTier,
@@ -44,23 +45,31 @@ export function nextAgentRunSequence(): number {
   return ++agentRunSeq;
 }
 
-export interface AgentLiveTaskInput {
+interface AgentLiveTaskBaseInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
   signal: AbortSignal;
-  agent: AgentDefinition;
-  resolvedAgent: string;
   rowId: string;
   label: string;
   title: string;
   task: string;
   approvalTier: ApprovalTier;
   liveModel: { model?: string; thinking?: string } | undefined;
-  modelRoleResolution: ModelRoleResolution;
   maxTurns: number;
   onStarted?: (line: string) => void;
   parentContext?: { inline?: string; artifactPath?: string };
 }
+
+export type AgentLiveTaskInput = AgentLiveTaskBaseInput &
+  (
+    | { executionMode: "bare"; agent?: never; resolvedAgent?: never; modelRoleResolution?: never }
+    | {
+        executionMode: "named";
+        agent: AgentDefinition;
+        resolvedAgent: string;
+        modelRoleResolution: ModelRoleResolution;
+      }
+  );
 
 /**
  * Single source of truth for running ONE catalog agent as a live row (T-188 W2).
@@ -73,10 +82,10 @@ export interface AgentLiveTaskInput {
 export async function runAgentLiveTask(
   input: AgentLiveTaskInput,
 ): Promise<Awaited<ReturnType<typeof executeAgentRunBoundary>>> {
-  const { ctx, resolvedAgent, rowId, label, title, liveModel } = input;
+  const { ctx, rowId, label, title, liveModel } = input;
   const execution = agentLiveStore.beginExecution({
     id: rowId,
-    agentName: resolvedAgent,
+    ...(input.executionMode === "named" ? { agentName: input.resolvedAgent } : {}),
     label,
     title,
     request: input.task,
@@ -98,8 +107,10 @@ export async function runAgentLiveTask(
   // precedence is identical — the agent's resolved tier, then the parent session
   // model — and an unresolvable CONCRETE selector fails the run by name rather than
   // silently inheriting. This is the one call site both interactive triggers share.
-  const tier = await resolveAgentExecutorModel(ctx, input.agent, input.modelRoleResolution);
+  const tier =
+    input.executionMode === "named" ? await resolveAgentExecutorModel(ctx, input.agent, input.modelRoleResolution) : {};
   if (tier.refusal !== undefined) {
+    if (input.executionMode !== "named") throw new Error("bare execution cannot produce a profile refusal");
     // The refusal lands before any session is created, so the row's seeded
     // `model`/`thinking` are the REQUEST talking to itself. Leaving them on a terminal
     // row shows an operator a model that never ran and cannot be told apart from one
@@ -112,6 +123,7 @@ export async function runAgentLiveTask(
     });
     return {
       status: "failed",
+      executionMode: "named",
       agentName: input.agent.name,
       reason: tier.refusal,
       diagnostics: [tier.refusal],
@@ -129,17 +141,23 @@ export async function runAgentLiveTask(
     },
     liveExecution: execution,
   });
-  const request = createAgentRunRequest(input.agent, input.task, {
+  const requestInput = {
     maxTurns: input.maxTurns,
     approvalTier: input.approvalTier,
-    modelRoleResolution: input.modelRoleResolution,
     // Travels on the request for the same reason it does in the bridge: the
     // run-result artifact is written inside the boundary. `writeAgentRunResultArtifact`
     // only promotes it once `executedModel` is set — i.e. after the child was actually
     // prompted — so a run that died in setup records no degradation it cannot prove.
     ...(tier.fallback !== undefined ? { modelRoleFallback: tier.fallback } : {}),
     ...(input.parentContext !== undefined ? { parentContext: input.parentContext } : {}),
-  });
+  };
+  const request =
+    input.executionMode === "named"
+      ? createAgentRunRequest(input.agent, input.task, {
+          ...requestInput,
+          modelRoleResolution: input.modelRoleResolution,
+        })
+      : createBareAgentRunRequest(input.task, requestInput);
   const boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
   const finishedRow = agentLiveStore.patchExecution(execution, {
     status: boundary.status === "completed" ? "done" : boundary.status === "cancelled" ? "cancelled" : "error",
@@ -270,6 +288,7 @@ export async function executeAgentRunCommand(
       pi,
       ctx,
       signal: controller.signal,
+      executionMode: "named",
       agent,
       resolvedAgent,
       rowId: `run:${resolvedAgent}:${nextAgentRunSequence()}`,

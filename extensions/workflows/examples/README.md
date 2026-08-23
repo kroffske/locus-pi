@@ -7,8 +7,7 @@ group-only. Runnable roots resolve as `<name>`; children resolve as
 `<name>/<child>`.
 
 Adding or removing an entry here changes the public package surface. The same
-change must update the npm allowlist, public-repository inventory, manuals,
-tests, and changelog.
+change must update the npm package boundary, manuals, tests, and changelog.
 
 All shipped entries use the `standard` authoring profile. That value describes
 the compact source-shape contract checked during authoring; it is metadata, not
@@ -24,7 +23,7 @@ a runtime mode or model choice.
 | `post-code-review` | runnable root plus 7 children                                     | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                          |
 | `workflow-creator` | runnable root plus 3 children                                     | Turns one semantic request into an accepted Design, SVG, and checked workflow package through `design`, `svg`, and `build`.                      |
 
-The registry therefore exposes eighteen runnable names across six namespaces.
+The registry therefore exposes eighteen runnable names across five namespaces.
 The retired `requirements-grill`, `review`, and `review-fix` roots overlapped
 the standard task planning, modular review, and authorized implementation
 paths. They are intentionally absent rather than retained as catalog noise.
@@ -67,8 +66,7 @@ Only `/workflow-stop` remains as an emergency flat alias.
 
 ## Distribution boundary
 
-- `package.json#files` controls npm contents.
-- `public-repository.json` controls public-repository contents.
+- Git tracks public-repository contents. `package.json#files` controls the installed npm package.
 - `tests/integration/package-boundary.test.ts` proves that packed workflow
   names equal the entries discovered from this directory.
 

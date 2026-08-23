@@ -82,7 +82,7 @@ describe("workflow command argument completion", () => {
       (completion) => completion.label ?? completion.value,
     );
 
-    expect(labels).toEqual(["dashboard", "list", "info", "status", "result", "run", "continue", "stop"]);
+    expect(labels).toEqual(["dashboard", "list", "info", "status", "result", "run", "continue", "stop", "skills"]);
   });
 
   it("returns full argument strings for grammar-owned tokens and yields free text and paths", async () => {
@@ -213,6 +213,18 @@ describe("workflow command argument completion", () => {
     expect(complete("run alpha -- ")).toBeNull();
     expect(complete("run ./local.workflow.mjs")).toBeNull();
     expect(complete("list auth")).toBeNull();
+    expect(complete("skills ")).toEqual([
+      expect.objectContaining({ value: "skills sync ", label: "sync" }),
+      expect.objectContaining({ value: "skills status ", label: "status" }),
+      expect.objectContaining({ value: "skills remove ", label: "remove" }),
+    ]);
+    expect(complete("skills sync ")).toEqual([
+      expect.objectContaining({ value: "skills sync --host ", label: "--host" }),
+      expect.objectContaining({ value: "skills sync --scope ", label: "--scope" }),
+    ]);
+    expect(complete("skills sync --host ")).toContainEqual(
+      expect.objectContaining({ value: "skills sync --host all ", label: "all" }),
+    );
     expect(complete("unknown tail")).toBeNull();
   });
 

@@ -170,3 +170,120 @@ describe("agent({ choice }) exact routing output", () => {
     expect(annotatedResult).toBe("revise");
   });
 });
+
+describe("agent({ choice }) reads an unquoted exact-choice answer", () => {
+  // Regression for run 20260822-194520-6c07 on openai-codex/gpt-5.6-luna: the step prompt said
+  // "return exactly `completed`", the child answered `completed`, the strict JSON parser rejected
+  // it, the repair attempt answered {"type":"string","value":"completed"}, and the whole run
+  // failed although the step had completed and its history file said so.
+  it("accepts the bare member text the live run answered with, on the first attempt", async () => {
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-choice-bare-text", ["completed\n"]);
+
+    await expect(dsl.agent("Implement the step.", { choice: ["completed", "blocked"] as const })).resolves.toBe(
+      "completed",
+    );
+    expect(requests).toHaveLength(1);
+    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
+      status: "valid",
+      attempts: 1,
+      errors: [],
+      coercion: "bare-text",
+    });
+  });
+
+  it("accepts the schema-echo wrapper the live run's repair attempt answered with", async () => {
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-choice-wrapper-object", [
+      '{"type":"string","value":"completed"}',
+    ]);
+
+    await expect(dsl.agent("Implement the step.", { choice: ["completed", "blocked"] as const })).resolves.toBe(
+      "completed",
+    );
+    expect(requests).toHaveLength(1);
+    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
+      status: "valid",
+      attempts: 1,
+      errors: [],
+      coercion: "wrapper-object",
+    });
+  });
+
+  it.each([
+    ["a fenced bare member", "```\nblocked\n```", "blocked"],
+    ["a single-backticked member", "`blocked`", "blocked"],
+    [
+      "a wrapper that also echoes the enum",
+      '{"type":"string","enum":["completed","blocked"],"value":"blocked"}',
+      "blocked",
+    ],
+    ["a wrapper without a type", '{"value":"completed"}', "completed"],
+  ])("reads %s as that member without a repair attempt", async (name, answer, expected) => {
+    const { dsl, requests } = scriptedRuntime(`agent-choice-read-${name.replaceAll(" ", "-")}`, [answer]);
+
+    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).resolves.toBe(expected);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("leaves the quoted JSON string as the unmarked reading", async () => {
+    const { dsl, getJournal } = scriptedRuntime("agent-choice-quoted", ['"completed"']);
+
+    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).resolves.toBe("completed");
+    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
+      status: "valid",
+      attempts: 1,
+      errors: [],
+    });
+  });
+
+  it.each([
+    ["prose around a member", "Status: completed"],
+    ["a near-miss in case", "Completed"],
+    ["an unlisted wrapper value", '{"type":"string","value":"done"}'],
+    ["a wrapper with an extra key", '{"value":"completed","note":"see history"}'],
+    ["a wrapper of another type", '{"type":"object","value":"completed"}'],
+    ["two members", "completed blocked"],
+  ])("still fails closed on %s after the shared budget", async (name, answer) => {
+    const { dsl, getJournal, requests } = scriptedRuntime(`agent-choice-strict-${name.replaceAll(" ", "-")}`, [answer]);
+
+    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).rejects.toBeInstanceOf(
+      SchemaValidationError,
+    );
+    expect(requests).toHaveLength(2);
+    expect(
+      getJournal()
+        .filter((line) => line.kind === "agent_end")
+        .map((line) => line.schemaValidation?.status),
+    ).toEqual(["mismatch", "mismatch"]);
+  });
+
+  it("applies the same readings to a hand-written string enum and to no other shape", async () => {
+    const handWritten = scriptedRuntime("agent-schema-string-enum-bare", ["completed"]);
+    await expect(
+      handWritten.dsl.agent("Route.", { schema: { type: "string", enum: ["completed", "blocked"] } }),
+    ).resolves.toBe("completed");
+    expect(handWritten.getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toMatchObject({
+      status: "valid",
+      coercion: "bare-text",
+    });
+
+    const plainString = scriptedRuntime("agent-schema-plain-string-bare", ["completed"]);
+    await expect(plainString.dsl.agent("Route.", { schema: { type: "string" } })).rejects.toThrow(/not valid JSON/u);
+
+    const objectShape = scriptedRuntime("agent-schema-object-bare", ["completed"]);
+    await expect(
+      objectShape.dsl.agent("Route.", {
+        schema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string", enum: ["completed", "blocked"] } },
+        },
+      }),
+    ).rejects.toThrow(/not valid JSON/u);
+  });
+
+  it("prefers the declared word over the parser for a member that is also JSON of another type", async () => {
+    const { dsl } = scriptedRuntime("agent-choice-json-looking-member", ["1"]);
+
+    await expect(dsl.agent("Pick.", { choice: ["1", "2"] as const })).resolves.toBe("1");
+  });
+});

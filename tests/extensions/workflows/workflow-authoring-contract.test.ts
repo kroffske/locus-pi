@@ -73,8 +73,7 @@ function dslReturnSource(call: string, body: string): string {
 
 describe("design-first readable workflow authoring", () => {
   const authoringSurfaces = [
-    "skills/locus-pi-workflows/SKILL.md",
-    ".agents/agents/workflow-author.md",
+    "skills/locus-pi-workflow-create/SKILL.md",
     "extensions/workflows/AUTHORING.md",
     "extensions/workflows/REFERENCE.md",
     "extensions/workflows/workflow-tool.ts",
@@ -94,8 +93,8 @@ describe("design-first readable workflow authoring", () => {
     "extensions/workflows/examples/task/plan.workflow.mjs",
     "extensions/workflows/examples/task/README.md",
     "extensions/workflows/examples/task/resources/implement-plan-template.prompt.md",
-    "skills/locus-pi-workflows/references/plan-to-sequential-workflow.md",
-    "skills/locus-task-workflow/SKILL.md",
+    "skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md",
+    "skills/locus-pi-workflow-implement-task/SKILL.md",
   ];
 
   it.each(planAuthoringSurfaces)("keeps the bespoke Plan handoff continuous on %s", (relativePath) => {
@@ -125,7 +124,7 @@ describe("design-first readable workflow authoring", () => {
     const canonical =
       "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]";
     for (const relativePath of [
-      "skills/locus-pi-run-workflow/SKILL.md",
+      "skills/locus-pi-workflow-run/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/references/patterns.md",
     ]) {
@@ -141,21 +140,18 @@ describe("design-first readable workflow authoring", () => {
   });
 
   it.each([
-    "skills/locus-pi-workflows/SKILL.md",
-    ".agents/agents/workflow-author.md",
+    "skills/locus-pi-workflow-create/SKILL.md",
     "extensions/workflows/AUTHORING.md",
     "extensions/workflows/REFERENCE.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
     expect(source(relativePath)).toContain("workflow_check_source");
   });
 
-  it("makes workflow-author source-checking fail closed through the Pi-native tool", () => {
-    for (const relativePath of [".agents/agents/workflow-author.md", "skills/locus-pi-workflows/SKILL.md"]) {
-      const text = source(relativePath);
-      expect(text).toContain("workflow_check_source");
-      expect(text).toMatch(/(?:unavailable tool|failed checker result)/iu);
-      expect(text).toMatch(/never (?:report|return).*successful Build/isu);
-    }
+  it("makes workflow authoring source-checking fail closed through the Pi-native tool", () => {
+    const text = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(text).toContain("workflow_check_source");
+    expect(text).toMatch(/(?:unavailable tool|failed checker result)/iu);
+    expect(text).toMatch(/never (?:report|return).*successful Build/isu);
   });
 
   it("keeps the manual hello-world inside the enforced input-normalization grammar", () => {
@@ -167,8 +163,7 @@ describe("design-first readable workflow authoring", () => {
   it("runs every public declared-standard documentation snippet through the source checker", () => {
     const documents = [
       "extensions/workflows/AUTHORING.md",
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
       "README.md",
@@ -185,8 +180,7 @@ describe("design-first readable workflow authoring", () => {
   it("keeps standard teaching free of author-side capability and answer engineering", () => {
     const documents = [
       "extensions/workflows/AUTHORING.md",
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
       "README.md",
@@ -200,8 +194,7 @@ describe("design-first readable workflow authoring", () => {
 
   it("teaches one project-local workflow workspace separate from two-zone run evidence", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "docs/workflows.md",
     ]) {
@@ -218,7 +211,7 @@ describe("design-first readable workflow authoring", () => {
 
   it("checks every AUTHORING and installed-SKILL standard teaching fragment", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
-    const skill = javascriptDocSnippets("skills/locus-pi-workflows/SKILL.md");
+    const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
     expect(authoring).toHaveLength(5);
     expect(skill).toHaveLength(2);
 
@@ -256,8 +249,7 @@ ${skill[1] ?? ""}
 
   it("keeps unused acknowledgement protocols review-owned instead of parsing prompt English", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -516,39 +508,28 @@ ${skill[1] ?? ""}
   });
 
   it("makes a raw request design-review-build and reserves design-only for explicit pauses", () => {
-    const author = source(".agents/agents/workflow-author.md");
-    expect(author).toContain("tools: read, search, find, write, edit, bash");
-    expect(author).toContain("Any plain request to create, design, write, or author a workflow is Author");
-    expect(author).toContain("Author performs one continuous sequence");
-    expect(author).toMatch(/Never create\s+source before the design/u);
-    expect(author).toContain("Only explicit wording such as `Design only`");
-    expect(author).toContain("You never run a workflow");
+    const author = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(author).toContain("This packaged workflow-extension skill owns the authoring protocol directly.");
+    expect(author).toContain("no package-provided catalog agent is required");
+    expect(author).toContain("A plain request to create, design, write, or author a workflow runs one visible");
+    expect(author).toContain("before any source");
+    expect(author).toMatch(/Stop\s+after the design only when the user explicitly asks/u);
+    expect(author).toMatch(/it does not run the new\s+workflow/u);
     expect(author).toMatch(/material\s+(?:algorithm\s+)?(?:mismatch|change)/u);
-
-    const authorRoute = author.split("### Author\n")[1]?.split("### Design-only\n")[0] ?? "";
-    const designOnlyRoute = author.split("### Design-only\n")[1]?.split("### Revise\n")[0] ?? "";
-    const buildRoute = author.split("### Build\n")[1]?.split("## Design method\n")[0] ?? "";
-    expect(authorRoute).toContain("then create exactly\nthe declared direct `.workflow.mjs` entries");
-    expect(authorRoute).toContain("if it declares `group-only`, it\ncontains no root");
-    expect(designOnlyRoute).toContain("must not create or edit a\n`.workflow.mjs`");
-    expect(buildRoute).toContain(
-      "creates an optional folder-owned root only when\n`Entries` declares a `runnable root`, plus exactly the direct child entries",
-    );
-    expect(buildRoute).toContain("A `group-only` design creates no root");
-    expect(buildRoute).toContain("stops without running");
+    expect(author).toMatch(/A `group-only`\s+namespace has no root source/u);
+    expect(author).toContain("Build does not run");
   });
 
   it("requires Build to return the exact copyable workflow launch command", () => {
-    const author = source(".agents/agents/workflow-author.md");
+    const author = source("skills/locus-pi-workflow-create/SKILL.md");
 
     expect(author).toContain("/workflows run <name>");
-    expect(author).toMatch(/exact copyable launch command/u);
+    expect(author).toMatch(/exact\s+copyable launch command/u);
   });
 
   it("defines an optional runnable root or group-only direct child contract", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -563,11 +544,7 @@ ${skill[1] ?? ""}
   });
 
   it("teaches exact text, choice, and handoffs as the standard answer forms", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
-      "extensions/workflows/AUTHORING.md",
-    ]) {
+    for (const relativePath of ["skills/locus-pi-workflow-create/SKILL.md", "extensions/workflows/AUTHORING.md"]) {
       const text = source(relativePath);
       expect(text).toContain("exact text");
       expect(text).toContain("choice:");
@@ -578,24 +555,19 @@ ${skill[1] ?? ""}
   });
 
   it("keeps the source graph visible and rejects hidden orchestration machinery", () => {
-    const author = source(".agents/agents/workflow-author.md");
-    expect(author).toContain("Keep direct `agent()` calls, prompts, exact text handoffs, branches, and edges");
-    for (const smell of [
-      "input splitting",
-      "JSON/prose parsers",
-      "domain validators",
-      "render helpers",
-      "manual\nretries",
-      "branch-local `try/catch`",
-      "wrappers around\n`agent()`",
-    ]) {
-      expect(author).toContain(smell);
-    }
+    const author = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(author).toMatch(/Keep every prompt,\s+call, branch, and exact handoff visible where it executes/u);
+    expect(author).toMatch(/input splitting, JSON\/prose parsers/u);
+    expect(author).toContain("domain validators");
+    expect(author).toContain("Markdown/table/report renderers");
+    expect(author).toContain("hand-written retries");
+    expect(author).toContain("broad `try/catch`");
+    expect(author).toMatch(/wrappers or registries around `agent\(\)`/u);
   });
 
   it("keeps semantic input out of hidden branch protocols", () => {
-    const skill = source("skills/locus-pi-workflows/SKILL.md");
-    const card = source("skills/locus-pi-workflows/references/fixed-fan-out.md");
+    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
+    const card = source("skills/locus-pi-workflow-create/references/fixed-fan-out.md");
     expect(skill).toContain("does not encode a hidden");
     expect(skill).toContain("`split`, regex-match, or parse");
     expect(card).toContain("author-known");
@@ -604,7 +576,7 @@ ${skill[1] ?? ""}
 
   it("teaches native caller items as one exact list source for the existing pipeline", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
       "extensions/workflows/references/patterns.md",
@@ -625,8 +597,7 @@ ${skill[1] ?? ""}
   it("omits default per-attempt fuse fields from standard authoring output", () => {
     const standardSnippets = [
       "extensions/workflows/AUTHORING.md",
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/REFERENCE.md",
     ].flatMap((relativePath) => declaredStandardDocSnippets(relativePath));
 
@@ -635,8 +606,7 @@ ${skill[1] ?? ""}
     }
 
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -651,8 +621,8 @@ ${skill[1] ?? ""}
 
   it("uses design-derived handoff bounds instead of a magic authoring limit", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
+      "skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -668,10 +638,9 @@ ${skill[1] ?? ""}
   });
 
   it("keeps Plan approval separate from continuous workflow authoring", () => {
-    const card = source("skills/locus-pi-workflows/references/plan-to-sequential-workflow.md");
+    const card = source("skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md");
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -686,29 +655,27 @@ ${skill[1] ?? ""}
     expect(card).toMatch(/visibly\s+separate child/u);
     expect(card).toMatch(/no Locus items count or\s+character policy/u);
     expect(card).not.toMatch(/\bunbounded\b/iu);
-    const author = source(".agents/agents/workflow-author.md");
-    expect(author).toContain("Each implementer receives exactly one complete task block");
-    expect(author).toContain("matching `history/S<n>.md`");
-    expect(author).toMatch(/reviewer receives.*separately/isu);
-    expect(author).toContain("never add a\nworkflow under `extensions/workflows/examples/`");
+    expect(card).toMatch(/Each implementer (?:gets|receives) exactly one\s+complete task block/u);
+    expect(card).toContain("matching `history/S<n>.md`");
+    expect(card).toMatch(/reviewer.*visibly separate child/isu);
+    expect(card).toContain("Do not add a Package example");
   });
 
   it("links canonical agent, authority, event, and human-unit budget semantics", () => {
-    const skill = source("skills/locus-pi-workflows/SKILL.md");
-    const author = source(".agents/agents/workflow-author.md");
+    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
     const manual = source("extensions/workflows/REFERENCE.md");
     const agentsManual = source("extensions/agents/README.md");
 
-    expect(manual).toContain('agent(prompt, { agent: "default" })');
-    expect(manual).toContain("project `.agents/agents/`");
+    expect(manual).toContain('agent("Apply the bounded edit.", { agent: "my-project-worker" })');
+    expect(manual).toContain("project/user catalog name");
     expect(manual).toContain("`~/.agents/agents/`");
-    expect(manual).toContain("package's bundled `.agents/agents/`");
+    expect(manual).toContain("The package ships no agent profiles");
     expect(manual).toContain("full host-exposed tool surface");
     expect(manual).toContain("is not authorization");
     expect(manual).toContain("presentation metadata");
     expect(manual).toContain("`phase()` is the\ncall that journals actual execution");
     expect(manual).toContain("one readable script event");
-    for (const text of [skill, author, manual]) {
+    for (const text of [skill, manual]) {
       expect(text).toMatch(/1,000 (?:tool )?calls/u);
       expect(text).toMatch(/24-hour/u);
       expect(text).toMatch(/20 turns/u);
@@ -720,7 +687,7 @@ ${skill[1] ?? ""}
       );
       expect(text).toMatch(/SDK timeout.*later transport backstop/isu);
     }
-    expect(agentsManual).toContain("project -> user -> package precedence");
+    expect(agentsManual).toContain("project -> user precedence");
     expect(manual).toContain("no Locus items count or character policy");
   });
 
@@ -740,7 +707,7 @@ ${skill[1] ?? ""}
   });
 
   it("ships compact progressive-disclosure cards with the required decision facts", () => {
-    const referencesDir = path.join(root, "skills/locus-pi-workflows/references");
+    const referencesDir = path.join(root, "skills/locus-pi-workflow-create/references");
     const cards = readdirSync(referencesDir)
       .filter((name) => name.endsWith(".md") && name !== "INDEX.md")
       .sort();
@@ -754,7 +721,7 @@ ${skill[1] ?? ""}
       "sequential-text.md",
     ]);
     for (const name of cards) {
-      const text = source(`skills/locus-pi-workflows/references/${name}`);
+      const text = source(`skills/locus-pi-workflow-create/references/${name}`);
       expect(text).toMatch(/Use |Use this card/u);
       expect(text).toMatch(/Avoid |Allowed redesigns/u);
       expect(text).toContain("Graph");
@@ -766,7 +733,7 @@ ${skill[1] ?? ""}
   });
 
   it("teaches bounded dynamic handoffs without manufacturing a recursive manager", () => {
-    const card = source("skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md");
+    const card = source("skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md");
     expect(card).toContain("agent({ handoffs })");
     expect(card).toContain("complete non-blank unique text unit");
     expect(card).toContain("child `spawn_agent`/`task`, which remains unavailable");
@@ -777,8 +744,7 @@ ${skill[1] ?? ""}
 
   it("teaches durable saved children, stable primary files, and explicit standard profiles", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -792,9 +758,8 @@ ${skill[1] ?? ""}
 
   it("keeps fresh model discovery outside resumable positional checkpointing", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflows/SKILL.md",
-      "skills/locus-pi-workflows/references/dynamic-orchestrator-workers.md",
-      ".agents/agents/workflow-author.md",
+      "skills/locus-pi-workflow-create/SKILL.md",
+      "skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",
     ]) {
@@ -1799,7 +1764,7 @@ ${skill[1] ?? ""}
   });
 
   it("reviews every paid bounded-loop revision and reports truthful call cost", () => {
-    const card = source("skills/locus-pi-workflows/references/bounded-review-loop.md");
+    const card = source("skills/locus-pi-workflow-create/references/bounded-review-loop.md");
     expect(card).toContain("maximum\nis `1 + 2R + (R - 1) = 3R` calls");
     expect(card).toContain("every paid revision is reviewed");
     expect(card.indexOf("if (round === MAX_REVIEWS) break;")).toBeLessThan(

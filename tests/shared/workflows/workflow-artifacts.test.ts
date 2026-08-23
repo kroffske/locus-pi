@@ -842,7 +842,7 @@ describe("workflow run artifact store", () => {
         writeFileSync(tracePath, `${JSON.stringify({ type: "session", id: childId })}\n`);
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "exact answer",
           text: "exact answer",
           diagnostics: [],
@@ -896,7 +896,7 @@ describe("workflow run artifact store", () => {
         executions += 1;
         return {
           status: "completed",
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "recorded answer",
           text: "recorded answer",
           diagnostics: [],
@@ -955,7 +955,7 @@ describe("workflow run artifact store", () => {
           executions += 1;
           return {
             status: "completed",
-            agentName: request.agent.name,
+            agentName: request.agent?.name ?? "sub-agent",
             reason: "recorded answer",
             text: "recorded answer",
             diagnostics: [],

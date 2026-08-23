@@ -271,7 +271,7 @@ export function createWorkflowTranscript(
 
   function recordAgentRow(line: WorkflowJournalLine): void {
     const key = agentRowKey(line);
-    const agent = compactTranscriptText(line.agent ?? "agent");
+    const agent = compactTranscriptText(line.agent ?? "sub-agent");
     const label = line.label === undefined ? "" : compactTranscriptText(line.label);
     const replayed = line.replayed === true;
     if (line.kind === "agent_start") {
@@ -430,7 +430,7 @@ function assertNever(value: never): never {
  * work this run performed.
  */
 function formatWorkflowAgentLifecycle(line: WorkflowJournalLine, replaySourceRunId?: string): string {
-  const agent = compactTranscriptText(line.agent ?? "agent");
+  const agent = compactTranscriptText(line.agent ?? "sub-agent");
   const label = line.label === undefined ? "" : compactTranscriptText(line.label);
   const labelPart = label !== "" ? ` — ${label}` : "";
   const replayed = line.replayed === true;
@@ -462,7 +462,8 @@ export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | un
   if (line.kind === "agent_end") {
     const warnings = line.evidenceWarnings?.filter((warning) => warning.trim() !== "") ?? [];
     if (warnings.length > 0) return `warning: ${warnings.join("; ")}`;
-    if (line.status !== undefined && line.status !== "completed") return `agent ${line.agent ?? ""} ${line.status}`;
+    if (line.status !== undefined && line.status !== "completed")
+      return `agent ${line.agent ?? "sub-agent"} ${line.status}`;
     return undefined;
   }
   if (line.kind === "log") {

@@ -10,13 +10,15 @@ export interface PackageJson {
 }
 
 /**
- * The manifest shape extension-manifest.schema.json declares. Tests read manifests through
+ * The manifest shape schemas/extension-manifest.schema.json declares. Tests read manifests through
  * `readExtensionManifest` below rather than re-typing this per file, so a schema change lands
  * in one place; scripts/check-extension-manifests.ts owns the validation itself.
  */
 export interface ExtensionManifest {
   id: string;
   agent: { name: string; description: string };
+  /** `default` registers on load; `beta` registers nothing until the project enables the id. */
+  tier: "default" | "beta";
   ownershipStatus: string;
   runtimeRequirements: string[];
   stateUsed: string[];
@@ -52,6 +54,7 @@ export interface PublicCatalogs {
     commands: string[];
     hooks: string[];
     risk: string;
+    tier: string;
     ownership: string;
   }>;
   workflows: Array<{ name: string; namespace: string }>;

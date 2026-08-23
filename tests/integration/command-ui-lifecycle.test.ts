@@ -4,9 +4,9 @@ import path from "node:path";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import agents from "../../extensions/agents/index.js";
-import loop from "../../extensions/loop/index.js";
+import { registerLoop } from "../../extensions/loop/index.js";
 import model from "../../extensions/model/index.js";
-import plan from "../../extensions/plan/index.js";
+import { registerPlan } from "../../extensions/plan/index.js";
 import workflows from "../../extensions/workflows/index.js";
 import type {
   ExtensionCommandContext,
@@ -80,7 +80,7 @@ describe("command UI lifecycle", () => {
   it("clears transient widgets and statuses when an unrelated slash command is entered", async () => {
     const h = createHarness();
     agents(h.pi);
-    loop(h.pi);
+    registerLoop(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");
@@ -106,8 +106,8 @@ describe("command UI lifecycle", () => {
   it("clears the transient plan receipt but keeps the persistent mode status before a different command renders", async () => {
     const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-plan-project-"));
     const h = createHarness(projectRoot);
-    plan(h.pi);
-    loop(h.pi);
+    registerPlan(h.pi);
+    registerLoop(h.pi);
     const tmpHome = mkdtempSync(path.join(tmpdir(), "command-ui-plan-home-"));
     const savedHome = process.env["LOCUS_PI_HOME"];
     const commandCtx = stubPlanSession(h, projectRoot);
@@ -136,8 +136,8 @@ describe("command UI lifecycle", () => {
   it("clears a prompt-shelf summary on an unrelated command without mutating its artifact", async () => {
     const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-shelf-project-"));
     const h = createHarness(projectRoot);
-    plan(h.pi);
-    loop(h.pi);
+    registerPlan(h.pi);
+    registerLoop(h.pi);
 
     try {
       await h.commands.get("review")!.handler("Keep this review prompt durable", h.ctx);
@@ -183,7 +183,7 @@ describe("command UI lifecycle", () => {
   it("does not clear explicitly persistent command status surfaces", async () => {
     const h = createHarness();
     model(h.pi);
-    loop(h.pi);
+    registerLoop(h.pi);
 
     h.ctx.ui.setStatus("model-roles", "Model roles: DEFAULT=test/fast");
 

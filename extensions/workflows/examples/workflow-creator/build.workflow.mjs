@@ -6,10 +6,10 @@ export const meta = {
 };
 
 const AGENTS = {
-  builder: { agent: "default" },
-  reviewer: { agent: "reviewer" },
-  router: { agent: "default" },
-  reviser: { agent: "default" },
+  builder: {},
+  reviewer: {},
+  router: {},
+  reviser: {},
 };
 
 export default async function runWorkflow(dsl, input) {

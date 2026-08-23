@@ -1,7 +1,7 @@
 # Authoring a readable pi-workflow
 
 The bundled entry point is
-[`skills/locus-pi-workflows/SKILL.md`](../../skills/locus-pi-workflows/SKILL.md).
+[`skills/locus-pi-workflow-create/SKILL.md`](../../skills/locus-pi-workflow-create/SKILL.md).
 The complete runtime, trust, replay, and artifact reference is
 [`REFERENCE.md`](REFERENCE.md).
 
@@ -44,10 +44,9 @@ revision and review before source is created or replaced. Routine corrections do
 not introduce another human stop; ask only when the correction changes the
 requested result.
 
-Use `/agent run workflow-author` or delegate to the bundled `workflow-author`
-catalog agent. A raw request is Author: Design first, review, then Build. The
-agent’s exact design template and standard source profile live in its prompt and
-the skill above.
+Use the packaged `locus-pi-workflow-create` skill. A raw request is Author:
+Design first, review, then Build. The exact design template and standard source
+profile live in that skill and this extension documentation.
 
 An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
 supplied as Design input for an optional sequential project-local workflow. Each
@@ -58,7 +57,7 @@ list through caller `items`.
 Neither path parses Plan prose at runtime, adds a Package example, or skips the
 ordinary Design -> review -> Build sequence. Plan approval alone does not start
 workflow authoring. The selected card
-is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflows/references/plan-to-sequential-workflow.md).
+is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
 
 ## What the design must expose
 
@@ -85,7 +84,7 @@ validator, parser, custom retry/recovery, execution wrapper, renderer, hidden
 state, loop, judge, and concurrency barrier.
 
 Pattern cards are progressive-disclosure references under
-[`skills/locus-pi-workflows/references/`](../../skills/locus-pi-workflows/references/INDEX.md).
+[`skills/locus-pi-workflow-create/references/`](../../skills/locus-pi-workflow-create/references/INDEX.md).
 They describe algorithms and truthful small snippets, not full scripts to copy.
 
 ## Standard primitive profile
@@ -102,7 +101,10 @@ const route = await agent("Choose the next step.", {
 
 The runtime desugars `choice` to its existing string-enum shape path. It owns
 format instructions, parsing, validation, corrective re-ask, journal evidence,
-replay, and budgets. By default exhaustion fails closed. A design may declare
+replay, and budgets. A child that answers with the bare member text or echoes the
+schema as `{"type":"string","value":"…"}` is read as that member and the journal
+records the reading; anything else is re-asked once. By default exhaustion fails
+closed. A design may declare
 `choiceFallback` as one of the listed choices when a deterministic degraded route
 is safer; the runtime uses it only after both invalid answers and records the
 fallback in the journal. Workflow code does none of that recovery itself.
@@ -177,8 +179,9 @@ into explicit assumptions inside its result.
 
 ## Target source shape
 
-Keep stable identities together near the top. Keep prompts,
-calls, branches, and handoffs visible at their execution edges.
+Keep stable stage option groups together near the top. Keep prompts, calls,
+branches, and handoffs visible at their execution edges. Stage prompts own their
+roles; package agent names are never required.
 
 ```js
 export const meta = {
@@ -188,8 +191,8 @@ export const meta = {
 };
 
 const AGENTS = {
-  reviewer: { agent: "reviewer" },
-  composer: { agent: "default" },
+  reviewer: {},
+  composer: {},
 };
 
 export default async function run({ agent, parallel, phase, publishPrimaryArtifact }, input) {

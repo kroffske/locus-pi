@@ -2,7 +2,7 @@
  * scripts/check-extension-manifests.ts — the gate that makes extension manifests a contract.
  *
  * It loads exactly the manifests referenced by `package.json#pi.extensions`, validates each
- * one against `extension-manifest.schema.json`, and then enforces the cross-file invariants a
+ * one against `schemas/extension-manifest.schema.json`, and then enforces the cross-file invariants a
  * single-document schema cannot express. `npm run check:manifests` runs it, and `npm run check`
  * runs that first, so an unknown field or an unlisted enum value fails the suite.
  *
@@ -19,9 +19,11 @@
  *
  * Every manifest field and the consumer that reads it:
  *
- *   id                  extensions/agents/catalog.ts, scripts/audit-sources.ts, this checker
- *   agent               extensions/agents/catalog.ts (profile resolution and description drift),
- *                       this checker (uniqueness and profile existence)
+ *   id                  scripts/audit-sources.ts, this checker
+ *   tier                extensions/_shared/host/beta-gate.ts is the switch a beta entrypoint asks;
+ *                       tests/contracts/extensions/beta-gate.test.ts,
+ *                       tests/contracts/host/selective-package-loading.test.ts,
+ *                       scripts/build-public-catalogs.ts (the Tier column)
  *   ownershipStatus     scripts/audit-sources.ts (adapted extensions need review metadata)
  *   runtimeRequirements tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
  *   stateUsed           tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
@@ -43,8 +45,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extensionManifestSources } from "./extension-manifest-sources.js";
 
-const SCHEMA_FILE = "extension-manifest.schema.json";
-const BUNDLED_AGENTS_DIR = path.join(".agents", "agents");
+const SCHEMA_FILE = "schemas/extension-manifest.schema.json";
 
 /** One rejected manifest. `field` is the path inside the manifest, so each finding names one edit. */
 export interface ManifestProblem {
@@ -98,10 +99,8 @@ export function extensionManifestProblems(root: string): ManifestProblem[] {
   const schema = JSON.parse(readFileSync(path.join(root, SCHEMA_FILE), "utf8")) as SchemaNode;
   assertSupportedSchema(schema, "#");
 
-  const packagedFiles = new Set(packageFiles);
   const problems: ManifestProblem[] = [];
   const seenIds = new Map<string, string>();
-  const seenAgents = new Map<string, string>();
 
   for (const source of sources) {
     if (source.state === "invalid-entrypoint") {
@@ -128,14 +127,9 @@ export function extensionManifestProblems(root: string): ManifestProblem[] {
 
     // The manifest matched the schema, so every field below has its declared shape.
     problems.push(
-      ...crossFileProblems(
-        root,
-        directory,
-        manifest as unknown as ManifestShape,
-        packagedFiles,
-        seenIds,
-        seenAgents,
-      ).map((problem) => ({ file, ...problem })),
+      ...crossFileProblems(root, directory, manifest as unknown as ManifestShape, packageFiles, seenIds).map(
+        (problem) => ({ file, ...problem }),
+      ),
     );
   }
   return problems;
@@ -150,7 +144,6 @@ export function formatManifestProblems(problems: readonly ManifestProblem[]): st
 
 interface ManifestShape {
   id: string;
-  agent: { name: string; description: string };
   provides: { tools: string[]; commands: string[]; hooks: string[] };
   uiLifecycle?: { commands?: Array<{ name: string }>; tools?: Array<{ name: string }> };
   docsPath: string;
@@ -158,16 +151,15 @@ interface ManifestShape {
 }
 
 /**
- * The invariants that need a second file: the directory, package.json, the bundled agent
- * profiles, and the paths a manifest points at.
+ * The invariants that need a second file: the directory, package.json, and the
+ * paths a manifest points at.
  */
 function crossFileProblems(
   root: string,
   directory: string,
   manifest: ManifestShape,
-  packagedFiles: ReadonlySet<string>,
+  packageFiles: readonly string[],
   seenIds: Map<string, string>,
-  seenAgents: Map<string, string>,
 ): Array<Omit<ManifestProblem, "file">> {
   const problems: Array<Omit<ManifestProblem, "file">> = [];
 
@@ -178,19 +170,9 @@ function crossFileProblems(
   if (duplicateId) problems.push({ field: "id", message: `repeats the id already declared by ${duplicateId}` });
   else seenIds.set(manifest.id, `extensions/${directory}/manifest.json`);
 
-  const duplicateAgent = seenAgents.get(manifest.agent.name);
-  if (duplicateAgent) {
-    problems.push({ field: "agent.name", message: `repeats the agent already assigned by ${duplicateAgent}` });
-  } else seenAgents.set(manifest.agent.name, `extensions/${directory}/manifest.json`);
-
-  const profile = path.join(BUNDLED_AGENTS_DIR, `${manifest.agent.name}.md`);
-  if (!existsSync(path.join(root, profile))) {
-    problems.push({ field: "agent.name", message: `names no bundled agent profile at ${profile}` });
-  }
-
   if (!existsSync(path.join(root, manifest.docsPath))) {
     problems.push({ field: "docsPath", message: `points at a missing file: ${manifest.docsPath}` });
-  } else if (!packagedFiles.has(manifest.docsPath)) {
+  } else if (!packageFileIncludes(packageFiles, manifest.docsPath)) {
     problems.push({ field: "docsPath", message: `is not published through package.json#files: ${manifest.docsPath}` });
   }
 
@@ -202,6 +184,16 @@ function crossFileProblems(
 
   problems.push(...uiLifecycleProblems(manifest));
   return problems;
+}
+
+function packageFileIncludes(patterns: readonly string[], file: string): boolean {
+  let included = false;
+  for (const declared of patterns) {
+    const excluded = declared.startsWith("!");
+    const normalized = declared.replace(/^!/u, "").replace(/^\.\//u, "").replace(/\/$/u, "");
+    if (file === normalized || file.startsWith(`${normalized}/`)) included = !excluded;
+  }
+  return included;
 }
 
 /**
@@ -230,7 +222,7 @@ function uiLifecycleProblems(manifest: ManifestShape): Array<Omit<ManifestProble
 
 /**
  * Refuse a schema this interpreter would only partly apply. Without this, adding a keyword to
- * extension-manifest.schema.json would silently weaken the gate instead of failing it.
+ * schemas/extension-manifest.schema.json would silently weaken the gate instead of failing it.
  */
 function assertSupportedSchema(node: unknown, pointer: string): void {
   if (!isRecord(node)) throw new Error(`${SCHEMA_FILE} ${pointer}: schema node must be an object`);

@@ -7,6 +7,7 @@ import {
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
 } from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
+import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createHarness, runTool } from "../../test-harness.js";
 
 const runSpy = vi.fn();
@@ -20,32 +21,8 @@ vi.mock("../../../extensions/_shared/agent-runtime/agent-sdk-host.js", async () 
     ...actual,
     createAgentSdkSessionExecutor() {
       return {
-        async run(request: {
-          agent: {
-            name: string;
-            description: string;
-            allowedTools: string[];
-            risk: "low" | "medium" | "high";
-            readOnly: boolean;
-            filePath?: string;
-            parentContextDefault?: boolean;
-          };
-          task: string;
-          parentContext?: { inline?: string; artifactPath?: string };
-        }) {
-          const capsule = createAgentExecutionPromptCapsule({
-            agent: request.agent,
-            task: request.task,
-            parentSessionId: "parent-session",
-            projectRoot: "/repo",
-            workingDirectory: "/repo",
-            maxTurns: 5,
-            depth: 0,
-            maxDepth: 1,
-            allowedTools: request.agent.allowedTools,
-            approvalTier: "allow",
-            ...(request.parentContext === undefined ? {} : { parentContext: request.parentContext }),
-          });
+        async run(request: AgentRunRequest) {
+          const capsule = createAgentExecutionPromptCapsule(request);
           const kickoff = formatAgentKickoffPrompt(capsule);
           runSpy({ request, kickoff });
           return fakeResult();

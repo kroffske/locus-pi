@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import todoContext from "../../../extensions/todo-context/index.js";
+import { registerTodoContext } from "../../../extensions/todo-context/index.js";
 import { exportTodosToProjectTask } from "../../../extensions/_shared/project/task-bridge.js";
 import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
 import { createHarness, emit, runTool } from "../../test-harness.js";
@@ -102,7 +102,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("initializes pending tasks and auto-starts the first task", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     const result = await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
@@ -128,7 +128,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("persists queue context and dispatches exactly one hidden continuation after progress settles", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     const init = await runTool(h, "todo_write", {
       context: "Verify arithmetic one response at a time.",
@@ -179,7 +179,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("keeps manual mode non-dispatching and lets /todo run and /todo pause control execution", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Checks", items: ["Add 2 + 2"] }] }],
@@ -204,7 +204,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("pauses without losing the active task when continuation transport fails", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     h.pi.sendMessage = async () => {
       throw new Error("follow-up transport failed");
     };
@@ -230,7 +230,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("pauses after the bounded continuation limit", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       autoContinue: true,
       ops: [{ op: "init", list: [{ phase: "Checks", items: ["Repeat bounded check"] }] }],
@@ -263,7 +263,7 @@ describe("todo-context OMP-compatible todo_write", () => {
         ],
       },
     });
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     const result = await runTool(h, "todo_write", {
       ops: [{ op: "note", task: "Keep old state readable", text: "Restored." }],
@@ -280,7 +280,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("marks phase tasks completed and reports completion transitions", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
@@ -307,7 +307,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("restores previous todos from session entries instead of process memory", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
@@ -333,7 +333,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     process.env.LOCUS_PI_SESSION_STORE = "jsonl";
     const root = tempRoot();
     const first = createHarness(root, { sessionId: "todo-jsonl-session" });
-    todoContext(first.pi);
+    registerTodoContext(first.pi);
 
     const init = await runTool(first, "todo_write", {
       context: "Persist across JSONL restore.",
@@ -352,7 +352,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     todoStateCache.context = null;
     todoStateCache.autoContinue = false;
     const second = createHarness(root, { sessionId: "todo-jsonl-session" });
-    todoContext(second.pi);
+    registerTodoContext(second.pi);
     const restored = await runTool(second, "todo_write", { ops: [{ op: "done", task: "Inspect contract" }] });
 
     expect(restored.details).toMatchObject({
@@ -375,7 +375,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("persists mutated state even when a later operation returns an error", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     const result = await runTool(h, "todo_write", {
       ops: [
@@ -402,7 +402,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("shows and mutates todos through the OMP-style /todo command", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "append Execution inspect contract");
     await runCommand(h, "todo", "done inspect");
@@ -420,7 +420,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("appends a delimiter-separated batch atomically", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "append Checks add 2 + 2 ;; add 3 + 4 ;; add 5 + 6");
 
@@ -448,7 +448,7 @@ describe("todo-context OMP-compatible todo_write", () => {
   it("shows the todo state backend in /todo output", async () => {
     process.env.LOCUS_PI_SESSION_STORE = "jsonl";
     const h = createHarness(tempRoot(), { sessionId: "todo-command-session" });
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "append Execution inspect contract");
     await runCommand(h, "todo", "show");
@@ -461,7 +461,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     const root = explicitTaskProject();
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "current-task");
 
@@ -488,7 +488,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     ]);
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Session active todo"] }] }],
     });
@@ -508,7 +508,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     const task = readTaskRecord(root, "T-136");
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "from-task T-136");
 
@@ -534,7 +534,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
     const task = readTaskRecord(root, "T-136");
     const h = createHarness(root);
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "from-task T-136");
     await runCommand(h, "todo", "append Verification Capture current session markdown");
@@ -567,7 +567,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     const beforeIndex = readFileSync(path.join(root, ".tasks", "index.json"), "utf8");
 
     const fromTaskHarness = createHarness(root);
-    todoContext(fromTaskHarness.pi);
+    registerTodoContext(fromTaskHarness.pi);
     await runCommand(fromTaskHarness, "todo", "from-task T-136");
     await runCommand(fromTaskHarness, "todo", "from-task T-404");
     expect(fromTaskHarness.widgets.get("todo")).toContain("todo from-task failed.");
@@ -577,7 +577,7 @@ describe("todo-context OMP-compatible todo_write", () => {
     expect(fromTaskHarness.entries.filter((entry) => entry.type === "todo_write")).toHaveLength(1);
 
     const completionHarness = createHarness(root);
-    todoContext(completionHarness.pi);
+    registerTodoContext(completionHarness.pi);
     await runCommand(completionHarness, "todo", "completion-note --yes T-404");
     expect(completionHarness.widgets.get("todo")).toContain("todo completion-note failed.");
     expect(completionHarness.widgets.get("todo")).toContain("Task target T-404 was not found in .tasks/index.json.");
@@ -588,7 +588,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("edits todos as Markdown through the /todo command", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     h.ctx.ui.editor = (async () =>
       "# Review\n- [ ] Inspect OMP todo command\n  > Keep source evidence\n") as unknown as typeof h.ctx.ui.editor;
 
@@ -613,7 +613,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("treats an undefined host editor result as cancellation without mutating session state", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "todo", "append Execution preserve state");
     const entriesBefore = h.entries.length;
     h.ctx.ui.editor = (async () => undefined) as unknown as typeof h.ctx.ui.editor;
@@ -630,7 +630,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("rejects malformed editor Markdown without committing partial state", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runCommand(h, "todo", "append Execution preserve state");
     const entriesBefore = h.entries.length;
     h.ctx.ui.editor = (async () => "this is not todo markdown") as unknown as typeof h.ctx.ui.editor;
@@ -648,7 +648,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("renders an ERROR card when the host editor fails without claiming a change", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     h.ctx.ui.editor = (async () => {
       throw new Error("editor transport failed");
     }) as unknown as typeof h.ctx.ui.editor;
@@ -664,7 +664,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("uses one typed warning for an unknown command without a duplicate host notification", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "unexpected");
 
@@ -675,7 +675,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("returns OMP-style errors without dropping mutated todo state", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract"] }] }],
     });
@@ -703,7 +703,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("explains that task-like ids are not valid todo identifiers", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract"] }] }],
     });
@@ -719,7 +719,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("stores notes on the active task and renders active notes", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract"] }] }],
     });
@@ -748,7 +748,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("exports deterministic Markdown from restored todo state", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect contract", "Patch wrapper"] }] }],
     });
@@ -769,7 +769,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("clears all todos through /todo rm and keeps the empty state after reload", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "append Execution inspect contract");
     await runCommand(h, "todo", "rm");
@@ -784,7 +784,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("renders the 13-line /todo help block in full via the factory widget path (T-178)", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     await runCommand(h, "todo", "help");
 
@@ -804,7 +804,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("clamps a long todo list to 14 lines with a '+N more' affordance via the factory widget (T-178)", async () => {
     const h = createHarness();
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
 
     for (let i = 1; i <= 20; i++) {
       await runCommand(h, "todo", `append Execution task number ${i}`);
@@ -830,7 +830,7 @@ describe("todo-context OMP-compatible todo_write", () => {
   it("keeps the RPC/plain Session todos projection semantic and below the host 10-line cap", async () => {
     const h = createHarness(tempRoot(), { mode: "rpc", sessionId: "todo-rpc-compact" });
     h.ctx.hasUI = true;
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [
         {
@@ -855,7 +855,7 @@ describe("todo-context OMP-compatible todo_write", () => {
 
   it("reads persisted todo state without appending or mutating entries", async () => {
     const h = createHarness(tempRoot(), { sessionId: "todo-read" });
-    todoContext(h.pi);
+    registerTodoContext(h.pi);
     await runTool(h, "todo_write", {
       ops: [{ op: "init", list: [{ phase: "Execution", items: ["Inspect current state"] }] }],
     });

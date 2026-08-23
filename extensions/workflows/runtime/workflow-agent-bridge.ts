@@ -11,7 +11,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
-import { createAgentRunRequest, executeAgentRunBoundary } from "../../_shared/agent-runtime/agent-runner.js";
+import {
+  createAgentRunRequest,
+  createBareAgentRunRequest,
+  executeAgentRunBoundary,
+} from "../../_shared/agent-runtime/agent-runner.js";
 import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
@@ -37,7 +41,7 @@ import {
   type ModelRolesState,
 } from "../../_shared/model/model-settings.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
-import { DEFAULT_WORKFLOW_AGENT, workflowSlotKey } from "./workflow-runtime.js";
+import { workflowSlotKey } from "./workflow-runtime.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
 import type {
   WorkflowAgentPreflight,
@@ -116,7 +120,6 @@ export interface WorkflowAgentBridgeOptions {
   }) => AgentExecutor;
   /** Injectable concrete-selector resolver; defaults to the host model registry on `ctx`. */
   resolveModel?: WorkflowModelResolver;
-  defaultAgent?: string; // default DEFAULT_WORKFLOW_AGENT
   workspaceManager?: WorkflowWorkspaceManager;
   evidenceDestinations?: (callId: string) => WorkflowChildEvidenceDestinations;
   /** Project-local workflow workspace shared by the root and saved children. */
@@ -177,11 +180,7 @@ export function composeWorkflowChildTask(
   return `${note}${WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR}${prompt}`;
 }
 
-export function resolvePermissionMode(input: {
-  agent: AgentDefinition;
-  reqMode: PermissionMode | undefined;
-  isDefaultAgent: boolean;
-}): PermissionMode {
+export function resolvePermissionMode(input: { reqMode: PermissionMode | undefined }): PermissionMode {
   void input;
   return "inherit-parent";
 }
@@ -202,7 +201,6 @@ export function resolveWorkspaceMode(input: {
 /** Resolve every declared agent/model leg without creating a child session.
  *  Compositions use this before fan-out so a bad judge cannot spend members. */
 export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions): WorkflowAgentPreflight {
-  const defaultAgentName = options.defaultAgent ?? DEFAULT_WORKFLOW_AGENT;
   const resolveModelFn: WorkflowModelResolver = options.resolveModel ?? createWorkflowModelResolver(options.ctx);
 
   return async function preflightWorkflowAgents(requests): Promise<void> {
@@ -212,14 +210,18 @@ export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions
     const modelRoles = await loadModelRolesState(options.ctx);
 
     for (const request of requests) {
-      const agentName = request.agent !== undefined && request.agent !== "" ? request.agent : defaultAgentName;
-      const agent = agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
-      if (agent === undefined || !agentMap.has(agentName)) {
+      const agentName = request.agent?.trim();
+      if (request.agent !== undefined && agentName === "") {
+        throw new Error("Agent name must be non-empty when provided.");
+      }
+      const agent = agentName === undefined ? undefined : agentMap.get(agentName);
+      if (agentName !== undefined && agent === undefined) {
         throw new Error(`Unknown agent: ${agentName}. Available: ${[...agentMap.keys()].join(", ")}`);
       }
       const req: WorkflowAgentRequest = {
         prompt: "Fusion model preflight",
-        agent: agentName,
+        executionMode: agentName === undefined ? "bare" : "named",
+        ...(agentName === undefined ? {} : { agent: agentName }),
         ...(request.model !== undefined ? { model: request.model } : {}),
         ...(request.modelRole !== undefined ? { modelRole: request.modelRole } : {}),
       };
@@ -232,7 +234,6 @@ export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions
 /** Builds the WorkflowAgentRunner the runtime depends on. */
 export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): WorkflowAgentRunner {
   const { pi, ctx, signal, resolveModel } = options;
-  const defaultAgentName = options.defaultAgent ?? DEFAULT_WORKFLOW_AGENT;
   const resolveModelFn: WorkflowModelResolver = resolveModel ?? createWorkflowModelResolver(ctx);
   // Freeze executable package commands once, before the first workflow child can write.
   const repositoryCheckScripts = captureRepositoryCheckScripts(getWorkingDirectory(ctx));
@@ -245,14 +246,16 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
 
   return async function runWorkflowAgent(req: WorkflowAgentRequest): Promise<WorkflowAgentResult> {
     const projectRoot = getProjectRoot(ctx);
+    const executionMode = req.executionMode ?? (req.agent === undefined ? "bare" : "named");
 
-    // 1. Resolve one catalog agent. Workflow-local behavior belongs in the rendered prompt.
-    const agentName = req.agent !== "" ? req.agent : defaultAgentName;
-    const discovered = discoverAgentDefinitions(projectRoot);
-    const agentMap = new Map(discovered.definitions.map((a) => [a.name, a]));
-    const selectedAgent = agentMap.get(agentName) ?? agentMap.get(defaultAgentName);
+    // 1. Resolve a named project/user profile only when the call explicitly asks
+    // for one. Omitted agent means a clean child and never consults the catalog.
+    const discovered = executionMode === "named" ? discoverAgentDefinitions(projectRoot) : undefined;
+    const agentMap = new Map((discovered?.definitions ?? []).map((a) => [a.name, a]));
+    const selectedAgent = executionMode === "named" && req.agent !== undefined ? agentMap.get(req.agent) : undefined;
 
-    if (selectedAgent === undefined || !agentMap.has(agentName)) {
+    if (executionMode === "named" && selectedAgent === undefined) {
+      const agentName = req.agent ?? "(empty)";
       // Unknown catalog name -> return a result (not throw); script error, not host-unavailable.
       return {
         ok: false,
@@ -262,6 +265,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         diagnostics: [
           `Workflow agent bridge: agent "${agentName}" not found in catalog. Available: ${[...agentMap.keys()].join(", ")}`,
         ],
+        executionMode: "named",
         agent: agentName,
         workspaceMode: resolveWorkspaceMode({ reqMode: req.workspaceMode, sandbox: req.sandbox }),
         ...(req.label !== undefined ? { label: req.label } : {}),
@@ -269,33 +273,36 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
     // Fusion tool-free is the only internal caller allowed to narrow this path.
     // Ordinary agent() and Fusion agent mode keep the established wildcard surface.
-    const agent: AgentDefinition =
-      req.capabilityMode === "tool-free"
-        ? {
-            ...selectedAgent,
-            allowedTools: [],
-            tools: [],
-            readOnly: true,
-            permissionMode: "inherit-parent",
-          }
-        : {
-            ...selectedAgent,
-            allowedTools: ["*"],
-            tools: ["*"],
-            readOnly: false,
-            permissionMode: "inherit-parent",
-          };
+    const agent: AgentDefinition | undefined =
+      selectedAgent === undefined
+        ? undefined
+        : req.capabilityMode === "tool-free"
+          ? {
+              ...selectedAgent,
+              allowedTools: [],
+              tools: [],
+              readOnly: true,
+              permissionMode: "inherit-parent",
+            }
+          : {
+              ...selectedAgent,
+              allowedTools: ["*"],
+              tools: ["*"],
+              readOnly: false,
+              permissionMode: "inherit-parent",
+            };
 
     // 2. Pi still owns operator approval. Workflow source cannot maintain a
     //    second capability policy; only the runtime-owned Fusion marker selects
     //    the closed tool-free shape above.
     const approvalTier: "allow" = "allow";
-    const permissionMode = resolvePermissionMode({
-      agent,
-      reqMode: req.permissionMode,
-      isDefaultAgent: agent.name === defaultAgentName,
-    });
+    const permissionMode = resolvePermissionMode({ reqMode: req.permissionMode });
     const workspaceMode = resolveWorkspaceMode({ reqMode: req.workspaceMode, sandbox: req.sandbox });
+    const executionName = agent?.name ?? "sub-agent";
+    const resultIdentity =
+      executionMode === "named"
+        ? ({ executionMode: "named", agent: executionName } as const)
+        : ({ executionMode: "bare" } as const);
 
     if (req.operatorAsk === true && options.noOperator === true) {
       // Run-level no-operator mode (T-165). Refused BEFORE tier resolution and
@@ -309,7 +316,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         failureCause: "ask-unavailable",
         summary: WORKFLOW_NO_OPERATOR_ASK_MESSAGE,
         diagnostics: [WORKFLOW_NO_OPERATOR_ASK_MESSAGE],
-        agent: agent.name,
+        ...resultIdentity,
         workspaceMode,
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
@@ -334,7 +341,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         // dropped and the operator was left with a quoted selector and no next step.
         summary: tier.message,
         diagnostics: [tier.message],
-        agent: agent.name,
+        ...resultIdentity,
         workspaceMode,
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
@@ -358,7 +365,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
-          agent: agent.name,
+          ...resultIdentity,
           workspaceMode,
           ...(req.label !== undefined ? { label: req.label } : {}),
         };
@@ -375,7 +382,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
-          agent: agent.name,
+          ...resultIdentity,
           workspaceMode,
           ...(req.label !== undefined ? { label: req.label } : {}),
         };
@@ -389,13 +396,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
-          agent: agent.name,
+          ...resultIdentity,
           workspaceMode,
           ...(req.label !== undefined ? { label: req.label } : {}),
         };
       }
       try {
-        const callId = `${agent.name}-${req.label ?? "agent"}-${++worktreeCounter}`;
+        const callId = `${executionName}-${req.label ?? "agent"}-${++worktreeCounter}`;
         const worktree = createWorkflowWorktree({
           projectRoot,
           runId: options.workflowRunId,
@@ -411,7 +418,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           failureCause: "workspace-allocation",
           summary: message,
           diagnostics: [message],
-          agent: agent.name,
+          ...resultIdentity,
           workspaceMode,
           ...(req.label !== undefined ? { label: req.label } : {}),
         };
@@ -450,7 +457,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             ctx,
             contextText: workflowAskContextText({
               runId: options.workflowRunId,
-              agent: agent.name,
+              agent: executionName,
               label: req.label,
             }),
             onWaitStart: () => pauseAskFuse(),
@@ -481,7 +488,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             },
           })
         : undefined;
-    const request = createAgentRunRequest(agent, childTask, {
+    const requestInput = {
       maxTurns,
       approvalTier,
       allowedTools: req.capabilityMode === "tool-free" ? [] : ["*"],
@@ -519,7 +526,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           }
         : { metadata: { permissionMode, workspaceMode } }),
       // depth defaults to 0, maxDepth defaults to 1 (children are leaves)
-    });
+    };
+    const request =
+      agent === undefined
+        ? createBareAgentRunRequest(childTask, requestInput)
+        : createAgentRunRequest(agent, childTask, requestInput);
 
     // 5. Build the executor via the injectable factory
     const createExecutorFn =
@@ -546,7 +557,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       options.workflowRunId !== undefined
         ? workflowAgentLiveRowId({
             runId: options.workflowRunId,
-            agent: agent.name,
+            ...resultIdentity,
             ...(req.label !== undefined ? { label: req.label } : {}),
             ...(req.phase !== undefined ? { phase: req.phase } : {}),
           })
@@ -559,7 +570,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       options.workflowRunId !== undefined && req.label !== undefined
         ? workflowAgentLiveChildRowId({
             runId: options.workflowRunId,
-            agent: agent.name,
+            ...resultIdentity,
             label: req.label,
             ...(req.phase !== undefined ? { phase: req.phase } : {}),
           })
@@ -707,10 +718,10 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
         summary: message,
         diagnostics: [...boundary.diagnostics, ...askNotes, message],
-        agent: agent.name,
+        ...resultIdentity,
         permissionMode,
         workspaceMode,
-        readOnly: agent.readOnly,
+        readOnly: agent?.readOnly ?? false,
         ...(boundary.activeToolNames === undefined ? {} : { activeToolNames: boundary.activeToolNames }),
         ...(req.label !== undefined ? { label: req.label } : {}),
         ...(boundary.executedModel !== undefined ? { executedModel: boundary.executedModel } : {}),
@@ -780,7 +791,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
       diagnostics: [...(degradationConfirmed ? [tier.fallback!] : []), ...boundary.diagnostics, ...askNotes],
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
-      agent: agent.name,
+      ...resultIdentity,
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
@@ -801,7 +812,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(usage !== undefined ? { usage } : {}),
       permissionMode,
       workspaceMode,
-      readOnly: agent.readOnly,
+      readOnly: agent?.readOnly ?? false,
       ...(boundary.activeToolNames === undefined ? {} : { activeToolNames: boundary.activeToolNames }),
     };
     return result;
@@ -835,8 +846,8 @@ function workflowAskContextText(input: {
  *    here with the selector quoted and zero child sessions.
  *
  * The asymmetry is deliberate and is the owner's decision (OD5): the package ships
- * no role assignments, so refusing an unassigned role would make every bundled agent
- * fail on a stock install; but a selector an author typed by hand is an instruction,
+ * no role assignments, so refusing an unassigned named profile role would fail on a
+ * stock install; but a selector an author typed by hand is an instruction,
  * and silently running something else is exactly what this task exists to stop.
  */
 type WorkflowTier =
@@ -854,7 +865,7 @@ type WorkflowTier =
 
 async function resolveWorkflowTier(input: {
   req: WorkflowAgentRequest;
-  agent: AgentDefinition;
+  agent: AgentDefinition | undefined;
   modelRoles: ModelRolesState;
   resolveModelFn: WorkflowModelResolver;
 }): Promise<WorkflowTier> {
@@ -862,7 +873,7 @@ async function resolveWorkflowTier(input: {
   // Frontmatter preference is computed either way: it is what the request capsule,
   // the run-result artifact and the live row have always recorded, and dropping it
   // on the per-call paths would silently change three evidence surfaces.
-  const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
+  const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent?.model ?? []);
 
   if (req.model !== undefined) {
     const resolution = await resolveModelFn(req.model);
@@ -931,6 +942,8 @@ async function resolveWorkflowTier(input: {
     };
   }
 
+  if (agent === undefined) return { kind: "inherit", roleResolution: frontmatterResolution };
+
   const frontmatterSelector = agent.model?.[0];
   if (frontmatterResolution.malformed !== undefined) {
     // D3b softens an UNASSIGNED frontmatter role so a stock install still works. It
@@ -981,7 +994,7 @@ function refusal(message: string, selector?: string): WorkflowTier {
 /**
  * The one predictable way this refusal fires on an upgrade.
  *
- * Before tiers, the bundled agents wrote their tier as `pi/<role>`, and nothing read
+ * Before tiers, the former bundled profiles wrote their tier as `pi/<role>`, and nothing read
  * it — `pi` was never a provider. An agent's FRONTMATTER in that namespace is now
  * repaired in `resolveAgentModelPreference`, because that spelling is the package's
  * own history and refusing it makes a stale catalog unusable. Everything else still

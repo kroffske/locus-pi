@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import loop from "../../../extensions/loop/index.js";
-import plan from "../../../extensions/plan/index.js";
+import { registerLoop } from "../../../extensions/loop/index.js";
+import { registerPlan } from "../../../extensions/plan/index.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
@@ -37,7 +37,7 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-help-"));
     try {
       const h = createHarness(projectRoot);
-      loop(h.pi);
+      registerLoop(h.pi);
 
       h.ctx.ui.setStatus("loop", "manual");
       await h.commands.get("loop")!.handler("help", h.ctx);
@@ -66,7 +66,7 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-status-placement-"));
     try {
       const h = createHarness(projectRoot);
-      loop(h.pi);
+      registerLoop(h.pi);
 
       await h.commands.get("loop")!.handler("status", h.ctx);
       expect(h.widgets.get("loop") ?? "").toContain("Loop status");
@@ -80,7 +80,7 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-no-source-"));
     try {
       const h = createHarness(projectRoot);
-      loop(h.pi);
+      registerLoop(h.pi);
 
       const result = await runTool(h, "loop", { action: "once" });
       expect(result.isError).toBe(true);
@@ -108,7 +108,7 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-no-run-id-"));
     try {
       const h = createHarness(projectRoot);
-      loop(h.pi);
+      registerLoop(h.pi);
 
       const result = await runTool(h, "loop", { action: "once", source: "workflow" });
       expect(result.isError).toBe(true);
@@ -132,8 +132,8 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-goal-focus-"));
     try {
       const h = createHarness(projectRoot);
-      plan(h.pi);
-      loop(h.pi);
+      registerPlan(h.pi);
+      registerLoop(h.pi);
       await runTool(h, "goal", { op: "create", objective: "Ship the bounded loop focus" });
 
       await h.commands.get("loop")!.handler("once goal tighten the release proof", h.ctx);
@@ -156,7 +156,7 @@ describe("loop command surfaces", () => {
       await writeCompletedWorkflowRun(projectRoot, runId);
       const h = createHarness(projectRoot);
       h.ctx.hasUI = true;
-      loop(h.pi);
+      registerLoop(h.pi);
 
       const editor = vi
         .fn()

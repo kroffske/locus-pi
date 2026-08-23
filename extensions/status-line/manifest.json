@@ -1,9 +1,6 @@
 {
   "id": "status-line",
-  "agent": {
-    "name": "extension-status-line",
-    "description": "Maintain the responsive Locus footer without hiding Pi session evidence."
-  },
+  "tier": "default",
   "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Pi custom footer API (minimum host floor 0.83.0)",

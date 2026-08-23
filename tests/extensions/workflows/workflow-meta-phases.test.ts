@@ -169,7 +169,7 @@ describe("/workflows status <runId> declared-versus-observed", () => {
       async run(request: AgentRunRequest) {
         return {
           status: "completed" as const,
-          agentName: request.agent.name,
+          agentName: request.agent?.name ?? "sub-agent",
           reason: "answered",
           text: "ok",
           diagnostics: [],

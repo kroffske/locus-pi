@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../extensions/agents/index.js";
-import loop from "../../../extensions/loop/index.js";
+import { registerLoop } from "../../../extensions/loop/index.js";
 import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../test-harness.js";
@@ -168,7 +168,7 @@ describe("agent observer command", () => {
   it("lets another command clear stale agent widgets when slash input cleanup is skipped", async () => {
     const h = createHarness();
     agents(h.pi);
-    loop(h.pi);
+    registerLoop(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");

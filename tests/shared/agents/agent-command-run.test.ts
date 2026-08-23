@@ -17,7 +17,7 @@ import { createHarness, runTool, type Harness } from "../../test-harness.js";
 const tempRoots: string[] = [];
 
 /**
- * Every `locus.agent.run-result.v1` body the run wrote, read off disk.
+ * Every `locus.agent.run-result.v2` body the run wrote, read off disk.
  *
  * The artifact is written INSIDE the boundary, so it is the only place an
  * interactive run's recorded degradation can be observed — the command handler
@@ -314,8 +314,7 @@ describe("agent command run (unified live surface)", () => {
     expect(widget).toContain('Unknown agent: "missing".');
     expect(widget).toContain("Available agents (");
     expect(widget).toContain("reviewer [project]");
-    expect(widget).toContain("Built-in aliases:");
-    expect(widget).toContain("default -> task");
+    expect(widget).toContain("Named agents come only from the project and user catalogs.");
     expect(h.widgetOptions.get("agents")).toEqual({ placement: "aboveEditor" });
   });
 

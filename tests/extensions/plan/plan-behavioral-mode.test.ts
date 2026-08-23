@@ -9,7 +9,7 @@ import {
   modeStatePath,
   writeModeState,
 } from "../../../extensions/plan/mode-state.js";
-import plan from "../../../extensions/plan/index.js";
+import { registerPlan } from "../../../extensions/plan/index.js";
 import {
   __resetModeUiStateForTests,
   __setEditorBaseLoaderForTests,
@@ -78,7 +78,7 @@ function armPlanWithArtifact(content = "# Active Plan\n\n- step one\n- step two\
 describe("plan mode is behavioral, not a tool block (v2)", () => {
   it("registers no tool_call block hook from the plan extension", () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     expect(harness.handlers.get("tool_call") ?? []).toHaveLength(0);
     expect(harness.handlers.has("before_agent_start")).toBe(true);
   });
@@ -86,7 +86,7 @@ describe("plan mode is behavioral, not a tool block (v2)", () => {
   it("never blocks a write or subprocess tool call, even while in plan mode", async () => {
     armPlanMode();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     const writeResults = (
       await emit(harness, "tool_call", { toolName: "write", toolArgs: { path: "src/foo.ts" } })
@@ -108,7 +108,7 @@ describe("plan-mode behavioral injection (before_agent_start)", () => {
   it("injects the planning framing into the system prompt while in plan mode", async () => {
     armPlanMode();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     const [result] = await emit(harness, "before_agent_start", { systemPrompt: "BASE PROMPT" });
 
@@ -119,7 +119,7 @@ describe("plan-mode behavioral injection (before_agent_start)", () => {
 
   it("does not inject the planning framing when not in plan mode", async () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     const results = await emit(harness, "before_agent_start", { systemPrompt: "BASE PROMPT" });
 
@@ -130,14 +130,14 @@ describe("plan-mode behavioral injection (before_agent_start)", () => {
 describe("/mode explicit command boundary", () => {
   it("registers /mode without any shift+tab mode shortcut", () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     expect(harness.commands.has("mode")).toBe(true);
     expect(harness.shortcuts.has("shift+tab")).toBe(false);
   });
 
   it("/mode with no argument only shows state and never changes it", async () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
     expect(currentCycleMode(loadActiveModeState(root))).toBe("default");
@@ -151,7 +151,7 @@ describe("/mode explicit command boundary", () => {
 
   it("/mode <name> sets the mode directly", async () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
     await mode.handler("plan", harness.ctx);
@@ -163,7 +163,7 @@ describe("/mode explicit command boundary", () => {
 
   it("places a no-op mode VIEW below the editor", async () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     await harness.commands.get("mode")!.handler("default", harness.ctx);
 
@@ -174,7 +174,7 @@ describe("/mode explicit command boundary", () => {
 
   it("renders typed mode view/change blocks at 146/80/48 columns and plain RPC", async () => {
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
     await mode.handler("show", harness.ctx);
@@ -197,7 +197,7 @@ describe("/mode explicit command boundary", () => {
 
     const rpc = createHarness(path.join(root, "rpc"), { mode: "rpc" });
     rpc.ctx.hasUI = true;
-    plan(rpc.pi);
+    registerPlan(rpc.pi);
     await rpc.commands.get("mode")!.handler("show", rpc.ctx);
     expect(Array.isArray(rpc.widgetPayloads.get("plan"))).toBe(true);
     expect(rpc.widgets.get("plan")).toContain("[VIEW] Behavioral mode");
@@ -208,7 +208,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
   it("publishes PLAN through the shared bounded status and clears the legacy key", async () => {
     __setEditorBaseLoaderForTests(async () => undefined); // skip editor install; only badge here
     const harness = createHarness(root, { theme: fakeTheme });
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
     await mode.handler("plan", harness.ctx);
@@ -221,7 +221,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
 
   it("leaves the badge as plain text when no theme is available (test/non-interactive)", async () => {
     const harness = createHarness(root); // no theme
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
     await mode.handler("plan", harness.ctx);
     expect(harness.statuses.get("locus")).toBe("MODE plan");
@@ -233,7 +233,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
     }
     __setEditorBaseLoaderForTests(async () => FakeEditor as unknown as new (...args: any[]) => any);
     const harness = createHarness(root, { theme: fakeTheme });
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     await emit(harness, "session_start", {});
     expect(harness.editorFactory).toBeTypeOf("function");
@@ -258,7 +258,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
     __setEditorBaseLoaderForTests(async () => undefined);
     armPlanMode();
     const harness = createHarness(root, { theme: fakeTheme });
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     await emit(harness, "session_start", {});
     expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
@@ -268,7 +268,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
 
   it("does not install a custom editor when the UI has no theme", async () => {
     const harness = createHarness(root); // no theme -> cannot host a themed editor
-    plan(harness.pi);
+    registerPlan(harness.pi);
     await emit(harness, "session_start", {});
     expect(harness.editorFactory).toBeUndefined();
   });
@@ -278,7 +278,7 @@ describe("mode-aware UI: status badge + input border color (T-UI)", () => {
     __setEditorBaseLoaderForTests(async () => FakeEditor as unknown as new (...args: any[]) => any);
     const harness = createHarness(root, { mode: "rpc", theme: fakeTheme });
     harness.ctx.hasUI = true;
-    plan(harness.pi);
+    registerPlan(harness.pi);
 
     await emit(harness, "session_start", {});
 
@@ -296,7 +296,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("plain-exits (no selector) when the UI is headless", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const planCmd = harness.commands.get("plan")!;
 
     await planCmd.handler("exit", harness.ctx); // harness.ctx.hasUI is undefined
@@ -312,7 +312,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("plain-exits when there is no composed plan artifact", async () => {
     armPlanMode(); // state armed, but no artifact file written
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const planCmd = harness.commands.get("plan")!;
 
     await planCmd.handler("exit", uiCtx(harness));
@@ -325,7 +325,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("'Execute (this context)' clears plan mode and injects the plan as a follow-up", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const planCmd = harness.commands.get("plan")!;
     // empty selectQueue -> harness returns the first option (Execute this context)
 
@@ -346,7 +346,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("'Keep planning' stays in plan mode and sends nothing", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     harness.selectQueue.push("Keep planning");
     const planCmd = harness.commands.get("plan")!;
 
@@ -362,7 +362,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("'Tweak, then execute' prompts for an amendment and folds it into the prompt", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     harness.selectQueue.push("Tweak, then execute"); // harness ui.input returns "typed"
     const planCmd = harness.commands.get("plan")!;
 
@@ -379,7 +379,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("'Tweak, then execute' treats Escape as cancel and keeps plan mode", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     harness.selectQueue.push("Tweak, then execute");
     const planCmd = harness.commands.get("plan")!;
     const ctx = {
@@ -403,7 +403,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("'Execute with a fresh context' opens a new session seeded with the plan", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     harness.selectQueue.push("Execute with a fresh context (reset)");
     const planCmd = harness.commands.get("plan")!;
 
@@ -437,7 +437,7 @@ describe("plan -> execution handoff on exit (T-D)", () => {
   it("leaving plan via explicit /mode default runs the handoff decision", async () => {
     armPlanWithArtifact();
     const harness = createHarness(root);
-    plan(harness.pi);
+    registerPlan(harness.pi);
     const mode = harness.commands.get("mode")!;
 
     await mode.handler("default", uiCtx(harness)); // empty queue -> Execute (this context)

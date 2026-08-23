@@ -30,8 +30,12 @@ export interface AgentParentContext {
   artifactPath?: string;
 }
 
-export interface AgentRunRequest {
-  agent: AgentDefinition;
+export type AgentExecutionMode = "bare" | "named";
+
+export type AgentRunIdentity =
+  { executionMode: "bare"; agent?: never } | { executionMode: "named"; agent: AgentDefinition };
+
+export interface AgentRunRequestBase {
   task: string;
   parentSessionId: string;
   projectRoot?: string;
@@ -64,6 +68,11 @@ export interface AgentRunRequest {
   metadata?: Record<string, unknown>;
 }
 
+export type AgentRunRequest = AgentRunRequestBase & AgentRunIdentity;
+export type AgentRunRequestWithoutContext = Omit<AgentRunRequestBase, "parentSessionId" | "projectRoot"> &
+  AgentRunIdentity;
+export type AgentRunRequestInput = Partial<Omit<AgentRunRequestBase, "task" | "parentSessionId" | "projectRoot">>;
+
 /**
  * Recorded when a child session was created but the host exposes no model on it —
  * an older peer, or a structural mock. A literal value beats an absent field
@@ -74,7 +83,8 @@ export const EXECUTED_MODEL_UNAVAILABLE = "unavailable";
 
 export interface AgentRunResult {
   status: AgentRunStatus;
-  agentName: string;
+  executionMode?: AgentExecutionMode;
+  agentName?: string;
   reason: string;
   /** Why this run did not complete. Absent on success, and on results written before
    *  the field existed — a reader treats absence as `unclassified`, never as retryable. */
@@ -127,14 +137,16 @@ export interface AgentChildOutputStats {
 }
 
 export interface AgentExecutor {
-  run(request: AgentRunRequest, signal: AbortSignal): Promise<AgentRunResult>;
+  run(request: AgentRunRequest, signal: AbortSignal): Promise<AgentExecutorResult>;
 }
+
+export type AgentExecutorResult = Omit<AgentRunResult, "executionMode" | "agentName"> &
+  Partial<Pick<AgentRunResult, "executionMode" | "agentName">>;
 
 export interface AgentRunBoundaryOptions {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
-  request: Omit<AgentRunRequest, "parentSessionId" | "projectRoot" | "workingDirectory"> &
-    Partial<Pick<AgentRunRequest, "workingDirectory">>;
+  request: AgentRunRequestWithoutContext;
   sessionStore?: SessionStore;
   executor?: AgentExecutor;
   signal?: AbortSignal;
@@ -183,10 +195,11 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
     type: "message",
     payload: {
       role: "system",
-      content: `Agent run requested for ${request.agent.name}.`,
+      content: `Sub-agent run requested${request.executionMode === "named" ? ` for ${request.agent.name}` : ""}.`,
       metadata: {
         source: "agent-runner",
-        agentName: request.agent.name,
+        executionMode: request.executionMode,
+        ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
         task: request.task,
       },
     },
@@ -202,7 +215,8 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
         metadata: {
           source: "agent-runner",
           reason: "No agent executor is configured.",
-          agentName: request.agent.name,
+          executionMode: request.executionMode,
+          ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
         },
       },
     });
@@ -215,7 +229,8 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
     );
   }
 
-  const result = await options.executor.run(request, options.signal ?? new AbortController().signal);
+  const observed = await options.executor.run(request, options.signal ?? new AbortController().signal);
+  const result: AgentRunResult = { ...observed, ...agentRunResultIdentity(request) };
   // Finalized before the envelope is written, so the durable record and the caller's
   // journal cannot disagree about one transport outcome.
   const finalized = options.finalizeResult?.(result) ?? result;
@@ -226,7 +241,7 @@ export function validateRunPolicy(request: AgentRunRequest): string | undefined 
   if (request.maxTurns < 1 || request.maxTurns > 20) return "maxTurns must be between 1 and 20.";
   if (request.depth < 0) return "depth must be non-negative.";
   if (request.depth >= request.maxDepth) return "Agent run depth limit reached.";
-  if (!isAllowedToolSubset(request.agent.allowedTools, request.allowedTools))
+  if (request.executionMode === "named" && !isAllowedToolSubset(request.agent.allowedTools, request.allowedTools))
     return "Requested tools exceed the agent definition allow-list.";
   return undefined;
 }
@@ -234,9 +249,10 @@ export function validateRunPolicy(request: AgentRunRequest): string | undefined 
 export function createAgentRunRequest(
   agent: AgentDefinition,
   task: string,
-  input: Partial<AgentRunRequest> = {},
-): Omit<AgentRunRequest, "parentSessionId" | "projectRoot"> {
-  const request: Omit<AgentRunRequest, "parentSessionId" | "projectRoot"> = {
+  input: AgentRunRequestInput = {},
+): AgentRunRequestWithoutContext {
+  const request: AgentRunRequestWithoutContext = {
+    executionMode: "named",
     agent,
     task,
     maxTurns: input.maxTurns ?? 5,
@@ -245,14 +261,32 @@ export function createAgentRunRequest(
     allowedTools: input.allowedTools ?? agent.allowedTools,
     approvalTier: input.approvalTier ?? "prompt",
   };
+  copyOptionalRunFields(request, input);
+  return request;
+}
+
+export function createBareAgentRunRequest(
+  task: string,
+  input: AgentRunRequestInput = {},
+): AgentRunRequestWithoutContext {
+  const request: AgentRunRequestWithoutContext = {
+    executionMode: "bare",
+    task,
+    maxTurns: input.maxTurns ?? 5,
+    depth: input.depth ?? 0,
+    maxDepth: input.maxDepth ?? 1,
+    allowedTools: input.allowedTools ?? ["*"],
+    approvalTier: input.approvalTier ?? "prompt",
+  };
+  copyOptionalRunFields(request, input);
+  return request;
+}
+
+function copyOptionalRunFields(request: AgentRunRequestWithoutContext, input: AgentRunRequestInput): void {
+  // Both builders are allowlists. Keep every optional field in one place so a
+  // named and a bare child cannot silently diverge in artifacts or host policy.
   if (input.metadata !== undefined) request.metadata = input.metadata;
   if (input.modelRoleResolution !== undefined) request.modelRoleResolution = input.modelRoleResolution;
-  // This builder is an ALLOWLIST, so an unforwarded field is silently dropped. Both
-  // the workflow bridge and the interactive launcher pass `modelRoleFallback` here
-  // and the artifact writer reads it off the request, so omitting this line meant
-  // the degradation note could never reach `locus.agent.run-result.v1` from either
-  // caller — the artifact test passed only because it built its request literal
-  // directly and never went through this function.
   if (input.modelRoleFallback !== undefined) request.modelRoleFallback = input.modelRoleFallback;
   if (input.capabilityMode !== undefined) request.capabilityMode = input.capabilityMode;
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
@@ -260,7 +294,6 @@ export function createAgentRunRequest(
   if (input.customTools !== undefined) request.customTools = input.customTools;
   if (input.additionalExcludeTools !== undefined) request.additionalExcludeTools = input.additionalExcludeTools;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
-  return request;
 }
 
 function createAgentChildSession(store: MemorySessionStore, request: AgentRunRequest): SessionRecord {
@@ -276,7 +309,8 @@ function createAgentChildSession(store: MemorySessionStore, request: AgentRunReq
   const childInput: Omit<CreateSessionInput, "parentSessionId"> = {
     metadata: {
       source: "agent-runner",
-      agentName: request.agent.name,
+      executionMode: request.executionMode,
+      ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
       maxTurns: request.maxTurns,
       depth: request.depth,
       maxDepth: request.maxDepth,
@@ -299,7 +333,7 @@ function blockedResult(
 ): AgentRunResult {
   const result: AgentRunResult = {
     status: "blocked",
-    agentName: request.agent.name,
+    ...agentRunResultIdentity(request),
     reason,
     failureCause,
     diagnostics: [reason],
@@ -321,7 +355,7 @@ export function writeAgentRunResultArtifact(
       ? createRuntimeArtifactStore(projectRoot)
       : new FileRuntimeArtifactStore({ rootDir: resultArtifactsDir });
   const body = {
-    version: "locus.agent.run-result.v1",
+    version: "locus.agent.run-result.v2",
     status: result.status,
     reason: result.reason,
     // The machine-readable half of `reason`. Without it the only durable record of WHY a
@@ -330,6 +364,7 @@ export function writeAgentRunResultArtifact(
     // to re-derive the classification the host already made. Undefined on success, and on
     // envelopes written before the field existed; a reader treats absence as unclassified.
     failureCause: result.failureCause,
+    executionMode: result.executionMode,
     agentName: result.agentName,
     parentSessionId: request.parentSessionId,
     childSessionId: result.childSession?.id,
@@ -372,9 +407,10 @@ export function writeAgentRunResultArtifact(
       kind: "json",
       content: `${JSON.stringify(body, null, 2)}\n`,
       sessionId: request.parentSessionId,
-      title: `Agent run result: ${result.agentName}`,
+      title: `Sub-agent run result${result.agentName === undefined ? "" : `: ${result.agentName}`}`,
       metadata: {
         source: "agent-runner",
+        executionMode: result.executionMode,
         agentName: result.agentName,
         status: result.status,
         childSessionId: result.childSession?.id,
@@ -389,6 +425,16 @@ export function writeAgentRunResultArtifact(
     const reason = error instanceof Error ? error.message : String(error);
     return { ...result, diagnostics: [...result.diagnostics, `Agent run result artifact was not written: ${reason}`] };
   }
+}
+
+export function agentRunDisplayName(request: AgentRunRequest): string {
+  return request.executionMode === "named" ? request.agent.name : "sub-agent";
+}
+
+export function agentRunResultIdentity(request: AgentRunRequest): Pick<AgentRunResult, "executionMode" | "agentName"> {
+  return request.executionMode === "named"
+    ? { executionMode: "named", agentName: request.agent.name }
+    : { executionMode: "bare" };
 }
 
 function isAllowedToolSubset(agentTools: string[], requestedTools: string[]): boolean {

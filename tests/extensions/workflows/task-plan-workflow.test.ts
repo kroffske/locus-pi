@@ -43,7 +43,7 @@ function temporaryProject(): string {
 function completed(request: AgentRunRequest, text: string) {
   return {
     status: "completed" as const,
-    agentName: request.agent.name,
+    agentName: request.agent?.name ?? "sub-agent",
     reason: text,
     text,
     diagnostics: [],
@@ -54,7 +54,7 @@ function completed(request: AgentRunRequest, text: string) {
 function failed(request: AgentRunRequest, reason: string) {
   return {
     status: "failed" as const,
-    agentName: request.agent.name,
+    agentName: request.agent?.name ?? "sub-agent",
     reason,
     diagnostics: [],
     lifecycleEntryIds: [],
@@ -216,7 +216,7 @@ describe("Package workflow: task/plan", () => {
     expect(prompts.compose).toContain("`implement-plan.workflow.mjs`");
     expect(prompts.compose).toContain("`task/implement-plan-template`");
     expect(prompts.compose).toContain("`task/substep`");
-    expect(prompts.compose).toMatch(/`workflow-author`\s+as a normal authoring request/u);
+    expect(prompts.compose).toMatch(/`locus-pi-workflow-create` skill as a normal authoring request/u);
     expect(prompts.compose).toMatch(/nothing is\s+executed until the owner reviews/u);
     expect(prompts.compose).toMatch(/the owner may edit those files first/u);
     expect(prompts.compose).toMatch(/files on disk stay the contract every later run reads/u);
@@ -243,7 +243,7 @@ describe("Package workflow: task/plan", () => {
     expect(result).toContain("task/substep");
     expect(result).not.toContain("task-via-script");
     expect(result).not.toContain("task/script");
-    expect(result).toContain("workflow-author");
+    expect(result).toContain("locus-pi-workflow-create skill");
     expect(result).toContain("Author a sequential project-local workflow");
   });
 

@@ -1,7 +1,7 @@
 # Workflow pattern catalog
 
 > **Advanced compatibility archive.** New standard authoring reads the compact
-> cards under `skills/locus-pi-workflows/references/` after producing an approved
+> cards under `skills/locus-pi-workflow-create/references/` after producing an approved
 > design. Do not copy this file's raw schemas, validators, parsers, renderers, or
 > recovery shapes into standard generated source. This catalog remains shipped
 > so existing reviewed workflows can understand their historical techniques.
@@ -499,7 +499,6 @@ export default async function run({ agent, phase }, input) {
 
   phase("audit");
   return agent(`Interpret and perform this audit request exactly:\n\n${input}`, {
-    agent: "reviewer",
     label: "audit",
   });
 }
@@ -518,7 +517,6 @@ export const meta = { name: "one-agent", description: "Run one bounded tool-usin
 export default async function run({ agent, phase }, input) {
   phase("work");
   const text = await agent(input, {
-    agent: "quick_task",
     label: "work",
   });
   return text;
@@ -541,7 +539,7 @@ const gate = await agent(`Classify whether tool work is needed: ${input}`, {
 
 if (!gate.needsTools) return { ok: true, skipped: true };
 
-const work = await agent(input, { agent: "quick_task", label: "work" });
+const work = await agent(input, { label: "work" });
 return work;
 ```
 
@@ -557,7 +555,6 @@ Yes/no answer — an `enum` leaves the child no room to answer "it depends":
 
 ```js
 const gate = await agent(`Does this diff need a security review?\n${diff}`, {
-  agent: "reviewer",
   label: "security-gate",
   schema: {
     type: "object",
@@ -574,7 +571,6 @@ Small fixed field set — one closed object handed to the next stage:
 
 ```js
 const triage = await agent(`Triage this failure report:\n${report}`, {
-  agent: "reviewer",
   label: "triage",
   schema: {
     type: "object",
@@ -589,7 +585,6 @@ const triage = await agent(`Triage this failure report:\n${report}`, {
 });
 
 const fix = await agent(`Fix the ${triage.severity} defect in ${triage.component}: ${triage.summary}`, {
-  agent: "task",
   label: "fix",
   workspaceMode: "worktree",
 });
@@ -645,16 +640,14 @@ This small one-run form is appropriate only when the plan is an internal
 handoff and the whole build is one task:
 
 ```js
-const plan = await agent(`Plan: ${input}`, { agent: "plan", label: "plan" });
+const plan = await agent(`Plan: ${input}`, { label: "plan" });
 
 const build = await agent(`Implement this plan:\n${plan}`, {
-  agent: "task",
   label: "build",
   workspaceMode: "worktree",
 });
 
 const review = await agent(`Review the implementation:\n${build}`, {
-  agent: "reviewer",
   label: "review",
 });
 return review;
@@ -708,10 +701,9 @@ the same run, budget, scheduler, workspace, and replay request keys.
 
 ```js
 const findings = await parallel(
-  targets.map((target) => () => agent(`Inspect ${target}`, { agent: "explore", label: `inspect:${target}` })),
+  targets.map((target) => () => agent(`Inspect ${target}`, { label: `inspect:${target}` })),
 );
 const merge = await agent(findings.map((item, index) => `${index + 1}. ${item}`).join("\n"), {
-  agent: "librarian",
   label: "merge",
 });
 return merge;

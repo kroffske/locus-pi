@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agents from "../../../extensions/agents/index.js";
 import {
   AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS,
@@ -18,6 +18,10 @@ import { createHarness, emit } from "../../test-harness.js";
 vi.mock("@earendil-works/pi-coding-agent", () => ({}));
 
 const tempRoots: string[] = [];
+
+beforeEach(() => {
+  vi.stubEnv("HOME", tempRoot("locus-pi-hint-home"));
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -60,15 +64,15 @@ function catalogLines(description: string): string[] {
 describe("agent catalog hint formatting", () => {
   it("emits one name-description line per resolved agent", () => {
     const hint = formatAgentCatalogHint([
-      definition("explore", "Fast read-only codebase scout", "bundled"),
-      definition("task", "Full-tool worker", "bundled"),
+      definition("explore", "Fast read-only codebase scout", "user"),
+      definition("task", "Full-tool worker", "user"),
     ]);
 
     expect(hint).toBe(["explore — Fast read-only codebase scout", "task — Full-tool worker"].join("\n"));
   });
 
   it("clamps each description to the per-entry cap", () => {
-    const hint = formatAgentCatalogHint([definition("verbose", "x".repeat(400), "bundled")]);
+    const hint = formatAgentCatalogHint([definition("verbose", "x".repeat(400), "user")]);
     const [line = ""] = hint.split("\n");
     const description = line.slice("verbose — ".length);
 
@@ -78,7 +82,7 @@ describe("agent catalog hint formatting", () => {
 
   it("caps the number of entries and states the overflow instead of hiding it", () => {
     const many = Array.from({ length: AGENT_CATALOG_HINT_MAX_ENTRIES + 5 }, (_unused, index) =>
-      definition(`agent-${String(index).padStart(2, "0")}`, `Agent ${index}`, "bundled"),
+      definition(`agent-${String(index).padStart(2, "0")}`, `Agent ${index}`, "user"),
     );
 
     const lines = formatAgentCatalogHint(many).split("\n");
@@ -89,10 +93,10 @@ describe("agent catalog hint formatting", () => {
     expect(lines[0]).toBe("agent-00 — Agent 0");
   });
 
-  it("orders project before user before bundled so a local agent is never the one dropped", () => {
+  it("orders project before user so a local agent is never the one dropped", () => {
     const hint = formatAgentCatalogHint(
       [
-        definition("zeta", "Bundled zeta", "bundled"),
+        definition("zeta", "User zeta", "user"),
         definition("alpha", "User alpha", "user"),
         definition("omega", "Project omega", "project"),
       ],
@@ -105,19 +109,14 @@ describe("agent catalog hint formatting", () => {
   it("reflects the resolved first-match-wins set, not raw discovery order", () => {
     const project = tempRoot("locus-pi-hint-project");
     const userHome = tempRoot("locus-pi-hint-user");
-    const bundled = tempRoot("locus-pi-hint-bundled");
     writeAgent(project, "explore.md", "explore", "Project scout wins");
     writeAgent(userHome, "explore.md", "explore", "User scout loses");
-    writeAgent(bundled, "explore.md", "explore", "Bundled scout loses");
-    writeAgent(bundled, "task.md", "task", "Bundled worker");
+    writeAgent(userHome, "task.md", "task", "User worker");
 
-    const discovered = discoverAgentDefinitions(project, {
-      userHome,
-      bundledDir: path.join(bundled, ".agents", "agents"),
-    });
+    const discovered = discoverAgentDefinitions(project, { userHome });
     const lines = formatAgentCatalogHint(discovered.definitions).split("\n");
 
-    expect(lines).toEqual(["explore — Project scout wins", "task — Bundled worker"]);
+    expect(lines).toEqual(["explore — Project scout wins", "task — User worker"]);
   });
 
   it("returns an empty hint when nothing is loaded", () => {
@@ -130,8 +129,7 @@ describe("agent catalog hint injection", () => {
     const project = tempRoot("locus-pi-hint-inject");
     vi.stubEnv("HOME", tempRoot("locus-pi-hint-home"));
     writeAgent(project, "shipper.md", "shipper", "Project release runner");
-    // Three project agents on top of the bundled catalog push the total past the
-    // entry cap, so the truncation path is exercised rather than assumed.
+    // Multiple project agents exercise dynamic catalog injection.
     writeAgent(project, "zz-one.md", "zz-one", "Filler one");
     writeAgent(project, "zz-two.md", "zz-two", "Filler two");
     const h = createHarness(project);
@@ -140,7 +138,7 @@ describe("agent catalog hint injection", () => {
     await emit(h, "before_agent_start", { systemPrompt: "BASE" });
 
     const description = injectedAgentDescription(h.tools.get("spawn_agent")!.parameters);
-    expect(description).toContain("Agent catalog name.");
+    expect(description).toContain("Optional project/user agent catalog name.");
     expect(description).toContain("Available agents (name — description):");
     expect(description).toContain("shipper — Project release runner");
     expect(h.tools.has("task")).toBe(false);
@@ -153,8 +151,6 @@ describe("agent catalog hint injection", () => {
       const [, text = ""] = line.split(" — ");
       expect(text.length).toBeLessThanOrEqual(AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS);
     }
-    // Project + bundled definitions exceed the cap, so the truncation is stated.
-    expect(lines.at(-1)).toMatch(/^\+\d+ more — \/agent list$/);
     expect(entries[0]).toBe("shipper — Project release runner");
   });
 

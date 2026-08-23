@@ -99,16 +99,16 @@ describe("workflow namespace copy", () => {
       topic: "copy proof",
       ok: true,
       notes: {
-        explore: "package:explore inspected the directory",
-        quick_task: "package:quick_task inspected the directory",
+        first: "package:list cwd entries 1 inspected the directory",
+        second: "package:list cwd entries 2 inspected the directory",
       },
     });
     expect(personalResult).toEqual({
       topic: "copy proof",
       ok: true,
       notes: {
-        explore: "personal:explore inspected the directory",
-        quick_task: "personal:quick_task inspected the directory",
+        first: "personal:list cwd entries 1 inspected the directory",
+        second: "personal:list cwd entries 2 inspected the directory",
       },
     });
   });
@@ -179,8 +179,8 @@ async function runLiveSmoke(sourcePath: string, source: "package" | "personal"):
     {
       phase: () => undefined,
       log: () => undefined,
-      agent: async (_prompt: string, options: { agent: string }) =>
-        `${source}:${options.agent} inspected the directory`,
+      agent: async (_prompt: string, options: { label: string }) =>
+        `${source}:${options.label} inspected the directory`,
     },
     "copy proof",
   );

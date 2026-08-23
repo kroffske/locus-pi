@@ -2,7 +2,7 @@
  * extensions/workflows/command-router.ts — The `/workflows` command surface.
  *
  * Parses the command text, routes it to one operator surface (help, catalog,
- * info, dashboard, status, result, stop, continue, run), and registers the
+ * info, dashboard, status, result, skills, stop, continue, run), and registers the
  * the emergency `/workflow-stop` alias into the same grammar. Everything
  * it needs from the session — the launcher, the handoff pump, the completion
  * context — arrives as injected dependencies, never as module state.
@@ -58,6 +58,8 @@ import {
 } from "./workflow-catalog.js";
 import type { WorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { handleWorkflowRunCommand } from "./command/run.js";
+import { presentWorkflowSkillHostCommand } from "./command/skills.js";
+import { WORKFLOW_MENU_OPTIONS, type WorkflowMenuCommand } from "./command/menu.js";
 
 /** Bounded preview for hosts without custom UI; the file path carries the rest. */
 const WORKFLOW_RESULT_WIDGET_LINES = 40;
@@ -67,27 +69,8 @@ const NATIVE_SELECTOR_TEARDOWN_MS = 20;
 /** Clearing an unused status is the host API's no-visible-change way to request the post-prefill render. */
 const WORKFLOW_EDITOR_PREFILL_RENDER_STATUS_KEY = "workflows:editor-prefill-render";
 
-const WORKFLOW_MENU_COMMANDS = ["dashboard", "list", "info", "status", "result", "run", "continue", "stop"] as const;
-
-type WorkflowMenuCommand = (typeof WORKFLOW_MENU_COMMANDS)[number];
 type WorkflowMenuSelection =
   { status: "selected"; value: string } | { status: "dismissed" } | { status: "failed"; message: string };
-
-const WORKFLOW_MENU_DESCRIPTIONS: Record<WorkflowMenuCommand, string> = {
-  dashboard: "inspect persisted runs and evidence",
-  list: "browse available workflows",
-  info: "inspect one workflow's details",
-  status: "view recent run progress",
-  result: "read a finished run's output",
-  run: "start a workflow",
-  continue: "answer a pending handoff",
-  stop: "stop an active run",
-};
-
-const WORKFLOW_MENU_OPTIONS = WORKFLOW_MENU_COMMANDS.map((command) => ({
-  command,
-  label: `${command} — ${WORKFLOW_MENU_DESCRIPTIONS[command]}`,
-}));
 
 const FLAT_WORKFLOW_COMMANDS = ["stop"] as const;
 
@@ -318,6 +301,8 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       return;
     }
 
+    if (text === "skills" || text.startsWith("skills ")) return presentWorkflowSkillHostCommand(text, ctx, projectRoot);
+
     const stopMatch = /^stop(?:\s+(\S+))?$/.exec(text);
     if (stopMatch !== null) {
       const lease = commandLauncher.currentLease(ctx);
@@ -392,7 +377,7 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       transientWidgets: ["workflows", WORKFLOW_LIVE_WIDGET_KEY],
     },
     {
-      description: `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last]. Bare /workflows opens an interactive command menu only in a Pi TUI with select support; other hosts receive command help. Subcommands remain available directly.`,
+      description: `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last] | skills <sync|status|remove> [--host codex|claude|all] [--scope user|project]. Bare /workflows opens an interactive command menu only in a Pi TUI with select support; other hosts receive command help. Subcommands remain available directly.`,
       getArgumentCompletions: (prefix) => {
         const context = deps.completionContext();
         const actionableRunIds = prefix.replace(/^\s+/u, "").startsWith("continue ")
@@ -442,7 +427,8 @@ async function openWorkflowCommandMenu(
     case "dashboard":
     case "list":
     case "status":
-      await route(command);
+    case "skills":
+      await route(command === "skills" ? "skills status" : command);
       return;
     case "info": {
       const selected = await selectWorkflowTarget(ctx, projectRoot, workingDirectory, "info");

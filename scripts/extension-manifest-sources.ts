@@ -5,7 +5,7 @@
  * entrypoint per extension, whose sibling `manifest.json` is that extension's declaration. Two gates
  * consume the same set and must never disagree about which files it contains:
  *
- *   scripts/check-extension-manifests.ts   validates each manifest against extension-manifest.schema.json
+ *   scripts/check-extension-manifests.ts   validates each manifest against schemas/extension-manifest.schema.json
  *   scripts/build-public-catalogs.ts       renders the public extension catalog from the same manifests
  *
  * The two want opposite failure behavior — the checker reports every finding, the generator stops at the
@@ -27,7 +27,7 @@ export type ExtensionManifestSource =
   | { state: "unreadable"; index: number; directory: string; file: string; reason: string };
 
 export interface ExtensionManifestSet {
-  /** `package.json#files`, empty when absent; consumers check publication of manifest paths against it. */
+  /** `package.json#files` patterns, empty when absent. */
   packageFiles: string[];
   /** Set when `pi.extensions` is not an array at all, in which case `sources` is empty. */
   declarationProblem?: string;

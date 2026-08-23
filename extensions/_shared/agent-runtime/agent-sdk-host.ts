@@ -9,6 +9,7 @@ import type {
   AgentRunRequest,
   AgentRunResult,
 } from "./agent-runner.js";
+import { agentRunDisplayName, agentRunResultIdentity } from "./agent-runner.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
 import { modelSelectorFromModel } from "../model/live-model-display.js";
 import {
@@ -884,6 +885,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
   const thinkingLevel = options.thinkingLevel;
   return {
     async run(request, signal) {
+      const executionName = agentRunDisplayName(request);
       // A per-child controller lets the fleet menu stop exactly one selected row.
       // The caller's signal is still authoritative and is forwarded into the same
       // controller, so workflow/tool cancellation keeps its existing semantics.
@@ -898,9 +900,9 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
           options.liveExecution ??
           (options.live !== undefined
             ? agentLiveStore.beginExecution(
-                liveBeginOptions(options.live.rowId, request.agent.name, options.live, cwd, request.task),
+                liveBeginOptions(options.live.rowId, executionName, options.live, cwd, request.task),
               )
-            : agentLiveStore.claimQueuedExecution(request.agent.name, request.agent.name));
+            : agentLiveStore.claimQueuedExecution(executionName, executionName));
         const boundedRequest = boundedAgentLiveRequest(request.task);
         if (agentLiveStore.rowForExecution(execution)?.request !== boundedRequest) {
           agentLiveStore.patchExecution(execution, { request: boundedRequest });
@@ -1036,13 +1038,14 @@ async function runChildSession(
   const kickoff = formatAgentKickoffPrompt(capsule);
 
   const cwd = request.workingDirectory ?? request.projectRoot ?? process.cwd();
-  const readOnlyCapabilities = request.agent.readOnly
-    ? createReadOnlyAgentSessionCapabilities(cwd, request.allowedTools, {
-        ...(request.repositoryCheckScripts !== undefined
-          ? { repositoryCheckScripts: request.repositoryCheckScripts }
-          : {}),
-      })
-    : undefined;
+  const readOnlyCapabilities =
+    request.executionMode === "named" && request.agent.readOnly
+      ? createReadOnlyAgentSessionCapabilities(cwd, request.allowedTools, {
+          ...(request.repositoryCheckScripts !== undefined
+            ? { repositoryCheckScripts: request.repositoryCheckScripts }
+            : {}),
+        })
+      : undefined;
   const effectiveTools =
     readOnlyCapabilities?.tools ?? (request.allowedTools.includes("*") ? undefined : [...request.allowedTools]);
   const baseExcludedTools = readOnlyCapabilities?.excludeTools ?? ["spawn_agent"];
@@ -1343,8 +1346,8 @@ async function runChildSession(
       );
     }
     const evidenceInput: EvidenceEvaluationInput = {
-      agentName: request.agent.name,
-      policy: request.agent.evidence ?? { mode: "none" },
+      agentName: agentRunDisplayName(request),
+      policy: request.executionMode === "named" ? (request.agent.evidence ?? { mode: "none" }) : { mode: "none" },
       toolCallCount: stats.toolCalls,
       toolResultCount: stats.toolResults,
       observedToolNames: childOutputStats.recordedToolNames ?? [],
@@ -1359,7 +1362,7 @@ async function runChildSession(
     });
     return {
       status: "completed",
-      agentName: request.agent.name,
+      ...agentRunResultIdentity(request),
       reason: parsed.text,
       text: parsed.text,
       evidence,
@@ -1617,7 +1620,9 @@ async function exportEvidence(
   try {
     if (session.sessionId.trim() === "") throw new Error("child session id is missing");
     mkdirSync(reportsDir, { recursive: true });
-    const exportedPath = session.exportToJsonl(path.join(reportsDir, `agent-sdk-${request.agent.name}-${stamp}.jsonl`));
+    const exportedPath = session.exportToJsonl(
+      path.join(reportsDir, `agent-sdk-${agentRunDisplayName(request)}-${stamp}.jsonl`),
+    );
     const realReportsDir = realpathSync(reportsDir);
     const realExportedPath = realpathSync(exportedPath);
     const relativePath = path.relative(realReportsDir, realExportedPath);
@@ -1704,7 +1709,8 @@ function createSdkSessionRecord(request: AgentRunRequest, childSessionId: string
     createdAt: "agent-sdk-session",
     metadata: {
       source: "agent-sdk-session-host",
-      agentName: request.agent.name,
+      executionMode: request.executionMode,
+      ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
       maxTurns: request.maxTurns,
       depth: request.depth,
       maxDepth: request.maxDepth,
@@ -1724,7 +1730,7 @@ function blockedResult(
 ): AgentRunResult {
   return {
     status: "blocked",
-    agentName: request.agent.name,
+    ...agentRunResultIdentity(request),
     reason,
     failureCause,
     diagnostics,
@@ -1742,7 +1748,7 @@ function failedResult(
 ): AgentRunResult {
   const result: AgentRunResult = {
     status: "failed",
-    agentName: request.agent.name,
+    ...agentRunResultIdentity(request),
     reason,
     failureCause,
     diagnostics,
@@ -1761,7 +1767,7 @@ function cancelledResult(
 ): AgentRunResult {
   const result: AgentRunResult = {
     status: "cancelled",
-    agentName: request.agent.name,
+    ...agentRunResultIdentity(request),
     reason,
     // Cancellation has exactly one origin, so the cause is a constant rather than a parameter.
     failureCause: "cancelled",

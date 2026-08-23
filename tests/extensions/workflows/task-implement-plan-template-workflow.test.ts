@@ -181,5 +181,9 @@ describe("Package workflow: task/implement-plan-template", () => {
     expect(template).toContain("leave the new target absent");
     expect(template).toContain("file numbers must be contiguous from 1");
     expect(template).toContain("return exactly \\`completed\\`");
+    // The runtime appends a JSON answer contract to every choice call; the step prompt must not
+    // forbid the JSON that contract then asks for, or the child is told two different things.
+    expect(template).toContain("Do not return the\n  history Markdown or any other text.");
+    expect(template).not.toContain("Markdown, JSON");
   });
 });

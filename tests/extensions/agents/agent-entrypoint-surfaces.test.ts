@@ -38,8 +38,8 @@ describe("spawn tool approval details", () => {
     const format = h.tools.get("spawn_agent")?.formatApprovalDetails;
     expect(format).toBeTypeOf("function");
     expect(format!({ agent: "reviewer", task: "Review" })).toEqual(["Agent: reviewer", "Tasks: 1"]);
-    expect(format!({ task: "Review" })).toEqual(["Agent: task", "Tasks: 1"]);
-    expect(format!(undefined)).toEqual(["Agent: task", "Tasks: 1"]);
+    expect(format!({ task: "Review" })).toEqual(["Agent: bare", "Tasks: 1"]);
+    expect(format!(undefined)).toEqual(["Agent: bare", "Tasks: 1"]);
     expect(h.tools.has("task")).toBe(false);
     expect(h.tools.has("locus_workload_proof")).toBe(false);
   });

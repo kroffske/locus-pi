@@ -132,7 +132,6 @@ function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | unde
     : undefined;
 }
 
-export const DEFAULT_WORKFLOW_AGENT = "default";
 export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
 
 /** Journal prelude for the run-level no-operator mode. Deliberately names the
@@ -224,8 +223,8 @@ type WorkflowFusionAnyOptions = WorkflowFusionOptions | WorkflowFusionSchemaOpti
 interface NormalizedWorkflowFusionSelector {
   key: string;
   display: string;
-  agent: string;
-  agentOptions: { agent: string; model?: string; modelRole?: string };
+  agent?: string;
+  agentOptions: { agent?: string; model?: string; modelRole?: string };
 }
 
 interface NormalizedWorkflowFusionMember extends NormalizedWorkflowFusionSelector {
@@ -265,7 +264,8 @@ interface WorkflowFusionPreparation {
 
 export interface WorkflowAgentRequest {
   prompt: string;
-  agent: string; // catalog name; defaults to DEFAULT_WORKFLOW_AGENT
+  executionMode?: "bare" | "named";
+  agent?: string | undefined; // project/user catalog name; absent in bare mode
   /** @deprecated ignored by the workflow bridge; every child receives all tools. */
   readOnly?: true;
   /** Runtime-owned invariant: every workflow child request carries `["*"]`. */
@@ -311,7 +311,8 @@ export interface WorkflowAgentResult {
   text?: string;
   diagnostics: string[];
   evidence?: EvidenceEvaluation;
-  agent: string;
+  executionMode?: "bare" | "named";
+  agent?: string | undefined;
   label?: string;
   childSessionId?: string;
   childTrace?: WorkflowAgentChildTrace;
@@ -364,7 +365,15 @@ export interface WorkflowSchemaValidation {
    *  call that declared `validate` — a schema-only call has one possible authority,
    *  so naming it would change every existing journal line for no added information. */
   source?: "schema" | "script";
+  /** How an exact-choice answer was read when it was not the quoted JSON string the contract
+   *  asked for. Present only on a valid verdict that needed the reading: `bare-text` means the
+   *  child answered with the member itself, `wrapper-object` means it echoed the schema as
+   *  `{"type":"string","value":"<member>"}`. Absent on every answer that validated as written
+   *  and on every line written before the field existed. */
+  coercion?: WorkflowChoiceCoercion;
 }
+
+export type WorkflowChoiceCoercion = "bare-text" | "wrapper-object";
 
 /** Token + cost projection for one model-backed child run, summed per run for the budget view. */
 export interface WorkflowUsage {
@@ -471,7 +480,7 @@ export interface WorkflowSavedChildResult {
 export type WorkflowSavedChildRunner = (input: WorkflowSavedChildInvocation) => Promise<WorkflowSavedChildResult>;
 
 export interface WorkflowAgentOptions {
-  agent?: string; // catalog name; default DEFAULT_WORKFLOW_AGENT
+  agent?: string; // project/user catalog name; omit for a clean child session
   /** @deprecated ignored; workflow children always receive all tools and can write. */
   readOnly?: true;
   /** @deprecated ignored; workflow children always receive `allowedTools: ["*"]`. */
@@ -777,6 +786,8 @@ export interface WorkflowJournalLine {
   groupTotal?: number;
   groupCompleted?: number;
   groupFailed?: number;
+  /** Explicit child identity. Absent only on legacy journals where `agent` implied named. */
+  executionMode?: "bare" | "named";
   agent?: string;
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
@@ -2004,27 +2015,77 @@ function checkAgentSchema(
 ): AgentSchemaCheck {
   const authority = validate === undefined ? {} : { source: "schema" as const };
   const parsed = parseJsonFromText(text);
-  if (!parsed.ok) {
+  const choiceMembers = exactChoiceMembers(schema);
+  const coerced = choiceMembers === undefined ? undefined : coerceExactChoiceAnswer(text, parsed, choiceMembers);
+  const read = coerced === undefined ? parsed : { ok: true as const, value: coerced.value };
+  if (!read.ok) {
     return {
       validation: {
         status: "mismatch",
         attempts: attempt,
-        errors: [`response is not valid JSON: ${parsed.error}`],
+        errors: [`response is not valid JSON: ${read.error}`],
         ...authority,
       },
     };
   }
-  const validation = validateAgainstSchema(parsed.value, schema);
+  const validation = validateAgainstSchema(read.value, schema);
   if (!validation.ok) {
     return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors], ...authority } };
   }
   if (validate !== undefined) {
-    const scriptErrors = assertScriptValidationErrors(validate(parsed.value));
+    const scriptErrors = assertScriptValidationErrors(validate(read.value));
     if (scriptErrors.length > 0) {
       return { validation: { status: "mismatch", attempts: attempt, errors: [...scriptErrors], source: "script" } };
     }
   }
-  return { validation: { status: "valid", attempts: attempt, errors: [] }, value: parsed.value };
+  const coercion = coerced === undefined ? {} : { coercion: coerced.coercion };
+  return { validation: { status: "valid", attempts: attempt, errors: [], ...coercion }, value: read.value };
+}
+
+/**
+ * The members of a root exact-choice schema — `{ type: "string", enum: [...] }` with only
+ * string members, the shape `agent({ choice })` desugars to — or undefined for any other
+ * shape. The lenient readings below are scoped to exactly this shape: a string enum is a
+ * routing word, and a routing word has no quoting to get wrong.
+ */
+function exactChoiceMembers(schema: Record<string, unknown>): readonly string[] | undefined {
+  if (schema.type !== "string" || !Array.isArray(schema.enum)) return undefined;
+  if (!schema.enum.every((member) => typeof member === "string")) return undefined;
+  return schema.enum as readonly string[];
+}
+
+/**
+ * Read an exact-choice answer the child did not quote as a JSON string.
+ *
+ * Observed on `openai-codex/gpt-5.6-luna` (run 20260822-194520-6c07): told by a step prompt
+ * to "return exactly `completed`", the child answered `completed` — not valid JSON — and,
+ * once the repair prompt quoted that parser error back, answered
+ * `{"type":"string","value":"completed"}`, echoing the schema itself. Both name one declared
+ * member and nothing else, and the step had genuinely completed; refusing them failed the
+ * whole run over quoting.
+ *
+ * Exactly two readings are accepted, and each must land on a declared member: the trimmed
+ * (fence-stripped, optionally single-backticked) text equal to a member, or an object whose
+ * keys are drawn from `type`/`enum`/`value` — a schema echo — whose `value` is a member and
+ * whose `type`, when present, is `"string"`. Prose around a member, a near-miss, an unlisted
+ * value and any other key stay a mismatch, so `choice` remains a routing contract and not a
+ * guess. The bare reading runs first: a member such as `"1"` or `"true"` is also valid JSON
+ * of the wrong type, and the declared word wins over the parser there.
+ */
+function coerceExactChoiceAnswer(
+  text: string,
+  parsed: ReturnType<typeof parseJsonFromText>,
+  members: readonly string[],
+): { value: string; coercion: WorkflowChoiceCoercion } | undefined {
+  const bare = stripJsonFences(text).trim();
+  const word = /^`([^`]*)`$/u.exec(bare)?.[1] ?? bare;
+  if (members.includes(word)) return { value: word, coercion: "bare-text" };
+  if (!parsed.ok || !isRecord(parsed.value)) return undefined;
+  const wrapper = parsed.value;
+  const echoesSchema = Object.keys(wrapper).every((key) => key === "type" || key === "enum" || key === "value");
+  if (!echoesSchema || typeof wrapper.value !== "string" || !members.includes(wrapper.value)) return undefined;
+  if (wrapper.type !== undefined && wrapper.type !== "string") return undefined;
+  return { value: wrapper.value, coercion: "wrapper-object" };
 }
 
 /**
@@ -2284,7 +2345,7 @@ function workflowFusionPacket(fusionId: string, fusion: NormalizedWorkflowFusion
     `- Context: ${fusion.contextMode}`,
     `- Strategy: ${fusion.strategy}`,
     `- Members: ${fusion.members.length}`,
-    `- Judge: ${fusion.judge.key} (agent=${fusion.judge.agent})`,
+    `- Judge: ${fusion.judge.key} (agent=${fusion.judge.agent ?? "bare"})`,
     `- Maximum physical invocations: ${fusion.maximumPhysicalInvocations}`,
     "",
     "## Question",
@@ -2296,7 +2357,7 @@ function workflowFusionPacket(fusionId: string, fusion: NormalizedWorkflowFusion
   for (const [index, member] of fusion.members.entries()) {
     lines.push(
       "",
-      `### ${index + 1}. ${member.label} (${member.key}; agent=${member.agent})`,
+      `### ${index + 1}. ${member.label} (${member.key}; agent=${member.agent ?? "bare"})`,
       "",
       buildWorkflowFusionMemberPrompt(fusion, member),
     );
@@ -2326,19 +2387,29 @@ function normalizeFusionSelector(value: unknown, field: string): NormalizedWorkf
   if (rawAgent !== undefined && (typeof rawAgent !== "string" || rawAgent.trim() === "")) {
     throw new Error(`${field}.agent must be a non-empty catalog name when provided`);
   }
-  const agent = typeof rawAgent === "string" ? rawAgent.trim() : DEFAULT_WORKFLOW_AGENT;
+  const agent = typeof rawAgent === "string" ? rawAgent.trim() : undefined;
   if (hasModel) {
     const normalized = model.trim();
     if (!normalized.includes("/") || normalized.startsWith("/") || normalized.endsWith("/")) {
       throw new Error(`${field}.model must be a provider/id selector`);
     }
-    return { key: `model:${normalized}`, display: normalized, agent, agentOptions: { agent, model: normalized } };
+    return {
+      key: `model:${normalized}`,
+      display: normalized,
+      ...(agent === undefined ? {} : { agent }),
+      agentOptions: { ...(agent === undefined ? {} : { agent }), model: normalized },
+    };
   }
   const normalized = (modelRole as string).trim();
   if (normalized.includes("/")) {
     throw new Error(`${field}.modelRole must be a bare role name, not a provider/id selector`);
   }
-  return { key: `modelRole:${normalized}`, display: normalized, agent, agentOptions: { agent, modelRole: normalized } };
+  return {
+    key: `modelRole:${normalized}`,
+    display: normalized,
+    ...(agent === undefined ? {} : { agent }),
+    agentOptions: { ...(agent === undefined ? {} : { agent }), modelRole: normalized },
+  };
 }
 
 function assertFusionText(
@@ -2509,12 +2580,16 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       timeoutMs: { requested: opts?.timeoutMs, applied: defaultTimeoutMs },
       turns: { requested: opts?.maxTurns, applied: defaultMaxTurns },
     });
-    const agentName = opts?.agent ?? DEFAULT_WORKFLOW_AGENT;
+    const agentName = opts?.agent?.trim();
+    if (opts?.agent !== undefined && agentName === "") {
+      throw new Error("agent must be a non-empty project/user catalog name when provided");
+    }
     const permissionMode = defaultWorkflowPermissionMode();
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
     const req: WorkflowAgentRequest = {
       prompt,
-      agent: agentName,
+      executionMode: agentName === undefined ? "bare" : "named",
+      ...(agentName === undefined ? {} : { agent: agentName }),
       tools: ["*"],
       ...(opts?.ask === true ? { operatorAsk: true as const } : {}),
       permissionMode,
@@ -2600,7 +2675,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         kind: "log",
         source: "runtime",
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        message: `[workflow:retry] ${req.agent}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
+        message: `[workflow:retry] ${workflowAgentDisplayName(req)}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
       });
     }
     options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
@@ -2648,7 +2723,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ts: nowFn(),
       runId,
       kind: "agent_start",
-      agent: req.agent,
+      ...workflowExecutionIdentity(req),
       ...(replayed ? { replayed: true } : {}),
       ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
       permissionMode,
@@ -2681,7 +2756,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         summary: "Replayed from a recorded run.",
         text: replayedText,
         diagnostics: [],
-        agent: req.agent,
+        ...workflowExecutionIdentity(req),
         permissionMode,
         workspaceMode,
         ...(req.label !== undefined ? { label: req.label } : {}),
@@ -2718,7 +2793,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ts: nowFn(),
           runId,
           kind: "error",
-          agent: req.agent,
+          ...workflowExecutionIdentity(req),
           callId,
           replayed: false,
           ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
@@ -2793,7 +2868,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           runId,
           kind: "error",
           source: "script",
-          agent: req.agent,
+          ...workflowExecutionIdentity(req),
           callId,
           ...attemptFields,
           replayed,
@@ -2829,7 +2904,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     try {
       artifactEvidence = options.artifactPorts?.recordAgentEvidence({
         callId,
-        name: opts?.artifact ?? defaultArtifactName(req.label ?? req.agent, callId),
+        name: opts?.artifact ?? defaultArtifactName(req.label ?? workflowAgentDisplayName(req), callId),
         ...(req.phase !== undefined ? { stage: req.phase } : {}),
         ...(finalResult.text !== undefined ? { text: finalResult.text } : {}),
         replayed,
@@ -2850,7 +2925,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         runId,
         kind: "error",
         source: "runtime",
-        agent: req.agent,
+        ...workflowExecutionIdentity(req),
         callId,
         ...attemptFields,
         replayed,
@@ -2872,7 +2947,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ts: nowFn(),
       runId,
       kind: "agent_end",
-      agent: req.agent,
+      ...workflowExecutionIdentity(req),
       callId,
       ...attemptFields,
       replayed,
@@ -3087,7 +3162,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    *
    * `choice` is syntax over `{ type: "string", enum: [...] }`; it reaches this same path
    * before any request is canonicalized. Without `choiceFallback`, a hand-written equivalent
-   * schema therefore has the same prompt, replay key, journal evidence and failure behavior.
+   * schema therefore has the same prompt, replay key, journal evidence and failure behavior —
+   * including the two lenient readings of an exact-choice answer (`coerceExactChoiceAnswer`),
+   * which stamp `coercion` on that attempt's `schemaValidation` instead of re-asking.
    * An explicit fallback changes only exhaustion: the runtime journals the degraded route and
    * returns that declared choice after both schema attempts fail.
    *
@@ -3613,6 +3690,7 @@ export function workflowSlotKey(input: { phase?: string | undefined; label?: str
 function canonicalAgentRequest(req: WorkflowAgentRequest): string {
   return JSON.stringify({
     prompt: req.prompt,
+    executionMode: workflowExecutionIdentity(req).executionMode,
     agent: req.agent,
     maxToolCalls: req.maxToolCalls ?? null,
     model: req.model ?? null,
@@ -3642,6 +3720,23 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     // not be served to the other.
     operatorAsk: req.operatorAsk ?? null,
   });
+}
+
+type WorkflowExecutionIdentity = { executionMode: "bare"; agent?: never } | { executionMode: "named"; agent: string };
+
+function workflowExecutionIdentity(req: WorkflowAgentRequest): WorkflowExecutionIdentity {
+  const mode = req.executionMode ?? (req.agent === undefined ? "bare" : "named");
+  if (mode === "bare") return { executionMode: "bare" };
+  if (req.agent === undefined || req.agent.trim() === "") {
+    throw new Error("named workflow execution requires a non-empty agent name");
+  }
+  return { executionMode: "named", agent: req.agent };
+}
+
+function workflowAgentDisplayName(req: WorkflowAgentRequest): string {
+  return (req.executionMode ?? (req.agent === undefined ? "bare" : "named")) === "named"
+    ? (req.agent ?? "named-agent")
+    : "sub-agent";
 }
 
 function defaultArtifactName(label: string, callId: string): string {

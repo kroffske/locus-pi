@@ -14,9 +14,18 @@
 /workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]
 /workflows continue <runId>
 /workflows stop [runId|last]
+/workflows skills <sync|status|remove> [--host codex|claude|all] [--scope user|project]
 ```
 
 Tools: `workflow`, read-only `workflow_check_source`, and opt-in `fusion`. Compatibility command: `/workflow-stop`.
+
+`/workflows skills` exposes the package's action-named workflow skills to
+external agents. Pi already loads the packaged skills. The command manages
+fail-closed symlinks in Codex `.agents/skills` and Claude Code `.claude/skills`;
+the adjacent `.locus-pi-workflow-skills.v1.json` file records ownership, so it
+never infers ownership from a path or replaces a real directory or foreign
+symlink. See
+[`skills/README.md`](../../skills/README.md).
 
 The `workflow` tool is the structured execution surface for agents. It supports fields that cannot always be represented safely by slash-command text, including caller `items` and approved continuations.
 
