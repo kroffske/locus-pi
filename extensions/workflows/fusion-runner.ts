@@ -7,7 +7,7 @@ import type { WorkflowAgentBridgeOptions } from "./runtime/workflow-agent-bridge
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "./runtime/workflow-agent-bridge.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "./runtime/workflow-artifacts.js";
 import { DEFAULT_WORKFLOW_BUDGET, formatWorkflowBudgetPrelude } from "./runtime/workflow-budget.js";
-import { createWorkflowJournalSink, newWorkflowRunId, workflowRunDir } from "./runtime/workflow-journal.js";
+import { claimNewWorkflowRun, workflowRunDir } from "./runtime/workflow-journal.js";
 import {
   acquireWorkflowRootLease,
   releaseWorkflowRootLease,
@@ -65,17 +65,18 @@ export interface DirectFusionRunResult {
 export async function runDirectFusion(options: DirectFusionRunOptions): Promise<DirectFusionRunResult> {
   const projectRoot = getProjectRoot(options.ctx);
   const workingDirectory = getWorkingDirectory(options.ctx);
-  const runId = newWorkflowRunId();
-  const runDir = workflowRunDir(projectRoot, runId);
-  const journalSink = createWorkflowJournalSink(projectRoot, runId);
-  const prelude: WorkflowJournalLine = {
-    ts: new Date().toISOString(),
+  const {
     runId,
+    journal: journalSink,
+    firstLine: prelude,
+  } = claimNewWorkflowRun(projectRoot, (mintedRunId) => ({
+    ts: new Date().toISOString(),
+    runId: mintedRunId,
     kind: "log",
     source: "runtime",
     message: formatWorkflowBudgetPrelude(DEFAULT_WORKFLOW_BUDGET),
-  };
-  journalSink.initialize(prelude);
+  }));
+  const runDir = workflowRunDir(projectRoot, runId);
   options.onEvent?.(prelude);
 
   const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory, { runId });

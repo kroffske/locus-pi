@@ -4,6 +4,10 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Fixed
+
+- A workflow run starting in the same second as another run could crash with `EEXIST` on the run journal instead of starting — most visible on `--resume` right after a short run, when both drew the same random run-id suffix. Run-id allocation now treats the exclusive journal create as the claim and retries with fresh ids on collision; resume ids are never re-minted.
+
 ## [0.6.0] - 2026-08-23
 
 ### Changed

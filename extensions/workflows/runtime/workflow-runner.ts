@@ -55,10 +55,9 @@ import {
   type WorkflowFailureOrigin,
 } from "./workflow-failure.js";
 import {
-  newWorkflowRunId,
+  claimNewWorkflowRun,
   workflowJournalFile,
   workflowRunDir,
-  createWorkflowJournalSink,
   readWorkflowRunResult,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
@@ -1032,23 +1031,25 @@ async function importWorkflowModule(specifier: string): Promise<WorkflowScriptMo
 export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise<RunWorkflowScriptResult> {
   const projectRoot = getProjectRoot(opts.ctx);
   const workingDirectory = getWorkingDirectory(opts.ctx);
-  const runId = newWorkflowRunId();
-  const runDir = workflowRunDir(projectRoot, runId);
-  const runtimeDir = workflowRunRuntimeDir(runDir);
-  const outputDir = workflowReportDir(projectRoot, runId);
   const inheritedCoordination = opts[RUN_COORDINATION];
-  const journal = createWorkflowJournalSink(projectRoot, runId);
   let items: readonly string[];
   const resolvedBudget = inheritedCoordination?.budget === undefined ? resolveWorkflowBudget(opts.budget) : undefined;
   const budget = inheritedCoordination?.budget ?? resolvedBudget!.budget;
   const budgetRaises = resolvedBudget?.raises ?? [];
-  const budgetPrelude: WorkflowJournalLine = {
-    ts: new Date().toISOString(),
+  const {
     runId,
+    journal,
+    firstLine: budgetPrelude,
+  } = claimNewWorkflowRun(projectRoot, (mintedRunId) => ({
+    ts: new Date().toISOString(),
+    runId: mintedRunId,
     kind: "log",
     source: "runtime",
     message: formatWorkflowBudgetPrelude(budget),
-  };
+  }));
+  const runDir = workflowRunDir(projectRoot, runId);
+  const runtimeDir = workflowRunRuntimeDir(runDir);
+  const outputDir = workflowReportDir(projectRoot, runId);
   // Inherited coordination is the only authority for children: a saved child
   // can neither drop nor introduce the mode, exactly like `budget`.
   const noOperator =
@@ -1069,7 +1070,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           // to say why input was refused to a reader who typed no flag.
           message: isOneShotHostMode(opts.ctx) ? WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE : WORKFLOW_NO_OPERATOR_PRELUDE,
         };
-  journal.initialize(budgetPrelude);
   if (noOperatorPrelude !== undefined) journal.write(noOperatorPrelude);
 
   const requestedResumeFromRunId = opts.resumeFromRunId;
