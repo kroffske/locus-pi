@@ -699,6 +699,45 @@ export default async function runWorkflow(dsl, input) {
     expect(resumed.executedPrompts).toEqual([]);
   });
 
+  it("claims a fresh run id when an immediate resume mints a colliding id in the same second", async () => {
+    // Regression: a run id is a second-resolution timestamp plus a 16-bit random
+    // suffix, so a resume starting in the same second as the run it resumes can
+    // mint the SAME id and die with EEXIST on the already-claimed journal. Freeze
+    // the clock and script the suffix draws so the collision is forced; the
+    // runner must claim the next fresh id instead of throwing.
+    const root = temporaryProject();
+    writeWorkflow(
+      root,
+      "inert",
+      `export const meta = { name: "inert", description: "replay-safe with no calls" };
+export default async function runWorkflow(dsl, input) {
+  return { summary: "no agents here: " + String(input ?? "") };
+}
+`,
+    );
+    vi.useFakeTimers({ now: new Date("2026-08-23T00:02:30.453Z"), toFake: ["Date"] });
+    let draws = 0;
+    const random = vi.spyOn(Math, "random").mockImplementation(() => {
+      draws += 1;
+      // Both runs mint the same suffix; every later draw is distinct.
+      return draws <= 2 ? 0x4560 / 0x10000 : (0x4560 + draws - 2) / 0x10000;
+    });
+    try {
+      const first = await runWorkflow(root, "inert");
+      expect(first.ok).toBe(true);
+      expect(first.runId).toBe("20260823-000230-4560");
+
+      const resumed = await runWorkflow(root, "inert", { resumeFromRunId: first.runId });
+      expect(resumed.ok).toBe(true);
+      // The retried claim, not an EEXIST crash: same frozen second, next suffix.
+      expect(resumed.runId).toBe("20260823-000230-4561");
+      expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "no-recorded-calls" });
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("gives two stages on two tiers two distinct records", async () => {
     // The defect this guards: `modelRole` missing from the canonical request would
     // make these two calls "the same call", and a `slow` stage could be served an

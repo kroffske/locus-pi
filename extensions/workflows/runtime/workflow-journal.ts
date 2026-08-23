@@ -96,6 +96,50 @@ export function newWorkflowRunId(now?: () => Date): string {
   return `${datePart}-${timePart}-${rand}`;
 }
 
+const WORKFLOW_RUN_ID_MINT_ATTEMPTS = 5;
+
+export interface ClaimedWorkflowRun {
+  runId: string;
+  journal: WorkflowJournalFileSink;
+  firstLine: WorkflowJournalLine;
+}
+
+/**
+ * Mint a fresh runId and durably claim it by creating the run's journal.
+ *
+ * The id is a second-resolution timestamp plus a 16-bit random suffix, so two
+ * runs starting in the same second can draw the same id (observed on an
+ * immediate resume after a short run). The journal create is exclusive and is
+ * the claim: when it fails with EEXIST the id belongs to another run, and only
+ * a NEWLY minted id is retried — an id supplied for resume is never re-minted.
+ */
+export function claimNewWorkflowRun(
+  projectRoot: string,
+  firstLine: (runId: string) => WorkflowJournalLine,
+  now?: () => Date,
+): ClaimedWorkflowRun {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < WORKFLOW_RUN_ID_MINT_ATTEMPTS; attempt += 1) {
+    const runId = newWorkflowRunId(now);
+    const journal = createWorkflowJournalSink(projectRoot, runId);
+    const line = firstLine(runId);
+    try {
+      journal.initialize(line);
+      return { runId, journal, firstLine: line };
+    } catch (error) {
+      if (!isExistingFileError(error)) throw error;
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `Could not claim a unique workflow run id after ${WORKFLOW_RUN_ID_MINT_ATTEMPTS} attempts: ${errorMessage(lastError)}`,
+  );
+}
+
+function isExistingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EEXIST";
+}
+
 // ---------------------------------------------------------------------------
 // File-backed journal sink
 // ---------------------------------------------------------------------------
