@@ -1,23 +1,23 @@
 /**
- * extensions/plan/operator-surface.ts — the ctx-bound writes this extension
+ * extensions/plan/operator/operator-surface.ts — the ctx-bound writes this extension
  * makes to its three widget keys (`plan`, `goal`, and the prompt-shelf key) and
  * to the `plan.mode` status lane, plus the one-time install of the mode-aware
  * input editor whose border tracks plan mode. Pure block construction stays in
  * the `-ui` modules.
  */
 
-import type { ExtensionContext } from "../_shared/host/pi-api.js";
-import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator/operator-status.js";
-import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import type { ExtensionContext } from "../../_shared/host/pi-api.js";
+import { clearOperatorStatus, setOperatorStatus } from "../../_shared/operator/operator-status.js";
+import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import {
   type ModeState,
   isInPlanMode,
   makeModeAwareEditorClass,
   modeStatusLabel,
   PLAN_MODE_COLOR,
-} from "./mode-state.js";
-import type { PromptShelfKind } from "./command-parser.js";
+} from "../mode/mode-state.js";
+import type { PromptShelfKind } from "../command/command-parser.js";
 
 export function setPlanOperatorBlock(
   ctx: ExtensionContext,

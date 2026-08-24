@@ -4,8 +4,8 @@ import type {
   NewSessionResultLike,
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
-} from "../_shared/host/pi-api.js";
-import { getSessionId } from "../_shared/host/pi-api.js";
+} from "../../_shared/host/pi-api.js";
+import { getSessionId } from "../../_shared/host/pi-api.js";
 
 export interface GoalAiDraftResult {
   status: "blocked" | "failed" | "completed" | "cancelled";

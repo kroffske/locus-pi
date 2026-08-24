@@ -1,5 +1,5 @@
 /**
- * extensions/plan/operator-ui.ts — pure OperatorBlock builders for the
+ * extensions/plan/operator/operator-ui.ts — pure OperatorBlock builders for the
  * `/plan` and `/mode` surfaces: the saved-plan list and help, the open receipt,
  * the exit receipt, the mode view/change receipts, and the two blocks every
  * host input dialog can end in (cancelled, unsupported result). Sibling of
@@ -7,10 +7,10 @@
  * render these blocks stay in `operator-surface.ts`.
  */
 
-import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "./mode-state.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import type { PlanExitAction } from "./plan-exit-handoff.js";
+import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "../mode/mode-state.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import type { PlanExitAction } from "../mode/plan-exit-handoff.js";
 
 export function cancelledInputBlock(subject: string, reopenCommand: string): OperatorBlock {
   return {

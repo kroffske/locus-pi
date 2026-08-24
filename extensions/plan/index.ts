@@ -16,11 +16,11 @@
 import { betaEnabled } from "../_shared/host/beta-gate.js";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { getProjectRoot } from "../_shared/host/pi-api.js";
-import { clearModeState } from "./mode-state.js";
-import { registerPlanCommands } from "./command-router.js";
-import { registerGoalTool } from "./goal-tool.js";
-import { ensureModeAwareEditor, setModeStatus } from "./operator-surface.js";
-import { injectPlanContext } from "./system-prompt.js";
+import { clearModeState } from "./mode/mode-state.js";
+import { registerPlanCommands } from "./command/command-router.js";
+import { registerGoalTool } from "./goal/goal-tool.js";
+import { ensureModeAwareEditor, setModeStatus } from "./operator/operator-surface.js";
+import { injectPlanContext } from "./mode/system-prompt.js";
 
 export default function plan(pi: ExtensionAPI): void {
   if (!betaEnabled("plan")) return;

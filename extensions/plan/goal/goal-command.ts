@@ -1,14 +1,19 @@
 /**
- * extensions/plan/goal-command.ts — the `/goal` grammar: inspect, create or
+ * extensions/plan/goal/goal-command.ts — the `/goal` grammar: inspect, create or
  * replace, pause/resume/drop/complete, budget, the bounded continuation
  * artifact, and the `/goal prompt` shelf alias. Every branch renders through
  * `goal-operator-ui.ts`; nothing here builds a block itself except the two
  * inline warnings its own parsing produces.
  */
 
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
-import { SETTINGS_HELP_PLACEMENT } from "../_shared/operator/widget-render.js";
+import type {
+  CommandArgs,
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "../../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
+import { SETTINGS_HELP_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import {
   type GoalOperationResult,
   completeGoalState,
@@ -22,11 +27,11 @@ import {
   setGoalBudget,
   writeGoalContinuationArtifact,
   writeGoalState,
-} from "../_shared/project/goal-mode.js";
-import { parseBudget, parseContinuationInput, splitFirstWord } from "./command-parser.js";
-import { setGoalOperatorBlock } from "./operator-surface.js";
+} from "../../_shared/project/goal-mode.js";
+import { parseBudget, parseContinuationInput, splitFirstWord } from "../command/command-parser.js";
+import { setGoalOperatorBlock } from "../operator/operator-surface.js";
 import { emptyGoalStateBlock, goalHelpBlock, goalOperationBlock, goalStateBlock } from "./goal-operator-ui.js";
-import { handlePromptShelf } from "./prompt-shelf-command.js";
+import { handlePromptShelf } from "../prompt-shelf/prompt-shelf-command.js";
 
 export const COMMAND_HELP = [
   "Usage:",

@@ -1,5 +1,5 @@
 /**
- * extensions/plan/prompt-shelf-ui.ts — pure OperatorBlock builders for the
+ * extensions/plan/prompt-shelf/prompt-shelf-ui.ts — pure OperatorBlock builders for the
  * prompt shelf `/review`, `/todos` and `/goal prompt` share: the summary, the
  * explicit body view, the saved receipt, and the warning/error blocks, plus the
  * label and path vocabulary they render. No Pi handle, no artifact access; the
@@ -7,9 +7,9 @@
  * ctx-bound writes happen in `operator-surface.ts`.
  */
 
-import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import type { PromptShelfKind, PromptShelfTarget, PromptShelfWriteSource } from "./command-parser.js";
+import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import type { PromptShelfKind, PromptShelfTarget, PromptShelfWriteSource } from "../command/command-parser.js";
 
 export function promptShelfSummaryBlock(
   kind: PromptShelfKind,

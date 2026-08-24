@@ -1,11 +1,11 @@
 /**
- * extensions/plan/system-prompt.ts — what this extension adds to the agent's
+ * extensions/plan/mode/system-prompt.ts — what this extension adds to the agent's
  * system prompt at `before_agent_start`: the active goal context, then the
  * behavioral plan-mode framing. v2 plan mode is BEHAVIORAL: it injects a
  * planning framing, it does NOT block tools.
  */
 
-import { goalInjectionText, loadGoalState, shouldInjectGoalContext } from "../_shared/project/goal-mode.js";
+import { goalInjectionText, loadGoalState, shouldInjectGoalContext } from "../../_shared/project/goal-mode.js";
 import { isInPlanMode, loadActiveModeState, planModeInjectionText } from "./mode-state.js";
 
 function appendSystemBlock(systemPrompt: string, block: string): string {

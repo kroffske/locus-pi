@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registerPlan } from "../../../extensions/plan/index.js";
+import { registerPlan } from "../../../../extensions/plan/index.js";
 import type {
   ExtensionCommandContext,
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
-} from "../../../extensions/_shared/host/pi-api.js";
-import { isInPlanMode, loadModeState, planArtifactPath } from "../../../extensions/plan/mode-state.js";
-import { createHarness, runTool } from "../../test-harness.js";
+} from "../../../../extensions/_shared/host/pi-api.js";
+import { isInPlanMode, loadModeState, planArtifactPath } from "../../../../extensions/plan/mode/mode-state.js";
+import { createHarness, runTool } from "../../../test-harness.js";
 
 const tempRoots: string[] = [];
 

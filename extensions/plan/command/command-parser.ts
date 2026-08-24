@@ -1,5 +1,5 @@
 /**
- * extensions/plan/command-parser.ts — pure text -> intent for this extension's
+ * extensions/plan/command/command-parser.ts — pure text -> intent for this extension's
  * command grammars: the leading verb every command splits on, the /goal budget
  * argument, the /goal continue free-form body, the `--task` prefix /goal-ai
  * accepts, and the whole prompt-shelf grammar `/review`, `/todos` and
@@ -7,7 +7,7 @@
  * render live in `prompt-shelf-ui.ts` and `operator-ui.ts`.
  */
 
-import type { PromptCommandTargetSelector } from "../_shared/project/prompt-command-store.js";
+import type { PromptCommandTargetSelector } from "../../_shared/project/prompt-command-store.js";
 
 export function splitFirstWord(input: string): [string, string] {
   const trimmed = input.trim();

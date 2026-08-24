@@ -1,5 +1,5 @@
 /**
- * extensions/plan/plan-exit-handoff.ts — the plan -> execution handoff (T-D).
+ * extensions/plan/mode/plan-exit-handoff.ts — the plan -> execution handoff (T-D).
  *
  * On leaving plan mode with a composed plan, ask the user what to do with it.
  * The "ask the user with options" primitive is the built-in ctx.ui.select; we
@@ -8,10 +8,10 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import type { ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
+import type { ExtensionAPI, ExtensionCommandContext } from "../../_shared/host/pi-api.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
 import { clearModeState, loadModeState } from "./mode-state.js";
-import { setModeStatus } from "./operator-surface.js";
+import { setModeStatus } from "../operator/operator-surface.js";
 
 export type PlanExitAction = "plain-exit" | "kept" | "execute" | "execute-fresh" | "tweak-execute";
 

@@ -1,16 +1,16 @@
 /**
- * extensions/plan/plan-command.ts — the `/plan` grammar: list, help, exit,
+ * extensions/plan/mode/plan-command.ts — the `/plan` grammar: list, help, exit,
  * open <slug>, the bare interactive prompt, and entering plan mode for an
  * explicit request. Owns the one draft-session pipeline both entry paths share.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../_shared/host/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
-import { runPlanDraftSession } from "./goal-ai-draft.js";
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import { SETTINGS_HELP_PLACEMENT } from "../_shared/operator/widget-render.js";
+import type { CommandArgs, ExtensionAPI, ExtensionCommandContext } from "../../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
+import { runPlanDraftSession } from "../goal/goal-ai-draft.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
+import { SETTINGS_HELP_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import {
   clearModeState,
   isInPlanMode,
@@ -22,8 +22,8 @@ import {
   slugify,
   writeModeState,
 } from "./mode-state.js";
-import { splitFirstWord } from "./command-parser.js";
-import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "./operator-surface.js";
+import { splitFirstWord } from "../command/command-parser.js";
+import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "../operator/operator-surface.js";
 import {
   cancelledInputBlock,
   dialogFailureBlock,
@@ -31,7 +31,7 @@ import {
   planHelpBlock,
   planListBlock,
   planOpenBlock,
-} from "./operator-ui.js";
+} from "../operator/operator-ui.js";
 import { runPlanExitDecision } from "./plan-exit-handoff.js";
 
 export async function handlePlanCommand(

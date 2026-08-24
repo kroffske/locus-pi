@@ -1,5 +1,5 @@
 /**
- * extensions/plan/command-router.ts — registers this extension's five commands
+ * extensions/plan/command/command-router.ts — registers this extension's five commands
  * and dispatches each to its own command module: the two prompt-shelf shells
  * (`/review`, `/todos`), the behavioral-mode pair (`/plan`, `/mode`), and the
  * goal pair (`/goal`, `/goal-ai`) — including the one error boundary `/goal`
@@ -7,16 +7,16 @@
  * blocks they render are built in the `-ui` modules.
  */
 
-import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
+import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../../_shared/operator/command-ui.js";
 import type { PromptShelfKind } from "./command-parser.js";
-import { goalErrorBlock } from "./goal-operator-ui.js";
-import { setGoalOperatorBlock } from "./operator-surface.js";
-import { handlePlanCommand } from "./plan-command.js";
-import { handleModeCommand } from "./mode-command.js";
-import { handleGoalCommand } from "./goal-command.js";
-import { handleGoalAiCommand } from "./goal-ai-command.js";
-import { handlePromptCommand } from "./prompt-shelf-command.js";
+import { goalErrorBlock } from "../goal/goal-operator-ui.js";
+import { setGoalOperatorBlock } from "../operator/operator-surface.js";
+import { handlePlanCommand } from "../mode/plan-command.js";
+import { handleModeCommand } from "../mode/mode-command.js";
+import { handleGoalCommand } from "../goal/goal-command.js";
+import { handleGoalAiCommand } from "../goal/goal-ai-command.js";
+import { handlePromptCommand } from "../prompt-shelf/prompt-shelf-command.js";
 
 const COMMANDS: Array<{ kind: Exclude<PromptShelfKind, "goal">; description: string }> = [
   { kind: "review", description: "Review prompt shelf: summary, show/read, or set a project/explicit-task prompt." },

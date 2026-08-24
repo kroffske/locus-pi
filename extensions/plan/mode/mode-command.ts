@@ -1,12 +1,17 @@
 /**
- * extensions/plan/mode-command.ts — the `/mode` grammar: show the current
+ * extensions/plan/mode/mode-command.ts — the `/mode` grammar: show the current
  * behavioral mode, set it explicitly, or route a plan -> default change through
  * the same exit handoff `/plan exit` uses. A mode change is never implicit.
  */
 
-import type { CommandArgs, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
-import { SETTINGS_HELP_PLACEMENT } from "../_shared/operator/widget-render.js";
+import type {
+  CommandArgs,
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "../../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
+import { SETTINGS_HELP_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import {
   type CycleMode,
   currentCycleMode,
@@ -15,9 +20,9 @@ import {
   modeStateForCycle,
   writeModeState,
 } from "./mode-state.js";
-import { splitFirstWord } from "./command-parser.js";
-import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "./operator-surface.js";
-import { modeChangeBlock, modeViewBlock, planExitBlock } from "./operator-ui.js";
+import { splitFirstWord } from "../command/command-parser.js";
+import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "../operator/operator-surface.js";
+import { modeChangeBlock, modeViewBlock, planExitBlock } from "../operator/operator-ui.js";
 import { runPlanExitDecision } from "./plan-exit-handoff.js";
 
 /** Set the active mode, persist it, and update the status badge + input border. */

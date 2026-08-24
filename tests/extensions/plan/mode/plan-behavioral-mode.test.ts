@@ -8,13 +8,13 @@ import {
   loadActiveModeState,
   modeStatePath,
   writeModeState,
-} from "../../../extensions/plan/mode-state.js";
-import { registerPlan } from "../../../extensions/plan/index.js";
+} from "../../../../extensions/plan/mode/mode-state.js";
+import { registerPlan } from "../../../../extensions/plan/index.js";
 import {
   __resetModeUiStateForTests,
   __setEditorBaseLoaderForTests,
-} from "../../../extensions/plan/operator-surface.js";
-import { createHarness, emit } from "../../test-harness.js";
+} from "../../../../extensions/plan/operator/operator-surface.js";
+import { createHarness, emit } from "../../../test-harness.js";
 
 const fakeTheme = {
   fg: (color: string, text: string) => `<${color}>${text}`,

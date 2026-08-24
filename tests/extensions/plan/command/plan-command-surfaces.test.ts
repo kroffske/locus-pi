@@ -2,11 +2,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { GoalOperationResult } from "../../../extensions/_shared/project/goal-mode.js";
-import { isInPlanMode, loadModeState, writeModeState } from "../../../extensions/plan/mode-state.js";
-import { goalOperationBlock } from "../../../extensions/plan/goal-operator-ui.js";
-import { registerPlan } from "../../../extensions/plan/index.js";
-import { createHarness, emit, runTool } from "../../test-harness.js";
+import type { GoalOperationResult } from "../../../../extensions/_shared/project/goal-mode.js";
+import { isInPlanMode, loadModeState, writeModeState } from "../../../../extensions/plan/mode/mode-state.js";
+import { goalOperationBlock } from "../../../../extensions/plan/goal/goal-operator-ui.js";
+import { registerPlan } from "../../../../extensions/plan/index.js";
+import { createHarness, emit, runTool } from "../../../test-harness.js";
 
 /**
  * Characterization tests for the /plan, /mode, /goal, goal-tool and
@@ -193,7 +193,7 @@ describe("/goal help and budget parsing", () => {
 
 /**
  * The `/goal` registration wraps its handler in the extension's only command
- * error boundary. `tests/extensions/plan/goal-operator-ui.test.ts` covers the
+ * error boundary. `tests/extensions/plan/goal/goal-operator-ui.test.ts` covers the
  * block builder in isolation, but nothing pinned the boundary itself, so it is
  * characterized here before the dispatch zone moves out of the entrypoint.
  */
@@ -418,7 +418,7 @@ describe("/goal-ai target resolution", () => {
 
 /**
  * Characterization of the project-relative path formatter used by the goal
- * continuation receipt. tests/extensions/plan/goal-operator-ui.test.ts only
+ * continuation receipt. tests/extensions/plan/goal/goal-operator-ui.test.ts only
  * covers the inside-the-root branch; the outside-the-root fallback had no test,
  * so both branches are pinned here before the formatter is deduplicated onto
  * the identical _shared/project/prompt-command-store.ts helper.

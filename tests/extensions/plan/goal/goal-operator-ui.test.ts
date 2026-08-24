@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { GoalOperationResult, GoalState } from "../../../extensions/_shared/project/goal-mode.js";
-import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
+import type { GoalOperationResult, GoalState } from "../../../../extensions/_shared/project/goal-mode.js";
+import { renderOperatorBlockPlain } from "../../../../extensions/_shared/operator/operator-ui.js";
 import {
   emptyGoalStateBlock,
   goalErrorBlock,
   goalOperationBlock,
   goalStateBlock,
-} from "../../../extensions/plan/goal-operator-ui.js";
+} from "../../../../extensions/plan/goal/goal-operator-ui.js";
 
 const state: GoalState = {
   version: 1,

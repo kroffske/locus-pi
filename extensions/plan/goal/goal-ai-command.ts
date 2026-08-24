@@ -1,24 +1,24 @@
 /**
- * extensions/plan/goal-ai-command.ts — the `/goal-ai` grammar: collect the
+ * extensions/plan/goal/goal-ai-command.ts — the `/goal-ai` grammar: collect the
  * request (inline or through one host dialog), resolve the goal prompt-shelf
  * target, run one replacement-session draft, and save the draft as a goal
  * prompt. It never executes the draft.
  */
 
-import type { ExtensionCommandContext, ExtensionContext, CommandArgs } from "../_shared/host/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
+import type { ExtensionCommandContext, ExtensionContext, CommandArgs } from "../../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
 import { runGoalAiDraftSession } from "./goal-ai-draft.js";
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { errorMessage } from "../_shared/host/error-text.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
 import {
   PromptCommandTargetError,
   resolvePromptCommandTarget,
   writePromptCommand,
-} from "../_shared/project/prompt-command-store.js";
-import { parsePromptCommandInput } from "./command-parser.js";
-import { setGoalOperatorBlock } from "./operator-surface.js";
-import { cancelledInputBlock, dialogFailureBlock } from "./operator-ui.js";
+} from "../../_shared/project/prompt-command-store.js";
+import { parsePromptCommandInput } from "../command/command-parser.js";
+import { setGoalOperatorBlock } from "../operator/operator-surface.js";
+import { cancelledInputBlock, dialogFailureBlock } from "../operator/operator-ui.js";
 
 export async function handleGoalAiCommand(args: CommandArgs, ctx: ExtensionContext): Promise<void> {
   let parsed = parsePromptCommandInput(getCommandText(args));

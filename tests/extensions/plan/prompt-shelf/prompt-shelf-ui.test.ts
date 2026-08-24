@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { renderOperatorBlockPlain } from "../../../extensions/_shared/operator/operator-ui.js";
-import { parsePromptShelfCommand, type PromptShelfTarget } from "../../../extensions/plan/command-parser.js";
+import { renderOperatorBlockPlain } from "../../../../extensions/_shared/operator/operator-ui.js";
+import { parsePromptShelfCommand, type PromptShelfTarget } from "../../../../extensions/plan/command/command-parser.js";
 import {
   promptShelfBodyBlock,
   promptShelfChangeBlock,
   promptShelfSummaryBlock,
   promptShelfWarningBlock,
-} from "../../../extensions/plan/prompt-shelf-ui.js";
+} from "../../../../extensions/plan/prompt-shelf/prompt-shelf-ui.js";
 
 const projectReviewTarget: PromptShelfTarget = {
   kind: "review",

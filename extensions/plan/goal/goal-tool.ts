@@ -1,13 +1,13 @@
 /**
- * extensions/plan/goal-tool.ts — the model-callable `goal` tool: its TypeBox
+ * extensions/plan/goal/goal-tool.ts — the model-callable `goal` tool: its TypeBox
  * params, the read/write approval split, and the one tool-result shape each
  * goal transition reports. The command surface renders blocks; this surface
  * only ever returns tool results.
  */
 
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
+import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../../_shared/host/pi-api.js";
 import {
   type GoalOperationResult,
   completeGoalState,
@@ -17,8 +17,8 @@ import {
   goalStatePath,
   loadGoalState,
   resumeGoalState,
-} from "../_shared/project/goal-mode.js";
-import { validateParams } from "../_shared/host/validation.js";
+} from "../../_shared/project/goal-mode.js";
+import { validateParams } from "../../_shared/host/validation.js";
 
 const GoalToolParams = Type.Object({
   op: Type.Union(
