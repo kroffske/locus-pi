@@ -25,8 +25,8 @@
  *                       tests/contracts/host/selective-package-loading.test.ts,
  *                       scripts/build-public-catalogs.ts (the Tier column)
  *   ownershipStatus     scripts/audit-sources.ts (adapted extensions need review metadata)
- *   runtimeRequirements tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
- *   stateUsed           tests/extensions/workflows/fusion-tool.test.ts, docs/extensions.md
+ *   runtimeRequirements tests/extensions/workflows/fusion/fusion-tool.test.ts, docs/extensions.md
+ *   stateUsed           tests/extensions/workflows/fusion/fusion-tool.test.ts, docs/extensions.md
  *   provides            tests/contracts/extensions/runtime-registration.test.ts,
  *                       tests/contracts/host/selective-package-loading.test.ts,
  *                       tests/contracts/docs/extension-reference.test.ts

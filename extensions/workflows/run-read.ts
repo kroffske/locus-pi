@@ -40,23 +40,21 @@
  *     extension take it from the journal rather than from here. Moving it into the
  *     read door would put the layout definition in the facade and leave its owner
  *     importing its own contract back.
- *   - `listWorkflowRunIds`, `readWorkflowRunJournal`, `readWorkflowRunSummary`,
+ *   - `listWorkflowRunIds`, `readWorkflowRunSummary`,
  *     `listWorkflowRoundsForSlot`, and `readWorkflowRoundBody` all resolve through
  *     private journal internals — the start-timestamp proof that orders runs, the
  *     per-line structural validator that separates valid rows from diagnostics,
  *     and the persisted-result disposition projection. Copying any of them here
  *     would fork a parser away from the format it parses.
  *
- * `readWorkflowRunJournal` returns lines typed in `workflow-runtime.ts`, not in the
- * journal, and no outside consumer names that type — they count lines. Re-exporting
- * it would widen this surface past what anything needs, so it is left out.
+ * `readWorkflowRunSummary` includes the semantic `hasJournal` flag needed by outside
+ * consumers. Raw journal records remain private to the workflow owner.
  */
 
 export {
   listWorkflowRoundsForSlot,
   listWorkflowRunIds,
   readWorkflowRoundBody,
-  readWorkflowRunJournal,
   readWorkflowRunSummary,
   workflowRunDir,
   workflowRunIdFromRowId,

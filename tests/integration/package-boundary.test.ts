@@ -359,7 +359,7 @@ describe("npm public package boundary", () => {
       "schemas/extension-manifest.schema.json",
       "skills/",
     ]);
-    expect(dryRun.files).toHaveLength(246);
+    expect(dryRun.files).toHaveLength(245);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

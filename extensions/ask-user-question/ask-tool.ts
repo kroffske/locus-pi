@@ -4,14 +4,14 @@
  * What each tool accepts (the TypeBox schema and its TypeScript mirror, kept
  * side by side so a schema edit cannot drift from the type the flow reads) and
  * how each is registered. The answering itself lives in `question-runner.ts`
- * and `legacy-ask.ts`; redrawing an answered question lives in
+ * and `rich-ask.ts`; redrawing an answered question lives in
  * `result-card.ts`.
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
-import { askRichQuestion } from "./legacy-ask.js";
+import { askRichQuestion } from "./rich-ask.js";
 import type { OmpQuestion } from "./question-prompt.js";
 import { askOmpCompatible } from "./question-runner.js";
 import { renderAskResult } from "./result-card.js";

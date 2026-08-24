@@ -202,7 +202,7 @@ describe("beta gate", () => {
    * would pass it just as well — the dedup it demonstrates is per-instance. Pi loads every
    * registered entrypoint with the module cache disabled, so the three beta entrypoints each
    * hold their own copy of `beta-gate.ts`, and the versioned `globalThis` slot the gate
-   * actually uses exists for exactly that case. `check:layers` rule 7 does not see the
+   * actually uses exists for exactly that case. `check:layers` rule 4 does not see the
    * difference either: it asserts STATICALLY that one module names the symbol, and stays
    * green for an edit that keeps the `Symbol.for` line and dedupes in a module binding.
    *

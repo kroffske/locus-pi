@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 /**
  * The proof T-135 W3 owes for moving `workflow-journal.ts` out of `extensions/_shared/`.
  *
- * `check:layers` rule 7 asserts STATICALLY that exactly one module names
+ * `check:layers` rule 4 asserts STATICALLY that exactly one module names
  * `Symbol.for("locus-pi.workflow-live-executions.v1")`. That is a source-level count and
  * cannot show what the process actually gets: Pi loads each registered entrypoint with the
  * module cache disabled, so every entrypoint holds its OWN instance of the journal module,
  * and a relocation that split the registry into two slots — or left one entrypoint
- * resolving a different copy — would keep rule 7 green while breaking the run.
+ * resolving a different copy — would keep rule 4 green while breaking the run.
  *
  * A same-process test that pokes `globalThis` would prove nothing here, because the failure
  * mode is per-entrypoint module instances, not per-process state. So this test loads two

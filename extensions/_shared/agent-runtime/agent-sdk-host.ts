@@ -28,14 +28,11 @@ import type { ThinkingLevel } from "../host/pi-api.js";
 /**
  * The live agent executor: this is the one the product runs.
  *
- * Its superseded counterpart is the command-context executor in
- * `agent-executor-host.ts`, backed by `ctx.newSession`, which is structurally
- * unreachable from a tool `execute()` context and is retained only as provenance.
- * This executor instead spawns a real HEADLESS child agent session via the
- * top-level public SDK `createAgentSession`, so the programmatic `task` tool can
- * run a genuine sub-agent. It shares the capsule + text-result layer with that
- * historical path — both import `agent-execution-prompt.js` — and it does NOT
- * touch the boundary/runner.
+ * Earlier command-context replacement-session adapters could not keep the parent
+ * session live while a tool-spawned child ran. They remain available in Git history
+ * rather than in the shipped package. This executor spawns a real headless child agent
+ * session through the public `createAgentSession` SDK and is the sole live child-session
+ * executor. Prompt construction remains isolated in `agent-execution-prompt.ts`.
  */
 
 /** Diagnostic token stamped on blocked results when the SDK host is unavailable. */

@@ -34,13 +34,13 @@
       "enum": ["locus-specific", "compat-wrapper"]
     },
     "runtimeRequirements": {
-      "description": "Host APIs and lifecycle events the extension needs. Reviewer and documentation contract; nothing executes it. Read by tests/extensions/workflows/fusion-tool.test.ts and documented in docs/extensions.md.",
+      "description": "Host APIs and lifecycle events the extension needs. Reviewer and documentation contract; nothing executes it. Read by tests/extensions/workflows/fusion/fusion-tool.test.ts and documented in docs/extensions.md.",
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1
     },
     "stateUsed": {
-      "description": "Session and on-disk state the extension reads or writes. Reviewer and documentation contract; nothing executes it. Read by tests/extensions/workflows/fusion-tool.test.ts and documented in docs/extensions.md.",
+      "description": "Session and on-disk state the extension reads or writes. Reviewer and documentation contract; nothing executes it. Read by tests/extensions/workflows/fusion/fusion-tool.test.ts and documented in docs/extensions.md.",
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1

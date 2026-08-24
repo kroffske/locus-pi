@@ -548,6 +548,8 @@ export interface WorkflowRunSummary {
   errors: number;
   lastKind: string | null;
   lastTs: string | null; // ISO timestamp of the last journal line
+  /** Whether at least one structurally valid journal line exists. Older persisted summaries may omit it. */
+  hasJournal?: boolean;
   hasResult: boolean; // result.json present (run finished writing a result)
 }
 
@@ -1246,6 +1248,7 @@ function isWorkflowRunSummary(value: unknown): boolean {
     (value.usage === null || isWorkflowUsage(value.usage)) &&
     (value.lastKind === null || typeof value.lastKind === "string") &&
     (value.lastTs === null || typeof value.lastTs === "string") &&
+    (value.hasJournal === undefined || typeof value.hasJournal === "boolean") &&
     typeof value.hasResult === "boolean"
   );
 }
@@ -2043,6 +2046,7 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
     errors,
     lastKind: last?.kind ?? null,
     lastTs: last?.ts ?? null,
+    hasJournal: lines.length > 0,
     hasResult,
   };
 }

@@ -8,20 +8,11 @@ import { OUTPUT_DEFAULTS } from "../host/safe-output.js";
 /**
  * The prompt capsule and text-result layer every live agent execution goes through.
  *
- * WHY THIS FILE IS SEPARATE FROM agent-executor-host.ts
- *
- * These two concerns used to share one 584-line module, and the mix hid which half the
- * product actually runs. `agent-sdk-host.ts` — the only production importer — takes exactly
- * three symbols from that module (`createAgentExecutionPromptCapsule`,
- * `formatAgentKickoffPrompt`, `parseAgentText`), and they are all here. Everything left in
- * `agent-executor-host.ts` is the superseded replacement-session path retained as reviewed
- * provenance; no registered entrypoint reaches it.
- *
- * Keeping them in one file meant a reader could not tell the live capsule builder from dead
- * provenance without tracing imports, and any edit to the live path sat next to code nobody
- * runs. The split makes the production surface the whole content of one file, so the boundary
- * is visible instead of inferred — and it makes the dependency direction explicit: the
- * historical module imports this one, never the reverse.
+ * Prompt construction and text-result parsing are host-independent contracts used by
+ * the live SDK executor. Keeping them separate prevents this layer from inheriting
+ * child-session lifecycle, tool, or transport dependencies from `agent-sdk-host.ts`.
+ * Superseded replacement-session implementations remain available in Git history
+ * rather than as shipped production modules.
  */
 export interface AgentExecutionPromptCapsule {
   version: "locus.agent.prompt.v2";

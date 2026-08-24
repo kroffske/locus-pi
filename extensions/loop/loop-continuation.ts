@@ -22,7 +22,6 @@ import {
 } from "../_shared/project/goal-mode.js";
 import {
   listWorkflowRunIds,
-  readWorkflowRunJournal,
   readWorkflowRunSummary,
   workflowJournalFile,
   workflowResultFile,
@@ -285,8 +284,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
   }
 
   const summary = readWorkflowRunSummary(projectRoot, latestRunId);
-  const journal = readWorkflowRunJournal(projectRoot, latestRunId);
-  const hasMetadata = journal.length > 0 || summary.hasResult;
+  const hasMetadata = summary.hasJournal === true || summary.hasResult;
   if (!hasMetadata) {
     return {
       source: "workflow",
@@ -311,8 +309,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
 
 async function loadWorkflowContinuationSummary(projectRoot: string, runId: string): Promise<WorkflowRunSummary> {
   const summary = readWorkflowRunSummary(projectRoot, runId);
-  const journal = readWorkflowRunJournal(projectRoot, runId);
-  if (journal.length === 0 && !summary.hasResult) {
+  if (summary.hasJournal !== true && !summary.hasResult) {
     throw new Error(`No workflow metadata found for run ${runId}.`);
   }
   return summary;

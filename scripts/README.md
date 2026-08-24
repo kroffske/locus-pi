@@ -43,7 +43,7 @@ The composite gates that bind them together:
 
 ### check-extension-layers.ts
 
-The ownership ledger for `extensions/_shared`. Every shared file is classified
+The steady-state ownership ledger for `extensions/_shared`. Every shared file is classified
 into one of the six named layers, and the script mechanically enforces the
 rules a reviewer cannot hold in their head across pull requests: no shared
 module may import feature code, a layer may only import layers at or below its

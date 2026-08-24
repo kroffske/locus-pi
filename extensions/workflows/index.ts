@@ -37,7 +37,7 @@ import {
 import { createWorkflowCommandLauncher } from "./workflow-command-launcher.js";
 import { registerWorkflowTool } from "./workflow-tool.js";
 import { registerWorkflowSourceCheckTool } from "./workflow-source-check-tool.js";
-import { registerFusionSurface } from "./fusion-surface.js";
+import { registerFusionSurface } from "./fusion/surface.js";
 import {
   announceCommandWorkflowStart,
   persistCommandWorkflowRejection,
