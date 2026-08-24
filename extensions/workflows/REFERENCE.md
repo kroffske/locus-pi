@@ -2277,7 +2277,7 @@ costs a cache miss, a false negative would replay an answer from a different
 world. Reach for `dsl.now()` / `dsl.random()` and the question does not arise.
 
 The folded forms above are each covered by a case in
-`tests/shared/workflows/workflow-replay.test.ts` (`static replay-safety
+`tests/extensions/workflows/runtime/workflow-replay.test.ts` (`static replay-safety
 assessment` and `replay-safety bypasses are refused end to end`).
 
 ### A replayed run is always marked

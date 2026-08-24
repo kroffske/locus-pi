@@ -125,11 +125,10 @@
   "sourceAuditPath": null,
   "tests": [
     "tests/extensions/plan/plan-prompt-commands.test.ts",
-    "tests/shared/operator-ui/goal-operator-ui.test.ts",
-    "tests/shared/operator-ui/prompt-shelf-ui.test.ts",
+    "tests/extensions/plan/goal-operator-ui.test.ts",
+    "tests/extensions/plan/prompt-shelf-ui.test.ts",
     "tests/extensions/plan/plan-behavioral-mode.test.ts",
-    "tests/shared/mode-state/mode-state.test.ts",
-    "tests/shared/agents/agent-executor-host.test.ts",
+    "tests/extensions/plan/mode-state.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/contracts/extensions/beta-gate.test.ts"
   ],

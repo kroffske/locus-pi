@@ -167,7 +167,7 @@ export function createTaskFromApprovedPrompt(input: CreateTaskFromPromptInput): 
 // The host's filesystem-write approval layer — not this extension — gates the write
 // (permission: delegated-to-pi). `approvalTier` is parsed by `/todo completion-note` for
 // forward-compatibility and is advisory only; the "deny" tier is legacy and still writes
-// (see tests/shared/task/tasks-bridge.test.ts `legacyDenyTier`). Do not re-introduce an extension-level
+// (see tests/shared/project/task-bridge.test.ts `legacyDenyTier`). Do not re-introduce an extension-level
 // gate here without also updating todo-context's advertised behavior and that test.
 export async function writeCompletionNoteWithApproval(
   input: CompletionNoteInput,

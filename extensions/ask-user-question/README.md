@@ -18,5 +18,5 @@ Sensitive answers are redacted from the visible result and durable decision entr
 - Entrypoint: `extensions/ask-user-question/index.ts`
 - Schema and dispatch: `extensions/ask-user-question/ask-tool.ts`
 - Option flow: `extensions/ask-user-question/question-runner.ts`
-- Rich single-question flow: `extensions/ask-user-question/legacy-ask.ts`
+- Rich single-question flow: `extensions/ask-user-question/rich-ask.ts`
 - Manifest: `extensions/ask-user-question/manifest.json`

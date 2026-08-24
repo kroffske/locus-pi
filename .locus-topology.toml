@@ -1,0 +1,41 @@
+schema = "locus.topology.v1"
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime"
+rule = "directory-files"
+ceiling = 33
+owner = "workflows runtime tests"
+reason = "Runtime behavior tests intentionally mirror their production owner after the shared-test layout correction."
+trigger = "Split when the directory exceeds 33 direct files or a stable runtime sub-owner gains four tests."
+
+[[exceptions]]
+path = "tests/shared/agent-runtime"
+rule = "directory-files"
+ceiling = 12
+owner = "shared agent runtime tests"
+reason = "Shared agent runtime tests intentionally mirror the named shared production layer."
+trigger = "Split when the directory exceeds 12 direct files or a stable agent-runtime sub-owner gains four tests."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-run-layout.test.ts"
+rule = "code-lines"
+ceiling = 629
+owner = "workflow run layout tests"
+reason = "The two-line growth verifies the semantic hasJournal projection while the test moves to its production owner."
+trigger = "Any growth above 629 lines requires a responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-run-report.test.ts"
+rule = "code-lines"
+ceiling = 1416
+owner = "workflow run report tests"
+reason = "The six-line growth is Prettier wrapping after the test moves to its production owner."
+trigger = "Any growth above 1416 lines requires a responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-journal.ts"
+rule = "code-lines"
+ceiling = 2052
+owner = "workflow journal runtime"
+reason = "Four lines keep journal presence inside the journal parser while replacing raw-record access outside the workflow owner."
+trigger = "Any growth above 2052 lines or another cross-feature read projection requires an owner-preserving split review."

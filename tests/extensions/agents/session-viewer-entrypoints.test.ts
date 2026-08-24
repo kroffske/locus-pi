@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * live process, so more than one instance of `session-viewer.ts` exists at once and each one would
  * get its own viewer set if the registry were a module binding.
  *
- * `check:layers` rule 7 asserts STATICALLY that exactly one module names the symbol. That is a
+ * `check:layers` rule 4 asserts STATICALLY that exactly one module names the symbol. That is a
  * source-level count and it stays green for a change that keeps the `Symbol.for` line and returns
  * a module-local `Set` from `activeSessionViewers()` — the exact shape a careless edit produces.
  * A same-process test that pokes `globalThis` cannot see it either, because the failure mode is

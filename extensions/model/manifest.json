@@ -61,7 +61,7 @@
   "tests": [
     "tests/extensions/model/model.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",
-    "tests/shared/operator-interaction.test.ts"
+    "tests/shared/operator/operator-interaction-slot.test.ts"
   ],
   "review": {
     "status": "reviewed",
