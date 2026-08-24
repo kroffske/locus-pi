@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
-import { clamp } from "../_shared/operator/viewer-geometry.js";
+import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
+import { clamp } from "../../_shared/operator/viewer-geometry.js";
 
 const CONTENT_LINE_COUNT = 18;
 const LARGE_SCROLL_STEP = 9;

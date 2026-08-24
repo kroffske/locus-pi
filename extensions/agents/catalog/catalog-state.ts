@@ -1,5 +1,5 @@
 /**
- * extensions/agents/catalog-state.ts — the resolved agent catalog this extension refreshes
+ * extensions/agents/catalog/catalog-state.ts — the resolved agent catalog this extension refreshes
  * from disk, keyed by agent name.
  *
  * `catalog.ts#refreshAgents` is the only writer: it clears and repopulates the map on every
@@ -12,6 +12,6 @@
  * gets its own copy. Nothing may rely on a write made through one entrypoint being visible
  * from another.
  */
-import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
+import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
 
 export const agentCatalog = new Map<string, AgentDefinition>();

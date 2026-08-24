@@ -1,17 +1,17 @@
 /**
- * extensions/agents/unknown-agent-report.ts — what the agents surfaces say when a
+ * extensions/agents/run/unknown-agent-report.ts — what the agents surfaces say when a
  * requested name is not in the catalog: the durable JSON artifact, the tool-result
  * text, the structured details, and the operator block. One report shape serves
  * the `task`/`spawn_agent` tool, `/agent run`, and `/agent inspect`.
  */
 import { relative } from "node:path";
-import { createRuntimeArtifactStore } from "../_shared/runtime/artifacts.js";
-import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import type { ExtensionContext } from "../_shared/host/pi-api.js";
-import { getProjectRoot, getSessionId } from "../_shared/host/pi-api.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import { listAvailableAgents, normalizeRequestedAgentName } from "./catalog.js";
-import { compactAgentCatalogLine } from "./operator-ui.js";
+import { createRuntimeArtifactStore } from "../../_shared/runtime/artifacts.js";
+import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getSessionId } from "../../_shared/host/pi-api.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import { listAvailableAgents, normalizeRequestedAgentName } from "../catalog/catalog.js";
+import { compactAgentCatalogLine } from "../operator/operator-ui.js";
 
 export interface UnknownAgentReport {
   text: string;

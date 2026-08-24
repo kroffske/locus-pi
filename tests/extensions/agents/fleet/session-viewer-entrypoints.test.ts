@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  *
  * Five of the seven declared process-global registries carry one of these; two did not, because
  * the rule for writing them was keyed on "the slice that moves the registry" and this one's owner,
- * `extensions/agents/session-viewer.ts`, never moved. Its two consumers also both sit inside the
+ * `extensions/agents/fleet/session-viewer.ts`, never moved. Its two consumers also both sit inside the
  * agents extension, which makes it look like single-instance state. It is not: Pi loads every
  * registered entrypoint with the module cache disabled, and Pi reload re-runs discovery in a
  * live process, so more than one instance of `session-viewer.ts` exists at once and each one would
@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
  *
  *   - The producer opens an `AgentSessionViewer`; the consumer, which opened nothing, must read
  *     `hasActiveAgentSessionViewer() === true`. That predicate is what
- *     `extensions/agents/interrupt-guard.ts:30` consults to decide whether to swallow an
+ *     `extensions/agents/fleet/interrupt-guard.ts:30` consults to decide whether to swallow an
  *     interrupt, so with two sets a viewer that owns the terminal and Escape is invisible to the
  *     guard living in the other instance.
  *   - The consumer then runs the teardown of `extensions/agents/index.ts:37`

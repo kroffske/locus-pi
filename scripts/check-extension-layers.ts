@@ -150,7 +150,7 @@ const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },
   { symbol: "locus-pi.operator-status.v1", owner: "extensions/_shared/operator/operator-status.ts" },
   { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/run/background-run-registry.ts" },
-  { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/session-viewer.ts" },
+  { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/fleet/session-viewer.ts" },
   { symbol: "locus-pi.viewer-external-rows.v1", owner: "extensions/_shared/operator/viewer-geometry.ts" },
   { symbol: "locus-pi.beta-config-warnings.v1", owner: "extensions/_shared/host/beta-gate.ts" },
 ];
@@ -168,7 +168,7 @@ interface MutableStateEntry {
 /** Plain mutable module bindings whose process semantics require an explicit owner. */
 const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
   {
-    file: "extensions/agents/catalog-state.ts",
+    file: "extensions/agents/catalog/catalog-state.ts",
     binding: "agentCatalog",
     note: "the resolved agent catalog; agents/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
   },

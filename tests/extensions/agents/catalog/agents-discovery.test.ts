@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import agents from "../../../extensions/agents/index.js";
-import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../extensions/_shared/agent-runtime/agents.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
-import { createHarness, runTool } from "../../test-harness.js";
+import agents from "../../../../extensions/agents/index.js";
+import { discoverAgentDefinitions, parseAgentMarkdown } from "../../../../extensions/_shared/agent-runtime/agents.js";
+import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
+import { createHarness, runTool } from "../../../test-harness.js";
 
 // Force the SDK host absent so the `task` tool degrades deterministically to the
 // honest fail-closed surface instead of attempting a real network-backed child.

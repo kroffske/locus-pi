@@ -4,7 +4,7 @@ import { acquireFleetViewedRow, fleetMenuState } from "../../../extensions/_shar
 
 /**
  * One of the two separately registered entrypoints behind
- * `tests/extensions/agents/fleet-menu-entrypoints.test.ts`. Pi loads each entrypoint with the
+ * `tests/extensions/agents/fleet/fleet-menu-entrypoints.test.ts`. Pi loads each entrypoint with the
  * module cache disabled, so this file holds its OWN instance of `fleet-menu.ts`; every
  * assertion in that test is about whether the two instances resolve to one shared state
  * object and one shared emitter.

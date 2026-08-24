@@ -3,18 +3,18 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
   type AgentLiveRow,
-} from "../_shared/agent-runtime/agent-sdk-host.js";
+} from "../../_shared/agent-runtime/agent-sdk-host.js";
 import type {
   AgentLiveTranscriptSnapshot,
   AgentTranscriptBlock,
   AgentTranscriptToolBlock,
-} from "../_shared/agent-runtime/agent-live-transcript.js";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
-import { RenderScheduler } from "../_shared/host/render-scheduler.js";
-import { agentLiveDisplayName, agentLiveTitle } from "../_shared/agent-runtime/agent-live-panel.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import { viewerExternalRows } from "../_shared/operator/viewer-geometry.js";
-import { acquireFleetViewedRow } from "../_shared/agent-runtime/fleet-menu.js";
+} from "../../_shared/agent-runtime/agent-live-transcript.js";
+import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
+import { RenderScheduler } from "../../_shared/host/render-scheduler.js";
+import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import { viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
+import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
 type ViewerTui = CustomUiTui & { terminal?: { rows: number; columns: number; write?(data: string): void } };

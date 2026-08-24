@@ -1,5 +1,5 @@
 /**
- * extensions/agents/catalog.ts — the agent catalog.
+ * extensions/agents/catalog/catalog.ts — the agent catalog.
  *
  * Owns discovery refresh into `catalog-state.ts`, the `TaskParams` schema whose
  * `agent` parameter description IS the published catalog (see writeAgentCatalogHint),
@@ -7,9 +7,9 @@
  * unknown-agent report reads.
  */
 import { Type } from "@sinclair/typebox";
-import { discoverAgentDefinitions, formatAgentCatalogHint } from "../_shared/agent-runtime/agents.js";
+import { discoverAgentDefinitions, formatAgentCatalogHint } from "../../_shared/agent-runtime/agents.js";
 import { agentCatalog } from "./catalog-state.js";
-import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
+import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
 
 const AGENT_PARAM_BASE_DESCRIPTION =
   "Optional project/user agent catalog name. Omit to run a clean child session without a role profile.";

@@ -6,10 +6,10 @@ import type {
   ToolRenderContext,
   ToolRenderResultOptions,
   ToolResult,
-} from "../../../extensions/_shared/host/pi-api.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import agents from "../../../extensions/agents/index.js";
-import { createHarness } from "../../test-harness.js";
+} from "../../../../extensions/_shared/host/pi-api.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import agents from "../../../../extensions/agents/index.js";
+import { createHarness } from "../../../test-harness.js";
 
 // Every directly spawned agent (`spawn_agent`) owns its own transcript
 // block: a LOCUS rail with the agent's petname and live status, the task title

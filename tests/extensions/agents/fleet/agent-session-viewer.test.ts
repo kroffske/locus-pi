@@ -2,21 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearViewerExternalRows,
   setViewerExternalRows,
-} from "../../../extensions/_shared/operator/viewer-geometry.js";
+} from "../../../../extensions/_shared/operator/viewer-geometry.js";
 import { type TUI, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
-} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
-import agents from "../../../extensions/agents/index.js";
+} from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
+import agents from "../../../../extensions/agents/index.js";
 import {
   AgentSessionViewer,
   createAgentViewerCapability,
   disposeAgentSessionViewers,
   loadAgentViewerCapability,
-} from "../../../extensions/agents/session-viewer.js";
-import { createHarness, emit } from "../../test-harness.js";
+} from "../../../../extensions/agents/fleet/session-viewer.js";
+import { createHarness, emit } from "../../../test-harness.js";
 
 class FakeAssistantComponent {
   #message: any;

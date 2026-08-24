@@ -1,5 +1,5 @@
 /**
- * extensions/agents/agent-tool-card.ts — transcript card for ONE spawned agent
+ * extensions/agents/tool/agent-tool-card.ts — transcript card for ONE spawned agent
  * (`spawn_agent` tool call). Each launched agent owns its own block in
  * the main window: a LOCUS rail with the agent's petname, live status, the task
  * title it is working on, and elapsed time — and, when the child returns text,
@@ -14,9 +14,9 @@ import type {
   ToolRenderContext,
   ToolRenderResultOptions,
   ToolResult,
-} from "../_shared/host/pi-api.js";
-import { agentLiveDisplayName, agentLiveTitle } from "../_shared/agent-runtime/agent-live-panel.js";
-import { agentLiveStore, type AgentLiveStatus } from "../_shared/agent-runtime/agent-sdk-host.js";
+} from "../../_shared/host/pi-api.js";
+import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
+import { agentLiveStore, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import {
   AGENT_ANSWER_BAR,
   CARD_TICK_MS,
@@ -25,7 +25,7 @@ import {
   formatAgentElapsed,
   singleLine,
   spinnerIndex,
-} from "../workflows/tool/workflow-tool-card.js";
+} from "../../workflows/tool/workflow-tool-card.js";
 
 export interface AgentToolCardModel {
   /** Petname of the live row (falls back to the catalog agent name). */

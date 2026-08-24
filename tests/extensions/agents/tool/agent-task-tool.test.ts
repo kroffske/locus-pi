@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentLiveStore,
   type SdkAgentSessionEventLike,
-} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import { createHarness, runTool } from "../../test-harness.js";
+} from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { createHarness, runTool } from "../../../test-harness.js";
 
 const tempRoots: string[] = [];
 
@@ -14,7 +14,7 @@ afterEach(() => {
   agentLiveStore.reset();
   vi.resetModules();
   vi.doUnmock("@earendil-works/pi-coding-agent");
-  vi.doUnmock("../../../extensions/_shared/agent-runtime/agent-runner.js");
+  vi.doUnmock("../../../../extensions/_shared/agent-runtime/agent-runner.js");
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -88,7 +88,7 @@ function mockSdkResult(text: string): void {
 describe("agent task tool execution", () => {
   it("streams the generated live agent name as soon as the child starts", async () => {
     mockSdkResult("done");
-    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
     const update = vi.fn();
@@ -125,7 +125,7 @@ describe("agent task tool execution", () => {
 
   it("returns one child's exact text and keeps metadata in details", async () => {
     mockSdkResult("  done\nwith details\n");
-    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "openai", id: "gpt-5.5", name: "GPT 5.5" };
     h.pi.setThinkingLevel?.("high");
@@ -157,7 +157,7 @@ describe("agent task tool execution", () => {
   it("treats JSON-looking child output as ordinary text", async () => {
     const text = '{"status":"failed","summary":"model words only"}';
     mockSdkResult(text);
-    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
@@ -170,7 +170,7 @@ describe("agent task tool execution", () => {
 
   it("returns isError when the child has no non-empty final text", async () => {
     mockSdkResult(" \n ");
-    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     agents(h.pi);
 
@@ -182,10 +182,10 @@ describe("agent task tool execution", () => {
   });
 
   it("stops progress and surfaces an error when the run boundary throws", async () => {
-    vi.doMock("../../../extensions/_shared/agent-runtime/agent-runner.js", async () => {
-      const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-runner.js")>(
-        "../../../extensions/_shared/agent-runtime/agent-runner.js",
-      );
+    vi.doMock("../../../../extensions/_shared/agent-runtime/agent-runner.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../../../extensions/_shared/agent-runtime/agent-runner.js")
+      >("../../../../extensions/_shared/agent-runtime/agent-runner.js");
       return {
         ...actual,
         async executeAgentRunBoundary() {
@@ -193,7 +193,7 @@ describe("agent task tool execution", () => {
         },
       };
     });
-    const { default: agents } = await import("../../../extensions/agents/index.js");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
     const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
     h.ctx.hasUI = true;
     agents(h.pi);

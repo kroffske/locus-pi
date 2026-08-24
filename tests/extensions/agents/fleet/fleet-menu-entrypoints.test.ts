@@ -26,10 +26,10 @@ import { describe, expect, it } from "vitest";
  *   - The producer opens and focuses the menu; the consumer must read back the producer's
  *     `focused`, `selectedRowId` and visible-row projection.
  *   - The consumer then runs the exact close sequence of
- *     `extensions/agents/fleet-menu-controller.ts` (`setFocused(false)` + `setVisibleRows([])`)
+ *     `extensions/agents/fleet/fleet-menu-controller.ts` (`setFocused(false)` + `setVisibleRows([])`)
  *     on state it did not open, and the producer must observe the release.
  *
- * Why the cross-release is the sharp assertion: `extensions/agents/interrupt-guard.ts:30` reads
+ * Why the cross-release is the sharp assertion: `extensions/agents/fleet/interrupt-guard.ts:30` reads
  * `fleetMenuState.focused` to decide whether to swallow an interrupt. With two copies, a menu
  * focused through one entrypoint is invisible to the guard living in the other, and a release
  * performed by a peer is a SILENT no-op — the peer keeps believing it holds focus. That is

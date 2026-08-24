@@ -1,5 +1,5 @@
 /**
- * extensions/agents/run-launcher.ts — the single start-a-run pipeline behind both
+ * extensions/agents/run/run-launcher.ts — the single start-a-run pipeline behind both
  * agent triggers: `runAgentLiveTask` (the live row + SDK child + terminal patch)
  * plus the `/agent run` slash wrapper that installs the progress panel around it.
  * The `spawn_agent` tool is the other client (see task-tool.ts).
@@ -9,14 +9,14 @@ import {
   createAgentRunRequest,
   executeAgentRunBoundary,
   type ApprovalTier,
-} from "../_shared/agent-runtime/agent-runner.js";
-import { agentLiveStore, createAgentSdkSessionExecutor } from "../_shared/agent-runtime/agent-sdk-host.js";
+} from "../../_shared/agent-runtime/agent-runner.js";
+import { agentLiveStore, createAgentSdkSessionExecutor } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import {
   formatAgentFinishedEventLine,
   formatAgentStartedEventLine,
-} from "../_shared/agent-runtime/agent-live-panel.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
-import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
+} from "../../_shared/agent-runtime/agent-live-panel.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../../_shared/operator/command-ui.js";
+import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
 import {
   formatAssignment,
   loadModelRolesState,
@@ -24,17 +24,17 @@ import {
   malformedRoleAssignmentNote,
   unassignedAgentTierNote,
   type ModelRoleResolution,
-} from "../_shared/model/model-settings.js";
-import { resolveWorkflowModel } from "../_shared/model/workflow-model-resolve.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import { installWorkflowProgress } from "../workflows/operator/progress-widget.js";
-import { resolveAgentSelection } from "./catalog.js";
-import type { CommandApprovalTier } from "./command-parser.js";
-import { AGENTS_WIDGET_KEY, emitAgentEventLine } from "./operator-surface.js";
-import { agentRunBoundaryBlock } from "./operator-ui.js";
+} from "../../_shared/model/model-settings.js";
+import { resolveWorkflowModel } from "../../_shared/model/workflow-model-resolve.js";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
+import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import { installWorkflowProgress } from "../../workflows/operator/progress-widget.js";
+import { resolveAgentSelection } from "../catalog/catalog.js";
+import type { CommandApprovalTier } from "../command/command-parser.js";
+import { AGENTS_WIDGET_KEY, emitAgentEventLine } from "../operator/operator-surface.js";
+import { agentRunBoundaryBlock } from "../operator/operator-ui.js";
 import { createUnknownAgentReport } from "./unknown-agent-report.js";
 
 /** Monotonic suffix so repeated `/agent run` of the same agent get distinct rows. */

@@ -13,7 +13,7 @@
  *
  * Every predicate here is the exact expression those copies used; this module
  * introduces no new key binding. Components that accept named keys in addition
- * to raw bytes (`"up"`, `"escape"`, as `extensions/agents/session-viewer.ts`
+ * to raw bytes (`"up"`, `"escape"`, as `extensions/agents/fleet/session-viewer.ts`
  * does) deliberately keep their own predicates — that is a different input
  * contract, not a duplicate of this one.
  */

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import agents from "../../../extensions/agents/index.js";
-import { registerLoop } from "../../../extensions/loop/index.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
-import { createHarness, emit } from "../../test-harness.js";
+import agents from "../../../../extensions/agents/index.js";
+import { registerLoop } from "../../../../extensions/loop/index.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
+import { createHarness, emit } from "../../../test-harness.js";
 
 afterEach(() => {
   agentLiveStore.reset();

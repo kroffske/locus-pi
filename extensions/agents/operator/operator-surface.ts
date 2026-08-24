@@ -1,23 +1,23 @@
 /**
- * extensions/agents/operator-surface.ts — the ctx-bound writes to the `agents`
+ * extensions/agents/operator/operator-surface.ts — the ctx-bound writes to the `agents`
  * widget/status lane: the bounded text widget the observer renders into, the
  * transient cleanup every command starts with, the inline scroll surface the
  * catalog falls back from, and the notifications an agents surface emits.
  */
-import { truncate } from "../_shared/agent-runtime/agent-live-panel.js";
-import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { truncate } from "../../_shared/agent-runtime/agent-live-panel.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator/operator-interaction.js";
-import { renderOperatorBlockPlain, type OperatorBlock } from "../_shared/operator/operator-ui.js";
-import type { CustomUiComponent, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import { setTextWidget } from "../_shared/host/pi-api.js";
+} from "../../_shared/operator/operator-interaction.js";
+import { renderOperatorBlockPlain, type OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import type { CustomUiComponent, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { setTextWidget } from "../../_shared/host/pi-api.js";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { ScrollableTextOverlay } from "./drill-overlay.js";
+import { ScrollableTextOverlay } from "../fleet/drill-overlay.js";
 import { AGENTS_WIDGET_FALLBACK_WIDTH } from "./operator-ui.js";
-import { notifyOperator } from "../_shared/operator/operator-notify.js";
+import { notifyOperator } from "../../_shared/operator/operator-notify.js";
 
 export const AGENTS_WIDGET_KEY = "agents";
 const AGENTS_WIDGET_MAX_LINES = 10;

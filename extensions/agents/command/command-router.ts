@@ -1,16 +1,16 @@
 /**
- * extensions/agents/command-router.ts — the `/ps` and `/agent` grammars and their
+ * extensions/agents/command/command-router.ts — the `/ps` and `/agent` grammars and their
  * dispatch. Both commands are registered with their transient-UI lifecycle here;
  * the fleet menu and the session authority arrive as injected dependencies so the
  * router owns no session state of its own.
  */
-import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../_shared/host/pi-api.js";
-import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
-import { agentCatalog } from "./catalog-state.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { renderAgentObserverText } from "../workflows/operator/progress-widget.js";
-import { refreshAgents } from "./catalog.js";
+import { registerCommandWithUiLifecycle } from "../../_shared/operator/command-ui.js";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
+import { agentCatalog } from "../catalog/catalog-state.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import { renderAgentObserverText } from "../../workflows/operator/progress-widget.js";
+import { refreshAgents } from "../catalog/catalog.js";
 import {
   parseAgentDrillCommand,
   parseAgentObserverCommand,
@@ -18,17 +18,17 @@ import {
   parseAgentRunCommand,
   parsePsTarget,
 } from "./command-parser.js";
-import { executeAgentDrillCommand, type AgentSessionAuthority } from "./drill-command.js";
+import { executeAgentDrillCommand, type AgentSessionAuthority } from "../fleet/drill-command.js";
 import {
   AGENTS_WIDGET_KEY,
   clearAgentsStatus,
   clearAgentsTransient,
   renderAgentBlockInteraction,
   setAgentsWidget,
-} from "./operator-surface.js";
-import { AGENT_CATALOG_FALLBACK_ROWS, agentCatalogBlock, agentInspectBlock } from "./operator-ui.js";
-import { executeAgentRunCommand } from "./run-launcher.js";
-import { createUnknownAgentReport } from "./unknown-agent-report.js";
+} from "../operator/operator-surface.js";
+import { AGENT_CATALOG_FALLBACK_ROWS, agentCatalogBlock, agentInspectBlock } from "../operator/operator-ui.js";
+import { executeAgentRunCommand } from "../run/run-launcher.js";
+import { createUnknownAgentReport } from "../run/unknown-agent-report.js";
 
 const AGENT_RUN_USAGE =
   "Usage: /agent list | /agent inspect <name> | /agent run [--yes|--approve] [--title <title>] <name> <task>";

@@ -1,5 +1,5 @@
 /**
- * extensions/agents/command-parser.ts — pure text→intent for the `/agent` and
+ * extensions/agents/command/command-parser.ts — pure text→intent for the `/agent` and
  * `/ps` grammars. No Pi handle, no ExtensionContext: the seam the router
  * dispatches on.
  */

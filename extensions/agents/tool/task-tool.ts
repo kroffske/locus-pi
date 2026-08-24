@@ -1,21 +1,21 @@
 /**
- * extensions/agents/task-tool.ts — the canonical spawn-a-subagent tool.
+ * extensions/agents/tool/task-tool.ts — the canonical spawn-a-subagent tool.
  * It routes through the createAgentSession host + honesty gate.
  */
-import { agentLiveStore, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../_shared/agent-runtime/agent-sdk-host.js";
-import { pinTransientUiKey, unpinTransientUiKey } from "../_shared/operator/command-ui.js";
-import { resolveLiveModelDisplay } from "../_shared/model/live-model-display.js";
-import { loadModelRolesState, resolveAgentModelPreference } from "../_shared/model/model-settings.js";
-import type { ExtensionAPI, ToolUpdate } from "../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
-import { validateParams } from "../_shared/host/validation.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import { installWorkflowProgress } from "../workflows/operator/progress-widget.js";
+import { agentLiveStore, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { pinTransientUiKey, unpinTransientUiKey } from "../../_shared/operator/command-ui.js";
+import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
+import { loadModelRolesState, resolveAgentModelPreference } from "../../_shared/model/model-settings.js";
+import type { ExtensionAPI, ToolUpdate } from "../../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, textResult } from "../../_shared/host/pi-api.js";
+import { validateParams } from "../../_shared/host/validation.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import { installWorkflowProgress } from "../../workflows/operator/progress-widget.js";
 import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-tool-card.js";
-import { refreshAgents, resolveAgentSelection, TaskParams } from "./catalog.js";
-import { AGENTS_WIDGET_KEY } from "./operator-surface.js";
-import { nextAgentRunSequence, resolveAgentTitle, runAgentLiveTask } from "./run-launcher.js";
-import { createUnknownAgentReport } from "./unknown-agent-report.js";
+import { refreshAgents, resolveAgentSelection, TaskParams } from "../catalog/catalog.js";
+import { AGENTS_WIDGET_KEY } from "../operator/operator-surface.js";
+import { nextAgentRunSequence, resolveAgentTitle, runAgentLiveTask } from "../run/run-launcher.js";
+import { createUnknownAgentReport } from "../run/unknown-agent-report.js";
 
 type TaskToolCtx = Parameters<ExtensionAPI["registerTool"]>[0]["execute"] extends (...args: infer Args) => unknown
   ? Args[4]

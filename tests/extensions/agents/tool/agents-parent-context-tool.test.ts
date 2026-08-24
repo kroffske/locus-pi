@@ -2,20 +2,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import agents from "../../../extensions/agents/index.js";
+import agents from "../../../../extensions/agents/index.js";
 import {
   createAgentExecutionPromptCapsule,
   formatAgentKickoffPrompt,
-} from "../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
-import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { createHarness, runTool } from "../../test-harness.js";
+} from "../../../../extensions/_shared/agent-runtime/agent-execution-prompt.js";
+import type { AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { createHarness, runTool } from "../../../test-harness.js";
 
 const runSpy = vi.fn();
 const tempRoots: string[] = [];
 
-vi.mock("../../../extensions/_shared/agent-runtime/agent-sdk-host.js", async () => {
-  const actual = await vi.importActual<typeof import("../../../extensions/_shared/agent-runtime/agent-sdk-host.js")>(
-    "../../../extensions/_shared/agent-runtime/agent-sdk-host.js",
+vi.mock("../../../../extensions/_shared/agent-runtime/agent-sdk-host.js", async () => {
+  const actual = await vi.importActual<typeof import("../../../../extensions/_shared/agent-runtime/agent-sdk-host.js")>(
+    "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js",
   );
   return {
     ...actual,

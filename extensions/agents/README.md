@@ -29,7 +29,7 @@ The catalog follows project -> user precedence: project `.agents/agents/`, then 
 ## Implementation
 
 - Entrypoint: `extensions/agents/index.ts`
-- Tool: `extensions/agents/task-tool.ts`
-- Catalog: `extensions/agents/catalog.ts`
+- Tool: `extensions/agents/tool/task-tool.ts`
+- Catalog: `extensions/agents/catalog/catalog.ts`
 - SDK adapter: `extensions/_shared/agent-runtime/agent-sdk-host.ts`
 - Manifest: `extensions/agents/manifest.json`

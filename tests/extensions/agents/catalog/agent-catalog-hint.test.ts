@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import agents from "../../../extensions/agents/index.js";
+import agents from "../../../../extensions/agents/index.js";
 import {
   AGENT_CATALOG_HINT_MAX_DESCRIPTION_CHARS,
   AGENT_CATALOG_HINT_MAX_ENTRIES,
@@ -10,8 +10,8 @@ import {
   formatAgentCatalogHint,
   type AgentDefinition,
   type AgentSource,
-} from "../../../extensions/_shared/agent-runtime/agents.js";
-import { createHarness, emit } from "../../test-harness.js";
+} from "../../../../extensions/_shared/agent-runtime/agents.js";
+import { createHarness, emit } from "../../../test-harness.js";
 
 // The catalog hint is a schema/description contract; no child session is spawned
 // here, so the SDK host stays absent exactly as in agents-discovery.test.ts.

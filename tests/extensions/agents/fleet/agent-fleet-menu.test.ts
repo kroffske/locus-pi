@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import agents from "../../../extensions/agents/index.js";
+import agents from "../../../../extensions/agents/index.js";
 import {
   FLEET_FOCUS_FALLBACK_SHORTCUT,
   FleetFocusComponent,
@@ -7,23 +7,23 @@ import {
   renderFleetMenuRows,
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
-} from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
-import { agentLiveStore, type AgentLiveStatus } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../extensions/_shared/host/render-scheduler.js";
+} from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
+import { agentLiveStore, type AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveChildRowId,
   workflowAgentLiveRowId,
   workflowGroupLiveRowId,
-} from "../../../extensions/workflows/runtime/workflow-journal.js";
-import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
-import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_shared/host/pi-api.js";
+} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import type { CustomUiComponent, CustomUiFactory } from "../../../../extensions/_shared/host/pi-api.js";
 import {
   installWorkflowProgress,
   type WorkflowProgressComponent,
-} from "../../../extensions/workflows/operator/progress-widget.js";
-import { workflowBackgroundRunRegistry } from "../../../extensions/workflows/run/background-run-registry.js";
-import { createHarness, emit } from "../../test-harness.js";
+} from "../../../../extensions/workflows/operator/progress-widget.js";
+import { workflowBackgroundRunRegistry } from "../../../../extensions/workflows/run/background-run-registry.js";
+import { createHarness, emit } from "../../../test-harness.js";
 
 afterEach(() => {
   fleetMenuState.setFocused(false);

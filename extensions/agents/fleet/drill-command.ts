@@ -1,25 +1,29 @@
 /**
- * extensions/agents/drill-command.ts — `/agent drill` / `/ps <target>`: resolve the
+ * extensions/agents/fleet/drill-command.ts — `/agent drill` / `/ps <target>`: resolve the
  * operator's target to exactly one live row, refuse honestly when it is missing,
  * a group summary, or ambiguous, and open the native session viewer on it with
  * the loop-round submenu the run journal supports.
  */
-import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
-import type { AgentLiveRow } from "../_shared/agent-runtime/agent-sdk-host.js";
-import { agentLiveShortId, formatAgentDrillTitle } from "../_shared/agent-runtime/agent-live-panel.js";
-import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../_shared/agent-runtime/fleet-menu.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveShortId, formatAgentDrillTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
+import { newestWorkflowRunId, selectFleetMenuLeafRows } from "../../_shared/agent-runtime/fleet-menu.js";
 import {
   isStaleInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
-} from "../_shared/operator/operator-interaction.js";
-import type { ExtensionCommandContext } from "../_shared/host/pi-api.js";
-import { getProjectRoot } from "../_shared/host/pi-api.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../workflows/run/run-read.js";
+} from "../../_shared/operator/operator-interaction.js";
+import type { ExtensionCommandContext } from "../../_shared/host/pi-api.js";
+import { getProjectRoot } from "../../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import {
+  listWorkflowRoundsForSlot,
+  readWorkflowRoundBody,
+  workflowRunIdFromRowId,
+} from "../../workflows/run/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
-import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "./operator-surface.js";
+import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "../operator/operator-surface.js";
 import { AgentSessionViewer, loadAgentViewerCapability } from "./session-viewer.js";
-import type { ParsedAgentDrillCommand } from "./command-parser.js";
+import type { ParsedAgentDrillCommand } from "../command/command-parser.js";
 
 export const AGENT_DRILL_USAGE = "Usage: /agent drill <row-id|agent|last>";
 
