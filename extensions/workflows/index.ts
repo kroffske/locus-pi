@@ -17,33 +17,36 @@ import {
   resetWorkflowLiveExecutions,
 } from "./runtime/workflow-journal.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { registerWorkflowCommands } from "./command-router.js";
-import { WorkflowOperatorHandoffController, type WorkflowHandoffPumpResult } from "./operator-handoff-controller.js";
-import { createWorkflowOperatorHandoffService } from "./operator-handoff-service.js";
+import { registerWorkflowCommands } from "./command/command-router.js";
+import {
+  WorkflowOperatorHandoffController,
+  type WorkflowHandoffPumpResult,
+} from "./operator/operator-handoff-controller.js";
+import { createWorkflowOperatorHandoffService } from "./operator/operator-handoff-service.js";
 import {
   clearWorkflowRunStatus,
   clearWorkflowWidget,
   presentWorkflowHandoffPumpResult,
   setWorkflowEventStatus,
   setWorkflowLaunchStatus,
-} from "./operator-surface.js";
-import { buildWorkflowResultBlock, errorMessage, workflowBackgroundFailureBlock } from "./operator-ui.js";
+} from "./operator/operator-surface.js";
+import { buildWorkflowResultBlock, errorMessage, workflowBackgroundFailureBlock } from "./operator/operator-ui.js";
 import {
   WORKFLOW_LIVE_WIDGET_KEY,
   installWorkflowProgress,
   renderAgentLiveRowsText,
   type WorkflowProgressComponent,
-} from "./progress-widget.js";
-import { createWorkflowCommandLauncher } from "./workflow-command-launcher.js";
-import { registerWorkflowTool } from "./workflow-tool.js";
-import { registerWorkflowSourceCheckTool } from "./workflow-source-check-tool.js";
+} from "./operator/progress-widget.js";
+import { createWorkflowCommandLauncher } from "./launch/workflow-command-launcher.js";
+import { registerWorkflowTool } from "./tool/workflow-tool.js";
+import { registerWorkflowSourceCheckTool } from "./tool/workflow-source-check-tool.js";
 import { registerFusionSurface } from "./fusion/surface.js";
 import {
   announceCommandWorkflowStart,
   persistCommandWorkflowRejection,
   persistCommandWorkflowTranscript,
 } from "./command/receipts.js";
-import { createWorkflowTranscript, registerWorkflowTranscriptRenderers } from "./workflow-transcript.js";
+import { createWorkflowTranscript, registerWorkflowTranscriptRenderers } from "./transcript/workflow-transcript.js";
 
 export default function workflows(pi: ExtensionAPI): void {
   registerWorkflowTranscriptRenderers(pi);

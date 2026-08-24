@@ -21,8 +21,8 @@ import type { CustomUiComponent, CustomUiFactory } from "../../../extensions/_sh
 import {
   installWorkflowProgress,
   type WorkflowProgressComponent,
-} from "../../../extensions/workflows/progress-widget.js";
-import { workflowBackgroundRunRegistry } from "../../../extensions/workflows/background-run-registry.js";
+} from "../../../extensions/workflows/operator/progress-widget.js";
+import { workflowBackgroundRunRegistry } from "../../../extensions/workflows/run/background-run-registry.js";
 import { createHarness, emit } from "../../test-harness.js";
 
 afterEach(() => {

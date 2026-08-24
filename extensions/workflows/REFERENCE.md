@@ -1071,7 +1071,7 @@ The diagram is an ownership map, not a decorative code trace:
 
 Keep the file self-contained and diffable: no `<script>`, no embedded or remote
 images, no remote fonts or stylesheets, and a `<title>`/`<desc>` pair so the
-diagram is readable without seeing it. `tests/extensions/workflows/workflow-diagram-artifacts.test.ts`
+diagram is readable without seeing it. `tests/extensions/workflows/tool/workflow-diagram-artifacts.test.ts`
 pins those properties, refuses any resurrected generator or Excalidraw artifact
 under the examples directory, and checks the diagram against the workflow source
 so a renamed phase or a new artifact fails the suite instead of quietly leaving

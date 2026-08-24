@@ -12,7 +12,7 @@ import type {
 import { errorResult, getCommandText, getProjectRoot, setTextWidget, textResult } from "../../_shared/host/pi-api.js";
 import { validateParams } from "../../_shared/host/validation.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "../runtime/workflow-journal.js";
-import { installWorkflowProgress } from "../progress-widget.js";
+import { installWorkflowProgress } from "../operator/progress-widget.js";
 import {
   FUSION_CONFIG_VERSION,
   FUSION_CONFIG_UPGRADED_MESSAGE,

@@ -12,7 +12,7 @@ import {
 import {
   buildWorkflowCatalogModel,
   readWorkflowCatalogSource,
-} from "../../../../extensions/workflows/workflow-catalog.js";
+} from "../../../../extensions/workflows/catalog/workflow-catalog.js";
 import { workflowRunRuntimeDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { packagedWorkflowPath } from "../../../../extensions/workflows/runtime/workflow-discovery.js";

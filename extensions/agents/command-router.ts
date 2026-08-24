@@ -9,7 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "..
 import { getCommandText, getProjectRoot } from "../_shared/host/pi-api.js";
 import { agentCatalog } from "./catalog-state.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { renderAgentObserverText } from "../workflows/progress-widget.js";
+import { renderAgentObserverText } from "../workflows/operator/progress-widget.js";
 import { refreshAgents } from "./catalog.js";
 import {
   parseAgentDrillCommand,

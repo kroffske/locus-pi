@@ -109,7 +109,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
 // Feature-internal facade (rule 6)
 // ---------------------------------------------------------------------------
 
-const WORKFLOW_READ_FACADE = "extensions/workflows/run-read.ts";
+const WORKFLOW_READ_FACADE = "extensions/workflows/run/run-read.ts";
 
 // ---------------------------------------------------------------------------
 // Feature-internal modules (rule 6)
@@ -149,7 +149,7 @@ const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.fleet-viewed-row.v1", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },
   { symbol: "locus-pi.operator-status.v1", owner: "extensions/_shared/operator/operator-status.ts" },
-  { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/background-run-registry.ts" },
+  { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/run/background-run-registry.ts" },
   { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/session-viewer.ts" },
   { symbol: "locus-pi.viewer-external-rows.v1", owner: "extensions/_shared/operator/viewer-geometry.ts" },
   { symbol: "locus-pi.beta-config-warnings.v1", owner: "extensions/_shared/host/beta-gate.ts" },

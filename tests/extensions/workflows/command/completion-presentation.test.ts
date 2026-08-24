@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createWorkflowTranscript,
   registerWorkflowTranscriptRenderers,
-} from "../../../../extensions/workflows/workflow-transcript.js";
+} from "../../../../extensions/workflows/transcript/workflow-transcript.js";
 import {
   persistCommandWorkflowTranscript,
   WORKFLOW_RESULT_CUSTOM_TYPE,

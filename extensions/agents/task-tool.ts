@@ -10,7 +10,7 @@ import type { ExtensionAPI, ToolUpdate } from "../_shared/host/pi-api.js";
 import { errorResult, getProjectRoot, textResult } from "../_shared/host/pi-api.js";
 import { validateParams } from "../_shared/host/validation.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import { installWorkflowProgress } from "../workflows/progress-widget.js";
+import { installWorkflowProgress } from "../workflows/operator/progress-widget.js";
 import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-tool-card.js";
 import { refreshAgents, resolveAgentSelection, TaskParams } from "./catalog.js";
 import { AGENTS_WIDGET_KEY } from "./operator-surface.js";

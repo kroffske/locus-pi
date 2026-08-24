@@ -30,7 +30,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "..
 import type { AgentDefinition } from "../_shared/agent-runtime/agents.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { errorMessage } from "../_shared/host/error-text.js";
-import { installWorkflowProgress } from "../workflows/progress-widget.js";
+import { installWorkflowProgress } from "../workflows/operator/progress-widget.js";
 import { resolveAgentSelection } from "./catalog.js";
 import type { CommandApprovalTier } from "./command-parser.js";
 import { AGENTS_WIDGET_KEY, emitAgentEventLine } from "./operator-surface.js";

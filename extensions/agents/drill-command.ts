@@ -15,7 +15,7 @@ import {
 import type { ExtensionCommandContext } from "../_shared/host/pi-api.js";
 import { getProjectRoot } from "../_shared/host/pi-api.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
-import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../workflows/run-read.js";
+import { listWorkflowRoundsForSlot, readWorkflowRoundBody, workflowRunIdFromRowId } from "../workflows/run/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "./operator-surface.js";
 import { AgentSessionViewer, loadAgentViewerCapability } from "./session-viewer.js";

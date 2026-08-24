@@ -25,7 +25,7 @@ import {
   formatAgentElapsed,
   singleLine,
   spinnerIndex,
-} from "../workflows/workflow-tool-card.js";
+} from "../workflows/tool/workflow-tool-card.js";
 
 export interface AgentToolCardModel {
   /** Petname of the live row (falls back to the catalog agent name). */
