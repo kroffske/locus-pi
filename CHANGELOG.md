@@ -4,6 +4,10 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- Internal package ownership is now reflected by source and test paths: the unreachable replacement-session executor was removed, Fusion was grouped under one owner, the rich question implementation was renamed, and outside workflow consumers now read `hasJournal` instead of raw journal records. The steady-state layer checker gained negative fixtures and explicit topology ceilings for the moved test suites; visible TUI behavior is unchanged.
+
 ### Fixed
 
 - A workflow run starting in the same second as another run could crash with `EEXIST` on the run journal instead of starting — most visible on `--resume` right after a short run, when both drew the same random run-id suffix. Run-id allocation now treats the exclusive journal create as the claim and retries with fresh ids on collision; resume ids are never re-minted.
