@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/phase-ops.ts — the OMP-compatible operation engine over
+ * extensions/todo-context/state/phase-ops.ts — the OMP-compatible operation engine over
  * todo phases: applying an ordered op batch, resolving phases/tasks by exact
  * value, normalizing which task is active, and reporting completion transitions.
  *
@@ -8,7 +8,7 @@
  * deliberately stays with the `/todo` command path in `state-commands.ts`,
  * because the tool path addresses tasks by exact content.
  */
-import { cloneTodoPhases, type TodoPhase, type TodoStatus, type TodoTask } from "../_shared/project/todo-state.js";
+import { cloneTodoPhases, type TodoPhase, type TodoStatus, type TodoTask } from "../../_shared/project/todo-state.js";
 
 export interface TodoOp {
   op: string;

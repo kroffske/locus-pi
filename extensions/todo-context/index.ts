@@ -24,9 +24,9 @@
  */
 import { betaEnabled } from "../_shared/host/beta-gate.js";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { registerTodoCommand } from "./command-router.js";
-import { createTodoQueueController } from "./queue-controller.js";
-import { registerTodoWriteTool } from "./todo-write-tool.js";
+import { registerTodoCommand } from "./command/command-router.js";
+import { createTodoQueueController } from "./queue/queue-controller.js";
+import { registerTodoWriteTool } from "./tool/todo-write-tool.js";
 
 export default function todoContext(pi: ExtensionAPI): void {
   if (!betaEnabled("todo-context")) return;

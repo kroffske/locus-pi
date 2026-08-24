@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/todo-state-cache.ts — the in-memory mirror of the todo queue that
+ * extensions/todo-context/state/todo-state-cache.ts — the in-memory mirror of the todo queue that
  * this extension keeps beside the durable session store.
  *
  * A CACHE AND FALLBACK, NOT A SOURCE OF TRUTH. `_shared/project/todo-state` owns backend
@@ -14,7 +14,7 @@
  * gets its own copy — which is a second reason the durable store, not this object, has to be
  * the thing a surface trusts.
  */
-import type { TodoPhase } from "../_shared/project/todo-state.js";
+import type { TodoPhase } from "../../_shared/project/todo-state.js";
 
 export const todoStateCache: { phases: TodoPhase[]; context: string | null; autoContinue: boolean } = {
   phases: [],

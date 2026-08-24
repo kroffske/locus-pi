@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/command-router.ts — registers `/todo` and dispatches
+ * extensions/todo-context/command/command-router.ts — registers `/todo` and dispatches
  * its verbs.
  *
  * `/todo` is a compatibility/operator surface. Agentic state updates should
@@ -9,13 +9,13 @@
  * verbs in `task-bridge-commands.ts`, the queue verbs in `queue-controller.ts`,
  * and the grammar in `command-parser.ts`.
  */
-import { registerCommandWithUiLifecycle } from "../_shared/operator/command-ui.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
-import { getCommandText } from "../_shared/host/pi-api.js";
+import { registerCommandWithUiLifecycle } from "../../_shared/operator/command-ui.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getCommandText } from "../../_shared/host/pi-api.js";
 import { splitCommand } from "./command-parser.js";
-import { setTodoBlock } from "./operator-surface.js";
-import { todoErrorBlock, todoHelpBlock, todoWarningBlock } from "./operator-ui.js";
-import type { TodoQueueController } from "./queue-controller.js";
+import { setTodoBlock } from "../operator/operator-surface.js";
+import { todoErrorBlock, todoHelpBlock, todoWarningBlock } from "../operator/operator-ui.js";
+import type { TodoQueueController } from "../queue/queue-controller.js";
 import { appendTodo, editTodos, exportTodos, mutateTodo, showTodos, startTodo } from "./state-commands.js";
 import { seedTodoFromTask, showCurrentProjectTask, writeTodoCompletionNote } from "./task-bridge-commands.js";
 

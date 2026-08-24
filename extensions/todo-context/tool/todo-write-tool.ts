@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/todo-write-tool.ts — the `todo_write` tool: its
+ * extensions/todo-context/tool/todo-write-tool.ts — the `todo_write` tool: its
  * TypeBox schema, the ordered application of one op batch onto session state,
  * the queue-state transition a batch implies, and the concise text summary the
  * model sees back.
@@ -8,14 +8,14 @@
  * queue state this tool moves is owned by `queue-controller.ts`.
  */
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { errorResult, textResult } from "../_shared/host/pi-api.js";
-import { todoStateCache } from "./todo-state-cache.js";
-import type { TodoPhase } from "../_shared/project/todo-state.js";
-import { validateParams } from "../_shared/host/validation.js";
-import { applyTodoOps, findActiveTask, getCompletionTransitions, type TodoOp } from "./phase-ops.js";
-import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "./phase-store.js";
-import type { TodoQueueController } from "./queue-controller.js";
+import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../../_shared/host/pi-api.js";
+import { todoStateCache } from "../state/todo-state-cache.js";
+import type { TodoPhase } from "../../_shared/project/todo-state.js";
+import { validateParams } from "../../_shared/host/validation.js";
+import { applyTodoOps, findActiveTask, getCompletionTransitions, type TodoOp } from "../state/phase-ops.js";
+import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "../state/phase-store.js";
+import type { TodoQueueController } from "../queue/queue-controller.js";
 
 const TodoWriteParams = Type.Object({
   context: Type.Optional(Type.String({ maxLength: 2000 })),

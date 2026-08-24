@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/command-parser.ts — pure text to intent for the
+ * extensions/todo-context/command/command-parser.ts — pure text to intent for the
  * `/todo` grammar: verb/rest splitting, quote-aware tokenization, the
  * `completion-note` argument shape, and the title-casing the append grammar
  * applies to operator text before it becomes stored todo content.

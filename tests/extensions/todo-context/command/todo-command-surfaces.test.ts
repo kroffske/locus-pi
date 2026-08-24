@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { registerTodoContext } from "../../../extensions/todo-context/index.js";
-import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
-import { createHarness, emit, runTool } from "../../test-harness.js";
+import { registerTodoContext } from "../../../../extensions/todo-context/index.js";
+import { todoStateCache } from "../../../../extensions/todo-context/state/todo-state-cache.js";
+import { createHarness, emit, runTool } from "../../../test-harness.js";
 
 /**
- * tests/extensions/todo-context/todo-command-surfaces.test.ts — characterization
+ * tests/extensions/todo-context/command/todo-command-surfaces.test.ts — characterization
  * coverage for the `/todo` verbs, `todo_write` op errors, and autonomous-queue
  * refusals that `todo-context.test.ts` never reached.
  *

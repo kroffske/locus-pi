@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveCurrentProjectTask } from "../../../extensions/_shared/project/task-bridge.js";
-import { todoStateCache } from "../../../extensions/todo-context/todo-state-cache.js";
+import { resolveCurrentProjectTask } from "../../../../extensions/_shared/project/task-bridge.js";
+import { todoStateCache } from "../../../../extensions/todo-context/state/todo-state-cache.js";
 
 const tempRoots: string[] = [];
 

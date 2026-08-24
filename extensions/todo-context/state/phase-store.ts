@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/phase-store.ts — the one load/commit pair every todo
+ * extensions/todo-context/state/phase-store.ts — the one load/commit pair every todo
  * surface goes through, and the queue-context normalization that travels with
  * it.
  *
@@ -8,8 +8,8 @@
  * step so the tool and command paths share one storage contract. The operations
  * applied between a load and a commit live in `phase-ops.ts`.
  */
-import { emitDevEvent } from "../_shared/runtime/event-bus.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
+import { emitDevEvent } from "../../_shared/runtime/event-bus.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
 import { todoStateCache } from "./todo-state-cache.js";
 import {
   cloneTodoPhases,
@@ -19,7 +19,7 @@ import {
   type TodoQueueMetadata,
   type TodoStateCommit,
   type TodoStateSnapshot,
-} from "../_shared/project/todo-state.js";
+} from "../../_shared/project/todo-state.js";
 
 /**
  * Load the current phases from the best available session source.

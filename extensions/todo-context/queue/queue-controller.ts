@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/queue-controller.ts — the autonomous todo queue.
+ * extensions/todo-context/queue/queue-controller.ts — the autonomous todo queue.
  *
  * Owns the two pieces of per-session state that decide whether the next settled
  * turn continues the queue: whether a continuation is armed, and how many
@@ -9,13 +9,13 @@
  *
  * Block wording comes from `operator-ui.ts`; persistence from `phase-store.ts`.
  */
-import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
-import type { TodoStateSnapshot } from "../_shared/project/todo-state.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import { setTodoBlock } from "./operator-surface.js";
-import { todoChangeBlock, todoWarningBlock } from "./operator-ui.js";
-import { findActiveTask, findActiveTaskDetails } from "./phase-ops.js";
-import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "./phase-store.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import type { TodoStateSnapshot } from "../../_shared/project/todo-state.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import { setTodoBlock } from "../operator/operator-surface.js";
+import { todoChangeBlock, todoWarningBlock } from "../operator/operator-ui.js";
+import { findActiveTask, findActiveTaskDetails } from "../state/phase-ops.js";
+import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "../state/phase-store.js";
 
 const MAX_AUTO_CONTINUATIONS = 20;
 

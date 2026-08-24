@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/state-commands.ts — the `/todo` verbs that read or
+ * extensions/todo-context/command/state-commands.ts — the `/todo` verbs that read or
  * change session todo state: show, copy, export, edit, append, start, done,
  * drop, rm.
  *
@@ -9,15 +9,21 @@
  * bodies is `command-router.ts`; the explicit project-task verbs are in
  * `task-bridge-commands.ts`.
  */
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
-import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../_shared/project/todo-state.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../../_shared/project/todo-state.js";
 import { titleCaseSentence, titleCaseWords, tokenize } from "./command-parser.js";
-import { markdownToPhases, phasesToMarkdown } from "./markdown-checklist.js";
-import { setTodoBlock } from "./operator-surface.js";
-import { todoChangeBlock, todoExportBlock, todoResultBlock, todoStateBlock, todoWarningBlock } from "./operator-ui.js";
-import { applyTodoOps, findTask, normalizeInProgressTask } from "./phase-ops.js";
-import { commitTodoPhases, loadTodoPhases } from "./phase-store.js";
+import { markdownToPhases, phasesToMarkdown } from "../state/markdown-checklist.js";
+import { setTodoBlock } from "../operator/operator-surface.js";
+import {
+  todoChangeBlock,
+  todoExportBlock,
+  todoResultBlock,
+  todoStateBlock,
+  todoWarningBlock,
+} from "../operator/operator-ui.js";
+import { applyTodoOps, findTask, normalizeInProgressTask } from "../state/phase-ops.js";
+import { commitTodoPhases, loadTodoPhases } from "../state/phase-store.js";
 
 const BATCH_DELIMITER = ";;";
 

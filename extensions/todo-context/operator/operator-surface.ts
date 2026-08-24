@@ -1,14 +1,14 @@
 /**
- * extensions/todo-context/operator-surface.ts — the one ctx-bound write to the
+ * extensions/todo-context/operator/operator-surface.ts — the one ctx-bound write to the
  * `todo` widget key, plus the compact projection non-TUI hosts get so a block
  * stays under the host line cap instead of being silently clipped.
  *
  * Pure block construction stays in `operator-ui.ts`; nothing here decides
  * wording.
  */
-import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import type { ExtensionContext } from "../_shared/host/pi-api.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../../_shared/host/pi-api.js";
+import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 
 export function setTodoBlock(ctx: ExtensionContext, block: OperatorBlock): void {
   setOperatorWidget(ctx, "todo", ctx.mode === "tui" ? block : compactTodoBlock(block));

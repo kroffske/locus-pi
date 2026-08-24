@@ -18,7 +18,7 @@ Continuation stops on an empty queue, pause, missing progress, dispatch failure,
 ## Implementation
 
 - Entrypoint: `extensions/todo-context/index.ts`
-- Tools: `extensions/todo-context/todo-write-tool.ts`
-- Queue: `extensions/todo-context/queue-controller.ts`
-- Task bridges: `extensions/todo-context/task-bridge-commands.ts`
+- Tools: `extensions/todo-context/tool/todo-write-tool.ts`
+- Queue: `extensions/todo-context/queue/queue-controller.ts`
+- Task bridges: `extensions/todo-context/command/task-bridge-commands.ts`
 - Manifest: `extensions/todo-context/manifest.json`

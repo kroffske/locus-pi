@@ -1,5 +1,5 @@
 /**
- * extensions/todo-context/task-bridge-commands.ts — the three explicit project
+ * extensions/todo-context/command/task-bridge-commands.ts — the three explicit project
  * task verbs: `/todo from-task`, `/todo current-task`, and
  * `/todo completion-note`.
  *
@@ -9,9 +9,9 @@
  * `state-commands.ts`; the card wording is in `operator-ui.ts`.
  */
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
-import { getProjectRoot } from "../_shared/host/pi-api.js";
-import { projectDisplayPath } from "../_shared/project/prompt-command-store.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import { getProjectRoot } from "../../_shared/host/pi-api.js";
+import { projectDisplayPath } from "../../_shared/project/prompt-command-store.js";
 import {
   exportTodosToProjectTask,
   importTodosFromProjectTasks,
@@ -19,19 +19,19 @@ import {
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
   type TaskBridgeSnapshot,
-} from "../_shared/project/task-bridge.js";
-import { tasksRoot, type ProjectTaskWorkspace } from "../_shared/project/tasks-store.js";
-import { errorMessage } from "../_shared/host/error-text.js";
+} from "../../_shared/project/task-bridge.js";
+import { tasksRoot, type ProjectTaskWorkspace } from "../../_shared/project/tasks-store.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
 import { parseCompletionNoteInput } from "./command-parser.js";
-import { setTodoBlock } from "./operator-surface.js";
+import { setTodoBlock } from "../operator/operator-surface.js";
 import {
   projectTaskResolutionBlock,
   todoChangeBlock,
   todoCompletionNoteBlock,
   todoResultBlock,
   todoWarningBlock,
-} from "./operator-ui.js";
-import { commitTodoPhases, loadTodoPhases } from "./phase-store.js";
+} from "../operator/operator-ui.js";
+import { commitTodoPhases, loadTodoPhases } from "../state/phase-store.js";
 
 type TaskBridgeTask = TaskBridgeSnapshot["tasks"][number];
 
