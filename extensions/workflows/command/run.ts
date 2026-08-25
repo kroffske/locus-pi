@@ -1,11 +1,15 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
-import { parseRunCommand, workflowRunRecoveryUsage } from "../command-parser.js";
-import { preflightWorkflowCommandTarget, isOneShotCommandMode, workflowCommandIdleBlock } from "../launch-guard.js";
-import { workflowNotFoundBlock, workflowRunConflictBlock, workflowWarningBlock } from "../operator-ui.js";
+import { parseRunCommand, workflowRunRecoveryUsage } from "./command-parser.js";
+import {
+  preflightWorkflowCommandTarget,
+  isOneShotCommandMode,
+  workflowCommandIdleBlock,
+} from "../launch/launch-guard.js";
+import { workflowNotFoundBlock, workflowRunConflictBlock, workflowWarningBlock } from "../operator/operator-ui.js";
 import { WORKFLOW_INPUT_MAX_CHARS } from "../runtime/workflow-runtime.js";
-import type { WorkflowCommandLauncher } from "../workflow-command-launcher.js";
+import type { WorkflowCommandLauncher } from "../launch/workflow-command-launcher.js";
 import { persistCommandWorkflowRejection, type WorkflowTranscriptRejectionCode } from "./receipts.js";
 
 export async function handleWorkflowRunCommand(

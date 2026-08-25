@@ -6,14 +6,14 @@
  * itself what "the operator pressed Down" means: an ANSI cursor sequence, its
  * application-mode variant, or the vi-style letter. Three surfaces had grown
  * byte-identical private copies of that decision — `operator-question.ts`,
- * `extensions/ask-user-question/question-panel.ts`, and
+ * `extensions/ask-user-question/question/question-panel.ts`, and
  * `extensions/model/model-role-selector.ts` — which meant the answer to "which
  * keys move the selection" lived in three places and could drift in two of them
  * unnoticed.
  *
  * Every predicate here is the exact expression those copies used; this module
  * introduces no new key binding. Components that accept named keys in addition
- * to raw bytes (`"up"`, `"escape"`, as `extensions/agents/session-viewer.ts`
+ * to raw bytes (`"up"`, `"escape"`, as `extensions/agents/fleet/session-viewer.ts`
  * does) deliberately keep their own predicates — that is a different input
  * contract, not a duplicate of this one.
  */

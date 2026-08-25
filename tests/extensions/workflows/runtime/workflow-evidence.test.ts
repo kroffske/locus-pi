@@ -13,7 +13,7 @@ import {
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import type { EvidenceEvaluation } from "../../../../extensions/_shared/agent-runtime/agent-evidence-evaluator.js";
-import { WorkflowProgressComponent } from "../../../../extensions/workflows/progress-widget.js";
+import { WorkflowProgressComponent } from "../../../../extensions/workflows/operator/progress-widget.js";
 import { createHarness } from "../../../test-harness.js";
 
 const evidence: EvidenceEvaluation = {

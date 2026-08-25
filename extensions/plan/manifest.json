@@ -124,11 +124,11 @@
   "docsPath": "extensions/plan/README.md",
   "sourceAuditPath": null,
   "tests": [
-    "tests/extensions/plan/plan-prompt-commands.test.ts",
-    "tests/extensions/plan/goal-operator-ui.test.ts",
-    "tests/extensions/plan/prompt-shelf-ui.test.ts",
-    "tests/extensions/plan/plan-behavioral-mode.test.ts",
-    "tests/extensions/plan/mode-state.test.ts",
+    "tests/extensions/plan/prompt-shelf/plan-prompt-commands.test.ts",
+    "tests/extensions/plan/goal/goal-operator-ui.test.ts",
+    "tests/extensions/plan/prompt-shelf/prompt-shelf-ui.test.ts",
+    "tests/extensions/plan/mode/plan-behavioral-mode.test.ts",
+    "tests/extensions/plan/mode/mode-state.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/contracts/extensions/beta-gate.test.ts"
   ],

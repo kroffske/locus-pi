@@ -31,8 +31,8 @@ import {
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflowsExt from "../../../../extensions/workflows/index.js";
-import type { WorkflowTextComponent } from "../../../../extensions/workflows/progress-widget.js";
-import { createWorkflowTranscript } from "../../../../extensions/workflows/workflow-transcript.js";
+import type { WorkflowTextComponent } from "../../../../extensions/workflows/operator/progress-widget.js";
+import { createWorkflowTranscript } from "../../../../extensions/workflows/transcript/workflow-transcript.js";
 import { createHarness } from "../../../test-harness.js";
 
 /**

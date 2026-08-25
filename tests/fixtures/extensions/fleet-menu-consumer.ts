@@ -33,7 +33,7 @@ export default function fleetMenuConsumer(pi: ExtensionAPI): void {
   });
 
   /**
-   * The close sequence `extensions/agents/fleet-menu-controller.ts` runs on exit, performed here
+   * The close sequence `extensions/agents/fleet/fleet-menu-controller.ts` runs on exit, performed here
    * by the entrypoint that did NOT open the menu. On a shared state object this releases the
    * producer's focus; on two copies the producer stays focused forever.
    */

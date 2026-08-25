@@ -80,7 +80,7 @@ function safeTaskDir(taskRoot: string, taskPath: string, taskId: string): string
 /**
  * Canonical project-relative path formatter for operator-facing receipts: a
  * path inside the project root renders as `./<relative>`, anything outside it
- * stays absolute. Exported because `extensions/plan/goal-operator-ui.ts` needs
+ * stays absolute. Exported because `extensions/plan/goal/goal-operator-ui.ts` needs
  * exactly this format for goal continuation receipts.
  */
 export function projectDisplayPath(projectRoot: string, filePath: string): string {

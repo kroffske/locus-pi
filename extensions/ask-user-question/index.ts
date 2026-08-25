@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { registerAskTools } from "./ask-tool.js";
+import { registerAskTools } from "./tool/ask-tool.js";
 
 export default function ask(pi: ExtensionAPI): void {
   registerAskTools(pi);

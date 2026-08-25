@@ -27,7 +27,7 @@ Interactive prompts and the plan-to-execution handoff require an interactive hos
 
 ## Implementation
 
-- Entrypoint and commands: `extensions/plan/index.ts`, `extensions/plan/command-router.ts`
-- Plan mode: `extensions/plan/mode-state.ts`, `extensions/plan/system-prompt.ts`
-- Goal tool/state: `extensions/plan/goal-tool.ts`, `extensions/plan/goal-command.ts`
+- Entrypoint and commands: `extensions/plan/index.ts`, `extensions/plan/command/command-router.ts`
+- Plan mode: `extensions/plan/mode/mode-state.ts`, `extensions/plan/mode/system-prompt.ts`
+- Goal tool/state: `extensions/plan/goal/goal-tool.ts`, `extensions/plan/goal/goal-command.ts`
 - Manifest: `extensions/plan/manifest.json`

@@ -21,7 +21,7 @@
   ],
   "properties": {
     "id": {
-      "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog.ts, scripts/audit-sources.ts and scripts/check-extension-manifests.ts.",
+      "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog/catalog.ts, scripts/audit-sources.ts and scripts/check-extension-manifests.ts.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
     },

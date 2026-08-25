@@ -28,7 +28,7 @@ import {
   workflowRunDir,
   workflowRunsRootDir,
   type WorkflowRunSummary,
-} from "../workflows/run-read.js";
+} from "../workflows/run/run-read.js";
 import { runtimeStateDir } from "../_shared/host/files.js";
 
 export type LoopSourceKind = "goal" | "workflow" | "review";

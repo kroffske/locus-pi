@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Box, Text } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ThemeLike } from "../../_shared/host/pi-api.js";
-import { formatWorkflowCommandToken } from "../command-parser.js";
+import { formatWorkflowCommandToken } from "./command-parser.js";
 import { WORKFLOW_RESULT_CUSTOM_TYPE, WORKFLOW_RUN_CUSTOM_TYPE } from "./receipts.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
 import { WORKFLOW_PLANS_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";

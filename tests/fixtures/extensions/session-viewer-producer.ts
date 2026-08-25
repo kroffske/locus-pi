@@ -5,13 +5,13 @@ import {
   createAgentViewerCapability,
   disposeAgentSessionViewers,
   hasActiveAgentSessionViewer,
-} from "../../../extensions/agents/session-viewer.js";
+} from "../../../extensions/agents/fleet/session-viewer.js";
 
 /**
  * One of the two separately registered entrypoints behind
- * `tests/extensions/agents/session-viewer-entrypoints.test.ts`. Pi loads each entrypoint with the
+ * `tests/extensions/agents/fleet/session-viewer-entrypoints.test.ts`. Pi loads each entrypoint with the
  * module cache disabled, so this file holds its OWN instance of
- * `extensions/agents/session-viewer.ts`; every assertion in that test is about whether the two
+ * `extensions/agents/fleet/session-viewer.ts`; every assertion in that test is about whether the two
  * instances resolve to one `locus-pi.active-agent-session-viewers.v1` set.
  */
 

@@ -313,7 +313,7 @@ beforeAll(() => {
 describe("npm public package boundary", () => {
   it("keeps the .locus-pi storage prefix owned by workflow-run-layout", () => {
     const owner = path.join(root, "extensions", "workflows", "runtime", "workflow-run-layout.ts");
-    const presentation = path.join(root, "extensions", "workflows", "workflow-tool.ts");
+    const presentation = path.join(root, "extensions", "workflows", "tool", "workflow-tool.ts");
     const violations: string[] = [];
     for (const file of recursiveTypeScriptFiles(path.join(root, "extensions"))) {
       if (file === owner || file === presentation) continue;
@@ -763,6 +763,7 @@ describe("npm public package boundary", () => {
           "locus-pi",
           "extensions",
           "workflows",
+          "tool",
           "workflow-source-check-tool.ts",
         ),
       ).href;

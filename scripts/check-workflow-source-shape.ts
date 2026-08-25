@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { staticWorkflowMeta } from "../extensions/workflows/workflow-catalog.js";
-import { standardWorkflowSourceShapeErrors } from "../extensions/workflows/workflow-source-shape.js";
+import { staticWorkflowMeta } from "../extensions/workflows/catalog/workflow-catalog.js";
+import { standardWorkflowSourceShapeErrors } from "../extensions/workflows/tool/workflow-source-shape.js";
 import { packagedWorkflowNames, packagedWorkflowPath } from "../extensions/workflows/runtime/workflow-runner.js";
 
 interface SourceShapeTarget {
