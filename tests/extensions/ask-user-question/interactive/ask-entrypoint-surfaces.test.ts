@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import askUserQuestion from "../../../extensions/ask-user-question/index.js";
-import { createHarness, renderToolResult, runTool } from "../../test-harness.js";
+import askUserQuestion from "../../../../extensions/ask-user-question/index.js";
+import { createHarness, renderToolResult, runTool } from "../../../test-harness.js";
 
 /**
  * Characterization coverage for the ask surfaces the existing suite never

@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/ask-tool.ts — The canonical ask tool declaration.
+ * extensions/ask-user-question/tool/ask-tool.ts — The canonical ask tool declaration.
  *
  * What each tool accepts (the TypeBox schema and its TypeScript mirror, kept
  * side by side so a schema edit cannot drift from the type the flow reads) and
@@ -9,12 +9,12 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../_shared/host/pi-api.js";
-import { validateParams } from "../_shared/host/validation.js";
-import { askRichQuestion } from "./rich-ask.js";
-import type { OmpQuestion } from "./question-prompt.js";
-import { askOmpCompatible } from "./question-runner.js";
-import { renderAskResult } from "./result-card.js";
+import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
+import { validateParams } from "../../_shared/host/validation.js";
+import { askRichQuestion } from "../interactive/rich-ask.js";
+import type { OmpQuestion } from "../question/question-prompt.js";
+import { askOmpCompatible } from "../interactive/question-runner.js";
+import { renderAskResult } from "../question/result-card.js";
 
 const OmpAskOption = Type.Object({
   label: Type.String({ description: "display label" }),

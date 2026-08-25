@@ -6,7 +6,7 @@
  * itself what "the operator pressed Down" means: an ANSI cursor sequence, its
  * application-mode variant, or the vi-style letter. Three surfaces had grown
  * byte-identical private copies of that decision — `operator-question.ts`,
- * `extensions/ask-user-question/question-panel.ts`, and
+ * `extensions/ask-user-question/question/question-panel.ts`, and
  * `extensions/model/model-role-selector.ts` — which meant the answer to "which
  * keys move the selection" lived in three places and could drift in two of them
  * unnoticed.

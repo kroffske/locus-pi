@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/option-labels.ts — The option-label vocabulary.
+ * extensions/ask-user-question/question/option-labels.ts — The option-label vocabulary.
  *
  * The sentinel choices ask appends to every option list, the checkbox markers
  * the select fallback draws with, and the transforms between a raw option label

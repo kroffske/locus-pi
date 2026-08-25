@@ -170,12 +170,12 @@ const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
   {
     file: "extensions/agents/catalog/catalog-state.ts",
     binding: "agentCatalog",
-    note: "the resolved agent catalog; agents/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
+    note: "the resolved agent catalog; agents/catalog/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
   },
   {
     file: "extensions/todo-context/state/todo-state-cache.ts",
     binding: "todoStateCache",
-    note: "a cache and fallback in front of the durable session store; todo-context/phase-store.ts is the only writer.",
+    note: "a cache and fallback in front of the durable session store; todo-context/state/phase-store.ts is the only writer.",
   },
   {
     file: "extensions/ast-structural-edit/ast-engine.ts",

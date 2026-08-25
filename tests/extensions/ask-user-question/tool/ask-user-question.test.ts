@@ -2,14 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import askUserQuestion from "../../../extensions/ask-user-question/index.js";
+import askUserQuestion from "../../../../extensions/ask-user-question/index.js";
 import {
   StaleInlineOperatorInteractionError,
   SupersededInlineOperatorInteractionError,
-} from "../../../extensions/_shared/operator/operator-interaction.js";
-import { sessionJsonlPath } from "../../../extensions/_shared/host/files.js";
-import { JsonlSessionStore } from "../../../extensions/_shared/runtime/session-core.js";
-import { createHarness, renderToolResult, runTool } from "../../test-harness.js";
+} from "../../../../extensions/_shared/operator/operator-interaction.js";
+import { sessionJsonlPath } from "../../../../extensions/_shared/host/files.js";
+import { JsonlSessionStore } from "../../../../extensions/_shared/runtime/session-core.js";
+import { createHarness, renderToolResult, runTool } from "../../../test-harness.js";
 
 describe("ask-user-question decision journal", () => {
   const tempRoots: string[] = [];

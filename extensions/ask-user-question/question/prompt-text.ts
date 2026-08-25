@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/prompt-text.ts — Operator-facing text shapes.
+ * extensions/ask-user-question/question/prompt-text.ts — Operator-facing text shapes.
  *
  * The one-line collapse every ask dialog title needs, and the two titles built
  * from it. Pure string work: no question model, no Pi handle.

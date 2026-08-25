@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/question-prompt.ts — One question in, one
+ * extensions/ask-user-question/question/question-prompt.ts — One question in, one
  * selection out.
  *
  * Declares the prompt contract every ask surface fulfils (`OmpQuestion` in,
@@ -10,13 +10,13 @@
  * lives in `question-panel.ts`.
  */
 
-import { requestInlineOperatorInteraction } from "../_shared/operator/operator-interaction.js";
-import { requestOperatorQuestion } from "../_shared/operator/operator-question.js";
-import type { OperatorThemeLike } from "../_shared/operator/operator-ui.js";
-import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { requestInlineOperatorInteraction } from "../../_shared/operator/operator-interaction.js";
+import { requestOperatorQuestion } from "../../_shared/operator/operator-question.js";
+import type { OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
+import type { ExtensionContext } from "../../_shared/host/pi-api.js";
 import { OTHER_OPTION } from "./option-labels.js";
 import { AskQuestionComponent } from "./question-panel.js";
-import { askMultiQuestion, askSingleSelectQuestion } from "./select-fallback.js";
+import { askMultiQuestion, askSingleSelectQuestion } from "../interactive/select-fallback.js";
 
 export interface OmpQuestion {
   id: string;

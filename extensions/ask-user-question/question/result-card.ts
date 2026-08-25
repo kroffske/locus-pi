@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/result-card.ts — The answered-question card.
+ * extensions/ask-user-question/question/result-card.ts — The answered-question card.
  *
  * Redraws a finished ask in the transcript: one `Q:` line per question, every
  * option carrying a chosen/unchosen marker, and the custom answer collapsed
@@ -8,9 +8,9 @@
  */
 
 import { Text } from "@earendil-works/pi-tui";
-import type { ToolResult } from "../_shared/host/pi-api.js";
+import type { ToolResult } from "../../_shared/host/pi-api.js";
 import { singleLine } from "./prompt-text.js";
-import type { QuestionResult } from "./question-runner.js";
+import type { QuestionResult } from "../interactive/question-runner.js";
 
 const MARK_CHOSEN = "(o)";
 const MARK_UNCHOSEN = "( )";

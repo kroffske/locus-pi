@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/question-panel.ts — The inline ask panel.
+ * extensions/ask-user-question/question/question-panel.ts — The inline ask panel.
  *
  * One non-overlay component that owns the whole answer for a question: cursor
  * movement, multi-select toggling, the custom-response editor, the ask timeout,
@@ -9,8 +9,8 @@
  */
 
 import { Input } from "@earendil-works/pi-tui";
-import { renderOperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
-import type { CustomUiComponent, CustomUiTui } from "../_shared/host/pi-api.js";
+import { renderOperatorBlock, type OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
+import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
 import {
   CHECKED_PREFIX,
   DONE_OPTION,
@@ -32,7 +32,7 @@ import {
   isRight,
   isSpace,
   isUp,
-} from "../_shared/operator/operator-keys.js";
+} from "../../_shared/operator/operator-keys.js";
 
 export interface AskQuestionComponentArgs {
   tui: CustomUiTui;

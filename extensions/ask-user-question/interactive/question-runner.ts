@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/question-runner.ts — The OMP ask flow.
+ * extensions/ask-user-question/interactive/question-runner.ts — The OMP ask flow.
  *
  * Walks a question list one prompt at a time, honouring back/forward
  * navigation, turns a lost prompt surface into its own retryable status,
@@ -7,17 +7,17 @@
  * reads back.
  */
 
-import { emitDevEvent } from "../_shared/runtime/event-bus.js";
+import { emitDevEvent } from "../../_shared/runtime/event-bus.js";
 import { recordDecision, stableDecisionId } from "./human-control.js";
 import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,
-} from "../_shared/operator/operator-interaction.js";
-import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/host/pi-api.js";
-import { errorResult, textResult } from "../_shared/host/pi-api.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import type { OmpAskParams } from "./ask-tool.js";
-import { askSingleQuestion, type AskNavigation, type AskSelection } from "./question-prompt.js";
+} from "../../_shared/operator/operator-interaction.js";
+import type { ExtensionAPI, ExtensionContext, ToolResult } from "../../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../../_shared/host/pi-api.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import type { OmpAskParams } from "../tool/ask-tool.js";
+import { askSingleQuestion, type AskNavigation, type AskSelection } from "../question/question-prompt.js";
 
 export interface QuestionResult {
   id: string;

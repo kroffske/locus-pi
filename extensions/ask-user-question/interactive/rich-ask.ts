@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/rich-ask.ts — The rich single-question ask flow.
+ * extensions/ask-user-question/interactive/rich-ask.ts — The rich single-question ask flow.
  *
  * Serves the free-text kinds itself through Pi's input/editor dialogs, and
  * converts a select/multi-select question into the OMP flow before projecting
@@ -7,16 +7,16 @@
  * declared sensitivity, and recorded as a decision exactly once.
  */
 
-import { emitDevEvent } from "../_shared/runtime/event-bus.js";
+import { emitDevEvent } from "../../_shared/runtime/event-bus.js";
 import { recordDecision, stableDecisionId } from "./human-control.js";
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import type { ExtensionAPI, ExtensionContext, ToolResult } from "../_shared/host/pi-api.js";
-import { errorResult, textResult } from "../_shared/host/pi-api.js";
-import { redactForSensitivity } from "../_shared/host/redaction.js";
-import { errorMessage } from "../_shared/host/error-text.js";
-import type { RichAskParams, OmpAskParams } from "./ask-tool.js";
-import { inputTitle } from "./prompt-text.js";
-import type { OmpQuestion } from "./question-prompt.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
+import type { ExtensionAPI, ExtensionContext, ToolResult } from "../../_shared/host/pi-api.js";
+import { errorResult, textResult } from "../../_shared/host/pi-api.js";
+import { redactForSensitivity } from "../../_shared/host/redaction.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
+import type { RichAskParams, OmpAskParams } from "../tool/ask-tool.js";
+import { inputTitle } from "../question/prompt-text.js";
+import type { OmpQuestion } from "../question/question-prompt.js";
 import { askOmpCompatible } from "./question-runner.js";
 
 export async function askRichQuestion(

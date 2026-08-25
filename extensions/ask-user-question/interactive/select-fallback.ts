@@ -1,5 +1,5 @@
 /**
- * extensions/ask-user-question/select-fallback.ts — Pi's native dialogs as an
+ * extensions/ask-user-question/interactive/select-fallback.ts — Pi's native dialogs as an
  * ask surface.
  *
  * Used when the inline panel is not available: a single-choice prompt, and a
@@ -7,8 +7,8 @@
  * the operator picks Done. Both honour the ask timeout by racing the dialog.
  */
 
-import { requestOperatorInput } from "../_shared/operator/operator-input.js";
-import type { ExtensionContext } from "../_shared/host/pi-api.js";
+import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
+import type { ExtensionContext } from "../../_shared/host/pi-api.js";
 import {
   CHECKED_PREFIX,
   DONE_OPTION,
@@ -18,9 +18,9 @@ import {
   getAutoSelectionOnTimeout,
   stripCheckboxPrefix,
   stripRecommendedSuffix,
-} from "./option-labels.js";
-import { selectTitle } from "./prompt-text.js";
-import type { AskSelection, OmpQuestion } from "./question-prompt.js";
+} from "../question/option-labels.js";
+import { selectTitle } from "../question/prompt-text.js";
+import type { AskSelection, OmpQuestion } from "../question/question-prompt.js";
 
 export async function askSingleSelectQuestion(
   ctx: ExtensionContext,
